@@ -1,7 +1,9 @@
 // The deed's step bar, ruled panels and steps, the deed-details block and a document row (shared by the deed's own
 // documents and the registry's).
 import React, { useState } from "react";
-import { Check, Download, Eye, Loader2, Lock, Pencil } from "lucide-react";
+import { Check, Download, Eye, Loader2, Lock, Pencil, Upload } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { GRID_BTN, GRID_BTN_BRAND, GridStatusPill } from "@/components/crm/CrmDataTable";
 import { DateInput } from "@/components/ui/date-input";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { docStatusColor } from "../agreement/Timeline";
@@ -195,7 +197,8 @@ export function DocTag({ status }: { status: string }) {
   );
 }
 
-/** One document: its name, status, what to do next, and the keys for it. */
+/** One document: its name, status, what to do next, and the keys for it. Drawn with the CRM record kit's buttons and
+ *  pills; on a sheet page the frame squares them off. */
 export function DocRow({ doc, previewing, onPreview, onDownload, attach, review, extraTag, nextStep }: {
   doc: any; previewing: boolean;
   /** What to do next, when the usual wording doesn't fit. */
@@ -208,44 +211,45 @@ export function DocRow({ doc, previewing, onPreview, onDownload, attach, review,
   extraTag?: React.ReactNode;
 }) {
   const inputId = `deed-doc-${React.useId()}`;
+  const small = "h-7 px-2.5";
   return (
-    <div className="px-3 py-2.5 text-sm" style={{ borderBottom: RULE_SOFT }}>
+    <div className="px-4 py-3 text-sm border-b border-border/70 last:border-0">
       <div className="flex items-start gap-3">
-        <div className="mt-0.5">{mimeIcon(doc.MimeType)}</div>
+        <div className="mt-0.5 w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">{mimeIcon(doc.MimeType)}</div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-            <span className="font-medium">{doc.Label || doc.DocumentType}</span>
-            <DocTag status={doc.Status} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold">{doc.Label || doc.DocumentType}</span>
+            <GridStatusPill status={doc.Status} />
             {extraTag}
           </div>
-          <p className="text-xs text-muted-foreground">{nextStep ?? docNextStep(doc)}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{nextStep ?? docNextStep(doc)}</p>
           {doc.HasFile && <p className="text-xs text-muted-foreground/80 truncate mt-0.5 tabular-nums">{doc.FileName} · {fmtBytes(doc.FileSize)}</p>}
           {doc.Status === "Rejected" && doc.Remarks && (
-            <p className="text-xs text-destructive mt-1 px-2 py-1" style={{ border: "1px solid hsl(var(--destructive) / 0.4)" }}>"{doc.Remarks}"</p>
+            <p className="text-xs text-destructive mt-1.5 rounded-md px-2 py-1.5 bg-destructive/5 border border-destructive/30">"{doc.Remarks}"</p>
           )}
         </div>
-      </div>
-      <div className="flex items-center gap-2 mt-2 pl-7 flex-wrap">
-        {doc.HasFile && (doc.MimeType?.startsWith("image/") || doc.MimeType === "application/pdf") && (
-          <button data-row-view onClick={onPreview} disabled={previewing} className={`${KEY_LINE} h-7 px-2`}>
-            {previewing ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />} Preview
-          </button>
-        )}
-        {doc.HasFile && <button onClick={onDownload} className={`${KEY_LINE} h-7 px-2`}><Download size={11} /> Download</button>}
-        {attach && ["Requested", "Rejected"].includes(doc.Status) && (
-          <>
-            <input type="file" className="hidden" id={inputId} onChange={(e) => { const f = e.target.files?.[0]; if (f) attach.onFile(f); e.target.value = ""; }} />
-            <button onClick={() => document.getElementById(inputId)?.click()} disabled={attach.disabled} title={attach.title} className={`${KEY_INK} h-7 px-2`}>
-              {doc.Status === "Rejected" ? "Re-attach file" : "Attach file"}
+        <div className="flex items-center gap-1.5 flex-wrap justify-end shrink-0">
+          {doc.HasFile && (doc.MimeType?.startsWith("image/") || doc.MimeType === "application/pdf") && (
+            <button type="button" data-row-view onClick={onPreview} disabled={previewing} className={cn(GRID_BTN, small)}>
+              {previewing ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />} Preview
             </button>
-          </>
-        )}
-        {review && doc.HasFile && doc.Status === "Uploaded" && (
-          <>
-            <button onClick={review.onVerify} className={`${KEY_INK} h-7 px-2`}>Verify</button>
-            <button onClick={review.onReject} className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}>Reject</button>
-          </>
-        )}
+          )}
+          {doc.HasFile && <button type="button" onClick={onDownload} className={cn(GRID_BTN, small)} aria-label="Download" title="Download"><Download size={12} /></button>}
+          {attach && ["Requested", "Rejected"].includes(doc.Status) && (
+            <>
+              <input type="file" className="hidden" id={inputId} onChange={(e) => { const f = e.target.files?.[0]; if (f) attach.onFile(f); e.target.value = ""; }} />
+              <button type="button" onClick={() => document.getElementById(inputId)?.click()} disabled={attach.disabled} title={attach.title} className={cn(GRID_BTN_BRAND, small)}>
+                <Upload size={12} /> {doc.Status === "Rejected" ? "Re-attach" : "Attach file"}
+              </button>
+            </>
+          )}
+          {review && doc.HasFile && doc.Status === "Uploaded" && (
+            <>
+              <button type="button" onClick={review.onVerify} className={cn(GRID_BTN_BRAND, small)}><Check size={12} /> Verify</button>
+              <button type="button" onClick={review.onReject} className={cn(GRID_BTN, small, "text-destructive hover:bg-destructive/5")}>Reject</button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 const express = require("express");
+const { sumMoney } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -46,8 +47,12 @@ const upload = multer({
 // (mirrors Sale Deed's Senior-Reject -> reprepare -> resubmit loop), and a
 // mutation fee + old/new Khata numbers are real outcomes worth recording.
 const MUT_SELECT = `
-  SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
-         sd.DeedNo, sd.RegistrationNo, reg.Id AS RegistryId, reg.RegNo, reg.SubRegistrarOffice
+  SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile, b.ApplicationId,
+         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+         sd.DeedNo, sd.RegistrationNo, reg.Id AS RegistryId, reg.RegNo, reg.SubRegistrarOffice,
+         -- the mandatory documents and how many are verified: approval waits for all of them
+         (SELECT COUNT(*) FROM dbo.CrmMutationDocument d WHERE d.MutationId = m.Id AND d.IsMandatory = 1) AS DocsRequired,
+         (SELECT COUNT(*) FROM dbo.CrmMutationDocument d WHERE d.MutationId = m.Id AND d.IsMandatory = 1 AND d.Status = 'Verified') AS DocsVerified
   FROM dbo.CrmMutation m
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -93,7 +98,11 @@ const MUT_SORT = {
   ApplicationDate: "m.ApplicationDate",
   ApprovedDate: "m.ApprovedDate",
   CreatedAt: "m.CreatedAt",
+  ProjectName: "COALESCE(bn.ProjectName, b.ProjectName)",
+  Authority: "m.Authority",
+  MutationFee: "m.MutationFee",
 };
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 function buildMutWhere(request, query, includeStatus, projectScope = null) {
   const conds = [];
   if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
@@ -109,6 +118,9 @@ function buildMutWhere(request, query, includeStatus, projectScope = null) {
     request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
     conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR m.MutationNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search)");
   }
+  // Applied between two dates (either end optional).
+  if (ISO_DATE.test(query.dateFrom || "")) { request.input("dateFrom", sql.Date, query.dateFrom); conds.push("m.ApplicationDate >= @dateFrom"); }
+  if (ISO_DATE.test(query.dateTo || "")) { request.input("dateTo", sql.Date, query.dateTo); conds.push("m.ApplicationDate < DATEADD(day, 1, @dateTo)"); }
   if (includeStatus && MUT_STATUSES.includes(query.status)) {
     request.input("status", sql.NVarChar(20), query.status);
     conds.push("m.Status = @status");
@@ -120,31 +132,34 @@ router.get("/", requirePageRight("crm-mutation", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const SELECT_WITH_BLOCK = `${MUT_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const sortCol = Object.hasOwn(MUT_SORT, req.query.sortKey) ? MUT_SORT[req.query.sortKey] : MUT_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
 
+    // No page: every matching row, sorted (the Excel export, and callers that read the whole list).
     if (req.query.page === undefined) {
       const r0 = pool.request();
       const where = buildMutWhere(r0, req.query, true, req.projectScope);
-      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY m.CreatedAt DESC`);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY ${sortCol} ${dir}, m.Id DESC`);
       return res.json(result.recordset);
     }
 
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
-    const sortCol = Object.hasOwn(MUT_SORT, req.query.sortKey) ? MUT_SORT[req.query.sortKey] : MUT_SORT.CreatedAt;
-    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
 
     const countReq = pool.request();
     const countWhere = buildMutWhere(countReq, req.query, false, req.projectScope);
     const countRes = await countReq.query(
-      `SELECT m.Status, COUNT(*) AS C FROM dbo.CrmMutation m
+      `SELECT m.Status, COUNT(*) AS C, ISNULL(SUM(m.MutationFee), 0) AS Fee FROM dbo.CrmMutation m
        JOIN dbo.CrmBooking b ON b.Id = m.BookingId
        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
        LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
        ${countWhere} GROUP BY m.Status`
     );
     const counts = { All: 0 };
-    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const fees = { All: sumMoney(countRes.recordset, (row) => row.Fee) };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; fees[row.Status] = Number(row.Fee); }
     const total = MUT_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+    const feeTotal = MUT_STATUSES.includes(req.query.status) ? (fees[req.query.status] || 0) : fees.All;
 
     const pageReq = pool.request();
     const pageWhere = buildMutWhere(pageReq, req.query, true, req.projectScope);
@@ -155,7 +170,8 @@ router.get("/", requirePageRight("crm-mutation", "view"), async (req, res) => {
     );
     // statusCounts (no All) for the sheet page's tabs; counts kept for other callers.
     const { All: _all, ...statusCounts } = counts;
-    res.json({ rows: rowsRes.recordset, total, counts, statusCounts, page, pageSize });
+    res.json({ rows: rowsRes.recordset, total, counts, statusCounts, page, pageSize, summary: { feeTotal } });
+
   } catch (e) {
     console.error("[crm-mutation] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });

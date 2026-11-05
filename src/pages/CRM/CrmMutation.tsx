@@ -1,50 +1,79 @@
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, CheckCircle2, Upload, AlertTriangle, History, Link2, Landmark, RefreshCw, ScrollText } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  Plus, CheckCircle2, Upload, AlertTriangle, History, Link2, Landmark, RefreshCw, ScrollText, ArrowLeft, Download, Copy,
+  RotateCcw, FileText, Home, FolderCheck, Info, Send,
+} from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
-import { useAuth } from "@/contexts/AuthContext";
 import { usePageRights } from "@/hooks/usePageRights";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { useUrlParam } from "@/hooks/useUrlParam";
+import { useCrmListState, useSticky, listParams, type CrmListQuery, type CrmSort } from "@/hooks/useCrmListState";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import {
+  CrmAppPage, CrmGrid, GridBulkBar, GridColumnChooser, GridDateFilter, GridFields, GridHighlights, GridMetric, GridPath, GridRelated,
+  GridSavedViews, GridSearch, GridStatusPill, GridTabs, exportGrid, gridListMeta, gridVisibleCols, resolveGridDateRange, useGridPrefs,
+  GRID_ANY_DATE, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_LABEL, GRID_PAGE_SIZES,
+  type GridCol, type GridDateRange, type GridPathState,
+} from "@/components/crm/CrmDataTable";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
-import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
-import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
-import { downloadFile, fetchFileBlob, fmtDate, localDay, roleKey } from "./salesDeed/config";
-import { DocRow, Panel } from "./salesDeed/parts";
+import { downloadFile, fetchFileBlob, fmtDate, localDay } from "./salesDeed/config";
+import { DocRow } from "./salesDeed/parts";
 import { useCanApprove } from "@/hooks/useCanApprove";
 
-import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/mutation";
-const STATUS_LABEL: Record<string, string> = { Applied: "Applied", QueryRaised: "Query raised", Approved: "Approved" };
-const mutTone = (s: string): "done" | "waiting" | "stopped" => s === "Approved" ? "done" : s === "QueryRaised" ? "stopped" : "waiting";
+const PREFS_KEY = "crm-mutation-grid";
+const VIEWS_KEY = "crm-mutation-saved-views";
+const ALL = "All";
+const DEFAULT_SORT: CrmSort = { key: "CreatedAt", dir: "desc" };
+const STATUS_LABEL: Record<string, string> = { Applied: "With the authority", QueryRaised: "Query raised", Approved: "Approved" };
+const statusText = (s: string) => STATUS_LABEL[s] || s;
+const DETAIL_TABS = ["Overview", "Documents", "History"] as const;
+type DetailTab = typeof DETAIL_TABS[number];
 
 const isSynced = (doc: any): boolean => !!doc.Remarks?.startsWith("Synced automatically");
+const fmt = (n: number | null | undefined) => (n != null ? fmtRupees(Number(n)) : "—");
+const DAY_MS = 86_400_000;
+/** Days the application has been with the authority (still open), or took (approved). */
+const daysOpen = (m: any): number | null => {
+  if (!m.ApplicationDate) return null;
+  const end = m.Status === "Approved" && m.ApprovedDate ? new Date(m.ApprovedDate) : new Date();
+  return Math.max(0, Math.floor((end.getTime() - new Date(m.ApplicationDate).getTime()) / DAY_MS));
+};
 
-type DetailTab = "Overview" | "Documents" | "History";
-
-const PAGE_SIZE = 20;
-interface MutationListFilters { search: string; status: string; companyId: string; projectId: string; blockId: string }
-async function fetchMutationList(filters: MutationListFilters, page: number): Promise<{ rows: any[]; total: number; statusCounts: Record<string, number> }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.status) params.set("status", filters.status);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  const r = await fetchWithAuth(`${API}?${params}`);
+/** This page's own filter beyond the common list ones: when it was applied. */
+interface ExtraFilters { applied: GridDateRange }
+const NO_EXTRA: ExtraFilters = { applied: GRID_ANY_DATE };
+function queryString(q: CrmListQuery, x: ExtraFilters): URLSearchParams {
+  const p = listParams(q, ALL);
+  const { from, to } = resolveGridDateRange(x.applied);
+  if (from) p.set("dateFrom", from);
+  if (to) p.set("dateTo", to);
+  return p;
+}
+interface MutationList { rows: any[]; total: number; statusCounts: Record<string, number>; summary: { feeTotal: number } }
+async function fetchMutationList(q: CrmListQuery, x: ExtraFilters): Promise<MutationList> {
+  const r = await fetchWithAuth(`${API}?${queryString(q, x)}`);
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data?.error || "Failed to load Mutation records");
-  return { rows: data.rows || [], total: data.total || 0, statusCounts: data.statusCounts || {} };
+  if (!r.ok) throw new Error(data?.error || `Could not load the mutations (${r.status}).`);
+  return { rows: data.rows || [], total: data.total || 0, statusCounts: data.statusCounts || {}, summary: data.summary || { feeTotal: 0 } };
+}
+async function fetchAllMutations(q: CrmListQuery, x: ExtraFilters): Promise<any[]> {
+  const p = queryString(q, x);
+  p.delete("page"); p.delete("pageSize");
+  const r = await fetchWithAuth(`${API}?${p}`);
+  const data = await r.json().catch(() => []);
+  if (!r.ok) throw new Error((data as any)?.error || `Could not export the mutations (${r.status}).`);
+  return data;
 }
 async function fetchEligible(): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/eligible-bookings`);
@@ -54,42 +83,100 @@ async function fetchEligible(): Promise<any[]> {
 
 const emptyStart = () => ({ ApplicationNo: "", ApplicationDate: localDay(), Authority: "", OldKhataNo: "", MutationFee: "" });
 
+/** The documents as a bar: verified of the mandatory ones. */
+function DocsProgress({ verified, required }: { verified: number; required: number }) {
+  if (!required) return <span className="text-muted-foreground">None asked</span>;
+  const done = verified >= required;
+  return (
+    <span className="inline-flex items-center gap-2" title={`${verified} of ${required} mandatory documents verified`}>
+      <span className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
+        <span className={cn("block h-full rounded-full", done ? "bg-emerald-600" : "bg-primary")} style={{ width: `${Math.round((verified / required) * 100)}%` }} />
+      </span>
+      <span className={cn("tabular-nums text-xs", done ? "text-emerald-700 dark:text-emerald-300 font-semibold" : "")}>{verified}/{required}</span>
+    </span>
+  );
+}
+
+const MUTATION_COLS: GridCol<any>[] = [
+  { id: "no", label: "Mutation", sortKey: "MutationNo", locked: true, cell: (m) => <span className="font-semibold text-primary hover:underline tabular-nums">{m.MutationNo}</span>, csv: (m) => m.MutationNo },
+  {
+    id: "customer", label: "Customer", sortKey: "ApplicantName",
+    cell: (m) => <span className="truncate block max-w-[16rem]" onClick={(e) => e.stopPropagation()}><ApplicantNames name={m.ApplicantName} bookingId={m.BookingId} applicationId={m.ApplicationId} /></span>,
+    csv: (m) => m.ApplicantName,
+  },
+  { id: "booking", label: "Booking", sortKey: "BookingNo", cell: (m) => <span className="tabular-nums">{m.BookingNo}</span>, csv: (m) => m.BookingNo },
+  {
+    id: "unit", label: "Project · unit", sortKey: "ProjectName",
+    cell: (m) => <span className="truncate block max-w-[14rem]">{[m.ProjectName, m.UnitNo].filter(Boolean).join(" · ") || "—"}</span>,
+    csv: (m) => [m.ProjectName, m.UnitNo].filter(Boolean).join(" · "),
+  },
+  { id: "authority", label: "Authority", sortKey: "Authority", cell: (m) => m.Authority || "—", csv: (m) => m.Authority },
+  { id: "applied", label: "Applied on", sortKey: "ApplicationDate", cell: (m) => <span className="tabular-nums">{fmtDate(m.ApplicationDate)}</span>, csv: (m) => fmtDate(m.ApplicationDate) },
+  {
+    id: "days", label: "Days", align: "right",
+    cell: (m) => { const d = daysOpen(m); return <span className="tabular-nums" title={m.Status === "Approved" ? "Days the authority took" : "Days with the authority so far"}>{d ?? "—"}</span>; },
+    csv: (m) => daysOpen(m),
+  },
+  { id: "docs", label: "Documents", cell: (m) => <DocsProgress verified={m.DocsVerified ?? 0} required={m.DocsRequired ?? 0} />, csv: (m) => `${m.DocsVerified ?? 0}/${m.DocsRequired ?? 0}` },
+  { id: "status", label: "Status", sortKey: "Status", cell: (m) => <GridStatusPill status={m.Status} label={statusText(m.Status)} />, csv: (m) => statusText(m.Status) },
+  { id: "oldKhata", label: "Old khata", hiddenByDefault: true, cell: (m) => <span className="tabular-nums">{m.OldKhataNo || "—"}</span>, csv: (m) => m.OldKhataNo },
+  { id: "newKhata", label: "New khata", cell: (m) => <span className="tabular-nums">{m.NewKhataNo || "—"}</span>, csv: (m) => m.NewKhataNo },
+  { id: "approvedNo", label: "Authority's mutation no.", hiddenByDefault: true, cell: (m) => <span className="tabular-nums">{m.ApprovedNo || "—"}</span>, csv: (m) => m.ApprovedNo },
+  { id: "approvedOn", label: "Approved on", sortKey: "ApprovedDate", hiddenByDefault: true, cell: (m) => <span className="tabular-nums">{fmtDate(m.ApprovedDate)}</span>, csv: (m) => fmtDate(m.ApprovedDate) },
+  { id: "deed", label: "Sale deed", hiddenByDefault: true, cell: (m) => <span className="tabular-nums">{m.DeedNo || "—"}</span>, csv: (m) => m.DeedNo },
+  { id: "fee", label: "Fee", sortKey: "MutationFee", align: "right", cell: (m) => <span className="tabular-nums">{fmt(m.MutationFee)}</span>, csv: (m) => m.MutationFee },
+];
+
+/** The mutation's stages, read from what is recorded. */
+function mutationPath(m: any, docsReady: boolean, required: number, verified: number): { label: string; state: GridPathState; note?: string }[] {
+  const approved = m.Status === "Approved";
+  const query = m.Status === "QueryRaised";
+  return [
+    { label: "Sale deed registered", state: "done", note: m.DeedNo ? `Deed ${m.DeedNo}${m.RegistrationNo ? `, registration ${m.RegistrationNo}` : ""}` : undefined },
+    { label: "Applied to authority", state: "done", note: `Applied ${fmtDate(m.ApplicationDate)}${m.Authority ? ` to ${m.Authority}` : ""}` },
+    {
+      label: query ? "Query raised" : "Documents verified", state: query ? "failed" : docsReady || approved ? "done" : "current",
+      note: query ? (m.QueryRemarks ? `The authority asked: "${m.QueryRemarks}"` : "The authority raised a query.")
+        : required ? `${verified} of ${required} mandatory documents verified.` : "No mandatory document requested yet.",
+    },
+    { label: "New khata issued", state: approved ? "done" : docsReady && !query ? "current" : "todo", note: approved ? `New khata ${m.NewKhataNo}` : "Approve once the authority issues the new khata." },
+  ];
+}
+
 const CrmMutation: React.FC = () => {
   const ask = useSheetAsk();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const rights = usePageRights("crm-mutation");
-  const { currentUser, canDoAction } = useAuth();
   // Approval Setup ("CRM Mutation Approve") names who approves; a super admin always can. The server says.
   const canApproveMutation = useCanApprove("crm-mutation-approve") && rights.canEdit;
-  const [sp, setSp] = useSearchParams();
+  const [sp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
-  const mutationIdParam = sp.get("mutationId");
+  // The open mutation and its tab live in the address, so a refresh or a shared link keeps them.
+  const [idParam, setIdParam] = useUrlParam("mutationId");
+  const detailId = /^\d+$/.test(idParam) ? Number(idParam) : null;
+  const [activeTab, setActiveTab] = useUrlParam<DetailTab>("tab", "Overview", DETAIL_TABS);
 
-  const [searchInput, setSearchInput] = useState("");
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [page, setPage] = useState(1);
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
+  const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
+  const s = useCrmListState({ pageSize, defaultSort: DEFAULT_SORT, defaultStatus: ALL });
+  const [extra, setExtraRaw] = useState<ExtraFilters>(NO_EXTRA);
+  const setExtra = (x: Partial<ExtraFilters>) => { setExtraRaw((cur) => ({ ...cur, ...x })); s.setPage(1); };
+  const filtered = s.hasFilters || extra.applied.preset !== "any";
+  const clearFilters = () => { s.reset(); setExtraRaw(NO_EXTRA); };
+  const [selected, setSelected] = useState<Map<string | number, any>>(new Map());
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bookingId, setBookingId] = useState("");
   const [startForm, setStartForm] = useState(emptyStart);
   const [saving, setSaving] = useState(false);
-
-  const [detailId, setDetailId] = useState<number | null>(mutationIdParam && /^\d+$/.test(mutationIdParam) ? Number(mutationIdParam) : null);
-  // In the address, so a refresh or a shared link keeps it.
-  const [activeTab, setActiveTab] = useUrlParam<DetailTab>("tab", "Overview", ["Overview", "Documents", "History"]);
   const [deepLinkDone, setDeepLinkDone] = useState(false);
-
   const [queryOpen, setQueryOpen] = useState(false);
   const [queryRemarks, setQueryRemarks] = useState("");
   const [approveOpen, setApproveOpen] = useState(false);
   const [approveForm, setApproveForm] = useState({ ApprovedNo: "", ApprovedDate: localDay(), NewKhataNo: "" });
   const [busy, setBusy] = useState(false);
-
   const [newDocType, setNewDocType] = useState("Other");
   const [newDocLabel, setNewDocLabel] = useState("");
   const [uploadingDoc, setUploadingDoc] = useState(false);
@@ -98,42 +185,41 @@ const CrmMutation: React.FC = () => {
   const [previewDoc, setPreviewDoc] = useState<{ url: string; mime: string; name: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState<number | null>(null);
 
-  const listFilters: MutationListFilters = useMemo(
-    () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, statusFilter, cpb]
-  );
-  const { data: listResult, isLoading, isError, error, isFetching, refetch } = useQuery({
-    queryKey: ["crm-mutation", listFilters, page],
-    queryFn: () => fetchMutationList(listFilters, page),
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
+    queryKey: ["crm-mutation", s.query, extra],
+    queryFn: () => fetchMutationList(s.query, extra),
     staleTime: 30_000,
   });
-  const rows = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
-  const counts = listResult?.statusCounts ?? {};
-  const allCount = Object.values(counts).reduce((s, n) => s + n, 0);
+  const result = useSticky(data);
+  const rows = result?.rows ?? [];
+  const total = result?.total ?? 0;
+  const counts = result?.statusCounts ?? {};
+  const allCount = Object.values(counts).reduce((n, x) => n + x, 0);
   const { data: startableBookings = [] } = useQuery({ queryKey: ["crm-mutation-eligible"], queryFn: fetchEligible, staleTime: 60_000, enabled: rights.canCreate });
+  const [prefs, setPrefs] = useGridPrefs(PREFS_KEY, MUTATION_COLS);
 
   const { data: detailData, isError: detailIsError, error: detailError } = useQuery({
     queryKey: ["crm-mutation-detail", detailId],
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/${detailId}`);
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data?.error || `Could not load the mutation (${r.status}).`);
-      return data;
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || `Could not load the mutation (${r.status}).`);
+      return d;
     },
     enabled: detailId != null,
     staleTime: 15_000,
     retry: false,
   });
-
-  const detail = detailData?.mutation ?? (detailId != null ? (rows as any[]).find((r: any) => r.Id === detailId) : null);
+  const detail = detailData?.mutation ?? (detailId != null ? rows.find((r: any) => r.Id === detailId) : null);
   const documents: any[] = detailData?.documents || [];
   const history: any[] = detailData?.history || [];
 
-  // ?bookingId opens the booking's mutation (found on the server: the page used to look in the 20 rows on screen),
-  // or the Start dialog when it has none and is eligible.
+  const selectDetail = (id: number) => { setIdParam(String(id)); setActiveTab("Overview"); };
+  const backToList = () => { setIdParam(""); setActiveTab("Overview"); };
+
+  // ?bookingId opens the booking's mutation (found on the server), or the Start dialog when it has none and is eligible.
   useEffect(() => {
-    if (deepLinkDone || !deepLinkBookingId || mutationIdParam) return;
+    if (deepLinkDone || !deepLinkBookingId || detailId != null) return;
     let stop = false;
     (async () => {
       const r = await fetchWithAuth(`${API}/booking/${deepLinkBookingId}`).catch(() => null);
@@ -148,7 +234,7 @@ const CrmMutation: React.FC = () => {
     })();
     return () => { stop = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, mutationIdParam, deepLinkDone, startableBookings.length, rights.canCreate]);
+  }, [deepLinkBookingId, detailId, deepLinkDone, startableBookings.length, rights.canCreate]);
 
   const invalidateDetail = () => qc.invalidateQueries({ queryKey: ["crm-mutation-detail", detailId] });
   const invalidate = () => {
@@ -159,32 +245,26 @@ const CrmMutation: React.FC = () => {
     if (detailId) invalidateDetail();
   };
 
-  const selectDetail = (id: number) => {
-    setDetailId(id);
-    setActiveTab("Overview");
-    setSp((p) => { p.set("mutationId", String(id)); return p; }, { replace: true });
-  };
-
   const send = async (url: string, method: string, body?: any) => {
     const res = await fetchWithAuth(url, body instanceof FormData ? { method, body } : {
       method, headers: { "Content-Type": "application/json" }, body: body !== undefined ? JSON.stringify(body) : undefined,
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-    return data;
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+    return d;
   };
 
   const handleStart = async () => {
     if (!bookingId) { toast.error("Booking is required"); return; }
     setSaving(true);
     try {
-      const data = await send(API, "POST", { BookingId: parseInt(bookingId), ...startForm });
-      toast.success(`${data.MutationNo} started`);
+      const d = await send(API, "POST", { BookingId: parseInt(bookingId), ...startForm });
+      toast.success(`${d.MutationNo} started`);
       setDialogOpen(false);
       setBookingId("");
       setStartForm(emptyStart());
       invalidate();
-      selectDetail(data.id);
+      selectDetail(d.id);
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setSaving(false); }
   };
@@ -226,7 +306,7 @@ const CrmMutation: React.FC = () => {
       if (label) fd.append("Label", label);
       await send(`${API}/${detailId}/documents/upload`, "POST", fd);
       toast.success("Document uploaded");
-      invalidateDetail();
+      invalidate();
       setNewDocLabel("");
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (e: any) { toast.error(translateError(e.message)); }
@@ -238,7 +318,7 @@ const CrmMutation: React.FC = () => {
     try {
       await send(`${API}/${detailId}/documents/request`, "POST", { DocumentType: documentType, Label: label, IsMandatory: true });
       toast.success("Document requested");
-      invalidateDetail();
+      invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setRequestingDoc(false); }
   };
@@ -252,7 +332,7 @@ const CrmMutation: React.FC = () => {
     try {
       await send(`${API}/${detailId}/documents/${docId}`, "PUT", verify ? { Status: "Verified" } : { Status: "Rejected", Remarks: remarks });
       toast.success(verify ? "Document verified" : "Document rejected");
-      invalidateDetail();
+      invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
   const fileUrl = (doc: any) => `${API}/documents/file/${doc.Id}`;
@@ -265,6 +345,17 @@ const CrmMutation: React.FC = () => {
     finally { setPreviewLoading(null); }
   };
   const closePreview = () => { if (previewDoc) URL.revokeObjectURL(previewDoc.url); setPreviewDoc(null); };
+
+  const runExport = async () => {
+    setExporting(true); setExportError(null);
+    try { exportGrid(await fetchAllMutations(s.query, extra), gridVisibleCols(MUTATION_COLS, prefs), `mutations-${s.status.toLowerCase()}`); }
+    catch (e) { setExportError((e as Error).message); } finally { setExporting(false); }
+  };
+  const exportSelected = () => exportGrid([...selected.values()], gridVisibleCols(MUTATION_COLS, prefs), `mutations-selected-${selected.size}`);
+  const copySelected = async () => {
+    try { await navigator.clipboard.writeText([...selected.values()].map((m) => m.MutationNo).join("\n")); toast.success(`Copied ${selected.size} mutation number${selected.size === 1 ? "" : "s"}`); }
+    catch { toast.error("Could not copy. Your browser blocked the clipboard."); }
+  };
 
   const required = documents.filter((d) => d.IsMandatory);
   const supporting = documents.filter((d) => !d.IsMandatory);
@@ -281,362 +372,406 @@ const CrmMutation: React.FC = () => {
       attach={canDocs ? { onFile: (f) => handleUploadDoc(f, doc.DocumentType, doc.Label) } : undefined}
       review={canDocs ? { onVerify: () => handleReviewDoc(doc.Id, true), onReject: () => handleReviewDoc(doc.Id, false) } : undefined}
       extraTag={isSynced(doc)
-        ? <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border border-foreground/30 border-dashed inline-flex items-center gap-1"><Link2 size={9} /> Synced from registry</span>
+        ? <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-dashed border-border text-[0.6875rem] text-muted-foreground"><Link2 size={10} /> Synced from registry</span>
         : undefined} />
   );
 
-  const figures = [
-    { label: "Mutations", value: allCount, note: "Khata transfers tracked", go: () => updateFilter(setStatusFilter)("") },
-    { label: "Applied", value: counts.Applied ?? 0, note: "With the authority", go: () => updateFilter(setStatusFilter)("Applied") },
-    { label: "Query raised", value: counts.QueryRaised ?? 0, note: "To correct and resubmit", go: () => updateFilter(setStatusFilter)("QueryRaised") },
-    { label: "Approved", value: counts.Approved ?? 0, note: "New khata issued", go: () => updateFilter(setStatusFilter)("Approved") },
-  ];
-  const note = (edge: string) => ({ border: RULE_SOFT, borderLeft: `3px solid ${edge}` });
+  const tabs = [ALL, "Applied", "QueryRaised", "Approved"].map((k) => ({ key: k, label: k === ALL ? "All" : statusText(k), count: result ? (k === ALL ? allCount : counts[k] ?? 0) : null }));
+
+  // What the open mutation is waiting on, and the one action that moves it on.
+  const guidance = !detail ? null : detail.Status === "Approved" ? {
+    tone: "done" as const, title: `Approved ${fmtDate(detail.ApprovedDate)}`, text: `New khata ${detail.NewKhataNo}${detail.ApprovedNo ? ` · authority's mutation no. ${detail.ApprovedNo}` : ""}. The municipal records now carry the buyer's name.`,
+  } : detail.Status === "QueryRaised" ? {
+    tone: "stopped" as const, title: "The authority raised a query", text: `${detail.QueryRemarks ? `"${detail.QueryRemarks}". ` : ""}Correct and re-verify the flagged documents (${verifiedCount}/${required.length} verified), then resubmit.`,
+  } : !required.length ? {
+    tone: "waiting" as const, title: "Ask for the application form", text: "No mandatory document has been requested yet, so the mutation can't be approved. Request the application form on the Documents tab.",
+  } : !docsReady ? {
+    tone: "waiting" as const, title: "Verify the documents", text: `${verifiedCount} of ${required.length} mandatory documents verified. Attach and verify the rest on the Documents tab.`,
+  } : {
+    tone: "moving" as const, title: "Waiting for the authority", text: "Every mandatory document is verified. When the authority issues the new khata, approve the mutation; if they raise a query, record it.",
+  };
+  const guidanceTone = { done: "border-emerald-500/30 bg-emerald-500/5", stopped: "border-rose-500/30 bg-rose-500/5", waiting: "border-amber-500/30 bg-amber-500/5", moving: "border-primary/30 bg-primary/5" };
+  const GuidanceIcon = !guidance ? Info : guidance.tone === "done" ? CheckCircle2 : guidance.tone === "stopped" ? AlertTriangle : Info;
+
+  const actions = detail && (
+    <>
+      {detail.Status === "Applied" && rights.canEdit && (
+        <button type="button" onClick={() => setQueryOpen(true)} className={cn(GRID_BTN, "text-destructive hover:bg-destructive/5")}><AlertTriangle size={13} /> Raise query</button>
+      )}
+      {detail.Status === "QueryRaised" && rights.canEdit && (
+        <button type="button" onClick={handleResubmit} disabled={!docsReady || busy} title={!docsReady ? "Fix and verify the flagged documents first" : undefined} className={GRID_BTN_BRAND}>
+          <Send size={13} /> Resubmit to authority
+        </button>
+      )}
+      {detail.Status === "Applied" && (canApproveMutation ? (
+        <button type="button" onClick={() => { setApproveForm({ ApprovedNo: "", ApprovedDate: localDay(), NewKhataNo: "" }); setApproveOpen(true); }}
+          disabled={!docsReady} title={!docsReady ? "Verify the mandatory documents first" : undefined} className={GRID_BTN_BRAND}>
+          <CheckCircle2 size={13} /> Approve
+        </button>
+      ) : rights.canEdit ? <span className="text-xs text-muted-foreground">Approving needs the Legal head or an admin</span> : null)}
+      <button type="button" className={GRID_BTN} onClick={() => navigate(`/crm/bookings?view=${detail.BookingId}`)}><Home size={13} /> Open booking</button>
+    </>
+  );
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "CRM", "Property Mutation"]} />
+      <Breadcrumbs items={detailId != null ? ["Dashboard", "CRM", "Property Mutation", "Record"] : ["Dashboard", "CRM", "Property Mutation"]} />
       {ask.node}
-      <SheetShell
-        eyebrow="CivilierERP · CRM · Sale deed"
-        title="Property Mutation"
-        subtitle="Khata transfer: the application to put the new owner's name on the municipal land records — only once the sale deed is registered."
-        action={
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
-            {/* The server starts a mutation under the create right; the button was offered to everyone. */}
-            {rights.canCreate && <button onClick={() => setDialogOpen(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> Start mutation</button>}
+      <CrmAppPage icon={Landmark} section="CRM · Legal & Possession" title="Property Mutation"
+        subtitle={detailId != null ? undefined : "Khata transfer: the application that puts the buyer's name on the municipal land records, once the sale deed is registered."}
+        actions={<>
+          {detailId != null && <button type="button" onClick={backToList} className={GRID_BTN}><ArrowLeft size={13} /> All mutations</button>}
+          {/* The server starts a mutation under the create right. */}
+          {rights.canCreate && <button type="button" onClick={() => setDialogOpen(true)} className={GRID_BTN_BRAND}><Plus size={13} /> Start mutation</button>}
+        </>}>
+
+        {/* The list stays mounted while a record is open, so its tab, search, filters, sort and page survive the round trip. */}
+        <div hidden={detailId != null} className={cn(GRID_CARD, "overflow-hidden")}>
+          <div className="px-4 pt-3 pb-2">
+            <h2 className="text-base font-bold leading-tight">{s.status === ALL ? "All mutations" : statusText(s.status)}</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">{gridListMeta(total, MUTATION_COLS, s.sort, filtered)}</p>
           </div>
-        }
-      >
-      <div className="space-y-4">
-        <div className="bg-card" style={{ border: RULE }}>
-          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
-            {figures.map((x) => (
-              <div key={x.label}>
-                <button onClick={x.go} className="label link">{x.label}</button>
-                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
-                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
-              </div>
-            ))}
+          <GridTabs label="Status" tabs={tabs} active={s.status} onChange={s.setStatus} />
+          <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border border-b border-border">
+            <GridMetric label="Mutations" value={total.toLocaleString("en-IN")} />
+            <GridMetric label="With the authority" value={(counts.Applied ?? 0).toLocaleString("en-IN")} />
+            <GridMetric label="Query raised" value={<span className={(counts.QueryRaised ?? 0) > 0 ? "text-destructive" : ""}>{(counts.QueryRaised ?? 0).toLocaleString("en-IN")}</span>} />
+            <GridMetric label="Mutation fees" value={fmt(result?.summary.feeTotal ?? 0)} strong />
           </div>
+
+          {selected.size > 0 && (
+            <GridBulkBar count={selected.size} onClear={() => setSelected(new Map())}>
+              <button type="button" className={GRID_BTN} onClick={exportSelected}><Download size={13} /> Export selected</button>
+              <button type="button" className={GRID_BTN} onClick={copySelected}><Copy size={13} /> Copy numbers</button>
+            </GridBulkBar>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+            <GridSearch value={s.searchInput} onChange={s.setSearchInput} placeholder="Search customer, booking, unit, mutation no." />
+            <CrmCompanyProjectBlockFilter value={s.cpb} onChange={s.setCpb} />
+            <GridDateFilter label="Applied" value={extra.applied} onChange={(v) => setExtra({ applied: v })} />
+            {filtered && (
+              <button type="button" onClick={clearFilters} className="inline-flex items-center gap-1 h-8 px-2 text-xs text-primary hover:underline">
+                <RotateCcw size={12} /> Clear filters
+              </button>
+            )}
+            <div className="ml-auto flex items-center gap-2 flex-wrap">
+              {exportError && <span className="text-xs text-destructive">{exportError}</span>}
+              <button type="button" className={cn(GRID_BTN, "w-9 px-0")} onClick={() => refetch()} aria-label="Refresh" title="Refresh">
+                <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              </button>
+              <GridSavedViews storageKey={VIEWS_KEY}
+                current={{ status: s.status, search: s.searchInput.trim(), cpb: s.cpb, sort: s.sort, pageSize, extra: { ...extra } }}
+                onApply={(v) => {
+                  setPageSize(GRID_PAGE_SIZES.includes(v.pageSize as typeof GRID_PAGE_SIZES[number]) ? v.pageSize : GRID_PAGE_SIZES[0]);
+                  s.apply(v);
+                  const x = (v.extra ?? {}) as Partial<ExtraFilters>;
+                  setExtraRaw({ applied: x.applied?.preset ? x.applied : GRID_ANY_DATE });
+                }} />
+              <GridColumnChooser cols={MUTATION_COLS} prefs={prefs} onChange={setPrefs} />
+              <button type="button" className={GRID_BTN} onClick={runExport} disabled={exporting || total === 0} title="Export to Excel">
+                <Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span>
+              </button>
+            </div>
+          </div>
+
+          <CrmGrid cols={MUTATION_COLS} prefs={prefs} onPrefs={setPrefs} rows={rows} rowKey={(m) => m.Id}
+            loading={isLoading} fetching={isFetching} error={error ? (error as Error).message : null} onRetry={() => refetch()}
+            sort={s.sort} onSort={s.toggleSort} onRowClick={(m) => selectDetail(m.Id)} activeKey={detailId}
+            selected={selected} onSelect={setSelected}
+            empty={filtered ? "No mutation matches these filters." : "No mutation yet. Start one once a booking's sale deed is registered."}
+            page={s.page} pageSize={pageSize} total={total} onPage={s.setPage} onPageSize={(n) => { setPageSize(n); s.setPage(1); }} />
         </div>
 
-        <div className="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-220px)]">
-          {/* List */}
-          <div className="w-full md:w-80 shrink-0 flex flex-col bg-card min-h-0" style={{ border: RULE }}>
-            <div className="p-3 space-y-2" style={{ borderBottom: RULE }}>
-              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-                placeholder="Search customer or booking…"
-                className="h-9 w-full border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
-              <select value={statusFilter} onChange={(e) => updateFilter(setStatusFilter)(e.target.value)} className={`${INP} text-xs`}>
-                <option value="">All statuses ({allCount})</option>
-                {Object.keys(STATUS_LABEL).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]} ({counts[s] ?? 0})</option>)}
-              </select>
-              <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
-            </div>
-            <div className="flex-1 overflow-y-auto thin-scroll max-h-[45vh] md:max-h-none">
-              {isError ? (
-                <p className="p-4 text-center text-sm text-destructive">{(error as Error)?.message}</p>
-              ) : isLoading ? (
-                <p className="p-4 text-center text-muted-foreground text-sm">Loading…</p>
-              ) : rows.length === 0 ? (
-                <p className="p-4 text-center text-muted-foreground text-sm">{search || statusFilter || cpb.projectId ? "No mutation matches." : "No mutation trackers yet."}</p>
-              ) : (rows as any[]).map((r: any) => {
-                const on = detailId === r.Id;
-                return (
-                  <button key={r.Id} onClick={() => selectDetail(r.Id)}
-                    className={`w-full text-left px-3 py-2.5 transition-colors ${on ? "bg-foreground text-card" : "hover:bg-primary/5"}`}
-                    style={{ borderBottom: RULE_SOFT }}>
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-semibold leading-tight truncate"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} applicationId={r.ApplicationId} /></span>
-                      <span className={on ? "[&_*]:!text-card" : ""}><SheetMark text={STATUS_LABEL[r.Status] || r.Status} tone={mutTone(r.Status)} /></span>
-                    </div>
-                    <div className={`mt-1 text-[0.6875rem] tabular-nums truncate ${on ? "opacity-80" : "text-muted-foreground"}`}>
-                      {[r.MutationNo, r.BookingNo, r.UnitNo].filter(Boolean).join(" · ")}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ borderTop: RULE_SOFT }}><CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} /></div>
-          </div>
+        {detailId != null && (
+          detailIsError && !detail ? (
+            <div className={cn(GRID_CARD, "py-16 text-center text-sm text-destructive")}>{(detailError as Error)?.message}</div>
+          ) : !detail ? (
+            <div className={cn(GRID_CARD, "py-16 text-center text-sm text-muted-foreground")}>Loading…</div>
+          ) : (
+            <div className="space-y-4">
+              <GridHighlights icon={Landmark} object={`Mutation · ${detail.MutationNo}`}
+                title={<ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} />}
+                status={<GridStatusPill status={detail.Status} label={statusText(detail.Status)} />}
+                sub={[detail.BookingNo, [detail.ProjectName, detail.UnitNo].filter(Boolean).join(" · ")].filter(Boolean).join(" · ")}
+                actions={actions}
+                fields={[
+                  { label: "Authority", value: detail.Authority || "—" },
+                  { label: "Applied on", value: fmtDate(detail.ApplicationDate) },
+                  { label: detail.Status === "Approved" ? "Days taken" : "Days with authority", value: daysOpen(detail) ?? "—" },
+                  { label: "Documents", value: <DocsProgress verified={verifiedCount} required={required.length} /> },
+                  { label: "Khata", value: `${detail.OldKhataNo || "—"} → ${detail.NewKhataNo || "pending"}` },
+                  { label: "Mutation fee", value: fmt(detail.MutationFee) },
+                ]} />
 
-          {/* Detail */}
-          <div className="flex-1 min-w-0 overflow-y-auto thin-scroll space-y-4">
-            {detailId == null ? (
-              <div className="h-full flex items-center justify-center text-sm text-muted-foreground">Select a mutation to view details</div>
-            ) : detailIsError && !detail ? (
-              <div className="h-full flex items-center justify-center text-sm text-destructive">{(detailError as Error)?.message}</div>
-            ) : !detail ? (
-              <div className="h-full flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
-            ) : (
-              <>
-                <div className="bg-card px-4 py-3 flex items-center justify-between gap-3 flex-wrap" style={{ border: RULE }}>
+              <GridPath steps={mutationPath(detail, docsReady, required.length, verifiedCount)} />
+
+              {guidance && (
+                <div className={cn("rounded-lg border px-4 py-3 flex items-start gap-3", guidanceTone[guidance.tone])}>
+                  <GuidanceIcon size={18} className={cn("shrink-0 mt-0.5", guidance.tone === "stopped" ? "text-destructive" : guidance.tone === "done" ? "text-emerald-600" : "text-primary")} />
                   <div className="min-w-0">
-                    <span className={`block ${LBL}`}>Mutation</span>
-                    <h2 className="font-heading font-bold text-lg text-foreground leading-tight truncate flex items-center gap-2">
-                      <Landmark size={16} /> <ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} />
-                    </h2>
-                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5 tabular-nums">
-                      {[detail.MutationNo, detail.BookingNo, detail.UnitNo, detail.DeedNo && `Deed ${detail.DeedNo}`].filter(Boolean).join(" · ")}
-                    </p>
+                    <p className="text-sm font-semibold">{guidance.title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{guidance.text}</p>
                   </div>
-                  <SheetMark text={STATUS_LABEL[detail.Status] || detail.Status} tone={mutTone(detail.Status)} />
-                </div>
-
-                <div className="flex flex-wrap items-stretch bg-card" style={{ border: RULE }}>
-                  {(["Overview", "Documents", "History"] as DetailTab[]).map((t) => (
-                    <button key={t} onClick={() => setActiveTab(t)}
-                      className={`px-4 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap shrink-0 transition-colors ${
-                        activeTab === t ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"
-                      }`} style={{ borderRight: RULE_SOFT }}>
-                      {t}
+                  {!locked && required.length > 0 && !docsReady && activeTab !== "Documents" && (
+                    <button type="button" className={cn(GRID_BTN, "ml-auto shrink-0")} onClick={() => setActiveTab("Documents")}>Go to documents</button>
+                  )}
+                  {!locked && !required.length && canDocs && (
+                    <button type="button" className={cn(GRID_BTN_BRAND, "ml-auto shrink-0")} disabled={requestingDoc}
+                      onClick={() => handleRequestDoc("MutationApplicationForm", "Mutation Application Form")}>
+                      {requestingDoc ? "Requesting…" : "Request application form"}
                     </button>
-                  ))}
+                  )}
                 </div>
+              )}
 
-                {activeTab === "Overview" && (
-                  <div className="space-y-4">
-                    {detail.Status === "Applied" && (
-                      <div className="bg-card px-4 py-3 flex items-center justify-between gap-3 flex-wrap" style={note("hsl(var(--foreground))")}>
-                        <div>
-                          <p className="text-sm font-semibold flex items-center gap-1.5"><Landmark size={14} /> Application pending with the authority</p>
-                          <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">
-                            {required.length > 0 ? `${verifiedCount}/${required.length} mandatory documents verified.` : "No mandatory document requested yet."}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {rights.canEdit && <button onClick={() => setQueryOpen(true)} className={`${KEY_LINE} h-8 px-3 !text-destructive !border-destructive`}>Raise query</button>}
-                          {canApproveMutation ? (
-                            <button onClick={() => { setApproveForm({ ApprovedNo: "", ApprovedDate: localDay(), NewKhataNo: "" }); setApproveOpen(true); }} disabled={!docsReady}
-                              title={!docsReady ? "Verify the mandatory documents first" : undefined} className={`${KEY_INK} h-8 px-3`}>
-                              Approve
-                            </button>
-                          ) : rights.canEdit ? (
-                            <span className="text-[0.6875rem] text-muted-foreground">Approving needs the Legal head / an admin</span>
-                          ) : null}
-                        </div>
-                      </div>
-                    )}
-                    {detail.Status === "QueryRaised" && (
-                      <div className="bg-card px-4 py-3 space-y-2" style={note("hsl(var(--destructive))")}>
-                        <p className="text-sm font-semibold text-destructive flex items-center gap-1.5"><AlertTriangle size={14} /> Query raised by the authority</p>
-                        {detail.QueryRemarks && <p className="text-xs px-2 py-1.5" style={{ border: RULE_SOFT }}>"{detail.QueryRemarks}"</p>}
-                        <p className="text-xs text-muted-foreground tabular-nums">
-                          {required.length > 0 ? `${verifiedCount}/${required.length} mandatory documents verified.` : "No mandatory document requested yet."}
-                        </p>
-                        {rights.canEdit && (
-                          <button onClick={handleResubmit} disabled={!docsReady || busy}
-                            title={!docsReady ? "Fix and verify the flagged documents first" : undefined} className={`${KEY_INK} h-8 px-3`}>
-                            Resubmit to authority
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {detail.Status === "Approved" && (
-                      <div className="bg-card px-4 py-3" style={note("hsl(var(--foreground))")}>
-                        <p className="text-sm font-semibold flex items-center gap-1.5 tabular-nums"><CheckCircle2 size={14} /> Mutation approved {fmtDate(detail.ApprovedDate)}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">New khata no. {detail.NewKhataNo} · mutation no. {detail.ApprovedNo || "—"}</p>
-                      </div>
-                    )}
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem] items-start">
+                <section className={cn(GRID_CARD, "overflow-hidden min-w-0")}>
+                  <GridTabs label="Mutation record" active={activeTab} onChange={setActiveTab} tabs={[
+                    { key: "Overview", label: "Overview" },
+                    { key: "Documents", label: "Documents", count: documents.length },
+                    { key: "History", label: "History", count: history.length },
+                  ]} />
 
-                    <Panel title="Application">
-                      <div className="grid grid-cols-1 sm:grid-cols-2">
-                        {([
-                          ["Booking", detail.BookingNo],
-                          ["Unit", detail.UnitNo],
-                          ["Applicant", <ApplicantNames key="a" name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} />],
-                          ["Sale deed", `${detail.DeedNo || "—"}${detail.RegistrationNo ? ` (reg. ${detail.RegistrationNo})` : ""}`],
-                          ["Application no.", detail.ApplicationNo || "—"],
-                          ["Applied on", fmtDate(detail.ApplicationDate)],
-                          ["Authority", detail.Authority || "—"],
-                          ["Old khata no.", detail.OldKhataNo || "—"],
-                          ["Mutation fee", detail.MutationFee != null ? fmtRupees(detail.MutationFee) : "—"],
-                          ...(detail.Status === "Approved" ? [["New khata no.", detail.NewKhataNo], ["Mutation no.", detail.ApprovedNo || "—"]] : []),
-                        ] as [string, React.ReactNode][]).map(([l, v], i, arr) => (
-                          <div key={l} className={`px-4 py-2.5 ${i === arr.length - 1 && arr.length % 2 === 1 ? "sm:col-span-2" : ""}`} style={{ borderBottom: RULE_SOFT, borderRight: i % 2 === 0 ? RULE_SOFT : undefined }}>
-                            <p className={LBL}>{l}</p>
-                            <p className="text-sm font-medium tabular-nums mt-0.5">{v}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </Panel>
-                  </div>
-                )}
+                  {activeTab === "Overview" && (
+                    <>
+                      <h3 className="px-4 pt-3 text-xs font-semibold text-muted-foreground">Application</h3>
+                      <GridFields fields={[
+                        { label: "Application no.", value: <span className="tabular-nums">{detail.ApplicationNo || "—"}</span> },
+                        { label: "Applied on", value: <span className="tabular-nums">{fmtDate(detail.ApplicationDate)}</span> },
+                        { label: "Authority", value: detail.Authority || "—" },
+                        { label: "Mutation fee", value: <span className="tabular-nums">{fmt(detail.MutationFee)}</span> },
+                        { label: "Old khata no.", value: <span className="tabular-nums">{detail.OldKhataNo || "—"}</span> },
+                        { label: "New khata no.", value: <span className="tabular-nums">{detail.NewKhataNo || "Issued on approval"}</span> },
+                        ...(detail.Status === "Approved" ? [
+                          { label: "Authority's mutation no.", value: <span className="tabular-nums">{detail.ApprovedNo || "—"}</span> },
+                          { label: "Approved on", value: <span className="tabular-nums">{fmtDate(detail.ApprovedDate)}</span> },
+                        ] : []),
+                        ...(detail.QueryRemarks ? [{ label: "Last query from the authority", value: <span className="whitespace-pre-line">{detail.QueryRemarks}</span>, wide: true }] : []),
+                      ]} />
+                      <h3 className="px-4 pt-3 text-xs font-semibold text-muted-foreground">Property and sale deed</h3>
+                      <GridFields fields={[
+                        { label: "Buyer", value: <ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /> },
+                        { label: "Mobile", value: <span className="tabular-nums">{detail.Mobile || "—"}</span> },
+                        { label: "Booking", value: <span className="tabular-nums">{detail.BookingNo}</span> },
+                        { label: "Project · unit", value: [detail.ProjectName, detail.UnitNo].filter(Boolean).join(" · ") || "—" },
+                        { label: "Sale deed", value: <span className="tabular-nums">{detail.DeedNo || "—"}{detail.RegistrationNo ? ` · reg. ${detail.RegistrationNo}` : ""}</span> },
+                        { label: "Sub-registrar office", value: detail.SubRegistrarOffice || "—" },
+                      ]} />
+                    </>
+                  )}
 
-                {activeTab === "Documents" && (
-                  <div className="space-y-4">
-                    <Panel title="Required documents"
-                      right={required.length > 0 ? <span className={`font-heading text-[0.6875rem] font-semibold tabular-nums ${verifiedCount === required.length ? "text-foreground" : "text-muted-foreground"}`}>{verifiedCount}/{required.length} verified</span> : undefined}>
+                  {activeTab === "Documents" && (
+                    <>
+                      <div className="px-4 h-10 flex items-center justify-between border-b border-border">
+                        <h3 className="text-[0.8125rem] font-bold">Required documents</h3>
+                        <DocsProgress verified={verifiedCount} required={required.length} />
+                      </div>
                       {required.length === 0 ? (
-                        <div className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-                          <p className="text-xs"><span className="font-semibold">No mandatory document requested yet.</span> Approval is blocked until one is requested and verified.</p>
+                        <div className="px-4 py-4 flex items-center justify-between gap-3 flex-wrap">
+                          <p className="text-xs text-muted-foreground">No mandatory document requested yet. Approval waits until one is requested and verified.</p>
                           {canDocs && (
-                            <button onClick={() => handleRequestDoc("MutationApplicationForm", "Mutation Application Form")} disabled={requestingDoc} className={`${KEY_INK} h-8 px-3 shrink-0`}>
+                            <button type="button" onClick={() => handleRequestDoc("MutationApplicationForm", "Mutation Application Form")} disabled={requestingDoc} className={GRID_BTN_BRAND}>
                               {requestingDoc ? "Requesting…" : "Request application form"}
                             </button>
                           )}
                         </div>
                       ) : required.map(docRow)}
-                    </Panel>
 
-                    <Panel title="Supporting documents">
-                      {supporting.length > 0 ? supporting.map(docRow) : <p className="px-4 py-3 text-xs text-muted-foreground italic">None added.</p>}
+                      <div className="px-4 h-10 flex items-center border-y border-border mt-2">
+                        <h3 className="text-[0.8125rem] font-bold">Supporting documents</h3>
+                      </div>
+                      {supporting.length > 0 ? supporting.map(docRow) : <p className="px-4 py-3 text-xs text-muted-foreground">None added.</p>}
                       {canDocs && (
-                        <div className="p-4" style={{ borderTop: supporting.length ? undefined : RULE_SOFT }}>
-                          <p className={`${LBL} mb-0.5`}>Add a supporting document</p>
-                          <p className="text-xs text-muted-foreground mb-2">Reference material only — anything approval checks goes through the request above.</p>
+                        <div className="p-4 border-t border-border bg-muted/20">
+                          <p className="text-xs font-semibold">Add a supporting document</p>
+                          <p className="text-xs text-muted-foreground mb-2">Reference only. Anything approval checks goes through the required list above.</p>
                           <div className="flex items-end gap-2 flex-wrap">
-                            <div className="flex-1 min-w-[9rem] space-y-1">
-                              <label className={`block ${LBL}`}>Type</label>
-                              <select value={newDocType} onChange={(e) => setNewDocType(e.target.value)} className={INP}>
+                            <label className="flex-1 min-w-[9rem] space-y-1">
+                              <span className={cn("block", GRID_LABEL)}>Type</span>
+                              <select value={newDocType} onChange={(e) => setNewDocType(e.target.value)} className={GRID_INPUT}>
                                 <option value="IdentityProof">Identity proof</option>
                                 <option value="Other">Other</option>
                               </select>
-                            </div>
-                            <div className="flex-1 min-w-[9rem] space-y-1">
-                              <label className={`block ${LBL}`}>Label (optional)</label>
-                              <input className={INP} value={newDocLabel} onChange={(e) => setNewDocLabel(e.target.value)} placeholder="e.g. Aadhaar copy" />
-                            </div>
+                            </label>
+                            <label className="flex-1 min-w-[9rem] space-y-1">
+                              <span className={cn("block", GRID_LABEL)}>Label (optional)</span>
+                              <input className={GRID_INPUT} value={newDocLabel} onChange={(e) => setNewDocLabel(e.target.value)} placeholder="e.g. Aadhaar copy" />
+                            </label>
                             <input type="file" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && handleUploadDoc(e.target.files[0], newDocType, newDocLabel)} />
-                            <button onClick={() => fileInputRef.current?.click()} disabled={uploadingDoc} className={`${KEY_INK} h-9 px-3`}>
-                              <Upload size={12} /> {uploadingDoc ? "Uploading…" : "Upload"}
+                            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadingDoc} className={GRID_BTN_BRAND}>
+                              <Upload size={13} /> {uploadingDoc ? "Uploading…" : "Upload"}
                             </button>
                           </div>
                         </div>
                       )}
-                    </Panel>
-                  </div>
-                )}
+                    </>
+                  )}
 
-                {activeTab === "History" && (
-                  <Panel title="History" icon={<History size={13} />}>
-                    {history.length > 0 ? history.map((log: any) => (
-                      <div key={log.Id} className="px-4 py-2.5 text-sm" style={{ borderBottom: RULE_SOFT }}>
-                        <div className="flex items-baseline justify-between gap-2 flex-wrap">
-                          <span className="font-medium flex items-center gap-1"><ScrollText size={12} /> {log.Action}</span>
-                          <span className="text-xs text-muted-foreground tabular-nums">{fmtDate(log.CreatedAt)}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">By {log.ActorName || "System"} ({log.ActorType})</div>
-                        {log.Remarks && <div className="text-xs px-2 py-1.5 mt-1.5" style={{ border: RULE_SOFT }}>{log.Remarks}</div>}
-                      </div>
-                    )) : <p className="px-4 py-6 text-center text-xs text-muted-foreground">No history recorded yet.</p>}
-                  </Panel>
-                )}
-              </>
-            )}
+                  {activeTab === "History" && (
+                    history.length > 0 ? (
+                      <ol className="px-4 py-4 relative ml-3 border-l border-border space-y-4">
+                        {history.map((log: any) => (
+                          <li key={log.Id} className="relative pl-5">
+                            <span className="absolute -left-[9px] top-0.5 w-[18px] h-[18px] rounded-full border border-border bg-card flex items-center justify-center text-muted-foreground"><ScrollText size={10} /></span>
+                            <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                              <span className="text-[0.8125rem] font-semibold">{log.Action}</span>
+                              <span className="text-xs text-muted-foreground tabular-nums">{log.CreatedAt ? new Date(log.CreatedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—"}</span>
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-0.5">By {log.ActorName || "System"}{log.ActorType ? ` · ${log.ActorType}` : ""}</div>
+                            {log.Remarks && <p className="mt-1 text-xs rounded-md bg-muted/60 px-2 py-1.5 whitespace-pre-line">{log.Remarks}</p>}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : <p className="px-4 py-8 text-center text-xs text-muted-foreground">No history recorded yet.</p>
+                  )}
+                </section>
+
+                <aside className="space-y-4 min-w-0 xl:sticky xl:top-4">
+                  <GridRelated icon={FolderCheck} title="Documents" count={required.length}
+                    action={activeTab !== "Documents" ? <button type="button" className={cn(GRID_BTN, "h-7")} onClick={() => setActiveTab("Documents")}>Open</button> : undefined}>
+                    {required.length === 0 ? <p className="px-4 py-4 text-xs text-muted-foreground">None requested yet.</p> : (
+                      <ul>
+                        {required.map((d) => (
+                          <li key={d.Id} className="px-4 py-2 flex items-center justify-between gap-2 border-b border-border/70 last:border-0">
+                            <span className="text-xs truncate">{d.Label || d.DocumentType}</span>
+                            <GridStatusPill status={d.Status} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </GridRelated>
+                  <GridRelated icon={History} title="Latest activity" count={history.length}
+                    action={history.length > 3 && activeTab !== "History" ? <button type="button" className={cn(GRID_BTN, "h-7")} onClick={() => setActiveTab("History")}>View all</button> : undefined}>
+                    {history.length === 0 ? <p className="px-4 py-4 text-xs text-muted-foreground">Nothing yet.</p> : (
+                      <ul>
+                        {history.slice(0, 3).map((log: any) => (
+                          <li key={log.Id} className="px-4 py-2 border-b border-border/70 last:border-0">
+                            <div className="text-xs font-semibold">{log.Action}</div>
+                            <div className="text-[0.6875rem] text-muted-foreground">{log.ActorName || "System"} · {fmtDate(log.CreatedAt)}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </GridRelated>
+                  <GridRelated icon={FileText} title="Sale deed">
+                    <GridFields fields={[
+                      { label: "Deed no.", value: <span className="tabular-nums">{detail.DeedNo || "—"}</span> },
+                      { label: "Registration", value: <span className="tabular-nums">{detail.RegNo || detail.RegistrationNo || "—"}</span> },
+                    ]} />
+                  </GridRelated>
+                </aside>
+              </div>
+            </div>
+          )
+        )}
+      </CrmAppPage>
+
+      {/* Start mutation */}
+      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setBookingId(""); } }}>
+        <DialogContent className="max-w-md p-5 gap-4">
+          <DialogHeader><DialogTitle>Start mutation</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <label className="block space-y-1">
+              <span className={cn("block font-medium", GRID_LABEL)}>Booking <span className="text-destructive">*</span></span>
+              <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)} className={cn(GRID_INPUT, "text-sm")}>
+                <option value="">Select booking</option>
+                {startableBookings.map((b: any) => (
+                  <option key={b.Id} value={String(b.Id)}>{`${b.BookingNo} — ${b.ApplicantName}`}</option>
+                ))}
+              </SearchableNativeSelect>
+              <span className="block text-[0.6875rem] text-muted-foreground">{startableBookings.length ? "Only bookings whose sale deed registry is complete are listed." : "No booking is eligible yet: the sale deed registry must be completed first."}</span>
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <span className={cn("block font-medium", GRID_LABEL)}>Application no.</span>
+                <input className={cn(GRID_INPUT, "text-sm")} value={startForm.ApplicationNo} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationNo: e.target.value }))} placeholder="Optional" />
+              </label>
+              <label className="block space-y-1">
+                <span className={cn("block font-medium", GRID_LABEL)}>Application date</span>
+                <DateInput value={startForm.ApplicationDate} max={localDay()} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationDate: e.target.value }))} className={cn(GRID_INPUT, "text-sm")} />
+              </label>
+            </div>
+            <label className="block space-y-1">
+              <span className={cn("block font-medium", GRID_LABEL)}>Authority</span>
+              <input className={cn(GRID_INPUT, "text-sm")} value={startForm.Authority} onChange={(e) => setStartForm((f) => ({ ...f, Authority: e.target.value }))} placeholder="e.g. GHMC, MCGM, BDA" />
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <span className={cn("block font-medium", GRID_LABEL)}>Old khata no.</span>
+                <input className={cn(GRID_INPUT, "text-sm")} value={startForm.OldKhataNo} onChange={(e) => setStartForm((f) => ({ ...f, OldKhataNo: e.target.value }))} />
+              </label>
+              <label className="block space-y-1">
+                <span className={cn("block font-medium", GRID_LABEL)}>Mutation fee</span>
+                <input type="number" className={cn(GRID_INPUT, "text-sm tabular-nums")} value={startForm.MutationFee} onChange={(e) => setStartForm((f) => ({ ...f, MutationFee: e.target.value }))} />
+              </label>
+            </div>
           </div>
-        </div>
-      </div>
+          <DialogFooter className="gap-2">
+            <button type="button" onClick={() => { setDialogOpen(false); setBookingId(""); }} className={GRID_BTN}>Cancel</button>
+            <button type="button" onClick={handleStart} disabled={saving || !bookingId} className={GRID_BTN_BRAND}>{saving ? "Starting…" : "Start mutation"}</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-        {/* Start mutation */}
-        <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setBookingId(""); } }}>
-          <DialogContent className="max-w-md rounded-none p-5 gap-4" style={{ border: RULE }}>
-            <DialogHeader><DialogTitle className="font-heading">Start mutation</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className={`block ${LBL}`}>Booking *</label>
-                <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)} className={INP}>
-                  <option value="">Select booking</option>
-                  {startableBookings.map((b: any) => (
-                    <option key={b.Id} value={String(b.Id)}>{`${b.BookingNo} — ${b.ApplicantName}`}</option>
-                  ))}
-                </SearchableNativeSelect>
-                <p className="text-[0.6875rem] text-muted-foreground">{startableBookings.length ? "Needs the sale deed registry completed." : "No booking is eligible yet — the sale deed registry must be completed first."}</p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className={`block ${LBL}`}>Application no.</label>
-                  <input className={INP} value={startForm.ApplicationNo} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationNo: e.target.value }))} placeholder="Optional" />
-                </div>
-                <div className="space-y-1">
-                  <label className={`block ${LBL}`}>Application date</label>
-                  <DateInput value={startForm.ApplicationDate} max={localDay()} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationDate: e.target.value }))} className={INP} />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className={`block ${LBL}`}>Authority</label>
-                <input className={INP} value={startForm.Authority} onChange={(e) => setStartForm((f) => ({ ...f, Authority: e.target.value }))} placeholder="e.g. GHMC, MCGM, BDA" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className={`block ${LBL}`}>Old khata no.</label>
-                  <input className={INP} value={startForm.OldKhataNo} onChange={(e) => setStartForm((f) => ({ ...f, OldKhataNo: e.target.value }))} />
-                </div>
-                <div className="space-y-1">
-                  <label className={`block ${LBL}`}>Mutation fee</label>
-                  <input type="number" className={`${INP} tabular-nums`} value={startForm.MutationFee} onChange={(e) => setStartForm((f) => ({ ...f, MutationFee: e.target.value }))} />
-                </div>
-              </div>
-            </div>
-            <DialogFooter className="gap-2">
-              <button onClick={() => { setDialogOpen(false); setBookingId(""); }} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-              <button onClick={handleStart} disabled={saving || !bookingId} className={`${KEY_INK} h-9 px-4`}>{saving ? "Starting…" : "Start"}</button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+      {/* Raise query */}
+      <Dialog open={queryOpen} onOpenChange={(o) => !o && setQueryOpen(false)}>
+        <DialogContent className="max-w-sm p-5 gap-4">
+          <DialogHeader><DialogTitle>Raise query</DialogTitle></DialogHeader>
+          <label className="block space-y-1">
+            <span className={cn("block font-medium", GRID_LABEL)}>What did the authority flag? <span className="text-destructive">*</span></span>
+            <textarea value={queryRemarks} onChange={(e) => setQueryRemarks(e.target.value)} rows={4} className={cn(GRID_INPUT, "h-auto py-2 text-sm resize-none")} />
+            <span className="block text-[0.6875rem] text-muted-foreground">The mandatory documents are reset, so staff correct and reattach them before resubmitting.</span>
+          </label>
+          <DialogFooter className="gap-2">
+            <button type="button" onClick={() => setQueryOpen(false)} className={GRID_BTN}>Cancel</button>
+            <button type="button" onClick={handleQuery} disabled={busy || !queryRemarks.trim()} className={cn(GRID_BTN_BRAND, "bg-destructive border-destructive hover:bg-destructive/90")}>{busy ? "Saving…" : "Record query"}</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-        {/* Raise query */}
-        <Dialog open={queryOpen} onOpenChange={(o) => !o && setQueryOpen(false)}>
-          <DialogContent className="max-w-sm rounded-none p-5 gap-4" style={{ border: RULE }}>
-            <DialogHeader><DialogTitle className="font-heading">Raise query</DialogTitle></DialogHeader>
-            <div className="space-y-1">
-              <label className={`block ${LBL}`}>What did the authority flag? *</label>
-              <textarea value={queryRemarks} onChange={(e) => setQueryRemarks(e.target.value)} className={`${TEXTAREA} min-h-[80px]`} />
-              <p className="text-[0.6875rem] text-muted-foreground">The mandatory documents are reset, so staff must correct and reattach them before resubmitting.</p>
+      {/* Approve */}
+      <Dialog open={approveOpen} onOpenChange={(o) => !o && setApproveOpen(false)}>
+        <DialogContent className="max-w-sm p-5 gap-4">
+          <DialogHeader><DialogTitle>Approve mutation</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <label className="block space-y-1">
+              <span className={cn("block font-medium", GRID_LABEL)}>New khata no. <span className="text-destructive">*</span></span>
+              <input className={cn(GRID_INPUT, "text-sm tabular-nums")} value={approveForm.NewKhataNo} onChange={(e) => setApproveForm((f) => ({ ...f, NewKhataNo: e.target.value }))} placeholder="e.g. 456/2026" />
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <span className={cn("block font-medium", GRID_LABEL)}>Authority's mutation no.</span>
+                <input className={cn(GRID_INPUT, "text-sm tabular-nums")} value={approveForm.ApprovedNo} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedNo: e.target.value }))} />
+              </label>
+              <label className="block space-y-1">
+                <span className={cn("block font-medium", GRID_LABEL)}>Approved date</span>
+                <DateInput value={approveForm.ApprovedDate} max={localDay()} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedDate: e.target.value }))} className={cn(GRID_INPUT, "text-sm")} />
+              </label>
             </div>
-            <DialogFooter className="gap-2">
-              <button onClick={() => setQueryOpen(false)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-              <button onClick={handleQuery} disabled={busy || !queryRemarks.trim()} className={`${KEY_INK} h-9 px-4`}>{busy ? "Saving…" : "Record query"}</button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          </div>
+          <DialogFooter className="gap-2">
+            <button type="button" onClick={() => setApproveOpen(false)} className={GRID_BTN}>Cancel</button>
+            <button type="button" onClick={handleApprove} disabled={busy || !approveForm.NewKhataNo.trim()} className={GRID_BTN_BRAND}>{busy ? "Saving…" : "Confirm approval"}</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-        {/* Approve */}
-        <Dialog open={approveOpen} onOpenChange={(o) => !o && setApproveOpen(false)}>
-          <DialogContent className="max-w-sm rounded-none p-5 gap-4" style={{ border: RULE }}>
-            <DialogHeader><DialogTitle className="font-heading">Approve mutation</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className={`block ${LBL}`}>New khata no. *</label>
-                <input className={`${INP} tabular-nums`} value={approveForm.NewKhataNo} onChange={(e) => setApproveForm((f) => ({ ...f, NewKhataNo: e.target.value }))} placeholder="e.g. 456/2026" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className={`block ${LBL}`}>Mutation no.</label>
-                  <input className={`${INP} tabular-nums`} value={approveForm.ApprovedNo} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedNo: e.target.value }))} />
-                </div>
-                <div className="space-y-1">
-                  <label className={`block ${LBL}`}>Approved date</label>
-                  <DateInput value={approveForm.ApprovedDate} max={localDay()} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedDate: e.target.value }))} className={INP} />
-                </div>
-              </div>
-            </div>
-            <DialogFooter className="gap-2">
-              <button onClick={() => setApproveOpen(false)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-              <button onClick={handleApprove} disabled={busy || !approveForm.NewKhataNo.trim()} className={`${KEY_INK} h-9 px-4`}>{busy ? "Saving…" : "Confirm approval"}</button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Preview */}
-        <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
-          <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden rounded-none" style={{ border: RULE }}>
-            <DialogHeader className="px-4 py-2.5" style={{ borderBottom: RULE }}>
-              <DialogTitle className="font-heading text-sm truncate">{previewDoc?.name}</DialogTitle>
-            </DialogHeader>
-            <div className="bg-muted/30 flex items-center justify-center" style={{ height: "75vh" }}>
-              {previewDoc?.mime === "application/pdf" ? (
-                <iframe src={previewDoc.url} title={previewDoc.name} className="w-full h-full border-0" />
-              ) : previewDoc ? (
-                <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full max-h-full object-contain" />
-              ) : null}
-            </div>
-          </DialogContent>
-        </Dialog>
-      </SheetShell>
+      {/* Preview */}
+      <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
+        <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-4 py-2.5 border-b border-border">
+            <DialogTitle className="text-sm truncate">{previewDoc?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="bg-muted/30 flex items-center justify-center" style={{ height: "75vh" }}>
+            {previewDoc?.mime === "application/pdf" ? (
+              <iframe src={previewDoc.url} title={previewDoc.name} className="w-full h-full border-0" />
+            ) : previewDoc ? (
+              <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full max-h-full object-contain" />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
