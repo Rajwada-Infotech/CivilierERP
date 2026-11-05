@@ -1,5 +1,5 @@
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -8,8 +8,9 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import {
-  Plus, CheckCircle2, Upload, AlertTriangle, History, Link2, Landmark, RefreshCw, ScrollText, ArrowLeft, Download, Copy,
-  RotateCcw, FileText, Home, FolderCheck, Info, Send,
+  Plus, CheckCircle2, AlertTriangle, History, Link2, Landmark, RefreshCw, ScrollText, ArrowLeft, Download, Copy,
+  RotateCcw, FileText, Home, FolderCheck, Send,
+
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -17,7 +18,8 @@ import { useUrlParam } from "@/hooks/useUrlParam";
 import { useCrmListState, useSticky, listParams, type CrmListQuery, type CrmSort } from "@/hooks/useCrmListState";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import {
-  CrmAppPage, CrmGrid, GridBulkBar, GridColumnChooser, GridDateFilter, GridFields, GridHighlights, GridMetric, GridPath, GridRelated,
+  CrmAppPage, CrmGrid, GridBulkBar, GridColumnChooser, GridDateFilter, GridFields, GridGuidance, GridHighlights, GridMetric, GridPath, GridProgress, GridRelated,
+
   GridSavedViews, GridSearch, GridStatusPill, GridTabs, exportGrid, gridListMeta, gridVisibleCols, resolveGridDateRange, useGridPrefs,
   GRID_ANY_DATE, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_LABEL, GRID_PAGE_SIZES,
   type GridCol, type GridDateRange, type GridPathState,
@@ -26,8 +28,8 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
-import { downloadFile, fetchFileBlob, fmtDate, localDay } from "./salesDeed/config";
-import { DocRow } from "./salesDeed/parts";
+import { fmtDate, localDay } from "./salesDeed/config";
+import { DocumentCentre } from "./salesDeed/parts";
 import { useCanApprove } from "@/hooks/useCanApprove";
 
 const API = "/api/crm/mutation";
@@ -84,18 +86,9 @@ async function fetchEligible(): Promise<any[]> {
 const emptyStart = () => ({ ApplicationNo: "", ApplicationDate: localDay(), Authority: "", OldKhataNo: "", MutationFee: "" });
 
 /** The documents as a bar: verified of the mandatory ones. */
-function DocsProgress({ verified, required }: { verified: number; required: number }) {
-  if (!required) return <span className="text-muted-foreground">None asked</span>;
-  const done = verified >= required;
-  return (
-    <span className="inline-flex items-center gap-2" title={`${verified} of ${required} mandatory documents verified`}>
-      <span className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
-        <span className={cn("block h-full rounded-full", done ? "bg-emerald-600" : "bg-primary")} style={{ width: `${Math.round((verified / required) * 100)}%` }} />
-      </span>
-      <span className={cn("tabular-nums text-xs", done ? "text-emerald-700 dark:text-emerald-300 font-semibold" : "")}>{verified}/{required}</span>
-    </span>
-  );
-}
+const DocsProgress = ({ verified, required }: { verified: number; required: number }) => (
+  <GridProgress done={verified} total={required} title={`${verified} of ${required} mandatory documents verified`} />
+);
 
 const MUTATION_COLS: GridCol<any>[] = [
   { id: "no", label: "Mutation", sortKey: "MutationNo", locked: true, cell: (m) => <span className="font-semibold text-primary hover:underline tabular-nums">{m.MutationNo}</span>, csv: (m) => m.MutationNo },
@@ -177,13 +170,7 @@ const CrmMutation: React.FC = () => {
   const [approveOpen, setApproveOpen] = useState(false);
   const [approveForm, setApproveForm] = useState({ ApprovedNo: "", ApprovedDate: localDay(), NewKhataNo: "" });
   const [busy, setBusy] = useState(false);
-  const [newDocType, setNewDocType] = useState("Other");
-  const [newDocLabel, setNewDocLabel] = useState("");
-  const [uploadingDoc, setUploadingDoc] = useState(false);
   const [requestingDoc, setRequestingDoc] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [previewDoc, setPreviewDoc] = useState<{ url: string; mime: string; name: string } | null>(null);
-  const [previewLoading, setPreviewLoading] = useState<number | null>(null);
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ["crm-mutation", s.query, extra],
@@ -298,20 +285,16 @@ const CrmMutation: React.FC = () => {
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setBusy(false); }
   };
-  const handleUploadDoc = async (file: File, documentType: string, label?: string) => {
-    if (detailId == null) return;
-    setUploadingDoc(true);
-    try {
-      const fd = new FormData(); fd.append("files", file); fd.append("DocumentType", documentType);
-      if (label) fd.append("Label", label);
-      await send(`${API}/${detailId}/documents/upload`, "POST", fd);
-      toast.success("Document uploaded");
-      invalidate();
-      setNewDocLabel("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setUploadingDoc(false); }
+  // The document centre's calls (the server's own rules decide who may do each).
+  const docUpload = (files: File[], documentType: string, label?: string) => {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    fd.append("DocumentType", documentType);
+    if (label) fd.append("Label", label);
+    return send(`${API}/${detailId}/documents/upload`, "POST", fd);
   };
+  const docReview = (doc: any, verify: boolean, remarks?: string) =>
+    send(`${API}/${detailId}/documents/${doc.Id}`, "PUT", verify ? { Status: "Verified" } : { Status: "Rejected", Remarks: remarks });
   const handleRequestDoc = async (documentType: string, label?: string) => {
     if (detailId == null) return;
     setRequestingDoc(true);
@@ -322,29 +305,7 @@ const CrmMutation: React.FC = () => {
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setRequestingDoc(false); }
   };
-  const handleReviewDoc = async (docId: number, verify: boolean) => {
-    if (detailId == null) return;
-    let remarks: string | undefined;
-    if (!verify) {
-      remarks = (await ask.prompt("Describe what's wrong with this document. The uploader sees this.", { title: "Reject document", okLabel: "Reject", danger: true })) ?? undefined;
-      if (!remarks) return;
-    }
-    try {
-      await send(`${API}/${detailId}/documents/${docId}`, "PUT", verify ? { Status: "Verified" } : { Status: "Rejected", Remarks: remarks });
-      toast.success(verify ? "Document verified" : "Document rejected");
-      invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
   const fileUrl = (doc: any) => `${API}/documents/file/${doc.Id}`;
-  const handlePreviewDoc = async (doc: any) => {
-    setPreviewLoading(doc.Id);
-    try {
-      const blob = await fetchFileBlob(fileUrl(doc));
-      setPreviewDoc({ url: URL.createObjectURL(blob), mime: doc.MimeType, name: doc.FileName || doc.DocumentType });
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setPreviewLoading(null); }
-  };
-  const closePreview = () => { if (previewDoc) URL.revokeObjectURL(previewDoc.url); setPreviewDoc(null); };
 
   const runExport = async () => {
     setExporting(true); setExportError(null);
@@ -364,17 +325,6 @@ const CrmMutation: React.FC = () => {
   const locked = detail?.Status === "Approved";
   const canDocs = rights.canEdit && !locked;
 
-  const docRow = (doc: any) => (
-    <DocRow key={doc.Id} doc={doc} previewing={previewLoading === doc.Id}
-      nextStep={isSynced(doc) ? "Pulled from the Registry's own verified copy — nothing to do here." : undefined}
-      onPreview={() => handlePreviewDoc(doc)}
-      onDownload={() => downloadFile(fileUrl(doc), doc.FileName || doc.DocumentType || "document").catch((e) => toast.error(translateError(e.message)))}
-      attach={canDocs ? { onFile: (f) => handleUploadDoc(f, doc.DocumentType, doc.Label) } : undefined}
-      review={canDocs ? { onVerify: () => handleReviewDoc(doc.Id, true), onReject: () => handleReviewDoc(doc.Id, false) } : undefined}
-      extraTag={isSynced(doc)
-        ? <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-dashed border-border text-[0.6875rem] text-muted-foreground"><Link2 size={10} /> Synced from registry</span>
-        : undefined} />
-  );
 
   const tabs = [ALL, "Applied", "QueryRaised", "Approved"].map((k) => ({ key: k, label: k === ALL ? "All" : statusText(k), count: result ? (k === ALL ? allCount : counts[k] ?? 0) : null }));
 
@@ -390,8 +340,6 @@ const CrmMutation: React.FC = () => {
   } : {
     tone: "moving" as const, title: "Waiting for the authority", text: "Every mandatory document is verified. When the authority issues the new khata, approve the mutation; if they raise a query, record it.",
   };
-  const guidanceTone = { done: "border-emerald-500/30 bg-emerald-500/5", stopped: "border-rose-500/30 bg-rose-500/5", waiting: "border-amber-500/30 bg-amber-500/5", moving: "border-primary/30 bg-primary/5" };
-  const GuidanceIcon = !guidance ? Info : guidance.tone === "done" ? CheckCircle2 : guidance.tone === "stopped" ? AlertTriangle : Info;
 
   const actions = detail && (
     <>
@@ -507,22 +455,15 @@ const CrmMutation: React.FC = () => {
               <GridPath steps={mutationPath(detail, docsReady, required.length, verifiedCount)} />
 
               {guidance && (
-                <div className={cn("rounded-lg border px-4 py-3 flex items-start gap-3", guidanceTone[guidance.tone])}>
-                  <GuidanceIcon size={18} className={cn("shrink-0 mt-0.5", guidance.tone === "stopped" ? "text-destructive" : guidance.tone === "done" ? "text-emerald-600" : "text-primary")} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold">{guidance.title}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{guidance.text}</p>
-                  </div>
-                  {!locked && required.length > 0 && !docsReady && activeTab !== "Documents" && (
-                    <button type="button" className={cn(GRID_BTN, "ml-auto shrink-0")} onClick={() => setActiveTab("Documents")}>Go to documents</button>
-                  )}
-                  {!locked && !required.length && canDocs && (
-                    <button type="button" className={cn(GRID_BTN_BRAND, "ml-auto shrink-0")} disabled={requestingDoc}
+                <GridGuidance tone={guidance.tone} title={guidance.title} text={guidance.text}
+                  action={!locked && required.length > 0 && !docsReady && activeTab !== "Documents" ? (
+                    <button type="button" className={GRID_BTN} onClick={() => setActiveTab("Documents")}>Go to documents</button>
+                  ) : !locked && !required.length && canDocs ? (
+                    <button type="button" className={GRID_BTN_BRAND} disabled={requestingDoc}
                       onClick={() => handleRequestDoc("MutationApplicationForm", "Mutation Application Form")}>
                       {requestingDoc ? "Requesting…" : "Request application form"}
                     </button>
-                  )}
-                </div>
+                  ) : undefined} />
               )}
 
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem] items-start">
@@ -562,50 +503,26 @@ const CrmMutation: React.FC = () => {
                   )}
 
                   {activeTab === "Documents" && (
-                    <>
-                      <div className="px-4 h-10 flex items-center justify-between border-b border-border">
-                        <h3 className="text-[0.8125rem] font-bold">Required documents</h3>
-                        <DocsProgress verified={verifiedCount} required={required.length} />
-                      </div>
-                      {required.length === 0 ? (
-                        <div className="px-4 py-4 flex items-center justify-between gap-3 flex-wrap">
-                          <p className="text-xs text-muted-foreground">No mandatory document requested yet. Approval waits until one is requested and verified.</p>
-                          {canDocs && (
-                            <button type="button" onClick={() => handleRequestDoc("MutationApplicationForm", "Mutation Application Form")} disabled={requestingDoc} className={GRID_BTN_BRAND}>
-                              {requestingDoc ? "Requesting…" : "Request application form"}
-                            </button>
-                          )}
-                        </div>
-                      ) : required.map(docRow)}
-
-                      <div className="px-4 h-10 flex items-center border-y border-border mt-2">
-                        <h3 className="text-[0.8125rem] font-bold">Supporting documents</h3>
-                      </div>
-                      {supporting.length > 0 ? supporting.map(docRow) : <p className="px-4 py-3 text-xs text-muted-foreground">None added.</p>}
-                      {canDocs && (
-                        <div className="p-4 border-t border-border bg-muted/20">
-                          <p className="text-xs font-semibold">Add a supporting document</p>
-                          <p className="text-xs text-muted-foreground mb-2">Reference only. Anything approval checks goes through the required list above.</p>
-                          <div className="flex items-end gap-2 flex-wrap">
-                            <label className="flex-1 min-w-[9rem] space-y-1">
-                              <span className={cn("block", GRID_LABEL)}>Type</span>
-                              <select value={newDocType} onChange={(e) => setNewDocType(e.target.value)} className={GRID_INPUT}>
-                                <option value="IdentityProof">Identity proof</option>
-                                <option value="Other">Other</option>
-                              </select>
-                            </label>
-                            <label className="flex-1 min-w-[9rem] space-y-1">
-                              <span className={cn("block", GRID_LABEL)}>Label (optional)</span>
-                              <input className={GRID_INPUT} value={newDocLabel} onChange={(e) => setNewDocLabel(e.target.value)} placeholder="e.g. Aadhaar copy" />
-                            </label>
-                            <input type="file" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && handleUploadDoc(e.target.files[0], newDocType, newDocLabel)} />
-                            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadingDoc} className={GRID_BTN_BRAND}>
-                              <Upload size={13} /> {uploadingDoc ? "Uploading…" : "Upload"}
-                            </button>
+                    <div className="p-4">
+                      <DocumentCentre documents={documents} hasFile={(d) => !!d.HasFile} fileUrl={fileUrl} onChanged={invalidate}
+                        review={docReview}
+                        attach={(d, f) => docUpload([f], d.DocumentType, d.Label)}
+                        upload={{ types: [{ value: "IdentityProof", label: "Identity proof" }, { value: "Other", label: "Other" }], run: docUpload }}
+                        canAttach={{ ok: canDocs, reason: locked ? "Approved: the papers are closed." : "Changing papers needs the edit right." }}
+                        canReview={{ ok: canDocs, reason: locked ? "Approved: the papers are closed." : "Reviewing papers needs the edit right." }}
+                        nextStep={(d) => (isSynced(d) ? "Pulled from the Registry's own verified copy — nothing to do here." : undefined)}
+                        extraTag={(d) => (isSynced(d) ? <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-dashed border-border text-[0.6875rem] text-muted-foreground"><Link2 size={10} /> Synced from registry</span> : null)}
+                        emptyRequired={(
+                          <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <p className="text-xs text-muted-foreground">No mandatory paper asked for yet. Approval waits until one is requested and verified.</p>
+                            {canDocs && (
+                              <button type="button" onClick={() => handleRequestDoc("MutationApplicationForm", "Mutation Application Form")} disabled={requestingDoc} className={GRID_BTN_BRAND}>
+                                {requestingDoc ? "Requesting…" : "Request application form"}
+                              </button>
+                            )}
                           </div>
-                        </div>
-                      )}
-                    </>
+                        )} />
+                    </div>
                   )}
 
                   {activeTab === "History" && (
@@ -757,21 +674,6 @@ const CrmMutation: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Preview */}
-      <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
-        <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
-          <DialogHeader className="px-4 py-2.5 border-b border-border">
-            <DialogTitle className="text-sm truncate">{previewDoc?.name}</DialogTitle>
-          </DialogHeader>
-          <div className="bg-muted/30 flex items-center justify-center" style={{ height: "75vh" }}>
-            {previewDoc?.mime === "application/pdf" ? (
-              <iframe src={previewDoc.url} title={previewDoc.name} className="w-full h-full border-0" />
-            ) : previewDoc ? (
-              <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full max-h-full object-contain" />
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 };

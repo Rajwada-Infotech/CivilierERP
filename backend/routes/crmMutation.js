@@ -227,10 +227,13 @@ router.get("/:id", requirePageRight("crm-mutation", "view"), async (req, res) =>
     const [mutRes, docRes, logRes] = await Promise.all([
       pool.request().input('id', sql.Int, id).query(`${MUT_SELECT} WHERE m.Id = @id`),
       pool.request().input('id', sql.Int, id).query(`
-        SELECT Id, DocumentType, Label, IsMandatory, Status, FileName, MimeType, FileSize,
-               UploadedAt, UploadedByType, Remarks, CreatedAt,
-               CASE WHEN FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
-        FROM dbo.CrmMutationDocument WHERE MutationId = @id ORDER BY CreatedAt
+        SELECT x.Id, x.DocumentType, x.Label, x.IsMandatory, x.Status, x.FileName, x.MimeType, x.FileSize,
+               x.UploadedAt, x.UploadedByType, x.Remarks, x.CreatedAt,
+               CASE WHEN x.Status IN ('Verified', 'Rejected') THEN rv.name END AS ReviewedByName,
+               CASE WHEN x.Status IN ('Verified', 'Rejected') THEN x.UpdatedAt END AS ReviewedAt,
+               CASE WHEN x.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
+        FROM dbo.CrmMutationDocument x LEFT JOIN dbo.Users rv ON rv.id = x.UpdatedBy
+        WHERE x.MutationId = @id ORDER BY x.CreatedAt
       `),
       pool.request().input('id', sql.Int, id).query(`
         SELECT l.*, u.name AS ActorName

@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDown, ArrowUp, ArrowUpDown, MoreHorizontal, Bookmark, Check, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Columns3, Search, Trash2, X,
+  Columns3, Search, Trash2, X, CheckCircle2, AlertTriangle, Info,
+
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { exportToCsv } from "@/lib/export";
@@ -233,10 +234,26 @@ export const GRID_CARD = "bg-card border border-border rounded-lg shadow-[0_2px_
 // Solid header (rows scroll under it, so it must not be see-through), in normal case.
 export const GRID_TH = "h-8 px-3 text-xs font-semibold normal-case tracking-normal text-muted-foreground whitespace-nowrap bg-muted border-b border-border";
 export const GRID_TD = "h-9 px-3 border-b border-border/70 align-middle";
-/** The neutral button (brand-coloured text); GRID_BTN_BRAND is the one main action on a page. */
-export const GRID_BTN = "inline-flex items-center justify-center gap-1.5 h-9 px-3 text-xs font-medium rounded-md border border-border bg-card text-primary hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-40 disabled:cursor-not-allowed";
-export const GRID_BTN_BRAND = "inline-flex items-center justify-center gap-1.5 h-9 px-3 text-xs font-semibold rounded-md border border-primary bg-primary text-primary-foreground hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-40 disabled:cursor-not-allowed";
+/** The neutral button (brand-coloured text); GRID_BTN_BRAND is the one main action on a page. The *_KEY forms are the
+ *  same buttons without a size, for a page that sets each button's height and padding itself. */
+export const GRID_KEY = "inline-flex items-center justify-center gap-1.5 text-xs font-medium rounded-md border border-border bg-card text-primary hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-40 disabled:cursor-not-allowed";
+export const GRID_KEY_BRAND = "inline-flex items-center justify-center gap-1.5 text-xs font-semibold rounded-md border border-primary bg-primary text-primary-foreground hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-40 disabled:cursor-not-allowed";
+export const GRID_KEY_DANGER = "inline-flex items-center justify-center gap-1.5 text-xs font-semibold rounded-md border border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 disabled:opacity-40 disabled:cursor-not-allowed";
+export const GRID_BTN = `${GRID_KEY} h-9 px-3`;
+export const GRID_BTN_BRAND = `${GRID_KEY_BRAND} h-9 px-3`;
 export const GRID_LABEL = "text-xs text-muted-foreground";
+/** For a page moving from the sheet look: its keys, label and rules (customers/config.ts) mapped onto the kit, so the
+ *  page's markup can stay as written. Each key keeps the height and padding set where it is used. */
+export const GRID_SHEET_KEYS = {
+  KEY_INK: GRID_KEY_BRAND,
+  KEY_LINE: GRID_KEY,
+  KEY_RED: GRID_KEY_DANGER,
+  LBL: GRID_LABEL,
+  RULE: "1px solid hsl(var(--border))",
+  RULE_SOFT: "1px solid hsl(var(--border) / 0.7)",
+  INP: "w-full h-9 px-2.5 text-sm rounded-md border border-border bg-card text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 read-only:bg-muted/40 read-only:cursor-default",
+  TEXTAREA: "w-full px-2.5 py-2 text-sm rounded-md border border-border bg-card text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 resize-none read-only:bg-muted/40",
+} as const;
 export const GRID_INPUT = "w-full h-9 px-2.5 text-xs rounded-md border border-border bg-card text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
 const GRID_MENU = "absolute right-0 top-10 z-30 bg-card border border-border rounded-lg shadow-lg py-1";
 const GRID_MENU_HEAD = "px-3 py-1.5 text-xs font-semibold text-muted-foreground";
@@ -282,6 +299,11 @@ export function GridStatusPill({ status, label }: { status: string | null | unde
   );
 }
 
+/** The sheet's status mark (text + tone) drawn as the kit's pill, for pages moving off the sheet: same props. */
+export function GridToneMark({ text, tone }: { text: string; tone: ReturnType<typeof statusBadgeTone> }) {
+  return <span className={cn("inline-flex items-center h-5 px-2 rounded-full border text-[0.6875rem] font-semibold whitespace-nowrap", PILL_TONE[tone] ?? PILL_TONE.waiting)}>{text}</span>;
+}
+
 // ── Record page parts ────────────────────────────────────────────────────────
 /** A record's highlights panel: icon tile, object, name, status, actions, then the key fields in one row. */
 export function GridHighlights({ icon: Icon, object, title, sub, status, actions, fields }: {
@@ -317,8 +339,9 @@ export function GridHighlights({ icon: Icon, object, title, sub, status, actions
 }
 
 export type GridPathState = "done" | "current" | "failed" | "todo";
-/** The record's stages as a chevron path: done (filled), the current one (brand), a stopped one (red), then the rest. */
-export function GridPath({ steps }: { steps: { label: string; state: GridPathState; note?: string }[] }) {
+/** The record's stages as a chevron path: done (filled), the current one (brand), a stopped one (red), then the rest.
+ *  A step with onClick opens what it stands for (a tab); `active` marks the one on view. */
+export function GridPath({ steps }: { steps: { label: string; state: GridPathState; note?: string; onClick?: () => void; active?: boolean }[] }) {
   const tone: Record<GridPathState, string> = {
     done: "bg-emerald-600 text-white",
     current: "bg-primary text-primary-foreground",
@@ -330,13 +353,18 @@ export function GridPath({ steps }: { steps: { label: string; state: GridPathSta
       <ol className="flex w-full overflow-x-auto" aria-label="Stages">
         {steps.map((s, i) => (
           <li key={s.label} aria-current={s.state === "current" ? "step" : undefined}
-            className={cn("relative flex-1 min-w-[8rem] h-9 flex items-center justify-center gap-1.5 px-6 text-xs font-semibold", tone[s.state],
-              i === 0 ? "rounded-l-full" : "", i === steps.length - 1 ? "rounded-r-full" : "")}
+            className={cn("relative flex-1 min-w-[7.5rem] h-9 flex", i === 0 ? "rounded-l-full overflow-hidden" : "", i === steps.length - 1 ? "rounded-r-full overflow-hidden" : "")}
             style={{ clipPath: i === steps.length - 1 ? undefined : "polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 0 0)", marginRight: i === steps.length - 1 ? 0 : -8 }}
             title={s.note}>
-            {s.state === "done" && <Check size={12} />}
-            {s.state === "failed" && <X size={12} />}
-            <span className="truncate">{s.label}</span>
+            {React.createElement(s.onClick ? "button" : "span", {
+              ...(s.onClick ? { type: "button", onClick: s.onClick } : {}),
+              className: cn("w-full h-full flex items-center justify-center gap-1.5 px-6 text-xs font-semibold", tone[s.state],
+                s.onClick && "hover:brightness-110 focus:outline-none focus-visible:brightness-110", s.active && "underline underline-offset-4"),
+            }, <>
+              {s.state === "done" && <Check size={12} />}
+              {s.state === "failed" && <X size={12} />}
+              <span className="truncate">{s.label}</span>
+            </>)}
           </li>
         ))}
       </ol>
@@ -347,7 +375,66 @@ export function GridPath({ steps }: { steps: { label: string; state: GridPathSta
   );
 }
 
+/** What the record is waiting on, in words, with the one action that moves it on. The tone colours it: done, stopped,
+ *  waiting on someone, or under way. */
+export type GridGuidanceTone = "done" | "stopped" | "waiting" | "moving";
+export function GridGuidance({ tone, title, text, action }: { tone: GridGuidanceTone; title: string; text: React.ReactNode; action?: React.ReactNode }) {
+  const box: Record<GridGuidanceTone, string> = {
+    done: "border-emerald-500/30 bg-emerald-500/5", stopped: "border-rose-500/30 bg-rose-500/5",
+    waiting: "border-amber-500/30 bg-amber-500/5", moving: "border-primary/30 bg-primary/5",
+  };
+  const ink: Record<GridGuidanceTone, string> = { done: "text-emerald-600", stopped: "text-destructive", waiting: "text-amber-600", moving: "text-primary" };
+  const Icon = tone === "done" ? CheckCircle2 : tone === "stopped" ? AlertTriangle : Info;
+  return (
+    <div className={cn("rounded-lg border px-4 py-3 flex flex-wrap items-start gap-3", box[tone])} role="status">
+      <Icon size={18} className={cn("shrink-0 mt-0.5", ink[tone])} />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold">{title}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{text}</p>
+      </div>
+      {action && <div className="shrink-0 flex flex-wrap gap-2">{action}</div>}
+    </div>
+  );
+}
+
+/** A small segmented picker with counts (e.g. All · Bank · Developer). */
+export function GridSegment<K extends string>({ options, value, onChange, label }: {
+  options: { key: K; label: string; count?: number | null; icon?: React.ElementType }[]; value: K; onChange: (k: K) => void; label: string;
+}) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex h-9 rounded-md border border-border bg-card overflow-hidden">
+      {options.map((o, i) => {
+        const on = o.key === value;
+        const Icon = o.icon;
+        return (
+          <button key={o.key} type="button" aria-pressed={on} onClick={() => onChange(o.key)}
+            className={cn("inline-flex items-center gap-1.5 px-3 text-xs font-medium transition-colors", i > 0 && "border-l border-border",
+              on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted")}>
+            {Icon && <Icon size={12} />}{o.label}
+            {o.count != null && <span className={cn("tabular-nums", on ? "opacity-90" : "opacity-70")}>{o.count.toLocaleString("en-IN")}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** How far along a set is, as a short bar and "done/total": a record's mandatory documents, say. */
+export function GridProgress({ done, total, empty = "None asked", title }: { done: number; total: number; empty?: string; title?: string }) {
+  if (!total) return <span className="text-muted-foreground">{empty}</span>;
+  const full = done >= total;
+  return (
+    <span className="inline-flex items-center gap-2" title={title ?? `${done} of ${total}`}>
+      <span className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
+        <span className={cn("block h-full rounded-full", full ? "bg-emerald-600" : "bg-primary")} style={{ width: `${Math.min(100, Math.round((done / total) * 100))}%` }} />
+      </span>
+      <span className={cn("tabular-nums text-xs", full ? "text-emerald-700 dark:text-emerald-300 font-semibold" : "")}>{done}/{total}</span>
+    </span>
+  );
+}
+
 /** A related-list card on a record page: icon tile, title, count, and an action on the right. */
+
 export function GridRelated({ icon: Icon, title, count, action, children }: {
   icon: React.ElementType; title: string; count?: number; action?: React.ReactNode; children: React.ReactNode;
 }) {
@@ -422,7 +509,7 @@ export function gridVisibleCols<T>(cols: GridCol<T>[], prefs: GridPrefs): GridCo
 }
 
 /** A small menu that closes on an outside click or Escape. */
-function usePopover() {
+export function usePopover() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -609,7 +696,7 @@ function GridSortHead<T>({ col, sort, onSort }: { col: GridCol<T>; sort: CrmSort
   );
 }
 
-function GridFooter({ page, pageSize, total, onPage, onPageSize }: { page: number; pageSize: number; total: number; onPage: (p: number) => void; onPageSize: (n: number) => void }) {
+export function GridFooter({ page, pageSize, total, onPage, onPageSize }: { page: number; pageSize: number; total: number; onPage: (p: number) => void; onPageSize: (n: number) => void }) {
   const last = Math.max(1, Math.ceil(total / pageSize));
   const from = total ? (page - 1) * pageSize + 1 : 0;
   const to = Math.min(total, page * pageSize);

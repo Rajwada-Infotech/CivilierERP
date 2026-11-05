@@ -7,25 +7,24 @@ export async function fetchAgreements(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
-export const PAGE_SIZE = 20;
-export interface AgreementListFilters {
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-export async function fetchAgreementsList(filters: AgreementListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
+/** One page of the list for the given query (page, sort, status, search, filters), with the counts by status. */
+export async function fetchAgreementsList(params: URLSearchParams): Promise<{ rows: any[]; total: number; statusCounts: Record<string, number> }> {
   // Throws, so a failed load shows as one instead of an empty list.
   const r = await fetchWithAuth(`${API}?${params}`);
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data?.error || `Could not load the agreements (${r.status}).`);
-  return { rows: data.rows || [], total: data.total || 0 };
+  return { rows: data.rows || [], total: data.total || 0, statusCounts: data.statusCounts || {} };
 }
+/** Every agreement matching the query, sorted (the Excel export). */
+export async function fetchAllAgreements(params: URLSearchParams): Promise<any[]> {
+  const p = new URLSearchParams(params);
+  p.delete("page"); p.delete("pageSize");
+  const r = await fetchWithAuth(`${API}?${p}`);
+  const data = await r.json().catch(() => []);
+  if (!r.ok) throw new Error((data as any)?.error || `Could not export the agreements (${r.status}).`);
+  return data;
+}
+
 export async function fetchAgreementDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   if (!r.ok) throw new Error("Failed to load agreement");

@@ -1,6 +1,7 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_SQL, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
+const { round2 } = require("../services/bookingUnits");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -60,35 +61,98 @@ const upload = multer({
 });
 const uploadQP = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
 
+// A deed's status, worked out rather than only stored: Overdue turns on today's date. The one rule, in SQL, so the
+// list can filter, count and page on it however many deeds there are; `c` names the SQL for each input (columns for a
+// row, parameters for a deed not yet saved). Blank text counts as none, as it always did.
+/** True when a text column holds something other than blanks (blank counts as none, as it always did). */
+const has = (x) => `NULLIF(LTRIM(RTRIM(CAST(${x} AS NVARCHAR(200)))), '') IS NOT NULL`;
+function deedStatusSql(c) {
+  const today = "CAST(SYSDATETIME() AS DATE)";
+  return `CASE
+    WHEN ISNULL(${c.storedStatus}, '') = '${CrmStatus.CANCELLED}' THEN '${CrmStatus.CANCELLED}'
+    WHEN ISNULL(${c.bookingStatus}, '') = '${CrmStatus.CANCELLED}' THEN '${CrmStatus.CANCELLED}'
+    WHEN ${has(c.registrationNo)} THEN '${CrmStatus.REGISTERED}'
+    WHEN ${has(c.executedBy)} AND ${c.registrationDeadline} IS NOT NULL AND CAST(${c.registrationDeadline} AS DATE) < ${today} THEN 'Overdue'
+    WHEN ${has(c.executedBy)} THEN '${CrmStatus.EXECUTED}'
+    WHEN ${c.deedDate} IS NOT NULL AND CAST(${c.deedDate} AS DATE) < ${today} THEN 'Overdue'
+    ELSE '${CrmStatus.DRAFT}'
+  END`;
+}
+const DEED_ROW_STATUS = deedStatusSql({
+  storedStatus: "d.Status", bookingStatus: "b.Status", registrationNo: "d.RegistrationNo",
+  executedBy: "d.ExecutedBy", deedDate: "d.DeedDate", registrationDeadline: "d.RegistrationDeadline",
+});
+/** The status a deed has with these values (for a save: what its row will say), by the same SQL rule. */
+async function deriveDeedStatus(executor, { bookingStatus = null, registrationNo = null, executedBy = null, deedDate = null, registrationDeadline = null, storedStatus = null }) {
+  const r = await executor.request()
+    .input("s_st", sql.NVarChar(30), storedStatus)
+    .input("s_bk", sql.NVarChar(30), bookingStatus)
+    .input("s_rn", sql.NVarChar(100), registrationNo || null)
+    .input("s_ex", sql.NVarChar(200), executedBy || null)
+    .input("s_dd", sql.Date, deedDate || null)
+    .input("s_rd", sql.Date, registrationDeadline || null)
+    .query(`SELECT ${deedStatusSql({ storedStatus: "@s_st", bookingStatus: "@s_bk", registrationNo: "@s_rn", executedBy: "@s_ex", deedDate: "@s_dd", registrationDeadline: "@s_rd" })} AS S`);
+  return r.recordset[0].S;
+}
+/** A deed row as the pages read it: Status is the worked-out one. */
+const withDerivedStatus = (r) => { const { DerivedStatus, ...rest } = r; return { ...rest, Status: DerivedStatus }; };
+
+// ── A deed's steps and what needs someone: the one place these rules live ─────
+// Worked out in SQL on every deed row (list, board, insights, record), so they are counted, filtered and paged on the
+// server however many deeds there are, and every screen reads the same answer. Columns: d (deed), b (booking),
+// qpx / regx / docx (the APPLY blocks in DEED_SELECT), and the derived status.
+const DEED_STEPS = [
+  { key: "setup", done: "1 = 1", since: "d.CreatedAt" },
+  { key: "legal", done: "d.LegalExecutiveId IS NOT NULL", since: "d.CreatedAt" },
+  { key: "docs", done: "docx.Required > 0 AND docx.Uploaded >= docx.Required", since: "d.CreatedAt" },
+  { key: "senior", done: `ISNULL(d.SeniorApprovalStatus, '') = '${CrmStatus.APPROVED}'`, since: "d.CreatedAt" },
+  { key: "customer", done: `ISNULL(d.CustomerApprovalStatus, '') = '${CrmStatus.APPROVED}'`, since: "COALESCE(d.SentToCustomerAt, d.SeniorApprovedAt, d.CreatedAt)" },
+  { key: "director", done: `ISNULL(d.DirectorApprovalStatus, '') = '${CrmStatus.APPROVED}'`, since: "COALESCE(d.CustomerApprovedAt, d.CreatedAt)" },
+  { key: "stampDuty", done: "ISNULL(qpx.Status, '') = 'Confirmed'", since: "COALESCE(d.DirectorApprovedAt, d.CreatedAt)" },
+  { key: "execution", done: `${has("d.ExecutedBy")} OR ${has("d.RegistrationNo")}`, since: "COALESCE(d.DirectorApprovedAt, d.CreatedAt)" },
+  { key: "registered", done: has("d.RegistrationNo"), since: "COALESCE(d.UpdatedAt, d.CreatedAt)" },
+];
+// The step it is on: the first not done, in order (9 = every step done).
+const DEED_STEP_INDEX = `CASE ${DEED_STEPS.map((st, i) => `WHEN NOT (${st.done}) THEN ${i}`).join(" ")} ELSE ${DEED_STEPS.length} END`;
+const DEED_STEP_SINCE = `CASE ${DEED_STEPS.map((st, i) => `WHEN NOT (${st.done}) THEN ${st.since}`).join(" ")} ELSE NULL END`;
+const LIVE = `ISNULL(d.Status, '') <> '${CrmStatus.CANCELLED}' AND ISNULL(b.Status, '') <> '${CrmStatus.CANCELLED}'`;
+// What needs someone now, from what is recorded only (no day limits).
+const DEED_ALERTS = {
+  overdue: `(${DEED_ROW_STATUS}) = 'Overdue'`,
+  recheck: `${LIVE} AND ISNULL(d.CustomerApprovalStatus, '') = 'RecheckRequested'`,
+  noLegal: `${LIVE} AND d.LegalExecutiveId IS NULL AND NOT (${has("d.ExecutedBy")})`,
+  toSend: `${LIVE} AND ISNULL(d.SeniorApprovalStatus, '') = '${CrmStatus.APPROVED}' AND d.SentToCustomerAt IS NULL`,
+  director: `${LIVE} AND ISNULL(d.CustomerApprovalStatus, '') = '${CrmStatus.APPROVED}' AND ISNULL(d.DirectorApprovalStatus, '') = '${CrmStatus.PENDING}'`,
+  stampDuty: `${LIVE} AND ISNULL(d.DirectorApprovalStatus, '') = '${CrmStatus.APPROVED}' AND ISNULL(qpx.Status, '') <> 'Confirmed' AND NOT (${has("d.ExecutedBy")})`,
+  toRegister: `${LIVE} AND ${has("d.ExecutedBy")} AND NOT (${has("d.RegistrationNo")})`,
+};
+const bit = (cond) => `CAST(CASE WHEN ${cond} THEN 1 ELSE 0 END AS INT)`;
+
 const DEED_SELECT = `
-  SELECT d.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+  SELECT d.*, ${DEED_ROW_STATUS} AS DerivedStatus, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, b.ApplicationId,
          b.TotalValue AS BookingValue, b.Status AS BookingStatus, a.ApplicantName, a.Mobile,
          le.name AS LegalExecutiveName,
-         -- For the list: where each deed stands (fees, registry, papers).
-         (SELECT TOP 1 qp.Status FROM dbo.CrmQueryPayment qp WHERE qp.BookingId = d.BookingId ORDER BY qp.Id DESC) AS ListQpStatus,
-         (SELECT TOP 1 r.Status FROM dbo.CrmRegistry r WHERE r.BookingId = d.BookingId
-            ORDER BY CASE WHEN r.Status = 'Cancelled' THEN 1 ELSE 0 END, r.Id DESC) AS ListRegistryStatus,
-         (SELECT COUNT(*) FROM dbo.CrmSalesDeedDocument x WHERE x.SalesDeedId = d.Id AND x.IsMandatory = 1) AS MandatoryDocCount,
-         (SELECT COUNT(*) FROM dbo.CrmSalesDeedDocument x WHERE x.SalesDeedId = d.Id AND x.IsMandatory = 1 AND x.FileBase64 IS NOT NULL) AS MandatoryUploadedCount
+         -- Where each deed stands (fees, registry, papers).
+         qpx.Status AS ListQpStatus, regx.Status AS ListRegistryStatus,
+         docx.Required AS MandatoryDocCount, docx.Uploaded AS MandatoryUploadedCount,
+         -- Its steps and what needs someone (DEED_STEPS / DEED_ALERTS above).
+         ${DEED_STEPS.map((st) => `${bit(st.done)} AS D_${st.key}`).join(", ")},
+         ${DEED_STEP_INDEX} AS StepIndex,
+         CASE WHEN ${LIVE} AND NOT (${has("d.RegistrationNo")}) THEN DATEDIFF(day, ${DEED_STEP_SINCE}, SYSDATETIME()) ELSE NULL END AS DaysAtStep,
+         ${Object.entries(DEED_ALERTS).map(([k, cond]) => `${bit(cond)} AS A_${k}`).join(", ")}
   FROM dbo.CrmSalesDeed d
   JOIN dbo.CrmBooking b ON b.Id = d.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.Users le ON le.id = d.LegalExecutiveId
+  OUTER APPLY (SELECT TOP 1 qp.Status FROM dbo.CrmQueryPayment qp WHERE qp.BookingId = d.BookingId ORDER BY qp.Id DESC) qpx
+  OUTER APPLY (SELECT TOP 1 r.Status FROM dbo.CrmRegistry r WHERE r.BookingId = d.BookingId
+               ORDER BY CASE WHEN r.Status = 'Cancelled' THEN 1 ELSE 0 END, r.Id DESC) regx
+  OUTER APPLY (SELECT COUNT(*) AS Required, SUM(CASE WHEN x.FileBase64 IS NOT NULL THEN 1 ELSE 0 END) AS Uploaded
+               FROM dbo.CrmSalesDeedDocument x WHERE x.SalesDeedId = d.Id AND x.IsMandatory = 1) docx
 `;
 
-function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate, registrationDeadline, storedStatus = null }) {
-  const today = new Date(new Date().toDateString());
-  // A deed cancelled on its own (booking still live) stays Cancelled - it
-  // showed as Draft / Overdue, since nothing below looked at its own status.
-  if (storedStatus === CrmStatus.CANCELLED) return CrmStatus.CANCELLED;
-  if (bookingStatus === CrmStatus.CANCELLED) return CrmStatus.CANCELLED;
-  if (registrationNo) return CrmStatus.REGISTERED;
-  if (executedBy && registrationDeadline && new Date(registrationDeadline) < today) return "Overdue";
-  if (executedBy) return CrmStatus.EXECUTED;
-  if (deedDate && new Date(deedDate) < today) return "Overdue";
-  return CrmStatus.DRAFT;
-}
 
 async function deedDocumentProgress(pool, deedId) {
   const result = await pool.request().input('id', sql.Int, deedId).query(`
@@ -249,60 +313,185 @@ router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), asy
 });
 
 // 2. GET /
-router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const { status, search } = req.query;
+// The list's sortable columns: sortKey → a column of the list row (x).
+const DEED_SORT = {
+  CreatedAt: "x.CreatedAt",
+  DeedNo: "x.DeedNo",
+  ApplicantName: "x.ApplicantName",
+  BookingNo: "x.BookingNo",
+  DeedDate: "x.DeedDate",
+  RegistrationDeadline: "x.RegistrationDeadline",
+  RegistrationDate: "x.RegistrationDate",
+  DeedValue: "x.DeedValue",
+  StampDuty: "x.StampDuty",
+  Status: "x.DerivedStatus",
+  LegalExecutiveName: "x.LegalExecutiveName",
+};
+const DEED_ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The deeds the user may see under the list's search and filters (not its status tab): the row set (alias x) and a
+ *  request maker carrying its inputs. Shared by the list, the insights and the board, so they always agree. */
+function deedScope(req, pool) {
+    const { search } = req.query;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
+    const inputs = [];
     const conds = [];
-    // Company/Project/Block narrow the SQL scan itself. Status, however, is
-    // derived in JS below (deriveDeedStatus depends on today's date and
-    // several columns together, not one stored column) — it stays a
-    // post-fetch filter, same as before, just now applied to an
-    // already-scoped set rather than the entire table.
     if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (companyId) { inputs.push(["companyId", sql.Int, companyId]); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { inputs.push(["projectId", sql.Int, projectId]); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { inputs.push(["blockId", sql.Int, blockId]); conds.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      inputs.push(["search", sql.NVarChar(200), `%${search}%`]);
       conds.push("(a.ApplicantName LIKE @search OR d.DeedNo LIKE @search OR b.BookingNo LIKE @search)");
     }
+    // Requested between two deed dates, either end optional.
+    if (DEED_ISO_DATE.test(req.query.dateFrom || "")) { inputs.push(["dateFrom", sql.Date, req.query.dateFrom]); conds.push("d.DeedDate >= @dateFrom"); }
+    if (DEED_ISO_DATE.test(req.query.dateTo || "")) { inputs.push(["dateTo", sql.Date, req.query.dateTo]); conds.push("d.DeedDate < DATEADD(day, 1, @dateTo)"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`${DEED_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where} ORDER BY d.CreatedAt DESC`);
-    let rows = result.recordset.map((r) => ({
-      ...r,
-      Status: deriveDeedStatus({
-        bookingStatus: r.BookingStatus, registrationNo: r.RegistrationNo,
-        executedBy: r.ExecutedBy, deedDate: r.DeedDate,
-        registrationDeadline: r.RegistrationDeadline, storedStatus: r.Status,
-      }),
-    }));
-    const statusCounts = {};
-    for (const r of rows) statusCounts[r.Status] = (statusCounts[r.Status] || 0) + 1;
-    if (status) rows = rows.filter((r) => r.Status === status);
+    const newReq = () => { const r = pool.request(); for (const [n, t, v] of inputs) r.input(n, t, v); return r; };
+    return { newReq, ROWS: `(${DEED_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where}) x` };
+}
 
-    if (!req.query.page) return res.json(rows);
+router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status } = req.query;
+    // The status is worked out in SQL (DEED_ROW_STATUS), so the filter, the counts, the order and the paging all run
+    // on the server.
+    const { newReq, ROWS: SCOPE } = deedScope(req, pool);
+    // "Needs action" narrows the whole list (its tabs too) to the deeds with that alert.
+    const alert = Object.hasOwn(DEED_ALERTS, req.query.alert) ? req.query.alert : null;
+    const ROWS = alert ? `(SELECT x.* FROM ${SCOPE} WHERE x.A_${alert} = 1) x` : SCOPE;
+    const statusWhere = status ? "WHERE x.DerivedStatus = @st" : "";
+    const sortCol = Object.hasOwn(DEED_SORT, req.query.sortKey) ? DEED_SORT[req.query.sortKey] : DEED_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const ORDER = `ORDER BY ${sortCol} ${dir}, x.Id DESC`;
 
-    // Status is JS-derived, so true SQL-side OFFSET/FETCH isn't possible
-    // here without replicating deriveDeedStatus in T-SQL — paginate the
-    // already company/project/block-scoped, already status-filtered array
-    // in memory instead. Still a real scalability win: the SQL scan itself
-    // is bounded to one company/project/block, not the whole portfolio.
-    const { page, pageSize } = applyPagination(req);
-    const total = rows.length;
-    const start = (page - 1) * pageSize;
-    res.json({ rows: rows.slice(start, start + pageSize), total, page, pageSize, statusCounts });
+    if (!req.query.page) {
+      const r0 = newReq(); if (status) r0.input("st", sql.NVarChar(30), status);
+      const all = await r0.query(`SELECT x.* FROM ${ROWS} ${statusWhere} ${ORDER}`);
+      return res.json(all.recordset.map(withDerivedStatus));
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    const pageReq = newReq().input("offset", sql.Int, offset).input("pageSize", sql.Int, pageSize);
+    if (status) pageReq.input("st", sql.NVarChar(30), status);
+    const [pageRes, countRes] = await Promise.all([
+      pageReq.query(`SELECT x.* FROM ${ROWS} ${statusWhere} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      newReq().query(`SELECT x.DerivedStatus AS Status, COUNT(*) AS n FROM ${ROWS} GROUP BY x.DerivedStatus`),
+    ]);
+    const statusCounts = Object.fromEntries(countRes.recordset.map((r) => [r.Status, r.n]));
+    const total = status ? (statusCounts[status] || 0) : Object.values(statusCounts).reduce((n, c) => n + c, 0);
+    res.json({ rows: pageRes.recordset.map(withDerivedStatus), total, page, pageSize, statusCounts });
   } catch (e) {
     console.error("[crm-sales-deed] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
+// GET /insights — the dashboard over every deed under the list's search and filters, counted on the server: deeds by
+// step, what needs action, the legal executives' load, this month, the registration deadlines and the money.
+const OPEN = `x.DerivedStatus NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REGISTERED}')`;
+router.get("/insights", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { newReq, ROWS } = deedScope(req, pool);
+    const TODAY = "CAST(SYSDATETIME() AS DATE)";
+    // the week's last day (Sunday), whatever the server's first day of the week is
+    const WEEK_END = `DATEADD(day, 6 - ((DATEPART(weekday, ${TODAY}) + @@DATEFIRST - 2) % 7), ${TODAY})`;
+    const MONTH_END = `EOMONTH(${TODAY})`;
+    const inMonth = (col) => `${col} >= DATEFROMPARTS(YEAR(${TODAY}), MONTH(${TODAY}), 1) AND CAST(${col} AS DATE) <= ${MONTH_END}`;
+    const DL = "CAST(x.RegistrationDeadline AS DATE)";
+    const stepSums = DEED_STEPS.map((_, i) => `SUM(CASE WHEN ${OPEN} AND x.StepIndex = ${i} THEN 1 ELSE 0 END) AS S_${i}`).join(", ");
+    const alertSums = Object.keys(DEED_ALERTS).map((k) => `SUM(x.A_${k}) AS A_${k}`).join(", ");
+    const live = `x.DerivedStatus <> '${CrmStatus.CANCELLED}'`;
+    const [sumRes, loadRes, dueRes, longRes] = await Promise.all([
+      newReq().query(`
+        SELECT COUNT(*) AS Total,
+               SUM(CASE WHEN x.DerivedStatus = '${CrmStatus.REGISTERED}' THEN 1 ELSE 0 END) AS Registered,
+               SUM(CASE WHEN ${OPEN} THEN 1 ELSE 0 END) AS OpenCount,
+               AVG(CASE WHEN ${OPEN} THEN CAST(x.DaysAtStep AS FLOAT) END) AS AvgDays,
+               ${stepSums}, ${alertSums},
+               SUM(CASE WHEN ${inMonth("x.CreatedAt")} THEN 1 ELSE 0 END) AS MadeThisMonth,
+               SUM(CASE WHEN x.DeedDate IS NOT NULL AND ${inMonth("x.DeedDate")} THEN 1 ELSE 0 END) AS DeedDatesThisMonth,
+               SUM(CASE WHEN x.RegistrationDate IS NOT NULL AND ${inMonth("x.RegistrationDate")} THEN 1 ELSE 0 END) AS RegisteredThisMonth,
+               SUM(CASE WHEN ${OPEN} AND x.RegistrationDeadline IS NOT NULL AND ${DL} < ${TODAY} THEN 1 ELSE 0 END) AS DueOverdue,
+               SUM(CASE WHEN ${OPEN} AND x.RegistrationDeadline IS NOT NULL AND ${DL} >= ${TODAY} AND ${DL} <= ${WEEK_END} THEN 1 ELSE 0 END) AS DueThisWeek,
+               SUM(CASE WHEN ${OPEN} AND x.RegistrationDeadline IS NOT NULL AND ${DL} > ${WEEK_END} AND ${DL} <= ${MONTH_END} THEN 1 ELSE 0 END) AS DueThisMonth,
+               SUM(CASE WHEN ${OPEN} AND x.RegistrationDeadline IS NOT NULL AND ${DL} > ${MONTH_END} THEN 1 ELSE 0 END) AS DueLater,
+               SUM(CASE WHEN ${OPEN} AND x.RegistrationDeadline IS NULL THEN 1 ELSE 0 END) AS DueNotSet,
+               SUM(CASE WHEN ${live} THEN ISNULL(x.DeedValue, 0) ELSE 0 END) AS DeedValue,
+               SUM(CASE WHEN ${live} THEN ISNULL(x.StampDuty, 0) ELSE 0 END) AS StampDuty,
+               SUM(CASE WHEN ${live} THEN ISNULL(x.RegistrationFee, 0) ELSE 0 END) AS RegistrationFee,
+               SUM(CASE WHEN ${live} THEN ISNULL(x.StampDutyCredit, 0) ELSE 0 END) AS StampDutyCredit
+        FROM ${ROWS}`),
+      newReq().query(`
+        SELECT ISNULL(x.LegalExecutiveName, '') AS Name, COUNT(*) AS OpenCount, MAX(x.DaysAtStep) AS OldestDays
+        FROM ${ROWS} WHERE ${OPEN} GROUP BY ISNULL(x.LegalExecutiveName, '') ORDER BY COUNT(*) DESC`),
+      newReq().query(`
+        SELECT TOP 8 x.Id, x.DeedNo, x.ApplicantName, x.RegistrationDeadline, x.DerivedStatus AS Status
+        FROM ${ROWS} WHERE ${OPEN} AND x.RegistrationDeadline IS NOT NULL ORDER BY x.RegistrationDeadline ASC, x.Id`),
+      newReq().query(`
+        SELECT TOP 5 x.Id, x.DeedNo, x.ApplicantName, x.StepIndex, x.DaysAtStep
+        FROM ${ROWS} WHERE ${OPEN} AND x.DaysAtStep IS NOT NULL ORDER BY x.DaysAtStep DESC, x.Id`),
+    ]);
+    const m = sumRes.recordset[0] || {};
+    const n = (v) => Number(v) || 0;
+    res.json({
+      total: n(m.Total), registered: n(m.Registered), open: n(m.OpenCount),
+      avgDaysAtStep: m.AvgDays == null ? null : Math.round(m.AvgDays),
+      byStep: DEED_STEPS.map((_, i) => n(m[`S_${i}`])),
+      alerts: Object.fromEntries(Object.keys(DEED_ALERTS).map((k) => [k, n(m[`A_${k}`])])),
+      thisMonth: { made: n(m.MadeThisMonth), deedDates: n(m.DeedDatesThisMonth), registered: n(m.RegisteredThisMonth) },
+      deadlines: { overdue: n(m.DueOverdue), thisWeek: n(m.DueThisWeek), thisMonth: n(m.DueThisMonth), later: n(m.DueLater), notSet: n(m.DueNotSet), upcoming: dueRes.recordset },
+      money: {
+        deedValue: round2(n(m.DeedValue)), stampDuty: round2(n(m.StampDuty)), registrationFee: round2(n(m.RegistrationFee)),
+        stampDutyCredit: round2(n(m.StampDutyCredit)),
+        // what the buyer pays the government: stamp duty and fee, less the AFS stamp duty already paid
+        netPayable: round2(n(m.StampDuty) + n(m.RegistrationFee) - n(m.StampDutyCredit)),
+      },
+      workload: loadRes.recordset.map((r) => ({ name: r.Name || null, open: n(r.OpenCount), oldestDays: r.OldestDays })),
+      longest: longRes.recordset,
+    });
+  } catch (e) {
+    console.error("[crm-sales-deed] GET /insights error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /board?limit= — every open deed placed on the step it is on, longest waiting first: each column brings its count
+// and its first `limit` cards, so the board stays light however many deeds there are.
+router.get("/board", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { newReq, ROWS } = deedScope(req, pool);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 30));
+    const [cardRes, countRes] = await Promise.all([
+      newReq().input("limit", sql.Int, limit).query(`
+        SELECT y.* FROM (
+          SELECT x.Id, x.DeedNo, x.ApplicantName, x.BookingId, x.ApplicationId, x.BookingNo, x.UnitNo, x.ProjectName,
+                 x.LegalExecutiveName, x.StepIndex, x.DaysAtStep, x.RegistrationDeadline, x.DerivedStatus AS Status,
+                 x.MandatoryDocCount, x.MandatoryUploadedCount, ${Object.keys(DEED_ALERTS).map((k) => `x.A_${k}`).join(", ")},
+                 ROW_NUMBER() OVER (PARTITION BY x.StepIndex ORDER BY x.DaysAtStep DESC, x.Id) AS Rn
+          FROM ${ROWS} WHERE ${OPEN}
+        ) y WHERE y.Rn <= @limit ORDER BY y.StepIndex, y.Rn`),
+      newReq().query(`SELECT x.StepIndex, COUNT(*) AS n FROM ${ROWS} WHERE ${OPEN} GROUP BY x.StepIndex`),
+    ]);
+    const counts = Object.fromEntries(countRes.recordset.map((r) => [r.StepIndex, r.n]));
+    res.json({
+      limit,
+      columns: DEED_STEPS.map((st, i) => ({ index: i, key: st.key, count: counts[i] || 0, cards: cardRes.recordset.filter((c) => c.StepIndex === i) })),
+    });
+  } catch (e) {
+    console.error("[crm-sales-deed] GET /board error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 // GET /booking/:bookingId/deed — the booking's current deed (a live one before a cancelled one), or null.
+
 router.get("/booking/:bookingId/deed", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
   try {
     const bookingId = parseId(req.params.bookingId);
@@ -539,10 +728,13 @@ router.get("/registry/:id", requireAnyPageRight(["crm-registry", "crm-sales-deed
     const [regRes, docRes, logRes] = await Promise.all([
       pool.request().input('id', sql.Int, id).query(`${REG_SELECT} WHERE r.Id = @id`),
       pool.request().input('id', sql.Int, id).query(`
-        SELECT Id, DocumentType, Label, IsMandatory, Status, FileName, MimeType, FileSize,
-               UploadedAt, UploadedByType, Remarks, CreatedAt,
-               CASE WHEN FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
-        FROM dbo.CrmRegistryDocument WHERE RegistryId = @id ORDER BY CreatedAt
+        SELECT x.Id, x.DocumentType, x.Label, x.IsMandatory, x.Status, x.FileName, x.MimeType, x.FileSize,
+               x.UploadedAt, x.UploadedByType, x.Remarks, x.CreatedAt,
+               CASE WHEN x.Status IN ('Verified', 'Rejected') THEN rv.name END AS ReviewedByName,
+               CASE WHEN x.Status IN ('Verified', 'Rejected') THEN x.UpdatedAt END AS ReviewedAt,
+               CASE WHEN x.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
+        FROM dbo.CrmRegistryDocument x LEFT JOIN dbo.Users rv ON rv.id = x.UpdatedBy
+        WHERE x.RegistryId = @id ORDER BY x.CreatedAt
       `),
       pool.request().input('id', sql.Int, id).query(`
         SELECT l.*, u.name AS ActorName
@@ -1543,10 +1735,13 @@ router.get("/:id", requirePageRight("crm-sales-deed", "view"), async (req, res) 
     const [deedRes, docRes, logRes] = await Promise.all([
       pool.request().input('id', sql.Int, id).query(`${DEED_SELECT} WHERE d.Id = @id`),
       pool.request().input('id', sql.Int, id).query(`
-        SELECT Id, DocumentType, Label, IsMandatory, Status, FileName, MimeType,
-               FileSize, UploadedAt, UploadedByType, Remarks, VersionNo, CreatedAt,
-               CASE WHEN FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
-        FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @id ORDER BY CreatedAt
+        SELECT x.Id, x.DocumentType, x.Label, x.IsMandatory, x.Status, x.FileName, x.MimeType,
+               x.FileSize, x.UploadedAt, x.UploadedByType, x.Remarks, x.VersionNo, x.CreatedAt,
+               CASE WHEN x.Status IN ('Verified', 'Rejected') THEN rv.name END AS ReviewedByName,
+               CASE WHEN x.Status IN ('Verified', 'Rejected') THEN x.UpdatedAt END AS ReviewedAt,
+               CASE WHEN x.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
+        FROM dbo.CrmSalesDeedDocument x LEFT JOIN dbo.Users rv ON rv.id = x.UpdatedBy
+        WHERE x.SalesDeedId = @id ORDER BY x.CreatedAt
       `),
       pool.request().input('id', sql.Int, id).query(`
         SELECT l.*, u.name AS ActorName
@@ -1556,17 +1751,7 @@ router.get("/:id", requirePageRight("crm-sales-deed", "view"), async (req, res) 
       `),
     ]);
     if (!deedRes.recordset[0]) return res.status(404).json({ error: 'Sale deed not found' });
-    const deed = {
-      ...deedRes.recordset[0],
-      Status: deriveDeedStatus({
-        bookingStatus: deedRes.recordset[0].BookingStatus,
-        registrationNo: deedRes.recordset[0].RegistrationNo,
-        executedBy: deedRes.recordset[0].ExecutedBy,
-        deedDate: deedRes.recordset[0].DeedDate,
-        registrationDeadline: deedRes.recordset[0].RegistrationDeadline,
-        storedStatus: deedRes.recordset[0].Status,
-      })
-    };
+    const deed = withDerivedStatus(deedRes.recordset[0]);
     res.json({ deed, documents: docRes.recordset, approvalLog: logRes.recordset });
   } catch (e) {
     console.error("[crm-sales-deed] GET /:id error:", e.message);
@@ -2027,7 +2212,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     }
 
     const newRegDeadline = b.RegistrationDeadline !== undefined ? (b.RegistrationDeadline || null) : row.RegistrationDeadline;
-    const newStatus = deriveDeedStatus({
+    const newStatus = await deriveDeedStatus(pool, {
       bookingStatus: row.BookingStatus,
       registrationNo: b.RegistrationNo || row.RegistrationNo,
       executedBy: b.ExecutedBy || row.ExecutedBy,
@@ -2489,6 +2674,7 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), validateBody(crmS
     }
 
     const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
+    const initialStatus = await deriveDeedStatus(pool, { deedDate: b.DeedDate || null, registrationDeadline: b.RegistrationDeadline || null });
 
     // The Deed row and its mandatory DeedDraft document placeholder are one
     // creation event — wrapped so a failure between them can't leave a deed
@@ -2520,7 +2706,8 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), validateBody(crmS
         .input("wit",     sql.NVarChar(500),     b.WitnessNames || null)
         .input("note",    sql.NVarChar(sql.MAX), b.Notes || null)
         .input("cb",      sql.Int,               actorId(req))
-        .input("st",      sql.NVarChar(30),      deriveDeedStatus({ bookingStatus: null, registrationNo: null, executedBy: null, deedDate: b.DeedDate || null, registrationDeadline: b.RegistrationDeadline || null }))
+        .input("st",      sql.NVarChar(30),      initialStatus)
+
         .query(`
           INSERT INTO dbo.CrmSalesDeed
             (DeedNo, BookingId, AgreementId, DeedValue, StampDuty, RegistrationFee, StampDutyCredit, SubRegistrarOffice, DeedDate, RegistrationDeadline, ExecutedBy, WitnessNames, Status, Notes, CreatedBy, CreatedAt)
