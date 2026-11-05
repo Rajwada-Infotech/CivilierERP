@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Building2, ChevronDown, Search, X as XIcon } from "lucide-react";
 import type { CompanyOption } from "@/api/bankMasterApi";
+import { useInSheet } from "@/components/sheet/useInSheet";
 
 // A "Company" scope filter that behaves like a real filter, not a gate:
 // "All companies" is a real, always-visible, always-selectable option (not
@@ -23,6 +24,8 @@ export function CompanyFilterCombo({
   const [rect, setRect] = useState<DOMRect | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Drawn in ink, squared, on a drawing-sheet page (Loan dashboard); unchanged elsewhere.
+  const sheet = useInSheet(triggerRef);
 
   const updateRect = useCallback(() => {
     if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
@@ -72,10 +75,11 @@ export function CompanyFilterCombo({
         left: rect.left,
         width: Math.max(rect.width, 220),
         zIndex: 9999,
+        ...(sheet ? { boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)" } : {}),
       }}
-      className="rounded-lg border border-border bg-card shadow-2xl overflow-hidden"
+      className={sheet ? "border border-foreground bg-card overflow-hidden" : "rounded-lg border border-border bg-card shadow-2xl overflow-hidden"}
     >
-      <div className="p-1.5 border-b border-border">
+      <div className={`p-1.5 border-b ${sheet ? "border-foreground" : "border-border"}`}>
         <div className="relative">
           <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -84,7 +88,7 @@ export function CompanyFilterCombo({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search company…"
-            className="w-full pl-6 pr-2 py-1.5 text-xs bg-muted border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
+            className={sheet ? "w-full pl-6 pr-2 py-1.5 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none" : "w-full pl-6 pr-2 py-1.5 text-xs bg-muted border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"}
           />
         </div>
       </div>
@@ -94,7 +98,7 @@ export function CompanyFilterCombo({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => { onChange(null); setOpen(false); setQuery(""); }}
           className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-muted/60 ${
-            value == null ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
+            value == null ? (sheet ? "text-foreground font-semibold bg-primary/10" : "text-emerald-600 dark:text-emerald-400 font-medium") : "text-foreground"
           }`}
         >
           All companies
@@ -109,7 +113,7 @@ export function CompanyFilterCombo({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => { onChange(c.id); setOpen(false); setQuery(""); }}
               className={`w-full text-left px-3 py-2 text-sm truncate transition-colors hover:bg-muted/60 ${
-                c.id === value ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
+                c.id === value ? (sheet ? "text-foreground font-semibold bg-primary/10" : "text-emerald-600 dark:text-emerald-400 font-medium") : "text-foreground"
               }`}
             >
               {c.label}
@@ -127,7 +131,7 @@ export function CompanyFilterCombo({
         ref={triggerRef}
         type="button"
         onClick={() => { setOpen((o) => !o); updateRect(); }}
-        className="flex items-center gap-1.5 h-7 min-w-[150px] rounded-md border border-border bg-background px-2.5 text-xs hover:border-emerald-500/40 transition-colors"
+        className={sheet ? "flex items-center gap-1.5 h-8 w-full min-w-[150px] border border-foreground/40 bg-card px-2.5 text-xs hover:border-foreground transition-colors" : "flex items-center gap-1.5 h-7 min-w-[150px] rounded-md border border-border bg-background px-2.5 text-xs hover:border-emerald-500/40 transition-colors"}
       >
         <Building2 size={11} className="text-muted-foreground shrink-0" />
         <span className={`flex-1 text-left truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground"}`}>

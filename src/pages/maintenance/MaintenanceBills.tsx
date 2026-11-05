@@ -716,7 +716,7 @@ function BillViewModal({
   });
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+    <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
       <style>{`
         @media print {
           body * { visibility: hidden; }
@@ -742,7 +742,7 @@ function BillViewModal({
         }
       `}</style>
       <div
-        className="mb-print-modal border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto"
+        className="mb-print-modal border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto"
         style={{ background: "hsl(var(--card))" }}
       >
         <div

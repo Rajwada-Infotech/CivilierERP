@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   MasterPage,
   type ColumnDef,
@@ -9,7 +9,7 @@ import {
   type DataChangeEvent,
 } from "@/components/MasterPage";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
-import { Ruler, Hash, Download, Upload, Loader2, Check, X } from "lucide-react";
+import { Download, Upload, Loader2, Check, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getUomList, addUom, updateUom, deleteUom } from "@/api/uomApi";
 import { toast } from "sonner";
@@ -107,38 +107,19 @@ interface ImportRowResult {
 
 const columnRenderers = {
   code: (value: unknown) => (
-    <div className="flex items-center gap-2 min-w-[100px]">
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-        <Hash size={15} />
-      </span>
-      <span className="font-heading font-semibold text-foreground">
-        {String(value ?? "")}
-      </span>
-    </div>
+    <span className="font-heading text-xs font-semibold tracking-wide text-foreground">{String(value ?? "")}</span>
   ),
   symbol: (value: unknown) => (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-[0.6875rem] font-heading text-foreground">
-      <Ruler size={11} className="text-emerald-600 dark:text-emerald-400" />
+    <span className="inline-flex items-center font-heading text-[0.625rem] font-semibold px-1.5 py-0.5 border border-foreground/40 text-foreground">
       {String(value ?? "")}
     </span>
   ),
-  status: (value: unknown) => (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.6875rem] font-heading ${
-        value
-          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-          : "border-amber-200 bg-amber-50 text-amber-700"
-      }`}
-    >
-      <span
-        className={`mr-1.5 h-1.5 w-1.5 rounded-full ${
-          value ? "bg-emerald-500" : "bg-amber-500"
-        }`}
-      />
-      {value ? "Active" : "Inactive"}
-    </span>
-  ),
+  status: (value: unknown) => <SheetMark text={value ? "Active" : "Inactive"} tone={value ? "done" : "waiting"} />,
 };
+
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
 
 export default function UnitOfMeasurementMaster() {
   const rights = usePageRights("unit-of-measurement");
@@ -291,19 +272,16 @@ export default function UnitOfMeasurementMaster() {
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       await addUom(toPayload(event.record));
-      toast.success("UOM saved!");
       await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
     }
 
     if (event.action === "update") {
       await updateUom(Number(event.id), toPayload(event.record));
-      toast.success("UOM updated!");
       await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
     }
 
     if (event.action === "delete") {
       await deleteUom(Number(event.id));
-      toast.success("UOM deleted!");
       await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
     }
   };
@@ -313,7 +291,7 @@ export default function UnitOfMeasurementMaster() {
 
   if (error)
     return (
-      <div className="p-6 text-red-500">
+      <div className="p-6 text-sm text-destructive">
         Failed to load UOM data. Check your backend connection.
       </div>
     );
@@ -321,10 +299,10 @@ export default function UnitOfMeasurementMaster() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Unit of Measurement"]} />
-      <MaterialShell
-        title="Unit of Measurement"
-        subtitle="Configure units used for items and stock"
-        icon={Ruler}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Units of measurement"
+        subtitle="The units items are bought, stocked and issued in, each with a code and a symbol."
         action={
           rights.canCreate ? (
           <div className="flex items-center gap-2">
@@ -338,16 +316,16 @@ export default function UnitOfMeasurementMaster() {
             <button
               onClick={handleDownloadTemplate}
               title="Download a blank CSV with all UOM fields"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              className={`${KEY_LINE} h-9 px-3`}
             >
               <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
+              <span className="hidden sm:inline">Template</span>
             </button>
             <button
               onClick={handleImportClick}
               disabled={importing}
               title="Import units from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-emerald-500/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className={`${KEY_LINE} h-9 px-3`}
             >
               {importing ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -355,7 +333,7 @@ export default function UnitOfMeasurementMaster() {
                 <Upload size={13} />
               )}
               <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
+                {importing ? "Importing…" : "Import CSV"}
               </span>
             </button>
           </div>
@@ -363,7 +341,6 @@ export default function UnitOfMeasurementMaster() {
         }
       >
         <MasterPage
-        saveButtonClass="btn-module "
           title="Unit of Measurement"
           fields={FIELDS}
           columns={COLUMNS}
@@ -377,7 +354,7 @@ export default function UnitOfMeasurementMaster() {
               { header: "Code", accessor: "code" },
               { header: "Name", accessor: "name" },
               { header: "Symbol", accessor: "symbol" },
-              { header: "Status", accessor: "status" },
+              { header: "Status", accessor: (r) => (r.status ? "Active" : "Inactive") },
             ],
           }}
           canCreate={rights.canCreate}
@@ -391,16 +368,15 @@ export default function UnitOfMeasurementMaster() {
           open={!!importResults}
           onOpenChange={(open) => !open && setImportResults(null)}
         >
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle className="font-heading text-base">
-                Import Results
-              </DialogTitle>
+          <DialogContent className="sheet-frame max-w-lg p-0 gap-0" style={{ margin: 0 }}>
+            <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Units of measurement</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Import results</DialogTitle>
             </DialogHeader>
             {importResults && (
-              <div className="space-y-3 pt-1">
+              <div className="space-y-3 px-5 pt-4">
                 <div className="flex items-center gap-3 text-sm">
-                  <span className="flex items-center gap-1.5 text-green-600">
+                  <span className="flex items-center gap-1.5 text-foreground">
                     <Check size={14} />
                     {
                       importResults.filter((r) => r.status === "success").length
@@ -417,7 +393,7 @@ export default function UnitOfMeasurementMaster() {
                     </span>
                   )}
                 </div>
-                <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                <div className="max-h-72 overflow-y-auto border border-foreground divide-y divide-foreground/10">
                   {importResults.map((r, i) => (
                     <div
                       key={i}
@@ -428,7 +404,7 @@ export default function UnitOfMeasurementMaster() {
                       {r.status === "success" ? (
                         <Check
                           size={14}
-                          className="text-green-600 shrink-0 mt-0.5"
+                          className="text-foreground shrink-0 mt-0.5"
                         />
                       ) : (
                         <X
@@ -451,17 +427,17 @@ export default function UnitOfMeasurementMaster() {
                 </div>
               </div>
             )}
-            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            <div className="flex justify-end gap-2 px-5 py-4">
               <button
                 onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-emerald-500 text-primary-foreground hover:bg-emerald-500/90 transition-all"
+                className={`${KEY_INK} h-9 px-4`}
               >
                 Close
               </button>
             </div>
           </DialogContent>
         </Dialog>
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 }

@@ -1,10 +1,12 @@
-const allowRoles = require("../middleware/role");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+// A slot (by id) and any project / block given must be inside the user's projects.
+require("../services/projectScope").setupScopeGuard(router, { idPaths: [["/", "slot"]] });
+const { requireAnyPageRight } = require("../middleware/requirePageRight");
 const { getPool, sql } = require("../db");
 const { getParkingSlotLockReason, getParkingSlotHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { PARKING_TYPES } = require("../constants/parkingTypes");
@@ -37,6 +39,7 @@ router.get("/", cache("parking-slot-master", 300), async (req, res) => {
       LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
       LEFT JOIN dbo.CrmInventoryHold h
         ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      ${req.projectScope ? `WHERE ${require("../services/projectScope").projectPredicate(req.projectScope, "s.ProjectId", "").trim()}` : ""}
       ORDER BY e.name, b.BlockName, s.SlotNo
     `);
     res.json(result.recordset);
@@ -47,7 +50,9 @@ router.get("/", cache("parking-slot-master", 300), async (req, res) => {
 });
 
 // POST — add a parking slot
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+// Parking Slot Master's own rights (admins always pass); edits and deletes also come from Auto Project Setup's parking
+// lists. Create was admin-only, and edit / delete took only Auto Setup's rights, so this page's own users were refused.
+router.post("/", requireAnyPageRight(["followup-parking-slot-master"], "create"), async (req, res) => {
   const { ProjectId, BlockId, SlotNo, ParkingType, IsActive } = req.body;
   if (!SlotNo?.trim()) return res.status(400).json({ error: "SlotNo is required" });
   if (!PARKING_TYPES.includes(ParkingType)) {
@@ -120,7 +125,8 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update a parking slot
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+// This page's users, or anyone who may edit in Auto Project Setup (its parking lists edit slots here).
+router.put("/:id", requireAnyPageRight(["followup-parking-slot-master", "crm-auto-project-setup"], "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, SlotNo, ParkingType, IsActive } = req.body;
   if (!SlotNo?.trim()) return res.status(400).json({ error: "SlotNo is required" });
@@ -151,30 +157,41 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     }
 
     // A Booked or OnHold slot can never be edited — not just deactivated —
-    // same reasoning as unitMaster.js's PUT lock check.
-    const lockReason = await getParkingSlotLockReason(pool, parseInt(id));
-    if (lockReason) {
-      return res.status(409).json({
-        error: `Parking slot "${SlotNo}" ${lockReason} and cannot be edited. Cancel/release the booking or hold first.`,
-      });
-    }
+    // same reasoning as unitMaster.js's PUT lock check. Checked and written
+    // under the slot's lock (lockSlot).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await lockSlot(tx, parseInt(id));
+      const lockReason = await getParkingSlotLockReason(tx, parseInt(id));
+      if (lockReason) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: `Parking slot "${SlotNo}" ${lockReason} and cannot be edited. Cancel/release the booking or hold first.`,
+        });
+      }
 
-    await pool
-      .request()
-      .input("Id",        sql.Int, parseInt(id))
-      .input("ProjectId", sql.Int, parseInt(ProjectId))
-      .input("BlockId",   sql.Int, BlockId ? parseInt(BlockId) : null)
-      .input("SlotNo",    sql.NVarChar(50), SlotNo.trim())
-      .input("Type",      sql.NVarChar(50), ParkingType)
-      .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
-      .input("UpdatedBy", sql.Int, updatedBy)
-      .query(`
-        UPDATE dbo.ParkingSlot SET
-          ProjectId = @ProjectId, BlockId = @BlockId, SlotNo = @SlotNo,
-          ParkingType = @Type, IsActive = @IsActive,
-          UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
-        WHERE Id = @Id
-      `);
+      await tx
+        .request()
+        .input("Id",        sql.Int, parseInt(id))
+        .input("ProjectId", sql.Int, parseInt(ProjectId))
+        .input("BlockId",   sql.Int, BlockId ? parseInt(BlockId) : null)
+        .input("SlotNo",    sql.NVarChar(50), SlotNo.trim())
+        .input("Type",      sql.NVarChar(50), ParkingType)
+        .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
+        .input("UpdatedBy", sql.Int, updatedBy)
+        .query(`
+          UPDATE dbo.ParkingSlot SET
+            ProjectId = @ProjectId, BlockId = @BlockId, SlotNo = @SlotNo,
+            ParkingType = @Type, IsActive = @IsActive,
+            UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+          WHERE Id = @Id
+        `);
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw e;
+    }
     await bumpCacheVersion("parking-slot-master");
     res.json({ message: "Parking slot updated successfully" });
   } catch (err) {
@@ -186,6 +203,18 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 });
 
+// Locks one slot, and the allotment and hold rows that could claim it (range
+// locks: HOLDLOCK covers rows not there yet), until the transaction ends — so a
+// booking or hold can't land between "not booked or held" and the edit /
+// delete that check guards. Same rows crmParking.js's assertSlotAvailable locks.
+async function lockSlot(tx, id) {
+  await tx.request().input("Id", sql.Int, id).query(`
+    SELECT Id FROM dbo.ParkingSlot WITH (UPDLOCK, HOLDLOCK) WHERE Id = @Id;
+    SELECT Id FROM dbo.CrmParkingAllotment WITH (UPDLOCK, HOLDLOCK) WHERE ParkingSlotId = @Id;
+    SELECT Id FROM dbo.CrmInventoryHold WITH (UPDLOCK, HOLDLOCK) WHERE EntityType = 'Parking' AND EntityId = @Id;
+  `);
+}
+
 // DELETE — a real, permanent removal (not a soft IsActive=0 flag left
 // sitting in the grid forever). Two checks run first: getParkingSlotLockReason
 // (booked/held), then getParkingSlotHardDeleteBlockers — dbo.ParkingSlot is
@@ -193,7 +222,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 // confirmed via sys.foreign_keys), so even a historical/inactive allotment
 // still physically blocks a hard DELETE. Only once both are clear does the
 // row actually get removed.
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["followup-parking-slot-master", "crm-auto-project-setup"], "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -203,21 +232,28 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
     if (!existing.recordset.length) return res.status(404).json({ error: "Parking slot not found" });
     const { SlotNo } = existing.recordset[0];
 
-    const lockReason = await getParkingSlotLockReason(pool, id);
-    if (lockReason) {
-      return res.status(409).json({
-        error: `Parking slot "${SlotNo}" ${lockReason} and cannot be deleted. Cancel/release the booking or hold first.`,
-      });
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await lockSlot(tx, id);
+      const lockReason = await getParkingSlotLockReason(tx, id);
+      if (lockReason) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: `Parking slot "${SlotNo}" ${lockReason} and cannot be deleted. Cancel/release the booking or hold first.`,
+        });
+      }
+      const hardBlockers = await getParkingSlotHardDeleteBlockers(tx, id);
+      if (hardBlockers) {
+        await tx.rollback();
+        return res.status(409).json({ error: `Parking slot "${SlotNo}" ${hardBlockers}.` });
+      }
+      await tx.request().input("Id", sql.Int, id).query("DELETE FROM dbo.ParkingSlot WHERE Id = @Id");
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw e;
     }
-
-    const hardBlockers = await getParkingSlotHardDeleteBlockers(pool, id);
-    if (hardBlockers) {
-      return res.status(409).json({
-        error: `Parking slot "${SlotNo}" ${hardBlockers}.`,
-      });
-    }
-
-    await pool.request().input("Id", sql.Int, id).query("DELETE FROM dbo.ParkingSlot WHERE Id = @Id");
     await bumpCacheVersion("parking-slot-master");
     res.json({ message: `Parking slot "${SlotNo}" deleted` });
   } catch (err) {

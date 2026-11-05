@@ -1,4 +1,4 @@
-import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText, ShieldTick, Edit2, Repeat } from "iconsax-react";
+import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText, ShieldTick, Edit2, Repeat, SearchNormal1 } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Room Composition, Room Categories and Room Master are reachable from the
@@ -61,5 +61,13 @@ export const buildCivilWorkDprNavItems = (_pendingApprovalCount: number): NavIte
     icon: Edit2,
     path: "/civilworkdpr/amendment",
     pageKey: "civilworkdpr-amendment",
+  },
+  // Same shape as the Finance module's Query menu: an expandable group whose children are the reports.
+  {
+    label: "Query",
+    icon: SearchNormal1,
+    children: [
+      { label: "User-Wise Daily Work Report", path: "/civilworkdpr/query", pageKey: "civilworkdpr-query" },
+    ],
   },
 ];

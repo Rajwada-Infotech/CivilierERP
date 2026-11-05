@@ -22,7 +22,10 @@ export interface FixedAssetListItem {
   Custodian: string | null;
   CustodianUserId: number | null;
   DepreciationRate: number | null;
-  AssetStatus: "Pending" | "Active" | "Sold" | "Scrapped" | "Under Maintenance";
+  AssetStatus: "Pending" | "Active" | "Sold" | "Scrapped" | "Under Maintenance" | "Transferred";
+  /** Set once the asset left this company through an Inter-Company Transfer —
+   *  depreciation stops from this month and the record is history only. */
+  TransferredAt?: string | null;
   SellingPrice: number | null;
   RepairType: string | null;   // SAC code (dbo.HSN.HCode where HIsSAC = 1)
   Status: string;
@@ -36,6 +39,8 @@ export interface FixedAssetListItem {
   GodownName: string | null;
   SourceTagId: number | null;
   FAItemCode: string | null;
+  /** Depreciation posted so far (reversed entries left out); book value is PurchaseCost less this. */
+  Depreciated: number;
 }
 
 export interface FixedAssetDetail extends FixedAssetListItem {
@@ -190,7 +195,18 @@ export const reverseAssetDepreciation = async (
   return res.json();
 };
 
-export const createFixedAsset = async (data: FixedAssetPayload): Promise<{ assetId: number; docNo: string; assetCode: string }> => {
+/** What posting the new asset's depreciation from its Purchase / Activation Date up to the last closed month did. */
+export interface DepreciationBackfill {
+  posted: number;
+  alreadyPosted: number;
+  totalAmount: number;
+  fromMonth: string | null;
+  toMonth: string | null;
+  notConfigured: string | null;
+  errors: string[];
+}
+
+export const createFixedAsset = async (data: FixedAssetPayload): Promise<{ assetId: number; docNo: string; assetCode: string; depreciationBackfill?: DepreciationBackfill | null }> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

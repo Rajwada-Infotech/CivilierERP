@@ -79,7 +79,7 @@ export default function MaterialRequestListScreen() {
   const [editingId, setEditingId] = useState<number | null>(null);
 
   const {
-    data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage, refetch,
+    data, isLoading, isError, error, fetchNextPage, hasNextPage, isFetchingNextPage, refetch, isRefetching,
   } = useInfiniteQuery({
     queryKey: ["material-requests-mobile", statusFilter],
     queryFn: ({ pageParam }) => getMaterialRequests({ page: pageParam, limit: PAGE_SIZE, status: statusFilter !== "All" ? statusFilter : undefined }),
@@ -184,6 +184,20 @@ export default function MaterialRequestListScreen() {
           <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.medium, marginTop: 8, textAlign: "center" }}>
             Failed to load Material Requests. Please try again.
           </Text>
+          {error instanceof Error && error.message ? (
+            <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 4, textAlign: "center" }}>
+              {error.message}
+            </Text>
+          ) : null}
+          <Pressable
+            onPress={() => refetch()}
+            disabled={isRefetching}
+            style={{ marginTop: 14, paddingHorizontal: 16, paddingVertical: 8, borderWidth: 1, borderColor: colors.foreground, opacity: isRefetching ? 0.5 : 1 }}
+          >
+            <Text style={{ color: colors.foreground, fontSize: 11, fontFamily: fonts.body.medium, letterSpacing: 1 }}>
+              {isRefetching ? "TRYING…" : "TRY AGAIN"}
+            </Text>
+          </Pressable>
         </View>
       ) : (
         <ProjectGroupedList

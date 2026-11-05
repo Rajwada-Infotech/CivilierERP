@@ -161,7 +161,7 @@ export default function ProfileScreen() {
           <Text style={{ fontSize: 13, fontFamily: fonts.heading.bold, color: "#e7e9ef" }}>Financial Info</Text>
         </View>
         <View style={{ marginTop: 4 }}>
-          <InfoRow icon={CreditCard} label="GST Number" value={profile?.LGST} mono highlight />
+          <InfoRow icon={CreditCard} label="GSTIN (GST Identification Number)" value={profile?.LGST} mono highlight />
           <InfoRow icon={MapPin} label="GST State" value={profile?.LGSTState} />
           <InfoRow icon={FileText} label="Payment Terms" value={profile?.LHeadPaymentTerms} />
           <InfoRow icon={Tag} label="Belongs To" value={profile?.LBelongsTo} />

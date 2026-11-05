@@ -18,16 +18,19 @@
  */
 
 const { sql } = require("../db");
+const { multiMrReady, mrQtySource } = require("./poMrLinks");
 
 // Per MR line item: requested vs. already-consumed (across all non-voided
 // POs and ICTs that were created from this MR item) vs. what's still pending.
 async function getMRItemFulfillment(pool, mrId) {
+  // A PO line summed from several MRs counts only its share against each MR line (migration 585).
+  const poQty = mrQtySource(await multiMrReady(pool));
   const r = await pool.request().input("MRId", sql.Int, mrId).query(`
     SELECT
       mri.MRItemId, mri.ItemId, mri.ItemName, mri.UOMCode, mri.Quantity AS RequestedQty,
       ISNULL((
         SELECT SUM(poi.Quantity)
-        FROM dbo.PurchaseOrderItems poi
+        FROM ${poQty} poi
         JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
         WHERE poi.MRItemId = mri.MRItemId
           AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')

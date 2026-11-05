@@ -1,5 +1,7 @@
 ﻿import { apiUrl } from "./apiBase";
 import { toast } from "sonner";
+import { STABILISING_MESSAGE, isGatewayFailure } from "./gatewayFetch";
+import { freshHeader, refreshAfterWrite } from "./queryClient";
 
 // Exported so callers can distinguish auth/permission errors from network errors.
 export class ApiError extends Error {
@@ -14,83 +16,57 @@ export class ApiError extends Error {
 // Extended options understood by fetchWithAuth itself.
 // All standard RequestInit fields are still forwarded to fetch().
 export interface FetchWithAuthOptions extends RequestInit {
-  // When true, the request must not trigger activity logging on the server
-  // or the client. Used by the activity-log read routes to prevent infinite
-  // self-logging loops. fetchWithAuth forwards an X-Skip-Activity-Log header
-  // so future server-side middleware can also honour the flag.
+  // When true, the server leaves this request out of the Activity Browser (fetchWithAuth sends an
+  // X-Skip-Activity-Log header that backend/middleware/activityAudit.js honours).
   skipActivityLog?: boolean;
+  // When true, a successful write is not treated as a save: the lists on screen are not read again. For housekeeping
+  // writes the user did not make (e.g. opening an activity's photos asks the server to carry photos forward).
+  skipRefresh?: boolean;
 }
+
+// A 502 / 504 from the gateway during a deploy: the browser's fetch is already wrapped (see gatewayFetch.ts) so
+// reads were retried and the "system is updating" banner is showing. If it is still down, fail with a plain
+// sentence instead of handing back the gateway's error page.
+export { STABILISING_MESSAGE };
 
 // Dedup key in sessionStorage — survives Vite HMR module re-evaluation
 // (unlike a plain `let`), is cleared when the tab closes, and is not
 // shared across tabs.
 const REDIRECTING_KEY = "__auth_redirecting";
 
-// ── Mutation activity logging ───────────────────────────────────────────────
-// The Activity Browser previously only ever logged page navigations (GET,
-// actionType "read" — see AppLayout.tsx's useModuleActivityLogger), because
-// nothing hooked into actual data-changing requests. Every write in the app
-// already flows through this one function, so logging it here covers every
-// page automatically instead of needing a manual call added to each of the
-// ~150 mutating call sites individually.
-const MUTATION_ACTION_TYPE: Record<string, "create" | "update" | "delete"> = {
-  POST: "create",
-  PUT: "update",
-  PATCH: "update",
-  DELETE: "delete",
-};
-
-function getStoredUserForLogging(): { id?: string; name?: string; email?: string; role?: string } {
-  try {
-    return JSON.parse(sessionStorage.getItem("user") || "{}");
-  } catch {
-    return {};
-  }
-}
-
-// Fire-and-forget — a logging failure must never affect the actual request.
-// Uses a raw fetch() rather than calling fetchWithAuth recursively.
-function logMutationActivity(method: string, url: string) {
-  if (typeof window === "undefined") return;
-  const actionType = MUTATION_ACTION_TYPE[method.toUpperCase()];
-  if (!actionType) return;
-
-  const user = getStoredUserForLogging();
-  if (!user?.id) return;
-
+// ── Activity logging ────────────────────────────────────────────────────────
+// The server writes every successful write into the Activity Browser itself (backend/middleware/activityAudit.js),
+// with the record it touched and the values submitted. The browser only says which page the write came from
+// and which sign-in session it belongs to.
+export function activityHeaders(): Record<string, string> {
+  if (typeof window === "undefined") return {};
   let sessionId = sessionStorage.getItem("currentSessionId");
-  if (!sessionId) {
+  if (!sessionId && sessionStorage.getItem("token")) {
     sessionId =
       typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        : `${Date.now()}-${Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
     sessionStorage.setItem("currentSessionId", sessionId);
     sessionStorage.setItem("sessionLoginTime", String(Date.now()));
   }
+  return {
+    "X-Page": window.location.pathname,
+    ...(sessionId ? { "X-Session-Id": sessionId } : {}),
+  };
+}
 
-  const token = sessionStorage.getItem("token");
-  fetch(apiUrl("/api/user-activity"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Skip-Activity-Log": "1",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      userId: user.id,
-      userName: user.name || "",
-      userEmail: user.email || "",
-      userRole: user.role || "",
-      event: "action",
-      timestamp: new Date().toISOString(),
-      actionType,
-      resource: url,
-      details: `${method.toUpperCase()} ${url} (from ${window.location.pathname})`,
-      requestMethod: method.toUpperCase(),
-      requestUrl: url,
-      sessionId,
-    }),
-  }).catch(() => {});
+// True when `token` is still this tab's session and the server rejects it on a plain authenticated
+// read as well. A network failure or any other answer leaves the user signed in.
+async function sessionIsDead(token: string | null): Promise<boolean> {
+  if (!token || sessionStorage.getItem("token") !== token) return false;
+  try {
+    const res = await fetch(apiUrl("/api/user-rights/my"), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return res.status === 401 && sessionStorage.getItem("token") === token;
+  } catch {
+    return false;
+  }
 }
 
 export async function fetchWithAuth(
@@ -99,7 +75,9 @@ export async function fetchWithAuth(
 ): Promise<Response> {
   // Pull out our custom flag before spreading into fetch() — fetch does not
   // accept unknown options and would silently drop it, so we strip it here.
-  const { skipActivityLog, ...fetchOptions } = options;
+  const { skipActivityLog, skipRefresh, ...fetchOptions } = options;
+  const method = (fetchOptions.method || "GET").toUpperCase();
+  const isRead = method === "GET" || method === "HEAD";
 
   const token =
     typeof window !== "undefined" ? sessionStorage.getItem("token") : null;
@@ -122,13 +100,16 @@ export async function fetchWithAuth(
   // it automatically so it can include the correct multipart boundary string.
   const isFormData = fetchOptions.body instanceof FormData;
 
+  const send = async (): Promise<Response> => {
   try {
-    response = await fetch(apiUrl(url), {
+    return await fetch(apiUrl(url), {
       ...fetchOptions,
       headers: {
         ...(!isFormData ? { "Content-Type": "application/json" } : {}),
         ...(fetchOptions.headers || {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...activityHeaders(),
+        ...(isRead ? freshHeader() : {}),
         ...(skipActivityLog ? { "X-Skip-Activity-Log": "1" } : {}),
       },
     });
@@ -151,11 +132,22 @@ export async function fetchWithAuth(
     }
     throw new Error("Network error. Please check your connection.");
   }
+  };
+
+  response = await send();
+  if (isGatewayFailure(response)) {
+    throw new ApiError(STABILISING_MESSAGE, response.status);
+  }
 
   if (response.status === 401) {
+    // Sign out only when the session this request carried is the one still in use and the server
+    // confirms it is dead. A 401 for a request sent before login (no token) or with a token since
+    // replaced by a fresh login used to wipe the new session too, bouncing the user back to the login
+    // page several times; a one-off 401 mid-entry no longer throws away their work either.
     if (
       typeof window !== "undefined" &&
-      !sessionStorage.getItem(REDIRECTING_KEY)
+      !sessionStorage.getItem(REDIRECTING_KEY) &&
+      (await sessionIsDead(token))
     ) {
       sessionStorage.setItem(REDIRECTING_KEY, "1");
       // The account may have been deleted/discontinued while the user was
@@ -181,19 +173,32 @@ export async function fetchWithAuth(
 
   if (response.status === 403) {
     console.error("Forbidden");
+    // Most 403s name the reason ("You uploaded this document, so someone
+    // else has to verify it", "You don't have access to this project") —
+    // show it. A bare "Forbidden" / "Access denied" or no body keeps the
+    // generic message.
+    let reason = "";
+    try {
+      const body = await response.clone().json();
+      if (typeof body?.error === "string") reason = body.error.trim();
+      else if (typeof body?.message === "string") reason = body.message.trim();
+    } catch {
+      // Non-JSON or empty body — fall back to the generic message.
+    }
     throw new ApiError(
-      "You do not have permission to perform this action.",
+      reason && !/^(forbidden|access denied)\.?$/i.test(reason)
+        ? reason
+        : "You do not have permission to perform this action.",
       response.status,
     );
   }
 
-  if (
-    !skipActivityLog &&
-    response.ok &&
-    url !== "/api/user-activity"
-  ) {
-    logMutationActivity(fetchOptions.method || "GET", url);
-  }
+  // A save: every list on screen reads again, so what was just created shows in every dropdown at once.
+  // Activity-log and page-visit writes (skipActivityLog) are not saves, nor is a POST the server marks as a
+  // look-up (X-Changes-Nothing: a price quote, a preview) — re-reading after one made a screen that reads it
+  // ask again after every answer, without end.
+  const changedNothing = response.headers?.get?.("X-Changes-Nothing") === "1";
+  if (!isRead && response.ok && !skipActivityLog && !skipRefresh && !changedNothing) refreshAfterWrite();
 
   return response;
 }

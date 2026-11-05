@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { useInSheet } from "@/components/sheet/useInSheet";
 import { createPortal } from "react-dom";
 import {
   ChevronDown,
@@ -42,6 +43,7 @@ function TreePickerNode({
   selected,
   onSelect,
   invalidParents,
+  sheet,
 }: {
   node: AccountGroupTreeNode;
   depth: number;
@@ -50,6 +52,7 @@ function TreePickerNode({
   selected: string;
   onSelect: (id: string) => void;
   invalidParents: Set<string>;
+  sheet: boolean;
 }) {
   const isInvalid = invalidParents.has(node._id);
   const isExpanded = expanded.has(node._id);
@@ -65,7 +68,7 @@ function TreePickerNode({
         {/* Expand/collapse only — separate from selection so opening a
             folder never also picks it and closes the dropdown. */}
         <span
-          className="w-6 h-8 flex items-center justify-center shrink-0 text-muted-foreground/50 cursor-pointer"
+          className={`w-6 h-8 flex items-center justify-center shrink-0 cursor-pointer ${sheet ? "text-foreground" : "text-muted-foreground/50"}`}
           onClick={(e) => {
             e.stopPropagation();
             if (isInvalid || !hasChildren) return;
@@ -76,19 +79,21 @@ function TreePickerNode({
             isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
           ) : null}
         </span>
-        <span className="w-4 h-8 flex items-center shrink-0">
+        {!sheet && <span className="w-4 h-8 flex items-center shrink-0">
           {hasChildren
             ? <FolderOpen size={13} className={isExpanded ? "text-amber-400" : "text-amber-500/70"} />
             : depth === 0
               ? <Layers size={12} className="text-primary/50" />
               : <Folder size={12} className="text-muted-foreground/40" />
           }
-        </span>
+        </span>}
         <div
-          className={`flex-1 flex items-center justify-between px-2 py-2 mx-0.5 my-0.5 rounded text-xs transition-colors cursor-pointer ${
+          className={`flex-1 flex items-center justify-between px-2 py-2 mx-0.5 my-0.5 text-xs transition-colors cursor-pointer ${sheet ? "" : "rounded"} ${
             isSelected
-              ? "bg-primary/15 text-primary font-semibold"
-              : "text-foreground/80 hover:bg-muted/60 group-hover/node:text-foreground"
+              ? sheet ? "bg-foreground text-card font-semibold" : "bg-primary/15 text-primary font-semibold"
+              : sheet
+                ? `text-foreground hover:bg-primary/10 ${depth === 0 ? "font-heading font-semibold uppercase tracking-[0.08em] text-[0.6875rem]" : ""}`
+                : "text-foreground/80 hover:bg-muted/60 group-hover/node:text-foreground"
           }`}
           onClick={() => {
             if (isInvalid) return;
@@ -96,7 +101,7 @@ function TreePickerNode({
           }}
         >
           <span className="truncate">{node.name}</span>
-          <span className="font-mono text-[0.5625rem] text-muted-foreground/50 ml-2 shrink-0">{node.code}</span>
+          <span className={`${sheet ? "font-heading tabular-nums opacity-70 normal-case tracking-normal" : "font-mono text-muted-foreground/50"} text-[0.5625rem] ml-2 shrink-0`}>{node.code}</span>
         </div>
       </div>
 
@@ -114,6 +119,7 @@ function TreePickerNode({
                 selected={selected}
                 onSelect={onSelect}
                 invalidParents={invalidParents}
+                sheet={sheet}
               />
             ))}
           </div>
@@ -150,6 +156,8 @@ export function GroupTreePicker({
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
+  // On a drawing-sheet page the picker is squared and inked to match; elsewhere it is drawn as before.
+  const sheet = useInSheet(triggerRef);
 
   const close = () => {
     setClosing(true);
@@ -232,29 +240,35 @@ export function GroupTreePicker({
         ref={triggerRef}
         type="button"
         onClick={() => (open ? close() : setOpen(true))}
-        className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border bg-background hover:border-primary/40 text-sm transition-colors text-left focus:outline-none focus:ring-2 focus:ring-primary/20 ${
-          error ? "border-red-400" : "border-border"
-        }`}
+        className={
+          sheet
+            ? `w-full flex items-center justify-between gap-2 px-3 py-2.5 border bg-card text-sm text-left focus:outline-none ${
+                error ? "border-destructive" : open ? "border-foreground" : "border-foreground/40 hover:border-foreground focus:border-foreground"
+              }`
+            : `w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border bg-background hover:border-primary/40 text-sm transition-colors text-left focus:outline-none focus:ring-2 focus:ring-primary/20 ${
+                error ? "border-red-400" : "border-border"
+              }`
+        }
       >
         <span className={`flex items-center gap-2 min-w-0 ${selectedName ? "text-foreground" : "text-muted-foreground/50"}`}>
           {selectedName ? (
-            <><FolderOpen size={13} className="text-amber-500 shrink-0" /><span className="truncate">{selectedName}</span></>
+            <>{!sheet && <FolderOpen size={13} className="text-amber-500 shrink-0" />}<span className={`truncate ${sheet ? "font-medium" : ""}`}>{selectedName}</span></>
           ) : (
-            <><Layers size={13} className="text-muted-foreground/40 shrink-0" />{placeholder}</>
+            <>{!sheet && <Layers size={13} className="text-muted-foreground/40 shrink-0" />}{placeholder}</>
           )}
         </span>
-        <ChevronsUpDown size={13} className={`text-muted-foreground/40 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+        <ChevronsUpDown size={13} className={`${sheet ? "text-muted-foreground" : "text-muted-foreground/40"} shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && createPortal(
         <div
           ref={panelRef}
-          style={panelStyle}
-          className={`relative flex flex-col rounded-xl border border-border bg-card shadow-2xl overflow-hidden transition-all duration-150 origin-top ${
+          style={sheet ? { ...panelStyle, boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)" } : panelStyle}
+          className={`relative flex flex-col bg-card overflow-hidden transition-all duration-150 origin-top ${sheet ? "border border-foreground" : "rounded-xl border border-border shadow-2xl"} ${
             closing ? "opacity-0 scale-y-95" : "opacity-100 scale-y-100 animate-in fade-in-0 zoom-in-95"
           }`}
         >
-          <div className="px-4 py-3.5 border-b border-border/60 shrink-0">
+          <div className={`shrink-0 ${sheet ? "px-3 py-3 border-b border-foreground" : "px-4 py-3.5 border-b border-border/60"}`}>
             <div className="relative">
               <Search size={11} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 pointer-events-none" />
               <input
@@ -262,7 +276,9 @@ export function GroupTreePicker({
                 value={pickerSearch}
                 onChange={(e) => setPickerSearch(e.target.value)}
                 placeholder="Search by name or code…"
-                className="w-full text-xs pl-8 pr-8 py-2.5 rounded-md bg-muted/40 border border-border/60 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                className={sheet
+                  ? "w-full text-xs pl-8 pr-8 py-2.5 bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+                  : "w-full text-xs pl-8 pr-8 py-2.5 rounded-md bg-muted/40 border border-border/60 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30"}
               />
               {pickerSearch && (
                 <button onClick={() => setPickerSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/40 hover:text-muted-foreground">
@@ -277,12 +293,14 @@ export function GroupTreePicker({
 
           <div className="flex-1 overflow-y-auto scroll-smooth py-2.5 [scrollbar-width:thin] [scrollbar-color:theme(colors.border)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/0 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-border/60 [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb]:duration-300">
             <div
-              className={`flex items-center gap-2 px-3 py-2 mx-1.5 rounded text-xs cursor-pointer transition-colors mb-1 ${
-                value === "" ? "bg-primary/15 text-primary font-semibold" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              className={`flex items-center gap-2 px-3 py-2 mx-1.5 text-xs cursor-pointer transition-colors mb-1 ${sheet ? "" : "rounded"} ${
+                value === ""
+                  ? sheet ? "bg-foreground text-card font-semibold" : "bg-primary/15 text-primary font-semibold"
+                  : sheet ? "text-muted-foreground hover:bg-primary/10 hover:text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
               }`}
               onClick={() => handleSelect("")}
             >
-              <Layers size={10} className="shrink-0" />
+              {!sheet && <Layers size={10} className="shrink-0" />}
               <span>{placeholder}</span>
             </div>
             <div className="h-px bg-border/40 mx-3 mb-1.5" />
@@ -294,14 +312,16 @@ export function GroupTreePicker({
                 searchResults.map((g) => (
                   <div
                     key={g._id}
-                    className={`flex items-center gap-2 px-3 py-2 mx-1.5 rounded text-xs cursor-pointer transition-colors ${
-                      value === g._id ? "bg-primary/15 text-primary font-semibold" : "hover:bg-muted/60"
+                    className={`flex items-center gap-2 px-3 py-2 mx-1.5 text-xs cursor-pointer transition-colors ${sheet ? "" : "rounded"} ${
+                      value === g._id
+                        ? sheet ? "bg-foreground text-card font-semibold" : "bg-primary/15 text-primary font-semibold"
+                        : sheet ? "text-foreground hover:bg-primary/10" : "hover:bg-muted/60"
                     }`}
                     onClick={() => handleSelect(g._id)}
                   >
-                    <CornerDownRight size={9} className="text-muted-foreground/40 shrink-0" />
+                    {!sheet && <CornerDownRight size={9} className="text-muted-foreground/40 shrink-0" />}
                     <span className="flex-1 truncate">{g.name}</span>
-                    <span className="font-mono text-[0.5625rem] text-muted-foreground/50 shrink-0">{g.code}</span>
+                    <span className={`${sheet ? "font-heading tabular-nums opacity-70" : "font-mono text-muted-foreground/50"} text-[0.5625rem] shrink-0`}>{g.code}</span>
                   </div>
                 ))
               )
@@ -316,6 +336,7 @@ export function GroupTreePicker({
                   selected={value}
                   onSelect={handleSelect}
                   invalidParents={invalidParents}
+                  sheet={sheet}
                 />
               ))
             )}

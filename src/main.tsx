@@ -2,6 +2,15 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
+import { isChunkLoadError, reloadForNewVersion } from "./lib/chunkReload";
+import { installGatewayFetch } from "./lib/gatewayFetch";
+import { applyUiPrefs } from "./lib/uiPrefs";
+
+// From here on every call to our API (not only the ones using fetchWithAuth) handles the few seconds of a deploy.
+installGatewayFetch();
+
+// The animation choices saved from Settings (profile pages) go on <html> before anything draws.
+applyUiPrefs();
 
 // Global safety net: unhandled promise rejections that slip past React Query
 // are logged to the console (visible in DevTools / server logs) but never
@@ -9,6 +18,14 @@ import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 // needs to show a graceful state.
 window.addEventListener("unhandledrejection", (e) => {
   console.error("[Unhandled Promise Rejection]", e.reason);
+  // A page's file from before the latest deploy no longer exists (404) — load the new build.
+  if (isChunkLoadError(e.reason)) reloadForNewVersion();
+});
+
+// Vite fires this when a lazily loaded page's files can't be fetched (typically a tab left open across a
+// deploy). Reloading picks up the new build; if we already reloaded a moment ago, let the error surface.
+window.addEventListener("vite:preloadError", (e) => {
+  if (reloadForNewVersion()) e.preventDefault();
 });
 
 // Catch synchronous JS errors outside the React tree (e.g. in event listeners
@@ -172,9 +189,40 @@ const NOWRAP_PATTERNS = [
 ];
 const isShortValue = (t: string) =>
   t.length > 0 && t.length <= 32 && (!/\s/.test(t) || NOWRAP_PATTERNS.some((re) => re.test(t)));
+// Phone card view for hand-built tables: every body cell gets its column's
+// header as data-label, and the table gets .auto-cards; on phones (<768px)
+// index.css turns each row into a card (first column = title, other values
+// labelled, actions in the footer). DataTable has its own cards already.
+function markCardTables() {
+  document.querySelectorAll<HTMLTableElement>("main table, [role=dialog] table").forEach((table) => {
+    // A calendar's day grid is a table too (role="grid"), and a date popup is itself role="dialog" —
+    // turning its weeks into cards is what squashed the calendar into narrow boxes on phones.
+    if (table.getAttribute("role") === "grid") { table.classList.remove("auto-cards"); return; }
+    if (!table.tHead || table.closest(".md\\:block")) { table.classList.remove("auto-cards"); return; }
+    const { placed, ncols } = placeCells(table);
+    if (ncols < 3) { table.classList.remove("auto-cards"); return; }
+    const labels: string[] = [];
+    placed.forEach((p) => {
+      if (p.inHead && p.start === p.end) labels[p.start] = (p.cell.textContent || "").replace(/\s+/g, " ").trim();
+    });
+    placed.forEach((p) => {
+      if (p.inHead) return;
+      if (p.start !== p.end) { p.cell.removeAttribute("data-label"); return; }
+      const label = labels[p.start] || "";
+      if (p.cell.getAttribute("data-label") !== label) p.cell.setAttribute("data-label", label);
+      // Blank / dash-only values are hidden in the compact phone cards.
+      const txt = (p.cell.textContent || "").replace(/\s+/g, "").trim();
+      const empty = (!txt || /^[-–—]+$/.test(txt)) && !p.cell.querySelector("button, a, input, select, img, svg");
+      p.cell.toggleAttribute("data-empty", empty);
+    });
+    table.classList.add("auto-cards");
+  });
+}
+
 function markNowrapCells() {
   document.querySelectorAll<HTMLTableCellElement>("main table td, [role=dialog] table td").forEach((td) => {
     if (td.hasAttribute("colspan")) return;
+    if (td.closest('table[role="grid"]')) return; // calendar day cells
     const candidates: HTMLElement[] = [td, ...Array.from(td.querySelectorAll<HTMLElement>("*"))];
     candidates.forEach((el) => {
       // Only elements whose own text (direct text nodes) is the value.
@@ -196,6 +244,7 @@ new MutationObserver(() => {
     markRows();
     markStickyActions();
     markNowrapCells();
+    markCardTables();
   });
 }).observe(document.documentElement, { childList: true, subtree: true });
 

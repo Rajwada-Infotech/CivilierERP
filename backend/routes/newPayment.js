@@ -1,8 +1,8 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectParamGuard, paymentProjectSql, ebResolvedProjectSql, assertProjectRawAllowed } = require("../services/projectScope");
 
@@ -26,6 +26,7 @@ const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
+const { normalizePaymentDimensions } = require("../services/paymentDimensions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -118,6 +119,7 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
       -- project" here means exactly what the picker already showed the
       -- user as matching.
       COALESCE(proj.name, eb.EProjectName) AS ProjectKey,
+      proj.id AS ProjectId,
       ISNULL(eb.TDSAmount, 0) AS TDSAmount,
       ISNULL(eb.ERemainingAmount, ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))) AS RemainingAmount,
       CASE
@@ -148,7 +150,9 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
     WHERE eb.Eid IN (${placeholders.join(",")})
   `);
 
-  const rows = result.recordset;
+  // In the order the ids came — the first picked invoice's project is the payment's own, and the links
+  // (which the GL posting reads first-to-last) keep that order.
+  const rows = result.recordset.sort((a, b) => ids.indexOf(a.Eid) - ids.indexOf(b.Eid));
   const bad = (msg) => { const e = new Error(msg); e.status = 400; throw e; };
 
   if (rows.length !== ids.length) bad("One or more invoices in this merge could not be found.");
@@ -168,8 +172,23 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
   const distinctProjects = new Set(rows.map((r) => String(r.ProjectKey ?? "").trim().toLowerCase()));
   const distinctSuppliers = new Set(rows.map((r) => Number(r.SupplierId)));
   if (distinctCompanies.size > 1) bad("All merged invoices must belong to the same company.");
-  if (distinctProjects.size > 1) bad("All merged invoices must belong to the same project.");
   if (distinctSuppliers.size > 1) bad("All merged invoices must share the same supplier.");
+  // Different projects merge when the company is on each of them — its own project or one tagged to it
+  // (Project Master's extra companies), e.g. Delta Realty paying its Boulevard and Magnus invoices together.
+  // Each invoice's ledger line keeps its own project.
+  if (distinctProjects.size > 1) {
+    const projectIds = [...new Set(rows.map((r) => r.ProjectId))];
+    if (projectIds.some((id) => !id)) bad("Invoices of different projects can be merged only when each is on a project from Project Master.");
+    const preq = pool.request().input("co", sql.Int, Number(rows[0].ECompanyId));
+    const pph = projectIds.map((id, i) => { preq.input(`p${i}`, sql.Int, id); return `@p${i}`; });
+    const off = (await preq.query(`
+      SELECT p.name FROM dbo.enterprise p
+      WHERE p.id IN (${pph.join(",")})
+        AND ISNULL(p.company_id, 0) <> @co
+        AND NOT EXISTS (SELECT 1 FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = p.id AND pc.CompanyId = @co)
+    `)).recordset;
+    if (off.length) bad(`${off.map((p) => p.name).join(", ")} is not tagged to the invoices' company.`);
+  }
 
   const links = rows.map((r) => ({
     expenseBookingId: r.Eid,
@@ -249,6 +268,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const dateParam = req.query.date ? String(req.query.date).trim() : "";
     const dueDate = req.query.dueDate ? String(req.query.dueDate).trim() : "";
     const remarks = req.query.remarks ? String(req.query.remarks).trim() : "";
+    // Cheque number (np.PChequeNo) - "contains", so typing the last digits of a cheque finds it.
+    const chequeNo = req.query.chequeNo ? String(req.query.chequeNo).trim().slice(0, 50) : "";
     const idFilter = req.query.id ? parseInt(req.query.id, 10) : null;
     // Payment Date (np.PDate) range — list view's Date filter.
     const dateFrom = req.query.from ? String(req.query.from).trim() : "";
@@ -306,8 +327,9 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           OR np.PBankName LIKE @search
           OR ${RESOLVED_SUPPLIER_SQL} LIKE @search)`);
     }
-    if (companyId) conditions.push(`np.PCompany = @companyId`);
-    if (project) conditions.push(`np.PProject LIKE @project`);
+    // The company / project filter sends a name or an id, and a payment holds either: match both.
+    if (companyId) conditions.push(`(np.PCompany = @companyId OR np.PCompany IN (SELECT CAST(ent.id AS VARCHAR(20)) FROM dbo.enterprise ent WHERE ent.business_type = 'C' AND (ent.name = @companyId OR CAST(ent.id AS VARCHAR(20)) = @companyId)) OR np.PCompany IN (SELECT ent.name FROM dbo.enterprise ent WHERE ent.business_type = 'C' AND CAST(ent.id AS VARCHAR(20)) = @companyId))`);
+    if (project) conditions.push(`(np.PProject LIKE @project OR np.PProject IN (SELECT CAST(ent.id AS VARCHAR(20)) FROM dbo.enterprise ent WHERE ent.business_type = 'P' AND ent.name LIKE @project))`);
     // Filters by the FinYear the payment's own PDate falls into (PFinYearId
     // — resolved at save time, see resolveFinYearId), matching the same
     // dbo.FinYear.FId the Reports page's FY dropdown sends. NOT DocYear,
@@ -318,6 +340,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (docDate) conditions.push(`CAST(np.PCreatedAt AS DATE) = @docDate`);
     if (dateParam) conditions.push(`np.PDate = @dateParam`);
     if (dueDate) conditions.push(`np.PChequeDate = @dueDate`);
+    if (chequeNo) conditions.push(`np.PChequeNo LIKE @chequeNo`);
     if (dateFrom) conditions.push(`np.PDate >= @dateFrom`);
     if (dateTo) conditions.push(`np.PDate <= @dateTo`);
     if (remarks)
@@ -343,6 +366,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (dateFrom) request.input("dateFrom", sql.Date, dateFrom);
     if (dateTo) request.input("dateTo", sql.Date, dateTo);
     if (remarks) request.input("remarks", sql.NVarChar(200), `%${remarks}%`);
+    if (chequeNo) request.input("chequeNo", sql.NVarChar(60), `%${chequeNo}%`);
 
     const countResult = await request.query(
       `SELECT COUNT(*) AS total FROM dbo.NewPayment np ${SUPPLIER_JOINS_SQL} ${whereClause}`,
@@ -368,6 +392,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (dateTo) dataRequest.input("dateTo", sql.Date, dateTo);
     if (remarks)
       dataRequest.input("remarks", sql.NVarChar(200), `%${remarks}%`);
+    if (chequeNo) dataRequest.input("chequeNo", sql.NVarChar(60), `%${chequeNo}%`);
 
     const result = await dataRequest.query(`
       SELECT
@@ -377,6 +402,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         -- Project name (resolved from EB → enterprise, or PO → enterprise)
         COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
+        mproj.Names                                        AS PMergedProjectNames,
         -- Supplier/contractor name — from the ExpenseBooking resolved chain
         -- when this payment is linked to an invoice, otherwise fall back to
         -- the party (PPartyId) picked directly on a direct/TOD payment.
@@ -431,10 +457,20 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         -- Journal Voucher this payment settles (JVLineId, migration 417) —
         -- so the list's Expense Ref column can show a JV chip the same way
         -- it shows an invoice/GRN chip, instead of a bare "—".
-        (
-          SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
-          JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
-          WHERE jvl.LineID = np.JVLineId
+        COALESCE(
+          (
+            SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
+            JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+            WHERE jvl.LineID = np.JVLineId
+          ),
+          -- a payment settling several JV lines (migration 620) lists them all
+          (
+            SELECT STRING_AGG(jv2.JVNo, ', ') WITHIN GROUP (ORDER BY jv2.JVNo)
+            FROM dbo.PaymentJvLineLink pjl
+            JOIN dbo.JournalVoucherLines jvl2 ON jvl2.LineID = pjl.JVLineId
+            JOIN dbo.JournalVoucher jv2 ON jv2.JVID = jvl2.JVID
+            WHERE pjl.PPaymentID = np.PPaymentID
+          )
         )                                                  AS JVNo,
         -- EB DocDate for reference
         eb.EDocDate                                        AS EBDocDate,
@@ -475,7 +511,17 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           ELSE np.Status
         END                                                AS DisplayStatus
       FROM dbo.NewPayment np
-      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
+      -- A merged payment's every project (its invoices can span the company's projects).
+      OUTER APPLY (
+        SELECT STRING_AGG(x.ProjName, ', ') AS Names FROM (
+          SELECT DISTINCT COALESCE(lp.name, leb.EProjectName) AS ProjName
+          FROM dbo.PaymentExpenseBookingLink pl
+          JOIN dbo.ExpenseBooking leb ON leb.Eid = pl.ExpenseBookingId
+          LEFT JOIN dbo.enterprise lp ON lp.id = TRY_CAST(leb.EProjectName AS INT)
+          WHERE pl.PPaymentID = np.PPaymentID
+        ) x
+      ) mproj
+      LEFT JOIN dbo.users pcu ON pcu.email = np.PCreatedBy
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
@@ -529,9 +575,12 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const allocMap = await getAllocationsForMany(
       pool, sql, "NewPayment", result.recordset.map((r) => r.PPaymentID),
     );
+    // A merged payment's invoices (migration 501), for the list's "Against" column.
+    const linkMap = await getLinksForMany(pool, sql, result.recordset.map((r) => r.PPaymentID));
     const dataWithAllocations = result.recordset.map((r) => ({
       ...r,
       EExpenseHeadAllocations: allocMap.get(r.PPaymentID) ?? [],
+      MergedInvoiceDocNos: (linkMap.get(r.PPaymentID) ?? []).map((l) => l.eDocNo),
     }));
 
     res.json({
@@ -931,6 +980,8 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     }
 
     try {
+      // The form sends the company's and project's names; the ledger posting and the reports read ids.
+      ({ PCompany, PProject } = await normalizePaymentDimensions(pool, { PCompany, PProject }));
       await assertProjectVisibleToCompany(pool, PProject, PCompany);
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
@@ -1236,18 +1287,15 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
 router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(paymentBodySchema), async (req, res) => {
   if (!(await assertPaymentProjectAllowed(req, res, req.body))) return;
   const { id } = req.params;
+  let { PAmount, PProject, PCompany, PExpenseRef } = req.body;
   const {
     PPaymentName,
     PRemarks,
     PMode,
-    PAmount,
     PDocType,
     PDate,
     PBankID,
     PBankName,
-    PProject,
-    PCompany,
-    PExpenseRef,
     parentDocNo,
     rootExBDocNo,
     // Cheque
@@ -1280,6 +1328,69 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const wasApproved = beforeSnapshot?.Status === "Approved";
     const wasRejected = beforeSnapshot?.Status === "Rejected";
 
+    // What this payment settles. Left alone unless the form says it was changed (tagChange). Checked here, before an approved
+    // payment's ledger entries are reversed below, so a refused change leaves everything as it was.
+    const paymentId = parseInt(id, 10);
+    const tagChange = req.body.tagChange === true;
+    const oldInvoiceLinks = await getLinks(pool, sql, paymentId);
+    const oldJvLinks = (await pool.request().input("id", sql.Int, paymentId)
+      .query("SELECT COUNT(*) AS n FROM dbo.PaymentJvLineLink WHERE PPaymentID = @id")).recordset[0].n;
+    let nextJvLineId = beforeSnapshot?.JVLineId ?? null;
+    let nextPartyId = beforeSnapshot?.PPartyId ?? null;
+    let nextInvoiceLinks = oldInvoiceLinks;
+    const amountChanged = Math.abs((Number(PAmount) || 0) - (Number(beforeSnapshot?.PAmount) || 0)) > 0.005;
+
+    if (tagChange) {
+      if (req.body.ContractId || beforeSnapshot?.ContractId) {
+        return res.status(400).json({ error: "A contract can't be added or changed on a saved payment. Delete the payment and create it again." });
+      }
+      nextJvLineId = req.body.JVLineId ? parseInt(req.body.JVLineId, 10) : null;
+      nextPartyId = req.body.partyId ? parseInt(req.body.partyId, 10) : nextPartyId;
+      nextInvoiceLinks = [];
+      if (Array.isArray(req.body.ExpenseBookingIds) && req.body.ExpenseBookingIds.length > 0) {
+        const resolved = await resolveMergedInvoices(pool, sql, req.body.ExpenseBookingIds);
+        nextInvoiceLinks = resolved.links;
+        PCompany = String(resolved.companyId);
+        PProject = String(resolved.projectRaw ?? "");
+        PAmount = resolved.totalAmount;
+        PExpenseRef = null;
+        nextPartyId = resolved.supplierId;
+        nextJvLineId = null;
+      }
+      if (nextJvLineId) PExpenseRef = null;
+    } else if (amountChanged && (oldJvLinks > 0 || oldInvoiceLinks.length > 0)) {
+      return res.status(400).json({ error: "This payment settles several invoices or JVs, each with its own share. Pick what it settles again to change the amount." });
+    }
+
+    if (nextJvLineId && (tagChange || amountChanged)) {
+      const line = (await pool.request().input("line", sql.Int, nextJvLineId).input("id", sql.Int, paymentId).query(`
+        SELECT jv.JVNo, jv.Status, jvl.LHeadId, jvl.CreditAmount,
+          ISNULL((SELECT SUM(np.PAmount) FROM dbo.NewPayment np
+                  WHERE np.JVLineId = jvl.LineID AND np.PPaymentID <> @id AND ISNULL(np.Status, N'') NOT IN (N'Rejected', N'Cancelled', N'Deleted')), 0)
+          + ISNULL((SELECT SUM(k.Amount) FROM dbo.PaymentJvLineLink k JOIN dbo.NewPayment np ON np.PPaymentID = k.PPaymentID
+                  WHERE k.JVLineId = jvl.LineID AND np.PPaymentID <> @id AND ISNULL(np.Status, N'') NOT IN (N'Rejected', N'Cancelled', N'Deleted')), 0) AS OtherPayments
+        FROM dbo.JournalVoucherLines jvl JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+        WHERE jvl.LineID = @line AND jvl.CreditAmount > 0`)).recordset[0];
+      if (!line) return res.status(404).json({ error: "That JV line was not found." });
+      if (tagChange && line.Status !== "Approved") {
+        return res.status(400).json({ error: `${line.JVNo} is ${line.Status}. Only an Approved JV can be paid.` });
+      }
+      const room = Math.round((Number(line.CreditAmount) - Number(line.OtherPayments)) * 100) / 100;
+      if ((Number(PAmount) || 0) > room + 0.005) {
+        return res.status(400).json({ error: `${line.JVNo} has only ₹${room.toFixed(2)} left to pay, after its other payments.` });
+      }
+      nextPartyId = line.LHeadId;
+    }
+
+    // A CRM refund payout may already have been paid and settled in CRM.
+    // Editing it could change the voucher while leaving that settlement in
+    // place, so corrections must use the authorized reversal workflow.
+    if (wasApproved && beforeSnapshot?.SourceCrmRefundId) {
+      return res.status(409).json({
+        error: "An approved CRM refund payout cannot be edited because its cash may already have moved and its refund may already be settled. Use the authorized reversal and reconciliation workflow.",
+      });
+    }
+
     // Editing an already-Approved payment must go back through approval —
     // this UPDATE never touched Status before, so an edited-Approved
     // payment silently stayed Approved with no re-approval and no GL
@@ -1301,7 +1412,9 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       return res.status(400).json({ error: "This payment's cheque was cancelled and cannot be edited." });
     }
 
-    await assertProjectVisibleToCompany(pool, PProject, PCompany);
+    // Names from the form become enterprise ids, as on create (the ledger posting and the reports read ids).
+    const dims = await normalizePaymentDimensions(pool, { PCompany, PProject });
+    await assertProjectVisibleToCompany(pool, dims.PProject, dims.PCompany);
 
     const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocationsPut.length > 0) {
@@ -1369,7 +1482,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     // always tracks the payment's own PDate, same as on create.
     const pFinYearIdUpdate = await resolveFinYearId(pool, PDate);
 
-    await pool
+    const paymentUpdate = await pool
       .request()
       .input("PPaymentID", sql.Int, id)
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
@@ -1381,8 +1494,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PFinYearId", sql.Int, pFinYearIdUpdate)
       .input("PBankID", sql.Int, normalizeBankId(PBankID))
       .input("PBankName", sql.VarChar, PBankName || (PMode === "Cash" ? "Cash-in-Hand A/c" : null))
-      .input("PProject", sql.VarChar, PProject || "")
-      .input("PCompany", sql.VarChar, PCompany || "")
+      .input("PProject", sql.VarChar, dims.PProject || "")
+      .input("PCompany", sql.VarChar, dims.PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
       .input("ParentDocNo", sql.NVarChar(100), parentDocNo || null)
       .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo || null)
@@ -1407,6 +1520,9 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PCardId", sql.Int, PCardId || null)
       .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply === undefined ? null : (oaSkipAutoApply ? 1 : 0))
       .input("PUpdatedBy", sql.NVarChar(100), userEmail)
+      .input("JVLineId", sql.Int, nextJvLineId)
+      .input("PPartyId", sql.Int, nextPartyId)
+      .input("ExpectedStatus", sql.NVarChar(20), beforeSnapshot?.Status || null)
       .input("TDSId", sql.Int, tdsSnapshotPut.tdsId)
       .input("TDSNature", sql.NVarChar(200), tdsSnapshotPut.tdsNature)
       .input("TDSName", sql.NVarChar(200), tdsSnapshotPut.tdsName)
@@ -1425,6 +1541,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
           PProject             = @PProject,
           PCompany             = @PCompany,
           PExpenseRef          = @PExpenseRef,
+          ${tagChange || amountChanged ? "JVLineId = @JVLineId, PPartyId = @PPartyId," : ""}
           ParentDocNo          = @ParentDocNo,
           RootExBDocNo         = @RootExBDocNo,
           PChequeNo            = @PChequeNo,
@@ -1442,10 +1559,24 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
           PCardId              = @PCardId,
           OASkipAutoApply      = ISNULL(@OASkipAutoApply, OASkipAutoApply),
           TDSId = @TDSId, TDSNature = @TDSNature, TDSName = @TDSName, TDSPercentage = @TDSPercentage, TDSAmount = @TDSAmount
-        WHERE PPaymentID = @PPaymentID
+        WHERE PPaymentID = @PPaymentID AND Status = @ExpectedStatus
       `);
 
+    if (!paymentUpdate?.rowsAffected?.[0]) {
+      return res.status(409).json({ error: "Payment status changed while it was being edited. Reload the payment and try again." });
+    }
+
     await replaceAllocations(() => pool.request(), sql, "NewPayment", parseInt(id, 10), expenseHeadAllocationsPut);
+
+    if (tagChange) {
+      await pool.request().input("id", sql.Int, paymentId).query("DELETE FROM dbo.PaymentJvLineLink WHERE PPaymentID = @id");
+      await replaceLinks(() => pool.request(), sql, paymentId, nextInvoiceLinks);
+      // The invoices it no longer settles, and the new ones, recompute what is paid.
+      const docNos = new Set([...oldInvoiceLinks, ...nextInvoiceLinks].map((l) => l.eDocNo));
+      if (beforeSnapshot?.PExpenseRef && beforeSnapshot.PExpenseRef !== PExpenseRef) docNos.add(beforeSnapshot.PExpenseRef);
+      for (const docNo of docNos) await _syncBillStatus(pool, docNo);
+      await bumpCacheVersion("journal-voucher");
+    }
 
     // Sync bill status since amount may have changed
     const updatedRef = await pool.request().input("id", sql.Int, id)
@@ -1539,6 +1670,16 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
       });
     }
 
+    // Raised from CRM: a refund / buy-back keeps its payout voucher's id.
+    // Deleting is allowed (business choice); an UNPAID voucher's refund /
+    // buy-back is sent back to CRM first, exactly as if Finance had rejected
+    // it, so a fresh voucher can be raised — otherwise the record pointed at
+    // a voucher that no longer existed ("already with Finance" forever).
+    // Brokerage needs nothing: its totals are read live from Payments.
+    const crmSrc = (await pool.request().input("PPaymentID", sql.Int, id)
+      .query("SELECT Status, SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID")).recordset[0];
+    let sendBackToCrm = crmSrc && crmSrc.Status !== "Approved" && (crmSrc.SourceCrmRefundId || crmSrc.SourceCrmResaleId);
+
     const refRow = await pool.request().input("PPaymentID", sql.Int, id)
       .query("SELECT PExpenseRef, PLinkedOAId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
     const expenseRef = refRow.recordset[0]?.PExpenseRef || null;
@@ -1552,12 +1693,37 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     // created must be removed and the amount added back to
     // AccountHeadMaster.OnAccountBalance, or that money is permanently lost
     // from the party's on-account pool.
+    // The reversals and the delete run as one unit: a failure part-way used
+    // to leave the ledger reversed (or the on-account money restored) with the
+    // payment still there — or the other way round.
+    const tx = pool.transaction();
+    await tx.begin();
+    let result;
+    try {
+    // Serialize deletion with approval and decide CRM recovery from the live,
+    // locked row rather than the earlier preflight snapshot.
+    const lockedPayment = (await tx.request().input("pid", sql.Int, id).query(`
+      SELECT Status, SourceCrmRefundId, SourceCrmResaleId
+      FROM dbo.NewPayment WITH (UPDLOCK, HOLDLOCK) WHERE PPaymentID = @pid
+    `)).recordset[0];
+    if (!lockedPayment) {
+      await tx.rollback();
+      return res.status(404).json({ error: "Payment not found" });
+    }
+    if (lockedPayment.SourceCrmRefundId && lockedPayment.Status === "Approved") {
+      await tx.rollback();
+      return res.status(409).json({
+        error: "An approved CRM refund payout cannot be hard-deleted because the cash may have left and its accounting or CRM settlement may already be recorded. Use the authorized reversal and reconciliation workflow.",
+      });
+    }
+    sendBackToCrm = lockedPayment.Status !== "Approved" && (lockedPayment.SourceCrmRefundId || lockedPayment.SourceCrmResaleId);
+
     if (linkedOAId) {
-      const ledgerRow = await pool.request().input("OAId", sql.Int, linkedOAId)
+      const ledgerRow = await tx.request().input("OAId", sql.Int, linkedOAId)
         .query("SELECT PartyId, Amount FROM dbo.OnAccountLedger WHERE OAId = @OAId");
       if (ledgerRow.recordset.length) {
         const { PartyId, Amount } = ledgerRow.recordset[0];
-        await pool.request()
+        await tx.request()
           .input("OAId", sql.Int, linkedOAId)
           .input("PartyId", sql.Int, PartyId)
           .input("Amount", sql.Decimal(18, 2), Amount).query(`
@@ -1579,20 +1745,36 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     // already applied to loanSanction.js's DELETE.
     const { reversePostingBySource } = require("../services/generalLedger");
     for (const sourceType of ["NewPayment", "PaymentPosting", "BounceChargePosting", "LoanRepayment"]) {
-      await reversePostingBySource(pool, sourceType, id);
+      await reversePostingBySource(tx, sourceType, id);
     }
 
-    const result = await pool
+    result = await tx
       .request()
       .input("PPaymentID", sql.Int, id)
       .query("DELETE FROM dbo.NewPayment WHERE PPaymentID=@PPaymentID");
     if (!result.rowsAffected[0]) {
+      await tx.rollback();
       return res.status(404).json({ error: "Payment not found" });
+    }
+    if (sendBackToCrm && crmSrc.SourceCrmRefundId) {
+      await tx.request().input("rid", sql.Int, crmSrc.SourceCrmRefundId).input("np", sql.Int, id)
+        .query(`UPDATE dbo.CrmRefund SET Status = 'Pending', FinanceNewPaymentId = NULL,
+                  RejectionNote = N'[Finance] Payout voucher deleted — raise it again', UpdatedAt = SYSDATETIME()
+                WHERE Id = @rid AND FinanceNewPaymentId = @np AND Status IN ('FinanceApproved', 'FinancePending')`);
+    }
+    if (sendBackToCrm && crmSrc.SourceCrmResaleId) {
+      await require("../services/crmResaleTransfer").buyBackVoucherRejected(tx, crmSrc.SourceCrmResaleId, Number(id), "Payout voucher deleted — raise it again");
+    }
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw txErr;
     }
     if (expenseRef) await _syncBillStatus(pool,expenseRef);
     if (linkedOAId) await bumpCacheVersion("on-account");
+    if (sendBackToCrm) await bumpCacheVersion(crmSrc.SourceCrmRefundId ? "crm-refunds" : "crm-resales");
     await bumpCacheVersion("new-payment");
-    res.json({ message: "Payment deleted successfully" });
+    res.json({ message: sendBackToCrm ? "Payment deleted — its CRM record is back with CRM to raise a new voucher" : "Payment deleted successfully" });
   } catch (err) {
     console.error("PAYMENT DELETE ERROR:", err.message);
     res.status(500).json({ error: err.message });
@@ -1639,13 +1821,13 @@ router.put("/:id/approve", async (req, res) => {
 
     const pool = getPool();
     const brokerageGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
-      SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmBrokerageId,
+      SELECT np.PPaymentID, np.PAmount, ISNULL(np.TDSAmount, 0) AS TDSAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmBrokerageId,
              br.ComputedAmount,
              ISNULL(br.NetPayable, br.ComputedAmount) AS NetPayable,
              (SELECT ISNULL(SUM(Amount),0)
               FROM dbo.CrmBrokerPayment
               WHERE BrokerageId = np.SourceCrmBrokerageId) AS TotalPaid,
-             (SELECT ISNULL(SUM(PAmount),0)
+             (SELECT ISNULL(SUM(PAmount - ISNULL(TDSAmount, 0)),0)
               FROM dbo.NewPayment np2
               WHERE np2.SourceCrmBrokerageId = np.SourceCrmBrokerageId
                 AND np2.PPaymentID <> np.PPaymentID
@@ -1666,7 +1848,8 @@ router.put("/:id/approve", async (req, res) => {
       // prevent the record from ever flipping to Paid when TDS is deducted.
       const netPayable = Number(gateRow.NetPayable || gateRow.ComputedAmount || 0);
       const remaining = netPayable - Number(gateRow.TotalPaid || 0) - Number(gateRow.OtherSubmitted || 0);
-      if (Number(gateRow.PAmount || 0) > remaining + 0.01) {
+      // The voucher is gross with its TDS; what reaches the broker is the net.
+      if (Number(gateRow.PAmount || 0) - Number(gateRow.TDSAmount || 0) > remaining + 0.01) {
         return res.status(400).json({
           error: `Brokerage payment exceeds the remaining net payable balance of ₹${remaining.toLocaleString("en-IN")}`,
         });
@@ -1684,22 +1867,40 @@ router.put("/:id/approve", async (req, res) => {
     // refund's NetAmount.
     const refundGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
       SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmRefundId,
-             r.NetAmount
+             r.NetAmount, r.RefundNo, r.CustomerAccountNo
       FROM dbo.NewPayment np
       LEFT JOIN dbo.CrmRefund r ON r.Id = np.SourceCrmRefundId
       WHERE np.PPaymentID = @PPaymentID
     `);
     const refundRow = refundGate.recordset[0];
+    const buyBackGate = (await pool.request().input("PPaymentID", sql.Int, id).query(`
+      SELECT np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmResaleId, r.AgreedValue
+      FROM dbo.NewPayment np JOIN dbo.CrmUnitResale r ON r.Id = np.SourceCrmResaleId
+      WHERE np.PPaymentID = @PPaymentID`)).recordset[0];
+    if (buyBackGate) {
+      if (!buyBackGate.PDate || !String(buyBackGate.PMode || "").trim() || !normalizeBankId(buyBackGate.PBankID)) {
+        return res.status(400).json({ error: "Complete the buy-back payment date, payment mode, and bank before approval." });
+      }
+      if (Math.abs(Number(buyBackGate.PAmount || 0) - Number(buyBackGate.AgreedValue || 0)) > 0.01) {
+        return res.status(400).json({ error: `This buy-back voucher must pay the agreed price ₹${Number(buyBackGate.AgreedValue).toLocaleString("en-IN")} (TDS is deducted from it, not from the amount).` });
+      }
+    }
     if (refundRow?.SourceCrmRefundId) {
       if (!refundRow.PDate || !String(refundRow.PMode || "").trim() || !normalizeBankId(refundRow.PBankID)) {
         return res.status(400).json({
           error: "Complete refund payment date, payment mode, and bank before approval.",
         });
       }
-      const netAmount = Number(refundRow.NetAmount) || 0;
-      if (netAmount > 0 && Number(refundRow.PAmount || 0) > netAmount + 0.01) {
+      // A transfer pays into the customer's account — it must be on the refund.
+      if (["NEFT", "RTGS", "IMPS", "UPI"].includes(String(refundRow.PMode).trim()) && !String(refundRow.CustomerAccountNo || "").trim()) {
         return res.status(400).json({
-          error: `Refund payment exceeds the refund's net amount of ₹${netAmount.toLocaleString("en-IN")}`,
+          error: `A ${refundRow.PMode} refund needs the customer's bank account — add it on refund ${refundRow.RefundNo}, or pay by Cheque.`,
+        });
+      }
+      const netAmount = Number(refundRow.NetAmount) || 0;
+      if (netAmount > 0 && Math.abs(Number(refundRow.PAmount || 0) - netAmount) > 0.01) {
+        return res.status(400).json({
+          error: `Refund payment must equal the refund's net amount of ₹${netAmount.toLocaleString("en-IN")}`,
         });
       }
     }
@@ -1717,7 +1918,32 @@ router.put("/:id/approve", async (req, res) => {
       req.user?.role,
       null,
       req.user?.userId ?? req.user?.id ?? null,
+      refundRow?.SourceCrmRefundId
+        ? async (approvalTx) => {
+            const live = (await approvalTx.request().input("PPaymentID", sql.Int, id).query(`
+              SELECT np.PAmount, np.PDate, np.PMode, np.PBankID,
+                     r.NetAmount, r.RefundNo, r.CustomerAccountNo
+              FROM dbo.NewPayment np
+              JOIN dbo.CrmRefund r ON r.Id = np.SourceCrmRefundId
+              WHERE np.PPaymentID = @PPaymentID
+            `)).recordset[0];
+            if (!live) throw Object.assign(new Error("The linked CRM refund payout no longer exists."), { status: 409 });
+            if (!live.PDate || !String(live.PMode || "").trim() || !normalizeBankId(live.PBankID)) {
+              throw Object.assign(new Error("Complete refund payment date, payment mode, and bank before approval."), { status: 400 });
+            }
+            if (["NEFT", "RTGS", "IMPS", "UPI"].includes(String(live.PMode).trim()) && !String(live.CustomerAccountNo || "").trim()) {
+              throw Object.assign(new Error(`A ${live.PMode} refund needs the customer's bank account, or pay by Cheque.`), { status: 400 });
+            }
+            const liveNet = Number(live.NetAmount) || 0;
+            if (!(liveNet > 0) || Math.abs(Number(live.PAmount || 0) - liveNet) > 0.01) {
+              throw Object.assign(new Error(`Refund payment must equal the refund's net amount of ₹${liveNet.toLocaleString("en-IN")}.`), { status: 400 });
+            }
+          }
+        : null,
     );
+    const manualPayoutNotice = refundRow?.SourceCrmRefundId
+      ? "Approval records staff confirmation that the customer was paid manually. CivilierERP did not move funds."
+      : null;
 
     // Sync EMI installment if this payment is for an EMI ref
     try {
@@ -1786,15 +2012,21 @@ router.put("/:id/approve", async (req, res) => {
     ]);
 
     // Sync bill status on approval — fetch full payment record and recalculate
+    let crmRefundSyncIssue = null;
     try {
       const approvedPayRec = await pool
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, TDSAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
+      // The money has moved only when the LAST level approves. Before that
+      // (a 2-level Payments workflow) nothing downstream may act on it — a
+      // buy-back must not close the booking, a refund or brokerage must not
+      // read Paid, on-account must not be credited.
+      const isFinalApproval = result?.newStatus === "Approved";
       const effectiveRef = approvedRef && /-EMI-\d+$/.test(approvedRef)
         ? approvedRef.replace(/-EMI-\d+$/, "")
         : approvedRef;
@@ -1803,7 +2035,7 @@ router.put("/:id/approve", async (req, res) => {
         await _syncBillStatus(pool, effectiveRef);
       }
 
-      if (approvedRow?.SourceCrmBrokerageId) {
+      if (isFinalApproval && approvedRow?.SourceCrmBrokerageId) {
         try {
           const existingBrokerPay = await pool.request()
             .input("pid", sql.Int, id)
@@ -1811,7 +2043,8 @@ router.put("/:id/approve", async (req, res) => {
           if (!existingBrokerPay.recordset.length) {
             await pool.request()
               .input("bid", sql.Int, approvedRow.SourceCrmBrokerageId)
-              .input("amt", sql.Decimal(18,2), Number(approvedRow.PAmount || 0))
+              // Net paid to the broker (the voucher is gross with its TDS).
+              .input("amt", sql.Decimal(18,2), Number(approvedRow.PAmount || 0) - Number(approvedRow.TDSAmount || 0))
               .input("dt", sql.Date, approvedRow.PDate ? new Date(approvedRow.PDate) : new Date())
               .input("mode", sql.NVarChar(50), approvedRow.PMode || null)
               .input("ref", sql.NVarChar(200), paymentReferenceForBrokerage(approvedRow))
@@ -1850,23 +2083,40 @@ router.put("/:id/approve", async (req, res) => {
       // CRM Refund payout: this NewPayment IS the customer refund disbursement.
       // Approving it means the cash has moved — mark the CrmRefund Paid, consume
       // its held/on-account source, and post the forfeiture GL leg. Non-fatal.
-      if (approvedRow?.SourceCrmRefundId) {
+      if (isFinalApproval && approvedRow?.SourceCrmRefundId) {
         try {
           const { markCrmRefundPaid } = require("./crmRefunds");
-          await markCrmRefundPaid(
+          const syncResult = await markCrmRefundPaid(
             pool,
             approvedRow.SourceCrmRefundId,
             id,
             req.user?.email || req.user?.name || null,
           );
-          await bumpCacheVersion("crm-refunds");
+          if (syncResult?.ok === false) {
+            crmRefundSyncIssue = syncResult.reason || "CRM refund settlement did not complete";
+          } else {
+            await bumpCacheVersion("crm-refunds");
+          }
         } catch (refundErr) {
           console.warn("[new-payment] CRM refund paid-sync failed (non-fatal):", refundErr.message);
+          crmRefundSyncIssue = refundErr.message;
+        }
+      }
+
+      // Buy-back payout: this NewPayment pays the seller — approving it brings
+      // the property back to stock (services/crmResaleTransfer.js). Non-fatal.
+      if (isFinalApproval && approvedRow?.SourceCrmResaleId) {
+        try {
+          const { completeBuyBack } = require("../services/crmResaleTransfer");
+          await completeBuyBack(pool, approvedRow.SourceCrmResaleId, id, req.user?.userId ?? null, req.user?.email || req.user?.name || null);
+          for (const k of ["crm-resales", "crm-bookings", "unit-master"]) await bumpCacheVersion(k);
+        } catch (bbErr) {
+          console.warn("[new-payment] buy-back completion failed (non-fatal):", bbErr.message);
         }
       }
 
       // ── On Account hooks: fire on APPROVE (funds have actually moved) ──────
-      if (approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
+      if (isFinalApproval && approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
         try {
           const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
           const partyTypeLabel = { S: "Supplier", V: "Vendor", C: "Contractor", A: "Customer" };
@@ -2013,7 +2263,23 @@ router.put("/:id/approve", async (req, res) => {
       console.warn("Bill status sync after approve failed:", syncErr.message);
     }
 
-    res.json({ message: "Payment approved", ...result });
+    if (crmRefundSyncIssue) {
+      await bumpCacheVersion("crm-refunds");
+      return res.status(202).json({
+        message: "The payout voucher was approved, but the linked CRM refund settlement did not complete. Review the refund and reconcile the already-approved payout before retrying.",
+        partialFailure: true,
+        manualPayoutNotice,
+        crmRefundSyncIssue,
+        ...result,
+      });
+    }
+    res.json({
+      message: refundRow?.SourceCrmRefundId
+        ? "Payout voucher approved; CRM records the refund as paid based on staff confirmation. CivilierERP did not move funds."
+        : "Payment approved",
+      ...(manualPayoutNotice ? { manualPayoutNotice } : {}),
+      ...result,
+    });
   } catch (err) {
     console.error("Payment approve error:", err.message);
     const status = err.message.includes("not authorized") ? 403 : 400;
@@ -2034,7 +2300,7 @@ router.put("/:id/reject", async (req, res) => {
     // its own single-level workflow, not the Payments bundle.
     const pool = getPool();
     const src = await pool.request().input("id", sql.Int, id)
-      .query("SELECT SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @id");
+      .query("SELECT SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @id");
     const rejectModule = src.recordset[0]?.SourceCrmRefundId ? "crm-refund-payment" : "payments";
 
     const result = await transition(
@@ -2046,6 +2312,21 @@ router.put("/:id/reject", async (req, res) => {
       note || null,
       req.user?.userId ?? req.user?.id ?? null,
     );
+    // A refund's payout voucher turned down by Finance sends the refund back
+    // to CRM with Finance's note (and frees it to raise a fresh voucher) —
+    // otherwise it sat 'with Finance' forever on a dead voucher.
+    if (src.recordset[0]?.SourceCrmResaleId && result?.newStatus === "Rejected") {
+      await require("../services/crmResaleTransfer").buyBackVoucherRejected(pool, src.recordset[0].SourceCrmResaleId, id, note);
+      await bumpCacheVersion("crm-resales");
+    }
+    const refundId = src.recordset[0]?.SourceCrmRefundId;
+    if (refundId && result?.newStatus === "Rejected") {
+      await pool.request().input("rid", sql.Int, refundId).input("np", sql.Int, id)
+        .input("n", sql.NVarChar(500), `[Finance] ${note || "Payout voucher rejected"}`.slice(0, 500))
+        .query(`UPDATE dbo.CrmRefund SET Status = 'Pending', FinanceNewPaymentId = NULL, RejectionNote = @n, UpdatedAt = SYSDATETIME()
+                WHERE Id = @rid AND FinanceNewPaymentId = @np AND Status IN ('FinanceApproved', 'FinancePending')`);
+      await bumpCacheVersion("crm-refunds");
+    }
     await Promise.all([
       bumpCacheVersion("new-payment"),
       bumpCacheVersion("brs"),
@@ -2071,6 +2352,7 @@ router.get("/:id", async (req, res) => {
         COALESCE(pcu.name, np.PCreatedBy)                  AS CreatedByName,
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
+        mproj.Names                                        AS PMergedProjectNames,
         COALESCE(
           CASE
             WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
@@ -2103,6 +2385,16 @@ router.get("/:id", async (req, res) => {
         cmast.card_holder_name                             AS PCardHolderName,
         ahm.LHeadName                                      AS BankAccountName
       FROM dbo.NewPayment np
+      -- A merged payment's every project (its invoices can span the company's projects).
+      OUTER APPLY (
+        SELECT STRING_AGG(x.ProjName, ', ') AS Names FROM (
+          SELECT DISTINCT COALESCE(lp.name, leb.EProjectName) AS ProjName
+          FROM dbo.PaymentExpenseBookingLink pl
+          JOIN dbo.ExpenseBooking leb ON leb.Eid = pl.ExpenseBookingId
+          LEFT JOIN dbo.enterprise lp ON lp.id = TRY_CAST(leb.EProjectName AS INT)
+          WHERE pl.PPaymentID = np.PPaymentID
+        ) x
+      ) mproj
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
@@ -2127,7 +2419,7 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
       LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadName = np.PBankName AND ahm.LHeadType = 'B'
-      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
+      LEFT JOIN dbo.users pcu ON pcu.email = np.PCreatedBy
       WHERE np.PPaymentID = @id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Payment not found" });
@@ -2661,6 +2953,8 @@ router.get("/:id/posting", async (req, res) => {
     `);
     if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
     const pmt = pmtRes.recordset[0];
+    // The form saves names; ids are what the ledger and the cash-in-hand lookup need.
+    const ownDims = await normalizePaymentDimensions(pool, { PCompany: pmt.PCompany, PProject: pmt.PProject });
 
     // Determine payment type: "on-account" if no invoice ref, else "direct"
     const isOnAccount = !pmt.PExpenseRef;
@@ -2724,11 +3018,15 @@ router.get("/:id/posting", async (req, res) => {
       ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null }
       : null;
     if (!bankAccount && pmt.PMode === "Cash") {
-      const cashHeadId = await getCashInHandBankId(pool, parseInt(pmt.PCompany, 10) || null).catch(() => null);
+      const cashHeadId = await getCashInHandBankId(pool, parseInt(ownDims.PCompany, 10) || null).catch(() => null);
       if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash in Hand", code: "CASH-IN-HAND" };
     }
 
+    // Paid straight to expense ledger(s) (Direct Expense Payment): those ledgers are the debit side, shown by name.
+    const previewAllocations = await require("../services/expenseHeadAllocation").getAllocations(pool, sql, "NewPayment", pmt.PPaymentID);
+
     const accounts = {
+      expenseHeads: previewAllocations.map((a) => ({ id: a.lHeadId, label: a.lHeadName, code: a.lHeadCode ?? null, amount: a.amount })),
       // Plain party name when one resolved — matches how a Journal
       // Voucher's own posting display names its ledgers (e.g. "Pinaki
       // Chandra", not "Supplier/Creditor Payable — Pinaki Chandra"), and
@@ -2814,12 +3112,13 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.JVLineId,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.PProject, np.JVLineId,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
              -- A merged payment (migration 501) has no single PExpenseRef to
              -- join ExpenseBooking through — fall back to its first merged
              -- invoice's own Company/Project (every merged invoice shares
-             -- the same one, enforced at merge time).
+             -- the company; a merge may span projects, and then each
+             -- supplier leg carries its own invoice's project).
              COALESCE(eb.ECompanyId, ebLink.ECompanyId) AS CompanyId,
              COALESCE(TRY_CAST(eb.EProjectName AS INT), TRY_CAST(ebLink.EProjectName AS INT)) AS ProjectId
       FROM dbo.NewPayment np
@@ -2835,6 +3134,8 @@ router.post("/:id/post-to-gl", async (req, res) => {
     `);
     if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
     const pmt = pmtRes.recordset[0];
+    // The form saves names; ids are what the ledger and the cash-in-hand lookup need.
+    const ownDims = await normalizePaymentDimensions(pool, { PCompany: pmt.PCompany, PProject: pmt.PProject });
     const mergedLinks = await getLinks(pool, sql, pmtId);
 
     // Already posted?
@@ -2874,6 +3175,10 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // ExpenseBooking's supplier → PPartyId) — not a system-generated
     // "supplier"/"creditor" placeholder, which doesn't exist.
     const supplierId = await resolvePaymentSupplierHeadId(pool, pmt);
+    // Paid straight to expense ledger(s) (Direct Expense Payment, migration 303): those ledgers are the
+    // debit, as postPaymentApproval does; no party to resolve.
+    const { getAllocations } = require("../services/expenseHeadAllocation");
+    const allocations = await getAllocations(pool, sql, "NewPayment", pmtId);
     const isCash = pmt.PMode === "Cash";
     let bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
@@ -2884,10 +3189,10 @@ router.post("/:id/post-to-gl", async (req, res) => {
       // ExpenseBooking-joined CompanyId above (NULL for a JV/PPartyId
       // payment with no linked invoice) — a cash payment's own company is
       // whose physical cash-in-hand actually shrinks.
-      bankId = await getCashInHandBankId(pool, parseInt(pmt.PCompany, 10) || pmt.CompanyId || null, userEmail).catch(() => null);
+      bankId = await getCashInHandBankId(pool, parseInt(ownDims.PCompany, 10) || pmt.CompanyId || null, userEmail).catch(() => null);
     }
 
-    if (!supplierId) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });
+    if (!supplierId && allocations.length === 0) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });
     if (!bankId) {
       return res.status(422).json({
         error: isCash ? "Cash-in-Hand system ledger not configured." : "No bank account linked to this payment.",
@@ -2910,9 +3215,14 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // uses when this payment auto-posts on approval instead of through this
     // manual route.
     const legs = [
-      ...(mergedLinks.length > 0
+      ...(allocations.length > 0
+        ? allocations.map((a) => ({
+            lHeadId: a.lHeadId, debit: a.amount, credit: 0,
+            narration: `Payment: ${pmt.DocNo} — ${a.lHeadName}`,
+          }))
+        : mergedLinks.length > 0
         ? mergedLinks.map((l) => ({
-            lHeadId: supplierId, debit: l.allocatedAmount, credit: 0,
+            lHeadId: supplierId, debit: l.allocatedAmount, credit: 0, projectId: l.projectId ?? undefined,
             narration: `Payment: ${pmt.DocNo} (${l.eDocNo}) — Supplier/Creditor`,
           }))
         : [{ lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` }]),
@@ -2943,8 +3253,11 @@ router.post("/:id/post-to-gl", async (req, res) => {
       voucherDate: pmt.PDate,
       sourceType: "PaymentPosting",
       sourceId: pmtId,
-      companyId: pmt.CompanyId ?? null,
-      projectId: pmt.ProjectId ?? null,
+      // The company / project of the invoice when there is one; otherwise the ones the payment itself was made under (a
+      // payment with no invoice - a partner payment, bank charges - used to be posted with no company or project, so it
+      // dropped out of every company-wise Trial Balance).
+      companyId: pmt.CompanyId ?? (Number.isFinite(parseInt(ownDims.PCompany, 10)) ? parseInt(ownDims.PCompany, 10) : null),
+      projectId: pmt.ProjectId ?? (Number.isFinite(parseInt(ownDims.PProject, 10)) ? parseInt(ownDims.PProject, 10) : null),
       createdBy: userEmail,
       legs,
     });

@@ -40,6 +40,7 @@ export function usePageRights(pageKey: string) {
     canDelete: check("delete"),
     canPrint:  check("print"),
     canExport: check("export"),
+    canApprove: check("approve") || check("edit"),
     /** Guards destructive, hard-to-undo actions distinct from plain delete
      *  (e.g. Fixed Asset Record's "Delete & Reverse GRN") — only granted
      *  where a page explicitly seeds 'reverse' into its PageDefinitions

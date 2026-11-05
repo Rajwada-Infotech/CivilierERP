@@ -62,6 +62,7 @@ async function runFollowupReminderCheck() {
         pool, row.ResponsibleUserId,
         overdue ? "fa_followup_overdue" : "fa_followup_due",
         title, body, row.QualityCheckId, "fixed_asset_quality_check",
+        { push: true, apps: ["fixed-asset"] },
       );
       notified++;
     }

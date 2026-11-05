@@ -245,19 +245,19 @@ export function DocSelectorPanel({
             : FileText;
     const colors = isPO
       ? {
-          ring: "border-emerald-500/30 bg-emerald-500/[0.05]",
-          icon: "bg-emerald-500/10",
-          text: "text-emerald-500",
+          ring: "border-foreground/40 bg-primary/10",
+          icon: "bg-primary/10",
+          text: "text-foreground",
           badge:
-            "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+            "bg-primary/10 text-foreground border-foreground/40",
         }
       : isWorkDone
         ? {
-            ring: "border-violet-500/30 bg-violet-500/5",
-            icon: "bg-violet-500/10",
-            text: "text-violet-500",
+            ring: "border-foreground/40 bg-primary/10",
+            icon: "bg-primary/10",
+            text: "text-foreground",
             badge:
-              "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
+              "bg-primary/10 text-foreground border-foreground/40",
           }
         : isWOPO
           ? {
@@ -269,18 +269,18 @@ export function DocSelectorPanel({
             }
           : isGRN
             ? {
-                ring: "border-teal-500/30 bg-teal-500/5",
-                icon: "bg-teal-500/10",
-                text: "text-teal-500",
+                ring: "border-foreground/40 bg-primary/10",
+                icon: "bg-primary/10",
+                text: "text-foreground",
                 badge:
-                  "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20",
+                  "bg-primary/10 text-foreground border-foreground/40",
               }
             : {
-                ring: "border-emerald-500/30 bg-emerald-500/5",
-                icon: "bg-emerald-500/10",
-                text: "text-emerald-500",
+                ring: "border-foreground/40 bg-primary/10",
+                icon: "bg-primary/10",
+                text: "text-foreground",
                 badge:
-                  "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+                  "bg-primary/10 text-foreground border-foreground/40",
               };
     return (
       <div className={`rounded-xl border p-4 ${colors.ring}`}>
@@ -307,17 +307,17 @@ export function DocSelectorPanel({
                           : "Document"}
                 </span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[0.625rem] font-mono font-bold border ${colors.badge}`}
+                  className={`px-2 py-0.5 rounded-none text-[0.625rem] font-mono font-bold border ${colors.badge}`}
                 >
                   {selected.docNo}
                 </span>
                 {selected.status && (
-                  <span className="px-2 py-0.5 rounded-full text-[0.625rem] border border-border bg-muted/50 text-muted-foreground">
+                  <span className="px-2 py-0.5 rounded-none text-[0.625rem] border border-border bg-muted/50 text-muted-foreground">
                     {selected.status}
                   </span>
                 )}
                 {selected.linkedGrnIds && selected.linkedGrnIds.length > 1 && (
-                  <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400">
+                  <span className="px-2 py-0.5 rounded-none text-[0.625rem] font-semibold border border-foreground/40 bg-primary/10 text-foreground">
                     Combined from {selected.linkedGrnIds.length} GRNs
                   </span>
                 )}
@@ -392,15 +392,15 @@ export function DocSelectorPanel({
                     );
                     return (
                       <>
-                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 border border-foreground/40">
                           <Package
                             size={11}
-                            className="text-emerald-600 dark:text-emerald-400 shrink-0"
+                            className="text-foreground shrink-0"
                           />
                           <span className="text-[0.625rem] text-muted-foreground">
                             Received:
                           </span>
-                          <span className="text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400">
+                          <span className="text-[0.625rem] font-semibold text-foreground">
                             {fmtQty(totalReceived)} units
                           </span>
                         </div>
@@ -456,7 +456,7 @@ export function DocSelectorPanel({
                   setTab("GRN");
                   onClear();
                 }}
-                className="flex items-center justify-center gap-1 text-[0.625rem] font-medium text-teal-600 dark:text-teal-400 hover:text-teal-700 transition-colors px-2 py-1.5 sm:py-1 rounded-md hover:bg-teal-500/10 border border-teal-500/30 flex-1 sm:flex-none"
+                className="flex items-center justify-center gap-1 text-[0.625rem] font-medium text-foreground hover:text-foreground transition-colors px-2 py-1.5 sm:py-1 rounded-md hover:bg-primary/10 border border-foreground/40 flex-1 sm:flex-none"
               >
                 <Plus size={10} /> Add More GRNs
               </button>
@@ -539,7 +539,7 @@ export function DocSelectorPanel({
               setTab(t.id as SourceKind);
               setSearch("");
             }}
-            className={`flex flex-1 items-center justify-center gap-1.5 px-6 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px whitespace-nowrap ${tab === t.id ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+            className={`flex flex-1 items-center justify-center gap-1.5 px-6 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px whitespace-nowrap ${tab === t.id ? "border-foreground/40 text-foreground bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
             <t.icon size={11} />
             {t.label}
@@ -556,7 +556,7 @@ export function DocSelectorPanel({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={placeholder}
-            className="w-full pl-8 pr-8 py-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-emerald-500/30 placeholder:text-muted-foreground"
+            className="w-full pl-8 pr-8 py-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-foreground/20 placeholder:text-muted-foreground"
           />
           {search && (
             <button
@@ -583,10 +583,10 @@ export function DocSelectorPanel({
               return (
                 <PickerRow
                   key={wd.ID}
-                  icon={<Hammer size={12} className="text-violet-500" />}
-                  iconBg="bg-violet-500/10"
+                  icon={<Hammer size={12} className="text-foreground" />}
+                  iconBg="bg-primary/10"
                   primary={wd.DocNo || `WD-${wd.ID}`}
-                  primaryColor="text-violet-600 dark:text-violet-400"
+                  primaryColor="text-foreground"
                   secondary={[
                     wd.ContractorName,
                     wd.WorkOrderNo ? `WO: ${wd.WorkOrderNo}` : null,
@@ -680,9 +680,9 @@ export function DocSelectorPanel({
                     setMultiGrnMode((m) => !m);
                     setMultiGrnSelectedIds(new Set());
                   }}
-                  className={`text-[0.6875rem] font-semibold px-3 py-1.5 rounded-full border transition-colors ${
+                  className={`text-[0.6875rem] font-semibold px-3 py-1.5 rounded-none border transition-colors ${
                     multiGrnMode
-                      ? "border-teal-500/40 bg-teal-500/10 text-teal-600 dark:text-teal-400"
+                      ? "border-foreground/40 bg-primary/10 text-foreground"
                       : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
                   }`}
                 >
@@ -691,7 +691,7 @@ export function DocSelectorPanel({
                     : "Combine multiple GRNs into one invoice"}
                 </button>
                 {multiGrnMode && multiGrnSelectedIds.size > 0 && (
-                  <span className="text-[0.6875rem] font-medium text-teal-600 dark:text-teal-400 shrink-0">
+                  <span className="text-[0.6875rem] font-medium text-foreground shrink-0">
                     {multiGrnSelectedIds.size} selected
                   </span>
                 )}
@@ -801,34 +801,34 @@ export function DocSelectorPanel({
                       poMismatch
                         ? "opacity-40 cursor-not-allowed"
                         : "hover:bg-muted/30"
-                    } ${isChecked ? "bg-teal-500/[0.07]" : ""}`}
+                    } ${isChecked ? "bg-primary/10" : ""}`}
                   >
                     {multiGrnMode ? (
                       <span
                         className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 mt-0.5 text-[0.6875rem] font-bold transition-colors ${
                           isChecked
-                            ? "bg-teal-500 border-teal-500 text-white"
-                            : "border-border/70 text-transparent group-hover:border-teal-500/50"
+                            ? "bg-foreground border-foreground/40 text-card"
+                            : "border-border/70 text-transparent group-hover:border-foreground"
                         }`}
                       >
                         ✓
                       </span>
                     ) : g.POType === "InterCompanyTransfer" ? (
-                      <div className="w-7 h-7 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                        <ArrowLeftRight size={12} className="text-violet-500" />
+                      <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <ArrowLeftRight size={12} className="text-foreground" />
                       </div>
                     ) : (
-                      <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                        <Truck size={12} className="text-teal-500" />
+                      <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <Truck size={12} className="text-foreground" />
                       </div>
                     )}
                     <div className="flex-1 min-w-0 space-y-2">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
+                        <span className="font-mono text-xs font-bold text-foreground">
                           {g.DocNo || g.GRNNo || "—"}
                         </span>
                         {g.Status && (
-                          <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+                          <span className="text-[0.625rem] px-1.5 py-0.5 rounded-none bg-muted text-muted-foreground border border-border/50">
                             {g.Status}
                           </span>
                         )}
@@ -837,12 +837,12 @@ export function DocSelectorPanel({
                             not a real supplier purchase — flag it so it isn't
                             mistaken for a normal GRN in this shared list. */}
                         {g.POType === "InterCompanyTransfer" ? (
-                          <span className="flex items-center gap-1 text-[0.625rem] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
+                          <span className="flex items-center gap-1 text-[0.625rem] px-1.5 py-0.5 rounded-none bg-primary/10 text-foreground border border-foreground/40">
                             <ArrowLeftRight size={9} /> Inter-Company Transfer
                           </span>
                         ) : (
                           g.PONumber && (
-                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded-none bg-primary/10 text-foreground border border-foreground/40">
                               PO: {g.PONumber}
                             </span>
                           )
@@ -855,7 +855,7 @@ export function DocSelectorPanel({
                       </p>
                       {parsedItems.length > 0 && (
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="flex items-center gap-1 text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
+                          <span className="flex items-center gap-1 text-[0.625rem] font-semibold text-foreground bg-primary/10 border border-foreground/40 px-1.5 py-0.5 rounded-md">
                             <Package size={9} />
                             {fmtQty(totalReceived)} received
                           </span>
@@ -883,9 +883,9 @@ export function DocSelectorPanel({
               })
             )}
             {multiGrnMode && multiGrnSelectedIds.size > 0 && onSelectMultiGRN && (
-              <div className="sticky bottom-0 flex items-center justify-between gap-3 px-4 py-3.5 border-t border-teal-500/30 bg-card shadow-[0_-4px_16px_rgba(0,0,0,0.25)]">
+              <div className="sticky bottom-0 flex items-center justify-between gap-3 px-4 py-3.5 border-t border-foreground/40 bg-card shadow-[0_-4px_16px_rgba(0,0,0,0.25)]">
                 <span className="text-[0.6875rem] font-medium text-muted-foreground">
-                  <span className="text-teal-600 dark:text-teal-400 font-semibold">
+                  <span className="text-foreground font-semibold">
                     {multiGrnSelectedIds.size} GRN
                     {multiGrnSelectedIds.size !== 1 ? "s" : ""}
                   </span>{" "}
@@ -906,7 +906,7 @@ export function DocSelectorPanel({
                     setMultiGrnMode(false);
                     setMultiGrnSelectedIds(new Set());
                   }}
-                  className="text-[0.6875rem] font-semibold px-4 py-2 rounded-lg bg-teal-500 text-white hover:bg-teal-600 transition-colors shadow-sm shrink-0"
+                  className="text-[0.6875rem] font-semibold px-4 py-2 rounded-lg bg-foreground text-card hover:bg-foreground/85 transition-colors shadow-sm shrink-0"
                 >
                   Combine into One Invoice
                 </button>
@@ -922,10 +922,10 @@ export function DocSelectorPanel({
               return (
                 <PickerRow
                   key={po.PurchaseOrderID}
-                  icon={<ShoppingCart size={12} className="text-emerald-600" />}
-                  iconBg="bg-emerald-500/10"
+                  icon={<ShoppingCart size={12} className="text-foreground" />}
+                  iconBg="bg-primary/10"
                   primary={docNo}
-                  primaryColor="text-emerald-600 dark:text-emerald-400"
+                  primaryColor="text-foreground"
                   secondary={[po.SupplierName, po.PODate?.slice(0, 10)]
                     .filter(Boolean)
                     .join(" · ")}
@@ -969,10 +969,10 @@ export function DocSelectorPanel({
           filteredTOD.map((tod) => (
             <PickerRow
               key={tod.TypeOfDocId}
-              icon={<Hash size={12} className="text-emerald-500" />}
-              iconBg="bg-emerald-500/10"
+              icon={<Hash size={12} className="text-foreground" />}
+              iconBg="bg-primary/10"
               primary={tod.FullPrefix ?? tod.Prefix}
-              primaryColor="text-emerald-600 dark:text-emerald-400"
+              primaryColor="text-foreground"
               secondary={tod.Description}
               badge={tod.EntryType}
               onClick={() => selectTod(tod)}

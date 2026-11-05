@@ -3,6 +3,8 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { getPool, sql } = require("../db");
@@ -13,8 +15,14 @@ const { proposeAgreementDate, acceptAgreementDate, syncLegalMilestoneStep } = re
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { getMoneyReceiptPdfBuffer } = require("../services/moneyReceiptPdf");
+const authMiddleware = require("../middleware/auth");
+const { requirePageRight } = require("../middleware/requirePageRight");
+const attachProjectScope = require("../services/projectScope").attachProjectScope;
+const projectPredicate = require("../services/projectScope").projectPredicate;
 const { getAgreementBookingLockReason, agreementExecutedLockReason } = require("./crmAgreements");
 const { redisGet, redisSet, redisDel } = require("../redis");
+const { redisGetStrict, getRedis } = require("../redis");
+const { blacklistToken } = require("../middleware/blacklist");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
@@ -23,8 +31,14 @@ const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const CUSTOMER_TICKET_CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal priority
 
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));
+
+// 15-second in-memory cache for portal user active/mustChangePassword status.
+// Declared at module scope so both the staff admin endpoint and the portal
+// per-request middleware can access it.
+const _portalUserStatusCache = new Map(); // portalUserId -> { isActive, mustChangePassword, cachedAt }
+const PORTAL_STATUS_CACHE_TTL_MS = 15_000;
 
 // Per-account brute-force lockout — mirrors the staff login's own protection
 // in routes/users.js exactly (same Redis keys shape, same 10/15min policy).
@@ -72,7 +86,7 @@ router.post("/login", async (req, res) => {
       .input("em", sql.NVarChar(200), normalizedEmail)
       .query(`
         SELECT pu.Id AS PortalUserId, pu.CustomerId, pu.PasswordHash,
-               pu.MustChangePassword, pu.IsActive, pu.Email
+               pu.MustChangePassword, pu.IsActive, pu.Email, c.Mobile
         FROM dbo.CrmCustomer c
         JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = c.Id
         WHERE LOWER(LTRIM(RTRIM(c.Email))) = @em
@@ -84,10 +98,25 @@ router.post("/login", async (req, res) => {
       });
     }
     const user = result.recordset[0];
-    if (!user) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
-    if (!user.IsActive) return res.status(401).json({ error: "This portal account has been deactivated" });
+    if (!user) {
+      // Run dummy comparison to prevent timing-based user enumeration
+      await bcrypt.compare(password, '$2b$10$invalidhashfortimingnormalizationXXXXXXXXXXXXXXXXXXXXXX');
+      await incrementPortalLoginAttempts(attemptsKey, lockKey);
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    if (!user.IsActive) {
+      await incrementPortalLoginAttempts(attemptsKey, lockKey);
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
 
-    const ok = await bcrypt.compare(password, user.PasswordHash);
+    // Check the submitted password and, for the initial mobile-number
+    // credential, its normalized form against the stored bcrypt hash.
+    const normalizedInput = (password || '').replace(/\D/g, '').slice(-10);
+
+    let ok = await bcrypt.compare(password, user.PasswordHash);
+    if (!ok && normalizedInput) {
+      ok = await bcrypt.compare(normalizedInput, user.PasswordHash);
+    }
     if (!ok) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
 
     try { await redisDel(attemptsKey); await redisDel(lockKey); } catch {}
@@ -95,11 +124,17 @@ router.post("/login", async (req, res) => {
     await pool.request().input("id", sql.Int, user.PortalUserId)
       .query("UPDATE dbo.CrmCustomerPortalUser SET LastLoginAt = SYSDATETIME() WHERE Id = @id");
 
+    // Redis stores a per-account session generation. Password resets and
+    // changes increment it, revoking every previously issued portal token.
+    const sessionVersion = Number(await redisGetStrict(`crm-portal:session-version:${user.PortalUserId}`)) || 0;
+
     // JWT carries customerId only — applicationId is a request-scoped param,
     // validated per-request against customerId, never embedded in the token.
+    // Portal uses its own secret (PORTAL_JWT_SECRET) so staff tokens can't be
+    // replayed against the portal API and vice-versa.
     const token = jwt.sign(
-      { type: "crm_portal", portalUserId: user.PortalUserId, customerId: user.CustomerId, email: user.Email },
-      process.env.JWT_SECRET,
+      { type: "crm_portal", portalUserId: user.PortalUserId, customerId: user.CustomerId, email: user.Email, sessionVersion },
+      process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
 
@@ -110,6 +145,90 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// ─── Staff-only admin endpoints (use staff JWT auth, NOT portal auth) ─────────
+// These must be declared BEFORE router.use(portalAuth) so they are not gated
+// behind the customer portal JWT.
+
+/**
+ * POST /api/crm-portal/admin/reset-password
+ * Staff resets a customer's portal password to a new temp value and forces
+ * MustChangePassword = 1 so the customer must set their own password on login.
+ * Body: { customerId: number, newPassword?: string }
+ * If newPassword is omitted, defaults to the customer's mobile number (normalized).
+ */
+router.post(
+  "/admin/reset-password",
+  authMiddleware,
+  requirePageRight("crm-customers", "edit"),
+  attachProjectScope,
+  async (req, res, next) => {
+    const customerId = Number.parseInt(req.body?.customerId, 10);
+    if (!req.projectScope || !Number.isFinite(customerId)) return next();
+    try {
+      const visible = await getPool().request().input("cid", sql.Int, customerId).query(`
+        SELECT TOP 1 1 AS Visible
+        FROM dbo.CrmApplication a
+        WHERE a.CustomerId = @cid${projectPredicate(req.projectScope, "a.ProjectId")}
+      `);
+      if (visible.recordset.length) return next();
+      return res.status(403).json({ error: "You don't have access to this customer's projects." });
+    } catch (e) {
+      console.error("[crm-portal] reset-password project scope check failed:", e.message);
+      return res.status(500).json({ error: "Could not verify customer project access." });
+    }
+  },
+  async (req, res) => {
+    const pool = getPool();
+    try {
+      const { customerId, newPassword } = req.body;
+      if (!customerId || isNaN(parseInt(customerId, 10))) {
+        return res.status(400).json({ error: "customerId is required" });
+      }
+      const cid = parseInt(customerId, 10);
+
+      // Resolve portal user record
+      const portalUser = (await pool.request()
+        .input("cid", sql.Int, cid)
+        .query("SELECT pu.Id, c.Mobile FROM dbo.CrmCustomerPortalUser pu JOIN dbo.CrmCustomer c ON c.Id = pu.CustomerId WHERE pu.CustomerId = @cid AND pu.IsActive = 1"))
+        .recordset[0];
+
+      if (!portalUser) {
+        return res.status(404).json({ error: "No active portal account found for this customer" });
+      }
+
+      // Derive password: explicit value or fall back to normalized mobile
+      const rawPassword = newPassword?.trim() ||
+        (portalUser.Mobile || "").replace(/\D/g, "").slice(-10) ||
+        null;
+
+      if (!rawPassword || rawPassword.length < 6) {
+        return res.status(400).json({ error: "Cannot determine a temporary password — please provide newPassword explicitly" });
+      }
+
+      const hash = await bcrypt.hash(rawPassword, 10);
+
+      // Revoke existing sessions before changing credentials. If Redis is
+      // unavailable, do not complete a password reset that cannot revoke.
+      await getRedis().then((redis) => redis.incr(`crm-portal:session-version:${portalUser.Id}`));
+
+      await pool.request()
+        .input("id", sql.Int, portalUser.Id)
+        .input("hash", sql.NVarChar(255), hash)
+        .query("UPDATE dbo.CrmCustomerPortalUser SET PasswordHash = @hash, MustChangePassword = 1, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+
+      // Invalidate the 15-second in-memory cache for this portal user so the
+      // next portal request reflects the new state immediately.
+      _portalUserStatusCache.delete(portalUser.Id);
+
+      res.json({ success: true, message: "Portal password reset. Customer must change it on next login." });
+    } catch (e) {
+      console.error("[crm-portal] POST /admin/reset-password error:", e.message);
+      res.status(500).json({ error: "An internal error occurred." });
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 router.use(portalAuth);
 
@@ -119,15 +238,36 @@ router.use(portalAuth);
 // /change-password, which is the one place that actually resolves it.
 router.use(async (req, res, next) => {
   try {
+    const uid = req.portalUser?.portalUserId;
+    if (!uid) return res.status(401).json({ error: "Portal account not found" });
+
+    // Check the in-memory cache first
+    const cached = _portalUserStatusCache.get(uid);
+    if (cached && Date.now() - cached.cachedAt < PORTAL_STATUS_CACHE_TTL_MS) {
+      if (!cached.isActive) return res.status(401).json({ error: "This portal account has been deactivated" });
+      if (req.path !== "/change-password" && cached.mustChangePassword) {
+        return res.status(403).json({ error: "You must set a new password before continuing", mustChangePassword: true });
+      }
+      return next();
+    }
+
     const pool = getPool();
-    const row = await pool.request().input("id", sql.Int, req.portalUser.portalUserId)
+    const row = await pool.request().input("id", sql.Int, uid)
       .query("SELECT IsActive, MustChangePassword FROM dbo.CrmCustomerPortalUser WHERE Id = @id");
     if (!row.recordset.length) return res.status(401).json({ error: "Portal account not found" });
-    if (!row.recordset[0].IsActive) {
+    const { IsActive, MustChangePassword } = row.recordset[0];
+
+    // Populate cache (only cache active accounts; deactivated ones stay uncached so
+    // re-activation takes immediate effect)
+    if (IsActive) {
+      _portalUserStatusCache.set(uid, { isActive: true, mustChangePassword: !!MustChangePassword, cachedAt: Date.now() });
+    }
+
+    if (!IsActive) {
       return res.status(401).json({ error: "This portal account has been deactivated" });
     }
     if (req.path === "/change-password") return next();
-    if (row.recordset[0].MustChangePassword) {
+    if (MustChangePassword) {
       return res.status(403).json({ error: "You must set a new password before continuing", mustChangePassword: true });
     }
     next();
@@ -141,17 +281,35 @@ router.use(async (req, res, next) => {
 router.post("/change-password", async (req, res) => {
   try {
     const { newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (!newPassword || newPassword.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+    if (!/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ error: "Password must contain both letters and numbers" });
+    }
     const pool = getPool();
     const hash = await bcrypt.hash(newPassword, 10);
+    // Revoke every existing session before changing credentials. If Redis is
+    // unavailable, leave the password unchanged and report the failure.
+    await getRedis().then((redis) => redis.incr(`crm-portal:session-version:${req.portalUser.portalUserId}`));
     await pool.request()
       .input("id", sql.Int, req.portalUser.portalUserId)
       .input("hash", sql.NVarChar(200), hash)
       .query("UPDATE dbo.CrmCustomerPortalUser SET PasswordHash = @hash, MustChangePassword = 0 WHERE Id = @id");
+    _portalUserStatusCache.delete(req.portalUser.portalUserId);
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-portal] POST /change-password error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST /logout — revoke this token before confirming logout.
+router.post("/logout", async (req, res) => {
+  try {
+    await blacklistToken(req.portalToken, req.portalUser.exp);
+    res.json({ success: true, message: "Logged out" });
+  } catch (e) {
+    console.error("[crm-portal] logout revocation failed:", e.message);
+    res.status(503).json({ error: "Could not revoke this session. Please try again." });
   }
 });
 
@@ -161,6 +319,10 @@ router.post("/change-password", async (req, res) => {
 // Returns the validated integer applicationId on success, throws 403 on failure.
 // This is the server-side enforcement of Option A: JWT carries customerId,
 // applicationId is a request-scoped param, validated here on every request.
+// The logged-in customer (@cid) is a co-applicant on application `a`.
+const CO_APPLICANT_OF = (a) => `EXISTS (SELECT 1 FROM dbo.CrmCoApplicant co WHERE co.IsActive = 1 AND co.CustomerId = @cid
+  AND (co.ApplicationId = ${a}.Id OR co.BookingId IN (SELECT bx.Id FROM dbo.CrmBooking bx WHERE bx.ApplicationId = ${a}.Id)))`;
+
 async function resolveAndAssertApplication(pool, req, res) {
   const raw = req.query.applicationId || req.params.applicationId;
   const appId = parseInt(raw, 10);
@@ -168,18 +330,25 @@ async function resolveAndAssertApplication(pool, req, res) {
     res.status(400).json({ error: "applicationId is required" });
     return null;
   }
+  // The main applicant can see and act; a co-applicant (Applicant 2, 3 ...)
+  // linked to this customer can only see (read-only: GET requests).
   const check = await pool.request()
     .input("aid", sql.Int, appId)
     .input("cid", sql.Int, req.portalUser.customerId)
     .query(`
-      SELECT a.Id
+      SELECT a.Id,
+             CASE WHEN a.CustomerId = @cid THEN 1 ELSE 0 END AS IsMain,
+             CASE WHEN ${CO_APPLICANT_OF("a")} THEN 1 ELSE 0 END AS IsCo
       FROM dbo.CrmApplication a
-      WHERE a.Id = @aid
-        AND a.CustomerId = @cid
-        AND a.IsActive = 1
+      WHERE a.Id = @aid AND a.IsActive = 1
     `);
-  if (!check.recordset.length) {
+  const row = check.recordset[0];
+  if (!row || (!row.IsMain && !row.IsCo)) {
     res.status(403).json({ error: "Application not found or does not belong to this account" });
+    return null;
+  }
+  if (!row.IsMain && req.method !== "GET") {
+    res.status(403).json({ error: "As a co-applicant you can view this booking; the main applicant takes the actions." });
     return null;
   }
   return appId;
@@ -195,6 +364,7 @@ router.get("/applications", async (req, res) => {
     const result = await pool.request().input("cid", sql.Int, customerId).query(`
       SELECT
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Status AS ApplicationStatus,
+        CASE WHEN a.CustomerId = @cid THEN 0 ELSE 1 END AS IsCoApplicant,
         a.InterestedProject, a.CreatedAt AS ApplicationDate,
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
@@ -203,14 +373,19 @@ router.get("/applications", async (req, res) => {
         ag.Status AS AgreementStatus, ag.SentToCustomerAt,
         ag.CustomerApprovalStatus, ag.SeniorApprovalStatus,
         sd.Status AS SalesDeedStatus, sd.CustomerApprovalStatus AS DeedCustomerApprovalStatus,
-        h.Status AS HandoverStatus, h.ActualHandoverDate
+        h.Status AS HandoverStatus, h.ActualHandoverDate,
+        -- Co-applicants (Applicant 2, 3 ...) in order, for "Mr. Roy & Mrs. Roy".
+        STUFF((SELECT N'|' + c.Name FROM dbo.CrmCoApplicant c
+               WHERE c.IsActive = 1 AND (c.ApplicationId = a.Id OR (b.Id IS NOT NULL AND c.BookingId = b.Id))
+               ORDER BY c.CreatedAt, c.Id FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, N'') AS CoApplicantNames
       FROM dbo.CrmApplication a
       LEFT JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id AND b.IsActive = 1
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
-      LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id
-      LEFT JOIN dbo.CrmHandover h ON h.BookingId = b.Id
-      WHERE a.CustomerId = @cid AND a.IsActive = 1
+      -- The latest of each (a redone agreement / deed leaves its old row): one line per booking.
+      OUTER APPLY (SELECT TOP 1 x.* FROM dbo.CrmAgreement x WHERE x.BookingId = b.Id ORDER BY x.Id DESC) ag
+      OUTER APPLY (SELECT TOP 1 x.* FROM dbo.CrmSalesDeed x WHERE x.BookingId = b.Id ORDER BY x.Id DESC) sd
+      OUTER APPLY (SELECT TOP 1 x.* FROM dbo.CrmHandover x WHERE x.BookingId = b.Id ORDER BY x.Id DESC) h
+      WHERE a.IsActive = 1 AND (a.CustomerId = @cid OR ${CO_APPLICANT_OF("a")})
       ORDER BY a.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -296,7 +471,7 @@ router.get("/timeline", async (req, res) => {
                ProposedDate, ProposedDateStatus, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','${CrmStatus.REJECTED}')) AS DocumentsNeedingAction
-        FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL
+        FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL AND Status <> 'Cancelled'
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status
@@ -305,9 +480,9 @@ router.get("/timeline", async (req, res) => {
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT Id, DeedNo, Status, DeedValue, SubRegistrarOffice, RegistrationNo, DeedDate, RegistrationDate, SentToCustomerAt,
                CustomerApprovalStatus, CustomerApprovedAt, CustomerRecheckRemarks
-        FROM dbo.CrmSalesDeed WHERE BookingId = @bid
+        FROM dbo.CrmSalesDeed WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Cancelled'
       `),
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, ScheduledDate, ActualHandoverDate FROM dbo.CrmHandover WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 Status, ScheduledDate, ActualHandoverDate FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC"),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT TOP 1 Id, NoticeNo, Status, OfferedDate, ResponseDeadline, SentAt, AcknowledgedAt, DisputedAt, DisputeReason
         FROM dbo.CrmPossessionNotice WHERE BookingId = @bid AND Status <> 'Draft' ORDER BY CreatedAt DESC
@@ -330,7 +505,7 @@ router.get("/timeline", async (req, res) => {
         LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
         WHERE qp.BookingId = @bid
       `),
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT Id, RegNo, Status, ScheduledDate, CompletedDate FROM dbo.CrmRegistry WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 Id, RegNo, Status, ScheduledDate, CompletedDate FROM dbo.CrmRegistry WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC"),
       // Every payment now lands in On Account first and stays there until an
       // explicit staff-side On Account Adjustment (crmPayments.js
       // applyOnAccountToMilestone) — so a customer who has genuinely paid can
@@ -338,7 +513,9 @@ router.get("/timeline", async (req, res) => {
       // so the portal's own "Total Paid" (PortalPayments.tsx) can reflect
       // real money received instead of only what's been swept, the same fix
       // already applied to the staff-side Dashboard/Customer 360.
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT ISNULL(SUM(Amount), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).// only the part not yet applied to a milestone — applied money is already in
+      // the milestones' AmountPaid, so the full Amount counted it twice
+      query("SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0) THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
     ]);
 
     res.json({
@@ -399,11 +576,21 @@ router.get("/invoices", async (req, res) => {
   }
 });
 
+// Per-user rate limit for PDF generation (expensive CPU/storage operation).
+// 20 downloads per minute is generous for legitimate use but stops bulk scraping.
+const pdfRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => `pdf:portal:${req.portalUser?.portalUserId || req.ip}`,
+  message: { error: "Too many PDF requests — please wait a moment before downloading more" },
+  validate: false,
+});
+
 // GET /invoices/:invoiceId/pdf — same invoice PDF the staff side downloads,
 // scoped to invoices on a booking belonging to THIS logged-in customer only
 // (via applicationId, same ownership check every other portal route uses —
 // portalUser.customerId comes from the JWT, never a client-supplied value).
-router.get("/invoices/:invoiceId/pdf", async (req, res) => {
+router.get("/invoices/:invoiceId/pdf", pdfRateLimiter, async (req, res) => {
   try {
     const pool = getPool();
     const appId = await resolveAndAssertApplication(pool, req, res);
@@ -455,7 +642,7 @@ router.get("/receipts", async (req, res) => {
 
 // GET /receipts/:receiptId/pdf — scoped to receipts on a booking belonging to
 // THIS logged-in customer only (same ownership check as /invoices/:id/pdf).
-router.get("/receipts/:receiptId/pdf", async (req, res) => {
+router.get("/receipts/:receiptId/pdf", pdfRateLimiter, async (req, res) => {
   try {
     const pool = getPool();
     const appId = await resolveAndAssertApplication(pool, req, res);
@@ -491,7 +678,9 @@ router.get("/agreement", async (req, res) => {
     if (appId === null) return;
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT ag.Id, ag.AgreementNo, ag.Status, ag.AgreementDate, ag.LegalName, ag.LegalAddress,
-             ag.PanNo, ag.AadhaarNo, ag.VersionNo, ag.CreatedAt,
+             CASE WHEN LEN(ag.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(ag.PanNo) - 4), RIGHT(ag.PanNo, 4)) ELSE ag.PanNo END AS PanNo,
+             CASE WHEN LEN(ag.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(ag.AadhaarNo) - 4), RIGHT(ag.AadhaarNo, 4)) ELSE ag.AadhaarNo END AS AadhaarNo,
+             ag.VersionNo, ag.CreatedAt,
              ag.SeniorApprovalStatus, ag.SeniorApprovedAt,
              ag.CustomerApprovalStatus, ag.CustomerApprovedAt, ag.RecheckCount,
              ag.ProposedDate, ag.ProposedDateStatus, ag.DateApprovalStatus,
@@ -503,7 +692,7 @@ router.get("/agreement", async (req, res) => {
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
     `);
     // Not having an agreement shared yet is a normal, expected state — 200 + null.
     res.json(result.recordset[0] || null);
@@ -681,7 +870,7 @@ router.post("/agreement/respond", async (req, res) => {
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement pending your response" });
     if (ag.recordset[0].SeniorApprovalStatus !== CrmStatus.APPROVED) {
@@ -804,7 +993,7 @@ router.post("/agreement/propose-date", async (req, res) => {
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement found" });
     const agreementRow = ag.recordset[0];
@@ -861,7 +1050,7 @@ router.post("/agreement/date/accept", async (req, res) => {
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement found" });
     const agreementRow = ag.recordset[0];
@@ -923,6 +1112,8 @@ router.get("/sales-deed", async (req, res) => {
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.ApplicationId = @aid AND d.SentToCustomerAt IS NOT NULL
+        AND ISNULL(d.Status, '') <> 'Cancelled'   -- the live deed, never a cancelled one (redo)
+      ORDER BY d.Id DESC
     `);
     if (!deed.recordset.length) return res.json({ deed: null, documents: [] });
 
@@ -994,6 +1185,8 @@ router.post("/sales-deed/respond", async (req, res) => {
       JOIN dbo.CrmBooking b ON b.Id = d.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE b.ApplicationId = @aid AND d.SentToCustomerAt IS NOT NULL
+        AND ISNULL(d.Status, '') <> 'Cancelled'   -- the live deed, never a cancelled one (redo)
+      ORDER BY d.Id DESC
     `);
     if (!deed.recordset.length) return res.status(404).json({ error: "No sales deed pending your response" });
     if (deed.recordset[0].CustomerApprovalStatus === CrmStatus.APPROVED) {
@@ -1222,6 +1415,13 @@ router.post("/query-payment/proof", async (req, res) => {
     if (buffer.length > QP_MAX_FILE_BYTES) {
       return res.status(400).json({ error: `File is too large (max ${(QP_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB)` });
     }
+    // A customer upload is opened later by staff: only real PDFs / images,
+    // whose content matches the declared type (it was stored and served back
+    // with whatever type the browser claimed, e.g. a web page).
+    const PROOF_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+    if (!PROOF_TYPES.includes(mimeType)) return res.status(400).json({ error: "Upload the proof as a PDF or an image (JPG, PNG, WebP)" });
+    const sigErr = verifyFileMatchesDeclaredType({ buffer, mimetype: mimeType });
+    if (sigErr) return res.status(400).json({ error: sigErr });
 
     const qp = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT qp.Id, qp.QPNo, qp.Status, qp.BookingId, qp.InfoSentAt, b.AssignedTo, b.BookingNo, a.ApplicantName
@@ -1277,7 +1477,7 @@ router.get("/tickets", async (req, res) => {
              t.RaisedByCustomer, t.CreatedAt
       FROM dbo.CrmServiceTicket t
       JOIN dbo.CrmBooking b ON b.Id = t.BookingId
-      WHERE b.ApplicationId = @aid
+      WHERE b.ApplicationId = @aid AND b.IsActive = 1 AND b.Status <> 'Cancelled'
       ORDER BY t.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -1395,7 +1595,8 @@ router.get("/activity", async (req, res) => {
         SELECT sd.DeedNo, sd.SentToCustomerAt, sd.CustomerApprovalStatus, sd.CustomerApprovedAt, sd.CustomerRecheckRemarks, sd.UpdatedAt
         FROM dbo.CrmSalesDeed sd
         JOIN dbo.CrmBooking b ON b.Id = sd.BookingId
-        WHERE b.ApplicationId = @aid
+        WHERE b.ApplicationId = @aid AND ISNULL(sd.Status, '') <> 'Cancelled'
+        ORDER BY sd.Id DESC
       `),
       pool.request().input("aid", sql.Int, appId).query(`
         SELECT qp.Id, qp.QPNo, qp.InfoSentAt, qp.ConfirmedAt, qp.ConfirmedAmount
@@ -1415,7 +1616,8 @@ router.get("/activity", async (req, res) => {
         SELECT reg.RegNo, reg.Status, reg.ScheduledDate, reg.CompletedDate, reg.UpdatedAt
         FROM dbo.CrmRegistry reg
         JOIN dbo.CrmBooking b ON b.Id = reg.BookingId
-        WHERE b.ApplicationId = @aid
+        WHERE b.ApplicationId = @aid AND ISNULL(reg.Status, '') <> 'Cancelled'
+        ORDER BY reg.Id DESC
       `),
       pool.request().input("aid", sql.Int, appId).query(`
         SELECT n.NocType, n.NocNo, n.IssuedDate
@@ -1493,6 +1695,158 @@ router.get("/activity", async (req, res) => {
     res.json(feed);
   } catch (e) {
     console.error("[crm-portal] GET /activity error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// ─── Transfer deeds (a resale / buy-back the customer is a party to) ────────
+// A deed belongs to people, not to one application: the SELLER (whose booking
+// is passing on) and, for a resale, the BUYER (who may own nothing yet). The
+// customer sees every live deed they are a party to and does their own part:
+// approve the draft or ask for a recheck, agree the signing date, upload their
+// papers and — when it is theirs to pay — the stamp-duty challan. Staff can do
+// any of it for them (proxy) from Transfer Deeds; the rules are the same
+// (services/crmTransferDeed.js), and each answer is recorded as theirs.
+const deedSvc = require("../services/crmTransferDeed");
+/** The deed and this customer's side of it — 404 when they aren't a party. */
+async function portalDeed(pool, req) {
+  const id = parseId(req.params.deedId);
+  if (id === null) { const e = new Error("Invalid deed"); e.status = 400; throw e; }
+  const st = await deedSvc.deedState(pool, id).catch(() => null);
+  const cid = Number(req.portalUser.customerId);
+  const role = !st ? null : Number(st.deed.SellerCustomerId) === cid ? "Seller"
+    : st.deed.DeedType === "Assignment" && Number(st.deed.BuyerCustomerId) === cid ? "Buyer" : null;
+  if (!st || !role || st.deed.Status === "Cancelled") { const e = new Error("Deed not found"); e.status = 404; throw e; }
+  return { st, role, id };
+}
+/** What a party sees: the draft, the registered copy and their own papers — nobody else's remarks. */
+function portalView(st, role) {
+  const d = st.deed;
+  const mine = (x) => x.Party === role || x.DocumentType === "DeedDraft" || x.DocumentType === "RegisteredDeed";
+  const pay = st.payment;
+  const payer = !!pay && (pay.PayableBy === role || pay.PayableBy === "Shared");
+  // What is waiting on this customer right now (the portal's menu badge).
+  const papersOpen = ["Draft", "UnderReview"].includes(d.Status);
+  const todo = st.documents.filter((x) => x.Party === role && papersOpen && ["Requested", "Rejected"].includes(x.Status)).length
+    + (d.Status === "WithParties" && d[`${role}Approval`] === "Pending" ? 1 : 0)
+    + (d.Status === "PartiesApproved" && (!d.ProposedDate || !d[`${role}DateAccepted`]) ? 1 : 0)
+    + (payer && pay.Status === "InfoSent" ? 1 : 0);
+  return {
+    role,
+    todo,
+    deed: {
+      Id: d.Id, DeedNo: d.DeedNo, DeedType: d.DeedType, Property: d.Property, BookingNo: d.BookingNo, Status: d.Status, StatusLabel: d.StatusLabel,
+      SellerName: d.SellerName, BuyerName: d.DeedType === "Assignment" ? d.BuyerName : null, VersionNo: d.VersionNo,
+      MyApproval: d[`${role}Approval`], MyDateAccepted: !!d[`${role}DateAccepted`],
+      ProposedDate: d.ProposedDate, ProposedBy: d.ProposedBy, DateApprovalStatus: d.DateApprovalStatus, DeedDate: d.DeedDate, ExecutedAt: d.ExecutedAt,
+    },
+    parties: st.parties,
+    approvals: Object.fromEntries(st.parties.map((p) => [p, d[`${p}Approval`]])),
+    dateAccepted: Object.fromEntries(st.parties.map((p) => [p, !!d[`${p}DateAccepted`]])),
+    documents: st.documents.filter(mine).map((x) => ({
+      Id: x.Id, DocumentType: x.DocumentType, Label: x.Label, Party: x.Party, Status: x.Status, HasFile: !!x.FileName,
+      Remarks: x.Party === role ? x.Remarks : null,
+    })),
+    payment: pay ? {
+      StampDuty: pay.StampDuty, RegistrationFee: pay.RegistrationFee, PayableBy: pay.PayableBy, Status: pay.Status, PaidRef: pay.PaidRef,
+      AmountPaid: pay.AmountPaid, ConfirmRemarks: payer ? pay.ConfirmRemarks : null, IAmPayer: payer,
+    } : null,
+    registry: st.registry ? { Office: st.registry.Office, ScheduledAt: st.registry.ScheduledAt, Attendees: st.registry.Attendees, RegNo: st.registry.RegNo, Status: st.registry.Status } : null,
+    steps: st.steps.map((s) => ({ key: s.key, label: s.label, ok: s.ok, state: s.state })),
+  };
+}
+const portalCtx = (req) => ({ actorType: "Portal", customerId: Number(req.portalUser.customerId) });
+const deedFail = (res, e, where) => {
+  if (e.status) return res.status(e.status).json({ error: e.message });
+  console.error(`[crm-portal] ${where}:`, e.message);
+  res.status(500).json({ error: "An internal error occurred. Please try again later." });
+};
+const deedAction = (fn, where) => async (req, res) => {
+  try {
+    const pool = getPool();
+    const { id, role } = await portalDeed(pool, req);
+    await fn(pool, id, role, req);
+    res.json(portalView(await deedSvc.deedState(pool, id), role));
+  } catch (e) { deedFail(res, e, where); }
+};
+const deedUpload = (fn, where) => (req, res) => portalDocUpload.single("file")(req, res, (err) => {
+  if (err) return res.status(400).json({ error: err.message });
+  if (!req.file) return res.status(400).json({ error: "Choose a file" });
+  // same content check as the agreement upload: the file must really be what it claims
+  const sigErr = verifyFileMatchesDeclaredType(req.file);
+  if (sigErr) return res.status(400).json({ error: sigErr });
+  return deedAction(fn, where)(req, res);
+});
+
+router.get("/transfer-deeds", async (req, res) => {
+  try {
+    const pool = getPool();
+    const cid = Number(req.portalUser.customerId);
+    const rows = (await pool.request().input("c", sql.Int, cid).query(`
+      SELECT d.Id FROM dbo.CrmTransferDeed d JOIN dbo.CrmUnitResale r ON r.Id = d.ResaleId
+      WHERE d.IsActive = 1 AND d.Status <> N'Cancelled'
+        AND (r.FromCustomerId = @c OR (d.DeedType = N'Assignment' AND r.ToCustomerId = @c))
+      ORDER BY d.CreatedAt DESC`)).recordset;
+    const out = [];
+    for (const r of rows) {
+      const st = await deedSvc.deedState(pool, r.Id);
+      out.push(portalView(st, Number(st.deed.SellerCustomerId) === cid ? "Seller" : "Buyer"));
+    }
+    res.json(out);
+  } catch (e) { deedFail(res, e, "GET /transfer-deeds"); }
+});
+
+router.get("/transfer-deeds/:deedId/documents/:docId/file", async (req, res) => {
+  try {
+    const pool = getPool();
+    const { st, role, id } = await portalDeed(pool, req);
+    const doc = st.documents.find((x) => x.Id === Number(req.params.docId));
+    if (!doc || !(doc.Party === role || ["DeedDraft", "RegisteredDeed"].includes(doc.DocumentType))) return res.status(404).json({ error: "Document not found" });
+    const f = await deedSvc.documentFile(pool, id, doc.Id);
+    if (!f?.FileBase64) return res.status(404).json({ error: "No file yet" });
+    res.setHeader("Content-Type", f.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(f.FileName || "document")}"`);
+    res.send(Buffer.from(f.FileBase64, "base64"));
+  } catch (e) { deedFail(res, e, "GET deed file"); }
+});
+router.post("/transfer-deeds/:deedId/documents/:docId/upload",
+  deedUpload((pool, id, _role, req) => deedSvc.uploadDocument(pool, id, Number(req.params.docId), req.file, portalCtx(req)), "POST deed upload"));
+router.put("/transfer-deeds/:deedId/respond",
+  deedAction((pool, id, role, req) => deedSvc.partyRespond(pool, id, role, req.body?.decision, { ...portalCtx(req), remarks: req.body?.remarks || null }), "PUT deed respond"));
+router.put("/transfer-deeds/:deedId/date/propose",
+  deedAction((pool, id, role, req) => deedSvc.proposeDate(pool, id, role, req.body?.Date, portalCtx(req), null), "PUT deed propose date"));
+router.put("/transfer-deeds/:deedId/date/accept",
+  deedAction((pool, id, role, req) => deedSvc.acceptDate(pool, id, role, portalCtx(req), null), "PUT deed accept date"));
+router.post("/transfer-deeds/:deedId/duty/proof",
+  deedUpload((pool, id, _role, req) => deedSvc.uploadDutyProof(pool, id, req.file, req.body || {}, portalCtx(req)), "POST deed duty proof"));
+
+// ─── GST documents for money given back (refund voucher / credit note) ──────
+// The customer's own, for every booking they were the customer on.
+router.get("/gst-notes", async (req, res) => {
+  try {
+    const rows = await require("../services/crmGstNotes").list(getPool(), { customerId: Number(req.portalUser.customerId), includeCancelled: false });
+    res.json(rows.map((n) => ({
+      Id: n.Id, DocNo: n.DocNo, DocType: n.DocType, Status: n.Status, DocDate: n.DocDate, RefundNo: n.RefundNo, Property: n.Property, BookingNo: n.BookingNo,
+      AgainstRef: n.AgainstRef, TaxableValue: n.TaxableValue, GstRate: n.GstRate, GstAmount: n.GstAmount, TotalAmount: n.TotalAmount,
+    })));
+  } catch (e) {
+    console.error("[crm-portal] GET /gst-notes:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+router.get("/gst-notes/:noteId/pdf", async (req, res) => {
+  const id = parseId(req.params.noteId);
+  if (id === null) return res.status(400).json({ error: "Invalid document" });
+  try {
+    const gst = require("../services/crmGstNotes");
+    const n = await gst.load(getPool(), id);
+    if (!n || n.Status === "Cancelled" || Number(n.CustomerId) !== Number(req.portalUser.customerId)) return res.status(404).json({ error: "Document not found" });
+    const buf = await gst.renderPdf(n);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${n.DocNo || `GST-certificate-${n.RefundNo}`}.pdf"`);
+    res.send(buf);
+  } catch (e) {
+    console.error("[crm-portal] GET gst-note pdf:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });

@@ -19,6 +19,8 @@ export interface EnterpriseOption {
   label: string;
   belongs_to: string | null;
   company_id: number | null;
+  /** Extra companies a project is tagged to in Project Master ("Tag Additional Companies"), comma-separated. */
+  tagged_company_ids?: string | null;
 }
 
 export const getCompanies = (): Promise<EnterpriseOption[]> =>

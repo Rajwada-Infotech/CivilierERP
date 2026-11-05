@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { Plus, Edit2, Trash2, RotateCcw, AlertTriangle, Tags } from "lucide-react";
+import { Plus, Edit2, Trash2, RotateCcw } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -15,6 +15,11 @@ import {
   getRoomCategories, createRoomCategory, updateRoomCategory, deleteRoomCategory, getRoomCategoryUsage, getRoomCategoryRenameCount,
   type RoomCategory,
 } from "@/api/roomCategoryMasterApi";
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
 
 const EMPTY = { categoryName: "", alias: "", sortOrder: "0", isActive: true };
 
@@ -117,12 +122,12 @@ export default function RoomCategoryMaster() {
     {
       id: "sortOrder",
       header: "Order",
-      cell: ({ row }) => <span className="text-xs text-muted-foreground font-mono">{row.original.sortOrder}</span>,
+      cell: ({ row }) => <span className="font-heading text-xs tabular-nums text-muted-foreground">{row.original.sortOrder}</span>,
     },
     {
       id: "alias",
       header: "Alias (shown in dropdowns)",
-      cell: ({ row }) => <span className="font-medium">{row.original.alias}</span>,
+      cell: ({ row }) => <span className={`font-medium ${row.original.isActive ? "text-foreground" : "text-muted-foreground"}`}>{row.original.alias}</span>,
     },
     {
       id: "categoryName",
@@ -133,15 +138,7 @@ export default function RoomCategoryMaster() {
       id: "status",
       header: "Status",
       cell: ({ row }) =>
-        row.original.isActive ? (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />Active
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <span className="w-1.5 h-1.5 rounded-full bg-border inline-block" />Inactive
-          </span>
-        ),
+        row.original.isActive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>,
     },
     {
       id: "actions",
@@ -154,8 +151,8 @@ export default function RoomCategoryMaster() {
             {rights.canEdit && (
               <button
                 onClick={() => openEdit(r)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                title="Edit"
+                className={ACT}
+                title="Edit" aria-label="Edit"
               >
                 <Edit2 size={13} />
               </button>
@@ -163,8 +160,8 @@ export default function RoomCategoryMaster() {
             {rights.canDelete && r.isActive && (
               <button
                 onClick={() => setDeleting(r)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                title="Deactivate"
+                className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
+                title="Deactivate" aria-label="Deactivate"
               >
                 <Trash2 size={13} />
               </button>
@@ -172,8 +169,8 @@ export default function RoomCategoryMaster() {
             {rights.canEdit && !r.isActive && (
               <button
                 onClick={() => reactivate(r)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors"
-                title="Reactivate"
+                className={ACT}
+                title="Reactivate" aria-label="Reactivate"
               >
                 <RotateCcw size={13} />
               </button>
@@ -184,40 +181,59 @@ export default function RoomCategoryMaster() {
     },
   ];
 
-  const inputCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30 placeholder:text-muted-foreground";
+  const inputCls = "w-full border border-foreground/40 focus:border-foreground bg-card px-3 py-2.5 text-sm text-foreground focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-60";
+
+  const active = categories.filter((c) => c.isActive).length;
 
   return (
-    <CivilWorkDprShell
-      title="Room Master"
-      subtitle="Manage the room types used across every Unit's room composition"
-      icon={Tags}
-      action={
-        rights.canCreate ? (
-          <button
-            onClick={openCreate}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 transition-opacity"
-          >
-            <Plus size={14} /> New Room Type
-          </button>
-        ) : undefined
-      }
-    >
+    <>
       <Breadcrumbs items={[{ label: "Civil Work DPR", path: "/civilworkdpr" }, { label: "Room Master" }]} />
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Room types"
+        subtitle="The room types every unit's room composition is counted in. The alias is what people see; the category name stays fixed underneath."
+        action={
+          rights.canCreate ? (
+            <button onClick={openCreate} className={`${KEY} px-4 py-2 bg-foreground text-card border border-foreground`}>
+              <Plus size={13} /> New room type
+            </button>
+          ) : undefined
+        }
+      >
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Room types", value: categories.length, note: "in all" },
+              { label: "Active", value: active, note: "offered in layouts and Work Allocation" },
+              { label: "Inactive", value: categories.length - active, note: "kept where already used" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
 
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <DataTable columns={columns} data={categories} loading={isLoading} emptyMessage="No room categories found. Add one to get started." />
-      </div>
+        <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+          <DataTable columns={columns} data={categories} loading={isLoading} emptyMessage="No room types yet. Add one to get started." />
+        </div>
+      </SheetShell>
 
       {/* Create / Edit dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="sheet-frame max-w-md" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit Room Type" : "New Room Type"}</DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Room type</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">{editing ? "Edit room type" : "New room type"}</DialogTitle>
+            </div>
           </DialogHeader>
           <div className="space-y-4 pt-1" onKeyDown={preventEnterSubmit}>
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Alias (shown to users) <span className="text-red-500">*</span>
+              <label className={`${LBL} block`}>
+                Alias (shown to users) <span className="text-destructive">*</span>
               </label>
               <input
                 className={inputCls}
@@ -227,14 +243,14 @@ export default function RoomCategoryMaster() {
               />
               {aliasChanged && (renameCount?.rooms ?? 0) > 0 && (
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input type="checkbox" checked={renameRooms} onChange={(e) => setRenameRooms(e.target.checked)} />
+                  <input type="checkbox" className="accent-foreground" checked={renameRooms} onChange={(e) => setRenameRooms(e.target.checked)} />
                   Also rename {renameCount!.rooms} existing room(s) from "{editing!.alias}" to "{form.alias.trim()}" (Flat Master history stays attached)
                 </label>
               )}
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Category Name (internal reference) <span className="text-red-500">*</span>
+              <label className={`${LBL} block`}>
+                Category Name (internal reference) <span className="text-destructive">*</span>
               </label>
               <input
                 className={`${inputCls} font-mono`}
@@ -250,7 +266,7 @@ export default function RoomCategoryMaster() {
               </p>
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              <label className={`${LBL} block`}>
                 Sort Order
               </label>
               <input
@@ -260,30 +276,31 @@ export default function RoomCategoryMaster() {
                 onChange={(e) => setForm((p) => ({ ...p, sortOrder: e.target.value }))}
               />
             </div>
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
+            <div className="flex items-center justify-between gap-3 border border-foreground/40 px-4 py-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium">Active</p>
+                <p className="text-sm font-medium text-foreground">Active</p>
                 <p className="text-xs text-muted-foreground">Inactive categories won't appear in the composition builder or Work Allocation</p>
               </div>
               <button
                 type="button"
                 onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
-                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none ${form.isActive ? "bg-emerald-500" : "bg-muted"}`}
+                aria-pressed={form.isActive}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none ${form.isActive ? "bg-foreground" : "bg-muted-foreground/30"}`}
               >
-                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${form.isActive ? "translate-x-6" : "translate-x-1"}`} />
+                <span className={`inline-block h-3.5 w-3.5 rounded-full bg-card transform transition-transform ${form.isActive ? "translate-x-4" : "translate-x-0.5"}`} />
               </button>
             </div>
-            <div className="flex justify-end gap-2 pt-1">
+            <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
               <button
                 onClick={() => setOpen(false)}
-                className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+                className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                className={`${KEY} h-9 px-5 bg-foreground text-card border border-foreground`}
               >
                 {saving ? "Saving…" : editing ? "Update" : "Create"}
               </button>
@@ -294,11 +311,12 @@ export default function RoomCategoryMaster() {
 
       {/* Delete confirm dialog */}
       <Dialog open={!!deleting} onOpenChange={() => setDeleting(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="sheet-frame max-w-sm" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle size={16} /> Deactivate Category
-            </DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Room type</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Deactivate {deleting?.alias}</DialogTitle>
+            </div>
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
             Deactivate <strong>{deleting?.alias}</strong>? It is only hidden from new selections — layouts, layout overrides and rooms that already use it keep it exactly as they are.
@@ -308,19 +326,19 @@ export default function RoomCategoryMaster() {
               ? `In use: ${deletingUsage.layouts} layout(s), ${deletingUsage.overrides} layout override(s), ${deletingUsage.rooms} room(s).`
               : null}
           </p>
-          <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setDeleting(null)} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+          <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
+            <button onClick={() => setDeleting(null)} className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}>
               Cancel
             </button>
             <button
               onClick={() => deleting && handleDelete(deleting)}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+              className={`${KEY} h-9 px-5 bg-destructive text-destructive-foreground border border-destructive`}
             >
               Deactivate
             </button>
           </div>
         </DialogContent>
       </Dialog>
-    </CivilWorkDprShell>
+    </>
   );
 }

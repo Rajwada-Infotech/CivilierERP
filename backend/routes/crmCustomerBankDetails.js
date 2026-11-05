@@ -2,17 +2,19 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, null); }
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { maybeAutoCreateAgreement, requireApprovedBooking, isLegalWorkStarted } = require("../services/crmWorkflowGuards");
 const { isMilestoneOneCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
-const { CRM_APPROVER_ROLES } = require("../services/approvalService");
+const { isApproverFor } = require("../services/approvalService");
 
+router.use(apiRateLimit);
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // Once KYC data is on file it's sensitive (bank account, PAN, Aadhaar) and
 // shouldn't be casually editable by any staff member with page rights —
@@ -22,10 +24,10 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 // gate on top of it, mirroring the "same actor/role" reasoning already used
 // for the Booking auto-approve-on-Application-approve flow elsewhere in CRM.
 async function requireAssignedOrApprover(req, res, pool, { bookingId, applicationId }) {
-  const role = String(req.user?.role || "").trim().toLowerCase();
-  if (CRM_APPROVER_ROLES.includes(role)) return true;
-
+  // Besides the assigned salesperson, who may edit a locked record is set in
+  // Approval Setup ("crm-bank-details-edit").
   const actor = actorId(req);
+  if (await isApproverFor("crm-bank-details-edit", actor, req.user?.role)) return true;
   const query = bookingId
     ? pool.request().input("bid", sql.Int, bookingId).query("SELECT AssignedTo FROM dbo.CrmBooking WHERE Id = @bid")
     : pool.request().input("aid", sql.Int, applicationId).query("SELECT AssignedTo FROM dbo.CrmApplication WHERE Id = @aid");
@@ -56,6 +58,7 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
@@ -93,7 +96,9 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
   }
 });
 
-router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
+// Payment Milestones shows the bank on file as reference when recording a payment.
+// Payment Milestones and Refunds (a refund's payout account) read it too.
+router.get("/booking/:bookingId", requireAnyPageRight(["crm-customer-bank-details", "crm-payments", "crm-refunds"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);
@@ -114,19 +119,19 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     // Adjustment.
     const bookingRow = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT b.FinancingType,
-             (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status,
-             (SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Id,
+             (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Status,
+             (SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Id,
              CAST(CASE WHEN EXISTS (
                SELECT 1 FROM dbo.ReceivedPayment rp
                JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
-               WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+               WHERE m.BookingId = b.Id AND m.MilestoneNo = 1 AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL
                  AND rp.RPStatus = '${CrmStatus.PENDING}'
              ) THEN 1 ELSE 0 END AS BIT) AS Milestone1PendingApproval,
              CAST(CASE WHEN EXISTS (
                SELECT 1 FROM dbo.CrmOnAccountPayment oap
                JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = oap.SourceReceivedPaymentId
                JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
-               WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+               WHERE m.BookingId = b.Id AND m.MilestoneNo = 1 AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL
                  AND oap.Amount > oap.AppliedAmount
              ) THEN 1 ELSE 0 END AS BIT) AS Milestone1AwaitingAdjustment,
              -- The real ledger sweep (Status='Paid') only fires automatically
@@ -136,15 +141,23 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
              -- arrived for Milestone 1", which is true the moment on-account
              -- covers Milestone 1's own amount, so the shortfall shown is
              -- against that, not the whole booking.
-             (SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Due,
-             ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS OnAccountAvailable
+             (SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Due,
+             ISNULL((SELECT SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0)
+               THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END) FROM dbo.CrmOnAccountPayment
+               WHERE BookingId = b.Id AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')), 0) AS OnAccountAvailable
       FROM dbo.CrmBooking b WHERE b.Id = @bid
     `);
     const bookingExtra = bookingRow.recordset[0] || {};
     bookingExtra.Milestone1VirtuallyCovered = await isMilestoneOneCoveredByOnAccount(pool, bid);
 
     const result = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT d.*, vu.name AS BookingStageVerifiedByName
+      SELECT d.Id, d.ApplicationId, d.BookingId, d.BankName, d.BranchName,
+             d.AccountNo, d.IfscCode, d.AccountHolderName,
+             d.NomineeName, d.NomineeRelation, d.NomineeDob, d.NomineeContact, d.NomineeAddress,
+             d.PanNo, d.AadhaarNo,
+             d.Occupation, d.AnnualIncome, d.ChequeNo, d.ChequeDate, d.TransactionRef, d.Notes,
+             d.BookingStageVerifiedAt, d.BookingStageVerifiedBy, d.CreatedBy, d.CreatedAt, d.UpdatedBy, d.UpdatedAt,
+             vu.name AS BookingStageVerifiedByName
       FROM dbo.CrmCustomerBankDetail d
       LEFT JOIN dbo.users vu ON vu.id = d.BookingStageVerifiedBy
       WHERE d.BookingId = @bid
@@ -161,7 +174,11 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     // genuinely new information this form is the first place to capture, so
     // they stay blank and unlocked.
     const prefill = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT c.PanNo, c.CustomerName AS AccountHolderName, c.AadhaarNo, c.Occupation, c.AnnualIncome
+      SELECT
+        CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+        c.CustomerName AS AccountHolderName,
+        CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+        c.Occupation, c.AnnualIncome
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
@@ -367,7 +384,13 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
     const aid = parseId(req.params.applicationId);
     if (aid === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, aid).query(`
-      SELECT d.*, vu.name AS BookingStageVerifiedByName
+      SELECT d.Id, d.ApplicationId, d.BookingId, d.BankName, d.BranchName,
+             d.AccountNo, d.IfscCode, d.AccountHolderName,
+             d.NomineeName, d.NomineeRelation, d.NomineeDob, d.NomineeContact, d.NomineeAddress,
+             d.PanNo, d.AadhaarNo,
+             d.Occupation, d.AnnualIncome, d.ChequeNo, d.ChequeDate, d.TransactionRef, d.Notes,
+             d.BookingStageVerifiedAt, d.BookingStageVerifiedBy, d.CreatedBy, d.CreatedAt, d.UpdatedBy, d.UpdatedAt,
+             vu.name AS BookingStageVerifiedByName
       FROM dbo.CrmCustomerBankDetail d
       LEFT JOIN dbo.users vu ON vu.id = d.BookingStageVerifiedBy
       WHERE d.ApplicationId = @aid
@@ -379,6 +402,13 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
     // staff never have to retype data the system already captured at
     // Customer intake (dbo.CrmCustomer). Flagged _prefilledFrom so the UI can
     // lock these fields for review/confirm rather than freshly-typed edit.
+    // Unmasked, like the saved-row branch above: this feeds the same
+    // editable save form, and the Aadhaar/AccountNo regex checks (both here
+    // and on the frontend) reject a masked value's "XXXX" placeholder
+    // characters outright, so a masked value round-tripped unmodified either
+    // silently corrupts the real stored value (no format check at all) or
+    // blocks every save until the field is retyped — masking a value this
+    // form will write straight back was the bug, not a privacy improvement.
     const prefill = await pool.request().input("aid", sql.Int, aid).query(`
       SELECT c.PanNo, c.CustomerName AS AccountHolderName, c.AadhaarNo, c.Occupation, c.AnnualIncome
       FROM dbo.CrmApplication a
@@ -411,6 +441,9 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
 
     if (!(await requireAssignedOrApprover(req, res, pool, { applicationId: aid }))) return;
+    // What Data Review ticked, before this save (a changed item goes back to be verified).
+    const checklistCols = require("../services/crmApplicationChecklist");
+    const beforeChecked = await checklistCols.snapshotColumns(pool, "CrmCustomerBankDetail", "ApplicationId", aid, checklistCols.BANK_DETAIL_ITEM_COLUMNS);
 
     // Once the Application's Booking exists, this row is shared with — and
     // frozen the same way as — the Booking-keyed endpoint below (both write
@@ -573,6 +606,10 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
       await maybeAutoCreateAgreement(pool, linkedBookingId, actor);
     }
 
+    {
+      const afterChecked = await checklistCols.snapshotColumns(pool, "CrmCustomerBankDetail", "ApplicationId", aid, checklistCols.BANK_DETAIL_ITEM_COLUMNS);
+      await checklistCols.resetForChangedColumns(pool, { applicationId: aid }, checklistCols.BANK_DETAIL_ITEM_COLUMNS, beforeChecked, afterChecked, "bank / KYC edited");
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-customer-bank-details] PUT /application error:", e.message);

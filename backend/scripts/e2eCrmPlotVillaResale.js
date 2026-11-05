@@ -158,7 +158,7 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
       console.log("\n[4b] A pays for villa Y and it is invoiced — the ledger");
       const vbid = vb.Id;
       const okr = (x) => x.status >= 200 && x.status < 300;
-      for (const key of ["ApplicantKyc", "ProjectUnitRate", "PaymentPlanAmounts", "BankDepositMode", "BrokerDetails", "SourceAssignment", "Documents"]) {
+      for (const key of require("../services/crmApplicationChecklist").CHECKLIST_ITEMS.map((i) => i.key)) {
         await call("PUT", `/api/crm/bookings/${vbid}/checklist/${key}/check`, { remarks: TAG });
       }
       await call("PUT", `/api/crm/bookings/${vbid}/ready-for-approval`, {});

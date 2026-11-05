@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool } = require("../db");
 const { cache } = require("../middleware/cache");
 // No extra permission gate here — /api routes are already protected
@@ -20,7 +20,7 @@ const { cache } = require("../middleware/cache");
  *   - Recent payments made               : last 8 rows
  *   - Recent received payments           : last 8 rows
  */
-router.get("/", cache("finance-dashboard", 60), async (req, res) => {
+router.get("/", cache("finance-dashboard", 60, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
 
@@ -125,7 +125,7 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
           PDate,
           PBankName,
           PDocType,
-          PProject,
+          COALESCE((SELECT TOP 1 ent.name FROM dbo.enterprise ent WHERE ent.business_type = 'P' AND ent.id = TRY_CAST(PProject AS INT)), PProject) AS PProject,
           PCreatedAt
         FROM dbo.NewPayment
         ORDER BY PCreatedAt DESC

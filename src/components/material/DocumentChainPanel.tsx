@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, FileText, ShoppingCart, Truck, Car, Receipt } from "lucide-react";
+import { ArrowRight, ClipboardList, FileText, FileSignature, ShoppingCart, Truck, Car, Receipt } from "lucide-react";
 import {
   getDocumentChain,
   CHAIN_ROUTES,
@@ -10,6 +10,8 @@ import {
 } from "@/api/materialChainApi";
 
 const DOC_ICON: Record<ChainDocType, React.ElementType> = {
+  wo: ClipboardList,
+  qt: FileSignature,
   mr: FileText,
   po: ShoppingCart,
   vio: Car,
@@ -18,6 +20,8 @@ const DOC_ICON: Record<ChainDocType, React.ElementType> = {
 };
 
 const DOC_COLOR: Record<ChainDocType, string> = {
+  wo: "bg-orange-500/10 border-orange-500/20 text-orange-700 dark:text-orange-400",
+  qt: "bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-400",
   mr: "bg-indigo-500/10 border-indigo-500/20 text-indigo-700 dark:text-indigo-400",
   po: "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400",
   vio: "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400",
@@ -27,7 +31,7 @@ const DOC_COLOR: Record<ChainDocType, string> = {
 
 /**
  * Clickable Linked Documents panel — every document in the procurement
- * chain (Material Request → Purchase Order → GRN → Invoice) is shown as a
+ * chain (Work Order → Material Request → Quotation → Purchase Order → GRN → Invoice) is shown as a
  * hyperlink. Clicking one navigates to that document's page with
  * ?view=<id>, which each page's deep-link effect picks up and opens.
  */
@@ -57,8 +61,8 @@ export const DocumentChainPanel: React.FC<{
         type="button"
         onClick={() => !current && goTo(node)}
         disabled={current}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[0.6875rem] font-semibold transition-opacity ${DOC_COLOR[node.docType]} ${
-          current ? "opacity-100 cursor-default ring-1 ring-inset ring-current" : "hover:opacity-75 cursor-pointer"
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 border text-[0.6875rem] font-semibold transition-opacity ${DOC_COLOR[node.docType]} ${
+          current ? "opacity-100 cursor-default" : "hover:opacity-75 cursor-pointer"
         }`}
         title={current ? undefined : `Open ${node.label} ${node.docNo ?? ""}`}
       >
@@ -69,9 +73,9 @@ export const DocumentChainPanel: React.FC<{
   };
 
   return (
-    <div className="border-t border-border/60 pt-4">
-      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-        <ArrowRight size={10} className="text-emerald-600 dark:text-emerald-400" /> Linked Documents
+    <div className="border-t border-foreground/30 pt-4">
+      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-3 flex items-center gap-1.5">
+        <ArrowRight size={10} className="text-foreground" /> Linked Documents
       </p>
       {isLoading ? (
         <p className="text-[0.6875rem] text-muted-foreground">Loading chain...</p>

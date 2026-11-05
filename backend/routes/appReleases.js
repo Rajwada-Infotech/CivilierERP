@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -27,6 +29,7 @@ const APP_CATALOG = {
   "fixed-asset": { label: "Civilier Fixed Asset", packageName: "com.rajwadainfotech.civiliererpfixedasset", fileName: "CivilierERPFixedAsset.apk" },
   "follow-up": { label: "Civilier Follow-Up", packageName: "com.rajwadainfotech.civilierfollowup", fileName: "CivilierERPFollowUp.apk" },
   maintenance: { label: "Civilier Maintenance", packageName: "com.rajwadainfotech.civiliermaintenance", fileName: "CivilierERPMaintenance.apk" },
+  cwd: { label: "Civilier Work DPR", packageName: "com.rajwadainfotech.civiliercwd", fileName: "CivilierERPWorkDPR.apk" },
 };
 
 const upload = multer({
@@ -88,6 +91,35 @@ router.get("/latest", async (req, res) => {
   }
 });
 
+// GET /public — PUBLIC. Every app's current build for the Download Android App page (shared without signing in):
+// version, build, size and date only — who published it stays private. An app with nothing published has null.
+router.get("/public", async (_req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query("SELECT * FROM dbo.AppRelease WHERE IsCurrent = 1");
+    const byKey = new Map(r.recordset.map((x) => [x.AppKey, x]));
+    res.set("Cache-Control", "no-store");
+    res.json(
+      Object.entries(APP_CATALOG).map(([appKey, a]) => {
+        const x = byKey.get(appKey);
+        const rel = x && toRelease(x);
+        return {
+          appKey,
+          label: a.label,
+          // The stable file every build is published under; also where a hand-copied APK sits.
+          filePath: `/downloads/${a.fileName}`,
+          current: rel
+            ? { versionName: rel.versionName, versionCode: rel.versionCode, sizeBytes: rel.sizeBytes, publishedAt: rel.publishedAt, downloadPath: rel.downloadPath }
+            : null,
+        };
+      }),
+    );
+  } catch (err) {
+    console.error("[app-releases] GET /public error:", err.message);
+    res.status(500).json({ error: "Failed to load the apps" });
+  }
+});
+
 // GET /catalog — the six apps with their current release (APK Manager page).
 router.get("/catalog", authenticateToken, requirePageRight("apk-manager", "view"), async (_req, res) => {
   try {
@@ -134,13 +166,15 @@ router.post(
   requirePageRight("apk-manager", "create"),
   upload.single("file"),
   async (req, res) => {
-    const tmp = req.file?.path;
+    // Only ever the temp file multer wrote (diskStorage above) — never a path taken from the request.
+    const uploaded = req.file?.path ? path.resolve(req.file.path) : null;
+    const tmp = uploaded && uploaded.startsWith(path.resolve(os.tmpdir()) + path.sep) && path.basename(uploaded).startsWith("apk-upload-") ? uploaded : null;
     const cleanup = () => tmp && fs.promises.unlink(tmp).catch(() => {});
     try {
       const appKey = String(req.body?.appKey || "");
       const app = APP_CATALOG[appKey];
       if (!app) return (await cleanup(), res.status(400).json({ error: "Choose which app this build is for." }));
-      if (!req.file) return res.status(400).json({ error: "Attach the .apk file." });
+      if (!req.file || !tmp) return (await cleanup(), res.status(400).json({ error: "Attach the .apk file." }));
 
       let manifest;
       try {

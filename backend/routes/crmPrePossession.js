@@ -1,21 +1,24 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmPrePossession")); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
-// DuesClearedCheck is computed live from CrmPaymentMilestone.DemandStatus —
-// the stored BIT column is intentionally not read (schema artefact; auto-derive
-// is the source of truth). OutstandingDemandCount is included so the frontend
-// can show "N demands outstanding" without a second round-trip.
+// DuesClearedCheck is computed live from net booking funding; the stored BIT
+// column is intentionally not read. OutstandingDemandCount lets the frontend
+// show the remaining count without another round-trip.
 const PP_SELECT = `
   SELECT
     p.Id, p.BookingId,
@@ -24,19 +27,12 @@ const PP_SELECT = `
     p.Status, p.Notes, p.CreatedAt, p.UpdatedAt,
     b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
     a.ApplicantName, a.Mobile,
-    -- Auto-derived dues status: 1 when no milestone has an outstanding balance.
-    -- Uses the same AmountDue/AmountPaid check as Handover — consistent source of truth.
-    CASE WHEN NOT EXISTS (
-      SELECT 1 FROM dbo.CrmPaymentMilestone m
-      WHERE m.BookingId = p.BookingId
-        AND m.Status NOT IN ('Paid', 'Waived')
-        AND m.AmountDue > ISNULL(m.AmountPaid, 0)
-    ) THEN 1 ELSE 0 END AS DuesClearedCheck,
-    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
-     WHERE m.BookingId = p.BookingId
-       AND m.Status NOT IN ('Paid', 'Waived')
-       AND m.AmountDue > ISNULL(m.AmountPaid, 0)
-    ) AS OutstandingDemandCount
+    -- Auto-derived dues status mirrors the net-funding check used by Handover.
+    CAST(CASE WHEN ${bookingFullyFundedSql("p.BookingId")} THEN 1 ELSE 0 END AS BIT) AS DuesClearedCheck,
+    CASE WHEN ${bookingFullyFundedSql("p.BookingId")} THEN 0 ELSE
+      (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
+       WHERE m.BookingId = p.BookingId AND m.Status NOT IN ('Paid', 'Waived')
+         AND m.AmountDue > ISNULL(m.AmountPaid, 0)) END AS OutstandingDemandCount
   FROM dbo.CrmPrePossession p
   JOIN dbo.CrmBooking b ON b.Id = p.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -85,7 +81,7 @@ function bindListFilters(request, query) {
 router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const baseCond = "b.Status NOT IN ('Cancelled','Rejected')";
+    const baseCond = `b.Status NOT IN ${DEAD_BOOKING_SQL}` + (req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "");
 
     if (req.query.page === undefined) {
       const r0 = pool.request();
@@ -137,13 +133,13 @@ router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res)
 router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cancelled = CrmStatus.CANCELLED;
-    const rejected  = CrmStatus.REJECTED;
 
     const bindConds = (request) => [
       "b.IsActive = 1",
-      "b.Status NOT IN ('" + cancelled + "', '" + rejected + "')",
+      "b.Status NOT IN " + DEAD_BOOKING_SQL,
       "NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
+      // A user limited to some projects sees only their bookings (this list and its counts used to show every project's).
+      ...(req.projectScope ? [require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()] : []),
       ...bindListFilters(request, req.query),
     ];
     const buildSelect = (conds) => [
@@ -172,12 +168,9 @@ router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), as
       // same fallback resolveOcCcGate (crmWorkflowGuards.js) implements in
       // JS for single-booking lookups. Kept inline here since this is one
       // big multi-row query, not a per-booking JS call.
+      // OC/CC for this booking - one rule everywhere (migration 577).
       "  CASE WHEN b.ProjectId IS NULL OR EXISTS (",
-      "    SELECT 1 FROM dbo.CrmOccupancyCertificate oc",
-      "    WHERE oc.Status = 'Received' AND (",
-      "      (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)",
-      "      OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)",
-      "    )",
+      "    SELECT 1 FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id AND v.Received = 1",
       "  ) THEN 1 ELSE 0 END AS Gate2_OcCcReceived",
       "FROM dbo.CrmBooking b",
       "JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId",
@@ -239,8 +232,6 @@ router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), as
 router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const cancelled = CrmStatus.CANCELLED;
-    const rejected  = CrmStatus.REJECTED;
     const q = [
       "SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName",
       "FROM dbo.CrmBooking b",
@@ -248,18 +239,16 @@ router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"
       "LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id",
       "LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
       "WHERE b.IsActive = 1",
-      "  AND b.Status NOT IN ('" + cancelled + "', '" + rejected + "')",
+      "  AND b.Status NOT IN " + DEAD_BOOKING_SQL,
       "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
+      // Only the user's own projects can start a check (every project's bookings used to be offered).
+      require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId"),
       // Agreement for Sale, registered at the Sub-Registrar, is mandatory
       // for every booking regardless of project type — no exception.
       "  AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = 'Registered')",
       // Same block-then-project OC/CC fallback as /gateway-status above.
       "  AND (b.ProjectId IS NULL OR EXISTS (",
-      "    SELECT 1 FROM dbo.CrmOccupancyCertificate oc",
-      "    WHERE oc.Status = 'Received' AND (",
-      "      (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)",
-      "      OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)",
-      "    )",
+      "    SELECT 1 FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id AND v.Received = 1",
       "  ))",
       "ORDER BY b.BookingNo",
     ].join(" ");
@@ -279,6 +268,11 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+    // The booking comes in the body, which the path guards don't see.
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -371,12 +365,7 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
 
         -- Dues clearance: computed live — true when no milestone has an outstanding balance.
         -- Consistent with the Handover payment gate (AmountDue/AmountPaid check).
-        DECLARE @dues_cleared BIT = CASE WHEN NOT EXISTS (
-          SELECT 1 FROM dbo.CrmPaymentMilestone m
-          WHERE m.BookingId = @bid
-            AND m.Status NOT IN ('Paid', 'Waived')
-            AND m.AmountDue > ISNULL(m.AmountPaid, 0)
-        ) THEN 1 ELSE 0 END;
+        DECLARE @dues_cleared BIT = CASE WHEN ${bookingFullyFundedSql("@bid")} THEN 1 ELSE 0 END;
 
         DECLARE @new_status NVARCHAR(30) =
           CASE
@@ -407,7 +396,7 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
       `);
 
     const row = result.recordset[0];
-    res.json({ success: true, status: row?.Status, duesClearedCheck: row?.DuesClearedCheck === 1 });
+    res.json({ success: true, status: row?.Status, duesClearedCheck: !!row?.DuesClearedCheck });
   } catch (e) {
     console.error("[crm-pre-possession] PUT error:", e.message);
     res.status(500).json({ error: e.message });

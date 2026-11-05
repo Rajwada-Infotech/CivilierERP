@@ -9,8 +9,10 @@ import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
 import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
+import { NAV_PANEL_CSS, GENIE_CSS } from "@/components/navbar/navPanelStyles";
+import { useGenieVisibility } from "@/components/navbar/useGeniePanel";
+import { ALL_MODULES, hexToHsl } from "./moduleDefs";
 import {
-  Settings,
   ChevronDown,
   Megaphone,
 } from "lucide-react";
@@ -26,7 +28,8 @@ import {
   Element4,
 } from "iconsax-react";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
-import { type SetupItem, financeSetupItems, salesSetupItems, maintenanceSetupItems, hrPayrollSetupItems, materialSetupItems, fixedAssetSetupItems, followupSetupItems, engineeringSetupItems, civilWorkDprSetupItems, salesAutomationSetupItems, crmSetupItems, adminSetupItems } from "./setupMenus";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
+import { type SetupItem, financeSetupItems, salesSetupItems, maintenanceSetupItems, hrPayrollSetupItems, materialSetupItems, fixedAssetSetupItems, followupSetupItems, engineeringSetupItems, civilWorkDprSetupItems, salesAutomationSetupItems, crmSetupItems, legalSetupItems, adminSetupItems } from "./setupMenus";
 
 // ─── useClickOutside ──────────────────────────────────────────────────────────
 
@@ -54,6 +57,7 @@ const Dropdown = ({
   children,
   className,
   style,
+  genie = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -61,16 +65,34 @@ const Dropdown = ({
   children: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
+  /** swell out of the trigger like a bubble, and pop back into it (see navPanelStyles GENIE_CSS) */
+  genie?: boolean;
 }) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   useClickOutside(wrapperRef, onClose, open);
+  const bubble = useGenieVisibility(open);
+
+  if (genie) {
+    return (
+      <div className="relative shrink-0" ref={wrapperRef}>
+        <style dangerouslySetInnerHTML={{ __html: GENIE_CSS }} />
+        {trigger}
+        <div
+          style={{ ...style, display: bubble.shown ? undefined : "none" }}
+          className={`genie ${bubble.className} absolute top-full mt-2.5 z-50 border border-foreground bg-card shadow-[5px_5px_0_hsl(var(--foreground)/0.12)] overflow-visible ${className || ""}`}
+        >
+          {children}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative shrink-0" ref={wrapperRef}>
       {trigger}
       <div
         style={style}
-        className={`absolute top-full mt-2.5 z-50 rounded-2xl border border-border/60 bg-card/95 backdrop-blur-2xl shadow-2xl transition-all duration-200 origin-top overflow-visible
+        className={`absolute top-full mt-2.5 z-50 border border-foreground bg-card shadow-[5px_5px_0_hsl(var(--foreground)/0.12)] transition-all duration-200 origin-top overflow-visible
           ${open ? "opacity-100 scale-100 pointer-events-auto translate-y-0" : "opacity-0 scale-95 pointer-events-none -translate-y-2"} ${className || ""}`}
       >
         {children}
@@ -81,37 +103,14 @@ const Dropdown = ({
 
 // ─── Module color helpers ──────────────────────────────────────────────────────
 
-// RGB triplets for dynamic glow (matches ModuleStrip ringRgb values)
-const MODULE_GLOW_RGB: Record<string, string> = {
-  finance: "99,102,241",
-  material: "16,185,129",
-  "fixed-asset": "234,179,8",
-  followup: "129,140,248",
-  engineering: "249,115,22",
-  ticket: "236,72,153",
-  sales: "168,85,247",
-  records: "225,29,72",
-  civilworkdpr: "8,145,178",
-  admin: "59,130,246",
-  crm: "14,165,233",
-};
-
-// HSL values derived from MODULE_HEADER hex colors in AppSidebar for consistency
-const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
-  finance: { h: 239, s: 84, l: 67 }, // #6366f1 indigo
-  material: { h: 160, s: 84, l: 39 }, // #10b981 emerald
-  "fixed-asset": { h: 45, s: 93, l: 47 }, // #eab308 yellow
-  followup: { h: 174, s: 82, l: 31 }, // #0d9488 teal
-  engineering: { h: 25, s: 95, l: 53 }, // #f97316 orange
-  ticket: { h: 330, s: 81, l: 60 }, // #ec4899 pink
-  sales: { h: 271, s: 91, l: 65 }, // #a855f7 purple
-  records: { h: 347, s: 77, l: 50 }, // #e11d48 rose
-  civilworkdpr: { h: 192, s: 91, l: 36 }, // #0891b2 cyan/teal
-  admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
-  crm: { h: 199, s: 89, l: 48 }, // #0ea5e9 sky
-  maintenance: { h: 85, s: 85, l: 35 }, // #65a30d lime
-  "hr-payroll": { h: 45, s: 93, l: 47 }, // #eab308 yellow
-};
+// Glow RGB and HSL per module, derived from the one shared module list (moduleDefs.tsx) so the top
+// bar, the module strip and the mobile nav can never disagree about a module's colour.
+const MODULE_GLOW_RGB: Record<string, string> = Object.fromEntries(
+  ALL_MODULES.map((m) => [m.id, m.ringRgb]),
+);
+const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = Object.fromEntries(
+  ALL_MODULES.map((m) => [m.id, hexToHsl(m.color)]),
+);
 
 function moduleColorVars(id: string): React.CSSProperties {
   const c = MODULE_COLORS[id] ?? MODULE_COLORS.finance;
@@ -175,7 +174,7 @@ const SetupDropdown = ({
               : modVars
           }
         >
-          <Setting2
+          <ChromeIcons.setup
             size={13}
             variant="Outline"
             color="currentColor"
@@ -189,165 +188,42 @@ const SetupDropdown = ({
         </button>
       }
     >
-      {/* ── Gradient header ── */}
-      <div
-        className="relative px-4 pt-4 pb-3.5 overflow-hidden rounded-t-2xl"
-        style={{
-          background: `linear-gradient(135deg,
-            hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.18) 0%,
-            hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.06) 60%,
-            transparent 100%)`,
-          borderBottom: `1px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.18)`,
-        }}
-      >
-        {/* radial bloom */}
-        <div
-          className="absolute -top-6 -left-4 w-32 h-32 rounded-full pointer-events-none"
-          style={{
-            background: `radial-gradient(circle, hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.22) 0%, transparent 70%)`,
-            filter: "blur(16px)",
-          }}
-        />
-        <div className="relative flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-              style={{
-                background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)`,
-                border: `1.5px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.4)`,
-                boxShadow: `0 4px 14px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.3), inset 0 1px 0 hsl(0 0% 100% / 0.1)`,
-                color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))`,
-              }}
-            >
-              <Settings size={15} strokeWidth={2} />
-            </div>
-            <div>
-              <p className="text-[0.6875rem] font-heading font-bold text-foreground uppercase tracking-widest leading-none">
-                Setup
-              </p>
-              <p
-                className="text-[0.625rem] font-heading mt-0.5 leading-none"
-                style={{
-                  color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
-                }}
-              >
-                Configure {moduleLabel}
-              </p>
-            </div>
-          </div>
-          <span
-            className="text-[0.625rem] font-heading font-semibold px-2.5 py-1 rounded-full border tracking-wide"
-            style={{
-              color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))`,
-              borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)`,
-              background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)`,
-            }}
-          >
+      {/* ── Title block ── */}
+      <div className="flex items-end justify-between gap-4 px-4 pt-3.5 pb-3 border-b border-foreground">
+        <div className="min-w-0">
+          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground leading-none">
             {moduleLabel}
-          </span>
-        </div>
-      </div>
-
-      {/* ── Items grid ── */}
-      <div className="p-3">
-        <div
-          className={`grid grid-cols-3 sm:grid-cols-4 gap-2 ${open ? "setup-grid-open" : ""}`}
-        >
-          {items.map(({ icon: Icon, label, path, color }, i) => {
-            const isActivePath = location.pathname === path;
-            return (
-              <button
-                key={path}
-                onClick={() => {
-                  navigate(path);
-                  onClose();
-                }}
-                className={`setup-item group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-200 active:scale-[0.93] cursor-pointer
-                  ${isActivePath ? "shadow-sm" : "border-transparent hover:border-border hover:bg-muted/50"}`}
-                style={{
-                  animationDelay: `${i * 35}ms`,
-                  ...(isActivePath
-                    ? {
-                        borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.45)`,
-                        background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.08)`,
-                      }
-                    : {}),
-                }}
-              >
-                <div className="relative w-9 h-9 flex items-center justify-center">
-                  <div
-                    className={`absolute inset-0 rounded-xl transition-all duration-200 ${isActivePath ? "" : "bg-muted/60 group-hover:bg-muted"}`}
-                    style={
-                      isActivePath
-                        ? {
-                            background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.16)`,
-                          }
-                        : undefined
-                    }
-                  />
-                  <div
-                    className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                    style={{
-                      boxShadow: `0 0 0 1.5px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35), 0 4px 12px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)`,
-                    }}
-                  />
-                  <div
-                    className="setup-icon-shimmer absolute inset-0 rounded-xl pointer-events-none opacity-0 group-hover:opacity-100"
-                    style={{
-                      background: `linear-gradient(105deg, transparent 30%, hsl(0 0% 100% / 0.12) 50%, transparent 70%)`,
-                      backgroundSize: "200% 100%",
-                    }}
-                  />
-                  <Icon
-                    size={16}
-                    className={`relative z-10 ${color} transition-transform duration-200 group-hover:scale-110`}
-                    strokeWidth={isActivePath ? 2.5 : 2}
-                  />
-                </div>
-                <span
-                  className={`text-[0.5625rem] font-heading text-center leading-tight line-clamp-2 transition-colors duration-150
-                    ${isActivePath ? "font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
-                  style={
-                    isActivePath
-                      ? { color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))` }
-                      : undefined
-                  }
-                >
-                  {label.replace(/ Master$/, "")}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Footer ── */}
-      <div
-        className="px-4 py-2.5 rounded-b-2xl flex items-center justify-between"
-        style={{
-          borderTop: `1px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)`,
-          background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.04)`,
-        }}
-      >
-        <p className="text-[0.5625rem] text-muted-foreground font-heading">
-          {items.length} configuration{items.length !== 1 ? "s" : ""}
-        </p>
-        <div className="flex items-center gap-1">
-          <div
-            className="w-1.5 h-1.5 rounded-full"
-            style={{
-              background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.7)`,
-            }}
-          />
-          <p
-            className="text-[0.5625rem] font-heading font-medium"
-            style={{
-              color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
-            }}
-          >
-            {moduleLabel} Module
           </p>
+          <p className="font-heading text-base font-bold tracking-tight text-foreground leading-none mt-1.5">Setup</p>
         </div>
+        <p className="font-heading text-[0.625rem] tabular-nums text-muted-foreground leading-none shrink-0">
+          {items.length} page{items.length !== 1 ? "s" : ""}
+        </p>
+      </div>
+
+      {/* ── Index of setup pages: two ruled columns ── */}
+      <div className={`grid grid-cols-2 max-h-[min(26rem,70vh)] overflow-y-auto`}>
+        {items.map(({ icon: Icon, label, path }, i) => {
+          const isActivePath = location.pathname === path;
+          return (
+            <button
+              key={path}
+              onClick={() => {
+                navigate(path);
+                onClose();
+              }}
+              aria-current={isActivePath ? "page" : undefined}
+              className={`flex items-center gap-2.5 px-4 py-2.5 text-left border-b border-border/70 transition-colors cursor-pointer
+                ${i % 2 === 0 ? "border-r" : ""}
+                ${isActivePath ? "bg-foreground text-card" : "text-foreground hover:bg-primary/10"}`}
+            >
+              <Icon size={14} strokeWidth={1.75} className={`shrink-0 ${isActivePath ? "" : "text-muted-foreground"}`} />
+              <span className={`text-xs leading-tight min-w-0 ${isActivePath ? "font-semibold" : "font-medium"}`}>
+                {label.replace(/ Master$/, "")}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </Dropdown>
   );
@@ -399,83 +275,62 @@ const UserMenuContent: React.FC<{
     transition: `opacity 240ms ease ${i * 55}ms, transform 240ms cubic-bezier(0.16,1,0.3,1) ${i * 55}ms`,
   });
 
+  // Drawn on the sheet like the other top-bar panels: a title block with a square avatar, the name and email, and the
+  // role as a squared tag in the role's own colour; then numbered rows with square marks, Sign Out in red.
   return (
     <>
-      {/* ── Identity banner ── */}
-      <div
-        className="relative -m-1 mb-1 px-4 pt-4 pb-3.5 rounded-t-2xl overflow-hidden"
-        style={cascade(0)}
-      >
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background: accent
-              ? `linear-gradient(135deg, ${accent.color}1F 0%, transparent 70%)`
-              : "linear-gradient(135deg, hsl(var(--primary) / 0.12) 0%, transparent 70%)",
-          }}
-        />
-        <div className="relative z-10 flex items-center gap-3">
-          <div
-            className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-heading font-bold text-primary-foreground shrink-0 overflow-hidden ring-2 ${currentUser?.avatarUrl ? "bg-muted" : "gradient-accent"}`}
-            style={accent ? { boxShadow: `0 0 0 2px ${accent.color}40` } : undefined}
-          >
+      <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS }} />
+      <div className="np-head" style={{ ...cascade(0), display: "block" }}>
+        <p className="np-label">CivilierERP · Signed in</p>
+        <div className="np-who">
+          <span className="np-avatar">
             {currentUser?.avatarUrl ? (
-              <img
-                src={currentUser.avatarUrl}
-                alt={currentUser.name}
-                className="w-full h-full object-cover rounded-full"
-              />
+              <img src={currentUser.avatarUrl} alt={currentUser.name} />
             ) : (
               currentUser?.initials || "?"
             )}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-heading font-semibold text-foreground truncate">
+          </span>
+          <span className="min-w-0">
+            <span className="np-name block truncate" style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em" }}>
               {currentUser?.name}
-            </p>
-            <p className="text-xs text-muted-foreground truncate">
-              {currentUser?.email}
-            </p>
-          </div>
-        </div>
-        <div className="relative z-10 mt-2.5">
-          {accent ? (
-            <span
-              className="inline-flex items-center text-[0.625rem] px-2 py-0.5 rounded-full font-heading font-semibold"
-              style={{ background: `${accent.color}1A`, color: accent.color }}
-            >
-              {accent.label}
             </span>
-          ) : (
-            <span className="inline-flex items-center text-[0.625rem] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
-              User · {currentUser?.pagePermissions?.length || 0} pages
-            </span>
-          )}
+            <span className="np-sub block truncate">{currentUser?.email}</span>
+          </span>
         </div>
+        {accent ? (
+          <span className="np-role" style={{ color: accent.color }}>{accent.label}</span>
+        ) : (
+          <span className="np-role" style={{ color: "hsl(var(--muted-foreground))" }}>
+            User · {currentUser?.pagePermissions?.length || 0} pages
+          </span>
+        )}
       </div>
 
-      <div className="border-t border-border/60" style={cascade(1)} />
-
-      <button
-        onMouseDown={() => {
-          onClose();
-          if (isSuperAdmin) navigate("/superadmin/profile");
-          else if (isDba) navigate("/dba/profile");
-          else if (currentUser?.role === "admin") navigate("/admin/profile");
-          else navigate("/user/profile");
-        }}
-        style={cascade(2)}
-        className="w-full flex items-center gap-2 px-3 py-2 mt-1 text-sm rounded-lg hover:bg-muted transition-colors text-foreground"
-      >
-        <Profile size={14} /> Profile
-      </button>
-      <button
-        onMouseDown={handleLogout}
-        style={cascade(3)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-destructive/10 transition-colors text-destructive"
-      >
-        <Logout size={14} /> Sign Out
-      </button>
+      <div className="np-list">
+        <button
+          type="button"
+          onMouseDown={() => {
+            onClose();
+            if (isSuperAdmin) navigate("/superadmin/profile");
+            else if (isDba) navigate("/dba/profile");
+            else if (currentUser?.role === "admin") navigate("/admin/profile");
+            else navigate("/user/profile");
+          }}
+          style={cascade(1)}
+          className="np-row center"
+        >
+          <span className="np-num">01</span>
+          <span className="np-mark"><Profile size={14} /></span>
+          <span className="np-name">Profile</span>
+          <span />
+        </button>
+        <button type="button" onMouseDown={handleLogout} style={cascade(2)} className="np-row center danger">
+          <span className="np-num">02</span>
+          <span className="np-mark"><Logout size={14} /></span>
+          <span className="np-name">Sign Out</span>
+          <span />
+        </button>
+      </div>
     </>
   );
 };
@@ -647,6 +502,13 @@ export const TopNavbar = () => {
         colorStyle: makeColorStyle("hr-payroll"),
         available: true,
       };
+    if (activeModule === "legal")
+      return {
+        items: filterSetupItems(legalSetupItems),
+        label: "Legal",
+        colorStyle: makeColorStyle("legal"),
+        available: true,
+      };
     return {
       items: [],
       label: "No Module",
@@ -707,35 +569,34 @@ export const TopNavbar = () => {
         .nav-pill-btn {
           display: inline-flex;
           align-items: center;
-          gap: 0.375rem;
-          padding: 0.375rem 0.75rem;
-          border-radius: 9999px;
-          font-size: 0.8125rem;
-          font-weight: 500;
-          font-family: var(--font-heading, inherit);
-          color: hsl(var(--foreground) / 0.70);
+          gap: 0.4rem;
+          padding: 0.45rem 0.85rem;
+          font-size: 0.625rem;
+          font-weight: 600;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          font-family: "Sora", sans-serif;
+          color: hsl(var(--muted-foreground));
           background: transparent;
-          border: 1px solid transparent;
-          transition: background 150ms, border-color 150ms, color 150ms;
+          border: 0;
+          transition: background 150ms, color 150ms;
           white-space: nowrap;
           cursor: pointer;
         }
         .nav-pill-btn:hover {
-          background: rgba(128,128,128,0.15);
-          border-color: rgba(128,128,128,0.20);
+          background: hsl(var(--primary) / 0.10);
           color: hsl(var(--foreground));
         }
-        .nav-pill-btn--active {
-          background: rgba(128,128,128,0.15);
-          border-color: rgba(128,128,128,0.20);
-          color: hsl(var(--foreground));
+        .nav-pill-btn--active, .nav-pill-btn--active:hover {
+          background: hsl(var(--foreground));
+          color: hsl(var(--card));
         }
 
         /* pill nav genie — expand: pinched sliver → full pill */
         @keyframes genie-expand {
           0%   {
             opacity: 0;
-            clip-path: inset(0% 48% 0% 48% round 99px);
+            clip-path: inset(0% 48% 0% 48% round 0px);
             transform: translateX(-50%) scaleY(0.4);
             filter: blur(6px);
           }
@@ -744,7 +605,7 @@ export const TopNavbar = () => {
             filter: blur(1px);
           }
           70%  {
-            clip-path: inset(0% 0% 0% 0% round 99px);
+            clip-path: inset(0% 0% 0% 0% round 0px);
             transform: translateX(-50%) scaleY(1.06);
           }
           100% {
@@ -759,17 +620,17 @@ export const TopNavbar = () => {
         @keyframes genie-collapse {
           0%   {
             opacity: 1;
-            clip-path: inset(0% 0% 0% 0% round 99px);
+            clip-path: inset(0% 0% 0% 0% round 0px);
             transform: translateX(-50%) scaleY(1);
             filter: blur(0px);
           }
           50%  {
-            clip-path: inset(0% 42% 0% 42% round 99px);
+            clip-path: inset(0% 42% 0% 42% round 0px);
             filter: blur(2px);
           }
           100% {
             opacity: 0;
-            clip-path: inset(0% 50% 0% 50% round 99px);
+            clip-path: inset(0% 50% 0% 50% round 0px);
             transform: translateX(-50%) scaleY(0.3);
             filter: blur(6px);
           }
@@ -822,7 +683,16 @@ export const TopNavbar = () => {
         }
       `}</style>
 
-      <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center px-3 sm:px-4 gap-3 border-b border-border bg-card/90 backdrop-blur-xl">
+      <header
+        className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center px-3 sm:px-4 gap-3"
+        style={{
+          backgroundColor: "hsl(var(--card))",
+          backgroundImage:
+            "linear-gradient(hsl(var(--foreground) / 0.04) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--foreground) / 0.04) 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+          borderBottom: "1.5px solid hsl(var(--foreground))",
+        }}
+      >
         {/* ── Logo ── */}
         <button
           onClick={() => navigate("/home")}
@@ -837,58 +707,10 @@ export const TopNavbar = () => {
         {/* ── Center pill nav — absolute center of the header ── */}
         <nav
           className={`hidden md:flex items-center gap-0.5 absolute left-1/2 ${pillNavClass}`}
-          style={
-            isDark
-              ? {
-                  borderRadius: "9999px",
-                  padding: "0.25rem",
-                  background: "rgba(15, 17, 26, 0.52)",
-                  border: "1px solid rgba(255,255,255,0.13)",
-                  boxShadow:
-                    "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
-                  backdropFilter: "blur(22px) saturate(160%)",
-                  WebkitBackdropFilter: "blur(22px) saturate(160%)",
-                }
-              : {
-                  borderRadius: "9999px",
-                  padding: "0.25rem",
-                  background: "rgba(255,255,255,0.42)",
-                  border: "1px solid rgba(255,255,255,0.65)",
-                  boxShadow:
-                    "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
-                  backdropFilter: "blur(22px) saturate(180%)",
-                  WebkitBackdropFilter: "blur(22px) saturate(180%)",
-                }
-          }
+          style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--foreground))" }}
         >
-          {/* Dot grid + glow — clipped to pill, tracks active module color */}
-          {(() => {
-            const modKey = isAdminPage ? "admin" : (activeModule ?? "finance");
-            const glowRgb = MODULE_GLOW_RGB[modKey] ?? MODULE_GLOW_RGB.finance;
-            return (
-              <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none z-0">
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    backgroundImage:
-                      "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
-                    backgroundSize: "14px 14px",
-                  }}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    background: `radial-gradient(ellipse at 50% 0%, rgba(${glowRgb},0.38) 0%, rgba(${glowRgb},0.12) 50%, transparent 80%)`,
-                  }}
-                />
-              </div>
-            );
-          })()}
-
           {/* Content — sits above glow */}
-          <div className="relative z-10 flex items-center gap-0.5">
+          <div className="relative z-10 flex items-center">
             {!isHome && setupConfig.available && (
               <SetupDropdown
                 open={setupOpen}
@@ -910,7 +732,7 @@ export const TopNavbar = () => {
               }}
               className={`nav-pill-btn ${isActive("/reports") ? "nav-pill-btn--active" : ""}`}
             >
-              <Chart size={13} variant="Outline" color="currentColor" />
+              <ChromeIcons.reports size={14} />
               <span>Reports</span>
             </button>
 
@@ -921,7 +743,7 @@ export const TopNavbar = () => {
               }}
               className={`nav-pill-btn ${isActive("/widgets") ? "nav-pill-btn--active" : ""}`}
             >
-              <Element4 size={13} variant="Outline" color="currentColor" />
+              <ChromeIcons.widgets size={14} />
               <span>Widgets</span>
             </button>
           </div>
@@ -931,24 +753,12 @@ export const TopNavbar = () => {
         <div className="hidden md:flex items-center gap-1.5 ml-auto shrink-0">
           {/* Collapse sidebar toggle */}
           <div className="relative shrink-0">
-            {/* Rotating conic-gradient arc ring */}
-            <span
-              className="absolute -inset-[2px] rounded-full pointer-events-none opacity-70"
-              style={{
-                background: `conic-gradient(from 0deg, transparent 60%, rgba(${activeGlowRgb},0.85) 80%, transparent 100%)`,
-                animation: "spin-ring 3s linear infinite",
-              }}
-            />
             <button
               onClick={() => setNavCollapsed(!navCollapsed)}
               title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-muted/80 text-foreground transition-all duration-200 active:scale-90 hover:scale-105"
+              className="relative z-10 w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors duration-150"
             >
-              {navCollapsed ? (
-                <SidebarLeft size={15} variant="Outline" />
-              ) : (
-                <SidebarLeft size={15} variant="Bold" />
-              )}
+              <ChromeIcons.menu size={18} />
             </button>
           </div>
 
@@ -964,12 +774,13 @@ export const TopNavbar = () => {
           <Dropdown
             open={userOpen}
             onClose={closeUser}
-            className="right-0 w-56 p-1"
+            genie
+            className="right-0 w-[17rem] p-0 np-sheet"
             trigger={
               <div className="relative">
                 <button
                   onClick={toggleUser}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90 overflow-hidden ring-2 ring-border hover:ring-primary/40 transition-all ${currentUser?.avatarUrl ? "bg-muted" : "gradient-accent"}`}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90 overflow-hidden ring-2 ring-border hover:ring-primary/40 transition-all ${userOpen ? "genie-pop" : ""} ${currentUser?.avatarUrl ? "bg-muted" : "gradient-accent"}`}
                 >
                   {currentUser?.avatarUrl ? (
                     <img
@@ -1007,46 +818,7 @@ export const TopNavbar = () => {
         <div className="flex md:hidden items-center gap-1.5 ml-auto">
           <SaNotificationBell />
           <ReminderBell />
-          <Dropdown
-            open={userOpen}
-            onClose={closeUser}
-            className="right-0 w-56 p-1"
-            trigger={
-              <div className="relative">
-                <button
-                  onClick={toggleUser}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-heading text-primary-foreground font-bold overflow-hidden ring-2 ring-border ${currentUser?.avatarUrl ? "bg-muted" : "gradient-accent"}`}
-                >
-                  {currentUser?.avatarUrl ? (
-                    <img
-                      src={currentUser.avatarUrl}
-                      alt={currentUser.name}
-                      className="w-full h-full object-cover rounded-full"
-                    />
-                  ) : (
-                    currentUser?.initials || "?"
-                  )}
-                </button>
-                {RoleIcon && (
-                  <span
-                    className={`pointer-events-none absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeCls}`}
-                  >
-                    <RoleIcon size={9} className="text-white" />
-                  </span>
-                )}
-              </div>
-            }
-          >
-            <UserMenuContent
-              currentUser={currentUser}
-              isSuperAdmin={isSuperAdmin}
-              isDba={isDba}
-              open={userOpen}
-              onClose={closeUser}
-              navigate={navigate}
-              handleLogout={handleLogout}
-            />
-          </Dropdown>
+          {/* No avatar here: the bottom bar's "Me" (MobileNav) has the profile and sign-out on phones. */}
         </div>
       </header>
     </>

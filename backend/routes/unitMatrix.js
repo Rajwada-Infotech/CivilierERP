@@ -1,22 +1,24 @@
 const express = require("express");
+const { DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET /projects — project dropdown (mirrors unitMaster.js /projects)
-router.get("/projects", requirePageRight("crm-unit-matrix", "view"), cache("unit-matrix-projects", 600), async (req, res) => {
+router.get("/projects", requirePageRight("crm-unit-matrix", "view"), cache("unit-matrix-projects", 600, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT id AS Id, name AS Name
       FROM dbo.enterprise
-      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0
+      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0${projectPredicate(req.projectScope, "id")}
       ORDER BY name
     `);
     res.json(result.recordset);
@@ -34,9 +36,11 @@ router.get("/blocks", requirePageRight("crm-unit-matrix", "view"), async (req, r
     const request = pool.request();
     let query = "SELECT Id, BlockName AS Name FROM dbo.BlockMaster WHERE IsActive = 1";
     if (Number.isFinite(projectId)) {
+      if (!assertProjectAllowed(req, res, projectId)) return;
       request.input("pid", sql.Int, projectId);
       query += " AND ProjectId = @pid";
     }
+    query += projectPredicate(req.projectScope, "ProjectId");
     query += " ORDER BY BlockName";
     const result = await request.query(query);
     res.json(result.recordset);
@@ -69,6 +73,8 @@ router.get("/plots", requirePageRight("crm-unit-matrix", "view"), async (req, re
     const pool = getPool();
     const projectId = parseInt(req.query.projectId, 10);
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+    // A user limited to some projects sees only their matrices (any project id used to be served).
+    if (!assertProjectAllowed(req, res, projectId)) return;
     const blockId = parseInt(req.query.blockId, 10);
 
     const request = pool.request().input("pid", sql.Int, projectId);
@@ -86,7 +92,8 @@ router.get("/plots", requirePageRight("crm-unit-matrix", "view"), async (req, re
         bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.BookingDate,
         bk.TotalValue, bk.GrandTotal, bk.BookingAmount,
         CASE WHEN EXISTS (
-          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id AND m.MilestoneNo = 1 AND m.Status = 'Paid'
+          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id AND m.MilestoneNo = 1
+            AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL AND m.Status = 'Paid'
         ) THEN 1 ELSE 0 END AS Milestone1Paid,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,
@@ -99,7 +106,7 @@ router.get("/plots", requirePageRight("crm-unit-matrix", "view"), async (req, re
         FROM dbo.CrmBookingPlot bp
         JOIN dbo.CrmBooking cb ON cb.Id = bp.BookingId
         WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND cb.IsActive = 1
-          AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+          AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
       ) bk
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
@@ -170,23 +177,41 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
     const pool = getPool();
     const projectId = parseInt(req.query.projectId, 10);
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+    // A user limited to some projects sees only their matrices (any project id used to be served).
+    if (!assertProjectAllowed(req, res, projectId)) return;
     const blockId = parseInt(req.query.blockId, 10);
 
     const request = pool.request().input("pid", sql.Int, projectId);
-    let where = "u.ProjectId = @pid";
+    // Land rows (a plot kept as a unit) are shown once, in the Plots section
+    // from /plots, never again as units; a villa retired by "undo convert"
+    // (inactive, renamed "~undone <id>") is history, not inventory.
+    let where = `u.ProjectId = @pid
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)
+      AND NOT (u.IsActive = 0 AND u.UnitName LIKE N'%~undone%')`;
     if (Number.isFinite(blockId)) {
       request.input("bid", sql.Int, blockId);
       where += " AND u.BlockId = @bid";
     }
 
+    const commercialCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c")).recordset[0].c != null;
     const result = await request.query(`
       SELECT
         u.Id, u.UnitName, u.FloorNo, u.BlockId, blk.BlockName, u.IsActive AS UnitIsActive,
+        -- a villa built on a plot: no tower floor, grouped as "Villas"
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id AND pl.IsActive = 1) THEN 1 ELSE 0 END AS BIT) AS IsVilla,
+        -- who owns the land under a villa (services/villaLand.js rule): only
+        -- that customer can buy it, and only once every plot under it is sold
+        (SELECT TOP 1 vt.Code FROM dbo.VillaTypeMaster vt WHERE vt.Id = u.VillaTypeId) AS VillaTypeCode, u.BuiltUpAreaSqFt,
+        land.PlotCount AS VillaPlotCount, land.SoldPlotCount AS VillaSoldPlotCount, land.OwnerName AS VillaLandOwner,
         u.AreaSqFt,
+        -- The unit's kind as named in the kind master, and whether it's
+        -- commercial — so the matrix can tell shops/offices from flats.
+        knd.Name AS KindName, ISNULL(knd.IsCommercial, 0) AS IsCommercial,
         bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.BookingDate, bk.ConfirmDeadline,
         bk.TotalValue, bk.GrandTotal, bk.BookingAmount,
         CASE WHEN EXISTS (
-          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id AND m.MilestoneNo = 1 AND m.Status = 'Paid'
+          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id AND m.MilestoneNo = 1
+            AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL AND m.Status = 'Paid'
         ) THEN 1 ELSE 0 END AS Milestone1Paid,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,
@@ -195,7 +220,22 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         hassn.name AS HoldAssignedToName, hassn.email AS HoldAssignedToEmail
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
+      OUTER APPLY (
+        SELECT COUNT(*) AS PlotCount, COUNT(o.CustomerId) AS SoldPlotCount, MAX(o.CustomerName) AS OwnerName
+        FROM dbo.PlotMaster lp
+        OUTER APPLY (
+          SELECT TOP 1 la.CustomerId, lc.CustomerName
+          FROM dbo.CrmBookingPlot lbp
+          JOIN dbo.CrmBooking lb ON lb.Id = lbp.BookingId
+          JOIN dbo.CrmApplication la ON la.Id = lb.ApplicationId
+          LEFT JOIN dbo.CrmCustomer lc ON lc.Id = la.CustomerId
+          WHERE lbp.PlotId = lp.Id AND lbp.Status = N'Active' AND lb.IsActive = 1 AND lb.Status NOT IN ${DEAD_BOOKING_SQL}
+          ORDER BY lbp.Id DESC
+        ) o
+        WHERE lp.ConvertedUnitId = u.Id AND lp.IsActive = 1
+      ) land
+      OUTER APPLY (SELECT TOP 1 k.Name, ${commercialCol ? "k.IsCommercial" : "CAST(0 AS BIT) AS IsCommercial"} FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind) knd
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
       LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
@@ -234,6 +274,14 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         BlockName: r.BlockName,
         Status: !r.UnitIsActive ? "Blocked" : isBooked ? "Booked" : isOnHold ? "OnHold" : "Available",
         AreaSqFt: r.AreaSqFt || null,
+        IsVilla: !!r.IsVilla,
+        // A villa whose land isn't (fully) sold can't be booked by anyone yet.
+        VillaLandSold: r.IsVilla ? r.VillaPlotCount > 0 && r.VillaSoldPlotCount === r.VillaPlotCount : null,
+        VillaLandOwner: r.IsVilla ? r.VillaLandOwner || null : null,
+        VillaTypeCode: r.IsVilla ? r.VillaTypeCode || null : null,
+        BuiltUpAreaSqFt: r.BuiltUpAreaSqFt ?? null,
+        KindName: r.KindName || null,
+        IsCommercial: !!r.IsCommercial,
         BookingId: hasBookingId ? r.BookingId : null,
         BookingNo: r.BookingNo || null,
         BookingStatus: r.BookingStatus || null,
@@ -267,6 +315,31 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
   } catch (err) {
     console.error("[unit-matrix] GET error:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /customers?projectId= — who a unit, plot or parking slot can be held or sold for on the matrix: every live
+// application of that project (rejected, cancelled and expired ones aside), converted ones included, since a customer
+// who has booked a flat is the usual buyer of its parking. Under the matrix rights: the matrices used to read
+// Applications' own list (that page's right, and converted applications left out).
+router.get("/customers", requireAnyPageRight(["crm-unit-matrix", "crm-parking-matrix"], "view"), async (req, res) => {
+  try {
+    const projectId = parseInt(req.query.projectId, 10);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+    if (!assertProjectAllowed(req, res, projectId)) return;
+    const result = await getPool().request().input("pid", sql.Int, projectId).query(`
+      SELECT a.Id, a.ApplicationNo, a.ApplicantName, a.Mobile, a.Status,
+             (SELECT TOP 1 b.BookingNo FROM dbo.CrmBooking b
+               WHERE b.ApplicationId = a.Id AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected')
+               ORDER BY b.Id DESC) AS BookingNo
+      FROM dbo.CrmApplication a
+      WHERE a.ProjectId = @pid AND a.IsActive = 1 AND a.Status NOT IN ('Rejected', 'Cancelled', 'Expired')
+      ORDER BY a.ApplicantName
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[unit-matrix] GET /customers error:", err.message);
+    res.status(500).json({ error: "Could not load the customers." });
   }
 });
 

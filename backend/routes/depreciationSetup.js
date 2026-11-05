@@ -1,18 +1,24 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests" } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 
 router.use(authenticateToken);
 
+// A yearly rate is a percentage of cost: 0-100 (the column would take up to 999.99).
+const rateOk = (v) => { const n = parseFloat(v); return Number.isFinite(n) && n >= 0 && n <= 100; };
+
 // GET / — all records (optionally ?status=Active)
-router.get("/", async (req, res) => {
+// The Fixed Asset form also reads the active rates, so the asset register's own right is enough.
+const DEP_READ_PAGES = ["depreciation-setup", "fixed-asset-record"];
+
+router.get("/", requireAnyPageRight(DEP_READ_PAGES, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
@@ -30,7 +36,7 @@ router.get("/", async (req, res) => {
 });
 
 // GET /active — only Active records (used by Fixed Asset form dropdown)
-router.get("/active", async (req, res) => {
+router.get("/active", requireAnyPageRight(DEP_READ_PAGES, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -50,6 +56,7 @@ router.post("/", requirePageRight("depreciation-setup", "create"), async (req, r
   const { assetCategory, depreciationType, depreciationRate, effectiveFrom, status } = req.body;
   if (!assetCategory || depreciationRate == null || !effectiveFrom)
     return res.status(400).json({ error: "assetCategory, depreciationRate and effectiveFrom are required" });
+  if (!rateOk(depreciationRate)) return res.status(400).json({ error: "Depreciation rate must be between 0 and 100%" });
 
   try {
     const pool = getPool();
@@ -86,6 +93,8 @@ router.put("/:id", requirePageRight("depreciation-setup", "edit"), async (req, r
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   const { assetCategory, depreciationType, depreciationRate, effectiveFrom, status } = req.body;
+  if (depreciationRate != null && depreciationRate !== "" && !rateOk(depreciationRate))
+    return res.status(400).json({ error: "Depreciation rate must be between 0 and 100%" });
 
   try {
     const pool = getPool();

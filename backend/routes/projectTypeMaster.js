@@ -23,16 +23,18 @@
 
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const allowRoles = require("../middleware/role");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+// The page's own rights (admins always pass). Writes used to be admin-only while the page offered New / Edit /
+// Delete to anyone holding them, so everyone else got "Forbidden".
+const PAGE = "project-type-master";
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 const SELECT = `
   SELECT t.Id, t.Code, t.Name, t.Description,
@@ -107,7 +109,44 @@ router.get("/impact", async (req, res) => {
   }
 });
 
-router.post("/", adminOnly, async (req, res) => {
+// What changing a type's switches would break in the projects / blocks that
+// use it (block's own type, else its project's): unsold units whose kind the
+// new switches no longer sell, or a layout change (floors <-> plots) under
+// blocks that already have floors / plots. Empty string = safe.
+async function switchConflicts(pool, typeId, next) {
+  const commercialCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c")).recordset[0].c != null;
+  const r = await pool.request()
+    .input("t", sql.Int, typeId)
+    .input("floors", sql.Bit, next.floors).input("land", sql.Bit, next.land).input("constr", sql.Bit, next.constr)
+    .input("resi", sql.Bit, next.resi).input("comm", sql.Bit, next.comm)
+    .query(`
+      WITH blk AS (
+        SELECT b.Id, b.ProjectId FROM dbo.BlockMaster b JOIN dbo.enterprise e ON e.id = b.ProjectId
+        WHERE b.IsActive = 1 AND COALESCE(b.ProjectTypeId, e.project_type_id) = @t
+      )
+      SELECT Reason, COUNT(*) AS N FROM (
+        SELECT CASE
+          WHEN ISNULL(k.IsLand, 0) = 1 THEN CASE WHEN @land = 0 THEN 'land unit(s)' END
+          WHEN @constr = 0 THEN 'constructed unit(s)'
+          ${commercialCol ? "WHEN ISNULL(k.IsCommercial, 0) = 1 AND @comm = 0 THEN 'commercial unit(s)' WHEN ISNULL(k.IsCommercial, 0) = 0 AND @resi = 0 THEN 'residential unit(s)'" : ""}
+        END AS Reason
+        FROM dbo.UnitMaster u JOIN blk ON blk.Id = u.BlockId
+        LEFT JOIN dbo.CrmConstructedAssetKind k ON k.Code = ISNULL(u.UnitKind, 'FLAT')
+        WHERE u.IsActive = 1 AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1)
+        UNION ALL
+        SELECT CASE WHEN @land = 0 THEN 'plot(s)' END
+        FROM dbo.PlotMaster p JOIN blk ON blk.Id = p.BlockId WHERE p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+        UNION ALL
+        SELECT CASE WHEN @floors = 0 THEN 'block(s) that already have floors' END
+        FROM blk WHERE EXISTS (SELECT 1 FROM dbo.CrmProjectAutoSetupFloor f WHERE f.BlockId = blk.Id AND f.IsActive = 1)
+        UNION ALL
+        SELECT CASE WHEN @floors = 1 THEN 'block(s) that already have plots' END
+        FROM blk WHERE EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.BlockId = blk.Id AND p.IsActive = 1)
+      ) x WHERE Reason IS NOT NULL GROUP BY Reason`);
+  return r.recordset.map((x) => `${x.N} ${x.Reason}`).join(", ");
+}
+
+router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   const b = req.body || {};
   const name = String(b.name || b.Name || "").trim();
   const code = String(b.code || b.Code || "").trim().toUpperCase();
@@ -148,7 +187,7 @@ router.post("/", adminOnly, async (req, res) => {
   }
 });
 
-router.put("/:id", adminOnly, async (req, res) => {
+router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const b = req.body || {};
@@ -162,6 +201,26 @@ router.put("/:id", adminOnly, async (req, res) => {
     const dup = await pool.request().input("c", sql.NVarChar(30), code).input("id", sql.Int, id)
       .query("SELECT TOP 1 Id FROM dbo.ProjectTypeMaster WHERE Code = @c AND IsActive = 1 AND Id <> @id");
     if (dup.recordset.length) return res.status(400).json({ error: `Code "${code}" is already in use` });
+
+    // Switching a type off from the edit form is a delete by another road: refused the same way while in use.
+    if (!toBit(b.isActive ?? b.IsActive, 1)) {
+      const used = (await pool.request().input("id", sql.Int, id).query(`
+        SELECT (SELECT COUNT(*) FROM dbo.enterprise WHERE project_type_id = @id) AS Projects,
+               (SELECT COUNT(*) FROM dbo.BlockMaster WHERE ProjectTypeId = @id) AS Blocks`)).recordset[0];
+      if (used.Projects > 0 || used.Blocks > 0) {
+        return res.status(400).json({ error: `In use by ${used.Projects} project(s) and ${used.Blocks} block(s) — reassign them before making this type inactive.` });
+      }
+    }
+
+    // The type's switches can't be changed under units / layouts that already depend on them.
+    const usageReady = (await pool.request().query("SELECT COL_LENGTH('dbo.ProjectTypeMaster', 'SellsCommercial') AS c")).recordset[0].c != null;
+    const clash = await switchConflicts(pool, id, {
+      floors: toBit(b.hasFloors ?? b.HasFloors, 1), land: toBit(b.sellsLand ?? b.SellsLand, 0),
+      constr: toBit(b.sellsConstruction ?? b.SellsConstruction, 1),
+      resi: usageReady ? toBit(b.sellsResidential ?? b.SellsResidential, 1) : 1,
+      comm: usageReady ? toBit(b.sellsCommercial ?? b.SellsCommercial, 0) : 1,
+    });
+    if (clash) return res.status(400).json({ error: `Projects using this type have ${clash} that these switches would no longer allow — change those first, or create a new type.` });
 
     const r = await pool.request()
       .input("id", sql.Int, id)
@@ -198,7 +257,7 @@ router.put("/:id", adminOnly, async (req, res) => {
 // Soft delete, and only when nothing references it. A type still in use decides
 // how those projects price and tax their units; removing it under them would
 // silently move them back to the legacy high-rise behaviour.
-router.delete("/:id", adminOnly, async (req, res) => {
+router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {

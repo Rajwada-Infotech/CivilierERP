@@ -59,6 +59,10 @@ async function checkGstExemption(pool, bookingId) {
       WHERE m.BookingId = @bid
       UNION ALL
       SELECT MIN(ReceivedDate) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+        AND ISNULL(Status, N'') NOT IN (N'Bounced', N'Held', N'Void', N'Cancelled', N'Refunded')
+      UNION ALL
+      SELECT MIN(ReceivedDate) FROM dbo.CrmMoneyReceipt
+      WHERE BookingId = @bid AND Status NOT IN (N'Cancelled', N'Bounced')
     ) x
   `);
   const earliestPaid = paidRow.recordset[0]?.EarliestPaid || null;
@@ -90,56 +94,44 @@ async function getHsnRate(pool, hcode) {
 // active land booking; a villa sold together with its land deliberately
 // resolves false rather than being misclassified as a works contract.
 async function resolveLandOwnedByBookingCustomer(pool, bookingId) {
-  const result = await pool.request().input("bid", sql.Int, bookingId).query(`
-    -- Every constructed unit on this booking, not just its primary one.
-    --
-    -- This used to read b.UnitId alone. Migration 505 made a booking a header
-    -- with CrmBookingUnit lines, so a booking carrying several villas would
-    -- have had only its primary unit examined — the rest silently escaping the
-    -- works-contract test, and once a CONSTRUCTION_ON_CUSTOMER_LAND rule
-    -- exists, silently taking the wrong rate.
-    --
-    -- The UNION's second arm is the pre-485 fallback and is guarded on the
-    -- absence of lines, so a booking with lines cannot also pull in its
-    -- primary UnitId and double-count. UNION (not UNION ALL) de-duplicates the
-    -- same unit appearing twice.
-    WITH BookingUnits AS (
-      SELECT l.UnitId
-      FROM dbo.CrmBookingUnit l
-      WHERE l.BookingId = @bid AND l.Status = N'Active' AND l.UnitId IS NOT NULL
-      UNION
-      SELECT b.UnitId
-      FROM dbo.CrmBooking b
-      WHERE b.Id = @bid AND b.UnitId IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM dbo.CrmBookingUnit l2
-          WHERE l2.BookingId = @bid AND l2.Status = N'Active'
-        )
-    ),
-    BuyingCustomer AS (
-      SELECT a.CustomerId
-      FROM dbo.CrmBooking b
-      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE b.Id = @bid
-    )
+  // Every constructed unit on this booking, not just its primary one: lines
+  // when it has them (migration 505), else its primary UnitId (pre-485).
+  const r = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT l.UnitId FROM dbo.CrmBookingUnit l
+    WHERE l.BookingId = @bid AND l.Status = N'Active' AND l.UnitId IS NOT NULL
+    UNION
+    SELECT b.UnitId FROM dbo.CrmBooking b
+    WHERE b.Id = @bid AND b.UnitId IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingUnit l2 WHERE l2.BookingId = @bid AND l2.Status = N'Active');
+    SELECT a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @bid;
+  `)).recordsets;
+  return landOwnedByCustomer(pool, r[0].map((x) => x.UnitId), r[1][0]?.CustomerId ?? null);
+}
+
+/**
+ * Whether these constructed units stand on land the customer already owns:
+ * true only when every source plot behind them (PlotMaster.ConvertedUnitId) is
+ * held by this customer under an active land booking. A villa sold together
+ * with its land resolves false rather than being misclassified as a works
+ * contract. Used for a booking (above) and for a quote before one exists.
+ */
+async function landOwnedByCustomer(pool, unitIds, customerId) {
+  const ids = (unitIds || []).map(Number).filter(Number.isInteger);
+  if (!ids.length || customerId == null) return false;
+  const row = (await pool.request().input("cid", sql.Int, customerId).query(`
     SELECT
+      (SELECT COUNT(DISTINCT p.Id) FROM dbo.PlotMaster p
+         WHERE p.IsActive = 1 AND p.ConvertedUnitId IN (${ids.join(",")})) AS SourcePlotCount,
       (SELECT COUNT(DISTINCT p.Id)
          FROM dbo.PlotMaster p
-         JOIN BookingUnits bu ON bu.UnitId = p.ConvertedUnitId
-         WHERE p.IsActive = 1) AS SourcePlotCount,
-      (SELECT COUNT(DISTINCT p.Id)
-         FROM dbo.PlotMaster p
-         JOIN BookingUnits bu ON bu.UnitId = p.ConvertedUnitId
          JOIN dbo.CrmBookingPlot bp ON bp.PlotId = p.Id AND bp.Status = N'Active'
          JOIN dbo.CrmBooking landBooking ON landBooking.Id = bp.BookingId
          JOIN dbo.CrmApplication landApplication ON landApplication.Id = landBooking.ApplicationId
-         WHERE p.IsActive = 1
+         WHERE p.IsActive = 1 AND p.ConvertedUnitId IN (${ids.join(",")})
            AND landBooking.IsActive = 1
-           AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
-           AND landApplication.CustomerId = (SELECT CustomerId FROM BuyingCustomer)
-      ) AS CustomerOwnedPlotCount
-  `);
-  const row = result.recordset[0];
+           AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
+           AND landApplication.CustomerId = @cid) AS CustomerOwnedPlotCount
+  `)).recordset[0];
   const sourceCount = Number(row?.SourcePlotCount || 0);
   return sourceCount > 0 && Number(row?.CustomerOwnedPlotCount || 0) === sourceCount;
 }
@@ -203,6 +195,41 @@ async function resolveExtraWorkHsn(pool, { landSale = false } = {}) {
   return { hsnCode: EXTRA_WORK_HSN_CODE, fromRule: false, ruleName: null };
 }
 
+/**
+ * The Unit + Parking HSN and its rate for a sale — the bracket applied once,
+ * here, for a real booking (recalculateBookingGst) and for the price shown on
+ * the application form before the booking exists (crmPriceQuote.js). Outside
+ * GST (a completed building, or land) there is no HSN and the rate is 0.
+ */
+async function resolveUnitParkingRate(pool, { constructionValue, parkingBase, outsideGst, landOwnedByCustomer = null, commercial = null }) {
+  if (outsideGst) return { hsnCode: null, rate: 0 };
+  // The bracket is an affordable-HOUSING test, so it sees construction value
+  // and parking only — never land.
+  const bracketBase = round2(Number(constructionValue || 0) + Number(parkingBase || 0));
+  const { hsnCode } = await resolveUnitParkingHsn(pool, bracketBase, { landOwnedByCustomer, commercial });
+  return { hsnCode, rate: await getHsnRate(pool, hsnCode) };
+}
+
+/** GST on one priced amount at a rate (%), to the paisa — a parking slot, an extra charge. */
+const gstOn = (amount, ratePercent) => round2(Number(amount || 0) * Number(ratePercent || 0) / 100);
+
+/**
+ * What a sale adds up to, from its parts. Pure — the one formula behind a
+ * booking's stored totals and the application form's preview.
+ *
+ *   Grand Total = Unit + Unit GST (construction part only) + Parking (with GST)
+ *               + Extra Charges (with GST) - approved credit notes
+ */
+function saleTotals({ totalValue, constructionValue, rate, parkingBase, parkingTotal, extraChargesTotal, extraWorkGstAmount, creditNoteTotal = 0, creditNoteGst = 0 }) {
+  const unitGstAmount = gstOn(constructionValue, rate);
+  // From the parking rows' own rounding, so it matches what Grand Total collects.
+  const parkingGstAmount = round2(Number(parkingTotal || 0) - Number(parkingBase || 0));
+  const unitParkingGstAmount = round2(unitGstAmount + parkingGstAmount);
+  const totalGstAmount = round2(unitParkingGstAmount + Number(extraWorkGstAmount || 0) - Number(creditNoteGst || 0));
+  const grandTotal = round2(Number(totalValue || 0) + unitGstAmount + Number(parkingTotal || 0) + Number(extraChargesTotal || 0) - Number(creditNoteTotal || 0));
+  return { unitGstAmount, parkingGstAmount, unitParkingGstAmount, totalGstAmount, grandTotal };
+}
+
 // The single source of truth for ParkingTotal/ExtraChargesTotal/GrandTotal
 // AND the fixed HSN-driven GST — merged into one function (rather than two
 // separate rollups) so milestones are always redistributed
@@ -250,11 +277,6 @@ async function recalculateBookingGst(pool, bookingId) {
   const split = await getBookingLandSplit(pool, bookingId, totalValue);
   const outsideGst = exempt || split.isPureLand;
 
-  // The bracket is an affordable-HOUSING test, so it sees construction value
-  // only. For an all-flat booking constructionValue === totalValue and this is
-  // byte-for-byte the previous behaviour.
-  const bracketBase = split.constructionValue + parkingBase;
-
   // WHICH HSN applies now comes from dbo.CrmGstRule (migration 507) so the
   // threshold and the works-contract question are editable master data rather
   // than constants in this file. The RATE still comes from dbo.HSN via
@@ -264,13 +286,11 @@ async function recalculateBookingGst(pool, bookingId) {
   // nothing matches, behaviour is exactly what it was before 487. A GST engine
   // that stopped taxing because someone deactivated a master row would be far
   // worse than one that carried on as it always had.
-  let hsnCode = null;
-  if (!outsideGst) {
-    const landOwnedByCustomer = await resolveLandOwnedByBookingCustomer(pool, bookingId);
-    const commercial = await getBookingCommercial(pool, bookingId);
-    hsnCode = (await resolveUnitParkingHsn(pool, bracketBase, { landOwnedByCustomer, commercial })).hsnCode;
-  }
-  const unitParkingRate = outsideGst ? 0 : await getHsnRate(pool, hsnCode);
+  const { hsnCode, rate: unitParkingRate } = await resolveUnitParkingRate(pool, {
+    constructionValue: split.constructionValue, parkingBase, outsideGst,
+    landOwnedByCustomer: outsideGst ? null : await resolveLandOwnedByBookingCustomer(pool, bookingId),
+    commercial: outsideGst ? null : await getBookingCommercial(pool, bookingId),
+  });
 
   // Reprice every active parking allotment to this same resolved rate (0
   // when exempt) — Parking is part of the Unit+Parking bracket, not
@@ -325,31 +345,15 @@ async function recalculateBookingGst(pool, bookingId) {
   const extraChargesTotal = Number(extraRow.recordset[0].Total || 0);
   const extraWorkGstAmount = round2(extraRow.recordset[0].Gst || 0);
 
-  // Unit's own GST portion (tax-exclusive base -> add tax on top, same
-  // convention Parking/Extra Charges already use). Computed on its own
-  // (not just implied inside the combined unitParkingGstAmount below) so it
-  // can be added into grandTotal explicitly instead of only being displayed.
-  // Charged on the CONSTRUCTION half only. Identical to the old
-  // `totalValue * rate` for every all-flat booking, and the difference that
-  // matters for a land+villa package: the land half is never taxed.
-  const unitGstAmount = round2(split.constructionValue * unitParkingRate / 100);
-
-  // unitParkingGstAmount is the combined Unit+Parking tax figure shown to
-  // the customer as one bracket-level number — Unit's portion (above) plus
-  // whatever Parking's repriced rows actually summed to (parkingTotal minus
-  // its own pre-tax base), computed from the real per-row rounding rather
-  // than re-deriving it from the combined base, so this always matches what
-  // grandTotal actually collects to the paisa.
-  const parkingGstAmount = round2(parkingTotal - parkingBase);
-  const unitParkingGstAmount = round2(unitGstAmount + parkingGstAmount);
-  const totalGstAmount = round2(unitParkingGstAmount + extraWorkGstAmount);
-
-  // GrandTotal = Unit (base + its GST) + Parking (base + its GST, already
-  // inclusive in parkingTotal) + Extra Charges (base + its GST, already
-  // inclusive in extraChargesTotal). Every rupee of tax shown anywhere on
-  // this booking is now actually inside the amount the milestone schedule
-  // collects.
-  const grandTotal = round2(totalValue + unitGstAmount + parkingTotal + extraChargesTotal);
+  // What approved credit notes took off this booking (migration 567) stays
+  // off through any re-price — the reduced value is the agreed value now.
+  const cn = (await pool.request().input("bid", sql.Int, bookingId).query(
+    "SELECT ISNULL(CreditNoteTotal, 0) AS T, ISNULL(CreditNoteGst, 0) AS G FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0] || { T: 0, G: 0 };
+  const { unitGstAmount, parkingGstAmount, unitParkingGstAmount, totalGstAmount, grandTotal } = saleTotals({
+    totalValue, constructionValue: split.constructionValue, rate: unitParkingRate,
+    parkingBase, parkingTotal, extraChargesTotal, extraWorkGstAmount,
+    creditNoteTotal: Number(cn.T || 0), creditNoteGst: Number(cn.G || 0),
+  });
 
   await pool.request()
     .input("bid", sql.Int, bookingId)
@@ -385,6 +389,17 @@ async function recalculateBookingGst(pool, bookingId) {
     landValue: split.landValue,
     constructionValue: split.constructionValue,
   };
+}
+
+/**
+ * The GST rate an extra charge added to this booking ends up at: none on a
+ * completed building (recalculateBookingGst zeroes it), else the Extra Work
+ * rule — a plot sale's own one on land. The booking page previews with this.
+ */
+async function extraWorkRateForBooking(pool, bookingId) {
+  if ((await checkGstExemption(pool, bookingId)).exempt) return 0;
+  const landSale = await isLandSale(pool, { bookingId });
+  return getHsnRate(pool, (await resolveExtraWorkHsn(pool, { landSale })).hsnCode);
 }
 
 /**
@@ -432,13 +447,43 @@ async function resolveResaleFeeGst(pool, feeAmount, { landSale = false } = {}) {
   return { hsnCode: resolved.hsnCode, rate, gstAmount: Math.round(fee * rate) / 100 };
 }
 
+/**
+ * A shop / office can't be sold until its GST is set up. Commercial property
+ * is taxed differently from homes, but with no rule marked ForCommercial = 1 a
+ * commercial unit silently takes a residential rule (rules left blank apply
+ * to both) or the residential constant fallback — under-charging GST the
+ * company then owes itself. So the sale is refused up front, before anything
+ * is written, naming what to set up. Units not of a commercial kind pass.
+ */
+async function assertCommercialGstReady(pool, unitIds) {
+  const ids = (unitIds || []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return;
+  const commercialKinds = await require("./projectType").loadCommercialKinds(pool);
+  if (!commercialKinds.size) return;
+  const units = (await pool.request().query(
+    `SELECT UnitName, UnitKind FROM dbo.UnitMaster WHERE Id IN (${ids.join(",")})`)).recordset
+    .filter((u) => commercialKinds.has(String(u.UnitKind || "").toUpperCase()));
+  if (!units.length) return;
+  const ready = (await pool.request().input("a", sql.NVarChar(50), APPLIES_TO.UNIT_PARKING).query(
+    "SELECT TOP 1 1 AS x FROM dbo.CrmGstRule WHERE IsActive = 1 AND AppliesTo = @a AND ForCommercial = 1")).recordset.length;
+  if (!ready) {
+    throw new GstSetupError(`${units.map((u) => u.UnitName).join(", ")} ${units.length === 1 ? "is" : "are"} commercial, and no commercial GST rule is set up yet. Add an active Unit + Parking rule marked "Commercial" in the GST rules master (with its HSN), then book.`);
+  }
+}
+
 module.exports = {
   isLandSale,
   resolveResaleFeeGst,
   GstSetupError,
+  assertCommercialGstReady,
   resolveUnitParkingHsn,
   resolveLandOwnedByBookingCustomer,
+  landOwnedByCustomer,
   resolveExtraWorkHsn,
+  extraWorkRateForBooking,
+  resolveUnitParkingRate,
+  saleTotals,
+  gstOn,
   recalculateBookingGst,
   checkGstExemption,
   getHsnRate,

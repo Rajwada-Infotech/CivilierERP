@@ -1,11 +1,12 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CalendarTick } from "iconsax-react";
+import { CalendarTick, Calendar1, Timer1 } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell, HR_GRADIENT } from "@/components/hrpayroll/HrPayrollShell";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { HrSkeleton } from "@/components/hrpayroll/HrUi";
 import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent, type RecordWithId } from "@/components/MasterPage";
 import { getEmployeeOptions } from "@/api/employeeMasterApi";
 import {
@@ -278,15 +279,31 @@ const AttendanceLeaveOvertime: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "HR and Payroll", "Attendance / Leave / Overtime"]} />
       <HrPayrollShell title="Attendance / Leave / Overtime" subtitle="Daily attendance, leave requests, and overtime hours per employee" icon={CalendarTick}>
         <Tabs defaultValue="attendance">
-          <TabsList>
-            <TabsTrigger value="attendance">Attendance</TabsTrigger>
-            <TabsTrigger value="leave">Leave</TabsTrigger>
-            <TabsTrigger value="overtime">Overtime</TabsTrigger>
+          {/* Big tab cards: what each list is + how many records it has */}
+          <TabsList className="!h-auto !bg-transparent !p-0 grid w-full grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+            {([
+              ["attendance", "Attendance", "Daily check-in / check-out", attendanceRows.length, CalendarTick],
+              ["leave", "Leave", "Leave requests & days", leaveRows.length, Calendar1],
+              ["overtime", "Overtime", "Extra hours per employee", overtimeRows.length, Timer1],
+            ] as const).map(([v, label, hint, n, Icon]) => (
+              <TabsTrigger
+                key={v}
+                value={v}
+                className="group !justify-start gap-3 rounded-2xl border border-border bg-card/80 px-4 py-3.5 text-left shadow-sm transition-all data-[state=active]:!shadow-md data-[state=active]:border-transparent hr-tab-card"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: HR_GRADIENT }}><Icon size={18} /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-heading font-semibold text-foreground">{label}</span>
+                  <span className="block text-[0.6875rem] text-muted-foreground truncate">{hint}</span>
+                </span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold tabular-nums text-foreground">{n}</span>
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           <TabsContent value="attendance">
             {attendanceLoading ? (
-              <div className="p-6 text-muted-foreground">Loading attendance...</div>
+              <HrSkeleton />
             ) : (
               <MasterPage
                 title="Attendance"
@@ -304,7 +321,7 @@ const AttendanceLeaveOvertime: React.FC = () => {
 
           <TabsContent value="leave">
             {leaveLoading ? (
-              <div className="p-6 text-muted-foreground">Loading leave records...</div>
+              <HrSkeleton />
             ) : (
               <MasterPage
                 title="Leave"
@@ -322,7 +339,7 @@ const AttendanceLeaveOvertime: React.FC = () => {
 
           <TabsContent value="overtime">
             {overtimeLoading ? (
-              <div className="p-6 text-muted-foreground">Loading overtime records...</div>
+              <HrSkeleton />
             ) : (
               <MasterPage
                 title="Overtime"

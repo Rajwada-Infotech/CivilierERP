@@ -1,19 +1,23 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const logger = require("../logger");
 const { getPool, sql } = require("../db");
-const { projectPredicate } = require("../services/projectScope");
+const { projectPredicate, ebResolvedProjectSql, paymentProjectSql } = require("../services/projectScope");
+const { enrichInboxRows } = require("../services/inboxEnrichment");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   MODULE_MAP,
-  MODULE_APPROVER_ROLE_OVERRIDES,
-  APPROVER_ROLES,
   getWorkflow,
   resolveCurrentLevel,
-  hasApprovalInboxEditRight,
+  isApproverFor,
 } = require("../services/approvalService");
+
+function isSuperAdminRole(role) {
+  const r = String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return r === "super_admin" || r === "superadmin" || r === "sa";
+}
 
 // ── Per-record visibility filter ────────────────────────────────────────────
 // Before this, GET / returned every Pending row in the system to anyone
@@ -57,13 +61,38 @@ const {
 // mis-resolved, even if they can't act on it from the wrong level. The
 // actual approve/reject gate in transition() is untouched and still checks
 // the real current level — this only widens what shows up in the list.
+// Same rule as approvalService.userMatchesLevel: a level names the viewer's
+// role or the viewer. A level naming nobody admits nobody.
 function isNamedOnLevel(levelDef, role, viewerUserId) {
-  const hasRoles = Array.isArray(levelDef?.roles) && levelDef.roles.length > 0;
-  const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
-  if (!hasRoles && !hasUsers) return null; // uncustomised — caller falls back
-  const roleMatch = hasRoles && levelDef.roles.map((r) => String(r).toLowerCase()).includes(role);
-  const userMatch = hasUsers && viewerUserId != null && levelDef.userIds.includes(viewerUserId);
-  return roleMatch || userMatch;
+  if (isSuperAdminRole(role)) return true;
+  const roles = Array.isArray(levelDef?.roles) ? levelDef.roles.map((r) => String(r).toLowerCase()) : [];
+  const ids = Array.isArray(levelDef?.userIds) ? levelDef.userIds.map(Number) : [];
+  return (role !== "" && roles.includes(role)) || (viewerUserId != null && ids.includes(Number(viewerUserId)));
+}
+
+// A Civil Work DPR activity's own approval levels (ApprovalLevelsJson) and the first one not yet satisfied.
+// null when the activity has no current assignment or no levels.
+async function dprApprovalLevels(rungId) {
+  const pool = getPool();
+  const a = await pool.request().input("rungId", sql.Int, rungId).query(
+    "SELECT Id, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+  );
+  if (!a.recordset.length) return null;
+  let levels = [];
+  try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
+  if (!levels.length) return null;
+
+  const approvalsRes = await pool.request().input("aid", sql.Int, a.recordset[0].Id).query(
+    "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+  );
+  const approvals = approvalsRes.recordset;
+  const satisfied = (level) => {
+    const approvedIds = new Set(approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)));
+    if (level.mode === "any") return level.userIds.some((id) => approvedIds.has(Number(id)));
+    return level.userIds.length > 0 && level.userIds.every((id) => approvedIds.has(Number(id)));
+  };
+  const index = levels.findIndex((l) => !satisfied(l));
+  return { levels, index, currentLevel: index >= 0 ? levels[index] : null };
 }
 
 // Returns { visible, canAct, currentLevel?, totalLevels? } rather than a
@@ -77,9 +106,18 @@ function isNamedOnLevel(levelDef, role, viewerUserId) {
 // MRs had been approved past Level 1 — before this, Level-2-only approvers
 // correctly couldn't act on the other 8 yet, but also couldn't see them
 // coming, which read as "the inbox is missing records" (2026-09-22).
+// Super Admin has parallel approval rights for every approval across all modules.
+// admin / super_admin see every pending item (oversight), and canAct is true whenever they match or are Super Admin.
 async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) {
+  const r = await whoMayAct(item, viewerRole, viewerUserId, workflowCache);
   const role = (viewerRole || "").toLowerCase();
-  if (role === "admin" || role === "super_admin") return { visible: true, canAct: true };
+  if (isSuperAdminRole(role)) return { ...r, visible: true, canAct: true };
+  if (!r.visible && role === "admin") return { ...r, visible: true, canAct: false };
+  return r;
+}
+
+async function whoMayAct(item, viewerRole, viewerUserId, workflowCache) {
+  const role = (viewerRole || "").toLowerCase();
 
   // Work Allocation's per-engineer confirmation isn't a document approval by
   // a manager — it's one specific engineer confirming their own task
@@ -87,7 +125,8 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   // role or Approval Setup workflow — there's no meaningful way to "name" a
   // whichever-engineer-happens-to-be-on-this-row approver in Approval Setup.
   if (item.Module === "work-allocation-engineer") {
-    const visible = viewerUserId != null && Number(item.AssigneeUserId) === Number(viewerUserId);
+    const isSA = isSuperAdminRole(role);
+    const visible = isSA || (viewerUserId != null && Number(item.AssigneeUserId) === Number(viewerUserId));
     return { visible, canAct: visible };
   }
 
@@ -101,28 +140,15 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   // "isNamedOnWorkflow" fallback below); actionable only for the level
   // that's actually next in line.
   if (item.Module === "civilworkdpr-approval") {
+    const isSA = isSuperAdminRole(role);
     const rungId = parseInt(item.RecordId, 10);
-    if (!Number.isFinite(rungId) || viewerUserId == null) return { visible: false, canAct: false };
+    if (!Number.isFinite(rungId)) return { visible: false, canAct: false };
+    if (isSA) return { visible: true, canAct: true };
+    if (viewerUserId == null) return { visible: false, canAct: false };
     try {
-      const pool = getPool();
-      const a = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Id, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
-      );
-      if (!a.recordset.length) return { visible: false, canAct: false };
-      let levels = [];
-      try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
-      if (!levels.length) return { visible: false, canAct: false };
-
-      const approvalsRes = await pool.request().input("aid", sql.Int, a.recordset[0].Id).query(
-        "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
-      );
-      const approvals = approvalsRes.recordset;
-      const satisfied = (level) => {
-        const approvedIds = new Set(approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)));
-        if (level.mode === "any") return level.userIds.some((id) => approvedIds.has(Number(id)));
-        return level.userIds.length > 0 && level.userIds.every((id) => approvedIds.has(Number(id)));
-      };
-      const currentLevel = levels.find((l) => !satisfied(l));
+      const dpr = await dprApprovalLevels(rungId);
+      if (!dpr) return { visible: false, canAct: false };
+      const { levels, currentLevel } = dpr;
       if (!currentLevel) return { visible: false, canAct: false }; // fully cleared — shouldn't normally still appear
 
       const named = currentLevel.userIds.map(Number).includes(Number(viewerUserId));
@@ -135,24 +161,20 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   }
 
   const map = MODULE_MAP[item.Module];
-  const fallbackRoles = MODULE_APPROVER_ROLE_OVERRIDES[item.Module] || APPROVER_ROLES;
-  const fallbackVisible = async () =>
-    fallbackRoles.includes(role) || (await hasApprovalInboxEditRight(viewerUserId));
 
-  // Modules the aggregator lists but that aren't in the shared MODULE_MAP
-  // (e.g. received-payment, crm-money-receipts — they never went through
-  // approvalService.js's level engine) keep today's page-right-only
-  // visibility; there's no per-level data to filter on.
-  if (!map) return { visible: true, canAct: true };
-
-  const workflow = workflowCache.get(item.Module);
-  if (!workflow || !workflow.LevelDefs?.length) {
-    const visible = await fallbackVisible();
-    return { visible, canAct: visible };
+  // Gates outside the level engine (received-payment,
+  // crm-booking-amendment...) are single-step: level 1 in Approval Setup.
+  if (!map) {
+    const ok = await isApproverFor(item.Module, viewerUserId, role);
+    return { visible: ok, canAct: ok };
   }
 
+  // No workflow in Approval Setup: nobody may act on it.
+  const workflow = workflowCache.get(item.Module);
+  if (!workflow || !workflow.LevelDefs?.length) return { visible: false, canAct: false };
+
   const isNamedOnWorkflow = workflow.LevelDefs.some(
-    (l) => isNamedOnLevel(l, role, viewerUserId) === true,
+    (l) => isNamedOnLevel(l, role, viewerUserId),
   );
 
   const tableName = map.table.replace("dbo.", "");
@@ -174,18 +196,7 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   }
 
   const levelDef = workflow.LevelDefs[currentLevel - 1];
-  if (!levelDef) {
-    const visible = await fallbackVisible();
-    return { visible, canAct: visible };
-  }
-
-  const matched = isNamedOnLevel(levelDef, role, viewerUserId);
-  // Level left uncustomised — no named roles or people — falls back to the
-  // module's default approver set, exactly like transition()'s own gate does.
-  if (matched === null) {
-    const visible = await fallbackVisible();
-    return { visible, canAct: visible };
-  }
+  const matched = !!levelDef && isNamedOnLevel(levelDef, role, viewerUserId);
   if (matched) return { visible: true, canAct: true, currentLevel, totalLevels };
 
   // Not a match on the level it currently resolved to, but this viewer IS
@@ -195,6 +206,72 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   // current level for the actual approve/reject action — rather than let it
   // vanish for one of this module's own approvers.
   return { visible: isNamedOnWorkflow, canAct: false, currentLevel, totalLevels };
+}
+
+const levelLabel = (defs, level, total) => defs?.[level - 1]?.label || (level === total ? "Final Level" : `Level ${level}`);
+
+// Where a record stands in its approval workflow, for the inbox row:
+//   stage — the step a Pending record is waiting on, { level, total, label } ("Pending · Final Level");
+//   steps — the decisions taken so far in this approval cycle, one per approver: { level, label, status, by, at }.
+// Every module with an Approval Setup workflow (and a Civil Work DPR activity's own levels) gets it, one step or
+// many. Uses the level visibility already worked out when it can; admins skip that check, so it's resolved here.
+async function approvalProgress(item, visibility, workflowCache) {
+  try {
+    const recordId = parseInt(item.RecordId, 10);
+    if (item.Module === "civilworkdpr-approval") {
+      const dpr = await dprApprovalLevels(recordId);
+      if (!dpr) return null;
+      const total = dpr.levels.length;
+      const dprLabel = (i) => (i === total - 1 ? "Final" : `Step ${i + 1}`);
+      const done = await getPool().request().input("rungId", sql.Int, recordId).query(`
+        SELECT ap.LevelId, ap.ApprovedAt, u.name AS ByName
+        FROM dbo.DependencyActivityApproval ap
+        JOIN dbo.DependencyActivityAssignment daa ON daa.Id = ap.AssignmentId AND daa.IsCurrent = 1
+        LEFT JOIN dbo.users u ON u.id = ap.ApproverUserId
+        WHERE daa.DependencyMasterActivityId = @rungId
+        ORDER BY ap.ApprovedAt`);
+      const steps = done.recordset.map((x) => {
+        const i = dpr.levels.findIndex((l) => l.id === x.LevelId);
+        return { level: i + 1, label: dprLabel(i), status: "Approved", by: x.ByName || null, at: x.ApprovedAt };
+      });
+      const stage = item.Status === "Pending" && dpr.index >= 0 ? { level: dpr.index + 1, total, label: dprLabel(dpr.index) } : null;
+      return { stage, steps };
+    }
+
+    const map = MODULE_MAP[item.Module];
+    const workflow = workflowCache.get(item.Module);
+    if (!map || !workflow?.LevelDefs?.length) return null;
+    const total = workflow.Levels || workflow.LevelDefs.length;
+    const tableName = map.table.replace("dbo.", "");
+
+    let stage = null;
+    if (item.Status === "Pending") {
+      const level = visibility.currentLevel
+        ?? (await resolveCurrentLevel(tableName, recordId, total, workflow.LevelDefs, null, { module: item.Module }));
+      if (level && level <= total) stage = { level, total, label: levelLabel(workflow.LevelDefs, level, total) };
+    }
+
+    // This cycle's decisions: everything after the last "sent for approval" marker (Level 0, Pending).
+    const log = await getPool().request()
+      .input("TableName", sql.NVarChar(100), tableName)
+      .input("RecordId", sql.Int, recordId)
+      .query(`
+        SELECT a.Level, a.ActionStatus, a.ActionAt, COALESCE(u.name, a.ApproverEmail) AS ByName
+        FROM dbo.ApprovalAuditLog a
+        LEFT JOIN dbo.users u ON u.id = a.UserId OR (a.UserId IS NULL AND u.email = a.ApproverEmail)
+        WHERE a.TableName = @TableName AND a.RecordId = @RecordId AND a.Level >= 1
+          AND a.ActionStatus IN ('Approved', 'Rejected')
+          AND a.ActionAt >= ISNULL((SELECT MAX(c.ActionAt) FROM dbo.ApprovalAuditLog c
+                                    WHERE c.TableName = @TableName AND c.RecordId = @RecordId AND c.Level = 0 AND c.ActionStatus = 'Pending'), '1900-01-01')
+        ORDER BY a.ActionAt`);
+    const steps = log.recordset.map((x) => ({
+      level: x.Level, label: levelLabel(workflow.LevelDefs, x.Level, total), status: x.ActionStatus, by: x.ByName || null, at: x.ActionAt,
+    }));
+    return stage || steps.length ? { stage, steps } : null;
+  } catch (err) {
+    logger.warn({ module: item.Module, recordId: item.RecordId, err: err.message }, "approval-inbox: could not work out the approval progress");
+    return null;
+  }
 }
 
 async function filterVisibleToViewer(items, req) {
@@ -215,6 +292,9 @@ async function filterVisibleToViewer(items, req) {
   const results = await Promise.all(
     items.map((item) => isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache)),
   );
+  const progress = await Promise.all(
+    items.map((item, i) => (results[i].visible ? approvalProgress(item, results[i], workflowCache) : null)),
+  );
   const out = [];
   items.forEach((item, i) => {
     const r = results[i];
@@ -222,7 +302,10 @@ async function filterVisibleToViewer(items, req) {
     // _canAct is only attached when it's actually informative (false) —
     // omitted entirely for the common case so existing consumers/tests that
     // don't know about it are unaffected.
-    out.push(r.canAct === false ? { ...item, _canAct: false, _currentLevel: r.currentLevel, _totalLevels: r.totalLevels } : item);
+    const row = r.canAct === false ? { ...item, _canAct: false, _currentLevel: r.currentLevel, _totalLevels: r.totalLevels } : { ...item };
+    if (progress[i]?.stage) row._stage = progress[i].stage;
+    if (progress[i]?.steps?.length) row._steps = progress[i].steps;
+    out.push(row);
   });
   return out;
 }
@@ -273,6 +356,21 @@ const withProjectName = (base, expr) =>
     `${expr} AS ProjectName,`,
   );
 
+// A payment row's person and project, read from the payment itself (the row is queried unaliased, so NewPayment.* qualifies):
+// the party it pays, else its invoice's supplier, a merged invoice's, its contract's party, else the expense ledgers it is
+// paid straight to. Its company is filled by the common layer (services/inboxEnrichment.js).
+const PAYMENT_PAYEE_SQL = `COALESCE(
+  (SELECT TOP 1 ISNULL(ph.DisplayName, ph.LHeadName) FROM dbo.AccountHeadMaster ph WHERE ph.LHeadId = NewPayment.PPartyId),
+  (SELECT TOP 1 pe1.EName FROM dbo.ExpenseBooking pe1 WHERE pe1.EDocNo = NewPayment.PExpenseRef),
+  (SELECT TOP 1 pe2.EName FROM dbo.PaymentExpenseBookingLink pel JOIN dbo.ExpenseBooking pe2 ON pe2.Eid = pel.ExpenseBookingId
+    WHERE pel.PPaymentID = NewPayment.PPaymentID ORDER BY pel.LinkId),
+  (SELECT TOP 1 ISNULL(pc.DisplayName, pc.LHeadName) FROM dbo.Contract ct JOIN dbo.AccountHeadMaster pc ON pc.LHeadId = ct.ContactPartyId
+    WHERE ct.ContractId = NewPayment.ContractId),
+  STUFF((SELECT N', ' + ah.LHeadName FROM dbo.ExpenseHeadAllocation ea JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = ea.LHeadId
+    WHERE ea.SourceType = N'NewPayment' AND ea.SourceId = NewPayment.PPaymentID ORDER BY ea.AllocationId
+    FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N''))`;
+const PAYMENT_PROJECT_LABEL_SQL = `(SELECT TOP 1 pj.name FROM dbo.enterprise pj WHERE pj.id = ${paymentProjectSql("NewPayment")})`;
+
 // Received Payment variant: a CRM payment (CrmBookingId set) is entered in
 // CRM WITHOUT a deposit bank — Accounts fills the bank on the Received
 // Payment page first. Until then it can't be approved (receivedPayment.js
@@ -297,6 +395,15 @@ const NULL_EXTRA_CIVILWORKDPR_APPROVAL = NULL_EXTRA.replace(
 // visibility filter as the list itself instead of a separate raw aggregate.
 function buildInboxQueries(module, projectScope = null) {
   const queries = [];
+  const pp = (col) => projectPredicate(projectScope, col);
+  const scopeIds = projectScope ? projectScope.map(Number).filter(Number.isFinite).join(",") || "NULL" : "";
+  // Stock transfers have no project of their own: visible when either godown belongs to an allowed project.
+  const godownScope = (a) =>
+    projectScope
+      ? ` AND EXISTS (SELECT 1 FROM dbo.Godowns sg WHERE sg.GodownID IN (${a}.FromGodownID, ${a}.ToGodownID) AND sg.ProjectID IN (${scopeIds}))`
+      : "";
+  const ictScope = (a) =>
+    projectScope ? ` AND (${a}.SenderProjectId IN (${scopeIds}) OR ${a}.ReceiverProjectId IN (${scopeIds}))` : "";
 
   if (!module || module === "purchase-orders") {
       queries.push(`
@@ -319,7 +426,7 @@ function buildInboxQueries(module, projectScope = null) {
           UpdatedAt                            AS LastModified
         FROM dbo.PurchaseOrders
         LEFT JOIN dbo.enterprise pr_po ON pr_po.id = dbo.PurchaseOrders.ProjectId
-        WHERE dbo.PurchaseOrders.Status = 'Pending'
+        WHERE dbo.PurchaseOrders.Status = 'Pending'${pp("dbo.PurchaseOrders.ProjectId")}
       `);
     }
 
@@ -344,7 +451,7 @@ function buildInboxQueries(module, projectScope = null) {
           UpdatedAt                            AS LastModified
         FROM dbo.WorkOrderHeader
         LEFT JOIN dbo.enterprise pr_wo ON pr_wo.id = dbo.WorkOrderHeader.ProjectId
-        WHERE dbo.WorkOrderHeader.Status = 'Pending'
+        WHERE dbo.WorkOrderHeader.Status = 'Pending'${pp("dbo.WorkOrderHeader.ProjectId")}
       `);
     }
 
@@ -361,9 +468,9 @@ function buildInboxQueries(module, projectScope = null) {
           PDate                                AS RecordDate,
           ISNULL(Status, 'Draft')              AS Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
-          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          CAST(${PAYMENT_PAYEE_SQL} AS NVARCHAR(255)) AS SupplierName,
           PAmount                              AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, PAYMENT_PROJECT_LABEL_SQL)}
           CAST(PCreatedBy AS NVARCHAR(255))    AS CreatedBy,
           ISNULL(CAST(PApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -371,7 +478,7 @@ function buildInboxQueries(module, projectScope = null) {
           ''                                   AS RejectionNote,
           CAST(NULL AS DATETIME2)              AS LastModified
         FROM dbo.NewPayment
-        WHERE Status = 'Pending' AND SourceCrmRefundId IS NULL
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NULL${pp(paymentProjectSql("NewPayment"))}
       `);
     }
 
@@ -385,15 +492,15 @@ function buildInboxQueries(module, projectScope = null) {
       queries.push(`
         SELECT
           'crm-refund-payment'                 AS Module,
-          'CRM Refund Payment'                 AS ModuleLabel,
+          'Refund payment'                     AS ModuleLabel,
           CAST(PPaymentID AS NVARCHAR)         AS RecordId,
           ISNULL(DocNo, PPaymentName)          AS Reference,
           PDate                                AS RecordDate,
           ISNULL(Status, 'Draft')              AS Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
-          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          CAST(${PAYMENT_PAYEE_SQL} AS NVARCHAR(255)) AS SupplierName,
           PAmount                              AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, PAYMENT_PROJECT_LABEL_SQL)}
           CAST(PCreatedBy AS NVARCHAR(255))    AS CreatedBy,
           ISNULL(CAST(PApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -401,7 +508,7 @@ function buildInboxQueries(module, projectScope = null) {
           ''                                   AS RejectionNote,
           CAST(NULL AS DATETIME2)              AS LastModified
         FROM dbo.NewPayment
-        WHERE Status = 'Pending' AND SourceCrmRefundId IS NOT NULL
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NOT NULL${pp(paymentProjectSql("NewPayment"))}
       `);
     }
 
@@ -415,7 +522,10 @@ function buildInboxQueries(module, projectScope = null) {
           RPDocDate                                       AS RecordDate,
           ISNULL(RPStatus, 'Draft')                       AS Status,
           CAST(NULL AS NVARCHAR)                           AS ContractorName,
-          ISNULL(RPCustomerName, RPReceivedFrom)           AS SupplierName,
+          -- A CRM payment names its booking and what it's for (a milestone, or On Account).
+          ISNULL(RPCustomerName, RPReceivedFrom)
+            + ISNULL(' · ' + (SELECT cb.BookingNo FROM dbo.CrmBooking cb WHERE cb.Id = CrmBookingId)
+              + ISNULL(' · ' + (SELECT cm.MilestoneName FROM dbo.CrmPaymentMilestone cm WHERE cm.Id = CrmMilestoneId), ' · On Account'), '') AS SupplierName,
           RPAmount                                        AS Amount,
           ${NULL_EXTRA_RECEIVED_PAYMENT}
           CAST(RPCreatedBy AS NVARCHAR(255))              AS CreatedBy,
@@ -425,7 +535,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(CAST(RPRejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
           RPUpdatedAt                                     AS LastModified
         FROM dbo.ReceivedPayment
-        WHERE RPStatus = 'Pending'
+        WHERE RPStatus = 'Pending'${pp("RPProjectId")}
       `);
     }
 
@@ -493,7 +603,7 @@ function buildInboxQueries(module, projectScope = null) {
         LEFT JOIN dbo.StockTransfers st ON st.TransferID = grn.SourceTransferID
         LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
         LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
-        WHERE grn.Status = 'Pending'
+        WHERE grn.Status = 'Pending'${pp("po.ProjectId")}
       `);
     }
 
@@ -554,7 +664,7 @@ function buildInboxQueries(module, projectScope = null) {
         LEFT JOIN dbo.users u_created  ON u_created.id = eb.ECreatedBy
         LEFT JOIN dbo.users u_approved ON u_approved.id = eb.EApprovedBy
         LEFT JOIN dbo.enterprise ebpr ON ebpr.id = TRY_CAST(eb.EProjectName AS INT)
-        WHERE eb.EStatus = 'Pending'
+        WHERE eb.EStatus = 'Pending'${pp(ebResolvedProjectSql("eb"))}
           AND NOT (
             ISNULL(eb.ESourceType, '') = 'GRN'
             AND ISNULL(eb.ERemarks, '') LIKE 'Auto-created for remaining items from GRN%'
@@ -582,7 +692,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(CAST(wd.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
           wd.UpdatedAt                         AS LastModified
         FROM dbo.WorkDone wd
-        WHERE ISNULL(wd.Status, 'Draft') = 'Pending'
+        WHERE ISNULL(wd.Status, 'Draft') = 'Pending'${pp("wd.ProjectId")}
       `);
     }
 
@@ -606,13 +716,24 @@ function buildInboxQueries(module, projectScope = null) {
           CAST(b.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                   AS ApprovedBy,
           ''                                   AS ApprovedAt,
-          ''                                   AS RejectedBy,
-          ISNULL(CAST(b.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL((
+            SELECT TOP 1 ApproverEmail
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'dbo.BOQ' AND RecordId = b.BoqID AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                               AS RejectedBy,
+          -- The reviewer's reason for rejecting, NOT the document's own Remarks (those show under Details).
+          ISNULL((
+            SELECT TOP 1 CAST(Note AS NVARCHAR(MAX))
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'dbo.BOQ' AND RecordId = b.BoqID AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                               AS RejectionNote,
           ISNULL(b.UpdatedAt, b.CreatedAt)     AS LastModified
         FROM dbo.BOQ b
         LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
-        WHERE ISNULL(b.Status, 'Draft') = 'Pending'
+        WHERE ISNULL(b.Status, 'Draft') = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -642,7 +763,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.MaterialRequests mr
         LEFT JOIN dbo.enterprise co ON co.id = mr.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = mr.ProjectId
-        WHERE mr.Status = 'Pending'
+        WHERE mr.Status = 'Pending'${pp("mr.ProjectId")}
       `);
     }
 
@@ -670,7 +791,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.StockTransfers st
         LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
         LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
-        WHERE st.Status = 'Pending'
+        WHERE st.Status = 'Pending'${godownScope("st")}
       `);
     }
 
@@ -695,7 +816,7 @@ function buildInboxQueries(module, projectScope = null) {
           v.UpdatedAt                            AS LastModified
         FROM dbo.VehicleInOut v
         LEFT JOIN dbo.enterprise vpr ON vpr.id = v.ProjectID
-        WHERE v.Status = 'Pending'
+        WHERE v.Status = 'Pending'${pp("v.ProjectID")}
       `);
     }
 
@@ -720,7 +841,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(mi.UpdatedAt, mi.CreatedAt)                            AS LastModified
         FROM dbo.MaterialIssues mi
         LEFT JOIN dbo.enterprise p ON p.id = mi.ProjectId
-        WHERE ISNULL(mi.Status, 'Pending') = 'Pending'
+        WHERE ISNULL(mi.Status, 'Pending') = 'Pending'${pp("mi.ProjectId")}
       `);
     }
 
@@ -746,7 +867,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.MaterialIssueReturn ir
         LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
         LEFT JOIN dbo.enterprise p ON p.id = ir.ProjectId
-        WHERE ISNULL(ir.Status, 'Pending') = 'Pending'
+        WHERE ISNULL(ir.Status, 'Pending') = 'Pending'${pp("ir.ProjectId")}
       `);
     }
 
@@ -867,7 +988,7 @@ function buildInboxQueries(module, projectScope = null) {
           ''                                    AS RejectionNote,
           ISNULL(jv.UpdatedAt, jv.CreatedAt)    AS LastModified
         FROM dbo.JournalVoucher jv
-        WHERE jv.Status = 'Pending'
+        WHERE jv.Status = 'Pending'${pp("jv.ProjectId")}
       `);
     }
 
@@ -893,7 +1014,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.InterCompanyTransfer ict
         LEFT JOIN dbo.enterprise sp ON sp.id = ict.SenderProjectId
         LEFT JOIN dbo.enterprise rp ON rp.id = ict.ReceiverProjectId
-        WHERE ict.Status = 'Pending'
+        WHERE ict.Status = 'Pending'${ictScope("ict")}
       `);
     }
 
@@ -968,6 +1089,7 @@ function buildInboxQueries(module, projectScope = null) {
           a.ApplicantName                       AS SupplierName,
           b.GrandTotal                          AS Amount,
           ${NULL_EXTRA}
+          ${require("../services/crmBookingStageService").sendBackTargetsSql("b.WorkflowStage")} AS SendBackTo,
           CAST(b.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
@@ -976,7 +1098,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(b.UpdatedAt, b.CreatedAt)      AS LastModified
         FROM dbo.CrmBooking b
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE b.Status = 'Pending' AND b.IsActive = 1 AND b.ReadyForApprovalAt IS NOT NULL
+        WHERE b.Status = 'Pending' AND b.IsActive = 1 AND b.ReadyForApprovalAt IS NOT NULL${pp("b.ProjectId")}
       `);
     }
 
@@ -1002,7 +1124,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmAgreement ag
         JOIN dbo.CrmBooking b     ON b.Id = ag.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE ag.SeniorApprovalStatus = 'Pending'
+        WHERE ag.SeniorApprovalStatus = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1028,8 +1150,43 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmAgreement ag
         JOIN dbo.CrmBooking b     ON b.Id = ag.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE ag.DateApprovalStatus = 'Pending'
+        WHERE ag.DateApprovalStatus = 'Pending'${pp("b.ProjectId")}
       `);
+    }
+
+    // A resale / buy-back's transfer deed: the Legal Head's sign-off and its
+    // signing date (services/crmTransferDeed.js).
+    if (!module || module === "crm-transfer-deeds" || module === "crm-transfer-deed-date") {
+      for (const [mod, label, col] of [["crm-transfer-deeds", "Transfer Deed (Legal Head)", "SeniorApprovalStatus"], ["crm-transfer-deed-date", "Transfer Deed (Date Approval)", "DateApprovalStatus"]]) {
+        if (module && module !== mod) continue;
+        queries.push(`
+          SELECT
+            '${mod}'                              AS Module,
+            '${label}'                            AS ModuleLabel,
+            CAST(d.Id AS NVARCHAR)                AS RecordId,
+            CONCAT(d.DeedNo, ' · ', COALESCE(b.UnitNo, b.BookingNo)) AS Reference,
+            d.CreatedAt                           AS RecordDate,
+            d.${col}                              AS Status,
+            CAST(NULL AS NVARCHAR)                AS ContractorName,
+            CONCAT(fc.CustomerName, CASE WHEN d.DeedType = N'Assignment' THEN CONCAT(' → ', tc.CustomerName) ELSE ' → us' END) AS SupplierName,
+            r.AgreedValue                         AS Amount,
+            ${withProjectName(NULL_EXTRA, "pr_td.name")}
+            ISNULL(CAST(cu.name AS NVARCHAR(255)), '') AS CreatedBy,
+            ''                                    AS ApprovedBy,
+            ''                                    AS ApprovedAt,
+            ''                                    AS RejectedBy,
+            ${col === "DateApprovalStatus" ? "CONCAT('Signing date: ', CONVERT(NVARCHAR(10), d.ProposedDate, 23))" : "CAST(ISNULL(d.SeniorRemarks, '') AS NVARCHAR(MAX))"} AS RejectionNote,
+            ISNULL(d.UpdatedAt, d.CreatedAt)      AS LastModified
+          FROM dbo.CrmTransferDeed d
+          JOIN dbo.CrmUnitResale r ON r.Id = d.ResaleId
+          JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+          LEFT JOIN dbo.CrmCustomer fc ON fc.Id = r.FromCustomerId
+          LEFT JOIN dbo.CrmCustomer tc ON tc.Id = r.ToCustomerId
+          LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy
+          LEFT JOIN dbo.enterprise pr_td ON pr_td.id = b.ProjectId
+          WHERE d.IsActive = 1 AND d.${col} = 'Pending'${pp("b.ProjectId")}
+        `);
+      }
     }
 
     if (!module || module === "crm-sales-deed-director") {
@@ -1054,7 +1211,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmSalesDeed d
         JOIN dbo.CrmBooking b     ON b.Id = d.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE d.DirectorApprovalStatus = 'Pending'
+        WHERE d.DirectorApprovalStatus = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1080,7 +1237,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmBrokerageMaster br
         JOIN dbo.CrmBooking b     ON b.Id = br.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE br.Status = 'Pending' AND br.IsLocked = 0
+        WHERE br.Status = 'Pending' AND br.IsLocked = 0${pp("b.ProjectId")}
       `);
     }
 
@@ -1106,36 +1263,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmCancellation c
         JOIN dbo.CrmBooking b     ON b.Id = c.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE c.Status = 'Pending'
-      `);
-    }
-
-    if (!module || module === "crm-money-receipts") {
-      queries.push(`
-        SELECT
-          'crm-money-receipts'                  AS Module,
-          'CRM Money Receipt'                   AS ModuleLabel,
-          CAST(mr.Id AS NVARCHAR)               AS RecordId,
-          mr.ReceiptNo                          AS Reference,
-          mr.ReceivedDate                       AS RecordDate,
-          mr.Status,
-          CAST(NULL AS NVARCHAR)                AS ContractorName,
-          a.ApplicantName                       AS SupplierName,
-          mr.Amount                             AS Amount,
-          ${NULL_EXTRA}
-          CAST(ISNULL(u_cr.name, CAST(mr.CreatedBy AS NVARCHAR(255))) AS NVARCHAR(255)) AS CreatedBy,
-          ISNULL(CAST(u_appr.name AS NVARCHAR(255)), '') AS ApprovedBy,
-          ISNULL(CAST(mr.ApprovedAt AS NVARCHAR), '')    AS ApprovedAt,
-          ISNULL(CAST(u_bnc.name AS NVARCHAR(255)), '')  AS RejectedBy,
-          ISNULL(CAST(mr.BouncedReason AS NVARCHAR(MAX)), '') AS RejectionNote,
-          ISNULL(mr.UpdatedAt, mr.CreatedAt)    AS LastModified
-        FROM dbo.CrmMoneyReceipt mr
-        JOIN dbo.CrmBooking b     ON b.Id = mr.BookingId
-        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        LEFT JOIN dbo.Users u_cr   ON u_cr.id   = mr.CreatedBy
-        LEFT JOIN dbo.Users u_appr ON u_appr.id = mr.ApprovedBy
-        LEFT JOIN dbo.Users u_bnc  ON u_bnc.id  = mr.BouncedBy
-        WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL
+        WHERE c.Status = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1161,7 +1289,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmNoc n
         JOIN dbo.CrmBooking b     ON b.Id = n.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE n.Status = 'Pending'
+        WHERE n.Status = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1189,7 +1317,7 @@ function buildInboxQueries(module, projectScope = null) {
         LEFT JOIN dbo.ExpenseBooking eb ON eb.Eid = dn.bill_id
         LEFT JOIN dbo.users u ON u.id = dn.created_by
         LEFT JOIN dbo.enterprise dnpr ON dnpr.id = TRY_CAST(eb.EProjectName AS INT)
-        WHERE ISNULL(dn.Status, 'Draft') = 'Pending' AND dn.is_active = 1
+        WHERE ISNULL(dn.Status, 'Draft') = 'Pending' AND dn.is_active = 1${pp(ebResolvedProjectSql("eb"))}
       `);
     }
 
@@ -1213,7 +1341,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(CAST(c.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
           ISNULL(c.UpdatedAt, c.CreatedAt)      AS LastModified
         FROM dbo.Contract c
-        WHERE c.Status = 'Pending'
+        WHERE c.Status = 'Pending'${pp("c.ProjectId")}
       `);
     }
 
@@ -1241,7 +1369,7 @@ function buildInboxQueries(module, projectScope = null) {
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         LEFT JOIN dbo.Users u_req ON u_req.id = r.RequestedBy
         LEFT JOIN dbo.Users u_rev ON u_rev.id = r.ReviewedBy
-        WHERE r.Status = 'Pending'
+        WHERE r.Status = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1263,8 +1391,8 @@ function buildInboxQueries(module, projectScope = null) {
           r.Status,
           CAST(NULL AS NVARCHAR)                 AS ContractorName,
           cu.CustomerName                        AS SupplierName,
-          r.GrossAmount                          AS Amount,
-          ${NULL_EXTRA}
+          r.NetAmount                            AS Amount,
+          ${withProjectName(NULL_EXTRA, "pr_rf.name")}
           ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
           ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
           ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
@@ -1275,42 +1403,106 @@ function buildInboxQueries(module, projectScope = null) {
         JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
         LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
         LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
-        WHERE r.Status = 'Pending'
+        LEFT JOIN dbo.enterprise pr_rf ON pr_rf.id = r.ProjectId
+        WHERE r.Status = 'Pending'${pp("COALESCE(r.ProjectId, (SELECT b2.ProjectId FROM dbo.CrmBooking b2 WHERE b2.Id = r.BookingId))")}
       `);
     }
 
-    // Second, separate approval tier — same gap as crm-refunds above but for
-    // the Finance-side step (PUT /:id/finance-approve in crmRefunds.js),
-    // which only ever ran from CrmRefunds.tsx's own inline "Finance Approve"
-    // button. Kept as its own module (not folded into crm-refunds) because
-    // it's a genuinely different gate — CRM checker vs. Finance — exactly
-    // like crm-agreement-date is split out from crm-agreements.
-    if (!module || module === "crm-refunds-finance") {
+    // Resale (to another buyer) or buy-back (to us) of a sold property.
+    if (!module || module === "crm-resales") {
       queries.push(`
         SELECT
-          'crm-refunds-finance'                  AS Module,
-          'CRM Refund (Finance)'                 AS ModuleLabel,
+          'crm-resales'                          AS Module,
+          CASE WHEN r.Kind = N'BuyBack' THEN 'Property Buy-back' ELSE 'Property Resale' END AS ModuleLabel,
           CAST(r.Id AS NVARCHAR)                 AS RecordId,
-          r.RefundNo                             AS Reference,
+          CONCAT(CASE WHEN r.Kind = N'BuyBack' THEN 'BUYBACK-' ELSE 'RESALE-' END, r.Id, ' · ', ISNULL(b.UnitNo, b.BookingNo)) AS Reference,
           r.CreatedAt                            AS RecordDate,
           r.Status,
-          CAST(NULL AS NVARCHAR)                 AS ContractorName,
-          cu.CustomerName                        AS SupplierName,
-          r.NetAmount                            AS Amount,
+          CAST(tc.CustomerName AS NVARCHAR(255)) AS ContractorName,
+          fc.CustomerName                        AS SupplierName,
+          r.AgreedValue                          AS Amount,
           ${NULL_EXTRA}
-          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
-          ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
-          ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
-          ''                                      AS RejectedBy,
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.CreatedBy AS NVARCHAR(255))) AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
           ISNULL(CAST(r.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
-          ISNULL(r.UpdatedAt, r.CreatedAt)        AS LastModified
-        FROM dbo.CrmRefund r
-        JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
-        LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
-        LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
-        WHERE r.Status = 'FinancePending'
+          ISNULL(r.UpdatedAt, r.CreatedAt)       AS LastModified
+        FROM dbo.CrmUnitResale r
+        LEFT JOIN dbo.CrmBooking b  ON b.Id = r.FromBookingId
+        LEFT JOIN dbo.CrmCustomer fc ON fc.Id = r.FromCustomerId
+        LEFT JOIN dbo.CrmCustomer tc ON tc.Id = r.ToCustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = r.CreatedBy
+        WHERE r.IsActive = 1 AND r.Status = 'Pending' AND r.BookingIds IS NOT NULL${pp("b.ProjectId")}
       `);
     }
+
+    // Credit notes: one raised without a refund (an invoice reduced), and the
+    // cancellation of any credit note.
+    for (const [mod, label, col, ref] of [
+      ["crm-credit-notes", "Credit Note (invoice reduced)", "ApprovalStatus", "CONCAT('Credit note on ', n.AgainstRef, ' · ', ISNULL(b.UnitNo, b.BookingNo))"],
+      ["crm-credit-note-cancel", "Credit Note — Cancellation", "CancelApprovalStatus", "CONCAT('Cancel ', ISNULL(n.DocNo, 'certificate'), ' · ', ISNULL(b.UnitNo, b.BookingNo))"],
+    ]) {
+      if (module && module !== mod) continue;
+      queries.push(`
+        SELECT
+          '${mod}'                               AS Module,
+          '${label}'                             AS ModuleLabel,
+          CAST(n.Id AS NVARCHAR)                 AS RecordId,
+          ${ref} AS Reference,
+          n.CreatedAt                            AS RecordDate,
+          n.${col}                               AS Status,
+          CAST(c.CustomerName AS NVARCHAR(255))  AS ContractorName,
+          CAST(n.ReasonType AS NVARCHAR(255))    AS SupplierName,
+          n.TotalAmount                          AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(n.CreatedBy AS NVARCHAR(255))) AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ISNULL(CAST(n.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          n.CreatedAt                            AS LastModified
+        FROM dbo.CrmGstNote n
+        JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+        LEFT JOIN dbo.CrmCustomer c ON c.Id = n.CustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = ${mod === "crm-credit-notes" ? "n.RequestedById" : "n.CancelRequestedById"}
+        WHERE n.${col} = 'Pending'${pp("b.ProjectId")}
+      `);
+    }
+
+    // A new owner of a conveyed property, recorded from their registered sale deed.
+    if (!module || module === "crm-ownership-changes") {
+      queries.push(`
+        SELECT
+          'crm-ownership-changes'                AS Module,
+          'Ownership Change'                     AS ModuleLabel,
+          CAST(o.Id AS NVARCHAR)                 AS RecordId,
+          CONCAT(o.ChangeNo, ' · ', ISNULL(b.UnitNo, b.BookingNo)) AS Reference,
+          o.CreatedAt                            AS RecordDate,
+          o.Status,
+          CAST(tc.CustomerName AS NVARCHAR(255)) AS ContractorName,
+          fc.CustomerName                        AS SupplierName,
+          o.ConsiderationValue                   AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(o.CreatedBy AS NVARCHAR(255))) AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ISNULL(CAST(o.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(o.UpdatedAt, o.CreatedAt)       AS LastModified
+        FROM dbo.CrmOwnershipChange o
+        LEFT JOIN dbo.CrmBooking b  ON b.Id = o.BookingId
+        LEFT JOIN dbo.CrmCustomer fc ON fc.Id = o.FromCustomerId
+        LEFT JOIN dbo.CrmCustomer tc ON tc.Id = o.ToCustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = o.CreatedBy
+        WHERE o.IsActive = 1 AND o.Status = 'Pending'${pp("b.ProjectId")}
+      `);
+    }
+
+    // A refund has ONE Finance step: CRM approval raises its payout voucher,
+    // which Finance approves in Payments (module crm-refund-payment above).
+    // The separate 'crm-refunds-finance' tier listed here before was a second
+    // Finance sign-off on the same money, so it is no longer shown.
 
     // Civil Work DPR's per-assignment Approval Setup — an activity that's
     // Completed and already passed Quality Check, now waiting on whichever
@@ -1345,7 +1537,10 @@ function buildInboxQueries(module, projectScope = null) {
             WHERE dae.AssignmentId = daa.Id
           )                                               AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))                    AS Amount,
-          ${NULL_EXTRA_CIVILWORKDPR_APPROVAL}
+          ${withProjectName(NULL_EXTRA_CIVILWORKDPR_APPROVAL, "ep.name")}
+          -- Shown in the row where other modules show an amount: an activity
+          -- has no amount, its name is what tells rows apart.
+          am.activity_name                               AS ActivityName,
           CAST(daa.CreatedBy AS NVARCHAR(255))           AS CreatedBy,
           ''                                              AS ApprovedBy,
           ''                                              AS ApprovedAt,
@@ -1356,6 +1551,7 @@ function buildInboxQueries(module, projectScope = null) {
         JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
         JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
         JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
         WHERE daa.IsCurrent = 1${projectPredicate(projectScope, "dm.ProjectId")}
           AND daa.Status = 'COMPLETED'
           -- No longer requires ApprovalLevelsJson to be configured — a
@@ -1375,17 +1571,27 @@ function buildInboxQueries(module, projectScope = null) {
   return queries;
 }
 
+// One request per module, merged here, instead of one 30-way UNION ALL: with the project filters added, SQL Server's
+// plan for the combined statement took over a minute, while each module on its own answers in milliseconds.
+// One batch on one connection: the ~37 module queries (they take no parameters) used to run in parallel, each
+// on its own connection — more than the pool's 30, so every badge refresh held the whole pool and queued the
+// rest of the page behind it. Run as one batch they take about the same time, warm.
+async function runInboxQueries(pool, queries) {
+  const { recordsets } = await pool.request().query(queries.join(";\n"));
+  const time = (r) => (r.LastModified ? new Date(r.LastModified).getTime() || 0 : 0);
+  return recordsets.flat().sort((x, y) => time(y) - time(x));
+}
+
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const queries = buildInboxQueries(req.query.module, req.projectScope);
     if (queries.length === 0) return res.json([]);
 
-    const fullQuery =
-      queries.join(" UNION ALL ") + " ORDER BY LastModified DESC";
-    const result = await pool.request().query(fullQuery);
+    const rows = await runInboxQueries(pool, queries);
 
-    res.json(await filterVisibleToViewer(result.recordset, req));
+    // Every row gets the common person / company / project, then keeps what is special to its own document type.
+    res.json(await enrichInboxRows(pool, await filterVisibleToViewer(rows, req)));
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox error");
     res.status(500).json({
@@ -1409,9 +1615,8 @@ router.get("/count", async (req, res) => {
     const queries = buildInboxQueries(undefined, req.projectScope);
     if (queries.length === 0) return res.json({ count: 0 });
 
-    const fullQuery = queries.join(" UNION ALL ");
-    const result = await pool.request().query(fullQuery);
-    const visible = await filterVisibleToViewer(result.recordset, req);
+    const rows = await runInboxQueries(pool, queries);
+    const visible = await filterVisibleToViewer(rows, req);
     res.json({ count: visible.length });
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox count error");

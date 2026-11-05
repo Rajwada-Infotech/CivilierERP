@@ -1,11 +1,17 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { unitPrice, rateSqlType } = require("../services/bookingUnits");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
+const { SA_LEAD_BOOKED } = require("../constants/saStatuses");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+// Project access: a restricted user gets 403 on applications outside their projects.
+const { projectParamGuard, projectPredicate, assertProjectAllowed } = require("../services/projectScope");
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmApplication WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const allowRoles = require("../middleware/role");
 const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
 const { validateSourceChain } = require("../services/sourceChain");
@@ -14,7 +20,7 @@ const { advanceApplicationStatus, logStatusChange } = require("../services/crmAp
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
+const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection, reallocateBookingLines, rebuildLandSchedule, generateMilestonesForBooking } = require("../services/crmEntityCreation");
 const { recalculateBookingGst } = require("../services/crmGst");
 const { assertVillaBuyerOwnsLand, VillaLandError } = require("../services/villaLand");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
@@ -46,7 +52,6 @@ async function getApplicationPlotIds(pool, applicationId) {
 }
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // Mirrors SaLead.SourceType so source values stay consistent across the
 // whole system, not just this module.
@@ -94,12 +99,12 @@ const APP_SELECT = `
     -- AreaSqFt sqft" at pick time — see CrmApplication.tsx step 1) — surface
     -- it here too so the detail dialog's "Type" line isn't permanently "—"
     -- for every application that has a real unit on it.
-    um.UnitType AS UnitTypeFromMaster, um.AreaSqFt AS UnitAreaSqFt,
+    COALESCE(um.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = um.UnitKind)) AS UnitTypeFromMaster, um.AreaSqFt AS UnitAreaSqFt,
     -- Customer-master fields, auto-fetched here so the Application page
     -- never asks staff to retype what's already on the Customer record.
     cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
     cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
-    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
+    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.WorkflowStage AS BookingWorkflowStage, bk.ReadyForApprovalAt AS BookingReadyForApprovalAt, bk.UnitNo AS BookingUnitNo,
     bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.GrandTotal AS BookingGrandTotal, bk.BookingDate,
     (SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = bk.Id ORDER BY CreatedAt DESC) AS DeedStatus,
     -- Stage drives the Converted/In Process/Not Converted split every
@@ -118,7 +123,7 @@ const APP_SELECT = `
     -- this guard. Stage being derived fresh from the live Booking row on
     -- every query is exactly what makes it safe regardless of that history.
     CASE
-      WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 'Converted'
+      WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ${DEAD_BOOKING_SQL} THEN 'Converted'
       WHEN a.Status IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}') THEN 'NotConverted'
       ELSE 'InProcess'
     END AS Stage,
@@ -137,7 +142,7 @@ const APP_SELECT = `
     -- whatever its Status happens to read.
     CASE
       WHEN a.Status NOT IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}', 'Expired') AND bk.Id IS NULL AND a.PreferredUnitId IS NOT NULL AND (
-        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') AND ob.ApplicationId <> a.Id)
+        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ${DEAD_BOOKING_SQL} AND ob.ApplicationId <> a.Id)
         OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold oh WHERE oh.EntityType = 'Unit' AND oh.EntityId = a.PreferredUnitId AND oh.Status = '${CrmStatus.ACTIVE}' AND oh.HoldUntil >= SYSDATETIME() AND oh.ApplicationId <> a.Id)
       ) THEN 1 ELSE 0
     END AS UnitUnavailableForBooking
@@ -158,10 +163,10 @@ const APP_SELECT = `
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = a.PreferredUnitId
   LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
   OUTER APPLY (
-    SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
+    SELECT TOP 1 Id, BookingNo, Status, WorkflowStage, ReadyForApprovalAt, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
     FROM dbo.CrmBooking
     WHERE ApplicationId = a.Id
-    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 0 ELSE 1 END, CreatedAt DESC
+    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL} THEN 0 ELSE 1 END, CreatedAt DESC
   ) bk
 `;
 
@@ -189,10 +194,14 @@ const APP_SELECT = `
 // apart on what "matches the current filter set" means (the exact drift
 // risk that broke tab counts once pagination made "count what's on this
 // page" stop being a valid substitute for "count everything that matches").
-function buildApplicationFilters(req0, query) {
+function buildApplicationFilters(req0, query, projectScope = null) {
   const { status, search, companyId, projectId, blockId } = query;
   const conds = ["a.IsActive = 1"];
-  if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
+  if (projectScope) conds.push(projectPredicate(projectScope, "a.ProjectId", "").trim());
+  // "Sent back" / "Resubmitted" — the shared rule (its booking's approval or data review), not a status column.
+  const sentBackCond = status ? require("../services/crmAttentionConditions").sentBackFilterSql(status, "a.Id", "ApplicationId") : null;
+  if (sentBackCond) conds.push(sentBackCond);
+  else if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
   if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("a.CompanyId = @companyId"); }
   if (projectId) { req0.input("projectId", sql.Int, parseInt(projectId, 10)); conds.push("a.ProjectId = @projectId"); }
   // um joins the application's PreferredUnitId, which a LAND application does
@@ -214,7 +223,8 @@ function buildApplicationFilters(req0, query) {
 // applied to crmInvoices.js's grouped-view query this session).
 const DISPLAY_STAGE_EXPR = `CASE WHEN x.Stage = 'Converted' AND x.BookingStatus <> '${CrmStatus.APPROVED}' THEN 'InProcess' ELSE x.Stage END`;
 
-router.get("/", requirePageRight("crm-applications", "view"), async (req, res) => {
+// Parking Booking sells standalone parking to an application, so its right lists them too.
+router.get("/", requireAnyPageRight(["crm-applications", "crm-parking-booking"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { stage, includeConverted, forBooking, page } = req.query;
@@ -226,7 +236,7 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     // else silently breaks from this rebuild.
     if (!page) {
       const req0 = pool.request();
-      const where = buildApplicationFilters(req0, req.query);
+      const where = buildApplicationFilters(req0, req.query, req.projectScope);
       const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
       let rows = result.recordset;
       if (forBooking) {
@@ -246,7 +256,7 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     // application lands in the right tab consistently everywhere.
     const { page: pageNum, pageSize, offset } = applyPagination(req);
     const req0 = pool.request();
-    const where = buildApplicationFilters(req0, req.query);
+    const where = buildApplicationFilters(req0, req.query, req.projectScope);
     req0.input("offset", sql.Int, offset).input("pageSize", sql.Int, pageSize);
     let displayStageWhere = "";
     if (req.query.displayStage) {
@@ -268,7 +278,7 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     `);
 
     const countReq = pool.request();
-    const countWhere = buildApplicationFilters(countReq, req.query);
+    const countWhere = buildApplicationFilters(countReq, req.query, req.projectScope);
     let countDisplayStageWhere = "";
     if (req.query.displayStage) {
       countReq.input("dstage", sql.NVarChar(20), req.query.displayStage);
@@ -302,7 +312,7 @@ router.get("/stage-counts", requirePageRight("crm-applications", "view"), async 
   try {
     const pool = getPool();
     const req0 = pool.request();
-    const where = buildApplicationFilters(req0, req.query);
+    const where = buildApplicationFilters(req0, req.query, req.projectScope);
     const result = await req0.query(`
       SELECT ${DISPLAY_STAGE_EXPR} AS DisplayStage, COUNT(*) AS Cnt
       FROM (${APP_SELECT} ${where}) x
@@ -316,6 +326,24 @@ router.get("/stage-counts", requirePageRight("crm-applications", "view"), async 
   } catch (e) {
     console.error("[crm-applications] GET /stage-counts error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /price-quote — the sale's price, GST and payment schedule before a
+// booking exists, from the same functions that price the booking itself
+// (services/crmPriceQuote.js). The application form shows this.
+router.post("/price-quote", requireAnyPageRight(["crm-applications", "crm-bookings"], "view"), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const { refuseOutOfScope } = require("../services/projectScope");
+    if (await refuseOutOfScope(req, res, "unit", Array.isArray(b.unitIds) ? b.unitIds : [])) return;
+    if (await refuseOutOfScope(req, res, "plot", Array.isArray(b.plotIds) ? b.plotIds : [])) return;
+    const quote = await require("../services/crmPriceQuote").quoteSale(getPool(), b);
+    if (!quote) return res.status(400).json({ error: "Pick a unit or plot to price." });
+    res.json(quote);
+  } catch (e) {
+    console.error("[crm-applications] POST /price-quote error:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -373,7 +401,7 @@ router.get("/:id/pdf", requirePageRight("crm-applications", "view"), async (req,
     // Level 1 gate: a live booking must exist (Booking not Cancelled/Rejected),
     // which only happens after the Application is Approved.
     const hasLiveBooking = app.BookingId
-      && !["Cancelled", "Rejected"].includes(app.BookingStatus);
+      && !require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(app.BookingStatus);
     if (!hasLiveBooking) {
       return res.status(403).json({
         error: "Application Form PDF is only available after Level 1 verification (Application Approved). Please complete the review process first.",
@@ -403,6 +431,22 @@ router.post("/", requirePageRight("crm-applications", "create"), async (req, res
   try {
     const pool = getPool();
     const actor = actorId(req);
+    let projectId = req.body?.ProjectId != null && req.body?.ProjectId !== "" ? parseInt(req.body.ProjectId, 10) : null;
+    if (projectId === null && req.body?.PreferredUnitId) {
+      const uRow = await pool.request().input("uid", sql.Int, parseInt(req.body.PreferredUnitId, 10))
+        .query("SELECT ProjectId FROM dbo.UnitMaster WHERE Id = @uid");
+      if (uRow.recordset.length) projectId = uRow.recordset[0].ProjectId;
+    }
+    if (projectId === null && Array.isArray(req.body?.PreferredPlotIds) && req.body.PreferredPlotIds.length > 0) {
+      const pRow = await pool.request().input("pid", sql.Int, parseInt(req.body.PreferredPlotIds[0], 10))
+        .query("SELECT ProjectId FROM dbo.PlotMaster WHERE Id = @pid");
+      if (pRow.recordset.length) projectId = pRow.recordset[0].ProjectId;
+    }
+    if (req.projectScope && (projectId === null || !assertProjectAllowed(req, res, projectId))) {
+      if (projectId === null) res.status(403).json({ error: "You don't have access to this project." });
+      return;
+    }
+    if (projectId !== null && !assertProjectAllowed(req, res, projectId)) return;
     // The human-filed Application form never lets AssignedTo/AssignedBy be
     // picked — the filer becomes the assignee, permanently recorded as the
     // filer too. (saHandoff.js, the other caller of this shared service,
@@ -438,12 +482,17 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const actor = actorId(req);
 
     const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, PreferredUnitId, Status, ProjectId, DepositBankId, CustomerId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, PreferredUnitId, Status, ProjectId, CompanyId, PaymentPlanId, DepositBankId, CustomerId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    // What Data Review ticked, before this save (a changed item goes back to be verified).
+    const checklistCols = require("../services/crmApplicationChecklist");
+    const beforeChecked = await checklistCols.snapshotColumns(pool, "CrmApplication", "Id", id, checklistCols.APPLICATION_ITEM_COLUMNS);
+    const plotsBefore = (await getApplicationPlotIds(pool, id)).sort().join(",");
     if (!existing.recordset.length) return res.status(404).json({ error: "Application not found" });
     // A villa built on plots can only be picked by the plot's current owner.
     if (Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0) {
       try {
         await assertVillaBuyerOwnsLand(pool, b.PreferredUnitIds, existing.recordset[0].CustomerId);
+        await require("../services/villaLand").copyLandCoOwners(pool, id, b.PreferredUnitIds, req.user?.userId ?? null);
       } catch (e) {
         if (e instanceof VillaLandError) return res.status(e.status).json({ error: e.message });
         throw e;
@@ -475,16 +524,45 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
         error: `Cannot change the Company/Project/Unit/Payment Plan selection once the application is ${existingStatus} — this is locked after approval.`,
       });
     }
-    // A Pending application that has a live booking (Stage=Converted) must also
-    // be blocked from unit/plan changes — the booking is the live legal record.
+    // With a booking already made from it, the application may still change
+    // its unit / plan / project until that booking is verified and sent for
+    // approval — "Submit Edits" then carries the change into the booking
+    // (unit through the same changeBookingUnit the booking's Change Unit uses).
+    // Only a real change counts: the form re-sends unchanged values on every
+    // save, which must not be refused for an edit to something else.
     if (changingUnitSelection) {
-      const bkCheck = await pool.request()
-        .input("AppId", sql.Int, id)
-        .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @AppId AND Status NOT IN ('Cancelled','Expired','Rejected')");
-      if (bkCheck.recordset.length > 0) {
-        return res.status(400).json({
-          error: "Cannot change unit/payment plan — this application has an active booking. Manage changes through the Booking module instead.",
-        });
+      const bk = (await pool.request().input("AppId", sql.Int, id)
+        .query(`SELECT TOP 1 Id, UnitId FROM dbo.CrmBooking WHERE ApplicationId = @AppId AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}`)).recordset[0];
+      if (bk) {
+        const cur = existing.recordset[0];
+        const differs = (v, was) => v !== undefined && Number(v || 0) !== Number(was || 0);
+        const curPlots = await getApplicationPlotIds(pool, id);
+        const plotsDiffer = b.PreferredPlotIds !== undefined
+          && [...preferredPlotIds].sort().join(",") !== [...curPlots].sort().join(",");
+        const unitDiffers = !preferredPlotIds.length && differs(b.PreferredUnitId, bk.UnitId);
+        const changed = unitDiffers || plotsDiffer || differs(b.PaymentPlanId, cur.PaymentPlanId)
+          || differs(b.ProjectId, cur.ProjectId) || differs(b.CompanyId, cur.CompanyId);
+        if (changed) {
+          const { applicationEditsClosedReason, changeBookingUnit } = require("../services/crmEntityCreation");
+          const closed = await applicationEditsClosedReason(pool, bk.Id);
+          if (closed) return res.status(400).json({ error: closed });
+          if (plotsDiffer) {
+            return res.status(400).json({ error: "A booking's plots can't be swapped — cancel the booking and book the new plots instead." });
+          }
+          if (differs(b.ProjectId, cur.ProjectId) || differs(b.CompanyId, cur.CompanyId)) {
+            return res.status(400).json({ error: "A booking stays in its own project — pick a unit from the same project, or cancel and book afresh." });
+          }
+          // The new unit must pass every check the booking will run on Submit
+          // Edits — refused now, not after the application has moved.
+          if (unitDiffers) {
+            try {
+              await changeBookingUnit(pool, bk.Id, { newUnitId: b.PreferredUnitId, checkOnly: true });
+            } catch (e) {
+              if (e.status) return res.status(e.status).json({ error: e.message });
+              throw e;
+            }
+          }
+        }
       }
     }
 
@@ -531,8 +609,11 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       unitName = preferredPlotIds.map((plotId) => selectedPlots.find((plot) => plot.Id === plotId)?.PlotName).filter(Boolean).join(", ");
     } else if (b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "") {
       const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
-        .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+        .query(`SELECT UnitName,
+                  CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = UnitKind AND k.IsLand = 1) THEN 1 ELSE 0 END AS IsLand
+                FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1`);
       if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
+      if (unit.recordset[0].IsLand) return res.status(400).json({ error: "This is land — choose it from the plot list, not as a unit." });
       unitName = unit.recordset[0].UnitName;
     }
 
@@ -546,11 +627,15 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // taken; the old hold is only released afterward, once the new one is
     // confirmed in place.
     const newUnitId = b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null;
-    const unitIsChanging = newUnitId !== existingUnitId;
+    // Only a save that actually sends a unit (or switches to plots) changes it:
+    // the wizard's step saves send just { CurrentStep }, and treating that as
+    // "unit -> none" released the application's hold after step 1.
+    const unitSent = b.PreferredUnitId !== undefined || preferredPlotIds.length > 0;
+    const unitIsChanging = unitSent && newUnitId !== existingUnitId;
     if (unitIsChanging && newUnitId !== null) {
       try {
         await placeHoldIfNeeded(pool, {
-          entityType: "Unit", entityId: newUnitId, applicationId: id, holdDays: 3,
+          entityType: "Unit", entityId: newUnitId, applicationId: id,
           reason: "Application unit changed — auto-hold", userId: actor,
           // Same effectiveProjectId pattern as the deposit-bank check below —
           // b.ProjectId is what's about to be saved by the UPDATE further
@@ -600,7 +685,13 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       ? parseFloat(b.BrokerageRatePercent)
       : (bridge?.commissionRate ?? null);
 
-    await pool.request()
+    // The application row and its unit / plot lines are saved together — a
+    // failure part-way used to leave the old lines deleted and the new ones
+    // not written (the application with no unit / plot picked).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+    await tx.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.ApplicantName || null)
       .input("mob",  sql.NVarChar(20),  b.Mobile || null)
@@ -619,7 +710,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("campid", sql.Int, campaignId ?? null)
       .input("adid",   sql.Int, adId ?? null)
       .input("cpid",   sql.Int, channelPartnerId)
-      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
+      .input("rate", rateSqlType(), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
       .input("ppid", sql.Int,           effectivePaymentPlanId)
       .input("pptouched", sql.Bit,      pptouched)
@@ -628,7 +719,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null && b.BookingAmount !== "" ? parseFloat(b.BookingAmount) : null)
       .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
       .input("dbid", sql.Int,           b.DepositBankId !== undefined && b.DepositBankId !== null && b.DepositBankId !== "" ? parseInt(b.DepositBankId) : null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes || null).input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
       .input("ub",   sql.Int,           actor)
       .input("brkid", sql.Int,          brokerId)
       .input("brkpct", sql.Decimal(5,2), brokerageRatePercent)
@@ -646,7 +737,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           ProjectId = ISNULL(@pid, ProjectId), PreferredUnitId = CASE WHEN @plotselected = 1 THEN NULL WHEN @uid IS NOT NULL THEN @uid ELSE PreferredUnitId END,
           CompanyId = ISNULL(@cid, CompanyId),
           InterestedProject = ISNULL(@proj, InterestedProject), InterestedUnit = ISNULL(@unit, InterestedUnit),
-          PropertyType = @pt, BhkPreference = @bhk,
+          PropertyType = ISNULL(@pt, PropertyType), BhkPreference = ISNULL(@bhk, BhkPreference),
           Source = ISNULL(@src, Source),
           PlatformId = ISNULL(@platid, PlatformId), CampaignId = ISNULL(@campid, CampaignId),
           AdId = ISNULL(@adid, AdId), ChannelPartnerId = ISNULL(@cpid, ChannelPartnerId),
@@ -661,7 +752,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           -- AssignedTo/AssignedBy are intentionally never accepted here — set
           -- once at creation (the filer becomes the assignee) and locked;
           -- reassignment goes through the existing lead-transfer flow instead.
-          Notes = @note,
+          Notes = CASE WHEN @noteSet = 1 THEN @note ELSE Notes END,
           CurrentStep = CASE WHEN @cstep IS NOT NULL AND @cstep > CurrentStep THEN @cstep ELSE CurrentStep END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id AND IsActive = 1
@@ -669,10 +760,10 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // Update CrmApplicationUnit lines if PreferredUnitIds was provided
     if (b.PreferredUnitIds !== undefined) {
       const rawIds = Array.isArray(b.PreferredUnitIds) ? b.PreferredUnitIds : [];
-      await pool.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationUnit WHERE ApplicationId = @aid");
+      await tx.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationUnit WHERE ApplicationId = @aid");
       if (rawIds.length > 0) {
         for (const uidStr of rawIds) {
-          await pool.request()
+          await tx.request()
             .input("aid", sql.Int, id)
             .input("uid", sql.Int, parseInt(uidStr))
             .input("pri", sql.Bit, String(uidStr) === String(b.PreferredUnitId) ? 1 : 0)
@@ -681,14 +772,19 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       }
     }
     if (b.PreferredPlotIds !== undefined) {
-      await pool.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid");
+      await tx.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid");
       for (let index = 0; index < preferredPlotIds.length; index++) {
-        await pool.request()
+        await tx.request()
           .input("aid", sql.Int, id)
           .input("pid", sql.Int, preferredPlotIds[index])
           .input("pri", sql.Bit, index === 0 ? 1 : 0)
           .query("INSERT INTO dbo.CrmApplicationPlot (ApplicationId, PlotId, Status, IsPrimary, CreatedAt) VALUES (@aid, @pid, 'Active', @pri, SYSDATETIME())");
       }
+    }
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
     }
 
 
@@ -708,7 +804,17 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       }
     }
 
-    res.json({ success: true });
+    // A new unit in another block than the parking already picked: say so.
+    const parkingWarning = unitIsChanging && newUnitId
+      ? await require("../services/crmEntityCreation").parkingOutsideUnitBlock(pool, { applicationId: id, unitId: newUnitId })
+      : null;
+    // Data a verifier already ticked, changed by this save: that item goes back to be verified.
+    const afterChecked = await checklistCols.snapshotColumns(pool, "CrmApplication", "Id", id, checklistCols.APPLICATION_ITEM_COLUMNS);
+    await checklistCols.resetForChangedColumns(pool, { applicationId: id }, checklistCols.APPLICATION_ITEM_COLUMNS, beforeChecked, afterChecked, "application edited");
+    if ((await getApplicationPlotIds(pool, id)).sort().join(",") !== plotsBefore) {
+      await checklistCols.resetVerifiedItems(pool, { applicationId: id }, ["ProjectUnitRate"], "plots changed");
+    }
+    res.json({ success: true, parkingWarning });
   } catch (e) {
     console.error("[crm-applications] PUT error:", e.message);
     res.status(500).json({ error: e.message });
@@ -738,6 +844,56 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
     const current = await getPool().request().input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id");
     const currentStatus = current.recordset[0]?.Status;
+    // A booking is never created at ₹0: the rate comes from the application,
+    // else the unit / plot's own rate. Checked before anything changes.
+    {
+      const pool0 = getPool();
+      const hasBooking = (await pool0.request().input("aid", sql.Int, id)
+        .query("SELECT TOP 1 1 AS x FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset.length > 0;
+      const ap = (await pool0.request().input("id", sql.Int, id)
+        .query("SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @id")).recordset[0];
+      const plotIds0 = await getApplicationPlotIds(pool0, id);
+      if (hasBooking && ap && !plotIds0.length) {
+        const existing = (await pool0.request().input("aid", sql.Int, id)
+          .query("SELECT TOP 1 Id, UnitId, PaymentPlanId, TotalValue FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset[0];
+        const planChanged = Number(ap.PaymentPlanId ?? -1) !== Number(existing?.PaymentPlanId ?? -1);
+        if (existing && planChanged) {
+          if (ap.PaymentPlanId == null) {
+            return res.status(400).json({ error: "A unit booking must keep a payment plan. Select a valid plan before resubmitting." });
+          }
+          try {
+            await resolveApplicationPaymentPlan(pool0, { preferredUnitId: existing.UnitId, paymentPlanId: ap.PaymentPlanId });
+          } catch (e) {
+            return res.status(e.status || 400).json({ error: e.message });
+          }
+          const newPlanAmount = (await pool0.request().input("pid", sql.Int, ap.PaymentPlanId)
+            .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid")).recordset[0]?.BookingAmount;
+          if (newPlanAmount != null && Number(newPlanAmount) > Number(existing.TotalValue || 0)) {
+            return res.status(400).json({ error: "The selected plan's Booking Amount is greater than this booking's value. Correct the plan amount before resubmitting." });
+          }
+          const history = (await pool0.request().input("bid", sql.Int, existing.Id).query(`
+            SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
+            WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('${CrmStatus.PAID}', 'Waived'))
+          `)).recordset[0]?.Cnt || 0;
+          if (history > 0) {
+            return res.status(400).json({ error: "The payment plan cannot be changed after a milestone payment or waiver. Update the Application without changing its plan, or use the Booking payment-plan workflow before any payment is recorded." });
+          }
+        }
+      }
+      if (!hasBooking && ap) {
+        const unitIds0 = plotIds0.length ? [] : await getApplicationUnitIds(pool0, id, ap.PreferredUnitId);
+        const ids0 = plotIds0.length ? plotIds0 : unitIds0;
+        if (ids0.length) {
+          const rows0 = (await pool0.request().input("r", rateSqlType(), Number(ap.RatePerSqFt) || 0).query(plotIds0.length
+            ? `SELECT PlotName AS Name, COALESCE(NULLIF(@r, 0), RatePerSqFt, 0) * ISNULL(AreaSqFt, 0) AS Price FROM dbo.PlotMaster WHERE Id IN (${ids0.join(",")})`
+            : `SELECT UnitName AS Name, COALESCE(NULLIF(@r, 0), RatePerSqFt, 0) * ISNULL(AreaSqFt, 0) AS Price FROM dbo.UnitMaster WHERE Id IN (${ids0.join(",")})`)).recordset;
+          const unpriced = rows0.filter((r) => !(Number(r.Price) > 0)).map((r) => r.Name);
+          if (unpriced.length) {
+            return res.status(400).json({ error: `${unpriced.join(", ")} has no price — enter the rate per sq ft on the application (or set the rate and area on the ${plotIds0.length ? "plot" : "unit"}) before submitting` });
+          }
+        }
+      }
+    }
     const result = currentStatus === CrmStatus.PENDING
       ? { newStatus: CrmStatus.PENDING }
       : await approvalTransition("crm-applications", id, CrmStatus.PENDING, userEmail, req.user?.role);
@@ -773,6 +929,30 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       `);
       const a = app.recordset[0];
 
+      // A unit corrected on the application (allowed until the booking is
+      // verified — see PUT /:id) moves the booking first, through the same
+      // changeBookingUnit the booking's own Change Unit uses. The rate / plan
+      // sync below then works on the booking's new unit.
+      if (a?.PreferredUnitId != null) {
+        const cur = (await pool.request().input("bid", sql.Int, booking.id).query(`
+          SELECT b.UnitId, (SELECT TOP 1 1 FROM dbo.CrmBookingPlot p WHERE p.BookingId = b.Id) AS IsPlotSale, ap.ApplicationNo
+          FROM dbo.CrmBooking b JOIN dbo.CrmApplication ap ON ap.Id = b.ApplicationId WHERE b.Id = @bid`)).recordset[0];
+        if (cur && !cur.IsPlotSale && Number(cur.UnitId) !== Number(a.PreferredUnitId)) {
+          const { applicationEditsClosedReason, changeBookingUnit } = require("../services/crmEntityCreation");
+          const closed = await applicationEditsClosedReason(pool, booking.id);
+          if (closed) return res.status(400).json({ error: closed });
+          try {
+            await changeBookingUnit(pool, booking.id, {
+              newUnitId: a.PreferredUnitId, paymentPlanId: a.PaymentPlanId, actor,
+              reason: `Unit corrected on application ${cur.ApplicationNo} before the booking was verified`,
+            });
+          } catch (e) {
+            if (e.status) return res.status(e.status).json({ error: e.message });
+            throw e;
+          }
+        }
+      }
+
       // SYNC edits from Application to the existing Booking, resync Milestone
       // #1 to the (possibly changed) BookingAmount, and relink any orphaned
       // documents — all three in one transaction. Previously these were three
@@ -793,20 +973,44 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       // running it after this commit is correct and matches existing order —
       // folding them into this atomic boundary would mean a single unrelated
       // parking hiccup rolls back the Booking/Milestone sync too.
-      if (a) {
+      // Once the booking is sent for approval its price, plan and schedule
+      // are the approvers' to judge — a re-submit must not rewrite them.
+      const syncClosed = await require("../services/crmEntityCreation").applicationEditsClosedReason(pool, booking.id);
+      if (a && !syncClosed) {
         const tx = pool.transaction();
         await tx.begin();
         try {
           const before = (await tx.request().input("bid", sql.Int, booking.id)
-            .query("SELECT RatePerSqFt, AreaSqFt, TotalValue FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+            .query("SELECT RatePerSqFt, AreaSqFt, TotalValue, BookingAmount, UnitId, PaymentPlanId FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+          const paymentPlanChanged = Number(a.PaymentPlanId ?? -1) !== Number(before?.PaymentPlanId ?? -1);
+          let planBookingAmount = null;
+          if (paymentPlanChanged && a.PaymentPlanId != null) {
+            planBookingAmount = (await tx.request().input("pid", sql.Int, a.PaymentPlanId)
+              .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid")).recordset[0]?.BookingAmount ?? null;
+          }
+          const newRateForValidation = a.RatePerSqFt != null ? Number(a.RatePerSqFt) : null;
+          const prospectiveTotal = newRateForValidation != null
+            && Number(before?.RatePerSqFt) !== newRateForValidation && Number(before?.AreaSqFt) > 0
+            ? unitPrice(before.AreaSqFt, newRateForValidation)
+            : Number(before?.TotalValue || 0);
+          const effectiveBookingAmount = planBookingAmount != null
+            ? Number(planBookingAmount)
+            : a.BookingAmount != null ? Number(a.BookingAmount)
+              : before?.BookingAmount != null ? Number(before.BookingAmount) : null;
+          if (effectiveBookingAmount != null && (!Number.isFinite(effectiveBookingAmount) || effectiveBookingAmount < 0)) {
+            throw Object.assign(new Error("Booking Amount must be a valid non-negative number"), { status: 400 });
+          }
+          if (effectiveBookingAmount != null && effectiveBookingAmount > prospectiveTotal) {
+            throw Object.assign(new Error("Booking Amount cannot exceed the booking value"), { status: 400 });
+          }
           await tx.request()
             .input("bid", sql.Int, booking.id)
-            .input("RatePerSqFt", sql.Decimal(18, 2), a.RatePerSqFt)
+            .input("RatePerSqFt", rateSqlType(), a.RatePerSqFt)
             .input("PaymentPlanId", sql.Int, a.PaymentPlanId)
             .input("BookingDate", sql.Date, a.DateOfApply)
             .input("TokenType", sql.NVarChar(50), a.TokenType)
             .input("TokenValue", sql.Decimal(18, 2), a.TokenValue)
-            .input("BookingAmount", sql.Decimal(18, 2), a.BookingAmount)
+            .input("BookingAmount", sql.Decimal(18, 2), effectiveBookingAmount)
             .input("PaymentMode", sql.NVarChar(50), a.PaymentMode)
             .input("DepositBankId", sql.Int, a.DepositBankId)
             .input("AssignedTo", sql.Int, a.AssignedTo)
@@ -818,10 +1022,10 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
               UPDATE dbo.CrmBooking
               SET RatePerSqFt = @RatePerSqFt,
                   PaymentPlanId = @PaymentPlanId,
-                  BookingDate = @BookingDate,
+                  BookingDate = COALESCE(@BookingDate, BookingDate),
                   TokenType = @TokenType,
                   TokenValue = @TokenValue,
-                  BookingAmount = @BookingAmount,
+                  BookingAmount = COALESCE(@BookingAmount, BookingAmount),
                   PaymentMode = @PaymentMode,
                   AssignedTo = @AssignedTo,
                   Notes = @Notes,
@@ -836,26 +1040,44 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           // across while TotalValue stayed at the old figure.
           const newRate = a.RatePerSqFt != null ? Number(a.RatePerSqFt) : null;
           if (newRate != null && Number(before?.RatePerSqFt) !== newRate && Number(before?.AreaSqFt) > 0) {
-            const newTotal = Math.round(Number(before.AreaSqFt) * newRate * 100) / 100;
+            const newTotal = unitPrice(before.AreaSqFt, newRate);
             await tx.request().input("bid", sql.Int, booking.id).input("tot", sql.Decimal(18, 2), newTotal).query(`
               UPDATE dbo.CrmBooking
               SET TotalValue = @tot, GrandTotal = @tot + ISNULL(ParkingTotal, 0) + ISNULL(ExtraChargesTotal, 0), UpdatedAt = SYSDATETIME()
               WHERE Id = @bid`);
             await reallocateBookingLines(tx, booking.id, newTotal);
             await recalculateBookingGst(tx, booking.id);
+            // The unpaid steps follow the new price. Before, they only did when
+            // a Booking Amount also came with the resubmit, so a rate-only
+            // change left a schedule that no longer added up to the price.
+            // A plan change rebuilds the schedule below anyway.
+            if (!paymentPlanChanged) await recalculateRemainingMilestones(tx, booking.id);
           }
 
           // A plot sale's schedule is re-derived from the (possibly new)
           // value and Booking Amount instead of patching Milestone 1.
           const land = await rebuildLandSchedule(tx, booking.id, actor);
 
+          if (paymentPlanChanged && land.reason === "not a plot sale") {
+            const bookingAmount = effectiveBookingAmount;
+            await tx.request().input("bid", sql.Int, booking.id).input("bamt", sql.Decimal(18, 2), bookingAmount).query(`
+              UPDATE dbo.CrmBooking SET BookingAmount = @bamt, UpdatedAt = SYSDATETIME() WHERE Id = @bid
+            `);
+            await tx.request().input("bid", sql.Int, booking.id)
+              .query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+            const currentBooking = (await tx.request().input("bid", sql.Int, booking.id)
+              .query("SELECT TotalValue, BookingDate FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+            await generateMilestonesForBooking(tx, booking.id, Number(currentBooking?.TotalValue || 0), a.PaymentPlanId,
+              currentBooking?.BookingDate, actor, bookingAmount);
+          }
+
           // Resync Milestone #1 (Booking Amount) to match the updated
           // BookingAmount. Without this, editing the application's
           // token/booking amount and re-submitting would update the
           // CrmBooking row but leave the milestone's AmountDue stale.
-          if (land.reason === "not a plot sale" && a.BookingAmount) {
+          if (!paymentPlanChanged && land.reason === "not a plot sale" && a.BookingAmount != null) {
             const m1Res = await tx.request().input("bid", sql.Int, booking.id)
-              .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+              .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id");
             const m1 = m1Res.recordset[0];
             if (m1 && m1.Status !== "Waived") {
               const newAmountDue = Math.max(parseFloat(a.BookingAmount), Number(m1.AmountPaid || 0));
@@ -869,6 +1091,12 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
                 .input("pct", sql.Decimal(5, 2), newPercent)
                 .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct,
                   Status = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+                  DemandStatus = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+                  DemandNo = CASE WHEN AmountPaid >= @amt THEN DemandNo ELSE NULL END,
+                  DemandRaisedOn = CASE WHEN AmountPaid >= @amt THEN DemandRaisedOn ELSE NULL END,
+                  DemandNotes = CASE WHEN AmountPaid >= @amt THEN DemandNotes ELSE NULL END,
+                  DemandRaisedAt = CASE WHEN AmountPaid >= @amt THEN DemandRaisedAt ELSE NULL END,
+                  PaidDate = CASE WHEN AmountPaid >= @amt THEN PaidDate ELSE NULL END,
                   UpdatedAt = SYSDATETIME() WHERE Id = @id`);
               await recalculateRemainingMilestones(tx, booking.id, { fixedMilestoneId: m1.Id });
             }
@@ -939,7 +1167,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         const unitIds = await getApplicationUnitIds(pool, id, unitId);
         for (const selectedUnitId of unitIds) {
           await placeHoldIfNeeded(pool, {
-            entityType: "Unit", entityId: selectedUnitId, applicationId: id, holdDays: 3,
+            entityType: "Unit", entityId: selectedUnitId, applicationId: id,
             reason: "Application submitted — auto-hold", userId: actor,
           });
         }
@@ -972,7 +1200,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           booking = { id: created.id, BookingNo: created.BookingNo };
           // Sync SA Lead to Booked now that a Booking exists
           await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id)
-            .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
+            .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${SA_LEAD_BOOKED}', UpdatedAt = SYSDATETIME()
                     WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @aid)`);
           await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`
             UPDATE dbo.CrmBookingDocument
@@ -1047,7 +1275,7 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
     // place a Booking gets created from, just moved here.
     await pool.request().input("bid", sql.Int, created.id).input("id", sql.Int, id)
       .query(`
-        UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
+        UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${SA_LEAD_BOOKED}', UpdatedAt = SYSDATETIME()
         WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @id)
       `);
     await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`
@@ -1096,7 +1324,7 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     // for the rare case of an Approved Application with an active Booking
     // where someone hits this endpoint directly.
     const activeBooking = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
+      .query(`SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}`);
     if (activeBooking.recordset.length) {
       const bk = activeBooking.recordset[0];
       return res.status(400).json({
@@ -1145,16 +1373,29 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     const app = appRes.recordset[0];
     if (!app) return res.status(404).json({ error: "Application not found" });
 
+    // A booking not yet fully approved is deleted with its application (the
+    // booking's own delete, same checks); a fully approved one needs Cancellation.
     const activeBooking = await pool.request().input("id", sql.Int, id).query(`
-      SELECT TOP 1 Id, BookingNo, Status
+      SELECT TOP 1 Id, BookingNo, Status, DirectorApprovedAt, ConfirmedAt
       FROM dbo.CrmBooking
-      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')
+      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}
     `);
     if (activeBooking.recordset.length) {
       const b = activeBooking.recordset[0];
-      return res.status(400).json({
-        error: `Cannot delete application ${app.ApplicationNo} because it has an active booking (${b.BookingNo}, ${b.Status}). Delete the unprogressed booking first, or use Cancellation Request if it has progressed.`,
-      });
+      const { softDeleteBooking, isBookingFullyApproved } = require("./crmBookings");
+      if (isBookingFullyApproved(b)) {
+        return res.status(400).json({
+          error: `Cannot delete application ${app.ApplicationNo} — its booking ${b.BookingNo} is fully approved. Use Cancellation Request instead.`,
+        });
+      }
+      try {
+        await softDeleteBooking(pool, b.Id, actorId(req));
+      } catch (e) {
+        return res.status(e.status || 500).json({ error: e.status ? e.message : "Could not delete the booking of this application." });
+      }
+      // The booking delete cancelled the application; re-read for the steps below.
+      app.Status = (await pool.request().input("id", sql.Int, id)
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id")).recordset[0]?.Status || app.Status;
     }
 
     const progressed = await pool.request().input("aid", sql.Int, id).query(`
@@ -1180,10 +1421,9 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     await releaseAllHoldsForApplication(pool, id, actor);
     await releaseAllParkingForApplication(pool, id);
 
-    await pool.request().input("aid", sql.Int, id).query(`
-      UPDATE dbo.CrmApplicationPlot SET Status = N'Cancelled'
-      WHERE ApplicationId = @aid AND Status = N'Active'
-    `);
+    // Its unit and plot lines both — leaving the unit line Active kept the
+    // flat or villa from ever being applied for again.
+    await require("../services/crmApplicationWorkflow").releaseApplicationLines(pool, id);
 
     await pool.request()
       .input("id", sql.Int, id)

@@ -11,7 +11,12 @@ const compression = require("compression");
 const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
+const { startSiteVisitReminderEngine } = require("./services/saSiteVisitReminders");
+const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
+const { startPoPaymentReminderEngine } = require("./services/poPaymentReminders");
+const { startDueDemandEngine } = require("./services/crmDemandScheduler");
 const authMiddleware = require("./middleware/auth");
+const { attachRateLimitUser, rateLimitKey, loginRateLimitKey } = require("./middleware/rateLimitIdentity");
 const { attachProjectScope } = require("./services/projectScope");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
@@ -157,6 +162,7 @@ const ALL_ROUTES = [
   { path: "/api/account-group", file: "./routes/accountGroup" },
   { path: "/api/account-head", file: "./routes/accountHeadMaster" },
   { path: "/api/activity-master", file: "./routes/activityMaster" },
+  { path: "/api/dpr-tag-master", file: "./routes/dprTagMaster" },
   { path: "/api/engineering-activity-master", file: "./routes/engineeringActivityMaster" },
   { path: "/api/bank-master", file: "./routes/bankMaster" },
   { path: "/api/partner-master", file: "./routes/partnerMaster" },
@@ -171,12 +177,18 @@ const ALL_ROUTES = [
   { path: "/api/designation-master", file: "./routes/designationMaster" },
   { path: "/api/candidate-master", file: "./routes/candidateMaster" },
   { path: "/api/shift-master", file: "./routes/shiftMaster" },
+  { path: "/api/legal/masters", file: "./routes/legal/legalMasters" },
+  { path: "/api/legal/land", file: "./routes/legal/landPipeline" },
+  { path: "/api/legal/land-docs", file: "./routes/legal/landDocuments" },
+  { path: "/api/legal/land-reports", file: "./routes/legal/landReports" },
+  { path: "/api/legal", file: "./routes/legal/legalOperations" },
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
   { path: "/api/holiday-master", file: "./routes/holidayMaster" },
   { path: "/api/deduction-addition-master", file: "./routes/deductionAdditionMaster" },
   { path: "/api/salary-structure", file: "./routes/salaryStructure" },
   { path: "/api/payroll-run", file: "./routes/payrollRun" },
   { path: "/api/attendance-record", file: "./routes/attendanceRecord" },
+  { path: "/api/employee-attendance", file: "./routes/employeeAttendance" },
   { path: "/api/leave-record", file: "./routes/leaveRecord" },
   { path: "/api/overtime-record", file: "./routes/overtimeRecord" },
   { path: "/api/incentive-record", file: "./routes/incentiveRecord" },
@@ -187,6 +199,8 @@ const ALL_ROUTES = [
   { path: "/api/document-type", file: "./routes/document-type" },
   { path: "/api/doc-selector", file: "./routes/docSelector" },
   { path: "/api/doc-search", file: "./routes/docSearch" },
+  { path: "/api/push-devices", file: "./routes/pushDevices" },
+  { path: "/api/dependency-bulk-assign", file: "./routes/dependencyBulkAssign" },
   { path: "/api/fin-year", file: "./routes/finYear" },
   { path: "/api/general-ledger", file: "./routes/generalLedger" },
   { path: "/api/hsn", file: "./routes/hsn" },
@@ -251,6 +265,7 @@ const ALL_ROUTES = [
   { path: "/api/dependency", file: "./routes/dependency" },
   { path: "/api/dependency-master", file: "./routes/dependencyMaster" },
   { path: "/api/dependency-activity-assignment", file: "./routes/dependencyActivityAssignment" },
+  { path: "/api/civilworkdpr-reports", file: "./routes/civilWorkDprReports" },
   { path: "/api/depreciation-setup", file: "./routes/depreciationSetup" },
   { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
   { path: "/api/fixed-asset-tagging", file: "./routes/fixedAssetTagging" },
@@ -259,6 +274,7 @@ const ALL_ROUTES = [
   { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
   { path: "/api/fixed-asset-quality-check", file: "./routes/fixedAssetQualityCheck" },
   { path: "/api/fixed-asset-maintenance", file: "./routes/fixedAssetMaintenance" },
+  { path: "/api/fixed-asset-depreciation-generate", file: "./routes/fixedAssetDepreciationGenerate" },
   { path: "/api/home", file: "./routes/homeActivity" },
   { path: "/api/id-template-master", file: "./routes/idTemplateMaster" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
@@ -268,6 +284,7 @@ const ALL_ROUTES = [
   { path: "/api/engineering-activity-items", file: "./routes/engineeringActivityItems" },
   { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
   { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
+  { path: "/api/script-console", file: "./routes/scriptConsole" },
   { path: "/api/tasks", file: "./routes/tasks" },
   { path: "/api/widgets", file: "./routes/widgets" },
   { path: "/api/widgets/metrics", file: "./routes/widgetMetrics" },
@@ -308,6 +325,7 @@ const ALL_ROUTES = [
   { path: "/api/personal-vault", file: "./routes/personalVault" },
   { path: "/api/signatures", file: "./routes/signatures" },
   { path: "/api/communicator", file: "./routes/communicator" },
+  { path: "/api/integrations/partner-keys", file: "./routes/partnerApiKeys" },
   { path: "/api/system/metrics", file: "./routes/systemMetrics" },
   { path: "/api/menu-master", file: "./routes/menuMaster" },
   { path: "/api/menu-type", file: "./routes/menuType" },
@@ -328,6 +346,7 @@ const ALL_ROUTES = [
   { path: "/api/sa/campaigns", file: "./routes/saCampaigns" },
   { path: "/api/sa/ads", file: "./routes/saAds" },
   { path: "/api/sa/leads", file: "./routes/saLeads" },
+  { path: "/api/sa/lead-import", file: "./routes/saLeadImport" },
   { path: "/api/sa/channel-partners", file: "./routes/saChannelPartners" },
   { path: "/api/sa/lead-activities", file: "./routes/saLeadActivities" },
   { path: "/api/sa/lead-tasks", file: "./routes/saLeadTasks" },
@@ -341,10 +360,10 @@ const ALL_ROUTES = [
   { path: "/api/sa/distribution-rules", file: "./routes/saDistributionRules" },
   { path: "/api/sa/teams", file: "./routes/saTeams" },
   { path: "/api/sa/lead-transfers", file: "./routes/saLeadTransfers" },
-  { path: "/api/sa/role-master", file: "./routes/saRoleMaster" },
   { path: "/api/sa/notifications", file: "./routes/saNotifications" },
   // ── CRM Module ──────────────────────────────────────────────────────────────
   { path: "/api/crm/customers",      file: "./routes/crmCustomers"      },
+  { path: "/api/crm/leads",          file: "./routes/crmLeads"          },
   { path: "/api/crm/applications",   file: "./routes/crmApplications"   },
   { path: "/api/crm/bookings",       file: "./routes/crmBookings"       },
   { path: "/api/crm/loan-summary",   file: "./routes/crmLoanSummary"    },
@@ -361,6 +380,8 @@ const ALL_ROUTES = [
   { path: "/api/crm/cancellations",  file: "./routes/crmCancellations"  },
   { path: "/api/crm/refunds",        file: "./routes/crmRefunds"        },
   { path: "/api/crm/resales",        file: "./routes/crmResales"        },
+  { path: "/api/crm/transfer-deeds",   file: "./routes/crmTransferDeeds"  },
+  { path: "/api/crm/ownership-changes", file: "./routes/crmOwnershipChanges" },
   { path: "/api/crm/customer-360",   file: "./routes/crmCustomer360"    },
   { path: "/api/crm/oc-cc",                file: "./routes/crmOcCc"               },
   { path: "/api/crm/legal-milestones",     file: "./routes/crmLegalMilestones"     },
@@ -373,6 +394,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/possession-notice",    file: "./routes/crmPossessionNotice"    },
   { path: "/api/crm/construction-updates", file: "./routes/crmConstructionUpdates" },
   { path: "/api/crm/dashboard",            file: "./routes/crmDashboard"           },
+  { path: "/api/crm/booking-statement",    file: "./routes/crmBookingStatement"    },
   { path: "/api/crm/reports",              file: "./routes/crmReports"             },
   { path: "/api/crm/customer-bank-details",file: "./routes/crmCustomerBankDetails" },
   { path: "/api/crm/brokerage",            file: "./routes/crmBrokerage"           },
@@ -399,9 +421,17 @@ async function createApp() {
   // container. nginx forwards the real client/ALB IP via X-Forwarded-For,
   // so trust 1 hop — not `true`, which would trust any spoofed header from
   // anywhere and defeat rate limiting and IP-based checks below.
-  app.set("trust proxy", 1);
+  // TRUST_PROXY_HOPS: how many proxies sit in front of this process. 1 today (nginx); set it to 2 when an
+  // AWS load balancer is added in front of nginx, so req.ip is the visitor's address the ALB passed on.
+  // Express counts back from the right of X-Forwarded-For, so a visitor sending their own header can't
+  // pick the address that gets recorded.
+  app.set("trust proxy", Math.max(1, parseInt(process.env.TRUST_PROXY_HOPS || "1", 10) || 1));
 
   app.disable("x-powered-by");
+  // The terminal monitor (npm run monitor): its local-only feed, mounted ahead of the request logger, timeout and
+  // compression so the live stream is neither cut off nor buffered; then the tap that hands it every request.
+  app.use("/internal/monitor", require("./routes/internalMonitor"));
+  app.use(require("./middleware/activityTap"));
   app.use(requestLogger);
   app.use(addRequestTiming);
   app.use(requestTimeout());
@@ -411,8 +441,19 @@ async function createApp() {
     next();
   });
 
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({
+    limit: "10mb",
+    // Meta signs its lead deliveries over the exact bytes sent — keep them for that check only.
+    verify: (req, _res, buf) => {
+      if (req.originalUrl.startsWith("/api/public/integrations/meta-leads/")) req.rawBody = buf;
+    },
+  }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+  // Any successful write anywhere (staff or customer portal) drops every { dropOnAnyWrite } cache — see
+  // middleware/writeInvalidator.js.
+  app.use("/api", require("./middleware/writeInvalidator").writeInvalidator);
+  // Every successful write by a signed-in user, with the record and the values, into the Activity Browser.
+  app.use("/api", require("./middleware/activityAudit").activityAudit);
 
   app.use(helmet());
   app.use(
@@ -432,7 +473,13 @@ async function createApp() {
         "Authorization",
         "X-Requested-With",
         "X-Request-Id",
+        "X-Page",
+        "X-Session-Id",
+        "X-Skip-Activity-Log",
+        "X-Fresh",
       ],
+      // A look-up POST's reply says it saved nothing (middleware/activityAudit.js).
+      exposedHeaders: ["X-Changes-Nothing"],
       optionsSuccessStatus: 204,
     }),
   );
@@ -456,12 +503,27 @@ async function createApp() {
   // including the Vercel serverless entry point (api/index.js) which calls
   // createApp() directly and never goes through startServer().
   if (!isTest) {
+    // Per account: 20 attempts / 15 min at one email address (see loginRateLimitKey for why not per IP).
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 20,
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
+      keyGenerator: loginRateLimitKey,
       skip: (req) => isDev && isLocalRequest(req),
+      validate: false,
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+    // Per IP, much higher: one machine trying many accounts. Everyone behind one address (an office, or this
+    // server's Docker gateway) shares it, so it must allow a whole company signing in together.
+    const loginIpLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 600,
+      message: { error: "Too many login attempts. Try again later." },
+      store: makeStore("rl:login-ip:"),
+      skip: (req) => isDev && isLocalRequest(req),
+      validate: false,
       standardHeaders: true,
       legacyHeaders: false,
     });
@@ -493,12 +555,14 @@ async function createApp() {
       return _cachedLimit;
     }
 
+    // The limiter runs before authentication, so req.user does not exist yet: the person is identified from a
+    // verified token by attachRateLimitUser (see middleware/rateLimitIdentity.js) and gets a bucket of their own.
     const apiLimiter = rateLimit({
       windowMs: 60 * 1000,
       max: async (req) => {
-        if (!req.user?.userId) return 1000;
+        if (req.rateLimitUserId == null) return 1000;
         try {
-          return await getDynamicLimitCached(req.user.userId);
+          return await getDynamicLimitCached(req.rateLimitUserId);
         } catch (err) {
           logger.warn(
             { event: "RATE_LIMIT_FALLBACK", err },
@@ -508,17 +572,22 @@ async function createApp() {
         }
       },
       store: makeStore("rl:api:"),
-      skip: (req) => req.path.startsWith("/api/user-activity"),
-      keyGenerator: (req) =>
-        req.user?.userId ? `user:${req.user.userId}` : req.ip,
+      // Inside app.use("/api", ...) req.path has the "/api" stripped ("/user-activity"), so this must read the full URL -
+      // comparing req.path with "/api/user-activity" never matched, and every logged action cost a second request.
+      skip: (req) => req.originalUrl.startsWith("/api/user-activity"),
+      keyGenerator: rateLimitKey,
       validate: false,
       standardHeaders: true,
       legacyHeaders: false,
     });
 
-    app.use("/api/users/login", loginLimiter);
+    app.use("/api/users/login", loginIpLimiter, loginLimiter);
+    app.use("/api", attachRateLimitUser);
     app.use("/api", apiLimiter);
   }
+
+  // Maintenance switch (Admin > System Maintenance): while on, only a super admin gets past this.
+  app.use("/api", require("./middleware/maintenanceGate").maintenanceGate);
 
   app.get("/", (req, res) => res.send("CivilierERP API running"));
   app.use("/health", require("./routes/health"));
@@ -530,6 +599,8 @@ async function createApp() {
   // "New: X just launched" badge on the Login page — public/pre-auth for
   // the same reason as app-version above.
   app.use("/api/feature-announcement", require("./routes/featureAnnouncement"));
+  // Maintenance status is public (the Maintenance page polls it); changing it needs a super admin token.
+  app.use("/api/system-maintenance", require("./routes/systemMaintenance"));
   // APK Manager. Registered here, before the blanket staff auth wall, because
   // GET /latest is called by the mobile apps on launch (possibly before login)
   // to check for an update. Every other route in the file carries its own
@@ -544,6 +615,11 @@ async function createApp() {
   // including login itself — was rejected with "No token provided" before
   // crmPortal.js's own router ever ran.
   app.use("/api/crm-portal", require("./routes/crmPortal"));
+  // Channel partners' systems push leads with an API key (Admin → Integrations),
+  // never a staff login — so it sits before the staff auth wall like the portal.
+  app.use("/api/public/partner-leads", require("./routes/publicPartnerLeads"));
+  // Meta / Google call these: the "Connect" sign-in callback and instant Meta lead-form leads.
+  app.use("/api/public/integrations", require("./routes/publicIntegrations"));
 
   // Active user tracking — runs after auth on all /api routes
   app.use("/api", authMiddleware, (req, res, next) => {
@@ -555,6 +631,12 @@ async function createApp() {
 
   // Per-user project scoping (req.projectScope: null = unrestricted).
   app.use("/api", attachProjectScope);
+
+  // CRM paged lists: served from Redis on repeat (per user + scope), dropped on any successful write.
+  {
+    const { crmListCache } = require("./middleware/crmListCache");
+    app.use("/api/crm", crmListCache);
+  }
 
   if (!isTest) logger.info("[ROUTES] Loading routes...");
 
@@ -621,6 +703,17 @@ async function createApp() {
     }
 
     res.err = err; // Let pino-http surface the real error
+    require("./services/activityFeed").recordError({
+      source: "handler",
+      level: "error",
+      msg: err.message,
+      stack: String(err.stack || "").split("\n").slice(1, 4).map((l) => l.trim()).join(" | "),
+      status: statusCode,
+      method: req.method,
+      path: (req.originalUrl || req.url || "").split("?")[0],
+      user: req.user?.email || null,
+      id: req.id,
+    });
 
     res.status(statusCode).json({
       success: false,
@@ -662,6 +755,10 @@ async function startServer() {
       logger.info(`[START] Server ready on port ${PORT}`);
       startCrmSlaEngine();
       startFollowupReminderEngine();
+      startSiteVisitReminderEngine();
+      startAutoDepreciationEngine();
+      startPoPaymentReminderEngine();
+      startDueDemandEngine();
     });
 
     setupGracefulShutdown(server, worker);

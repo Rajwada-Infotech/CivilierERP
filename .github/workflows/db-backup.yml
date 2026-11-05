@@ -1,0 +1,86 @@
+# Nightly backup of the production SQL Server database on the EC2 box.
+#
+# What it does, over SSH (same secrets and box path as deploy.yml / renew-cert.yml — EC2_HOST, EC2_USER,
+# EC2_SSH_KEY):
+#   1. BACKUP DATABASE inside the sqlserver container (full, COPY_ONLY so it never disturbs any other backup
+#      chain, CHECKSUM, compressed), using the sa password the container already has — no database password is
+#      stored in GitHub.
+#   2. RESTORE VERIFYONLY on the file, so a broken backup fails the run instead of being kept.
+#   3. Copies the .bak out of the container to /home/administrator/db-backups on the box and removes it from the
+#      container's volume.
+#   4. Keeps the newest KEEP_DAYS files there and deletes older ones.
+#   5. Optional off-box copy: if the repository variable BACKUP_S3_BUCKET is set (Settings > Secrets and variables
+#      > Actions > Variables, e.g. "my-bucket/civilier"), the file is also uploaded with the box's AWS CLI, which
+#      must be installed and allowed to write there (an instance role is best). A backup that lives only on the
+#      same machine does not survive losing that machine, so setting this up is strongly recommended.
+#
+# A failed backup fails the run, so it shows as a red X on the Actions tab (and GitHub e-mails the workflow's
+# owner). Run it any time from the Actions tab with "Run workflow".
+#
+# Scheduled workflows only run from the default branch (main).
+name: Nightly database backup
+
+on:
+  schedule:
+    - cron: "30 20 * * *" # every day 20:30 UTC = 02:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Back up the database over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DB_NAME: Civilier
+          KEEP_DAYS: "14"
+          S3_TARGET: ${{ vars.BACKUP_S3_BUCKET }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DB_NAME,KEEP_DAYS,S3_TARGET
+          command_timeout: 60m
+          script: |
+            set -euo pipefail
+            # Absolute paths, not ~ (see the note in deploy.yml about this box's broken $HOME under a
+            # non-interactive SSH login).
+            cd /home/administrator/CivilierERP
+            BACKUP_DIR=/home/administrator/db-backups
+            mkdir -p "$BACKUP_DIR"
+
+            STAMP="$(date -u +%Y%m%d_%H%M)"
+            FILE="${DB_NAME}_${STAMP}.bak"
+            IN_CONTAINER="/var/opt/mssql/backup/${FILE}"
+
+            echo "Free space on the box before the backup:"
+            df -h "$BACKUP_DIR" | tail -1
+
+            echo "Backing up [${DB_NAME}] to ${FILE}..."
+            docker compose exec -T sqlserver bash -c "mkdir -p /var/opt/mssql/backup && /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"\$MSSQL_SA_PASSWORD\" -C -b -Q \"BACKUP DATABASE [${DB_NAME}] TO DISK = N'${IN_CONTAINER}' WITH COPY_ONLY, CHECKSUM, COMPRESSION, INIT, STATS = 25\""
+
+            echo "Verifying the backup file..."
+            docker compose exec -T sqlserver bash -c "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"\$MSSQL_SA_PASSWORD\" -C -b -Q \"RESTORE VERIFYONLY FROM DISK = N'${IN_CONTAINER}' WITH CHECKSUM\""
+
+            echo "Copying it out of the container..."
+            docker compose cp "sqlserver:${IN_CONTAINER}" "${BACKUP_DIR}/${FILE}"
+            docker compose exec -T sqlserver rm -f "${IN_CONTAINER}"
+            ls -lh "${BACKUP_DIR}/${FILE}"
+
+            if [ -n "${S3_TARGET:-}" ]; then
+              echo "Uploading to s3://${S3_TARGET}/..."
+              aws s3 cp "${BACKUP_DIR}/${FILE}" "s3://${S3_TARGET}/${FILE}" --only-show-errors
+            else
+              echo "No BACKUP_S3_BUCKET variable set — the backup stays on this box only."
+            fi
+
+            echo "Keeping the newest ${KEEP_DAYS} backups:"
+            ls -1t "${BACKUP_DIR}/${DB_NAME}_"*.bak | tail -n +"$((KEEP_DAYS + 1))" | xargs -r rm -f --
+            ls -lh "${BACKUP_DIR}"

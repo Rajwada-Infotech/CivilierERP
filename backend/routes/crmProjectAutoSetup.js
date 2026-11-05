@@ -1,18 +1,27 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { PARKING_TYPES } = require("../constants/parkingTypes");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+
+// A user limited to some projects can't read or change another project's
+// blocks, floors, plots, villas or villa types (services/projectScope.js).
+require("../services/projectScope").setupScopeGuard(router, { params: { projectId: "project", blockId: "block", unitId: "unit" }, idPaths: [["/blocks", "block"], ["/floors", "floor"], ["/plots", "plot"]] });
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { isValidShortCode, ensureProjectShortCode } = require("../services/projectShortCode");
-const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
+const { logAudit } = require("../utils/auditLog");
+const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers, getUnitLockReason } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
 const { getEffectiveType } = require("../services/projectType");
+const { assertProjectAllowed } = require("../services/projectScope");
+
+const PLOT_CONVERSION_TIMEOUT_MS = 120000;
 
 // Mirrors unitMaster.js's syncUnitPaymentPlanTags — deactivate all, then
 // upsert each valid plan ID back in. Called after generating each unit so
@@ -53,7 +62,6 @@ async function syncBlockPaymentPlanTags(pool, blockId, planIds) {
 }
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 
 async function getProject(pool, projectId) {
@@ -63,6 +71,39 @@ async function getProject(pool, projectId) {
     WHERE id = @id AND business_type = 'P' AND ISNULL(discontinue, 0) = 0
   `);
   return r.recordset[0] || null;
+}
+
+// One writer at a time per project. Every structure write on this page (blocks,
+// floors, parking mixes and slots) runs its checks AND its writes inside one
+// transaction holding this project's lock — the same lock GET /status takes to
+// back-fill the scaffold — so a check ("no units on this floor", "N slots
+// missing") can't go stale before the write it guards. `fn(tx)` must do all
+// its reads and writes through `tx`.
+const setupLockName = (projectId) => `crm-auto-setup-sync-${projectId}`;
+async function inSetupLock(pool, projectId, fn) {
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    await tx.request().input("r", sql.NVarChar(100), setupLockName(projectId))
+      .query("EXEC sp_getapplock @Resource = @r, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 30000");
+    const out = await fn(tx);
+    await tx.commit();
+    return out;
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* already rolled back */ }
+    throw e;
+  }
+}
+// A unique index refused a duplicate (two people saving the same name at once).
+const isUniqueViolation = (e) => [2601, 2627].includes(e?.number || e?.originalError?.info?.number);
+// An error with a status the route answers with as is (400 / 404 / 409).
+const httpError = (status, message) => Object.assign(new Error(message), { status });
+// The shared catch for these routes: a known status, a duplicate, or a 500.
+function sendSetupError(res, e, label, duplicateMessage = "That name already exists in this project — refresh and try again.") {
+  if (e.status) return res.status(e.status).json({ error: e.message });
+  if (isUniqueViolation(e)) return res.status(409).json({ error: duplicateMessage });
+  console.error(`[crm-project-auto-setup] ${label} error:`, e.message);
+  return res.status(500).json({ error: e.message });
 }
 
 function resolveShortCode(project) {
@@ -142,6 +183,8 @@ async function syncExistingStructure(pool, projectId) {
     FROM dbo.UnitMaster u
     JOIN dbo.BlockMaster b ON b.Id = u.BlockId
     WHERE b.ProjectId = @pid AND b.IsActive = 1 AND u.IsActive = 1 AND u.FloorNo IS NULL
+      -- land rows (plots kept as units) never sit on a floor; they aren't missing one
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)
     GROUP BY b.Id
   `);
   // Also collect blocks that HAD the bucket but now have no orphans (for cleanup).
@@ -170,7 +213,13 @@ async function syncExistingStructure(pool, projectId) {
         .query(`
           INSERT INTO dbo.CrmProjectAutoSetupFloor
             (ProjectId, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated, IsActive, CreatedAt)
-          VALUES (@pid, @bid, -1, 'Unassigned', @uc, 1, 1, 1, SYSDATETIME())
+          -- In a plotted block the floorless units are villas built on plots,
+          -- not legacy flats missing a floor: label the row by their kind.
+          VALUES (@pid, @bid, -1, COALESCE(
+            (SELECT TOP 1 k.Name FROM dbo.UnitMaster u JOIN dbo.CrmConstructedAssetKind k ON k.Code = u.UnitKind
+              WHERE u.BlockId = @bid AND u.IsActive = 1 AND u.FloorNo IS NULL
+                AND EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id)),
+            'Unassigned'), @uc, 1, 1, 1, SYSDATETIME())
         `);
     }
   }
@@ -403,24 +452,42 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
     const project = await getProject(pool, projectId);
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    await syncExistingStructure(pool, projectId);
+    // Two tabs (or a refetch) opening the page at once both passed the
+    // "not there yet" checks and inserted the same backfilled rows - a floor
+    // then counted twice. One sync per project at a time, all-or-nothing.
+    {
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request().input("r", sql.NVarChar(100), setupLockName(projectId))
+          .query("EXEC sp_getapplock @Resource = @r, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 30000");
+        await syncExistingStructure(tx, projectId);
+        await tx.commit();
+      } catch (e) {
+        try { await tx.rollback(); } catch { /* rolled back */ }
+        throw e;
+      }
+    }
 
     const blocks = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT
-        b.Id, b.BlockName,
-        (SELECT COUNT(*) FROM dbo.ParkingSlot ps WHERE ps.BlockId = b.Id AND ps.IsActive = 1) AS ParkingSlotCount
+        b.Id, b.BlockName, b.ProjectTypeId AS OwnTypeId,
+        (SELECT COUNT(*) FROM dbo.ParkingSlot ps WHERE ps.BlockId = b.Id AND ps.IsActive = 1) AS ParkingSlotCount,
+        (SELECT ISNULL(SUM(sf.Missing), 0) FROM (${parkingShortfallSql("b.Id")}) sf) AS ParkingSlotsToCreate
       FROM dbo.BlockMaster b
       WHERE b.ProjectId = @pid AND b.IsActive = 1
       ORDER BY b.Id
     `);
 
+    const floorKindCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupFloor', 'UnitKind') AS c")).recordset[0].c != null;
     const floors = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT
         f.Id, f.BlockId, f.FloorNo, f.FloorLabel, f.UnitCount, f.HasUnits, f.IsGenerated,
+        ${floorKindCol ? "f.UnitKind" : "CAST(NULL AS NVARCHAR(20)) AS UnitKind"},
         (SELECT COUNT(*) FROM dbo.UnitMaster u
          WHERE u.BlockId = f.BlockId AND u.IsActive = 1
            AND (
-             (f.FloorNo = -1 AND u.FloorNo IS NULL)
+             (f.FloorNo = -1 AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1))
              OR
              (f.FloorNo <> -1 AND u.FloorNo = f.FloorNo)
            )
@@ -450,7 +517,7 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
       SELECT u.Id, u.UnitName, b.BlockName
       FROM dbo.UnitMaster u
       JOIN dbo.BlockMaster b ON b.Id = u.BlockId
-      WHERE b.ProjectId = @pid AND b.IsActive = 1 AND u.IsActive = 1 AND u.FloorNo IS NULL
+      WHERE b.ProjectId = @pid AND b.IsActive = 1 AND u.IsActive = 1 AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)
       ORDER BY b.BlockName, u.UnitName
     `);
 
@@ -552,16 +619,13 @@ router.post("/blocks", requirePageRight("crm-auto-project-setup", "create"), asy
     // there, guarded by the same name-collision check as Block Master
     // itself. (See syncExistingStructure in GET /status for how existing
     // Blocks/Units become visible to the wizard in the first place.)
-    const existing = await pool.request().input("pid", sql.Int, projectId)
-      .query("SELECT BlockName FROM dbo.BlockMaster WHERE ProjectId = @pid AND IsActive = 1");
-    const existingLower = new Set(existing.recordset.map((r) => String(r.BlockName).toLowerCase()));
-    const collision = names.find((n) => existingLower.has(n.toLowerCase()));
-    if (collision) return res.status(409).json({ error: `Block "${collision}" already exists in this Project.` });
-
-    const tx = pool.transaction();
-    await tx.begin();
-    try {
-      const created = [];
+    const created = await inSetupLock(pool, projectId, async (tx) => {
+      const existing = await tx.request().input("pid", sql.Int, projectId)
+        .query("SELECT BlockName FROM dbo.BlockMaster WHERE ProjectId = @pid AND IsActive = 1");
+      const existingLower = new Set(existing.recordset.map((r) => String(r.BlockName).toLowerCase()));
+      const collision = names.find((n) => existingLower.has(n.toLowerCase()));
+      if (collision) throw httpError(409, `Block "${collision}" already exists in this Project.`);
+      const rows = [];
       for (const name of names) {
         const result = await tx.request()
           .input("pid", sql.Int, projectId)
@@ -572,19 +636,15 @@ router.post("/blocks", requirePageRight("crm-auto-project-setup", "create"), asy
             OUTPUT INSERTED.Id, INSERTED.BlockName
             VALUES (@pid, @name, 1, @cb, SYSDATETIME())
           `);
-        created.push(result.recordset[0]);
+        rows.push(result.recordset[0]);
       }
-      await tx.commit();
-      await bumpCacheVersion("block-master");
-      await bumpFlatMasterCaches();
-      res.status(201).json({ blocks: created });
-    } catch (e) {
-      await tx.rollback();
-      throw e;
-    }
+      return rows;
+    });
+    await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
+    res.status(201).json({ blocks: created });
   } catch (e) {
-    console.error("[crm-project-auto-setup] POST /blocks error:", e.message);
-    res.status(500).json({ error: e.message });
+    sendSetupError(res, e, "POST /blocks", "A block with that name already exists in this project.");
   }
 });
 
@@ -605,18 +665,19 @@ router.put("/blocks/:id", requirePageRight("crm-auto-project-setup", "edit"), as
     if (!existing.recordset.length) return res.status(404).json({ error: "Block not found" });
     const { ProjectId } = existing.recordset[0];
 
-    const dupe = await pool.request().input("id", sql.Int, id).input("pid", sql.Int, ProjectId).input("name", sql.NVarChar(100), name)
-      .query("SELECT Id FROM dbo.BlockMaster WHERE ProjectId = @pid AND BlockName = @name AND Id <> @id AND IsActive = 1");
-    if (dupe.recordset.length) return res.status(409).json({ error: `Block "${name}" already exists in this Project.` });
-
-    await pool.request().input("id", sql.Int, id).input("name", sql.NVarChar(100), name).input("ub", sql.Int, updatedBy)
-      .query("UPDATE dbo.BlockMaster SET BlockName = @name, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    await inSetupLock(pool, ProjectId, async (tx) => {
+      const dupe = await tx.request().input("id", sql.Int, id).input("pid", sql.Int, ProjectId).input("name", sql.NVarChar(100), name)
+        .query("SELECT Id FROM dbo.BlockMaster WHERE ProjectId = @pid AND BlockName = @name AND Id <> @id AND IsActive = 1");
+      if (dupe.recordset.length) throw httpError(409, `Block "${name}" already exists in this Project.`);
+      const upd = await tx.request().input("id", sql.Int, id).input("name", sql.NVarChar(100), name).input("ub", sql.Int, updatedBy)
+        .query("UPDATE dbo.BlockMaster SET BlockName = @name, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id AND IsActive = 1");
+      if (!upd.rowsAffected[0]) throw httpError(404, "Block not found — it may have just been deleted.");
+    });
     await bumpCacheVersion("block-master");
     await bumpFlatMasterCaches();
     res.json({ message: "Block renamed", Id: id, BlockName: name });
   } catch (e) {
-    console.error("[crm-project-auto-setup] PUT /blocks/:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    sendSetupError(res, e, "PUT /blocks/:id", "A block with that name already exists in this project.");
   }
 });
 
@@ -632,43 +693,187 @@ router.delete("/blocks/:id", requirePageRight("crm-auto-project-setup", "delete"
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, BlockName FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, BlockName, ProjectId FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Block not found" });
-    const { BlockName } = existing.recordset[0];
+    const { BlockName, ProjectId } = existing.recordset[0];
 
-    const lockReason = await getBlockLockReason(pool, id);
-    if (lockReason) {
-      return res.status(409).json({ error: `Block "${BlockName}" ${lockReason} and cannot be deleted. Delete its Units/Parking Slots first.` });
-    }
-
-    // Real, permanent removal — dbo.BlockMaster is the target of real SQL
-    // Server FK constraints (see blockMaster.js's own DELETE route for the
-    // full list), so a hard delete still has to check for those regardless
-    // of the business-lock check above already passing.
-    const hardBlockers = await getBlockHardDeleteBlockers(pool, id);
-    if (hardBlockers) {
-      return res.status(409).json({ error: `Block "${BlockName}" ${hardBlockers}.` });
-    }
-
-    const tx = pool.transaction();
-    await tx.begin();
-    try {
+    // The checks run inside the lock, so no unit or slot can be added between
+    // "nothing under it" and the delete.
+    await inSetupLock(pool, ProjectId, async (tx) => {
+      const lockReason = await getBlockLockReason(tx, id);
+      if (lockReason) throw httpError(409, `Block "${BlockName}" ${lockReason} and cannot be deleted. Delete its Units/Parking Slots first.`);
+      // No units or slots under it: the block's own setup rows go with it — its
+      // parking mix, unit mix and plot layout, and its parking rates that no
+      // allotment ever used. Saving a parking mix creates those rates, so
+      // without this a block could never be deleted here once its mix was saved.
+      await tx.request().input("bid", sql.Int, id).query(`
+        DELETE pm FROM dbo.ParkingMaster pm
+        WHERE pm.BlockId = @bid AND NOT EXISTS (SELECT 1 FROM dbo.CrmParkingAllotment pa WHERE pa.ParkingMasterId = pm.Id);
+        DELETE FROM dbo.CrmProjectAutoSetupParkingTemplate WHERE BlockId = @bid;
+        DELETE FROM dbo.CrmProjectAutoSetupUnitTemplate WHERE BlockId = @bid;
+        IF OBJECT_ID('dbo.CrmProjectAutoSetupPlotTemplate') IS NOT NULL DELETE FROM dbo.CrmProjectAutoSetupPlotTemplate WHERE BlockId = @bid;
+      `);
+      // Real, permanent removal — dbo.BlockMaster is the target of real SQL
+      // Server FK constraints (see blockMaster.js's own DELETE route for the
+      // full list), so a hard delete still has to check for those regardless
+      // of the business-lock check above already passing.
+      const hardBlockers = await getBlockHardDeleteBlockers(tx, id);
+      if (hardBlockers) throw httpError(409, `Block "${BlockName}" ${hardBlockers}.`);
       await removeOverridesFor(tx, { blockId: id });
       await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.BlockMaster WHERE Id = @id");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @bid");
-      await tx.commit();
-    } catch (e) {
-      await tx.rollback();
-      throw e;
-    }
+    });
     await bumpCacheVersion("block-master");
     await bumpFlatMasterCaches();
     res.json({ message: `Block "${BlockName}" deleted` });
   } catch (e) {
-    console.error("[crm-project-auto-setup] DELETE /blocks/:id error:", e.message);
+    sendSetupError(res, e, "DELETE /blocks/:id");
+  }
+});
+
+// ── Floor stack: typical floor + per-floor "Own mix" (migration 530) ─────────
+const mixReady = async (pool) =>
+  (await pool.request().query("SELECT CASE WHEN OBJECT_ID('dbo.CrmProjectAutoSetupFloorMix') IS NULL THEN 0 ELSE 1 END AS ok")).recordset[0].ok === 1;
+
+// Keeps every not-yet-generated floor's UnitCount equal to what it will hold:
+// its own mix if it has one, else the block's typical floor. Replaces the old
+// separate "Apply to Floors" step, so counts are never stale.
+async function syncFloorCounts(pool, blockId, updatedBy = null) {
+  const typical = (await pool.request().input("bid", sql.Int, blockId)
+    .query("SELECT ISNULL(SUM(Count), 0) AS n FROM dbo.CrmProjectAutoSetupUnitTemplate WHERE BlockId = @bid AND IsActive = 1")).recordset[0].n;
+  const hasMix = await mixReady(pool);
+  await pool.request().input("bid", sql.Int, blockId).input("typ", sql.Int, typical).input("ub", sql.Int, updatedBy).query(`
+    UPDATE f SET
+      UnitCount = CASE WHEN f.HasUnits = 0 THEN 0
+                       ${hasMix ? "WHEN m.n IS NOT NULL THEN m.n" : ""}
+                       ELSE @typ END,
+      UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+    FROM dbo.CrmProjectAutoSetupFloor f
+    ${hasMix ? "OUTER APPLY (SELECT SUM(x.Count) AS n FROM dbo.CrmProjectAutoSetupFloorMix x WHERE x.FloorId = f.Id AND x.IsActive = 1) m" : ""}
+    WHERE f.BlockId = @bid AND f.IsActive = 1 AND f.IsGenerated = 0`);
+}
+
+// Validates mix rows (typical or own): each is a BHK layout with rooms defined,
+// or a unit kind the block's project type sells. Normalises in place.
+async function normaliseMixItems(pool, { projectId, blockId }, items) {
+  const allowed = await require("../services/unitKind").allowedKinds(pool, { projectId, blockId });
+  for (const it of items) {
+    const count = parseInt(it.Count, 10);
+    if (!Number.isFinite(count) || count < 1 || count > 100) throw new LayoutValidationError("Each row needs a count between 1 and 100");
+    it.Count = count;
+    if (it.UnitKind) {
+      const k = allowed.find((x) => x.Code === String(it.UnitKind).toUpperCase());
+      if (!k) throw new LayoutValidationError(`"${it.UnitKind}" isn't a unit kind this block's type sells.`);
+      it.UnitKind = k.Code; it.UnitType = k.Name; it.LayoutTypeId = null;
+      continue;
+    }
+    if (!String(it.UnitType || "").trim() && !it.LayoutTypeId) throw new LayoutValidationError("Each row needs a unit type");
+    if (!allowed.some((k) => !k.IsCommercial)) throw new LayoutValidationError(`This block's type sells no residential units — "${it.UnitType}" can't be used; pick a commercial kind.`);
+    const resolved = await resolveUnitTypeInput(pool, { LayoutTypeId: it.LayoutTypeId, UnitType: String(it.UnitType || "").trim() }, { requireComposition: true });
+    it.UnitType = resolved.unitType; it.LayoutTypeId = resolved.layoutTypeId; it.UnitKind = null;
+  }
+}
+const mixNum = (v) => (v === undefined || v === null || v === "" ? null : parseFloat(v));
+
+// GET /blocks/:id/stack — the block as a building: typical floor + each floor
+// (top first) with its own mix when it has one.
+router.get("/blocks/:id/stack", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const blockId = parseId(req.params.id);
+    if (blockId === null) return res.status(400).json({ error: "Invalid id" });
+    const kindCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupUnitTemplate', 'UnitKind') AS c")).recordset[0].c != null;
+    const typical = (await pool.request().input("bid", sql.Int, blockId).query(`
+      SELECT UnitType, LayoutTypeId, ${kindCol ? "UnitKind" : "CAST(NULL AS NVARCHAR(20)) AS UnitKind"}, Count,
+             CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
+      FROM dbo.CrmProjectAutoSetupUnitTemplate WHERE BlockId = @bid AND IsActive = 1 ORDER BY SortOrder`)).recordset;
+    const floors = (await pool.request().input("bid", sql.Int, blockId).query(`
+      SELECT f.Id, f.FloorNo, f.FloorLabel, f.HasUnits, f.IsGenerated, f.UnitCount,
+        (SELECT COUNT(*) FROM dbo.UnitMaster u WHERE u.BlockId = f.BlockId AND u.IsActive = 1 AND u.FloorNo = f.FloorNo) AS GeneratedUnitCount
+      FROM dbo.CrmProjectAutoSetupFloor f WHERE f.BlockId = @bid AND f.IsActive = 1 AND f.FloorNo >= 0
+      ORDER BY f.FloorNo DESC`)).recordset;
+    const ready = await mixReady(pool);
+    const own = ready ? (await pool.request().input("bid", sql.Int, blockId).query(`
+      SELECT x.FloorId, x.UnitType, x.LayoutTypeId, x.UnitKind, x.Count, x.CarpetAreaSqFt, x.BuiltUpAreaSqFt, x.SuperBuiltUpAreaSqFt, x.OpenTerraceAreaSqFt, x.RatePerSqFt
+      FROM dbo.CrmProjectAutoSetupFloorMix x JOIN dbo.CrmProjectAutoSetupFloor f ON f.Id = x.FloorId
+      WHERE f.BlockId = @bid AND x.IsActive = 1 ORDER BY x.SortOrder`)).recordset : [];
+    const planIds = (await pool.request().input("bid", sql.Int, blockId)
+      .query("SELECT PlanId FROM dbo.CrmBlockPaymentPlan WHERE BlockId = @bid AND IsActive = 1")).recordset.map((r) => r.PlanId);
+    res.json({
+      mixReady: ready,
+      paymentPlanIds: planIds,
+      typical,
+      floors: floors.map((f) => ({ ...f, ownMix: own.some((o) => o.FloorId === f.Id) ? own.filter((o) => o.FloorId === f.Id) : null })),
+    });
+  } catch (e) {
+    console.error("[auto-setup] GET stack:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
+
+// PUT /floors/:id/mix { Items | null } — a floor's own mix; null = back to the typical floor.
+router.put("/floors/:id/mix", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const pool = getPool();
+  try {
+    if (!(await mixReady(pool))) return res.status(409).json({ error: "Own floor mixes need database migration 530 — run the migrations and reload." });
+    const floorId = parseId(req.params.id);
+    if (floorId === null) return res.status(400).json({ error: "Invalid id" });
+    const fl = (await pool.request().input("id", sql.Int, floorId)
+      .query("SELECT f.Id, f.BlockId, f.IsGenerated, b.ProjectId FROM dbo.CrmProjectAutoSetupFloor f JOIN dbo.BlockMaster b ON b.Id = f.BlockId WHERE f.Id = @id AND f.IsActive = 1")).recordset[0];
+    if (!fl) return res.status(404).json({ error: "Floor not found" });
+    if (fl.IsGenerated) return res.status(409).json({ error: "This floor's units are already generated — edit them in Unit Master." });
+    const items = Array.isArray(req.body.Items) ? req.body.Items : null;
+    if (items) {
+      if (!items.length) return res.status(400).json({ error: "Add at least one row, or switch the floor back to the typical floor" });
+      await normaliseMixItems(pool, { projectId: fl.ProjectId, blockId: fl.BlockId }, items);
+    }
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, floorId)
+        .query("UPDATE dbo.CrmProjectAutoSetupFloorMix SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FloorId = @id AND IsActive = 1");
+      for (let i = 0; items && i < items.length; i++) {
+        const it = items[i];
+        await tx.request().input("f", sql.Int, floorId).input("s", sql.Int, i + 1)
+          .input("ut", sql.NVarChar(50), it.UnitType || null).input("lt", sql.Int, it.LayoutTypeId ?? null).input("k", sql.NVarChar(20), it.UnitKind || null)
+          .input("c", sql.Int, it.Count).input("ca", sql.Decimal(18, 2), mixNum(it.CarpetAreaSqFt)).input("bu", sql.Decimal(18, 2), mixNum(it.BuiltUpAreaSqFt))
+          .input("sb", sql.Decimal(18, 2), mixNum(it.SuperBuiltUpAreaSqFt)).input("ot", sql.Decimal(18, 2), mixNum(it.OpenTerraceAreaSqFt)).input("r", sql.Decimal(18, 2), mixNum(it.RatePerSqFt))
+          .input("by", sql.Int, req.user?.userId || null)
+          .query(`INSERT INTO dbo.CrmProjectAutoSetupFloorMix (FloorId, SortOrder, UnitType, LayoutTypeId, UnitKind, Count, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, CreatedBy)
+                  VALUES (@f, @s, @ut, @lt, @k, @c, @ca, @bu, @sb, @ot, @r, @by)`);
+      }
+      // A floor given its own mix obviously has units.
+      if (items) await tx.request().input("id", sql.Int, floorId).query("UPDATE dbo.CrmProjectAutoSetupFloor SET HasUnits = 1 WHERE Id = @id");
+      // The mix now decides each unit's kind — drop any older whole-floor kind.
+      if ((await tx.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupFloor', 'UnitKind') AS c")).recordset[0].c != null) {
+        await tx.request().input("id", sql.Int, floorId).query("UPDATE dbo.CrmProjectAutoSetupFloor SET UnitKind = NULL WHERE Id = @id");
+      }
+      await tx.commit();
+    } catch (e) { try { await tx.rollback(); } catch (_) { /* ignore */ } throw e; }
+    await syncFloorCounts(pool, fl.BlockId, req.user?.userId || null);
+    await bumpFlatMasterCaches();
+    res.json({ success: true });
+  } catch (e) {
+    if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
+    console.error("[auto-setup] PUT floor mix:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// A floor's own mix, expanded like getBlockUnitSequence; [] when it follows the typical floor.
+async function getFloorUnitSequence(pool, floorId) {
+  if (!(await mixReady(pool))) return [];
+  const rows = await pool.request().input("f", sql.Int, floorId).query(`
+    SELECT UnitType, LayoutTypeId, UnitKind, Count, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
+    FROM dbo.CrmProjectAutoSetupFloorMix WHERE FloorId = @f AND IsActive = 1 ORDER BY SortOrder`);
+  const seq = [];
+  for (const r of rows.recordset) for (let i = 0; i < r.Count; i++) {
+    seq.push({ UnitKind: r.UnitKind || null, UnitType: r.UnitKind ? null : r.UnitType, LayoutTypeId: r.UnitKind ? null : r.LayoutTypeId,
+      AreaSqFt: r.SuperBuiltUpAreaSqFt, CarpetAreaSqFt: r.CarpetAreaSqFt, BuiltUpAreaSqFt: r.BuiltUpAreaSqFt,
+      SuperBuiltUpAreaSqFt: r.SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt: r.OpenTerraceAreaSqFt, RatePerSqFt: r.RatePerSqFt });
+  }
+  return seq;
+}
 
 // GET /blocks/:id/unit-template — the Block's "typical floor" unit mix
 // (e.g. 2x 2BHK + 2x 3BHK), in SortOrder, plus the computed total. Empty
@@ -679,8 +884,10 @@ router.get("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
   try {
     const blockId = parseId(req.params.id);
     if (blockId === null) return res.status(400).json({ error: "Invalid id" });
+    const tplKindCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupUnitTemplate', 'UnitKind') AS c")).recordset[0].c != null;
     const items = await pool.request().input("bid", sql.Int, blockId).query(`
       SELECT Id, SortOrder, UnitType, LayoutTypeId, Count, AreaSqFt,
+             ${tplKindCol ? "UnitKind" : "CAST(NULL AS NVARCHAR(20)) AS UnitKind"},
              CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
       FROM dbo.CrmProjectAutoSetupUnitTemplate
       WHERE BlockId = @bid AND IsActive = 1
@@ -733,7 +940,21 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
       .query("SELECT UnitType, LayoutTypeId FROM dbo.CrmProjectAutoSetupUnitTemplate WHERE BlockId = @bid AND IsActive = 1");
     const keepLayoutIds = currentRows.recordset.map((r) => r.LayoutTypeId).filter(Boolean);
     const keepTexts = new Set(currentRows.recordset.filter((r) => !r.LayoutTypeId).map((r) => String(r.UnitType || "").trim()));
+    // A row may be a unit kind (Shop, Office…) the project type sells,
+    // instead of a BHK layout — such units get no layout or rooms.
+    const tplKindCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupUnitTemplate', 'UnitKind') AS c")).recordset[0].c != null;
+    const allowed = await require("../services/unitKind").allowedKinds(pool, { projectId, blockId });
     for (const it of items) {
+      if (it.UnitKind) {
+        if (!tplKindCol) return res.status(409).json({ error: "Shops / offices in the unit mix need database migration 529 — run the migrations and reload." });
+        const k = allowed.find((x) => x.Code === String(it.UnitKind).toUpperCase());
+        if (!k) return res.status(400).json({ error: `"${it.UnitKind}" isn't a unit kind this project's type sells.` });
+        it.UnitKind = k.Code; it.UnitType = k.Name; it.LayoutTypeId = null;
+        continue;
+      }
+      if (!allowed.some((k) => !k.IsCommercial)) {
+        return res.status(400).json({ error: `This block's type sells no residential units — "${it.UnitType}" can't be used; pick a commercial kind.` });
+      }
       const text = String(it.UnitType || "").trim();
       const resolved = await resolveUnitTypeInput(
         pool,
@@ -742,6 +963,14 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
       );
       it.UnitType = resolved.unitType;
       it.LayoutTypeId = resolved.layoutTypeId;
+    }
+
+    // Checked before anything is written - it used to run after the template
+    // was saved, so a refused plan left the template changed anyway.
+    if (requestedPlanIds.length) {
+      const applicable = await getApplicablePaymentPlans(pool, { projectId });
+      const applicableIds = new Set(applicable.map((p) => p.Id));
+      if (requestedPlanIds.some((pid) => !applicableIds.has(pid))) return res.status(400).json({ error: "One or more selected Payment Plans are not applicable to this Block." });
     }
 
     const tx = pool.transaction();
@@ -763,10 +992,11 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
           .input("openTerraceArea", sql.Decimal(18, 2), items[i].OpenTerraceAreaSqFt != null && items[i].OpenTerraceAreaSqFt !== "" ? parseFloat(items[i].OpenTerraceAreaSqFt) : null)
           .input("rate", sql.Decimal(18, 2), items[i].RatePerSqFt != null && items[i].RatePerSqFt !== "" ? parseFloat(items[i].RatePerSqFt) : null)
           .input("cb", sql.Int, updatedBy)
+          .input("kind", sql.NVarChar(20), items[i].UnitKind || null)
           .query(`
             INSERT INTO dbo.CrmProjectAutoSetupUnitTemplate
-              (BlockId, SortOrder, UnitType, LayoutTypeId, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
-            VALUES (@bid, @so, @type, @lt, @count, @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea, @rate, 1, @cb, SYSDATETIME())
+              (BlockId, SortOrder, UnitType, LayoutTypeId, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt${tplKindCol ? ", UnitKind" : ""})
+            VALUES (@bid, @so, @type, @lt, @count, @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea, @rate, 1, @cb, SYSDATETIME()${tplKindCol ? ", @kind" : ""})
           `);
       }
       await tx.commit();
@@ -780,6 +1010,7 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
     // MERGE ensures we upsert (update if exists, insert if not) without wiping
     // unrelated rows for other unit types in the same block.
     for (const item of items) {
+      if (item.UnitKind) continue; // BHK area spec only
       const carpetArea  = item.CarpetAreaSqFt  != null && item.CarpetAreaSqFt  !== "" ? parseFloat(item.CarpetAreaSqFt)  : null;
       const builtUpArea = item.BuiltUpAreaSqFt != null && item.BuiltUpAreaSqFt !== "" ? parseFloat(item.BuiltUpAreaSqFt) : null;
       const sbuArea     = item.SuperBuiltUpAreaSqFt != null && item.SuperBuiltUpAreaSqFt !== "" ? parseFloat(item.SuperBuiltUpAreaSqFt) : null;
@@ -816,10 +1047,6 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
 
     // Validate and sync block-level payment plan tags if provided.
     if (requestedPlanIds.length) {
-      const applicable = await getApplicablePaymentPlans(pool, { projectId });
-      const applicableIds = new Set(applicable.map((p) => p.Id));
-      const invalid = requestedPlanIds.filter((pid) => !applicableIds.has(pid));
-      if (invalid.length) return res.status(400).json({ error: "One or more selected Payment Plans are not applicable to this Block." });
       await syncBlockPaymentPlanTags(pool, blockId, requestedPlanIds);
     } else if (req.body.PaymentPlanIds !== undefined) {
       // Explicit empty array = clear all plan tags for this block.
@@ -827,6 +1054,7 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
     }
 
     const total = items.reduce((s, it) => s + parseInt(it.Count, 10), 0);
+    await syncFloorCounts(pool, blockId, updatedBy);
     res.json({ message: "Template saved", total });
   } catch (e) {
     if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
@@ -851,17 +1079,8 @@ router.post("/blocks/:id/unit-template/apply", requirePageRight("crm-auto-projec
     const total = totalRes.recordset[0].total;
     if (!total) return res.status(400).json({ error: "Save a Unit Type template for this block first" });
 
-    const result = await pool.request()
-      .input("bid", sql.Int, blockId)
-      .input("uc", sql.Int, total)
-      .input("ub", sql.Int, updatedBy)
-      .query(`
-        UPDATE dbo.CrmProjectAutoSetupFloor SET
-          UnitCount = @uc, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        OUTPUT INSERTED.Id
-        WHERE BlockId = @bid AND IsActive = 1 AND IsGenerated = 0 AND HasUnits = 1 AND FloorNo <> 0
-      `);
-    res.json({ message: "Applied to this block's floors", updatedCount: result.recordset.length, total });
+    await syncFloorCounts(pool, blockId, updatedBy);
+    res.json({ message: "Applied to this block's floors", total });
   } catch (e) {
     console.error("[crm-project-auto-setup] POST /blocks/:id/unit-template/apply error:", e.message);
     res.status(500).json({ error: e.message });
@@ -942,16 +1161,23 @@ router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
         return res.status(400).json({ error: `Invalid Parking Type. Must be: ${PARKING_TYPES.join(", ")}` });
       }
       if (!Number.isFinite(count) || count < 1 || count > 500) return res.status(400).json({ error: "Count must be between 1 and 500" });
+      const charge = it.Charge !== undefined && it.Charge !== "" && it.Charge !== null ? Number(it.Charge) : null;
+      const gst = it.GstRate !== undefined && it.GstRate !== "" && it.GstRate !== null ? Number(it.GstRate) : null;
+      if (charge !== null && !(charge >= 0)) return res.status(400).json({ error: `${it.ParkingType}: the charge can't be negative` });
+      if (gst !== null && !(gst >= 0 && gst <= 100)) return res.status(400).json({ error: `${it.ParkingType}: GST must be between 0 and 100%` });
     }
+    // One row per type: a block holds one charge per type (ParkingMaster), so
+    // a second "Open" row would silently replace the first one's charge.
+    const dupType = items.map((it) => it.ParkingType).find((t, i, a) => a.indexOf(t) !== i);
+    if (dupType) return res.status(400).json({ error: `"${dupType}" is listed twice — put all ${dupType} slots in one row.` });
 
     const blockRow = await pool.request().input("id", sql.Int, blockId)
       .query("SELECT Id, ProjectId FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
     if (!blockRow.recordset.length) return res.status(404).json({ error: "Block not found" });
     const projectId = blockRow.recordset[0].ProjectId;
 
-    const tx = pool.transaction();
-    await tx.begin();
-    try {
+    // The mix and its prices are saved together, under the project's lock.
+    await inSetupLock(pool, projectId, async (tx) => {
       await tx.request().input("bid", sql.Int, blockId)
         .query("UPDATE dbo.CrmProjectAutoSetupParkingTemplate SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE BlockId = @bid AND IsActive = 1");
       for (let i = 0; i < items.length; i++) {
@@ -966,19 +1192,13 @@ router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
             VALUES (@bid, @so, @type, @count, 1, @cb, SYSDATETIME())
           `);
       }
-      await tx.commit();
-    } catch (e) {
-      await tx.rollback();
-      throw e;
-    }
 
-    // Forward-fill ParkingMaster pricing — only for items that supply Charge or GstRate.
-    if (projectId) {
+      // Forward-fill ParkingMaster pricing — only for items that supply Charge or GstRate.
       for (const it of items) {
-        const charge = it.Charge !== undefined && it.Charge !== "" ? parseFloat(it.Charge) : null;
-        const gst    = it.GstRate !== undefined && it.GstRate !== "" ? parseFloat(it.GstRate) : null;
+        const charge = it.Charge !== undefined && it.Charge !== "" && it.Charge !== null ? parseFloat(it.Charge) : null;
+        const gst    = it.GstRate !== undefined && it.GstRate !== "" && it.GstRate !== null ? parseFloat(it.GstRate) : null;
         if (charge === null && gst === null) continue;
-        await pool.request()
+        await tx.request()
           .input("pid",  sql.Int,           projectId)
           .input("bid",  sql.Int,           blockId)
           .input("type", sql.NVarChar(50),  it.ParkingType)
@@ -995,13 +1215,12 @@ router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
               VALUES (src.ProjectId, src.BlockId, src.ParkingType, @chg, @gst, 1);
           `);
       }
-    }
+    });
 
     const total = items.reduce((s, it) => s + parseInt(it.Count, 10), 0);
     res.json({ message: "Parking template saved", total });
   } catch (e) {
-    console.error("[crm-project-auto-setup] PUT /blocks/:id/parking-template error:", e.message);
-    res.status(500).json({ error: e.message });
+    sendSetupError(res, e, "PUT /blocks/:id/parking-template");
   }
 });
 
@@ -1010,6 +1229,34 @@ router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
 // delete straight through the existing parking-slot-master endpoints (which
 // already enforce the shared booking/hold lock check — not duplicated
 // here).
+// Active parking slots with what holds each one (allotment -> booking, live
+// hold), for one block or a whole project. `where` is a trusted SQL condition
+// on alias s. One query shape for both routes below.
+const parkingSlotsSql = (where) => `
+  SELECT s.Id, s.ProjectId, s.BlockId, s.SlotNo, s.ParkingType, s.IsActive,
+    pa.Id AS LockAllotmentId, bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
+  FROM dbo.ParkingSlot s
+  LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
+  LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
+  LEFT JOIN dbo.CrmInventoryHold h
+    ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
+  WHERE ${where} AND s.IsActive = 1
+  ORDER BY s.BlockId, s.SlotNo`;
+
+// GET /projects/:projectId/parking-slots — every block's slots in one call,
+// for the Parking tab's slot maps and project totals.
+router.get("/projects/:projectId/parking-slots", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  try {
+    const projectId = parseId(req.params.projectId);
+    if (projectId === null) return res.status(400).json({ error: "Invalid project id" });
+    const slots = await getPool().request().input("pid", sql.Int, projectId).query(parkingSlotsSql("s.ProjectId = @pid"));
+    res.json({ slots: slots.recordset });
+  } catch (e) {
+    console.error("[crm-project-auto-setup] GET /projects/:projectId/parking-slots error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/blocks/:id/parking-slots", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
   const pool = getPool();
   try {
@@ -1019,17 +1266,7 @@ router.get("/blocks/:id/parking-slots", requirePageRight("crm-auto-project-setup
       .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
     if (!block.recordset.length) return res.status(404).json({ error: "Block not found" });
 
-    const slots = await pool.request().input("bid", sql.Int, blockId).query(`
-      SELECT s.Id, s.ProjectId, s.BlockId, s.SlotNo, s.ParkingType, s.IsActive,
-        pa.Id AS LockAllotmentId, bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
-      FROM dbo.ParkingSlot s
-      LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
-      LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
-      LEFT JOIN dbo.CrmInventoryHold h
-        ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
-      WHERE s.BlockId = @bid AND s.IsActive = 1
-      ORDER BY s.SlotNo
-    `);
+    const slots = await pool.request().input("bid", sql.Int, blockId).query(parkingSlotsSql("s.BlockId = @bid"));
     res.json({ slots: slots.recordset });
   } catch (e) {
     console.error("[crm-project-auto-setup] GET /blocks/:id/parking-slots error:", e.message);
@@ -1050,6 +1287,9 @@ router.post("/floors", requirePageRight("crm-auto-project-setup", "create"), asy
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: "ProjectId is required" });
     if (!blocks.length) return res.status(400).json({ error: "At least one block's floor count is required" });
 
+    // Validate every block first, then add all floors in one locked
+    // transaction: a failure part-way no longer leaves some blocks' floors.
+    const plan = [];
     for (const b of blocks) {
       const blockId = parseInt(b.BlockId, 10);
       const floorCount = parseInt(b.FloorCount, 10);
@@ -1072,28 +1312,35 @@ router.post("/floors", requirePageRight("crm-auto-project-setup", "create"), asy
       const block = await pool.request().input("id", sql.Int, blockId).input("pid", sql.Int, projectId)
         .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @id AND ProjectId = @pid AND IsActive = 1");
       if (!block.recordset.length) return res.status(404).json({ error: `Block ${blockId} not found on this project` });
-
-      const existingFloors = await pool.request().input("bid", sql.Int, blockId)
-        .query("SELECT FloorNo FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @bid AND IsActive = 1");
-      const existingNos = new Set(existingFloors.recordset.map((r) => r.FloorNo));
-
-      for (let floorNo = 0; floorNo < floorCount; floorNo++) {
-        if (existingNos.has(floorNo)) continue;
-        const label = floorNo === 0 ? "G" : String(floorNo);
-        const hasUnits = floorNo === 0 ? 0 : 1;
-        await pool.request()
-          .input("pid", sql.Int, projectId)
-          .input("bid", sql.Int, blockId)
-          .input("fno", sql.Int, floorNo)
-          .input("label", sql.NVarChar(20), label)
-          .input("hu", sql.Bit, hasUnits)
-          .input("cb", sql.Int, createdBy)
-          .query(`
-            INSERT INTO dbo.CrmProjectAutoSetupFloor (ProjectId, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated, IsActive, CreatedBy, CreatedAt)
-            VALUES (@pid, @bid, @fno, @label, 0, @hu, 0, 1, @cb, SYSDATETIME())
-          `);
-      }
+      plan.push({ blockId, floorCount });
     }
+
+    await inSetupLock(pool, projectId, async (tx) => {
+      for (const { blockId, floorCount } of plan) {
+        const existingFloors = await tx.request().input("bid", sql.Int, blockId)
+          .query("SELECT FloorNo FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @bid AND IsActive = 1");
+        const existingNos = new Set(existingFloors.recordset.map((r) => r.FloorNo));
+
+        for (let floorNo = 0; floorNo < floorCount; floorNo++) {
+          if (existingNos.has(floorNo)) continue;
+          const label = floorNo === 0 ? "G" : String(floorNo);
+          const hasUnits = floorNo === 0 ? 0 : 1;
+          await tx.request()
+            .input("pid", sql.Int, projectId)
+            .input("bid", sql.Int, blockId)
+            .input("fno", sql.Int, floorNo)
+            .input("label", sql.NVarChar(20), label)
+            .input("hu", sql.Bit, hasUnits)
+            .input("cb", sql.Int, createdBy)
+            .query(`
+              INSERT INTO dbo.CrmProjectAutoSetupFloor (ProjectId, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated, IsActive, CreatedBy, CreatedAt)
+              VALUES (@pid, @bid, @fno, @label, 0, @hu, 0, 1, @cb, SYSDATETIME())
+            `);
+        }
+        // New floors take the typical floor's count straight away.
+        await syncFloorCounts(tx, blockId, createdBy);
+      }
+    });
 
     const floors = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT Id, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated
@@ -1102,8 +1349,7 @@ router.post("/floors", requirePageRight("crm-auto-project-setup", "create"), asy
     await bumpFlatMasterCaches();
     res.status(201).json({ floors: floors.recordset });
   } catch (e) {
-    console.error("[crm-project-auto-setup] POST /floors error:", e.message);
-    res.status(500).json({ error: e.message });
+    sendSetupError(res, e, "POST /floors", "Those floors were just added by someone else — refresh to see them.");
   }
 });
 
@@ -1128,37 +1374,62 @@ router.put("/floors/:id", requirePageRight("crm-auto-project-setup", "edit"), as
   try {
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
-    const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, IsGenerated, HasUnits, UnitCount FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id AND IsActive = 1");
-    if (!existing.recordset.length) return res.status(404).json({ error: "Floor not found" });
-    if (existing.recordset[0].IsGenerated) {
-      return res.status(409).json({ error: "Units have already been generated for this floor — edit them in Unit Master instead." });
-    }
+    const head = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ProjectId FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id AND IsActive = 1");
+    if (!head.recordset.length) return res.status(404).json({ error: "Floor not found" });
 
-    const hasUnits = req.body.HasUnits !== undefined ? !!req.body.HasUnits : !!existing.recordset[0].HasUnits;
-    // Turning a floor off always zeroes its count so a stray value can't
-    // survive a re-toggle later.
-    const unitCount = !hasUnits ? 0
-      : (req.body.UnitCount !== undefined ? parseInt(req.body.UnitCount, 10) : existing.recordset[0].UnitCount);
-    if (!Number.isFinite(unitCount) || unitCount < 0 || unitCount > 500) {
-      return res.status(400).json({ error: "UnitCount must be between 0 and 500" });
-    }
+    const result = await inSetupLock(pool, head.recordset[0].ProjectId, async (pool) => {
+      const existing = await pool.request().input("id", sql.Int, id)
+        .query("SELECT Id, IsGenerated, HasUnits, UnitCount FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id AND IsActive = 1");
+      if (!existing.recordset.length) throw httpError(404, "Floor not found");
+      if (existing.recordset[0].IsGenerated) {
+        throw httpError(409, "Units have already been generated for this floor — edit them in Unit Master instead.");
+      }
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("uc", sql.Int, unitCount)
-      .input("hu", sql.Bit, hasUnits ? 1 : 0)
-      .input("ub", sql.Int, updatedBy)
-      .query(`
-        UPDATE dbo.CrmProjectAutoSetupFloor SET
-          UnitCount = @uc, HasUnits = @hu, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+      const hasUnits = req.body.HasUnits !== undefined ? !!req.body.HasUnits : !!existing.recordset[0].HasUnits;
+      // Turning a floor off always zeroes its count so a stray value can't
+      // survive a re-toggle later.
+      const unitCount = !hasUnits ? 0
+        : (req.body.UnitCount !== undefined ? parseInt(req.body.UnitCount, 10) : existing.recordset[0].UnitCount);
+      if (!Number.isFinite(unitCount) || unitCount < 0 || unitCount > 500) {
+        throw httpError(400, "UnitCount must be between 0 and 500");
+      }
+
+      // What the floor's units are (Unit Master › Unit kinds), limited to what
+      // the project type sells. "" = back to the default (flats).
+      if (req.body.UnitKind !== undefined) {
+        const hasCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupFloor', 'UnitKind') AS c")).recordset[0].c != null;
+        if (!hasCol) throw httpError(409, "Floor use needs database migration 528 — run the migrations and reload.");
+        const code = req.body.UnitKind ? String(req.body.UnitKind).trim().toUpperCase() : null;
+        if (code) {
+          const fl = (await pool.request().input("id", sql.Int, id).query("SELECT ProjectId, BlockId FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id")).recordset[0];
+          const allowed = await require("../services/unitKind").allowedKinds(pool, { projectId: fl.ProjectId, blockId: fl.BlockId });
+          if (!allowed.some((k) => k.Code === code)) throw httpError(400, `"${code}" isn't a unit kind this project's type sells.`);
+        }
+        await pool.request().input("id", sql.Int, id).input("k", sql.NVarChar(20), code)
+          .query("UPDATE dbo.CrmProjectAutoSetupFloor SET UnitKind = @k WHERE Id = @id");
+      }
+
+      await pool.request()
+        .input("id", sql.Int, id)
+        .input("uc", sql.Int, unitCount)
+        .input("hu", sql.Bit, hasUnits ? 1 : 0)
+        .input("ub", sql.Int, updatedBy)
+        .query(`
+          UPDATE dbo.CrmProjectAutoSetupFloor SET
+            UnitCount = @uc, HasUnits = @hu, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      if (req.body.HasUnits !== undefined && req.body.UnitCount === undefined) {
+        const bid = (await pool.request().input("id", sql.Int, id).query("SELECT BlockId FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id")).recordset[0]?.BlockId;
+        if (bid) await syncFloorCounts(pool, bid, updatedBy);
+      }
+      return { unitCount, hasUnits };
+    });
     await bumpFlatMasterCaches();
-    res.json({ message: "Floor updated", Id: id, UnitCount: unitCount, HasUnits: hasUnits });
+    res.json({ message: "Floor updated", Id: id, UnitCount: result.unitCount, HasUnits: result.hasUnits });
   } catch (e) {
-    console.error("[crm-project-auto-setup] PUT /floors/:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    sendSetupError(res, e, "PUT /floors/:id");
   }
 });
 
@@ -1171,24 +1442,27 @@ router.delete("/floors/:id", requirePageRight("crm-auto-project-setup", "delete"
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, BlockId, FloorNo, FloorLabel FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, ProjectId, BlockId, FloorNo, FloorLabel FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Floor not found" });
     const floor = existing.recordset[0];
 
-    const lockReason = await getFloorLockReason(pool, floor.BlockId, floor.FloorNo);
-    if (lockReason) {
-      return res.status(409).json({ error: `Floor "${floor.FloorLabel}" ${lockReason} and cannot be deleted. Delete the unit(s) first.` });
-    }
-
-    // No FK references this table (it's just this wizard's own scaffold),
-    // so a real permanent delete is safe here with no further checks.
-    await pool.request().input("id", sql.Int, id)
-      .query("DELETE FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id");
+    // Checked and deleted under the project's lock: units can't be generated
+    // onto the floor between "no units on it" and the delete.
+    await inSetupLock(pool, floor.ProjectId, async (tx) => {
+      const lockReason = await getFloorLockReason(tx, floor.BlockId, floor.FloorNo);
+      if (lockReason) throw httpError(409, `Floor "${floor.FloorLabel}" ${lockReason} and cannot be deleted. Delete the unit(s) first.`);
+      // No FK references this table (it's just this wizard's own scaffold),
+      // so a real permanent delete is safe here with no further checks.
+      // The floor's own mix goes with it (setup rows only — no units exist on it).
+      if (await mixReady(tx)) {
+        await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmProjectAutoSetupFloorMix WHERE FloorId = @id");
+      }
+      await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id");
+    });
     await bumpFlatMasterCaches();
     res.json({ message: `Floor "${floor.FloorLabel}" deleted` });
   } catch (e) {
-    console.error("[crm-project-auto-setup] DELETE /floors/:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    sendSetupError(res, e, "DELETE /floors/:id");
   }
 });
 
@@ -1211,7 +1485,8 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
     // All other floors use the normal equality join.
     const unitsQuery = FloorNo === -1
       ? pool.request().input("bid", sql.Int, BlockId).query(`
-          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType,
+          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType, u.UnitKind,
+            (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind) AS KindName,
             u.AreaSqFt, u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
             u.IsActive,
             tags.PlanIds AS PaymentPlanIds,
@@ -1222,14 +1497,15 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
             FROM dbo.CrmUnitPaymentPlan upp
             WHERE upp.UnitId = u.Id AND upp.IsActive = 1
           ) tags
-          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
-          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
-          WHERE u.BlockId = @bid AND u.FloorNo IS NULL AND u.IsActive = 1
+          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Converted')
+          WHERE u.BlockId = @bid AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1) AND u.IsActive = 1
           ORDER BY u.UnitName
         `)
       : pool.request().input("bid", sql.Int, BlockId).input("fno", sql.Int, FloorNo).query(`
-          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType,
+          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType, u.UnitKind,
+            (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind) AS KindName,
             u.AreaSqFt, u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
             u.IsActive,
             tags.PlanIds AS PaymentPlanIds,
@@ -1240,9 +1516,9 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
             FROM dbo.CrmUnitPaymentPlan upp
             WHERE upp.UnitId = u.Id AND upp.IsActive = 1
           ) tags
-          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
-          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Converted')
           WHERE u.BlockId = @bid AND u.FloorNo = @fno AND u.IsActive = 1
           ORDER BY u.UnitName
         `);
@@ -1264,8 +1540,9 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
 // for this block) means every generated unit keeps UnitType/AreaSqFt NULL,
 // exactly like before this feature existed.
 async function getBlockUnitSequence(pool, blockId) {
+  const kindCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupUnitTemplate', 'UnitKind') AS c")).recordset[0].c != null;
   const rows = await pool.request().input("bid", sql.Int, blockId).query(`
-    SELECT UnitType, LayoutTypeId, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
+    SELECT UnitType, LayoutTypeId, Count, ${kindCol ? "UnitKind" : "CAST(NULL AS NVARCHAR(20)) AS UnitKind"}, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
     FROM dbo.CrmProjectAutoSetupUnitTemplate
     WHERE BlockId = @bid AND IsActive = 1 ORDER BY SortOrder
   `);
@@ -1273,8 +1550,10 @@ async function getBlockUnitSequence(pool, blockId) {
   for (const r of rows.recordset) {
     for (let i = 0; i < r.Count; i++) {
       sequence.push({
-        UnitType: r.UnitType,
-        LayoutTypeId: r.LayoutTypeId,
+        // A kind row (Shop…) carries no BHK: the unit gets the kind, no layout.
+        UnitKind: r.UnitKind || null,
+        UnitType: r.UnitKind ? null : r.UnitType,
+        LayoutTypeId: r.UnitKind ? null : r.LayoutTypeId,
         AreaSqFt: r.AreaSqFt,
         CarpetAreaSqFt: r.CarpetAreaSqFt,
         BuiltUpAreaSqFt: r.BuiltUpAreaSqFt,
@@ -1292,16 +1571,29 @@ async function getBlockUnitSequence(pool, blockId) {
 // ParkingType). Unlike Units, this sequence's own length IS the block's
 // total slot count to generate — there's no separate per-floor count step,
 // since dbo.ParkingSlot has no FloorNo (Parking is Block-scoped only).
-async function getBlockParkingSequence(pool, blockId) {
-  const rows = await pool.request().input("bid", sql.Int, blockId).query(`
-    SELECT ParkingType, Count FROM dbo.CrmProjectAutoSetupParkingTemplate
-    WHERE BlockId = @bid AND IsActive = 1 ORDER BY SortOrder
-  `);
-  const sequence = [];
-  for (const r of rows.recordset) {
-    for (let i = 0; i < r.Count; i++) sequence.push(r.ParkingType);
-  }
-  return sequence;
+// A block's parking still to create, per type: what its saved mix asks for
+// minus the active slots of that type it already has. Counted by TYPE, not by
+// name — a block's existing slots can carry an older naming pattern (EMP/CP1)
+// that the current one (EMP/1/P1) would never match, and counting by name
+// made "create" duplicate every one of them. Read by the status (the "+N to
+// create" figure) and by POST /generate-parking-slots, so the two always agree.
+// `blockIdExpr` is a trusted SQL expression (b.Id or @bid).
+// How many names to try in one block before giving up on the pattern.
+const MAX_PARKING_NAME_TRIES = 5000;
+function parkingShortfallSql(blockIdExpr) {
+  return `
+    SELECT t.ParkingType, t.SortOrder,
+      CASE WHEN t.Wanted > ISNULL(x.Have, 0) THEN t.Wanted - ISNULL(x.Have, 0) ELSE 0 END AS Missing
+    FROM (
+      SELECT ParkingType, MIN(SortOrder) AS SortOrder, SUM(Count) AS Wanted
+      FROM dbo.CrmProjectAutoSetupParkingTemplate
+      WHERE BlockId = ${blockIdExpr} AND IsActive = 1
+      GROUP BY ParkingType
+    ) t
+    OUTER APPLY (
+      SELECT COUNT(*) AS Have FROM dbo.ParkingSlot ps
+      WHERE ps.BlockId = ${blockIdExpr} AND ps.IsActive = 1 AND ps.ParkingType = t.ParkingType
+    ) x`;
 }
 
 // POST /generate-units — the final commit. For every eligible floor
@@ -1312,6 +1604,86 @@ async function getBlockParkingSequence(pool, blockId) {
 // Block's own Unit Type template (see getBlockUnitSequence above) if one has
 // been set up; otherwise left NULL exactly like before this feature
 // existed, filled in afterward via the existing Unit Master edit page.
+// ── Project / block type, chosen right here ─────────────────────────────────
+// Type-change safety checks live in services/typeGuard.js (shared with Project Master).
+const { typeImpact, layoutConflict } = require("../services/typeGuard");
+
+// PUT /project-type { ProjectId, TypeId|null }
+router.put("/project-type", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const projectId = parseInt(req.body.ProjectId, 10);
+    const typeId = req.body.TypeId === null || req.body.TypeId === "" ? null : parseInt(req.body.TypeId, 10);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: "ProjectId is required" });
+    if (typeId != null) {
+      const followers = (await pool.request().input("p", sql.Int, projectId)
+        .query("SELECT Id FROM dbo.BlockMaster WHERE ProjectId = @p AND IsActive = 1 AND ProjectTypeId IS NULL")).recordset.map((b) => b.Id);
+      const clash = await layoutConflict(pool, typeId, followers);
+      if (clash) return res.status(400).json({ error: clash });
+      const why = await typeImpact(pool, typeId, { projectId });
+      if (why) return res.status(400).json({ error: `This type would make ${why} unsellable — pick a type that sells them.` });
+    }
+    await pool.request().input("p", sql.Int, projectId).input("t", sql.Int, typeId)
+      .query("UPDATE dbo.enterprise SET project_type_id = @t WHERE id = @p");
+    // Same caches Project Master clears on save, so its list shows the new type at once.
+    await Promise.all(["enterprises", "project-master", "block-master"].map((k) => bumpCacheVersion(k))).catch(() => {});
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[auto-setup] PUT project-type:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /blocks/:id/type { TypeId|null } — null = same as the project.
+router.put("/blocks/:id/type", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const blockId = parseId(req.params.id);
+    if (blockId === null) return res.status(400).json({ error: "Invalid block" });
+    const blk = (await pool.request().input("b", sql.Int, blockId).query("SELECT ProjectId FROM dbo.BlockMaster WHERE Id = @b")).recordset[0];
+    if (!blk) return res.status(404).json({ error: "Block not found" });
+    let typeId = req.body.TypeId === null || req.body.TypeId === "" ? null : parseInt(req.body.TypeId, 10);
+    const effective = typeId ?? (await pool.request().input("p", sql.Int, blk.ProjectId)
+      .query("SELECT project_type_id AS t FROM dbo.enterprise WHERE id = @p")).recordset[0]?.t ?? null;
+    if (effective != null) {
+      const clash = await layoutConflict(pool, effective, [blockId]);
+      if (clash) return res.status(400).json({ error: clash });
+      const why = await typeImpact(pool, effective, { projectId: blk.ProjectId, blockId });
+      if (why) return res.status(400).json({ error: `This type would make ${why} unsellable — pick a type that sells them.` });
+    }
+    await pool.request().input("b", sql.Int, blockId).input("t", sql.Int, typeId)
+      .query("UPDATE dbo.BlockMaster SET ProjectTypeId = @t WHERE Id = @b");
+    await Promise.all(["block-master", "project-master"].map((k) => bumpCacheVersion(k))).catch(() => {});
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[auto-setup] PUT block type:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /kinds?ProjectId= — unit kinds this project's type may use (for the
+// per-floor "use" picker). Same rule as Unit Master and the booking guard.
+router.get("/kinds", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  try {
+    // Per block: a block with its own type (e.g. a commercial block inside a
+    // township) allows what ITS type sells, not the project's.
+    const pool = getPool();
+    const projectId = parseInt(req.query.ProjectId, 10);
+    if (!Number.isFinite(projectId)) return res.json({ project: [], blocks: {} });
+    const uk = require("../services/unitKind");
+    const shape = (list) => list.map((k) => ({ Code: k.Code, Name: k.Name, IsCommercial: !!k.IsCommercial }));
+    const blocks = {};
+    for (const b of (await pool.request().input("p", sql.Int, projectId)
+      .query("SELECT Id FROM dbo.BlockMaster WHERE ProjectId = @p AND IsActive = 1")).recordset) {
+      blocks[b.Id] = shape(await uk.allowedKinds(pool, { projectId, blockId: b.Id }));
+    }
+    res.json({ project: shape(await uk.allowedKinds(pool, { projectId })), blocks, defaultKind: await uk.defaultKind(pool) });
+  } catch (err) {
+    console.error("[auto-setup] GET kinds:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Naming patterns (migration 527) ──────────────────────────────────────────
 // GET /naming?ProjectId= — active patterns + what's assigned at project, block
 // and floor level, so the wizard can show and change it at every stage.
@@ -1355,6 +1727,13 @@ router.put("/naming", requirePageRight("crm-auto-project-setup", "edit"), async 
     }[level];
     if (!target || !Number.isFinite(id)) return res.status(400).json({ error: "Level (project/block/floor) and Id are required" });
     if (level === "floor" && scope === "PARKING") return res.status(400).json({ error: "Parking is named per block, not per floor" });
+    // The target comes from Level + Id, which the setup guard can't see -
+    // check its project here.
+    if (req.projectScope) {
+      const projectId = level === "project" ? id : (await pool.request().input("id", sql.Int, id)
+        .query(`SELECT ProjectId FROM ${level === "block" ? "dbo.BlockMaster" : "dbo.CrmProjectAutoSetupFloor"} WHERE Id = @id`)).recordset[0]?.ProjectId;
+      if (projectId != null && !require("../services/projectScope").assertProjectAllowed(req, res, projectId)) return;
+    }
     if (patternId != null) {
       const p = await pool.request().input("id", sql.Int, patternId).input("s", sql.NVarChar(10), scope)
         .query("SELECT Id FROM dbo.CrmNamingPattern WHERE Id = @id AND IsActive = 1 AND Scope = @s");
@@ -1436,7 +1815,8 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
 
     const req0 = pool.request().input("pid", sql.Int, projectId);
     let query = `
-      SELECT f.Id, f.BlockId, f.FloorNo, f.FloorLabel, f.UnitCount, b.BlockName
+      SELECT f.Id, f.BlockId, f.FloorNo, f.FloorLabel, f.UnitCount, b.BlockName,
+             ${(await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupFloor', 'UnitKind') AS c")).recordset[0].c != null ? "f.UnitKind" : "CAST(NULL AS NVARCHAR(20)) AS UnitKind"}
       FROM dbo.CrmProjectAutoSetupFloor f
       JOIN dbo.BlockMaster b ON b.Id = f.BlockId
       WHERE f.ProjectId = @pid AND f.IsActive = 1 AND f.IsGenerated = 0 AND f.HasUnits = 1 AND f.UnitCount > 0
@@ -1454,8 +1834,11 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
     // type at all) — reported back so the user knows to set the layout up in
     // Unit Composition and then run Flat Master's bulk "Generate Rooms".
     const noRoomTypes = new Map(); // type label -> unit count
-    const tallyRooms = (rs, unitType) => {
+    const commercialKindsForTally = await require("../services/projectType").loadCommercialKinds(pool);
+    const tallyRooms = (rs, unitType, unitKind = null) => {
       roomsCreated += rs.created + rs.reactivated;
+      // Commercial units (shop, office…) have no rooms by design — not a gap to report.
+      if (unitKind && commercialKindsForTally.has(String(unitKind).toUpperCase())) return;
       if (rs.skipped === "no-layout" || rs.skipped === "no-composition") {
         const key = unitType || "No Unit Type";
         noRoomTypes.set(key, (noRoomTypes.get(key) || 0) + 1);
@@ -1466,6 +1849,7 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
     // Naming pattern per floor (floor → block → project; none = legacy names).
     const { SCOPE, towerNumbers, resolvePattern, nameFor } = require("../services/namingPattern");
     const towers = await towerNumbers(pool, projectId);
+    const commercialKinds = await require("../services/projectType").loadCommercialKinds(pool);
     // Pre-fetch payment plan tags per block — forward-fill to each generated unit.
     const plansByBlock = new Map();
     for (const floor of floors.recordset) {
@@ -1479,14 +1863,21 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
       if (!sequenceByBlock.has(floor.BlockId)) {
         sequenceByBlock.set(floor.BlockId, await getBlockUnitSequence(pool, floor.BlockId));
       }
-      const sequence = sequenceByBlock.get(floor.BlockId);
+      const ownSeq = await getFloorUnitSequence(pool, floor.Id);
+      const sequence = ownSeq.length ? ownSeq : sequenceByBlock.get(floor.BlockId);
       const pattern = await resolvePattern(pool, { projectId, blockId: floor.BlockId, floorId: floor.Id, scope: SCOPE.UNIT });
 
       for (let seq = 1; seq <= floor.UnitCount; seq++) {
         const unitName = nameFor(pattern, SCOPE.UNIT, {
           shortCode, blockName: floor.BlockName, towerNo: towers.get(floor.BlockId), floorNo: floor.FloorNo, floorLabel: floor.FloorLabel, seq,
         });
-        const typeSlot = sequence.length ? sequence[(seq - 1) % sequence.length] : null;
+        // A commercial floor (shops, offices…) takes no BHK from the block's
+        // unit mix — those units have no layout or rooms by design.
+        // The floor's own mix (or typical floor) decides each unit; a legacy
+        // whole-floor commercial kind only applies when the floor has no own mix.
+        const typeSlot = ownSeq.length ? ownSeq[(seq - 1) % ownSeq.length]
+          : commercialKinds.has(String(floor.UnitKind || "").toUpperCase()) ? null
+          : (sequence.length ? sequence[(seq - 1) % sequence.length] : null);
         const blockPlanIds = plansByBlock.get(floor.BlockId) || [];
 
         // Wrap the check+INSERT in a transaction with UPDLOCK so that two
@@ -1531,8 +1922,13 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                 WHERE Id = @id`);
               // Its rooms, from its layout, in the same transaction (add-only;
               // a reactivated unit's existing rooms are kept).
+              const reKind = typeSlot?.UnitKind || floor.UnitKind || null;
+              if (reKind) {
+                await tx.request().input("id", sql.Int, reactivatedId).input("kind", sql.NVarChar(20), reKind)
+                  .query("UPDATE dbo.UnitMaster SET UnitKind = @kind WHERE Id = @id");
+              }
               const rs = await syncUnitRooms(tx, reactivatedId, { removeUnused: false, createdBy });
-              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType);
+              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType, typeSlot?.UnitKind || floor.UnitKind);
               await tx.commit();
               if (blockPlanIds.length) await syncUnitPaymentPlanTags(pool, reactivatedId, blockPlanIds);
               totalCreated++;
@@ -1566,12 +1962,18 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                    @area, @carpetArea, @builtUp, @superBuiltUp, @openTerrace, @rate,
                    1, @cb, SYSDATETIME())
               `);
+            // Floor use wins, then the unit-mix row's kind; otherwise the column default stands.
+            const unitKind = typeSlot?.UnitKind || floor.UnitKind || null;
+            if (unitKind && ins.recordset[0]?.Id) {
+              await tx.request().input("id", sql.Int, ins.recordset[0].Id).input("kind", sql.NVarChar(20), unitKind)
+                .query("UPDATE dbo.UnitMaster SET UnitKind = @kind WHERE Id = @id");
+            }
             const newId = ins.recordset[0]?.Id;
             // The new unit's rooms (Bedroom 1, Kitchen, ...) from its layout,
             // in the same transaction as the unit itself.
             if (newId) {
               const rs = await syncUnitRooms(tx, newId, { removeUnused: false, createdBy });
-              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType);
+              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType, typeSlot?.UnitKind || floor.UnitKind);
             }
             await tx.commit();
             if (newId && blockPlanIds.length) await syncUnitPaymentPlanTags(pool, newId, blockPlanIds);
@@ -1610,19 +2012,14 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
   }
 });
 
-// POST /generate-parking-slots — the Parking commit, mirroring
-// POST /generate-units but Block-scoped (dbo.ParkingSlot has no FloorNo).
-// For every Block that has a saved Parking template with a total > 0
-// (optionally filtered to BlockIds), generates real dbo.ParkingSlot rows
-// named `${ProjectShortCode}/${BlockName}/P${seq}` where seq is a 2-digit,
-// per-block sequence (P01, P02, ...) — plain, not type-prefixed. ParkingType
-// for each seq comes from cycling the Block's own template sequence (see
-// getBlockParkingSequence), same repeating-pattern behavior generate-units
-// uses for UnitType. Idempotent/additive: re-running after raising a
-// template's total only fills in the new seq numbers; an existing active
-// slot at a given seq is left untouched (its ParkingType is NOT rewritten
-// even if the template changed — matches generate-units' "already active,
-// leave it alone" rule for real inventory).
+// POST /generate-parking-slots — the Parking commit, Block-scoped
+// (dbo.ParkingSlot has no FloorNo). For every Block with a saved Parking mix
+// (optionally only BlockIds), creates exactly the slots its mix still lacks,
+// type by type (parkingShortfallSql), in the mix's order. Each new slot takes
+// the next name the block's naming pattern gives that is not already used in
+// the block; a deactivated slot of that name is brought back instead.
+// Idempotent/additive: existing slots are never renamed, retyped or removed,
+// and a second run creates nothing.
 router.post("/generate-parking-slots", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
   const pool = getPool();
   const createdBy = req.user?.userId || null;
@@ -1635,81 +2032,75 @@ router.post("/generate-parking-slots", requirePageRight("crm-auto-project-setup"
     if (!project) return res.status(404).json({ error: "Project not found" });
     const shortCode = await ensureProjectShortCode(pool, { Id: project.Id, Name: project.Name, ShortName: resolveShortCode(project) });
 
-    const req0 = pool.request().input("pid", sql.Int, projectId);
-    let query = `
-      SELECT b.Id AS BlockId, b.BlockName,
-        ISNULL(t.total, 0) AS TemplateTotal
-      FROM dbo.BlockMaster b
-      OUTER APPLY (
-        SELECT SUM(Count) AS total FROM dbo.CrmProjectAutoSetupParkingTemplate
-        WHERE BlockId = b.Id AND IsActive = 1
-      ) t
-      WHERE b.ProjectId = @pid AND b.IsActive = 1 AND ISNULL(t.total, 0) > 0
-    `;
-    if (blockIds && blockIds.length) {
-      req0.input("ids", sql.NVarChar(sql.MAX), blockIds.join(","));
-      query += ` AND b.Id IN (SELECT value FROM STRING_SPLIT(@ids, ','))`;
-    }
-    query += " ORDER BY b.Id";
-    const blocks = await req0.query(query);
-
-    let totalCreated = 0;
-    const sample = [];
     const { SCOPE, towerNumbers, resolvePattern, nameFor } = require("../services/namingPattern");
     const towers = await towerNumbers(pool, projectId);
-    for (const block of blocks.recordset) {
-      const sequence = await getBlockParkingSequence(pool, block.BlockId);
-      const pattern = await resolvePattern(pool, { projectId, blockId: block.BlockId, scope: SCOPE.PARKING });
 
-      for (let seq = 1; seq <= sequence.length; seq++) {
-        const slotNo = nameFor(pattern, SCOPE.PARKING, { shortCode, blockName: block.BlockName, towerNo: towers.get(block.BlockId), seq });
-        const parkingType = sequence[seq - 1];
-
-        // Wrap the check+INSERT in a transaction with UPDLOCK so that two
-        // concurrent generate-parking-slots requests for the same project
-        // serialise on a per-slot-number basis — same fix as generate-units.
-        const tx = pool.transaction();
-        await tx.begin();
-        try {
-          const dupe = await tx.request()
-            .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId).input("slot", sql.NVarChar(50), slotNo)
-            .query("SELECT Id, IsActive FROM dbo.ParkingSlot WITH (UPDLOCK, ROWLOCK) WHERE ProjectId = @pid AND BlockId = @bid AND SlotNo = @slot");
-
-          if (dupe.recordset.length) {
-            if (!dupe.recordset[0].IsActive) {
-              await tx.request().input("id", sql.Int, dupe.recordset[0].Id).input("type", sql.NVarChar(50), parkingType)
-                .query("UPDATE dbo.ParkingSlot SET IsActive = 1, ParkingType = ISNULL(ParkingType, @type), UpdatedAt = SYSDATETIME() WHERE Id = @id");
-              await tx.commit();
-              totalCreated++;
-            } else {
-              // Already active — leave it alone, it's already real inventory.
-              await tx.commit();
-            }
-          } else {
-            await tx.request()
-              .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId)
-              .input("slot", sql.NVarChar(50), slotNo).input("type", sql.NVarChar(50), parkingType)
-              .input("cb", sql.Int, createdBy)
-              .query(`
-                INSERT INTO dbo.ParkingSlot (ProjectId, BlockId, SlotNo, ParkingType, IsActive, CreatedBy, CreatedAt)
-                VALUES (@pid, @bid, @slot, @type, 1, @cb, SYSDATETIME())
-              `);
-            await tx.commit();
-            totalCreated++;
-          }
-        } catch (txErr) {
-          try { await tx.rollback(); } catch (_) { /* already rolled back */ }
-          throw txErr;
-        }
-        if (sample.length < 5) sample.push(slotNo);
+    // What is missing is counted INSIDE the project's lock, and all of it is
+    // created in that one transaction: two clicks on Create (or two people)
+    // can't both see "5 missing" and make 10.
+    const { totalCreated, sample, blocksGenerated } = await inSetupLock(pool, projectId, async (tx) => {
+      const req0 = tx.request().input("pid", sql.Int, projectId);
+      let query = `
+        SELECT b.Id AS BlockId, b.BlockName
+        FROM dbo.BlockMaster b
+        WHERE b.ProjectId = @pid AND b.IsActive = 1
+          AND (SELECT ISNULL(SUM(sf.Missing), 0) FROM (${parkingShortfallSql("b.Id")}) sf) > 0
+      `;
+      if (blockIds && blockIds.length) {
+        req0.input("ids", sql.NVarChar(sql.MAX), blockIds.join(","));
+        query += ` AND b.Id IN (SELECT value FROM STRING_SPLIT(@ids, ','))`;
       }
-    }
+      query += " ORDER BY b.Id";
+      const blocks = (await req0.query(query)).recordset;
+
+      let created = 0;
+      const names = [];
+      for (const block of blocks) {
+        const shortfall = (await tx.request().input("bid", sql.Int, block.BlockId)
+          .query(`${parkingShortfallSql("@bid")} ORDER BY t.SortOrder`)).recordset.filter((r) => r.Missing > 0);
+        const pattern = await resolvePattern(pool, { projectId, blockId: block.BlockId, scope: SCOPE.PARKING });
+        const nameAt = (seq) => nameFor(pattern, SCOPE.PARKING, { shortCode, blockName: block.BlockName, towerNo: towers.get(block.BlockId), seq });
+
+        let seq = 0;
+        for (const { ParkingType: parkingType, Missing } of shortfall) {
+          for (let made = 0; made < Missing;) {
+            seq++;
+            // A pattern whose names never change with the number would loop for ever.
+            if (seq > MAX_PARKING_NAME_TRIES) {
+              throw httpError(400, `Block ${block.BlockName}: its parking naming pattern gives no free slot name — check the pattern in Naming`);
+            }
+            const slotNo = nameAt(seq);
+            const dupe = await tx.request()
+              .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId).input("slot", sql.NVarChar(50), slotNo)
+              .query("SELECT Id, IsActive FROM dbo.ParkingSlot WITH (UPDLOCK, ROWLOCK) WHERE ProjectId = @pid AND BlockId = @bid AND SlotNo = @slot");
+            // Name taken by a live slot — real inventory, left alone; try the next name.
+            if (dupe.recordset.length && dupe.recordset[0].IsActive) continue;
+            if (dupe.recordset.length) {
+              await tx.request().input("id", sql.Int, dupe.recordset[0].Id).input("type", sql.NVarChar(50), parkingType)
+                .query("UPDATE dbo.ParkingSlot SET IsActive = 1, ParkingType = @type, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+            } else {
+              await tx.request()
+                .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId)
+                .input("slot", sql.NVarChar(50), slotNo).input("type", sql.NVarChar(50), parkingType)
+                .input("cb", sql.Int, createdBy)
+                .query(`
+                  INSERT INTO dbo.ParkingSlot (ProjectId, BlockId, SlotNo, ParkingType, IsActive, CreatedBy, CreatedAt)
+                  VALUES (@pid, @bid, @slot, @type, 1, @cb, SYSDATETIME())
+                `);
+            }
+            made++;
+            created++;
+            if (names.length < 5) names.push(slotNo);
+          }
+        }
+      }
+      return { totalCreated: created, sample: names, blocksGenerated: blocks.length };
+    });
 
     if (totalCreated > 0) await bumpCacheVersion("parking-slot-master");
-    res.status(201).json({ message: "Parking slots generated", createdCount: totalCreated, sample, blocksGenerated: blocks.recordset.length });
+    res.status(201).json({ message: "Parking slots generated", createdCount: totalCreated, sample, blocksGenerated });
   } catch (e) {
-    console.error("[crm-project-auto-setup] POST /generate-parking-slots error:", e.message);
-    res.status(500).json({ error: e.message });
+    sendSetupError(res, e, "POST /generate-parking-slots", "A slot with that name was just created by someone else — refresh and try again.");
   }
 });
 
@@ -1841,31 +2232,44 @@ router.post("/generate-plots", requirePageRight("crm-auto-project-setup", "creat
 
     for (let i = 0; i < tpl.PlotCount; i++) {
       const plotNo = `${prefix}${tpl.StartNumber + i}`;
-      // Existing names are skipped rather than erroring the whole run, so a
-      // partially-generated block can be completed without manual cleanup.
-      const dupe = await pool.request()
-        .input("pid", sql.Int, tpl.ProjectId).input("bid", sql.Int, blockId).input("n", sql.NVarChar(100), plotNo)
-        .query("SELECT Id FROM dbo.PlotMaster WHERE ProjectId = @pid AND BlockId = @bid AND PlotName = @n AND IsActive = 1");
-      if (dupe.recordset.length) { skipped.push(plotNo); continue; }
+      // Wrap the check+INSERT in a transaction with UPDLOCK so two concurrent
+      // generate-plots requests for the same block serialize per-plot-name —
+      // without this, both can pass the dupe-check SELECT before either
+      // INSERT commits, producing duplicate plots. Mirrors the identical fix
+      // already applied to generate-units/generate-parking-slots in this file.
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        // Existing names are skipped rather than erroring the whole run, so a
+        // partially-generated block can be completed without manual cleanup.
+        const dupe = await tx.request()
+          .input("pid", sql.Int, tpl.ProjectId).input("bid", sql.Int, blockId).input("n", sql.NVarChar(100), plotNo)
+          .query("SELECT Id FROM dbo.PlotMaster WITH (UPDLOCK, ROWLOCK) WHERE ProjectId = @pid AND BlockId = @bid AND PlotName = @n AND IsActive = 1");
+        if (dupe.recordset.length) { await tx.commit(); skipped.push(plotNo); continue; }
 
-      await pool.request()
-        .input("pid", sql.Int, tpl.ProjectId)
-        .input("bid", sql.Int, blockId)
-        .input("name", sql.NVarChar(100), plotNo)
-        .input("plotNo", sql.NVarChar(50), plotNo)
-        .input("area", sql.Decimal(18, 2), tpl.DefaultAreaSqFt)
-        .input("rate", sql.Decimal(18, 2), tpl.DefaultRatePerSqFt)
-        .input("facing", sql.NVarChar(20), tpl.DefaultFacing)
-        .input("road", sql.Decimal(18, 2), tpl.DefaultRoadWidthFt)
-        .input("by", sql.Int, createdBy)
-        .query(`
-          INSERT INTO dbo.PlotMaster
-            (ProjectId, BlockId, PlotName, PlotNo, AreaSqFt, RatePerSqFt,
-             Facing, RoadWidthFt, IsActive, CreatedBy, CreatedAt)
-          VALUES (@pid, @bid, @name, @plotNo, @area, @rate,
-                  @facing, @road, 1, @by, SYSDATETIME())
-        `);
-      created++;
+        await tx.request()
+          .input("pid", sql.Int, tpl.ProjectId)
+          .input("bid", sql.Int, blockId)
+          .input("name", sql.NVarChar(100), plotNo)
+          .input("plotNo", sql.NVarChar(50), plotNo)
+          .input("area", sql.Decimal(18, 2), tpl.DefaultAreaSqFt)
+          .input("rate", sql.Decimal(18, 2), tpl.DefaultRatePerSqFt)
+          .input("facing", sql.NVarChar(20), tpl.DefaultFacing)
+          .input("road", sql.Decimal(18, 2), tpl.DefaultRoadWidthFt)
+          .input("by", sql.Int, createdBy)
+          .query(`
+            INSERT INTO dbo.PlotMaster
+              (ProjectId, BlockId, PlotName, PlotNo, AreaSqFt, RatePerSqFt,
+               Facing, RoadWidthFt, IsActive, CreatedBy, CreatedAt)
+            VALUES (@pid, @bid, @name, @plotNo, @area, @rate,
+                    @facing, @road, 1, @by, SYSDATETIME())
+          `);
+        await tx.commit();
+        created++;
+      } catch (txErr) {
+        try { await tx.rollback(); } catch { /* already rolled back */ }
+        throw txErr;
+      }
     }
 
     await pool.request().input("id", sql.Int, tpl.Id)
@@ -1896,15 +2300,16 @@ router.get("/blocks/:blockId/plots", requirePageRight("crm-auto-project-setup", 
         -- booking / hold / application locks (same pattern as /floors/:id/units)
         (SELECT TOP 1 b.BookingNo FROM dbo.CrmBooking b
            JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id
-           WHERE bp.PlotId = p.Id AND b.IsActive = 1
-             AND b.Status NOT IN ('Cancelled', 'Draft')) AS LockBookingNo,
+           -- same lock rule as Plot Master (routes/plotMaster.js)
+           WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND b.IsActive = 1
+             AND b.Status NOT IN ${DEAD_BOOKING_SQL}) AS LockBookingNo,
         (SELECT TOP 1 CAST(h.Id AS NVARCHAR) FROM dbo.CrmInventoryHold h
            WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id AND h.Status = N'Active'
              AND h.HoldUntil > SYSDATETIME()) AS LockHoldId,
         (SELECT TOP 1 a.ApplicationNo FROM dbo.CrmApplication a
            JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a.Id
-           WHERE ap.PlotId = p.Id AND a.IsActive = 1
-             AND a.Status NOT IN ('Cancelled', 'Draft')) AS LockApplicationNo
+           WHERE ap.PlotId = p.Id AND ap.Status = N'Active' AND a.IsActive = 1
+             AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')) AS LockApplicationNo
       FROM dbo.PlotMaster p
       WHERE p.BlockId = @bid AND p.IsActive = 1
       ORDER BY p.PlotName
@@ -1942,11 +2347,13 @@ router.delete("/plots/:id", requirePageRight("crm-auto-project-setup", "delete")
 // Convert one or more adjacent plots into one constructed asset. The source
 // plots remain in PlotMaster for land-sale history; UnitMaster begins here.
 router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
+  res.setTimeout(PLOT_CONVERSION_TIMEOUT_MS);
   const plotIds = Array.isArray(req.body?.PlotIds) ? req.body.PlotIds.map(Number).filter(Number.isInteger) : [];
   const unitName = String(req.body?.UnitName || "").trim();
   const unitType = String(req.body?.UnitType || "").trim();
   const unitKind = String(req.body?.UnitKind || "").trim();
-  if (!plotIds.length || !unitName || !unitType || !unitKind) return res.status(400).json({ error: "PlotIds, UnitName, UnitType, and UnitKind are required" });
+  const hasVillaType = req.body?.VillaTypeId != null && req.body.VillaTypeId !== "";
+  if (!plotIds.length || !unitName || (!unitType && !hasVillaType) || !unitKind) return res.status(400).json({ error: "PlotIds, UnitName, UnitKind and a villa type (or unit type) are required" });
   // Merging plots into one villa cannot be undone, so it must be asked for
   // explicitly; one villa per plot is the default and needs no flag.
   if (new Set(plotIds).size > 1 && req.body?.Combine !== true) {
@@ -1954,11 +2361,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   }
   // The villa's own construction rate. Never the plot's land rate: the plot's
   // owner has already paid for the land, and a villa priced at the land rate
-  // would charge them for it again.
-  const villaRate = Number(req.body?.RatePerSqFt);
-  if (!Number.isFinite(villaRate) || villaRate <= 0) {
-    return res.status(400).json({ error: "Enter the villa's construction rate per sq ft — the plot's land rate is not used for the villa." });
-  }
+  // would charge them for it again. Rate is optional — defaults to 0 when not provided.
+  const villaRateRaw = req.body?.RatePerSqFt;
+  const villaRate = (villaRateRaw == null || villaRateRaw === "" || Number(villaRateRaw) < 0 || !Number.isFinite(Number(villaRateRaw)))
+    ? 0
+    : Number(villaRateRaw);
   // A villa's built-up area is its own (per villa design), never the land
   // area. Super built-up is optional; when given it is the saleable area, as
   // for flats (AreaSqFt = SBU), otherwise the built-up area is.
@@ -1969,8 +2376,13 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   let villaType = null;
   if (villaTypeId != null) {
     villaType = (await getPool().request().input("id", sql.Int, villaTypeId)
-      .query("SELECT Id, ProjectId, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt FROM dbo.VillaTypeMaster WHERE Id = @id AND IsActive = 1")).recordset[0];
+      .query(`SELECT v.Id, v.ProjectId, v.Name, v.BuiltUpAreaSqFt, v.SuperBuiltUpAreaSqFt, v.LayoutTypeId, l.Label AS LayoutLabel
+                FROM dbo.VillaTypeMaster v LEFT JOIN dbo.RoomLayoutType l ON l.Id = v.LayoutTypeId AND l.IsActive = 1
+                WHERE v.Id = @id AND v.IsActive = 1`)).recordset[0];
     if (!villaType) return res.status(400).json({ error: "Select an active villa type" });
+    // The villa type decides the rooms. Without a layout it would silently take
+    // whatever unit type the form held, so it is refused instead.
+    if (!villaType.LayoutLabel) return res.status(400).json({ error: `${villaType.Name} has no room layout — set it in Plot Master > Villa types first` });
   }
   const builtUpArea = optArea(req.body?.BuiltUpAreaSqFt ?? req.body?.AreaSqFt) ?? (villaType ? Number(villaType.BuiltUpAreaSqFt) : null);
   const superBuiltUpArea = optArea(req.body?.SuperBuiltUpAreaSqFt)
@@ -1984,14 +2396,21 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   try {
     const pool = getPool();
     const kind = await pool.request().input("kind", sql.NVarChar(20), unitKind)
-      .query("SELECT Code FROM dbo.CrmConstructedAssetKind WHERE Code = @kind AND IsActive = 1");
+      .query("SELECT Code, ISNULL(IsLand, 0) AS IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @kind AND IsActive = 1");
     if (!kind.recordset.length) return res.status(400).json({ error: "Select an active constructed asset kind" });
+    // What stands on a plot is a building, never land again.
+    if (kind.recordset[0].IsLand) return res.status(400).json({ error: "A plot is converted into a building — choose a constructed kind such as Villa, not land" });
     const resolvedType = await resolveUnitTypeInput(
-      pool, { UnitType: unitType }, { requireComposition: true },
+      pool, villaType ? { LayoutTypeId: villaType.LayoutTypeId } : { UnitType: unitType }, { requireComposition: true },
     );
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Any statement that errors aborts the whole transaction, so nothing
+      // half-done can be committed. (A statement cancelled by the request
+      // timeout is not covered by this — the rollback in the catch below is
+      // what releases the plot locks then, and it must never be skipped.)
+      await tx.request().query("SET XACT_ABORT ON");
       // Lock source plots and re-check all inventory claims inside this
       // transaction. UI availability is advisory; this is the authority.
       //
@@ -2007,7 +2426,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
                   JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
                   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
                  WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-                   AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')) AS OwnerCustomerId
+                   AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')) AS OwnerCustomerId
         FROM dbo.PlotMaster p WITH (UPDLOCK, HOLDLOCK)
         WHERE p.Id IN (${plotIds.join(",")})
           AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
@@ -2019,7 +2438,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
               -- An application that already became a booking is ownership,
               -- not an open claim.
               AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking ab WHERE ab.ApplicationId = a.Id AND ab.IsActive = 1
-                                AND ab.Status NOT IN (N'Cancelled', N'Rejected', N'Expired'))
+                                AND ab.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred'))
           )
           AND NOT EXISTS (
             SELECT 1 FROM dbo.CrmInventoryHold h
@@ -2074,9 +2493,17 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
         }
       }
       const area = superBuiltUpArea ?? builtUpArea;
+      // A bare name (the plot's own, e.g. "P-100") is given the same
+      // SHORT/BLOCK/ prefix every other unit carries, so the villa and its DPR
+      // chains ("SW/A/P-100/Bedroom 1") read like the rest of the system.
+      const villaName = await fullVillaName(tx, first.ProjectId, first.BlockId, unitName);
+      // A clear message instead of the name index's raw error.
+      const nameTaken = (await tx.request().input("p", sql.Int, first.ProjectId).input("n", sql.NVarChar(100), villaName)
+        .query("SELECT TOP 1 Id FROM dbo.UnitMaster WHERE ProjectId = @p AND UnitName = @n")).recordset[0];
+      if (nameTaken) { const dup = new Error(`${villaName} is already used by another unit in this project — choose another villa name`); dup.status = 409; throw dup; }
       const created = await tx.request()
         .input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId)
-        .input("name", sql.NVarChar(100), unitName).input("type", sql.NVarChar(50), resolvedType.unitType)
+        .input("name", sql.NVarChar(100), villaName).input("type", sql.NVarChar(50), resolvedType.unitType)
         .input("layoutTypeId", sql.Int, resolvedType.layoutTypeId)
         .input("kind", sql.NVarChar(20), unitKind)
         .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), villaRate)
@@ -2086,18 +2513,400 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
         .query(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, UnitType, LayoutTypeId, UnitKind, AreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, VillaTypeId, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
                 OUTPUT INSERTED.Id VALUES (@pid, @bid, @name, @type, @layoutTypeId, @kind, @area, @bua, @sbu, @villaType, @rate, 1, @by, SYSDATETIME())`);
       const unitId = created.recordset[0].Id;
-      await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
+      await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null, villaTool: true });
       await tx.request().input("uid", sql.Int, unitId)
         .query(`UPDATE dbo.PlotMaster SET ConvertedUnitId = @uid, ConvertedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
                 WHERE Id IN (${plotIds.join(",")})`);
+      // A plotted block has no floors, so its villas sit in the block's
+      // floorless row (FloorNo = -1) — what makes them show in Room Master and
+      // DPR pickers. Labelled with the asset kind's own name, e.g. "Villa".
+      await tx.request().input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId).input("kind", sql.NVarChar(20), unitKind).query(`
+        DECLARE @n INT = (SELECT COUNT(*) FROM dbo.UnitMaster u WHERE u.BlockId = @bid AND u.IsActive = 1 AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1));
+        IF EXISTS (SELECT 1 FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @bid AND FloorNo = -1 AND IsActive = 1)
+          UPDATE dbo.CrmProjectAutoSetupFloor SET UnitCount = @n, HasUnits = 1, UpdatedAt = SYSDATETIME() WHERE BlockId = @bid AND FloorNo = -1 AND IsActive = 1;
+        ELSE
+          INSERT INTO dbo.CrmProjectAutoSetupFloor (ProjectId, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated, IsActive, CreatedAt)
+          VALUES (@pid, @bid, -1, (SELECT TOP 1 Name FROM dbo.CrmConstructedAssetKind WHERE Code = @kind), @n, 1, 1, 1, SYSDATETIME());`);
+      // DPR follows conversion: the villa's rooms get their work chains now.
+      // The villa type's rooms sit on its floors (G, 1, 2 …) before DPR is wired.
+      await require("../services/villaComposition").applyStoreys(tx, unitId);
+      const dpr = await require("../services/autoDprChains").createChainsForUnit(tx, unitId, req.user?.email || req.user?.name || null);
       await tx.commit();
       await bumpCacheVersion("unit-master");
-      res.status(201).json({ success: true, UnitId: unitId, PlotIds: plotIds });
-    } catch (e) { await tx.rollback(); throw e; }
+      await bumpFlatMasterCaches(); // Room Master lists the villa at once, not after its cache expires
+      await logAudit({ module: "PlotConversion", recordId: unitId, recordNo: villaName, action: "Converted",
+        changedBy: req.user?.userId ?? null,
+        notes: `Plots ${plotIds.join(", ")} -> villa ${villaName}; ${dpr.created} DPR chain(s)${dpr.skipped.length ? `; no steps yet for ${dpr.skipped.join(", ")}` : ""}` }).catch(() => {});
+      res.status(201).json({ success: true, UnitId: unitId, UnitName: villaName, PlotIds: plotIds, DprChainsCreated: dpr.created, DprRoomsWithoutTemplate: dpr.skipped });
+    } catch (e) {
+      try { await tx.rollback(); } catch (rbErr) { console.error("[auto-setup] convert-plots rollback:", rbErr.message); }
+      throw e;
+    }
   } catch (e) {
     if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
     console.error("[auto-setup] POST convert-plots:", e.message);
+    if (res.headersSent) return; // the request already timed out and was answered
     res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// POST /projects/:projectId/villas/fill-dpr — gives every villa room that
+// has no DPR chain yet the step list of a room of its type, now that one
+// exists (e.g. a Store Room step list created in Dependency Master after the
+// villas were built). Rooms that already have a chain are never touched;
+// types still without any step list are reported back.
+router.post("/projects/:projectId/villas/fill-dpr", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ error: "Invalid project" });
+  if (!assertProjectAllowed(req, res, projectId)) return;
+  const pool = getPool();
+  const r = await require("../services/autoDprChains").fillChainlessVillaRooms(pool, { projectId, actor: req.user?.email || req.user?.name || null });
+  if (r.chainsCreated) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
+  res.json({ success: r.failed.length === 0, ...r });
+});
+
+// The full name a villa is stored under: a bare name ("V-21", "Rose Villa")
+// gets the same SHORT/BLOCK/ prefix every unit carries; a name that already
+// has "/" in it is taken as given.
+async function fullVillaName(db, projectId, blockId, name) {
+  const n = String(name || "").trim();
+  if (!n || n.includes("/")) return n;
+  const proj = await getProject(db, projectId);
+  const blk = (await db.request().input("b", sql.Int, blockId).query("SELECT BlockName FROM dbo.BlockMaster WHERE Id = @b")).recordset[0];
+  const short = proj ? resolveShortCode(proj) : "";
+  return short && blk?.BlockName ? `${short}/${String(blk.BlockName).trim()}/${n}` : n;
+}
+
+// Rename a built villa. Its DPR chains are renamed with it (each in its own
+// naming style), and so are its live bookings / applications, so every screen
+// shows the new name; dead and transferred sales keep the name they had.
+// POST /villas/:unitId/add-missing-rooms — a built villa brought up to its
+// type's floor plan: the plan's rooms it lacks are ADDED (floor + DPR steps);
+// existing rooms, their names and their work are never touched.
+// ?dryRun=1 reports what would be added and changes nothing.
+router.post("/villas/:unitId/add-missing-rooms", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const unitId = Number(req.params.unitId);
+  if (!Number.isInteger(unitId) || unitId <= 0) return res.status(400).json({ error: "Invalid villa" });
+  const dryRun = req.query.dryRun === "1" || req.body?.dryRun === true;
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const { addMissingPlanRooms } = require("../services/villaComposition");
+    const r = await addMissingPlanRooms(tx, unitId, req.user?.userId || null);
+    if (dryRun || !r.added) await tx.rollback(); else await tx.commit();
+    if (!dryRun && r.added) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
+    res.json({ success: true, dryRun, ...r,
+      message: !r.added ? "Already has every room in its floor plan"
+        : `${dryRun ? "Would add" : "Added"} ${r.added} room(s)${r.withoutSteps.length ? ` — ${r.withoutSteps.length} without DPR steps yet (no step list for their room type)` : ""}` });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* rolled back */ }
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Could not add the rooms" });
+  }
+});
+
+// POST /projects/:projectId/villas/add-missing-rooms — the same for every
+// typed villa in the project, each in its own transaction. ?dryRun=1 reports only.
+router.post("/projects/:projectId/villas/add-missing-rooms", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ error: "Invalid project" });
+  if (!assertProjectAllowed(req, res, projectId)) return;
+  const dryRun = req.query.dryRun === "1" || req.body?.dryRun === true;
+  const pool = getPool();
+  const villaTypeId = req.query.villaTypeId ? Number(req.query.villaTypeId) : null;
+  const villas = (await pool.request().input("p", sql.Int, projectId).input("vt", sql.Int, Number.isInteger(villaTypeId) ? villaTypeId : null).query(`
+    SELECT DISTINCT u.Id, u.UnitName FROM dbo.UnitMaster u
+    JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
+    JOIN dbo.VillaTypeMaster v ON v.Id = u.VillaTypeId AND v.IsActive = 1 AND v.LayoutTypeId IS NOT NULL
+    WHERE u.ProjectId = @p AND u.IsActive = 1 AND (@vt IS NULL OR u.VillaTypeId = @vt) ORDER BY u.UnitName`)).recordset;
+  const { addMissingPlanRooms } = require("../services/villaComposition");
+  const changed = []; const failed = [];
+  let added = 0;
+  for (const v of villas) {
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const r = await addMissingPlanRooms(tx, v.Id, req.user?.userId || null);
+      if (dryRun || !r.added) await tx.rollback(); else await tx.commit();
+      if (r.added) { added += r.added; changed.push({ villa: v.UnitName, added: r.added, withoutSteps: r.withoutSteps.length }); }
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* rolled back */ }
+      failed.push(`${v.UnitName}: ${e.message}`);
+    }
+  }
+  if (!dryRun && added) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
+  res.json({ success: failed.length === 0, dryRun, villas: villas.length, roomsAdded: added, changed, failed });
+});
+
+router.post("/villas/:unitId/rename", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const unitId = Number(req.params.unitId);
+  const raw = String(req.body?.UnitName || "").trim();
+  if (!Number.isInteger(unitId) || unitId <= 0) return res.status(400).json({ error: "Invalid villa" });
+  if (!raw || raw.length > 80) return res.status(400).json({ error: "Enter a villa name of up to 80 characters" });
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  const fail = async (status, error) => { try { await tx.rollback(); } catch (_) { /* rolled back */ } return res.status(status).json({ error }); };
+  try {
+    await tx.request().query("SET XACT_ABORT ON");
+    const unit = (await tx.request().input("u", sql.Int, unitId).query(`
+      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId FROM dbo.UnitMaster u WITH (UPDLOCK)
+      WHERE u.Id = @u AND u.IsActive = 1 AND EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)`)).recordset[0];
+    if (!unit) return fail(404, "That is not an active villa built on a plot");
+    const name = await fullVillaName(tx, unit.ProjectId, unit.BlockId, raw);
+    if (name.length > 100) return fail(400, "The full name is too long — shorten it");
+    if (name === unit.UnitName) return fail(400, "That is already the villa's name");
+    const taken = (await tx.request().input("p", sql.Int, unit.ProjectId).input("n", sql.NVarChar(100), name).input("u", sql.Int, unitId)
+      .query("SELECT TOP 1 Id FROM dbo.UnitMaster WHERE ProjectId = @p AND UnitName = @n AND Id <> @u")).recordset[0];
+    if (taken) return fail(409, `${name} is already used by another unit in this project`);
+    // Chain names: re-built in each chain's own style from its room.
+    const { aliasFormatOf, buildAlias } = require("../services/autoDprChains");
+    const chains = (await tx.request().input("u", sql.Int, unitId).query(`
+      SELECT d.Id, d.Alias, r.RoomName FROM dbo.DependencyMaster d JOIN dbo.RoomMaster r ON r.Id = d.RoomId WHERE d.FlatId = @u`)).recordset;
+    await tx.request().input("u", sql.Int, unitId).input("n", sql.NVarChar(100), name)
+      .query("UPDATE dbo.UnitMaster SET UnitName = @n, UpdatedAt = SYSDATETIME() WHERE Id = @u");
+    let renamedChains = 0;
+    for (const c of chains) {
+      const style = aliasFormatOf({ Alias: c.Alias, UnitName: unit.UnitName, RoomName: c.RoomName });
+      if (!style) continue; // a hand-named chain keeps its name
+      await tx.request().input("id", sql.Int, c.Id).input("a", sql.NVarChar(200), buildAlias(style, name, c.RoomName).slice(0, 200))
+        .query("UPDATE dbo.DependencyMaster SET Alias = @a, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      renamedChains++;
+    }
+    const sales = await tx.request().input("u", sql.Int, unitId).input("n", sql.NVarChar(100), name).query(`
+      UPDATE dbo.CrmBooking SET UnitNo = @n, UpdatedAt = SYSDATETIME()
+      WHERE UnitId = @u AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL};
+      UPDATE dbo.CrmApplication SET InterestedUnit = @n, UpdatedAt = SYSDATETIME()
+      WHERE PreferredUnitId = @u AND IsActive = 1 AND Status NOT IN (N'Rejected', N'Cancelled', N'Expired');`);
+    await tx.commit();
+    await bumpCacheVersion("unit-master");
+    await bumpFlatMasterCaches();
+    await logAudit({ module: "PlotConversion", recordId: unitId, recordNo: name, action: "VillaRenamed",
+      changedBy: req.user?.userId ?? null, notes: `${unit.UnitName} -> ${name}; ${renamedChains} DPR chain(s) renamed` }).catch(() => {});
+    res.json({ success: true, UnitName: name, chainsRenamed: renamedChains, bookingsUpdated: sales.rowsAffected[0] || 0, applicationsUpdated: sales.rowsAffected[1] || 0 });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* rolled back */ }
+    console.error("[auto-setup] POST villa rename:", e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// Give a villa that is already built its villa type (or a different one), and
+// rebuild its rooms floor by floor from the type's plan. For villas converted
+// before their type had a plan, or built to the wrong type. Allowed only while
+// no DPR work has started on it (the same test undo uses): its rooms and
+// chains are still untouched stubs, so they are re-cut to the plan. Rooms of a
+// category the plan keeps return with their Id and their chain; new rooms get
+// fresh chains; rooms the plan drops are retired with their chains.
+router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const unitId = Number(req.params.unitId);
+  const villaTypeId = Number(req.body?.VillaTypeId);
+  if (!Number.isInteger(unitId) || unitId <= 0) return res.status(400).json({ error: "Invalid villa" });
+  if (!Number.isInteger(villaTypeId) || villaTypeId <= 0) return res.status(400).json({ error: "Choose a villa type" });
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  const fail = async (status, error) => { try { await tx.rollback(); } catch (_) { /* already rolled back */ } return res.status(status).json({ error }); };
+  try {
+    await tx.request().query("SET XACT_ABORT ON");
+    const q = (text) => tx.request().input("u", sql.Int, unitId).input("vt", sql.Int, villaTypeId).query(text);
+    const unit = (await q(`SELECT u.Id, u.UnitName, u.ProjectId, u.VillaTypeId FROM dbo.UnitMaster u WITH (UPDLOCK)
+                           WHERE u.Id = @u AND u.IsActive = 1
+                             AND EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)`)).recordset[0];
+    if (!unit) return fail(404, "That is not an active villa built on a plot");
+    const vt = (await q(`SELECT v.Id, v.Code, v.Name, v.ProjectId, v.LayoutTypeId, l.Label AS LayoutLabel
+                         FROM dbo.VillaTypeMaster v LEFT JOIN dbo.RoomLayoutType l ON l.Id = v.LayoutTypeId AND l.IsActive = 1
+                         WHERE v.Id = @vt AND v.IsActive = 1`)).recordset[0];
+    if (!vt) return fail(400, "Select an active villa type");
+    if (vt.ProjectId !== unit.ProjectId) return fail(400, "That villa type belongs to a different project");
+    if (!vt.LayoutLabel) return fail(400, `${vt.Name} has no rooms yet — set them with Rooms in Villa types first`);
+    // Same booking/hold/application lock every other structural change in
+    // this file checks first (block delete, plot unconvert, …) — without
+    // it, a villa's type/layout/DPR plan could be swapped out from under
+    // an active sale with no error and no record that the sold layout
+    // changed.
+    const lock = await getUnitLockReason(tx, unitId);
+    if (lock) return fail(409, `${unit.UnitName} ${lock} — its type can't be changed now`);
+    const work = (await q(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.DependencyActivityAssignment a
+           JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
+           JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
+          WHERE d.FlatId = @u AND (ISNULL(a.Status, N'PENDING') NOT IN (N'PENDING', N'CANCELLED') OR a.EngineerId IS NOT NULL OR a.StartDate IS NOT NULL)) AS Steps,
+        (SELECT COUNT(*) FROM dbo.DailyLabourEntry l JOIN dbo.RoomMaster r ON r.Id = l.RoomId WHERE r.UnitId = @u) AS Labour,
+        (SELECT COUNT(*) FROM dbo.ActivityBlueprintAnnotation b JOIN dbo.RoomMaster r ON r.Id = b.RoomId WHERE r.UnitId = @u) AS Drawings,
+        (SELECT COUNT(*) FROM dbo.RoomMaster r WHERE r.UnitId = @u AND r.BlueprintFileData IS NOT NULL) AS Blueprints`)).recordset[0];
+    if (work.Steps || work.Labour || work.Drawings || work.Blueprints) {
+      return fail(409, `Work has started on ${unit.UnitName} (${work.Steps} step(s), ${work.Labour} labour entr(ies), ${work.Drawings + work.Blueprints} drawing(s)) — its rooms can't be re-cut now`);
+    }
+    // Each chain's naming style, read now while its name still matches its room.
+    const { aliasFormatOf, buildAlias } = require("../services/autoDprChains");
+    const styleByChain = new Map((await q(`
+      SELECT d.Id, d.Alias, r.RoomName, u.UnitName FROM dbo.DependencyMaster d
+      JOIN dbo.RoomMaster r ON r.Id = d.RoomId JOIN dbo.UnitMaster u ON u.Id = d.FlatId
+      WHERE d.FlatId = @u`)).recordset.map((c) => [c.Id, aliasFormatOf(c)]));
+    // 1. Retire the old chains. Their (untouched) steps keep their status —
+    //    nobody cancelled that work; the chain is simply no longer live, and
+    //    every list and count reads live chains only.
+    await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
+    await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1 AND RoomCategoryId IS NOT NULL");
+    // 2. The type and its own layout. Its areas too when asked — never once
+    //    the villa is sold, so an agreed price can't move under the buyer.
+    await q("UPDATE dbo.UnitMaster SET VillaTypeId = @vt, LayoutTypeId = (SELECT LayoutTypeId FROM dbo.VillaTypeMaster WHERE Id = @vt), UpdatedAt = SYSDATETIME() WHERE Id = @u");
+    let areasTaken = false;
+    if (req.body?.TakeAreas === true) {
+      const sold = (await q(`SELECT TOP 1 BookingNo FROM dbo.CrmBooking WHERE UnitId = @u AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}`)).recordset[0];
+      if (sold) return fail(409, `${unit.UnitName} is booked (${sold.BookingNo}) — its areas can't change now. Change the type without taking its areas.`);
+      await q(`UPDATE u SET BuiltUpAreaSqFt = v.BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt = v.SuperBuiltUpAreaSqFt,
+                 AreaSqFt = COALESCE(v.SuperBuiltUpAreaSqFt, v.BuiltUpAreaSqFt)
+               FROM dbo.UnitMaster u JOIN dbo.VillaTypeMaster v ON v.Id = @vt WHERE u.Id = @u`);
+      areasTaken = true;
+    }
+    await tx.request().input("u", sql.Int, unitId).input("l", sql.NVarChar(50), vt.LayoutLabel).query("UPDATE dbo.UnitMaster SET UnitType = @l WHERE Id = @u");
+    // 3. Rooms from the plan (an inactive room of the same category comes back first), then their floors.
+    const sync = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null, villaTool: true });
+    await require("../services/villaComposition").applyStoreys(tx, unitId);
+    // 4. A returning room gets its own chain back (steps restored, alias renamed with the room).
+    const revived = await q(`
+      UPDATE d SET IsActive = 1, UpdatedAt = SYSDATETIME()
+      OUTPUT INSERTED.Id
+      FROM dbo.DependencyMaster d
+      JOIN dbo.RoomMaster r ON r.Id = d.RoomId AND r.IsActive = 1
+      WHERE d.FlatId = @u AND d.IsActive = 0
+        AND d.Id = (SELECT MAX(d2.Id) FROM dbo.DependencyMaster d2 WHERE d2.RoomId = d.RoomId)`);
+    // Renamed after its room (the sync may have renumbered it), in the chain's own style.
+    if (revived.recordset.length) {
+      const named = (await tx.request().query(`
+        SELECT d.Id, r.RoomName, u.UnitName FROM dbo.DependencyMaster d
+        JOIN dbo.RoomMaster r ON r.Id = d.RoomId JOIN dbo.UnitMaster u ON u.Id = d.FlatId
+        WHERE d.Id IN (${revived.recordset.map((r) => r.Id).join(",")})`)).recordset;
+      for (const c of named) {
+        const style = styleByChain.get(c.Id) || { sep: "/", unitCase: "asIs", roomCase: "asIs" };
+        await tx.request().input("id", sql.Int, c.Id).input("a", sql.NVarChar(200), buildAlias(style, c.UnitName, c.RoomName).slice(0, 200))
+          .query("UPDATE dbo.DependencyMaster SET Alias = @a WHERE Id = @id");
+      }
+    }
+    if (revived.recordset.length) {
+      await tx.request().query(`
+        UPDATE a SET Status = ISNULL(a.PreCancelStatus, N'PENDING'), PreCancelStatus = NULL, UpdatedAt = SYSDATETIME()
+        FROM dbo.DependencyActivityAssignment a
+        JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
+        WHERE x.DependencyMasterId IN (${revived.recordset.map((r) => r.Id).join(",")}) AND a.Status = N'CANCELLED'`);
+    }
+    // 5. Brand-new rooms get chains copied from a room of the same kind.
+    const dpr = await require("../services/autoDprChains").createChainsForUnit(tx, unitId, req.user?.email || req.user?.name || null);
+    await tx.commit();
+    await bumpCacheVersion("unit-master");
+    await bumpFlatMasterCaches();
+    const rooms = (await pool.request().input("u", sql.Int, unitId).query("SELECT COUNT(*) AS n FROM dbo.RoomMaster WHERE UnitId = @u AND IsActive = 1")).recordset[0].n;
+    await logAudit({ module: "PlotConversion", recordId: unitId, recordNo: unit.UnitName, action: "VillaTypeSet",
+      changedBy: req.user?.userId ?? null,
+      notes: `${unit.UnitName} -> ${vt.Code} ${vt.Name}; ${rooms} room(s); ${revived.recordset.length} chain(s) kept, ${dpr.created} new${dpr.skipped.length ? `; no steps yet for ${dpr.skipped.join(", ")}` : ""}` }).catch(() => {});
+    res.json({ success: true, rooms, chainsKept: revived.recordset.length, chainsCreated: dpr.created, roomsWithoutSteps: dpr.skipped, created: sync.created, areasTaken });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+    console.error("[auto-setup] POST villa-type:", e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// Undo a plot -> villa conversion made by mistake. Allowed only while nothing
+// real hangs on the villa: no booking / application / hold on it, and no DPR
+// work started (every step still an untouched PENDING stub, no labour or
+// drawings on its rooms). Nothing is deleted: the villa, its rooms and its
+// stub chains are deactivated and the plot is freed to convert again.
+router.post("/plots/unconvert", requirePageRight("crm-auto-project-setup", "delete"), async (req, res) => {
+  const unitId = Number(req.body?.UnitId);
+  if (!Number.isInteger(unitId) || unitId <= 0) return res.status(400).json({ error: "UnitId is required" });
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const q = (text) => tx.request().input("u", sql.Int, unitId).query(text);
+    const plots = (await q("SELECT Id, PlotName FROM dbo.PlotMaster WITH (UPDLOCK) WHERE ConvertedUnitId = @u")).recordset;
+    if (!plots.length) { await tx.rollback(); return res.status(404).json({ error: "That unit was not converted from a plot" }); }
+    const lock = await getUnitLockReason(tx, unitId);
+    if (lock) { await tx.rollback(); return res.status(409).json({ error: `The villa ${lock} — release it first` }); }
+    const work = (await q(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.DependencyActivityAssignment a
+           JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
+           JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
+          WHERE d.FlatId = @u AND (ISNULL(a.Status, N'PENDING') <> N'PENDING' OR a.EngineerId IS NOT NULL OR a.StartDate IS NOT NULL)) AS Steps,
+        (SELECT COUNT(*) FROM dbo.DailyLabourEntry l JOIN dbo.RoomMaster r ON r.Id = l.RoomId WHERE r.UnitId = @u) AS Labour,
+        (SELECT COUNT(*) FROM dbo.ActivityBlueprintAnnotation b JOIN dbo.RoomMaster r ON r.Id = b.RoomId WHERE r.UnitId = @u) AS Drawings`)).recordset[0];
+    if (work.Steps || work.Labour || work.Drawings) {
+      await tx.rollback();
+      return res.status(409).json({ error: `Work has started on this villa (${work.Steps} step(s) allocated or progressed, ${work.Labour} labour entr(ies), ${work.Drawings} drawing note(s)) — it can't be undone` });
+    }
+    const villaName = (await q("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @u")).recordset[0]?.UnitName || `Unit #${unitId}`;
+    // The chains are retired; their (untouched) steps keep their status —
+    // a retired chain is out of every list and count, not "cancelled" work.
+    const retired = await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
+    await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1");
+    // Renamed as it retires: UnitMaster's name index also counts inactive rows,
+    // so keeping the name would stop this plot ever being converted again.
+    await q("UPDATE dbo.UnitMaster SET IsActive = 0, UnitName = LEFT(UnitName, 80) + N' ~undone ' + CAST(Id AS NVARCHAR(12)), UpdatedAt = SYSDATETIME() WHERE Id = @u");
+    await q("UPDATE dbo.PlotMaster SET ConvertedUnitId = NULL, ConvertedAt = NULL, UpdatedAt = SYSDATETIME() WHERE ConvertedUnitId = @u");
+    await tx.commit();
+    await bumpCacheVersion("unit-master");
+    await bumpFlatMasterCaches();
+    await logAudit({ module: "PlotConversion", recordId: unitId, recordNo: villaName, action: "ConversionUndone",
+      changedBy: req.user?.userId ?? null,
+      notes: `Villa ${villaName} retired; ${retired.rowsAffected[0]} DPR chain(s) retired; plots ${plots.map((p) => p.PlotName).join(", ")} freed` }).catch(() => {});
+    res.json({ success: true, PlotIds: plots.map((p) => p.Id), message: `Conversion undone — ${plots.map((p) => p.PlotName).join(", ")} can be converted again` });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+    console.error("[auto-setup] POST unconvert:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /projects/:projectId/plot-summary — what a plotted project's setup page
+// needs at a glance: where its land stands (available / held / sold / built
+// on), its villa types and whether each has a room layout, and how far the
+// villas are wired into DPR. Counts only; one round trip.
+router.get("/projects/:projectId/plot-summary", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  const projectId = parseInt(req.params.projectId, 10);
+  if (!Number.isFinite(projectId)) return res.status(400).json({ error: "Invalid project" });
+  try {
+    const r = await getPool().request().input("p", sql.Int, projectId).query(`
+      WITH plots AS (
+        SELECT p.Id, p.ConvertedUnitId,
+          CASE
+            WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
+                         WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND b.IsActive = 1
+                           AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')) THEN 'Sold'
+            WHEN EXISTS (SELECT 1 FROM dbo.CrmApplicationPlot ap JOIN dbo.CrmApplication a ON a.Id = ap.ApplicationId
+                         WHERE ap.PlotId = p.Id AND ap.Status = N'Active' AND a.IsActive = 1
+                           AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted'))
+              OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id
+                         AND h.Status = N'Active' AND h.HoldUntil > SYSDATETIME()) THEN 'Held'
+            ELSE 'Available' END AS LandState
+        FROM dbo.PlotMaster p WHERE p.ProjectId = @p AND p.IsActive = 1
+      ),
+      villas AS (
+        SELECT DISTINCT u.Id FROM dbo.UnitMaster u JOIN plots pl ON pl.ConvertedUnitId = u.Id WHERE u.IsActive = 1
+      )
+      SELECT
+        (SELECT COUNT(*) FROM plots) AS Plots,
+        (SELECT COUNT(*) FROM plots WHERE LandState = 'Available' AND ConvertedUnitId IS NULL) AS Available,
+        (SELECT COUNT(*) FROM plots WHERE LandState = 'Held') AS Held,
+        (SELECT COUNT(*) FROM plots WHERE LandState = 'Sold') AS Sold,
+        (SELECT COUNT(*) FROM plots WHERE ConvertedUnitId IS NOT NULL) AS BuiltOn,
+        (SELECT COUNT(*) FROM villas) AS Villas,
+        (SELECT COUNT(*) FROM villas v WHERE EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.FlatId = v.Id AND d.IsActive = 1)) AS VillasWithDpr,
+        (SELECT COUNT(*) FROM dbo.RoomMaster r JOIN villas v ON v.Id = r.UnitId
+           WHERE r.IsActive = 1 AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id AND d.IsActive = 1)) AS VillaRoomsWithoutDpr,
+        (SELECT COUNT(*) FROM dbo.VillaTypeMaster vt WHERE vt.ProjectId = @p AND vt.IsActive = 1) AS VillaTypes,
+        (SELECT COUNT(*) FROM dbo.VillaTypeMaster vt JOIN dbo.RoomLayoutType l ON l.Id = vt.LayoutTypeId AND l.IsActive = 1
+           WHERE vt.ProjectId = @p AND vt.IsActive = 1) AS VillaTypesWithLayout,
+        (SELECT COUNT(*) FROM dbo.PlotMaster p WHERE p.ProjectId = @p AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL AND p.PlannedVillaTypeId IS NOT NULL) AS PlannedNotBuilt
+    `);
+    res.json(r.recordset[0]);
+  } catch (e) {
+    console.error("[auto-setup] GET plot-summary:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

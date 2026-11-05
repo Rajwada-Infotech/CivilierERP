@@ -1,8 +1,13 @@
 const express = require("express");
+const { round2, sumMoney } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+// Project access: a restricted user gets 403 on records outside their projects.
+const { crmProjectGuards, crmViaBookingSql, projectPredicate } = require("../services/projectScope");
+crmProjectGuards(router, crmViaBookingSql("CrmBrokerageMaster"));
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -15,10 +20,9 @@ const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { assertSanePercentRate } = require("../services/brokerageValidation");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { bumpCacheVersion } = require("../redis");
-const { applyPagination } = require("../services/crmListPagination");
 
+router.use(apiRateLimit);
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 const { calculateTds } = require("../services/tds");
 
@@ -45,58 +49,93 @@ const BROKERAGE_SELECT = `
   ) fp
 `;
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmHandover / CrmServiceTickets / CrmBookingAmendments:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Pending, Approved, Paid } }
+// `counts` honours search + company/project/block but NOT status, so the
+// tabs always show what each status would contain. Without `page` the
+// legacy full-array response is returned so existing callers keep working.
+const BRK_STATUSES = ["Pending", "Approved", "Paid", "Rejected"];
+const BRK_SORT = {
+  BookingNo: "b.BookingNo",
+  BrokerName: "ahm.LHeadName",
+  Status: "br.Status",
+  ComputedAmount: "br.ComputedAmount",
+  CreatedAt: "br.CreatedAt",
+};
+function buildBrkWhere(request, query, includeStatus, projectScope = null) {
+  const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR ahm.LHeadName LIKE @search)");
+  }
+  if (includeStatus && BRK_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(20), query.status);
+    conds.push("br.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 // GET / — all brokerage records. Staff/internal only — never exposed to crm-portal.
 router.get("/", requirePageRight("crm-brokerage", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
-    const conds = [];
-    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("br.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR ahm.LHeadName LIKE @search)");
-    }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${BROKERAGE_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY br.CreatedAt DESC`);
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildBrkWhere(r0, req.query, true, req.projectScope);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY br.CreatedAt DESC`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY br.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(20), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmBrokerageMaster br
-          JOIN dbo.CrmBooking b ON b.Id = br.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId
-          WHERE (@st2 IS NULL OR br.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR ahm.LHeadName LIKE @search2))
-        `),
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(BRK_SORT, req.query.sortKey) ? BRK_SORT[req.query.sortKey] : BRK_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const FROM = `
+      FROM dbo.CrmBrokerageMaster br
+      JOIN dbo.CrmBooking b ON b.Id = br.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId`;
+
+    // One filter definition for the rows, the total and the status counts (the count used to skip the project scope).
+    const pageReq = pool.request();
+    const pageWhere = buildBrkWhere(pageReq, req.query, true, req.projectScope);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const totalReq = pool.request();
+    const totalWhere = buildBrkWhere(totalReq, req.query, true, req.projectScope);
+    const statusReq = pool.request();
+    const statusWhere = buildBrkWhere(statusReq, req.query, false, req.projectScope);
+    const [rowsRes, totalRes, statusRes] = await Promise.all([
+      pageReq.query(`${SELECT_WITH_BLOCK} ${pageWhere} ORDER BY ${sortCol} ${dir}, br.Id DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      totalReq.query(`SELECT COUNT(*) AS total ${FROM} ${totalWhere}`),
+      statusReq.query(`SELECT br.Status, CAST(ISNULL(br.IsLocked, 0) AS BIT) AS IsLocked, COUNT(*) AS n,
+          SUM(COALESCE(br.NetPayable, br.ComputedAmount)) AS net
+        ${FROM} ${statusWhere} GROUP BY br.Status, CAST(ISNULL(br.IsLocked, 0) AS BIT)`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    // counts: by status, with All (the tabs). statusCounts: locked tranches apart, with their net (the sheet's figures).
+    const counts = { All: 0 };
+    const statusCounts = {};
+    for (const x of statusRes.recordset) {
+      counts[x.Status] = (counts[x.Status] || 0) + x.n;
+      counts.All += x.n;
+      const key = x.IsLocked ? "Locked" : x.Status;
+      const cur = statusCounts[key] || { count: 0, net: 0 };
+      statusCounts[key] = { count: cur.count + x.n, net: cur.net + (Number(x.net) || 0) };
+    }
+    res.json({ rows: rowsRes.recordset, total: totalRes.recordset[0].total, page, pageSize, counts, statusCounts });
   } catch (e) {
     console.error("[crm-brokerage] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -111,8 +150,10 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
     const { status } = req.query;
     const req0 = pool.request();
     const conds = [];
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("br.Status = @st"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await req0.query(`
       SELECT p.Id, p.BrokerageId, p.Amount, p.PaidDate, p.PaymentMode, p.TransactionRef, p.Notes, p.CreatedAt,
              CAST(NULL AS INT) AS FinancePaymentId, CAST(NULL AS NVARCHAR(100)) AS FinancePaymentDocNo, 'Paid' AS FinancePaymentStatus,
@@ -128,7 +169,7 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
       LEFT JOIN dbo.Users cu ON cu.id = p.CreatedBy
       ${where}
       UNION ALL
-      SELECT np.PPaymentID AS Id, br.Id AS BrokerageId, np.PAmount AS Amount, np.PDate AS PaidDate, np.PMode AS PaymentMode,
+      SELECT np.PPaymentID AS Id, br.Id AS BrokerageId, np.PAmount - ISNULL(np.TDSAmount, 0) AS Amount, np.PDate AS PaidDate, np.PMode AS PaymentMode,
              COALESCE(np.PNeftNumber, np.PUpiTransactionId, np.PRtgsReference, np.PImpsReference, np.PCardReference, np.PChequeNo, np.DocNo) AS TransactionRef,
              np.PRemarks AS Notes, np.PCreatedAt AS CreatedAt,
              np.PPaymentID AS FinancePaymentId, np.DocNo AS FinancePaymentDocNo, np.Status AS FinancePaymentStatus,
@@ -141,7 +182,10 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn2 ON bn2.BookingId = b.Id
-      WHERE np.Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}') ${status ? "AND br.Status = @st" : ""}
+      -- A voucher already recorded as a broker payment (approved) is listed
+      -- once, by that payment row above — not twice.
+      WHERE np.Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}')
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmBrokerPayment bp WHERE bp.SourceNewPaymentId = np.PPaymentID) ${status ? "AND br.Status = @st" : ""} ${scope}
       ORDER BY PaidDate DESC, CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -168,7 +212,25 @@ function computeBrokerageAmount(rateType, rateValue, baseAmount) {
   return Math.round(base * rate) / 100;
 }
 
+// One voucher per tranche: approve and "retry hand-off" racing each other
+// both passed the "no voucher yet" check and raised two. The check and the
+// insert now run in one transaction behind a lock on the brokerage row.
 async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    await tx.request().input("id", sql.Int, brokerageId)
+      .query("SELECT Id FROM dbo.CrmBrokerageMaster WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id");
+    const out = await createFinancePaymentForBrokerageLocked(tx, brokerageId, req);
+    await tx.commit();
+    return out;
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+    throw e;
+  }
+}
+
+async function createFinancePaymentForBrokerageLocked(pool, brokerageId, req) {
   const existing = await pool.request().input("id", sql.Int, brokerageId).query(`
     SELECT TOP 1 PPaymentID, DocNo, Status
     FROM dbo.NewPayment
@@ -195,6 +257,10 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   // only pays out what's legally due to the broker.
   const amount = Number(row.NetPayable ?? row.ComputedAmount) || 0;
   if (amount <= 0) throw new Error("Approved brokerage net payable amount must be greater than 0");
+  // The voucher carries the GROSS with its TDS, like every TDS payment: the
+  // payment posting then pays the bank the net and credits TDS Payable.
+  // (Carrying the net here had the TDS deducted a second time.)
+  const voucherAmount = Math.round((amount + (Number(row.TDSAmount) || 0)) * 100) / 100;
 
   const actorEmail = req.user?.email || req.user?.name || null;
   const docTypeId = await resolveDocTypeId(pool, sql, "PAY");
@@ -220,7 +286,7 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   const result = await pool.request()
     .input("name", sql.VarChar, "Brokerage Payment")
     .input("remarks", sql.NVarChar(1000), `Approved brokerage for ${row.BookingNo} (${milestoneText}) — gross ₹${Number(row.ComputedAmount).toLocaleString("en-IN")}, TDS ${row.TDSPercentage ?? 0}% (₹${Number(row.TDSAmount ?? 0).toLocaleString("en-IN")}), net payable ₹${amount.toLocaleString("en-IN")} — finance to complete payment details`)
-    .input("amt", sql.Decimal(18,2), amount)
+    .input("amt", sql.Decimal(18,2), voucherAmount)
     .input("dt", sql.Date, today)
     .input("project", sql.VarChar, row.ProjectId != null ? String(row.ProjectId) : "")
     .input("company", sql.VarChar, row.CompanyId != null ? String(row.CompanyId) : "")
@@ -292,8 +358,14 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+
+    const allowed = await assertBookingProjectScope(req, res, b.BookingId);
+    if (allowed === false) return;
+
     if (!b.BrokerId) return res.status(400).json({ error: "Broker is required — select one from Broker Master" });
 
+    // The booking's project must be one the user may work in.
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, parseInt(b.BookingId, 10)))) return;
     const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
     if (activeErr) return res.status(400).json({ error: activeErr });
 
@@ -314,7 +386,7 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     }
 
     const agr = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
-      .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
     if (!agr.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.recordset[0].Status)) {
       return res.status(400).json({ error: "Brokerage requires the agreement to be Executed first" });
     }
@@ -335,9 +407,15 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     const rateValue = parseFloat(b.RateValue);
     if (!rateValue || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
     const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
-      .query("SELECT TotalValue, ParkingTotal, CompanyId FROM dbo.CrmBooking WHERE Id = @bid");
+      .query("SELECT TotalValue, ParkingTotal, ExtraChargesTotal, CompanyId FROM dbo.CrmBooking WHERE Id = @bid");
     const bkRow = bk.recordset[0] || {};
-    const dealValue = Number(bkRow.TotalValue || 0) + Number(bkRow.ParkingTotal || 0);
+    // Same deal-value definition as the auto-created schedule in
+    // crmWorkflowGuards.js's maybeAutoCreateBrokerage (TotalValue +
+    // ParkingTotal + ExtraChargesTotal) — this manual-entry path never
+    // picked up ExtraChargesTotal when that one was fixed (booking 41),
+    // so a broker's tier/commission silently depended on which of the two
+    // paths created their record.
+    const dealValue = sumMoney([bkRow.TotalValue, bkRow.ParkingTotal, bkRow.ExtraChargesTotal]);
 
     try {
       assertSanePercentRate(rateType, rateValue, dealValue);
@@ -444,7 +522,7 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     const rateType = b.RateType === "Amount" ? "Amount" : (b.RateType === "Percentage" ? "Percentage" : row.RateType);
     const rateValue = b.RateValue != null && b.RateValue !== "" ? Number(b.RateValue) : Number(row.RateValue);
     if (!Number.isFinite(rateValue) || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
-    const baseAmount = Number(row.TotalValue || 0) + Number(row.ParkingTotal || 0);
+    const baseAmount = sumMoney([row.TotalValue, row.ParkingTotal]);
     try {
       assertSanePercentRate(rateType, rateValue, baseAmount);
     } catch (e) {
@@ -537,6 +615,11 @@ router.put("/:id/submit", requirePageRight("crm-brokerage", "edit"), async (req,
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+    const pool = getPool();
+    const bk = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+    if (!bk.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
+    const activeErr = await requireActiveBooking(pool, bk.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     const result = await approvalTransition("crm-brokerage", id, CrmStatus.PENDING, userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
@@ -559,13 +642,21 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
     // created locked, so this branch only ever fires for UnlockGate='Agreement'.
     const pool = getPool();
     const locked = await pool.request().input("id", sql.Int, id)
-      .query("SELECT IsLocked, UnlockGate FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+      .query("SELECT IsLocked, UnlockGate, BookingId FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+    if (!locked.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
     if (locked.recordset[0]?.IsLocked) {
       const msg = "This tranche unlocks once the Agreement is Executed";
       return res.status(400).json({ error: msg });
     }
+    // requireActiveBooking is only checked at tranche creation (POST /) —
+    // nothing re-checks it on submit/approve/reject, so a tranche created
+    // while the booking was still live stays Pending/actionable even after
+    // the booking is later cancelled. Approving it would post a real GL
+    // accrual and a Finance payout voucher for a dead booking's commission.
+    const activeErr = await requireActiveBooking(pool, locked.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
-    const result = await approvalTransition("crm-brokerage", id, CrmStatus.APPROVED, userEmail, req.user?.role);
+    const result = await approvalTransition("crm-brokerage", id, CrmStatus.APPROVED, userEmail, req.user?.role, null, req.user?.userId ?? null);
     // approvalTransition() manages its own internal transaction and commits
     // before returning, so by this point the Approved status is already
     // permanent — it can't be rolled back if the Finance handoff below
@@ -576,6 +667,16 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
     // and let PUT /:id/retry-finance-handoff pick up exactly this case.
     let financePayment = null;
     if (result.newStatus === CrmStatus.APPROVED) {
+      await pool.request().input("id", sql.Int, id).input("by", sql.Int, req.user?.userId ?? null)
+        .query("UPDATE dbo.CrmBrokerageMaster SET ApprovedBy = ISNULL(ApprovedBy, @by), ApprovedAt = ISNULL(ApprovedAt, SYSDATETIME()) WHERE Id = @id");
+      // What is owed to the broker goes to the books now; a ledger failure is
+      // recorded and reported, never allowed to undo the approval.
+      try {
+        const outcome = await require("../services/crmLedger").postCrmBrokerageAccrualToGL(pool, id, userEmail);
+        await require("../services/approvalService").recordGLPosting("crm-brokerage", id, outcome, userEmail);
+      } catch (glErr) {
+        await require("../services/approvalService").recordGLPosting("crm-brokerage", id, { failed: true, reason: glErr.message }, userEmail).catch(() => {});
+      }
       try {
         financePayment = await createFinancePaymentForBrokerage(pool, id, req);
         await Promise.all([bumpCacheVersion("crm-brokerage"), bumpCacheVersion("new-payment")]);
@@ -604,6 +705,10 @@ router.put("/:id/retry-finance-handoff", requirePageRight("crm-brokerage", "edit
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    const bk = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+    if (!bk.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
+    const activeErr = await requireActiveBooking(pool, bk.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     const financePayment = await createFinancePaymentForBrokerage(pool, id, req);
     await Promise.all([bumpCacheVersion("crm-brokerage"), bumpCacheVersion("new-payment")]);
     res.json({ success: true, financePayment });

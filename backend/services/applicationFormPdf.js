@@ -56,7 +56,7 @@ async function fetchApplicationFormData(pool, applicationId) {
       comp.logo AS CompanyLogo,
       proj.name AS ProjectFullName, proj.rera_no AS ProjectRera,
       proj.address AS ProjectAddress, proj.city AS ProjectCity, proj.state AS ProjectState,
-      um.UnitName, um.UnitType, um.AreaSqFt, um.BlockId, blk.BlockName,
+      um.UnitName, COALESCE(um.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = um.UnitKind)) AS UnitType, um.AreaSqFt, um.BlockId, blk.BlockName,
       cust.CustomerNo, cust.PanNo AS CustomerPanNo, cust.AadhaarNo AS CustomerAadhaar,
       cust.Address AS CustomerAddress, cust.City AS CustomerCity, cust.State AS CustomerState,
       cust.Pincode AS CustomerPincode, cust.Occupation AS CustomerOccupation,
@@ -540,7 +540,7 @@ function renderApplicationFormPdfBuffer(d) {
       ], L, W / 3);
       fieldRow(doc, [
         ["Email Address", d.Email || "—"],
-        ["PAN No.", d.CustomerPanNo || "—"],
+        ["PAN (Permanent Account Number)", d.CustomerPanNo || "—"],
         ["Aadhaar No.", d.CustomerAadhaar || "—"],
       ], L, W / 3);
       fieldRow(doc, [
@@ -650,7 +650,7 @@ function renderApplicationFormPdfBuffer(d) {
             ["Date of Birth", c.DateOfBirth ? fmtDate(c.DateOfBirth) : "—"],
           ], L, W / 3);
           fieldRow(doc, [
-            ["PAN No.", c.PanNo || "—"],
+            ["PAN (Permanent Account Number)", c.PanNo || "—"],
             ["Aadhaar No.", c.AadhaarNo || "—"],
             ["Occupation", c.Occupation || "—"],
           ], L, W / 3);

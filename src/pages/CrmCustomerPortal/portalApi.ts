@@ -3,6 +3,7 @@
 // booking, agreement, payments, documents, construction, tickets and
 // profile pages instead of each page re-implementing its own fetch layer.
 export const API = "/api/crm-portal";
+export const BASE = API;
 
 export function authHeaders() {
   const token = localStorage.getItem("crm_portal_token");
@@ -31,14 +32,34 @@ function withAppId(path: string, applicationId: number) {
 // ── Routes that don't need applicationId ──────────────────────────────────────
 export const fetchMe          = () => get("/me");
 export const fetchApplications = () => get("/applications");
+// Every live transfer deed the customer is a party to (not tied to one application).
+export const fetchTransferDeeds = () => get("/transfer-deeds");
+// The customer's credit notes (money given back / invoices reduced).
+export const fetchCreditNotes = () => get("/gst-notes");
+/** Highest credit note id this customer has seen on Payments (per browser). */
+export const creditNotesSeenKey = (customerId: any) => `portal-credit-notes-seen-${customerId}`;
+export function readSeen(key: string) { try { return Number(localStorage.getItem(key) || 0); } catch { return 0; } }
+export function writeSeen(key: string, v: number) { try { localStorage.setItem(key, String(v)); } catch { /* private mode */ } }
 
 // ── Routes that require applicationId ────────────────────────────────────────
 export const fetchTimeline          = (applicationId: number) => get(withAppId("/timeline", applicationId));
 export const fetchTickets           = (applicationId: number) => get(withAppId("/tickets", applicationId));
-export const fetchActivity          = (applicationId: number) => get(withAppId("/activity", applicationId)).catch(() => []);
-export const fetchAgreement         = (applicationId: number) => get(withAppId("/agreement", applicationId)).catch(() => null);
-export const fetchAgreementDocuments = (applicationId: number) => get(withAppId("/agreement/documents", applicationId)).catch(() => []);
-export const fetchInvoices          = (applicationId: number) => get(withAppId("/invoices", applicationId)).catch(() => []);
+export const fetchActivity          = (applicationId: number) => get(withAppId("/activity", applicationId));
+export const fetchAgreement         = (applicationId: number) => get(withAppId("/agreement", applicationId));
+export const fetchAgreementDocuments = (applicationId: number) => get(withAppId("/agreement/documents", applicationId));
+export const fetchInvoices          = (applicationId: number) => get(withAppId("/invoices", applicationId));
+export const fetchReceipts          = (appId: number) => get(withAppId("/receipts", appId));
+
+export const downloadReceiptPdf = async (receiptId: number, appId?: number): Promise<Blob> => {
+  const token = localStorage.getItem("crm_portal_token");
+  const aid = appId ?? (typeof window !== "undefined" ? Number(sessionStorage.getItem("crm_portal_app_id")) : undefined);
+  const query = aid ? `?applicationId=${aid}` : "";
+  const res = await fetch(`${BASE}/receipts/${receiptId}/pdf${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to download receipt");
+  return res.blob();
+};
 
 
 
@@ -90,7 +111,7 @@ export async function acceptAgreementDate(applicationId: number) {
 
 export async function respondAgreement(
   applicationId: number,
-  decision: "Approve" | "Reject",
+  decision: "Approve" | "Recheck",
   remarks: string,
   proposedDate?: string
 ) {
@@ -103,7 +124,7 @@ export async function respondAgreement(
   return res.json();
 }
 
-export async function respondSalesDeed(applicationId: number, decision: "Approve" | "Reject", remarks: string) {
+export async function respondSalesDeed(applicationId: number, decision: "Approve" | "Recheck", remarks: string) {
   const res = await fetch(`${API}/sales-deed/respond?applicationId=${applicationId}`, {
     method: "POST",
     headers: authHeaders(),
@@ -113,7 +134,7 @@ export async function respondSalesDeed(applicationId: number, decision: "Approve
   return res.json();
 }
 
-export const fetchQueryPaymentAttachments = (applicationId: number) => get(withAppId("/query-payment/attachments", applicationId)).catch(() => []);
+export const fetchQueryPaymentAttachments = (applicationId: number) => get(withAppId("/query-payment/attachments", applicationId));
 
 // Files travel as base64 JSON, decoded server-side into the same
 // VARBINARY(MAX) column staff uploads use — see crmPortal.js POST

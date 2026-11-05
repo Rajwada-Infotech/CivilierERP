@@ -2,6 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmNoc")); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -13,10 +15,10 @@ const { getNextDocNumber } = require("../services/docNumber");
 // editor being able to self-approve a NOC on this page.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { requireActiveBooking, resolveNocType } = require("../services/crmWorkflowGuards");
-const { applyPagination } = require("../services/crmListPagination");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const NOC_TYPES = ["Organisation", "Bank"];
 
@@ -30,60 +32,97 @@ const NOC_SELECT = `
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmPossessionNotice / CrmMutation:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&type=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Pending, Approved, Issued, Rejected } }
+// `counts` honours type + search + company/project/block but NOT status, so
+// the tabs always show what each status would contain. Without `page` the
+// legacy full-array response is returned so existing callers keep working.
+const NOC_STATUSES = ["Pending", "Approved", "Issued", "Rejected"];
+const NOC_SORT = {
+  NocNo: "n.NocNo",
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  NocType: "n.NocType",
+  Status: "n.Status",
+  IssuedDate: "n.IssuedDate",
+  CreatedAt: "n.CreatedAt",
+};
+function buildNocWhere(request, query, includeStatus, projectScope = null) {
+  const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  if (NOC_TYPES.includes(query.type)) { request.input("type", sql.NVarChar(30), query.type); conds.push("n.NocType = @type"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR n.NocNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search)");
+  }
+  if (includeStatus && NOC_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(30), query.status);
+    conds.push("n.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 // GET / — all NOCs
 router.get("/", requirePageRight("crm-noc", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { type, status, search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
-    const conds = [];
-    if (type)   { req0.input("t",  sql.NVarChar(30), type);   conds.push("n.NocType = @t"); }
-    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("n.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
-    }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${NOC_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC`);
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildNocWhere(r0, req.query, true, req.projectScope);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("t2", sql.NVarChar(30), type || null)
-        .input("st2", sql.NVarChar(30), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmNoc n
-          JOIN dbo.CrmBooking b ON b.Id = n.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@t2 IS NULL OR n.NocType = @t2)
-            AND (@st2 IS NULL OR n.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
-        `),
-    ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(NOC_SORT, req.query.sortKey) ? NOC_SORT[req.query.sortKey] : NOC_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
+    const countReq = pool.request();
+    const countWhere = buildNocWhere(countReq, req.query, false, req.projectScope);
+    const countRes = await countReq.query(
+      `SELECT n.Status, COUNT(*) AS C FROM dbo.CrmNoc n
+       JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+       ${countWhere} GROUP BY n.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = NOC_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildNocWhere(pageReq, req.query, true, req.projectScope);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${SELECT_WITH_BLOCK} ${pageWhere} ORDER BY ${sortCol} ${dir}, n.Id DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    // The sheet page's tabs: by status (as counts, no All) and by type across every type under the other filters.
+    const typeReq = pool.request();
+    const typeWhere = buildNocWhere(typeReq, { ...req.query, type: undefined }, false, req.projectScope);
+    const typeRes = await typeReq.query(
+      `SELECT n.NocType, COUNT(*) AS C FROM dbo.CrmNoc n
+       JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+       ${typeWhere} GROUP BY n.NocType`
+    );
+    const typeCounts = Object.fromEntries(typeRes.recordset.map((r) => [r.NocType, r.C]));
+    const { All: _all, ...statusCounts } = counts;
+    res.json({ rows: rowsRes.recordset, total, counts, statusCounts, typeCounts, page, pageSize });
   } catch (e) {
     console.error("[crm-noc] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -145,6 +184,37 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), a
   }
 });
 
+// GET /by-booking — look up the NOC row for a specific booking (+ optional
+// nocType filter). Used exclusively by the frontend deep-link handler so it
+// can resolve a NOC regardless of which page of the paginated list it lives
+// on — scanning `nocs` (paginated first page) silently missed NOCs on page
+// 2+ and fell through to opening the Create dialog incorrectly.
+router.get("/by-booking", requirePageRight("crm-noc", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = req.query.bookingId ? parseInt(req.query.bookingId, 10) : null;
+    if (!bookingId || isNaN(bookingId)) return res.status(400).json({ error: "bookingId is required" });
+    const { nocType } = req.query;
+    const req0 = pool.request().input("bid", sql.Int, bookingId);
+    const conds = ["n.BookingId = @bid"];
+    if (nocType && ["Bank", "Organisation"].includes(nocType)) {
+      req0.input("nt", sql.NVarChar(30), nocType);
+      conds.push("n.NocType = @nt");
+    }
+    // Same project scope as the list — a user only finds NOCs of their projects.
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    const result = await req0.query(
+      `${NOC_SELECT} WHERE ${conds.join(" AND ")} ORDER BY n.CreatedAt DESC`
+    );
+    // Return the most-recent matching NOC (null if none exists — frontend
+    // treats null as "go ahead and open the create dialog").
+    res.json(result.recordset[0] || null);
+  } catch (e) {
+    console.error("[crm-noc] GET /by-booking error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /eligible-bookings — bookings eligible for a new NOC. NOC is a single
 // step per booking (never both Bank and Organisation — see resolveNocType in
 // crmWorkflowGuards.js), so this returns each candidate along with its
@@ -156,23 +226,25 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
     const pool = getPool();
     const { type } = req.query; // "Bank" | "Organisation" | "" (= no filter)
     const typeFilter = NOC_TYPES.includes(type) ? type : null;
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
     const candidates = await pool.request().query(`
       SELECT b.Id, b.BookingNo,
              COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
              a.ApplicantName,
              CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
                SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
              ) THEN 'Bank' ELSE 'Organisation' END AS NocType,
              CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
                SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
              ) THEN 1 ELSE 0 END AS HasLoan
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
+        ${scope}
         -- Agreement for Sale, registered at the Sub-Registrar, is mandatory
         -- for every booking regardless of project type — no exception.
         AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}')
@@ -203,6 +275,11 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+    // The booking comes in the body, which the path guards don't see.
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -362,9 +439,12 @@ router.put("/:id/approve", requirePageRight("crm-noc", "edit"), async (req, res)
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await approvalTransition("crm-noc", id, CrmStatus.APPROVED, userEmail, req.user?.role);
-    await getPool().request()
-      .input("id", sql.Int, id)
-      .query("UPDATE dbo.CrmNoc SET ApprovalDate = ISNULL(ApprovalDate, CAST(SYSDATETIME() AS DATE)) WHERE Id = @id");
+    // Only the final level approves the NOC - an intermediate level leaves it Pending.
+    if (result.newStatus === CrmStatus.APPROVED) {
+      await getPool().request()
+        .input("id", sql.Int, id)
+        .query("UPDATE dbo.CrmNoc SET ApprovalDate = ISNULL(ApprovalDate, CAST(SYSDATETIME() AS DATE)) WHERE Id = @id");
+    }
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-noc] approve error:", e.message);

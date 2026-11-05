@@ -1,17 +1,19 @@
 const { sql } = require("../db");
+const { round2, sumMoney } = require("./bookingUnits");
+const { onAccountWithAvailableSql } = require("./crmPaymentFunding");
 
 // Business rule (confirmed 2026-09-15): every rupee a customer pays lands in
 // On Account and stays there, on hold — it is never swept onto a specific
 // milestone by hand. It is only ever auto-adjusted, all at once, in
-// milestone order, the moment the on-account pool covers the booking's
-// entire GrandTotal (see autoApplyOnAccountIfFullyFunded in crmPayments.js).
+// milestone order, once settled milestone payments plus available deposits
+// cover all non-waived dues (see autoApplyOnAccountIfFullyFunded in crmPayments.js).
 //
 // But staff and downstream workflow gates (Agreement prep, Bank/KYC save)
 // still need to see "the customer has paid this milestone" the moment
 // enough money is sitting on-account to cover it — waiting for the full
 // booking to be funded before showing that would make every gate lie about
 // money that's already, genuinely, in hand. This module computes that
-// *virtual* per-milestone coverage from the raw on-account total, without
+// *virtual* per-milestone coverage from the unapplied on-account balance, without
 // ever touching CrmPaymentMilestone.AmountPaid/Status itself — the real
 // ledger only moves via the auto-adjustment described above.
 //
@@ -19,21 +21,28 @@ const { sql } = require("../db");
 // once the on-account pool is enough to pay milestones 1..N in full (a
 // Waived milestone requires nothing). This mirrors the same
 // "earlier-milestone-first" ordering the real sweep enforces.
-async function getBookingOnAccountCoverage(pool, bookingId) {
+//
+// With { withPendingVerification: true } money staff have entered and Finance
+// hasn't verified yet counts too — used only to decide whether the NEXT entry
+// may be made / verified, so payments can be entered one after another without
+// waiting for each verification. Shown coverage never uses it.
+async function getBookingOnAccountCoverage(pool, bookingId, { withPendingVerification = false } = {}) {
   const milestonesRes = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT Id, MilestoneNo, MilestoneName, AmountDue, AmountPaid, Status
-    FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+    SELECT Id, MilestoneNo, MilestoneName, AmountDue, AmountPaid, Status, ExtraChargeId, ParkingAllotmentId
+    FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo, Id
   `);
   const oaRes = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT ISNULL(SUM(Amount), 0) AS TotalOnAccount FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+    SELECT ISNULL(SUM(o.AvailableAmount), 0) AS TotalOnAccount FROM ${onAccountWithAvailableSql("o")}
+    WHERE o.BookingId = @bid
   `);
-  const totalOnAccount = Number(oaRes.recordset[0]?.TotalOnAccount) || 0;
+  const pendingVerification = withPendingVerification ? await pendingVerificationTotal(pool, bookingId) : 0;
+  const totalOnAccount = round2((Number(oaRes.recordset[0]?.TotalOnAccount) || 0) + pendingVerification);
 
   let cumulativeRequired = 0;
   const milestones = milestonesRes.recordset.map((m) => {
-    const required = m.Status === "Waived" ? 0 : Number(m.AmountDue || 0);
-    cumulativeRequired = Math.round((cumulativeRequired + required) * 100) / 100;
-    const alreadyPaid = m.Status === "Paid" || m.Status === "Waived";
+    const required = m.Status === "Waived" ? 0 : Math.max(0, round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)));
+    cumulativeRequired = round2(cumulativeRequired + required);
+    const alreadyPaid = m.Status === "Paid" || m.Status === "Waived" || Number(m.AmountPaid || 0) >= Number(m.AmountDue || 0);
     return {
       ...m,
       CumulativeRequired: cumulativeRequired,
@@ -48,7 +57,8 @@ async function getBookingOnAccountCoverage(pool, bookingId) {
 // workflow gate cares about) virtually covered by on-account money yet?
 async function isMilestoneOneCoveredByOnAccount(pool, bookingId) {
   const { milestones } = await getBookingOnAccountCoverage(pool, bookingId);
-  return !!milestones[0]?.VirtuallyCovered;
+  const bookingMilestone = milestones.find((m) => Number(m.MilestoneNo) === 1 && m.ExtraChargeId == null && m.ParkingAllotmentId == null);
+  return !!bookingMilestone?.VirtuallyCovered;
 }
 
 // Are all milestones strictly before milestoneNo virtually covered (Paid,
@@ -60,11 +70,42 @@ async function isMilestoneOneCoveredByOnAccount(pool, bookingId) {
 // genuinely arrived — otherwise no payment past Milestone 1 could ever be
 // approved, since Milestone 1 itself only becomes physically Paid once the
 // WHOLE booking (money for every later milestone included) is already in.
-async function areEarlierMilestonesCoveredByOnAccount(pool, bookingId, milestoneNo) {
+async function areEarlierMilestonesCoveredByOnAccount(pool, bookingId, milestoneNo, opts = {}) {
   if (Number(milestoneNo) <= 1) return true;
-  const { milestones } = await getBookingOnAccountCoverage(pool, bookingId);
-  const preceding = milestones.find((m) => Number(m.MilestoneNo) === Number(milestoneNo) - 1);
+  const { milestones } = await getBookingOnAccountCoverage(pool, bookingId, opts);
+  // Same reasoning as isMilestoneOneCoveredByOnAccount above: an older
+  // booking can carry a legacy dedicated parking/extra-charge milestone
+  // sharing the same MilestoneNo as a real schedule milestone. Matching on
+  // MilestoneNo alone could silently return that legacy row instead of the
+  // real "milestone N-1" the caller means.
+  const preceding = milestones.find((m) => Number(m.MilestoneNo) === Number(milestoneNo) - 1 && m.ExtraChargeId == null && m.ParkingAllotmentId == null);
   return !!preceding?.VirtuallyCovered;
 }
 
-module.exports = { getBookingOnAccountCoverage, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };
+// Money entered against this booking (a milestone or its account) that Finance
+// hasn't verified yet — Received Payment rows still Pending.
+const PENDING_VERIFICATION_SQL = `
+  SELECT rp.RPPaymentID, rp.RPDocNo, rp.RPAmount, rp.RPMode, rp.RPDocDate, rp.RPTransactionID,
+         rp.RPCreatedBy, rp.RPCreatedAt, rp.CrmMilestoneId, m.MilestoneName
+  FROM dbo.ReceivedPayment rp
+  LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
+  WHERE rp.CrmBookingId = @bid AND rp.RPStatus = N'Pending'`;
+async function pendingVerificationEntries(pool, bookingId) {
+  return (await pool.request().input("bid", sql.Int, bookingId).query(`${PENDING_VERIFICATION_SQL} ORDER BY rp.RPCreatedAt, rp.RPPaymentID`)).recordset;
+}
+// Entries Finance returned (rejected), newest first — shown so a returned
+// payment never just vanishes from "With Finance".
+async function returnedEntries(pool, bookingId) {
+  return (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT rp.RPPaymentID, rp.RPDocNo, rp.RPAmount, rp.RPMode, rp.RPDocDate, rp.RPTransactionID,
+           rp.RPCreatedBy, rp.RPRejectedBy, rp.RPRejectedAt, rp.RPRejectionNote, m.MilestoneName
+    FROM dbo.ReceivedPayment rp
+    LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
+    WHERE rp.CrmBookingId = @bid AND rp.RPStatus = N'Rejected'
+    ORDER BY rp.RPRejectedAt DESC, rp.RPPaymentID DESC`)).recordset;
+}
+async function pendingVerificationTotal(pool, bookingId) {
+  return sumMoney(await pendingVerificationEntries(pool, bookingId), (r) => r.RPAmount);
+}
+
+module.exports = { getBookingOnAccountCoverage, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };

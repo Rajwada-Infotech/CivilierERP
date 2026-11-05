@@ -5,7 +5,7 @@ import { Profile2User, Camera } from "iconsax-react";
 import { FileText } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell, HR_PAYROLL_ACCENT as ACCENT } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell, HR_PAYROLL_ACCENT as ACCENT, HR_GRADIENT } from "@/components/hrpayroll/HrPayrollShell";
 import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent, type RecordWithId } from "@/components/MasterPage";
 import { EmployeeDocumentsModal } from "@/components/hrpayroll/EmployeeDocumentsModal";
 import {
@@ -419,17 +419,18 @@ export default function EmployeeMaster() {
         );
       },
     },
+    // Rows of three on desktop: identity → contact → personal → photo/address.
     { name: "employeeCode", label: "Employee ID / Employee Code", type: "text", required: true, uppercase: true, placeholder: "e.g. EMP-0001" },
-    { name: "employeeName", label: "Employee Name", type: "text", required: true, fullWidth: true },
+    { name: "employeeName", label: "Employee Name", type: "text", required: true },
     { name: "companyId", label: "Company", type: "select", asyncOptions: async () => companyOptions },
-    { name: "photoBase64", label: "Photo", type: "custom", fullWidth: true, render: (p) => <PhotoField value={p.value} onChange={p.onChange} /> },
-    { name: "dateOfBirth", label: "Date of Birth", type: "date" },
-    { name: "gender", label: "Gender", type: "select", options: GENDERS },
     { name: "mobile", label: "Mobile", type: "text" },
     { name: "email", label: "Email", type: "text" },
-    { name: "address", label: "Address", type: "textarea", fullWidth: true },
+    { name: "dateOfBirth", label: "Date of Birth", type: "date" },
+    { name: "gender", label: "Gender", type: "select", options: GENDERS },
     { name: "emergencyContactName", label: "Emergency Contact Name", type: "text" },
     { name: "emergencyContactPhone", label: "Emergency Contact Phone", type: "text" },
+    { name: "photoBase64", label: "Photo", type: "custom", fullWidth: true, render: (p) => <PhotoField value={p.value} onChange={p.onChange} /> },
+    { name: "address", label: "Address", type: "textarea", fullWidth: true },
 
     { name: "sec-employment", label: "Employment Details", type: "section" },
     { name: "joiningDate", label: "Joining Date", type: "date" },
@@ -472,7 +473,7 @@ export default function EmployeeMaster() {
     { name: "bankIFSC", label: "IFSC Code", type: "text", uppercase: true },
 
     { name: "sec-statutory", label: "Statutory Details", type: "section" },
-    { name: "pan", label: "PAN", type: "text", uppercase: true },
+    { name: "pan", label: "PAN (Permanent Account Number)", type: "text", uppercase: true },
     { name: "aadhaar", label: "Aadhaar", type: "text" },
     { name: "uan", label: "UAN", type: "text" },
     { name: "esicNumber", label: "ESIC Number", type: "text" },
@@ -500,8 +501,35 @@ export default function EmployeeMaster() {
     { key: "isActive", label: "Status" },
   ];
 
+  const initials = (name: string) => (name || "?").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  const chip = "inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium";
+
   const columnRenderers: Record<string, (value: unknown, row: RecordWithId) => React.ReactNode> = {
-    employeeCode: (value) => <span className="font-mono text-xs font-semibold">{String(value || "-")}</span>,
+    employeeCode: (value) => (
+      <span className="font-mono text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `${ACCENT}14`, color: ACCENT }}>
+        {String(value || "-")}
+      </span>
+    ),
+    employeeName: (value, row) => (
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[0.6875rem] font-bold text-white shadow-sm" style={{ background: HR_GRADIENT }}>
+          {initials(String(value || ""))}
+        </span>
+        <div className="min-w-0">
+          <p className="font-medium text-foreground truncate">{String(value || "-")}</p>
+          {(row.mobile || row.email) && (
+            <p className="text-[0.6875rem] text-muted-foreground truncate">{String(row.mobile || row.email)}</p>
+          )}
+        </div>
+      </div>
+    ),
+    designation: (value) => (value ? <span className="text-sm text-foreground">{String(value)}</span> : <span className="text-xs text-muted-foreground">-</span>),
+    department: (value) =>
+      value ? <span className={`${chip} bg-muted text-foreground border border-border`}>{String(value)}</span> : <span className="text-xs text-muted-foreground">-</span>,
+    employmentType: (value) =>
+      value ? (
+        <span className={chip} style={{ background: `${ACCENT}14`, color: ACCENT }}>{String(value)}</span>
+      ) : <span className="text-xs text-muted-foreground">-</span>,
     candidateCode: (value, row) =>
       value ? (
         <span className="text-xs" title={row.candidateName as string}>{String(value)}</span>
@@ -527,7 +555,9 @@ export default function EmployeeMaster() {
         onClick={() =>
           setDocsFor({ id: Number(row._id), name: (row.employeeName as string) || "" })
         }
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[0.6875rem] font-medium text-foreground hover:bg-muted transition-colors"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[0.6875rem] font-medium transition-colors hover:brightness-95"
+        style={{ borderColor: `${ACCENT}40`, background: `${ACCENT}0f`, color: ACCENT }}
+        title="Documents"
       >
         <FileText size={12} /> {Number(row.documentCount || 0)}
       </button>
@@ -537,7 +567,8 @@ export default function EmployeeMaster() {
         <button
           type="button"
           onClick={() => setBreakupFor({ id: Number(row._id), name: (row.employeeName as string) || "" })}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[0.6875rem] font-medium text-foreground hover:bg-muted transition-colors"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-semibold text-white shadow-sm hover:shadow-md transition-shadow"
+          style={{ background: HR_GRADIENT }}
         >
           <Wallet3 size={12} /> View
         </button>
@@ -546,15 +577,48 @@ export default function EmployeeMaster() {
       ),
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load Employee Master.</div>;
+  if (isLoading) {
+    return (
+      <div className="space-y-4 p-1">
+        <div className="h-24 rounded-2xl bg-muted/60 animate-pulse" />
+        <div className="h-72 rounded-2xl bg-muted/40 animate-pulse" />
+      </div>
+    );
+  }
+  if (error) return <div className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">Failed to load Employee Master.</div>;
+
+  // Display-only summary from the rows already loaded.
+  const summary = (() => {
+    const active = mappedData.filter((r) => r.isActive).length;
+    const depts = new Set(mappedData.map((r) => String(r.department || "")).filter(Boolean)).size;
+    const withCtc = mappedData.filter((r) => r.ctcAmount && r.salaryStructureCode).length;
+    return [
+      ["Total", mappedData.length],
+      ["Active", active],
+      ["Inactive", mappedData.length - active],
+      ["Departments", depts],
+      ["With salary / CTC", withCtc],
+    ] as const;
+  })();
 
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "HR and Payroll", path: "/hr-payroll" }, { label: "Employee Master" }]} />
       <HrPayrollShell title="Employee Master" subtitle="Employees, roles, statutory & bank details" icon={Profile2User}>
+        <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 rounded-2xl border p-3" style={{ background: `${ACCENT}0a`, borderColor: `${ACCENT}2e` }}>
+          {summary.map(([label, n], i) => (
+            <div key={label} className="rounded-xl bg-card/80 border border-border px-3.5 py-2.5 shadow-sm">
+              <p className="text-xl font-heading font-bold tabular-nums leading-tight" style={{ color: i === 0 ? ACCENT : i === 1 ? "#059669" : i === 2 ? "#dc2626" : undefined }}>{n}</p>
+              <p className="text-[0.6875rem] text-muted-foreground">{label}</p>
+            </div>
+          ))}
+        </div>
         <MasterPage
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           title="Employee"
+          gridCols={3}
           collapsibleAddForm
           fields={fields}
           columns={columns}
@@ -579,7 +643,7 @@ export default function EmployeeMaster() {
               { header: "Cost Centre", accessor: "costCenterName" },
               { header: "Mobile", accessor: "mobile" },
               { header: "Email", accessor: "email" },
-              { header: "PAN", accessor: "pan" },
+              { header: "PAN (Permanent Account Number)", accessor: "pan" },
               { header: "Aadhaar", accessor: "aadhaar" },
               { header: "Status", accessor: (r) => (r.isActive ? "Active" : "Inactive") },
             ],

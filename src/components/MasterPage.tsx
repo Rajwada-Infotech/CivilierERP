@@ -1,5 +1,5 @@
 import React from "react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Search,
   Edit2,
@@ -12,6 +12,8 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
+  ChevronLeft,
+  ChevronRight,
   CalendarDays,
   RotateCcw,
 } from "lucide-react";
@@ -25,6 +27,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
+import { SheetMark } from "@/components/sheet/Sheet";
+import { useInSheet } from "@/components/sheet/useInSheet";
 
 export interface FieldDef {
   name: string;
@@ -199,6 +203,13 @@ interface MasterPageProps {
    */
   onPrint?: (row: RecordWithId) => void;
   rowActions?: (row: RecordWithId, data: RecordWithId[]) => React.ReactNode;
+  /** Clicking a row (outside its buttons, links and inputs) calls this, e.g. to show the row's details. */
+  onRowClick?: (row: RecordWithId) => void;
+  /** Extra classes for a row, e.g. a tint by status. */
+  rowClassName?: (row: RecordWithId) => string | undefined;
+  /** Rows with an Active / Inactive `status` get Active · Inactive · All tabs above the table, showing Active
+   *  first, so inactive records never sit among the live ones unnoticed. */
+  statusTabs?: boolean;
   /** Permission flags — when omitted everything is visible (default-open) */
   canCreate?: boolean;
   canEdit?: boolean;
@@ -223,6 +234,12 @@ interface MasterPageProps {
   isDeleteLocked?: (row: RecordWithId) => string | null | undefined;
   /** Form field grid columns at the md breakpoint. Defaults to 2. */
   gridCols?: 2 | 3;
+  /**
+   * Lay out by the space this page actually has rather than the screen size: the form fits as many columns as
+   * its width allows and the table toolbar wraps under the title when narrow. For pages that share the screen
+   * with side panels (Legal). Off by default, so other pages are unchanged.
+   */
+  fluid?: boolean;
   /**
    * When true, the Add form starts collapsed behind a "+ New Entry" button
    * instead of always being expanded -- useful for forms with many fields
@@ -272,14 +289,18 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   viewConfig,
   onPrint,
   rowActions,
+  onRowClick,
+  rowClassName,
   canCreate = true,
   canEdit = true,
   canDelete = true,
   canExport = true,
   gridCols = 2,
+  fluid = false,
   isRowLocked,
   isDeleteLocked,
   collapsibleAddForm = false,
+  statusTabs = false,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -303,7 +324,35 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(!collapsibleAddForm);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+
+  // Long forms (3+ sections) show one section at a time behind tabs, so the
+  // user isn't scrolling one very long page. Values in every section are
+  // kept while switching; saving is unchanged.
+  const sectionGroups = useMemo(() => {
+    const groups: { key: string; label: string; fields: string[] }[] = [];
+    let cur = { key: "__general", label: "General", fields: [] as string[] };
+    fields.forEach((f) => {
+      if (f.type === "section") {
+        if (cur.fields.length) groups.push(cur);
+        cur = { key: f.name, label: f.label || f.name, fields: [] };
+      } else {
+        cur.fields.push(f.name);
+      }
+    });
+    if (cur.fields.length) groups.push(cur);
+    return groups;
+  }, [fields]);
+  const tabbed = sectionGroups.length >= 3;
+  const sectionOf = useMemo(() => {
+    const m: Record<string, string> = {};
+    sectionGroups.forEach((g) => g.fields.forEach((n) => { m[n] = g.key; }));
+    return m;
+  }, [sectionGroups]);
+  const [activeSection, setActiveSection] = useState<string | null>(null);
+  const currentSection = tabbed ? (sectionGroups.find((g) => g.key === activeSection) ?? sectionGroups[0]) : null;
+  const currentSectionIdx = currentSection ? sectionGroups.indexOf(currentSection) : -1;
   const [search, setSearch] = useState("");
+  const [statusView, setStatusView] = useState<"active" | "inactive" | "all">("active");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -423,12 +472,19 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: false }));
   };
 
+  useEffect(() => { setActiveSection(null); }, [formOpen, editingId]);
+
   const validate = () => {
     const errs: Record<string, boolean> = {};
     fields.forEach((f) => {
       if (f.required && !isFieldFilled(f, form[f.name])) errs[f.name] = true;
     });
     setErrors(errs);
+    // Jump to the first section that has a missing required field.
+    if (tabbed) {
+      const first = sectionGroups.find((g) => g.fields.some((n) => errs[n]));
+      if (first) setActiveSection(first.key);
+    }
     return Object.keys(errs).length === 0;
   };
 
@@ -582,7 +638,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
   const canSave = fields.every((f) => !f.required || isFieldFilled(f, form[f.name]));
 
+  const hasStatus = statusTabs && data.some((row) => typeof row.status === "boolean");
+  const statusCount = {
+    active: data.filter((row) => row.status === true).length,
+    inactive: data.filter((row) => row.status === false).length,
+    all: data.length,
+  };
   const filtered = data.filter((row) => {
+    if (hasStatus && statusView !== "all" && row.status !== (statusView === "active")) return false;
     if (!search) return true;
     return Object.values(row).some((v) =>
       String(v).toLowerCase().includes(search.toLowerCase()),
@@ -605,14 +668,31 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  const inputBase =
-    "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
+  // This component serves pages on the drawing sheet and pages that are not. On a sheet it draws itself to match
+  // (ruled boxes, capital labels, ink keys, square marks); elsewhere it is drawn as before. `sx(classic, drawn)` picks.
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const sheet = useInSheet(rootRef);
+  const sx = (classic: string, drawn: string) => (sheet ? drawn : classic);
+  const RULE = "1px solid hsl(var(--foreground))";
+  const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+
+  const inputBase = sx(
+    "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground",
+    "w-full px-3 py-2.5 text-sm bg-card border focus:outline-none text-foreground",
+  );
+  // Field border: red when missing, otherwise the theme's (classic) or ink (drawn).
+  const bd = (bad: boolean) => (bad ? "border-destructive" : sx("border-border", "border-foreground/40 focus:border-foreground"));
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" ref={rootRef}>
       {/* ── FORM CARD ── */}
-      {(canCreate || canEdit) && <div
-        className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden"
+      {/* A collapsible form on a page that can't create shows only while a row
+          is being edited — otherwise it would offer "New Entry" with a Save
+          that can never be clicked. */}
+      {(canCreate || canEdit) && !(collapsibleAddForm && !canCreate && editingId === null) && <div
+        className={sx("rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden", "bg-card")}
+        style={sheet ? { border: RULE } : undefined}
         // Enter inside a text/number/date/select field must not act like a
         // form submit — there's no <form> here, but this still guards
         // against it acting as one accidentally (e.g. a future <form> wrap,
@@ -627,9 +707,12 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         }}
       >
         {/* Header — title, plus a New Entry toggle for collapsible forms */}
-        <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
+        <div
+          className={sx("flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl", "flex items-center justify-between gap-3 px-4 py-3")}
+          style={sheet && (formOpen || editingId !== null) ? { borderBottom: RULE } : undefined}
+        >
           <div>
-            <h2 className="font-heading font-semibold text-foreground text-sm">
+            <h2 className={sx("font-heading font-semibold text-foreground text-sm", "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground")}>
               {editingId !== null ? `Edit ${title}` : `Add ${title}`}
             </h2>
             <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
@@ -645,27 +728,71 @@ export const MasterPage: React.FC<MasterPageProps> = ({
           {collapsibleAddForm && editingId === null && (
             <button
               onClick={() => setFormOpen((v) => !v)}
-              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm transition-opacity"
+              className={sheet
+                ? `flex-shrink-0 ${KEY} px-3 py-2 border border-foreground ${formOpen ? "text-foreground hover:bg-primary/10" : "bg-foreground text-card"}`
+                : `flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-colors ${
+                formOpen
+                  ? "border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                  : "gradient-accent text-white shadow-sm"
+              }`}
             >
-              <Plus size={12} />
+              {formOpen ? <X size={12} /> : <Plus size={12} />}
               {formOpen ? "Close" : "New Entry"}
             </button>
           )}
         </div>
 
         {(formOpen || editingId !== null) && (<>
-        <div className="p-5">
-          <div className={`grid grid-cols-1 gap-4 ${gridCols === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+        <div className={sx("p-5", "px-4 py-5")}>
+          {tabbed && currentSection && (
+            <div className="-mx-1 mb-4 flex gap-1 overflow-x-auto thin-scroll pb-1" role="tablist">
+              {sectionGroups.map((g, i) => {
+                const active = g.key === currentSection.key;
+                // Dot = this section still has an empty required field (Save
+                // stays disabled until they're filled), or a failed validation.
+                const hasError = g.fields.some((n) => {
+                  if (errors[n]) return true;
+                  const f = fields.find((x) => x.name === n);
+                  return !!f?.required && !isFieldFilled(f, form[n]);
+                });
+                return (
+                  <button
+                    key={g.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveSection(g.key)}
+                    className={sheet
+                      ? `relative shrink-0 inline-flex items-center gap-2 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground transition-colors ${active ? "bg-foreground text-card" : "text-foreground hover:bg-primary/10"}`
+                      : `relative shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border transition-colors ${
+                      active
+                        ? "gradient-accent text-white border-transparent shadow-sm"
+                        : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <span className={sheet ? "tabular-nums opacity-70" : `w-4 h-4 rounded-full text-[0.625rem] flex items-center justify-center ${active ? "bg-white/25" : "bg-muted"}`}>{i + 1}</span>
+                    {g.label}
+                    {hasError && <span className="w-1.5 h-1.5 rounded-full bg-destructive" aria-label="has missing fields" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div
+            className={fluid && !tabbed ? "grid gap-x-3 sm:gap-x-4 gap-y-3.5" : `grid ${tabbed ? "grid-cols-2 mp-tabbed" : "grid-cols-1"} gap-x-3 sm:gap-x-4 gap-y-3.5 ${gridCols === 3 ? "md:grid-cols-2 xl:grid-cols-3" : "md:grid-cols-2"}`}
+            style={fluid && !tabbed ? { gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${gridCols === 3 ? "15rem" : "18rem"}), 1fr))` } : undefined}
+          >
             {fields.map((field) => {
+              if (tabbed && currentSection && (field.type === "section" || sectionOf[field.name] !== currentSection.key)) return null;
               const isFullWidth =
                 field.fullWidth || field.type === "textarea" || field.type === "section";
               return (
                 <div
                   key={field.name}
-                  className={isFullWidth ? (gridCols === 3 ? "md:col-span-3" : "md:col-span-2") : ""}
+                  className={isFullWidth ? (fluid && !tabbed ? "col-span-full" : gridCols === 3 ? `${tabbed ? "col-span-2 " : ""}md:col-span-2 xl:col-span-3` : `${tabbed ? "col-span-2 " : ""}md:col-span-2`) : "min-w-0"}
                 >
                   {field.type !== "toggle" && field.type !== "section" && field.label && (
-                    <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    <label className={sx("block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5", "block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5")}>
                       {field.label}
                       {field.required && (
                         <span className="text-destructive ml-0.5">*</span>
@@ -674,8 +801,12 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   )}
 
                   {field.type === "section" ? (
-                    <div className={fields[0] === field ? "" : "pt-1 -mb-1"}>
-                      <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-foreground/80 pb-1.5 border-b border-border/70">
+                    <div className={fields[0] === field ? "" : "pt-3 -mb-1"}>
+                      <p
+                        className={sx("flex items-center gap-2 text-xs uppercase tracking-widest font-heading font-semibold text-foreground pb-2 border-b border-border/70", "font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2")}
+                        style={sheet ? { borderBottom: RULE } : undefined}
+                      >
+                        {!sheet && <span className="w-1 h-3.5 rounded-full gradient-accent" aria-hidden="true" />}
                         {field.label}
                       </p>
                     </div>
@@ -704,7 +835,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         onChange={(e) =>
                           updateField(field.name, e.target.value, field)
                         }
-                        className={`${inputBase} ${field.prefix ? "pl-7" : ""} ${errors[field.name] ? "border-destructive" : "border-border"}`}
+                        placeholder={field.placeholder}
+                        disabled={field.disabledWhen?.(form) ?? false}
+                        className={`${inputBase} ${field.prefix ? "pl-7" : ""} ${bd(!!errors[field.name])} disabled:opacity-50 disabled:cursor-not-allowed`}
                       />
                     </div>
                   ) : field.type === "date" ? (
@@ -718,7 +851,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         onChange={(e) =>
                           updateField(field.name, e.target.value, field)
                         }
-                        className={`${inputBase} pl-8 ${errors[field.name] ? "border-destructive" : "border-border"} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                        className={`${inputBase} pl-8 ${bd(!!errors[field.name])} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                       />
                     </div>
                   ) : field.type === "select" ? (
@@ -732,12 +865,15 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               updateField(field.name, e.target.value, field)
                             }
                             disabled={isDisabled}
-                            className={`${inputBase} appearance-none pr-9 ${errors[field.name] ? "border-destructive" : "border-border"} ${isDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                            className={`${inputBase} appearance-none pr-9 ${bd(!!errors[field.name])} ${isDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
                           >
                             <option value="">
                               {isDisabled ? (field.disabledPlaceholder ?? "Select...") : "Select..."}
                             </option>
-                            {!isDisabled && (() => {
+                            {/* A locked field that already has a value (e.g. a
+                                read-only field while editing) still shows that
+                                value, not the empty placeholder. */}
+                            {(!isDisabled || !!form[field.name]) && (() => {
                               let opts: { value: string; label: string }[] = [];
                               const editingRow = editingId
                                 ? data.find((r) => r._id === editingId)
@@ -777,27 +913,49 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         updateField(field.name, e.target.value, field)
                       }
                       rows={3}
-                      className={`${inputBase} ${errors[field.name] ? "border-destructive" : "border-border"}`}
+                      placeholder={field.placeholder}
+                      disabled={field.disabledWhen?.(form) ?? false}
+                      className={`${inputBase} ${bd(!!errors[field.name])} disabled:opacity-50 disabled:cursor-not-allowed`}
                     />
                   ) : field.type === "toggle" ? (
                     <div className="flex items-center gap-3 pt-7">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateField(field.name, !form[field.name], field)
-                        }
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form[field.name] ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
-                      >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form[field.name] ? "translate-x-4" : "translate-x-0.5"}`}
-                        />
-                      </button>
-                      <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
-                        {field.label} —{" "}
-                        <span className={form[field.name] ? "text-emerald-600" : "text-foreground"}>
-                          {form[field.name] ? "Active" : "Inactive"}
+                      {sheet ? (
+                        // On the sheet: the square on / off key every sheet form uses (Broker Master, Project Type…).
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={!!form[field.name]}
+                          onClick={() => updateField(field.name, !form[field.name], field)}
+                          className={`relative h-4 w-7 shrink-0 border border-foreground transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 ${form[field.name] ? "bg-foreground" : "bg-card"}`}
+                        >
+                          <span className={`absolute top-[2px] h-2.5 w-2.5 transition-all ${form[field.name] ? "left-[14px] bg-card" : "left-[2px] bg-foreground"}`} />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateField(field.name, !form[field.name], field)
+                          }
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form[field.name] ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                        >
+                          <span
+                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form[field.name] ? "translate-x-4" : "translate-x-0.5"}`}
+                          />
+                        </button>
+                      )}
+                      {sheet ? (
+                        <span className="text-xs">
+                          <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground">{field.label}</span>
+                          <span className="text-muted-foreground"> — {form[field.name] ? "Active" : "Inactive"}</span>
                         </span>
-                      </span>
+                      ) : (
+                        <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                          {field.label} —{" "}
+                          <span className={form[field.name] ? "text-emerald-600" : "text-foreground"}>
+                            {form[field.name] ? "Active" : "Inactive"}
+                          </span>
+                        </span>
+                      )}
                     </div>
                   ) : field.type === "multiselect" ? (
                     <div className="flex flex-wrap gap-2">
@@ -817,7 +975,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 : [...current, o];
                               updateField(field.name, next, field);
                             }}
-                            className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${selected ? "btn-module text-white border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
+                            className={sheet
+                              ? `px-3 py-1.5 text-xs border border-foreground transition-colors ${selected ? "bg-foreground text-card" : "text-foreground hover:bg-primary/10"}`
+                              : `px-3 py-1 rounded-full text-xs font-heading border transition-all ${selected ? "btn-module text-white border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
                           >
                             {o}
                           </button>
@@ -836,22 +996,53 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             })}
           </div>
 
+          {tabbed && currentSection && (
+            <div className={sx("flex items-center justify-between gap-2 mt-5 pt-3 border-t border-border/60", "flex items-center justify-between gap-2 mt-5 pt-3 border-t border-border")}>
+              <button
+                type="button"
+                disabled={currentSectionIdx <= 0}
+                onClick={() => setActiveSection(sectionGroups[currentSectionIdx - 1]?.key ?? null)}
+                className={sx("inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed", `${KEY} px-3 py-2 border border-foreground text-foreground hover:bg-primary/10`)}
+              >
+                <ChevronLeft size={13} /> Previous
+              </button>
+              <span className="text-[0.6875rem] text-muted-foreground">
+                Section {currentSectionIdx + 1} of {sectionGroups.length}
+              </span>
+              <button
+                type="button"
+                disabled={currentSectionIdx >= sectionGroups.length - 1}
+                onClick={() => setActiveSection(sectionGroups[currentSectionIdx + 1]?.key ?? null)}
+                className={sx("inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed", `${KEY} px-3 py-2 border border-foreground text-foreground hover:bg-primary/10`)}
+              >
+                <span className="hidden sm:inline">Next{sectionGroups[currentSectionIdx + 1] ? `: ${sectionGroups[currentSectionIdx + 1].label}` : ""}</span>
+                <span className="sm:hidden">Next</span>
+                <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
+
         </div>
 
         {/* Footer — actions */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-          <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
+        <div
+          className={fluid
+            ? sx("flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden", "flex flex-wrap items-center justify-between gap-2 px-4 py-3")
+            : sx("flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden", "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3")}
+          style={sheet ? { borderTop: RULE } : undefined}
+        >
+          <p className={fluid ? "w-full text-[0.6875rem] text-muted-foreground sm:w-auto sm:min-w-[10rem] sm:flex-1" : "text-[0.6875rem] text-muted-foreground hidden sm:block"}>
             {canSave
-              ? <span className="text-emerald-500 font-medium">Ready to save</span>
+              ? sheet ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-emerald-500 font-medium">Ready to save</span>
               : fields.some((f) => f.required)
                 ? "Fill in the required fields to save"
                 : ""}
           </p>
-          <div className="flex items-center gap-2 sm:ml-auto">
+          <div className={fluid ? "flex w-full flex-wrap items-center justify-end gap-2 sm:ml-auto sm:w-auto" : "flex items-center gap-2 sm:ml-auto"}>
             <button
               onClick={handleReset}
               disabled={!isDirty && editingId === null}
-              className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              className={sx("flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5", `${KEY} flex-1 sm:flex-none h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`)}
             >
               <RotateCcw size={12} />
               {editingId !== null ? "Cancel" : "Reset"}
@@ -859,7 +1050,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             <button
               onClick={handleSave}
               disabled={!canSave || (editingId === null ? !canCreate : !canEdit)}
-              className={`flex-1 sm:flex-none px-4 sm:px-5 py-2 rounded-lg text-sm font-heading font-semibold ${saveButtonClass || "gradient-accent"} text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-opacity whitespace-nowrap`}
+              className={sheet
+                ? `${KEY} flex-1 sm:flex-none h-9 px-5 bg-foreground text-card border border-foreground whitespace-nowrap`
+                : `flex-1 sm:flex-none px-4 sm:px-5 py-2 rounded-lg text-sm font-heading font-semibold ${saveButtonClass || "gradient-accent"} text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-opacity whitespace-nowrap`}
             >
               {editingId !== null ? <Check size={14} /> : <Plus size={14} />}
               {editingId !== null ? `Update ${title}` : `Save ${title}`}
@@ -871,9 +1064,37 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
       {/* ── TABLE CARD ── */}
       {!hideTable && (
-        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-visible">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60 rounded-t-xl overflow-visible">
-            <div>
+        <div className={sx("rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-visible", "bg-card overflow-visible")} style={sheet ? { border: RULE } : undefined}>
+          <div
+            className={fluid
+              ? sx("flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60 rounded-t-xl overflow-visible", "flex flex-wrap items-center justify-between gap-2 px-4 py-3 overflow-visible")
+              : sx("flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60 rounded-t-xl overflow-visible", "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3 overflow-visible")}
+            style={sheet ? { borderBottom: RULE } : undefined}
+          >
+            {sheet ? (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <p className="flex items-baseline gap-2.5">
+                <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{title} records</span>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
+              </p>
+              {hasStatus && (
+                <div className="inline-flex border border-foreground" role="tablist" aria-label="Show records">
+                  {(["active", "inactive", "all"] as const).map((v, i) => (
+                    <button
+                      key={v}
+                      role="tab"
+                      aria-selected={statusView === v}
+                      onClick={() => setStatusView(v)}
+                      className={`${i ? "border-l border-foreground " : ""}px-2.5 py-1 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${statusView === v ? "bg-foreground text-card" : "text-muted-foreground hover:bg-primary/10 hover:text-foreground"}`}
+                    >
+                      {v === "active" ? "Active" : v === "inactive" ? "Inactive" : "All"} <span className="tabular-nums">{statusCount[v]}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              </div>
+            ) : (
+            <div className={fluid ? "min-w-[9rem]" : undefined}>
               <h3 className="font-heading font-semibold text-foreground text-sm">
                 {title} Records
               </h3>
@@ -881,7 +1102,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                 {filtered.length} record{filtered.length !== 1 ? "s" : ""}
               </p>
             </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            )}
+            <div className={fluid ? "flex w-full min-w-0 items-center justify-end gap-2 sm:w-auto sm:min-w-[15rem] sm:flex-1" : "flex items-center gap-2 w-full sm:w-auto"}>
               {exportConfig && canExport && (
                 <ExportMenu
                   data={sorted as Record<string, unknown>[]}
@@ -892,7 +1114,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   disabled={filtered.length === 0}
                 />
               )}
-              <div className="relative flex-1 sm:flex-none">
+              <div className={fluid ? "relative min-w-0 flex-1 sm:max-w-[14rem]" : "relative flex-1 sm:flex-none"}>
                 <Search
                   size={13}
                   className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -902,7 +1124,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   placeholder="Search..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-44"
+                  className={sx("pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-44", "pl-8 pr-3 h-9 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none w-full sm:w-48")}
                 />
               </div>
             </div>
@@ -926,9 +1148,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                           {canSort && (
                             <span className="text-muted-foreground/50">
                               {active && sortDir === "asc" ? (
-                                <ChevronUp size={11} className="text-primary" />
+                                <ChevronUp size={11} className={sx("text-primary", "text-foreground")} />
                               ) : active && sortDir === "desc" ? (
-                                <ChevronDown size={11} className="text-primary" />
+                                <ChevronDown size={11} className={sx("text-primary", "text-foreground")} />
                               ) : (
                                 <ChevronsUpDown size={11} />
                               )}
@@ -943,7 +1165,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody className={sx("divide-y divide-border", "")}>
                 {sorted.length === 0 ? (
                   <tr>
                     <td
@@ -952,7 +1174,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     >
                       {search
                         ? "No records match your search."
-                        : "No records yet. Add one above."}
+                        : hasStatus && data.length > 0
+                          ? `No ${statusView} records. ${statusView === "active" ? "Inactive" : "Active"} ones are under "${statusView === "active" ? "Inactive" : "Active"}".`
+                          : "No records yet. Add one above."}
                     </td>
                   </tr>
                 ) : (
@@ -974,7 +1198,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     return (
                     <tr
                       key={row._id}
-                      className={`hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
+                      className={`${sheet ? "" : `hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}${onRowClick ? " cursor-pointer" : ""}${rowClassName ? ` ${rowClassName(row) ?? ""}` : ""}`}
+                      onClick={onRowClick ? (e) => { if (!(e.target as HTMLElement).closest("button, a, input, select, textarea, label")) onRowClick(row); } : undefined}
+                      style={sheet && editingId === row._id ? { boxShadow: "inset 3px 0 0 hsl(var(--primary))" } : undefined}
                     >
                       {columns.map((col) => (
                         <td
@@ -983,6 +1209,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         >
                           {columnRenderers && columnRenderers[col.key] ? (
                             columnRenderers[col.key](row[col.key], row, data)
+                          ) : col.key === "status" && sheet ? (
+                            <SheetMark text={row[col.key] ? "Active" : "Inactive"} tone={row[col.key] ? "done" : "none"} />
                           ) : col.key === "status" ? (
                             <span
                               className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
@@ -1007,19 +1235,19 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         <div className="flex items-center justify-end gap-1">
                           {deleteConfirmId === row._id ? (
                             <>
-                              <span className="text-[0.6875rem] text-muted-foreground mr-1">
+                              {!sheet && <span className="text-[0.6875rem] text-muted-foreground mr-1">
                                 Confirm?
-                              </span>
+                              </span>}
                               <button
                                 onClick={() => handleDelete(row._id)}
-                                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                                className={sx("p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors", "h-7 px-2 flex items-center gap-1 border border-destructive bg-destructive text-destructive-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]")}
                                 title="Confirm delete"
                               >
-                                <Check size={13} />
+                                <Check size={13} />{sheet && " Delete"}
                               </button>
                               <button
                                 onClick={() => setDeleteConfirmId(null)}
-                                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+                                className={sx("p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors", ACT)}
                                 title="Cancel"
                               >
                                 <X size={13} />
@@ -1030,7 +1258,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               {viewConfig && (
                                 <button data-row-view
                                   onClick={() => setViewRow(row)}
-                                  className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                  className={sx("p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors", ACT)}
                                   title="View details"
                                 >
                                   <Eye size={13} />
@@ -1039,7 +1267,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               {onPrint && (
                                 <button
                                   onClick={() => onPrint(row)}
-                                  className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors"
+                                  className={sx("p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors", ACT)}
                                   title="Print"
                                 >
                                   <Printer size={13} />
@@ -1050,7 +1278,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 (lockReason || pendingLockReason) ? (
                                   <button
                                     disabled
-                                    className="p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed"
+                                    className={sx("p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed", "w-7 h-7 flex items-center justify-center text-muted-foreground/30 cursor-not-allowed")}
                                     title={lockReason || pendingLockReason || undefined}
                                   >
                                     <Edit2 size={13} />
@@ -1058,7 +1286,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 ) : (
                                   <button
                                     onClick={() => handleEdit(row._id)}
-                                    className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors"
+                                    className={sx("p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors", ACT)}
                                     title="Edit"
                                   >
                                     <Edit2 size={13} />
@@ -1069,7 +1297,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 (lockReason || deleteOnlyLockReason || pendingLockReason) ? (
                                   <button
                                     disabled
-                                    className="p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed"
+                                    className={sx("p-1.5 rounded-lg text-muted-foreground/30 cursor-not-allowed", "w-7 h-7 flex items-center justify-center text-muted-foreground/30 cursor-not-allowed")}
                                     title={lockReason || deleteOnlyLockReason || pendingLockReason || undefined}
                                   >
                                     <Trash2 size={13} />
@@ -1077,7 +1305,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 ) : (
                                   <button
                                     onClick={() => setDeleteConfirmId(row._id)}
-                                    className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                                    className={sx("p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors", "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors")}
                                     title="Delete"
                                   >
                                     <Trash2 size={13} />
@@ -1104,11 +1332,18 @@ export const MasterPage: React.FC<MasterPageProps> = ({
           open={!!viewRow}
           onOpenChange={(open) => !open && setViewRow(null)}
         >
-          <DialogContent className="max-w-lg">
+          <DialogContent className={sx("max-w-lg", "sheet-frame max-w-lg")} style={sheet ? { margin: 0 } : undefined}>
             <DialogHeader>
+              {sheet ? (
+                <div className="pb-3" style={{ borderBottom: RULE }}>
+                  <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{title}</p>
+                  <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">{viewConfig.title}</DialogTitle>
+                </div>
+              ) : (
               <DialogTitle className="font-heading text-base">
                 {viewConfig.title}
               </DialogTitle>
+              )}
             </DialogHeader>
             {viewRow && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
@@ -1124,14 +1359,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         : "—";
                   return (
                     <div key={key}>
-                      <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                      <p className={sx("text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-0.5", "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1")}>
                         {label}
                       </p>
                       {render ? (
                         render(val, viewRow)
                       ) : (
                         <p
-                          className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
+                          className={`text-sm text-foreground break-words ${mono ? sx("font-mono", "font-heading font-semibold tabular-nums") : "font-body"}`}
                         >
                           {display}
                         </p>
@@ -1141,13 +1376,13 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                 })}
               </div>
             )}
-            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            <div className={sx("flex justify-end gap-2 pt-2 border-t border-border mt-2", "flex justify-end gap-2 pt-3 mt-3")} style={sheet ? { borderTop: RULE } : undefined}>
               {onPrint && viewRow && (
                 <button
                   onClick={() => {
                     onPrint(viewRow);
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
+                  className={sx("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all", `${KEY} h-9 px-3 border border-foreground text-foreground hover:bg-primary/10`)}
                 >
                   <Printer size={13} />
                   Print
@@ -1155,7 +1390,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               )}
               <button
                 onClick={() => setViewRow(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
+                className={sx("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all", `${KEY} h-9 px-4 bg-foreground text-card border border-foreground`)}
               >
                 Close
               </button>

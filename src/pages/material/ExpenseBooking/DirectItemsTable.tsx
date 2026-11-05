@@ -285,7 +285,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
             variant="outline"
             size="sm"
             onClick={addItem}
-            className="h-7 px-2.5 text-xs gap-1.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+            className="h-7 px-2.5 text-xs gap-1.5 border-foreground/40 text-foreground hover:bg-primary/10"
           >
             <Plus size={12} />
             Add Item
@@ -302,7 +302,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
               <button
                 type="button"
                 onClick={addItem}
-                className="underline text-emerald-500 hover:text-emerald-400"
+                className="underline text-foreground hover:text-foreground"
               >
                 Add the first item
               </button>
@@ -355,13 +355,13 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
                   value={item.qty || ""}
                   readOnly={readOnly}
                   onChange={(e) => patch(i, { qty: parseFloat(e.target.value) || 0 })}
-                  className="h-8 text-xs text-center border-border/60 bg-transparent px-1 font-mono w-[72px]"
+                  className="h-8 text-xs text-center border-border/60 bg-transparent px-1 font-heading tabular-nums w-[72px]"
                   placeholder="1"
                 />
 
                 {/* UOM */}
                 {readOnly ? (
-                  <span className="text-xs text-center text-muted-foreground font-mono px-1 w-[96px]">
+                  <span className="text-xs text-center text-muted-foreground font-heading tabular-nums px-1 w-[96px]">
                     {item.uom || "—"}
                   </span>
                 ) : (
@@ -369,7 +369,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
                     value={item.uom}
                     disabled={uomLoading}
                     onChange={(e) => { lastUom.current = e.target.value; patch(i, { uom: e.target.value }); }}
-                    className="h-8 text-xs rounded-md border border-border/60 bg-background text-foreground px-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 font-mono w-[96px]"
+                    className="h-8 text-xs rounded-md border border-border/60 bg-background text-foreground px-1.5 focus:outline-none focus:ring-1 focus:ring-foreground/20 font-heading tabular-nums w-[96px]"
                   >
                     {item.uom && !uomOptions.some((u) => (u.abbreviation || u.name) === item.uom) && (
                       <option value={item.uom}>{item.uom}</option>
@@ -393,12 +393,12 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
                   value={item.rate || ""}
                   readOnly={readOnly}
                   onChange={(e) => patch(i, { rate: parseFloat(e.target.value) || 0 })}
-                  className="h-8 text-xs text-right border-border/60 bg-transparent px-1 font-mono w-[84px]"
+                  className="h-8 text-xs text-right border-border/60 bg-transparent px-1 font-heading tabular-nums w-[84px]"
                   placeholder="0.00"
                 />
 
                 {/* Computed amount */}
-                <span className="text-xs text-right font-mono font-semibold text-foreground pr-1 w-[88px]">
+                <span className="text-xs text-right font-heading tabular-nums font-semibold text-foreground pr-1 w-[88px]">
                   {item.amount > 0 ? `Rs.${fmt(item.amount)}` : "—"}
                 </span>
 
@@ -421,11 +421,11 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
 
           {/* Footer total */}
           {items.length > 1 && (
-            <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20 border-t border-border">
-              <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">
+            <div className="flex items-center justify-between px-4 py-2.5 border-t border-foreground">
+              <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Subtotal ({items.length} items)
               </span>
-              <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">
+              <span className="font-heading tabular-nums font-bold text-sm text-foreground">
                 Rs.{fmt(total)}
               </span>
             </div>

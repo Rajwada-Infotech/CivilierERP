@@ -2,7 +2,7 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -16,7 +16,9 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB per file
 });
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+const rateLimit = require("../middleware/rateLimiter");
 router.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -603,13 +605,20 @@ router.get("/", cache("grns", 300), async (req, res) => {
     const offset = (page - 1) * limit;
     const finYearFilter = req.query.finYear || null; // e.g. "2025-2026"
     const companyId = parseInt(req.query.companyId, 10) || null;
+    // The page searched and filtered only the rows it had loaded, so a GRN on any other page was never found.
+    // LIKE's own wildcards in the text are matched literally.
+    const searchText = String(req.query.search || "").trim().slice(0, 100);
+    const search = searchText ? `%${searchText.replace(/[\[%_]/g, "[$&]")}%` : null;
+    const status = req.query.status && req.query.status !== "All" ? String(req.query.status).slice(0, 30) : null;
 
     const result = await pool
       .request()
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit)
       .input("finYear", sql.NVarChar(20), finYearFilter)
-      .input("companyId", sql.Int, companyId).query(`
+      .input("companyId", sql.Int, companyId)
+      .input("search", sql.NVarChar(220), search)
+      .input("status", sql.NVarChar(30), status).query(`
       SELECT
         grn.GRNID,
         grn.GRNNo,
@@ -682,6 +691,9 @@ router.get("/", cache("grns", 300), async (req, res) => {
         ) = @finYear
       ))
         AND (@companyId IS NULL OR p.CompanyId = @companyId)${projectPredicate(req.projectScope, "p.ProjectId")}
+        AND (@status IS NULL OR grn.Status = @status)
+        AND (@search IS NULL OR grn.DocNo LIKE @search OR grn.GRNNo LIKE @search OR p.PurchaseOrderNo LIKE @search
+          OR p.DocNo LIKE @search OR s.LHeadName LIKE @search OR grn.SourceTransferDocNo LIKE @search OR p.SourceMRDocNo LIKE @search)
       ORDER BY grn.GRNID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
@@ -850,7 +862,7 @@ router.get("/register", cache("grns", 300), async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster  s  ON s.LHeadId = grn.SupplierID
         LEFT JOIN dbo.DocNumberSequence  ds ON ds.TableName = 'GoodsReceiptNotes'
                                             AND ds.DocNo = COALESCE(grn.DocNo, grn.GRNNo)
-        LEFT JOIN dbo.Users cu ON LOWER(cu.email) = LOWER(ds.IssuedBy)
+        LEFT JOIN dbo.Users cu ON cu.email = ds.IssuedBy
         OUTER APPLY (
           SELECT
             SUM(base) AS TaxableAmount,
@@ -874,7 +886,7 @@ router.get("/register", cache("grns", 300), async (req, res) => {
             AND ISNULL(a.IsDeleted, 0) = 0
           ORDER BY a.CreatedAt DESC
         ) amd
-        LEFT JOIN dbo.Users mu ON LOWER(mu.email) = LOWER(amd.CreatedBy)
+        LEFT JOIN dbo.Users mu ON mu.email = amd.CreatedBy
         OUTER APPLY (
           SELECT TOP 1 aal.ApproverEmail, aal.ActionAt
           FROM dbo.ApprovalAuditLog aal
@@ -882,7 +894,7 @@ router.get("/register", cache("grns", 300), async (req, res) => {
             AND aal.ActionStatus = 'Approved'
           ORDER BY aal.ActionAt DESC
         ) appr
-        LEFT JOIN dbo.Users pu ON LOWER(pu.email) = LOWER(appr.ApproverEmail)
+        LEFT JOIN dbo.Users pu ON pu.email = appr.ApproverEmail
         WHERE (@companyId  IS NULL OR p.CompanyId = @companyId)
           AND (@projectId  IS NULL OR p.ProjectId = @projectId)${projectPredicate(req.projectScope, "p.ProjectId")}
           AND (@supplierId IS NULL OR grn.SupplierID = @supplierId)
@@ -1017,6 +1029,8 @@ router.get("/:id", async (req, res) => {
           p.GST AS ParentGST,
           p.TotalAmount    AS POTotalAmount,
           p.SubtotalAmount AS POSubtotalAmount,
+          s.LGSTType AS SupplierGstType,
+          s.LGST AS SupplierGst,
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription,
           vio.DocNo AS VehicleInOutDocNo,
@@ -1031,7 +1045,7 @@ router.get("/:id", async (req, res) => {
         LEFT JOIN dbo.VehicleInOut vio ON vio.VehicleInOutID = grn.VehicleInOutID
         LEFT JOIN dbo.DocNumberSequence ds ON ds.TableName = 'GoodsReceiptNotes'
                                           AND ds.DocNo = COALESCE(grn.DocNo, grn.GRNNo)
-        LEFT JOIN dbo.Users cu ON LOWER(cu.email) = LOWER(ds.IssuedBy)
+        LEFT JOIN dbo.Users cu ON cu.email = ds.IssuedBy
         WHERE grn.GRNID = @GRNID
       `);
 
@@ -1395,6 +1409,7 @@ router.put(
   async (req, res) => {
     let wasApproved = false;
     let wasRejected = false;
+    let wasPending = false;
     let beforeSnapshot = null;
     try {
       const currentStatus = await getRecordStatus("goods-receipt", req.params.id);
@@ -1402,7 +1417,8 @@ router.put(
         req,
         "grn-master",
       );
-      await guardEdit("goods-receipt", req.params.id, { allowPostApproval });
+      // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
+      await guardEditAnyStage("goods-receipt", req.params.id, { allowPostApproval });
 
       // Chain guard: an Expense Booking already raised against this GRN
       // (directly, or as one of a multi-GRN combined invoice) must be
@@ -1417,6 +1433,7 @@ router.put(
 
       wasApproved = currentStatus === "Approved";
       wasRejected = currentStatus === "Rejected";
+      wasPending = currentStatus === "Pending";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.GoodsReceiptNotes", "GRNID", req.params.id);
       }
@@ -1446,7 +1463,8 @@ router.put(
     // Status='Pending', and to the invoice picker, which only offers
     // Status='Approved' GRNs). Mirrors journalVoucher.js's wasApproved
     // handling.
-    const effectiveStatus = wasApproved ? "Pending" : status || "Draft";
+    // The form always sends "Draft", so a Pending GRN is held at Pending too.
+    const effectiveStatus = wasApproved || wasPending ? "Pending" : status || "Draft";
 
     // Reject future dates
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -1600,6 +1618,16 @@ router.put(
           });
         } catch (logErr) {
           console.error("Amendment log error (grn):", logErr.message);
+        }
+      }
+
+      // Edited while Pending: it stays Pending, but earlier sign-offs were given to the old figures, so the
+      // approval starts again from level 1 (same as Journal Voucher and Fund Transfer).
+      if (wasPending) {
+        try {
+          await restartApprovalCycle("goods-receipt", grnId, req.user?.email, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+        } catch (cycleErr) {
+          console.error("[grns] could not restart approval cycle after pending edit:", cycleErr.message);
         }
       }
 

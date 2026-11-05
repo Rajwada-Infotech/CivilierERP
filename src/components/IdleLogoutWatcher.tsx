@@ -1,9 +1,8 @@
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { Clock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
-import { useIdleLogout } from "@/hooks/useIdleLogout";
+import { COUNTDOWN_SECONDS, useIdleLogout } from "@/hooks/useIdleLogout";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,11 +11,21 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-// Mirrors COUNTDOWN_SECONDS in useIdleLogout.ts — only used here to size the
-// countdown ring's fill, not to drive the timer itself.
-const COUNTDOWN_TOTAL = 60;
-const RING_RADIUS = 20;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+/** One big thin-numeral block ("00" over "Minutes") framed by hairline corner ticks. */
+function Digits({ value, label }: { value: number; label: string }) {
+  return (
+    <div className="relative px-5 pt-4 pb-3">
+      <span className="absolute left-0 top-0 h-3 w-3 border-l border-t border-white/40" />
+      <span className="absolute right-0 top-0 h-3 w-3 border-r border-t border-white/40" />
+      <span className="absolute left-0 bottom-0 h-3 w-3 border-l border-b border-white/40" />
+      <span className="absolute right-0 bottom-0 h-3 w-3 border-r border-b border-white/40" />
+      <p className="font-sans text-[5.5rem] sm:text-[7rem] font-extralight leading-none tracking-tight tabular-nums text-white">
+        {String(value).padStart(2, "0")}
+      </p>
+      <p className="mt-2 text-[0.625rem] uppercase tracking-[0.3em] text-white/50">{label}</p>
+    </div>
+  );
+}
 
 /**
  * Global inactivity watcher. Mounted once inside AppLayout, so it's alive on
@@ -50,8 +59,8 @@ export function IdleLogoutWatcher() {
 
   if (!currentUser) return null;
 
-  const progress = secondsLeft != null ? secondsLeft / COUNTDOWN_TOTAL : 1;
-  const ringOffset = RING_CIRCUMFERENCE * (1 - progress);
+  const left = secondsLeft ?? COUNTDOWN_SECONDS;
+  const progress = left / COUNTDOWN_SECONDS;
 
   return (
     <>
@@ -67,68 +76,45 @@ export function IdleLogoutWatcher() {
           if (!open) resetTimer();
         }}
       >
-        <AlertDialogContent className="max-w-sm gap-0 overflow-hidden rounded-2xl border border-amber-500/20 bg-gradient-to-b from-card to-amber-500/[0.04] p-0 shadow-2xl">
-          <div className="flex items-start gap-4 p-5 pb-4">
-            {/* Countdown ring — depletes in sync with the number below,
-                giving an at-a-glance read on urgency without reading text. */}
-            <div className="relative shrink-0">
-              <svg viewBox="0 0 48 48" className="h-12 w-12 -rotate-90">
-                <circle
-                  cx="24"
-                  cy="24"
-                  r={RING_RADIUS}
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  className="text-amber-500/15"
-                />
-                <circle
-                  cx="24"
-                  cy="24"
-                  r={RING_RADIUS}
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeDasharray={RING_CIRCUMFERENCE}
-                  strokeDashoffset={ringOffset}
-                  className="text-amber-500 transition-[stroke-dashoffset] duration-1000 ease-linear"
-                />
-              </svg>
-              <Clock className="absolute inset-0 m-auto h-5 w-5 text-amber-500" />
+        <AlertDialogContent className="!fixed !inset-0 !left-0 !top-0 !translate-x-0 !translate-y-0 !max-w-none !w-screen !h-screen !rounded-none border-0 p-0 bg-transparent shadow-none flex items-center justify-center">
+          {/* Dark stage: near-black radial vignette, a faint grid and a floor glow. */}
+          <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse at 50% 40%, #2a2c30 0%, #141517 55%, #08090a 100%)" }} />
+          <div
+            className="absolute inset-0 opacity-[0.07]"
+            style={{
+              backgroundImage: "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)",
+              backgroundSize: "80px 80px",
+            }}
+          />
+          <div className="absolute inset-x-0 bottom-0 h-1/3" style={{ background: "radial-gradient(ellipse at 50% 100%, rgba(255,255,255,0.10), transparent 70%)" }} />
+
+          <div className="relative flex flex-col items-center px-4 text-center">
+            <AlertDialogTitle className="mb-6 text-[0.6875rem] font-medium uppercase tracking-[0.4em] text-white/60">
+              Session idle · signing out
+            </AlertDialogTitle>
+
+            <div className="flex items-end gap-4 sm:gap-8">
+              <Digits value={Math.floor(left / 60)} label="Minutes" />
+              <Digits value={left % 60} label="Seconds" />
             </div>
 
-            <div className="min-w-0 pt-0.5">
-              <AlertDialogTitle className="text-base font-semibold text-foreground">
-                Are you still there?
-              </AlertDialogTitle>
-              <AlertDialogDescription className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                You've been inactive for a while. For your security, you'll
-                be signed out in{" "}
-                <span className="font-semibold tabular-nums text-amber-500">
-                  {secondsLeft}s
-                </span>{" "}
-                unless you stay active.
-              </AlertDialogDescription>
+            {/* hairline progress — drains with the countdown */}
+            <div className="mt-8 h-px w-64 sm:w-80 bg-white/15">
+              <div className="h-full bg-white/80 transition-[width] duration-1000 ease-linear" style={{ width: `${progress * 100}%` }} />
             </div>
-          </div>
 
-          {/* Depleting bar — same countdown, restated as a full-width cue
-              that's still visible even if the ring goes unnoticed. */}
-          <div className="h-1 w-full bg-[#ffe2021a]">
-            <div
-              className="h-full bg-amber-500 transition-[width] duration-1000 ease-linear"
-              style={{ width: `${progress * 100}%` }}
-            />
-          </div>
+            <AlertDialogDescription className="mt-5 max-w-xs text-xs leading-relaxed text-white/55">
+              No activity for a while. For your security you'll be signed out when the timer reaches zero.
+            </AlertDialogDescription>
 
-          <div className="p-4">
             <AlertDialogAction
               onClick={resetTimer}
-              className="w-full bg-gradient-to-r from-indigo-500 to-violet-500 font-semibold text-white hover:from-indigo-600 hover:to-violet-600"
+              className="mt-6 rounded-none border border-white/40 bg-transparent px-8 text-[0.6875rem] font-semibold uppercase tracking-[0.3em] text-white hover:bg-white hover:text-black"
             >
               Stay signed in
             </AlertDialogAction>
+
+            <p className="mt-10 text-[0.625rem] font-bold uppercase tracking-[0.35em] text-white/70">CivilierERP</p>
           </div>
         </AlertDialogContent>
       </AlertDialog>

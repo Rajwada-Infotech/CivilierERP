@@ -3,17 +3,39 @@ const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+const { cleanNames } = require("../middleware/cleanNames");
+// Account Head Master: names are saved without stray spaces (see middleware/cleanNames.js).
+router.use(cleanNames(["LHeadName", "LHeadCode", "DisplayName"]));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const allowRoles = require("../middleware/role");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const bcrypt = require("bcrypt");
+const { requireApprover } = require("../middleware/requireApprover");
 
-const adminOnly = allowRoles("admin", "super_admin");
+
+// Brokers are account heads too (LHeadType 'BR'), kept from Broker Master. Its users were refused every save here,
+// since only Account Head's rights counted. A broker row — the stored one for an id, else the one being created —
+// also takes Broker Master's rights; any other type, or turning a broker into another type, still needs Account Head.
+const headRight = (action) => async (req, res, next) => {
+  try {
+    const bodyType = req.body?.LHeadType ?? req.body?.lHeadType;
+    let isBroker = bodyType == null ? null : String(bodyType).toUpperCase() === "BR";
+    const id = parseInt(req.params.id, 10);
+    if (Number.isFinite(id)) {
+      const r = await getPool().request().input("id", sql.Int, id)
+        .query("SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+      const stored = r.recordset[0]?.LHeadType;
+      isBroker = String(stored || "").toUpperCase() === "BR" && isBroker !== false;
+    }
+    return requireAnyPageRight(isBroker ? ["account-head", "broker-master"] : ["account-head"], action)(req, res, next);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
 
 // ── Broker RERA certificate upload — mirrors crmBookingDocuments.js's
 // disk-storage + streamed-GET pattern exactly (private upload dir, random
@@ -372,7 +394,7 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
 });
 
 // ─── POST — create (always Draft) ─────────────────────────────────────────────
-router.post("/", requirePageRight("account-head", "create"), async (req, res) => {
+router.post("/", headRight("create"), async (req, res) => {
   const {
     LHeadName,
     LHeadCode,
@@ -456,7 +478,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // ── PAN is mandatory for suppliers ──
     if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
       return res.status(400).json({
-        error: "PAN Number is mandatory for suppliers.",
+        error: "PAN is mandatory for suppliers.",
         code: "MISSING_PAN",
       });
     }
@@ -718,7 +740,7 @@ router.get("/options", async (req, res) => {
     // Partner Master's own listing, Trial Balance).
     let query = `SELECT LHeadId AS id,
                  CASE WHEN LHeadType = 'P' THEN LHeadName ELSE ISNULL(DisplayName, LHeadName) END AS label,
-                 LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type
+                 LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type, LHeadCategory AS category
                  FROM dbo.AccountHeadMaster
                  WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'
                    AND ISNULL(LHeadCode, '') NOT LIKE 'PRJ-%-SUPP'
@@ -822,8 +844,8 @@ router.put("/:id/submit", requirePageRight("account-head", "edit"), async (req, 
   }
 });
 
-// ─── PUT /:id/approve — admin approves ────────────────────────────────────────
-router.put("/:id/approve", adminOnly, async (req, res) => {
+// ─── PUT /:id/approve — an Account Head approver (Approval Setup) approves ────
+router.put("/:id/approve", requireApprover("account-heads", "account heads"), async (req, res) => {
   try {
     const userName = requireUserName(req, res);
     if (!userName) return;
@@ -862,8 +884,8 @@ router.put("/:id/approve", adminOnly, async (req, res) => {
   }
 });
 
-// ─── PUT /:id/reject — admin rejects ──────────────────────────────────────────
-router.put("/:id/reject", adminOnly, async (req, res) => {
+// ─── PUT /:id/reject — an Account Head approver (Approval Setup) rejects ──────
+router.put("/:id/reject", requireApprover("account-heads", "account heads"), async (req, res) => {
   try {
     const userName = requireUserName(req, res);
     if (!userName) return;
@@ -906,7 +928,7 @@ router.put("/:id/reject", adminOnly, async (req, res) => {
 });
 
 // ─── PUT /:id — update (blocked if Approved) ──────────────────────────────────
-router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) => {
+router.put("/:id", headRight("edit"), async (req, res) => {
   const {
     LHeadName,
     LHeadCode,
@@ -991,7 +1013,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     // ── PAN is mandatory for suppliers ──
     if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
       return res.status(400).json({
-        error: "PAN Number is mandatory for suppliers.",
+        error: "PAN is mandatory for suppliers.",
         code: "MISSING_PAN",
       });
     }
@@ -1158,7 +1180,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
 });
 
 // ─── DELETE ────────────────────────────────────────────────────────────────────
-router.delete("/:id", requirePageRight("account-head", "delete"), async (req, res) => {
+router.delete("/:id", headRight("delete"), async (req, res) => {
   try {
     const pool = getPool();
 
@@ -1196,7 +1218,7 @@ router.delete("/:id", requirePageRight("account-head", "delete"), async (req, re
 // POST /:id/certificate — RERA/broker certificate upload, single file.
 // Scoped to LHeadType='BR' rows only — this is a broker-only concept even
 // though it lives on the shared AccountHeadMaster table.
-router.post("/:id/certificate", requirePageRight("account-head", "edit"), (req, res) => {
+router.post("/:id/certificate", headRight("edit"), (req, res) => {
   brokerCertUpload.single("file")(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     try {
@@ -1234,7 +1256,7 @@ router.post("/:id/certificate", requirePageRight("account-head", "edit"), (req, 
 });
 
 // GET /:id/certificate/file — stream the certificate for inline preview/download
-router.get("/:id/certificate/file", requirePageRight("account-head", "view"), async (req, res) => {
+router.get("/:id/certificate/file", headRight("view"), async (req, res) => {
   try {
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });

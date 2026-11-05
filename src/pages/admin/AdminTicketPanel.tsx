@@ -1,3 +1,4 @@
+import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 import React, { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -104,24 +105,24 @@ const priorityRank: Record<TicketPriority, number> = {
 };
 
 const priorityBar: Record<TicketPriority, string> = {
-  Urgent: "bg-red-500",
-  High: "bg-orange-500",
-  Medium: "bg-amber-400",
-  Low: "bg-blue-400",
+  Urgent: "bg-destructive",
+  High: "bg-foreground",
+  Medium: "bg-muted-foreground",
+  Low: "bg-primary",
 };
 
 const priorityBadge: Record<TicketPriority, string> = {
-  Urgent: "bg-red-50 text-red-800 border-red-200",
-  High: "bg-orange-50 text-orange-800 border-orange-200",
-  Medium: "bg-amber-50 text-amber-800 border-amber-200",
-  Low: "bg-blue-50 text-blue-800 border-blue-200",
+  Urgent: "bg-destructive/10 text-destructive border-destructive/30",
+  High: "bg-foreground/10 text-foreground border-foreground/30",
+  Medium: "bg-muted text-muted-foreground border-border",
+  Low: "bg-primary/10 text-primary border-primary/30",
 };
 
 const priorityDot: Record<TicketPriority, string> = {
-  Urgent: "bg-red-500",
-  High: "bg-orange-500",
-  Medium: "bg-amber-400",
-  Low: "bg-blue-400",
+  Urgent: "bg-destructive",
+  High: "bg-foreground",
+  Medium: "bg-muted-foreground",
+  Low: "bg-primary",
 };
 
 const statusBadge: Record<
@@ -129,22 +130,22 @@ const statusBadge: Record<
   { cls: string; Icon: React.ElementType; label: string }
 > = {
   Pending: {
-    cls: "bg-amber-50 text-amber-800 border-amber-200",
+    cls: "bg-muted text-muted-foreground border-border",
     Icon: Clock,
     label: "Pending",
   },
   InProgress: {
-    cls: "bg-blue-50 text-blue-800 border-blue-200",
+    cls: "bg-primary/10 text-primary border-primary/30",
     Icon: RefreshCw,
     label: "Resolving",
   },
   Resolved: {
-    cls: "bg-green-50 text-green-800 border-green-200",
+    cls: "bg-foreground/10 text-foreground border-foreground/30",
     Icon: CheckCircle2,
     label: "Resolved",
   },
   Closed: {
-    cls: "bg-slate-100 text-slate-500 border-slate-200",
+    cls: "bg-muted text-muted-foreground border-border",
     Icon: Lock,
     label: "Closed",
   },
@@ -290,7 +291,7 @@ function TicketDetailDialog({
       <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden [&>button:first-of-type]:hidden">
         {/* Header — ticket id | subject | close — all in one row, no overlap possible */}
         <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border">
-          <span className="shrink-0 font-mono text-[0.6875rem] font-medium text-muted-foreground bg-muted border border-border rounded px-1.5 py-0.5">
+          <span className="shrink-0 tabular-nums text-[0.6875rem] font-medium text-muted-foreground bg-muted border border-border rounded px-1.5 py-0.5">
             #{t.id}
           </span>
           <h2 className="flex-1 text-sm font-semibold text-foreground leading-snug truncate">
@@ -324,7 +325,7 @@ function TicketDetailDialog({
                   </span>
                 )}
                 {t.escalated_at && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border bg-red-50 text-red-800 border-red-200">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border bg-destructive/10 text-destructive border-destructive/30">
                     <ShieldAlert size={9} />
                     Escalated
                   </span>
@@ -357,13 +358,13 @@ function TicketDetailDialog({
 
               {/* Resolution note */}
               {t.resolution_note && (
-                <div className="rounded-lg border border-green-200 bg-green-50 px-3.5 py-2.5">
-                  <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-green-700 mb-1">
+                <div className="rounded-lg border border-foreground/30 bg-foreground/10 px-3.5 py-2.5">
+                  <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-foreground mb-1">
                     Resolution
                   </p>
-                  <p className="text-sm text-green-900">{t.resolution_note}</p>
+                  <p className="text-sm text-foreground">{t.resolution_note}</p>
                   {t.resolved_by && (
-                    <p className="mt-1 text-xs text-green-600">
+                    <p className="mt-1 text-xs text-foreground">
                       By {t.resolved_by}
                     </p>
                   )}
@@ -371,15 +372,15 @@ function TicketDetailDialog({
               )}
 
               {t.escalated_at && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5">
-                  <p className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-widest text-red-700 mb-1">
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5">
+                  <p className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-widest text-destructive mb-1">
                     <ShieldAlert size={11} />
                     Escalation
                   </p>
-                  <p className="text-sm text-red-900">
+                  <p className="text-sm text-destructive">
                     {t.escalation_reason || "This ticket was auto-escalated."}
                   </p>
-                  <p className="mt-1 text-xs text-red-600">
+                  <p className="mt-1 text-xs text-destructive">
                     {fmtDate(t.escalated_at)}
                   </p>
                 </div>
@@ -413,7 +414,7 @@ function TicketDetailDialog({
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-8 text-xs px-3"
+                      className={`${KEY_LINE} h-8 px-3`}
                       disabled={!assigneeId || assignMutation.isPending}
                       onClick={() => assignMutation.mutate()}
                     >
@@ -431,7 +432,7 @@ function TicketDetailDialog({
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8 text-xs px-3 text-green-700 border-green-200 bg-green-50 hover:bg-green-100 hover:text-green-800"
+                    className={`${KEY_LINE} h-8 px-3`}
                     onClick={() => setShowResolve(true)}
                   >
                     <CheckCircle2 size={12} />
@@ -451,7 +452,7 @@ function TicketDetailDialog({
                     <div className="flex gap-2">
                       <Button
                         size="sm"
-                        className="h-8 text-xs btn-module shadow-sm text-white hover:opacity-90"
+                        className={`${KEY_INK} h-8 px-3`}
                         disabled={resolveMutation.isPending}
                         onClick={() => resolveMutation.mutate()}
                       >
@@ -465,7 +466,7 @@ function TicketDetailDialog({
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-8 text-xs"
+                        className={`${KEY_LINE} h-8 px-3`}
                         onClick={() => setShowResolve(false)}
                       >
                         Cancel
@@ -478,7 +479,7 @@ function TicketDetailDialog({
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8 text-xs px-3"
+                    className={`${KEY_LINE} h-8 px-3`}
                     disabled={closeMutation.isPending}
                     onClick={() => closeMutation.mutate()}
                   >
@@ -627,19 +628,19 @@ export default function AdminTicketPanel() {
       id: "open",
       label: "Open",
       value: (counts?.pending ?? 0) + (counts?.in_progress ?? 0),
-      activeColor: "text-amber-600",
+      activeColor: "text-muted-foreground",
     },
     {
       id: "resolved",
       label: "Resolved",
       value: counts?.resolved ?? 0,
-      activeColor: "text-green-600",
+      activeColor: "text-foreground",
     },
     {
       id: "closed",
       label: "Closed",
       value: counts?.closed ?? 0,
-      activeColor: "text-slate-500",
+      activeColor: "text-muted-foreground",
     },
     {
       id: "all",
@@ -665,13 +666,13 @@ export default function AdminTicketPanel() {
               Support Tickets
             </span>
             {(counts?.urgent_open ?? 0) > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium bg-red-50 text-red-800 border border-red-200">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium bg-destructive/10 text-destructive border border-destructive/30">
                 <ShieldAlert size={9} />
                 {counts.urgent_open} urgent
               </span>
             )}
             {(counts?.escalated_open ?? 0) > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium bg-red-50 text-red-800 border border-red-200">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium bg-destructive/10 text-destructive border border-destructive/30">
                 <Flame size={9} />
                 {counts.escalated_open} escalated
               </span>
@@ -792,7 +793,7 @@ export default function AdminTicketPanel() {
                         </span>
                       )}
                       {ticket.escalated_at && (
-                        <span className="flex items-center gap-1 text-red-700">
+                        <span className="flex items-center gap-1 text-destructive">
                           <ShieldAlert size={9} />
                           Escalated
                         </span>

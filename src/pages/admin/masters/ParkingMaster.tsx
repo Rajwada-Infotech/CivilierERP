@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
-import { FollowupShell } from "@/components/followup/FollowupShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -15,11 +15,18 @@ import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/parking-master";
+const RULE = "1px solid hsl(var(--foreground))";
+const NUM = "font-heading tabular-nums";
+// A project can belong to several companies (company_ids); company_id is only its primary one. Filtering on it hid a
+// project from every company but the first.
+const companiesOf = (p: { company_id?: number; company_ids?: string }) =>
+  String(p.company_ids ?? p.company_id ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 const DROPDOWN_API = "/api/business/dropdown";
 async function fetchParkingRates(): Promise<any[]> {
   const res = await fetchWithAuth(API);
-  if (!res.ok) throw new Error("Failed to fetch parking rates");
-  return res.json().catch(() => ({}));
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error || "Failed to load parking rates");
+  return Array.isArray(body) ? body : [];
 }
 
 // ── Fields defined inside the component so parkingTypes (fetched live from
@@ -43,11 +50,11 @@ const FIELDS_STATIC_PREFIX: FieldDef[] = [
     disabledWhen: (form) => !form?.companyId,
     disabledPlaceholder: "Select a Company first",
     optionsProvider: (_data, _currentId, form) => {
-      const projects: { id: number; name: string; company_id: number }[] = (form?.__projects as any) ?? [];
+      const projects: { id: number; name: string; company_id: number; company_ids?: string }[] = (form?.__projects as any) ?? [];
       const selectedCompany = form?.companyId as string | undefined;
       if (!selectedCompany) return [];
       return projects
-        .filter((p) => String(p.company_id) === selectedCompany)
+        .filter((p) => companiesOf(p).includes(selectedCompany))
         .map((p) => ({ value: String(p.id), label: p.name }));
     },
   },
@@ -70,7 +77,7 @@ const FIELDS_STATIC_PREFIX: FieldDef[] = [
 const FIELDS_STATIC_SUFFIX: FieldDef[] = [
   {
     name: "charge",
-    label: "Charge (₹)",
+    label: "Charge ₹ (before GST)",
     type: "number",
     required: true,
   },
@@ -92,8 +99,9 @@ const columns = [
   { key: "projectName", label: "Project" },
   { key: "blockName", label: "Block" },
   { key: "parkingType", label: "Type" },
-  { key: "charge", label: "Charge (₹)" },
-  { key: "gstRate", label: "GST %" },
+  { key: "charge", label: "Charge" },
+  { key: "gstRate", label: "GST" },
+  { key: "total", label: "With GST", sortable: false },
   { key: "status", label: "Status" },
 ];
 
@@ -153,7 +161,7 @@ const ParkingMaster: React.FC = () => {
   // app (BlockMaster.tsx, UnitMaster.tsx, CrmApplication.tsx) already uses.
   const { data: dropdownData } = useQuery<{
     companies: { id: number; name: string }[];
-    projects: { id: number; name: string; company_id: number }[];
+    projects: { id: number; name: string; company_id: number; company_ids?: string }[];
   }>({
     queryKey: ["business-dropdown"],
     queryFn: async () => {
@@ -183,6 +191,7 @@ const ParkingMaster: React.FC = () => {
         parkingType: item.ParkingType ?? "Open",
         charge: item.Charge != null ? String(item.Charge) : "",
         gstRate: item.GstRate != null ? String(item.GstRate) : "18",
+        total: item.Charge != null ? Number(item.Charge) * (1 + (item.GstRate != null ? Number(item.GstRate) : 18) / 100) : null,
         isActive: Boolean(item.IsActive),
         // MasterPage's built-in Active/Inactive pill only kicks in for a
         // column keyed "status" — alias it here instead of showing the raw
@@ -218,7 +227,7 @@ const ParkingMaster: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toPayload(event.record)),
       });
-      if (!res.ok) throw new Error((await res.json()).error || "Failed to add parking rate");
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to add parking rate");
       toast.success("Parking rate added!");
     }
     if (event.action === "update") {
@@ -227,87 +236,125 @@ const ParkingMaster: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toPayload(event.record)),
       });
-      if (!res.ok) throw new Error((await res.json()).error || "Failed to update parking rate");
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to update parking rate");
       toast.success("Parking rate updated!");
     }
     if (event.action === "delete") {
       const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error || "Failed to delete parking rate");
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to delete parking rate");
       toast.success("Parking rate deleted!");
     }
     await queryClient.invalidateQueries({ queryKey: ["parking-master"] });
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading parking rates...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load parking rates.</div>;
+  const rupees = (v: unknown) => (v === "" || v == null ? "—" : `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
+  const active = mappedData.filter((r) => r.isActive).length;
+  const figures = [
+    { label: "Rates", value: mappedData.length, note: "in your projects" },
+    { label: "Active", value: active, note: "offered when allotting parking" },
+    { label: "Allotted", value: mappedData.filter((r) => r.inUse).length, note: "on a booking — can't be deleted" },
+    { label: "Inactive", value: mappedData.length - active, note: "kept on old bookings" },
+  ];
+  const statusMark = (v: unknown) => <SheetMark text={v ? "Active" : "Inactive"} tone={v ? "done" : "draft"} />;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Follow-Up", "Setup", "Parking Master"]} />
-      <FollowupShell title="Parking Master">
-        <MasterPage
-          title="Parking Rate"
-          canCreate={rights.canCreate}
-          canEdit={rights.canEdit}
-          canDelete={rights.canDelete}
-          fields={fields}
-          columns={columns}
-          initialData={mappedData}
-          onDataEvent={handleDataEvent}
-          externalFormPatch={blocksPatch}
-          externalFormPatchKey={`${allBlocks.length}:${companies.length}:${projectsList.length}`}
-          onFieldChange={(form, fieldName) => {
-            if (fieldName === "companyId") {
-              return { ...form, projectId: "", blockId: "" };
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Setup"
+        title="Parking rates"
+        subtitle="What each type of parking costs in a project — or in one block of it, which wins over the project-wide rate — and its GST. Allotments take the charge from here."
+      >
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {figures.map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading parking rates…</p>
+        ) : error ? (
+          <div className="px-4 py-2.5 text-xs text-destructive bg-card" style={{ border: "1px solid hsl(var(--destructive))" }}>
+            {(error as Error)?.message || "Failed to load parking rates."}
+          </div>
+        ) : (
+          <MasterPage
+            title="Parking Rate"
+            canCreate={rights.canCreate}
+            canEdit={rights.canEdit}
+            canDelete={rights.canDelete}
+            fields={fields}
+            columns={columns}
+            columnRenderers={{
+              blockName: (v) => (v === "All blocks" ? <span className="text-muted-foreground">All blocks</span> : <span className="font-medium">{String(v)}</span>),
+              charge: (v) => <span className={NUM}>{rupees(v)}</span>,
+              gstRate: (v) => <span className={NUM}>{v === "" ? "—" : `${Number(v)}%`}</span>,
+              total: (v) => <span className={`${NUM} font-semibold`}>{rupees(v)}</span>,
+              status: (v) => statusMark(v),
+            }}
+            initialData={mappedData}
+            onDataEvent={handleDataEvent}
+            externalFormPatch={blocksPatch}
+            externalFormPatchKey={`${allBlocks.length}:${companies.length}:${projectsList.length}`}
+            onFieldChange={(form, fieldName) => {
+              if (fieldName === "companyId") {
+                return { ...form, projectId: "", blockId: "" };
+              }
+              if (fieldName === "projectId") {
+                return { ...form, blockId: "" };
+              }
+              return form;
+            }}
+            // A rate that's ever been allotted to a booking can't be
+            // deleted — matches the server-side guard in parkingMaster.js
+            // exactly. Editing stays open (same as Block Master) since a
+            // correction here is looked up live, not snapshotted.
+            isDeleteLocked={(row) =>
+              row.inUse ? "Already allotted to one or more bookings" : null
             }
-            if (fieldName === "projectId") {
-              return { ...form, blockId: "" };
-            }
-            return form;
-          }}
-          // A rate that's ever been allotted to a booking can't be
-          // deleted — matches the server-side guard in parkingMaster.js
-          // exactly. Editing stays open (same as Block Master) since a
-          // correction here is looked up live, not snapshotted.
-          isDeleteLocked={(row) =>
-            row.inUse ? "Already allotted to one or more bookings" : null
-          }
-          exportConfig={{
-            title: "Parking Master",
-            filename: "parking-master",
-            columns: exportColumns,
-          }}
-          viewConfig={{
-            title: "Parking Rate Details",
-            fields: [
-              { key: "projectName", label: "Project" },
-              { key: "blockName", label: "Block" },
-              { key: "parkingType", label: "Type" },
-              { key: "charge", label: "Charge (₹)" },
-              { key: "gstRate", label: "GST %" },
-              { key: "status", label: "Status" },
-            ],
-          }}
-          onPrint={(row) => {
-            const win = window.open("", "_blank", "width=600,height=400");
-            if (!win) return;
-            win.document.write(safeHtml`
-              <html><head><title>Parking Rate — ${row.parkingType}</title>
-              <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-              </head><body><h2>Parking Rate</h2><div className="overflow-x-auto thin-scroll"><table>
-                <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
-                <tr><td>Block</td><td>${row.blockName || "All blocks"}</td></tr>
-                <tr><td>Type</td><td>${row.parkingType || "—"}</td></tr>
-                <tr><td>Charge</td><td>₹${row.charge || "0"}</td></tr>
-                <tr><td>GST %</td><td>${row.gstRate || "0"}%</td></tr>
-                <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
-              </table></div></body></html>
-            `);
-            win.document.close();
-            win.print();
-          }}
-        />
-      </FollowupShell>
+            exportConfig={rights.canExport ? {
+              title: "Parking Master",
+              filename: "parking-master",
+              columns: exportColumns,
+            } : undefined}
+            viewConfig={{
+              title: "Parking Rate Details",
+              fields: [
+                { key: "projectName", label: "Project" },
+                { key: "blockName", label: "Block" },
+                { key: "parkingType", label: "Type" },
+                { key: "charge", label: "Charge (before GST)", render: (v) => <span className={NUM}>{rupees(v)}</span> },
+                { key: "gstRate", label: "GST", render: (v) => <span className={NUM}>{v === "" ? "—" : `${Number(v)}%`}</span> },
+                { key: "total", label: "With GST", render: (v) => <span className={`${NUM} font-semibold`}>{rupees(v)}</span> },
+                { key: "status", label: "Status", render: (v) => statusMark(v) },
+              ],
+            }}
+            onPrint={(row) => {
+              const win = window.open("", "_blank", "width=600,height=400");
+              if (!win) return;
+              win.document.write(safeHtml`
+                <html><head><title>Parking Rate — ${row.parkingType}</title>
+                <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+                </head><body><h2>Parking Rate</h2><table>
+                  <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
+                  <tr><td>Block</td><td>${row.blockName || "All blocks"}</td></tr>
+                  <tr><td>Type</td><td>${row.parkingType || "—"}</td></tr>
+                  <tr><td>Charge</td><td>₹${row.charge || "0"}</td></tr>
+                  <tr><td>GST %</td><td>${row.gstRate || "0"}%</td></tr>
+                  <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
+                </table></body></html>
+              `);
+              win.document.close();
+              win.print();
+            }}
+          />
+        )}
+      </SheetShell>
     </>
   );
 };

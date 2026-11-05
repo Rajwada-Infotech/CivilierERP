@@ -11,13 +11,13 @@
 
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const { APPLIES_TO } = require("../services/gstRules");
 
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 const PAGE = "crm-gst-rule-master";
 
@@ -82,7 +82,16 @@ router.get("/options", requirePageRight(PAGE, "view"), async (_req, res) => {
         ORDER BY HCode`),
     ]);
     const appliesTo = [...new Set([...Object.values(APPLIES_TO), ...used.recordset.map((x) => x.AppliesTo)])].sort();
+    // Coverage check: commercial units exist but no active rule targets them
+    // -> they are taxed with the residential rules until one is added.
+    const cov = await pool.request().query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.UnitMaster u JOIN dbo.CrmConstructedAssetKind k ON k.Code = u.UnitKind
+          WHERE u.IsActive = 1 AND k.IsCommercial = 1) AS CommercialUnits,
+        (SELECT COUNT(*) FROM dbo.CrmGstRule WHERE IsActive = 1 AND ForCommercial = 1) AS CommercialRules`)
+      .then((r) => r.recordset[0]).catch(() => ({ CommercialUnits: 0, CommercialRules: 0 })); // pre-526: nothing to check
     res.json({
+      coverage: { commercialUnits: cov.CommercialUnits, commercialRules: cov.CommercialRules },
       appliesTo,
       hsn: hsn.recordset.map((h) => ({ code: h.HCode, label: `${h.HCode} — ${h.HDescription || ""} (${Number(h.HIGST) || 0}%)` })),
     });

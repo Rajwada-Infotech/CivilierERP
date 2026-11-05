@@ -1,11 +1,12 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { generateFAItemCodes } = require("../services/faItemCodeGenerator");
@@ -88,7 +89,8 @@ router.get("/eligible-items", requirePageRight("fixed-asset-tagging", "view"), a
 // that has no tags yet, and why (e.g. its project has no ID Template) ─────────
 router.get("/pending-batches", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
   try {
-    res.json(await listUntaggedBatches(getPool()));
+    // Only the user's projects, as the tagging list below.
+    res.json((await listUntaggedBatches(getPool())).filter((b) => projectAllowed(req.projectScope, b.ProjectId)));
   } catch (err) {
     console.error("[fixedAssetTagging] GET /pending-batches:", err.message);
     res.status(500).json({ error: err.message });
@@ -115,6 +117,7 @@ router.delete("/pending-batches/:assetId", requirePageRight("fixed-asset-tagging
       `);
       const b = r.recordset[0];
       if (!b) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+      if (b.SourceType === "ICT") { await tx.rollback(); return res.status(409).json({ error: "This stock arrived through an Inter-Company Transfer — delete or reverse that transfer instead." }); }
       if (b.SourceType !== "GRN") { await tx.rollback(); return res.status(409).json({ error: "This stock came from Inventory Import — reverse it from Inventory Import instead." }); }
       if (b.TagCount > 0 || b.AssetStatus !== "Pending") { await tx.rollback(); return res.status(409).json({ error: "This stock already has FA Item Codes — delete those tagging entries instead." }); }
       await tx.request().input("AssetId", sql.Int, assetId).query(`DELETE FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`);
@@ -140,12 +143,14 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
         CONVERT(NVARCHAR(100), im.M_Id) AS ItemId, im.M_Name AS ItemName,
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
-        t.GodownId, gd.GodownName
+        t.GodownId, gd.GodownName,
+        batch.AssetCategory   -- captured at FA Inventory import; the Depreciation Tag reuses it
       FROM dbo.FixedAssetTagging t
       LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
       LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
       LEFT JOIN dbo.Godowns gd ON gd.GodownID = t.GodownId
+      LEFT JOIN dbo.FixedAssetRecord batch ON batch.AssetId = t.AssetId
       WHERE t.FAItemCode IS NOT NULL AND t.Status = 'Tagged'
         AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId AND fa.Status <> 'Deleted')
       ORDER BY t.CreatedAt DESC
@@ -185,6 +190,8 @@ router.get("/tagged-codes", requirePageRight("fixed-asset-tagging", "view"), asy
       request.input("Search", sql.NVarChar(200), `%${String(req.query.search).trim()}%`);
       where.push("(t.FAItemCode LIKE @Search OR ISNULL(fr.AssetName, im.M_Name) LIKE @Search)");
     }
+    // Only the user's projects, judged by where the asset is now.
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "ISNULL(fr.ProjectId, t.ProjectId)", "").trim());
 
     const result = await request.query(`
       SELECT
@@ -231,17 +238,20 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
     if (req.query.fromDate)  { request.input("FromDate",  sql.Date, req.query.fromDate);                where.push("t.DocDate >= @FromDate"); }
     if (req.query.toDate)    { request.input("ToDate",    sql.Date, req.query.toDate);                  where.push("t.DocDate <= @ToDate"); }
     if (req.query.godownId)  { request.input("GodownId",  sql.Int, parseInt(req.query.godownId, 10));   where.push("t.GodownId = @GodownId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "t.ProjectId", "").trim());
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const result = await request.query(`
       SELECT
         t.TagId, t.DocNo, t.DocDate, t.FinYear, t.TaggedQty, t.FAItemCode, t.Remarks, t.Status,
+        t.TransferredAt, t.TransferredToCode, t.TransferredFromCode, t.SourceICTId,
         t.CreatedBy, t.CreatedAt,
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
         t.GodownId, gd.GodownName,
         t.AssetId, fa.AssetName, fa.AssetCategory, fa.AssetCode,
+        fa.SourceType AS StockSource,
         CASE
           WHEN t.FAItemCode IS NULL THEN NULL
           WHEN EXISTS (
@@ -501,7 +511,7 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
     await tx.begin();
     try {
       const tagRes = await tx.request().input("TagId", sql.Int, id).query(`
-        SELECT t.TagId, t.AssetId, t.Status, fa.Quantity,
+        SELECT t.TagId, t.AssetId, t.Status, t.SourceICTId, fa.Quantity,
                ISNULL((SELECT SUM(t2.TaggedQty) FROM dbo.FixedAssetTagging t2 WITH (UPDLOCK, HOLDLOCK)
                        WHERE t2.AssetId = t.AssetId AND t2.Status = 'Tagged'), 0) AS TaggedSoFar
         FROM dbo.FixedAssetTagging t WITH (UPDLOCK, HOLDLOCK)
@@ -510,6 +520,15 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
       `);
       const tag = tagRes.recordset[0];
       if (!tag) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+
+      // Moved by an Inter-Company Transfer: the old code is retired history and
+      // the new one belongs to that transfer — only deleting the transfer undoes it.
+      if (tag.Status === "Transferred" || tag.SourceICTId) {
+        await tx.rollback();
+        return res.status(409).json({ error: tag.Status === "Transferred"
+          ? "This FA Item Code was transferred to another company — delete the Inter-Company Transfer to undo it."
+          : "This FA Item Code arrived through an Inter-Company Transfer — delete that transfer to undo it." });
+      }
 
       // A tag that's already been completed into a Fixed Asset Record
       // can't be removed out from under it — that would leave a live

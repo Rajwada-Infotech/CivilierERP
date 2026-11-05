@@ -70,7 +70,7 @@ export default function StockLedgerScreen() {
   const [dateTo, setDateTo] = useState(initialTo ?? "");
 
   const {
-    data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage,
+    data, isLoading, isError, error, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: ["stock-ledger", itemId, godownId, type, search, dateFrom, dateTo],
     queryFn: ({ pageParam }) => getStockLedger({
@@ -162,6 +162,7 @@ export default function StockLedgerScreen() {
           <View className="items-center py-10">
             <AlertCircle size={20} color={colors.destructive} />
             <Text style={{ color: colors.destructive, fontSize: 12, marginTop: 8, textAlign: "center" }}>Failed to load the stock ledger. Please try again.</Text>
+            {!!(error as Error | null)?.message && <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 4, textAlign: "center" }}>{(error as Error).message}</Text>}
           </View>
         </View>
       ) : (

@@ -28,8 +28,10 @@
 "use strict";
 
 const express = require("express");
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 router.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,

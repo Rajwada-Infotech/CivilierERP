@@ -1,11 +1,12 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests" } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { autoTagBatch, deriveFinYear } = require("../services/fixedAssetAutoAlloc");
@@ -34,6 +35,7 @@ router.get("/", requirePageRight("fixed-asset-inventory-import", "view"), async 
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("i.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("i.ProjectId = @ProjectId"); }
     if (req.query.godownId)  { request.input("GodownId",  sql.Int, parseInt(req.query.godownId, 10));  where.push("i.GodownId = @GodownId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "i.ProjectId", "").trim());
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
@@ -96,7 +98,7 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
   const email = requireUser(req, res);
   if (!email) return;
 
-  const { docDate, companyId, projectId, godownId, itemId, quantity, rate, remarks } = req.body;
+  const { docDate, companyId, projectId, godownId, itemId, quantity, rate, remarks, assetCategory } = req.body;
 
   const godownIdVal = toInt(godownId);
   const itemIdVal = itemId ? String(itemId) : null;
@@ -104,9 +106,14 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
   const rateVal = rate != null && rate !== "" ? parseFloat(rate) : null;
 
   if (!docDate) return res.status(400).json({ error: "docDate is required" });
+  // Stock with no project can never be tagged (FA codes come from the project's ID template), so it is refused here.
+  if (!toInt(companyId)) return res.status(400).json({ error: "Pick the company." });
+  if (!toInt(projectId)) return res.status(400).json({ error: "Pick the project: its ID template is what tags the stock." });
+  if (!projectAllowed(req.projectScope, projectId)) return res.status(403).json({ error: "You don't have access to that project." });
   if (!godownIdVal) return res.status(400).json({ error: "godownId is required" });
   if (!itemIdVal) return res.status(400).json({ error: "itemId is required" });
   if (!Number.isFinite(qtyVal) || qtyVal <= 0) return res.status(400).json({ error: "quantity must be a positive number" });
+  if (!assetCategory || !String(assetCategory).trim()) return res.status(400).json({ error: "Asset Category is required" });
 
   try {
     const pool = getPool();
@@ -118,6 +125,18 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
     if (!item) return res.status(404).json({ error: "Item not found" });
     if (item.M_Type !== "Fixed Asset") {
       return res.status(400).json({ error: `"${item.M_Name}" is not a Fixed-Asset-category item` });
+    }
+
+    // The category is captured here, once, and travels with the stock: tagging copies it onto
+    // every FA Item Code and the Fixed Asset Depreciation Tag picks it up (no re-selecting).
+    // It must be one Depreciation Setup knows, otherwise no depreciation rate could ever apply.
+    const catRes = await pool.request().input("Cat", sql.NVarChar(100), String(assetCategory).trim()).query(`
+      SELECT TOP 1 AssetCategory FROM dbo.DepreciationSetup
+      WHERE Status = 'Active' AND LOWER(LTRIM(RTRIM(AssetCategory))) = LOWER(LTRIM(RTRIM(@Cat)))
+    `);
+    const categoryName = catRes.recordset[0]?.AssetCategory?.trim();
+    if (!categoryName) {
+      return res.status(400).json({ error: `Asset Category "${String(assetCategory).trim()}" has no active Depreciation Setup — add it in Depreciation Setup first.` });
     }
 
     const docTypeId = await resolveDocTypeId(pool, sql, "FAI");
@@ -172,13 +191,13 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
         .input("CompanyId",         sql.Int, companyIdVal)
         .input("ProjectId",         sql.Int, projectIdVal)
         .input("AssetName",         sql.NVarChar(200), item.M_Name)
-        .input("AssetCategory",     sql.NVarChar(100), item.M_Group || "Uncategorized")
+        .input("AssetCategory",     sql.NVarChar(100), categoryName)
         .input("PurchaseDate",      sql.Date, docDate)
         .input("PurchaseInvoiceRef",sql.NVarChar(100), docNo)
         .input("PurchaseCost",      sql.Decimal(18,2), purchaseCost)
         .input("Quantity",          sql.Decimal(18,3), qtyVal)
         .input("AssetStatus",       sql.NVarChar(30), "Pending")
-        .input("Remarks",           sql.NVarChar(sql.MAX), `Manually imported via Inventory Import ${docNo}${remarks ? " — " + remarks : ""}`)
+        .input("Remarks",           sql.NVarChar(sql.MAX), `Imported stock — without GRN (Inventory Import ${docNo})${remarks ? " — " + remarks : ""}`)
         .input("SourceType",        sql.NVarChar(20), "IMPORT")
         .input("SourceId",          sql.Int, importId)
         .input("SourceItemId",      sql.NVarChar(100), itemIdVal)
@@ -215,7 +234,7 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
           const result = await autoTagBatch(pool, {
             assetId, itemId: itemIdVal, itemName: item.M_Name, qty: qtyVal,
             companyId: companyIdVal, projectId: projectIdVal, godownId: godownIdVal,
-            docDate, sourceDocNo: docNo, userEmail: email,
+            docDate, sourceDocNo: docNo, userEmail: email, receiptLabel: "IMPORT",
           });
           tagged = result.tagged;
         } catch (err) {

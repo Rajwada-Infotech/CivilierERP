@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { PanelLeftOpen } from "lucide-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { TopNavbar } from "./TopNavbar";
 import { AppSidebar } from "./AppSidebar";
 import { ModuleStrip } from "./ModuleStrip";
@@ -10,7 +10,10 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
 import { IdleLogoutWatcher } from "@/components/IdleLogoutWatcher";
+import { useLiveData } from "@/hooks/useLiveData";
+import { markAllStale } from "@/lib/queryClient";
 import { LoginRemindersPopup } from "@/components/LoginRemindersPopup";
+import { DirectorAlerts } from "@/components/DirectorAlerts";
 const SlowConnectionBanner = React.lazy(
   () => import("@/components/SlowConnectionBanner"),
 );
@@ -114,6 +117,8 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const isMobile = useIsMobile();
   const { moduleSwitching, activeModule } = useModule();
   const isHome = useIsHomePage();
+  // Someone saved something: every cached list is read again the next time it is shown (lib/queryClient.ts).
+  useLiveData("any", markAllStale);
   const location = useLocation();
 
   // Home hides the strip/nav panel by default (full-width dashboard), but
@@ -162,9 +167,13 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   // uses; TopNavbar (fixed, full-width) is its only chrome.
   const STRIP_W = 76;
   const NAV_W = 200;
-  const mainML = isMobile || effectiveIsHome
+  // Home's "Open modules" tab is fixed to the left edge; the page keeps clear of it instead of running underneath.
+  const HOME_TAB_W = 20;
+  const mainML = isMobile
     ? 0
-    : hideNavPanel
+    : effectiveIsHome
+      ? (isHome ? HOME_TAB_W : 0)
+      : hideNavPanel
       ? STRIP_W
       : sidebarCollapsed
         ? STRIP_W
@@ -178,6 +187,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
         <NavPanelAutoExpand isHome={isHome} homeNavOpen={homeNavOpen} setHomeNavOpen={setHomeNavOpen}>
           <div className="min-h-screen bg-background" data-module={activeModule ?? undefined}>
             <TopNavbar />
+            <DirectorAlerts />
 
             {/* ── Home-only toggle — the only way back to the module strip
                 from a page that otherwise renders with none at all. Once
@@ -188,10 +198,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               <button
                 onClick={() => setHomeNavOpen(true)}
                 title="Open modules"
-                className="fixed z-50 flex items-center justify-center w-9 h-9 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors shadow-sm"
-                style={{ top: 66, left: 14 }}
+                className="fixed z-50 flex items-center justify-center bg-card text-foreground hover:bg-primary/10 transition-colors"
+                // A slim tab on the left edge, half-way down: clear of the Home sheet's title block and its text.
+                style={{ top: "50%", left: 0, width: HOME_TAB_W, height: 52, transform: "translateY(-50%)", border: "1px solid hsl(var(--foreground))", borderLeft: 0 }}
               >
-                <PanelLeftOpen size={16} />
+                <ChromeIcons.right size={15} />
               </button>
             )}
 
@@ -272,7 +283,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             {isMobile && <MobileNav />}
 
             <main
-              className={`pt-14 min-h-screen ${isMobile ? "pb-16" : ""}`}
+              className={`pt-14 min-h-screen ${isMobile ? "pb-[calc(5rem+env(safe-area-inset-bottom))]" : ""}`}
               style={{
                 marginLeft: mainML,
                 transition: "margin-left 250ms cubic-bezier(0.4, 0, 0.2, 1)",
@@ -290,9 +301,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               >
                 <div
                   className={
-                    !effectiveIsHome && !isMobile
-                      ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background min-w-0 overflow-x-clip"
-                      : "p-4 md:p-6 transition-opacity duration-300 min-w-0 overflow-x-clip"
+                    isHome
+                      ? "transition-opacity duration-300 min-w-0 overflow-x-clip"
+                      : !effectiveIsHome && !isMobile
+                        ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background min-w-0 overflow-x-clip"
+                        : "p-4 md:p-6 transition-opacity duration-300 min-w-0 overflow-x-clip"
                   }
                   style={{ opacity: moduleSwitching ? 0 : 1 }}
                 >

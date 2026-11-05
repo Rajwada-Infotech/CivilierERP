@@ -9,6 +9,7 @@
 // polish — see purchaseOrdersApi.ts's resolveLineGstSplit/convert* exports.
 // Payment Terms is a plain text field here (web also offers a T&C-master
 // multi-select — dropped for v1, non-essential to correctness).
+import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
@@ -69,7 +70,7 @@ type FormState = {
   paymentTerms: string; remarks: string;
 };
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() { return istToday(); }
 
 function blankForm(): FormState {
   return {

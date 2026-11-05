@@ -54,6 +54,8 @@ export interface CreateMRPayload {
   Priority?: string;
   Reason: string;
   Remarks?: string | null;
+  /** Set when the request is raised from an approved Work Order (checked again by the server). */
+  SourceWOId?: number | null;
   items: MRLineItem[];
 }
 
@@ -128,11 +130,6 @@ export const deleteMaterialRequest = (id: number | string) =>
     handleResponse(r),
   );
 
-export const submitMaterialRequest = (id: number | string) =>
-  fetchWithAuth(`${BASE}/${id}/submit`, { method: "PUT" }).then((r) =>
-    handleResponse(r),
-  );
-
 // ── Master data ────────────────────────────────────────────────────────────────
 
 export const getMRCompanies = () =>
@@ -154,11 +151,6 @@ export const getMRItemOptions = (projectId?: string | number | null) => {
 export const getMRUomOptions = () =>
   fetchWithAuth(`${BASE}/uom-options`).then((r) => handleResponse<any[]>(r));
 
-export const previewNextMRNumber = () =>
-  fetchWithAuth(`${BASE}/preview-next-number`).then((r) =>
-    handleResponse<{ nextDocNo: string | null }>(r),
-  );
-
 // ── PO creation from MR ────────────────────────────────────────────────────────
 
 export interface MRPOPrefillItem {
@@ -176,6 +168,11 @@ export interface MRPOPrefillItem {
   M_CGST: number | null;
   M_SGST: number | null;
   M_IGST: number | null;
+  /** From the work order this MR was raised from (absent otherwise): its rate, GST % and per-line supplier. */
+  WoRate?: number;
+  WoGstRate?: number;
+  WoSupplierId?: number | null;
+  WoSupplierName?: string | null;
 }
 
 export interface MRItemFulfillment {
@@ -188,28 +185,11 @@ export interface MRItemFulfillment {
   PendingQty: number;
 }
 
-export interface MRPendingSummary {
-  MRId: number;
-  items: MRItemFulfillment[];
-  totalRequested: number;
-  totalOrdered: number;
-  totalPending: number;
-}
-
 export interface MRPendingSummaryTotals {
   MRId: number;
   totalRequested: number;
   totalOrdered: number;
   totalPending: number;
-}
-
-export interface MRLinkedPO {
-  purchaseOrderId: number;
-  poNumber: string;
-  date: string;
-  status: string;
-  orderedQty: number;
-  remainingQtyAfter: number;
 }
 
 export interface MRPOPrefill {
@@ -222,6 +202,11 @@ export interface MRPOPrefill {
   FinYearId: number | null;
   FinYearName: string;
   Remarks: string;
+  /** Set when the MR was raised from a work order. The supplier is only given when every line agrees on one. */
+  WorkOrderId?: number;
+  WorkOrderDocNo?: string | null;
+  WorkOrderSupplierId?: number | null;
+  WorkOrderSupplierName?: string | null;
   items: MRPOPrefillItem[];
 }
 
@@ -250,11 +235,6 @@ export const getApprovedMRList = (params?: {
     handleResponse<ApprovedMRSummary[]>(r),
   );
 };
-
-export const getMRPOPrefillByDocNo = (docNo: string) =>
-  fetchWithAuth(
-    `${BASE}/by-docno/${encodeURIComponent(docNo.trim().toUpperCase())}`,
-  ).then((r) => handleResponse<MRPOPrefill>(r));
 
 export const getMRPOPrefill = (id: number | string) =>
   fetchWithAuth(`${BASE}/${id}/create-po-prefill`).then((r) =>
@@ -297,24 +277,7 @@ export const getICTMRPrefill = (id: number | string) =>
     handleResponse<ICTMRPrefill>(r),
   );
 
-export const markMROrdered = (id: number | string) =>
-  fetchWithAuth(`${BASE}/${id}/mark-ordered`, { method: "PUT" }).then((r) =>
-    handleResponse(r),
-  );
-
-// ── Partial-fulfillment tracking ────────────────────────────────────────────────
-
-export const getMRPendingSummary = (id: number | string) =>
-  fetchWithAuth(`${BASE}/${id}/pending-summary`).then((r) =>
-    handleResponse<MRPendingSummary>(r),
-  );
-
 export const getBulkMRPendingSummary = () =>
   fetchWithAuth(`${BASE}/pending-summary`).then((r) =>
     handleResponse<MRPendingSummaryTotals[]>(r),
-  );
-
-export const getMRLinkedPOs = (id: number | string) =>
-  fetchWithAuth(`${BASE}/${id}/linked-pos`).then((r) =>
-    handleResponse<MRLinkedPO[]>(r),
   );

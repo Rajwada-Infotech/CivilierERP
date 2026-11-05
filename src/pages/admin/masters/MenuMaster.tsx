@@ -1,19 +1,22 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, CheckCircle2, LayoutList, X, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, CheckCircle2, X, Search } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { SheetShell } from "@/components/sheet/Sheet";
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const FIELD = "w-full px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground transition-colors";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Table,
@@ -141,20 +144,20 @@ const MenuMasterPage: React.FC = () => {
   if (isLoading) {
     return (
       <div className="p-8 flex flex-col items-center justify-center min-h-[400px] text-muted-foreground">
-        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mb-4" />
-        <p>Loading Menu Master...</p>
+        <div className="animate-spin h-7 w-7 border-2 border-foreground border-t-transparent rounded-full mb-4" />
+        <p className="text-sm">Loading menu types…</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-8 text-red-500 bg-red-50 dark:bg-red-950/30 rounded-xl border border-red-200 mt-8">
-        <h2 className="font-semibold mb-2">Failed to Load Data</h2>
-        <p>{(error as Error).message}</p>
+      <div className="p-6 text-destructive bg-card border border-destructive mt-8">
+        <h2 className="font-heading font-bold mb-2">Could not load the menu types</h2>
+        <p className="text-sm">{(error as Error).message}</p>
         <button
           onClick={() => window.location.reload()}
-          className="mt-4 px-5 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
+          className={`${KEY_LINE} mt-4 h-9 px-4`}
         >
           Retry
         </button>
@@ -165,48 +168,48 @@ const MenuMasterPage: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Setup", "Menu Master"]} />
-      <AdminShell
-        title="Menu Master"
-        icon={LayoutList}
+      <SheetShell
+        eyebrow="CivilierERP · Admin · Setup"
+        title="Menu types"
+        subtitle="The kinds of entry a document can be — they fill the Entry Type dropdowns."
         action={
-          <div className="flex items-center gap-3">
-            <div className="relative w-64">
-              <Search
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                placeholder="Search menus..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 h-8 text-sm"
-              />
-            </div>
-            {rights.canCreate && (
-              <Button onClick={openCreate} size="sm" className="gap-1.5 btn-module shadow-sm text-white hover:opacity-90">
-                <Plus size={15} />
-                New Menu Entry
-              </Button>
-            )}
-          </div>
+          rights.canCreate && (
+            <button type="button" onClick={openCreate} className={`${KEY_INK} h-9 px-4`}>
+              <Plus size={13} /> New menu entry
+            </button>
+          )
         }
       >
       {/* Table */}
-      <div className="border rounded-xl bg-card overflow-hidden shadow-sm">
+      <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+          <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
+            Entries <span className="font-normal text-muted-foreground tabular-nums ml-1">{menus.length}</span>
+          </span>
+          <div className="relative w-full sm:w-64">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              placeholder="Search menus…"
+              aria-label="Search menus"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className={`${FIELD} h-9 pl-8`}
+            />
+          </div>
+        </div>
         <Table>
           <TableHeader>
-            <TableRow className="bg-muted/40 hover:bg-muted/40">
-              <TableHead className="w-10 text-center">#</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead className="text-right w-24">Actions</TableHead>
+            <TableRow className={`${LBL} hover:bg-transparent`} style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.3)" }}>
+              <TableHead className="w-10 text-center h-9 text-inherit">#</TableHead>
+              <TableHead className="h-9 text-inherit">Name</TableHead>
+              <TableHead className="h-9 text-inherit">Description</TableHead>
+              <TableHead className="text-right w-24 h-9 text-inherit">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={4} className="text-center py-16 text-muted-foreground">
-                  <LayoutList size={32} className="mx-auto mb-3 opacity-20" />
                   <p className="text-sm">
                     {search ? "No results match your search." : "No menu entries yet."}
                   </p>
@@ -219,8 +222,8 @@ const MenuMasterPage: React.FC = () => {
               </TableRow>
             ) : (
               filtered.map((row, idx) => (
-                <TableRow key={row.Id} className="hover:bg-muted/30 transition-colors">
-                  <TableCell className="text-center text-muted-foreground text-xs">
+                <TableRow key={row.Id} className="hover:bg-primary/5 transition-colors border-foreground/10">
+                  <TableCell className="text-center text-muted-foreground text-xs font-heading tabular-nums">
                     {idx + 1}
                   </TableCell>
                   <TableCell className="font-medium text-sm">{row.Name}</TableCell>
@@ -230,24 +233,26 @@ const MenuMasterPage: React.FC = () => {
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
                       {rights.canEdit && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
+                        <button
+                          type="button"
                           onClick={() => openEdit(row)}
-                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          className={`${ACT} hover:text-foreground hover:border-foreground`}
+                          title="Edit"
+                          aria-label={`Edit ${row.Name}`}
                         >
                           <Pencil size={13} />
-                        </Button>
+                        </button>
                       )}
                       {rights.canDelete && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
+                        <button
+                          type="button"
                           onClick={() => setDeleteId(row.Id)}
-                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          className={`${ACT} hover:text-destructive hover:border-destructive`}
+                          title="Delete"
+                          aria-label={`Delete ${row.Name}`}
                         >
                           <Trash2 size={13} />
-                        </Button>
+                        </button>
                       )}
                     </div>
                   </TableCell>
@@ -257,74 +262,80 @@ const MenuMasterPage: React.FC = () => {
           </TableBody>
         </Table>
       </div>
-      </AdminShell>
+      </SheetShell>
 
       {/* Create / Edit Dialog */}
       {(rights.canCreate || rights.canEdit) && <Dialog open={dialogOpen} onOpenChange={(v) => !v && closeDialog()}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="sheet-frame max-w-sm" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2">
-              <LayoutList size={16} className="text-primary" />
-              {editingId !== null ? "Edit Menu Entry" : "New Menu Entry"}
-            </DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Menu type</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">
+                {editingId !== null ? "Edit menu entry" : "New menu entry"}
+              </DialogTitle>
+            </div>
           </DialogHeader>
 
           <div className="space-y-4 py-1">
             <div className="space-y-1.5">
-              <Label className="text-sm">
+              <label htmlFor="menu-name" className={`${LBL} block`}>
                 Name <span className="text-destructive">*</span>
-              </Label>
-              <Input
+              </label>
+              <input
+                id="menu-name"
                 placeholder="e.g. Received Payment, Site Expense, Invoice..."
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={200}
                 autoFocus
-                className="text-sm"
+                className={`${FIELD} h-9`}
                 onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-sm">Description</Label>
-              <Textarea
+              <label htmlFor="menu-description" className={`${LBL} block`}>Description</label>
+              <textarea
+                id="menu-description"
                 placeholder="Optional — describe what this menu type represents"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 maxLength={500}
                 rows={3}
-                className="text-sm resize-none"
+                className={`${FIELD} py-2 resize-none`}
               />
             </div>
           </div>
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={closeDialog} disabled={isPending} size="sm">
-              <X size={13} className="mr-1" />
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} disabled={isPending || !name.trim()} size="sm" className="btn-module shadow-sm text-white hover:opacity-90">
-              <CheckCircle2 size={13} className="mr-1" />
-              {isPending ? "Saving..." : editingId !== null ? "Update" : "Create"}
-            </Button>
-          </DialogFooter>
+          <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
+            <button type="button" onClick={closeDialog} disabled={isPending} className={`${KEY_LINE} h-9 px-4`}>
+              <X size={12} /> Cancel
+            </button>
+            <button type="button" onClick={handleSubmit} disabled={isPending || !name.trim()} className={`${KEY_INK} h-9 px-5`}>
+              <CheckCircle2 size={12} />
+              {isPending ? "Saving…" : editingId !== null ? "Update" : "Create"}
+            </button>
+          </div>
         </DialogContent>
       </Dialog>}
 
       {/* Delete Confirm */}
       <AlertDialog open={deleteId !== null} onOpenChange={(v) => !v && setDeleteId(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sheet-frame" style={{ margin: 0 }}>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Menu Entry?</AlertDialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Menu type</p>
+              <AlertDialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Delete menu entry</AlertDialogTitle>
+            </div>
             <AlertDialogDescription>
               This will permanently remove this menu entry. It will no longer
               appear in Entry Type dropdowns.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="pt-3" style={{ borderTop: RULE }}>
+            <AlertDialogCancel className={`${KEY} h-9 px-4 rounded-none border border-foreground text-foreground bg-card hover:bg-primary/10`}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className={`${KEY} h-9 px-5 rounded-none !bg-destructive !text-destructive-foreground border border-destructive hover:!bg-destructive/90`}
               onClick={() => deleteId !== null && deleteMutation.mutate(deleteId)}
             >
               Delete

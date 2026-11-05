@@ -1,105 +1,78 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   ASSIGNMENT_STATUSES,
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
   getActivityScopeSummary,
+  getScopeProjects,
   getActivityPhotos,
   startDelayInfo,
   type AssignmentStatus,
   type ScopeSummaryRoom,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { ScopeLocationTree } from "@/components/civilworkdpr/ScopeLocationTree";
 import {
-  ClipboardList,
   UserRound,
   CalendarDays,
   Package,
   Loader2,
   ChevronDown,
   ChevronRight,
-  GitBranch,
   Camera,
-  Clock,
   Activity,
-  PauseCircle,
-  XCircle,
-  ShieldCheck,
-  RotateCcw,
-  CheckCircle2,
   Search,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
 import ActivityDetailModal from "./ActivityDetailModal";
-
-// Purely presentational — icon + accent color per status, same colors as
-// ASSIGNMENT_STATUS_META's Tailwind classes just as hex for GlassCard's
-// inline styling. "ALL" isn't in that enum so it gets its own entry.
-const STATUS_TILE_META: Record<AssignmentStatus | "ALL", { icon: LucideIcon; accentColor: string }> = {
-  ALL: { icon: ClipboardList, accentColor: "#06b6d4" },
-  PENDING: { icon: Clock, accentColor: "#64748b" },
-  ALLOCATED: { icon: GitBranch, accentColor: "#6366f1" },
-  IN_PROGRESS: { icon: Activity, accentColor: "#3b82f6" },
-  HOLD: { icon: PauseCircle, accentColor: "#f59e0b" },
-  CANCELLED: { icon: XCircle, accentColor: "#ef4444" },
-  APPROVED: { icon: ShieldCheck, accentColor: "#14b8a6" },
-  REWORK: { icon: RotateCcw, accentColor: "#d946ef" },
-  COMPLETED: { icon: CheckCircle2, accentColor: "#10b981" },
-};
+import { dependencyAutoName } from "@/lib/dependencyAutoName";
+import { PriorityBadge } from "@/components/civilworkdpr/PriorityBadge";
+import { AssignmentPrioritySelect } from "@/components/civilworkdpr/AssignmentPrioritySelect";
 
 const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "All" },
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
 
-// Status filter chip — icon, label, and a count badge for how many
-// assigned activities currently sit in that status.
+// Status filter key — the label and how many assigned activities currently
+// sit in that status. The chosen one is inked; Cancelled keeps the one red.
 function StatusTile({
   label,
-  icon: Icon,
-  accentColor,
+  stopped,
   active,
   count,
   onClick,
 }: {
   label: string;
-  icon: LucideIcon;
-  accentColor: string;
+  stopped: boolean;
   active: boolean;
   count: number;
   onClick: () => void;
 }) {
+  const red = stopped && count > 0;
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-colors border shrink-0"
-      style={
+      aria-pressed={active}
+      className={`flex items-baseline gap-2 px-3 py-2 border shrink-0 transition-colors ${
         active
-          ? { background: `${accentColor}18`, borderColor: `${accentColor}59`, color: accentColor }
-          : { background: "transparent", borderColor: "var(--border)", color: "var(--muted-foreground)" }
-      }
+          ? red ? "bg-destructive border-destructive text-destructive-foreground" : "bg-foreground border-foreground text-card"
+          : red ? "border-destructive text-destructive hover:bg-destructive/10" : "border-foreground/40 text-foreground hover:border-foreground hover:bg-primary/10"
+      }`}
     >
-      <Icon size={12} />
-      {label}
-      <span
-        className="px-1.5 rounded-full text-[0.625rem] font-heading font-semibold leading-4"
-        style={
-          active
-            ? { background: `${accentColor}2e`, color: accentColor }
-            : { background: "var(--muted)", color: "var(--muted-foreground)" }
-        }
-      >
-        {count}
-      </span>
+      <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap">{label}</span>
+      <span className={`font-heading text-xs font-semibold tabular-nums ${active ? "" : red ? "" : "text-muted-foreground"}`}>{count}</span>
     </button>
   );
 }
@@ -107,17 +80,21 @@ function StatusTile({
 // Purely informational — clicking anywhere on the row (including this
 // badge) opens the Activity Detail modal; clicking the badge specifically
 // jumps straight to its Photos tab instead of landing on Overview.
-function ActivityPhotosBadge({ rungId }: { rungId: number }) {
+// The count comes with the room's list (photoCount). This row used to download the activity's every photo — data
+// and all — just to count them, one request per row, which on a full room tripped the rate limit (429s).
+// enabled: false only reads the photos already cached by the detail modal, so an upload made there shows at once.
+function ActivityPhotosBadge({ rungId, count: listed }: { rungId: number; count?: number }) {
   const { data: photos } = useQuery({
     queryKey: ["activity-photos", rungId],
     queryFn: () => getActivityPhotos(rungId),
+    enabled: false,
   });
-  const count = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
+  const count = photos ? photos.before.length + photos.after.length : (listed ?? 0);
 
   return (
     <span
-      className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[0.6875rem] font-medium ${
-        count > 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+      className={`inline-flex items-center gap-1.5 text-[0.6875rem] whitespace-nowrap underline-offset-2 hover:underline ${
+        count > 0 ? "font-semibold text-foreground" : "text-muted-foreground"
       }`}
     >
       <Camera size={12} />
@@ -166,7 +143,7 @@ function ChainGroupList({
     });
 
   return (
-    <div className="rounded-lg border border-border/60 overflow-hidden divide-y divide-border">
+    <div className="overflow-hidden divide-y divide-foreground/40 border border-foreground/40">
       {groups.map((group) => {
         const collapsed = collapsedKeys.has(group.key);
         return (
@@ -174,25 +151,17 @@ function ChainGroupList({
             <button
               type="button"
               onClick={() => toggle(group.key)}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-primary/10 transition-colors text-left"
+              aria-expanded={!collapsed}
             >
               {collapsed ? (
-                <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                <ChevronRight size={14} className="text-foreground shrink-0" />
               ) : (
-                <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                <ChevronDown size={14} className="text-foreground shrink-0" />
               )}
-              <GitBranch size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
-              <span className="text-sm font-heading font-semibold text-foreground">{group.alias}</span>
-              <span
-                className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                  group.workType === "INTERNAL"
-                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                    : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                }`}
-              >
-                {group.workType}
-              </span>
-              <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+              <span className="text-sm font-semibold text-foreground">{group.alias}</span>
+              <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{group.workType}</span>
+              <span className="ml-auto font-heading text-[0.625rem] tabular-nums text-muted-foreground shrink-0">
                 {group.rows.length} activit{group.rows.length !== 1 ? "ies" : "y"}
               </span>
             </button>
@@ -210,14 +179,17 @@ function ChainGroupList({
                       <div
                         key={row.assignmentId}
                         onClick={() => openDetail(row, "overview")}
-                        className="p-3.5 active:bg-muted/30 cursor-pointer space-y-2.5"
+                        className="p-3.5 active:bg-primary/10 cursor-pointer space-y-2.5"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <span className="text-sm font-medium text-foreground leading-snug min-w-0">
                             {row.sequenceNo}. {row.activityName}
                           </span>
-                          <div onClick={(e) => e.stopPropagation()} className="shrink-0">
-                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
+                          <div onClick={(e) => e.stopPropagation()} className="shrink-0 flex flex-col items-end gap-0.5">
+                            <PriorityBadge priority={row.priority} />
+                            {row.tagName && <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground" title="Tag">{row.tagName}</span>}
+                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
+                            <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} />
                           </div>
                         </div>
 
@@ -233,17 +205,13 @@ function ChainGroupList({
                           </span>
                           <span className="flex items-center gap-1.5">
                             <CalendarDays size={12} className="shrink-0" />
-                            {row.startDate ? new Date(row.startDate).toLocaleDateString() : "—"}
+                            {row.startDate ? new Date(row.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                           </span>
                         </div>
 
                         {delay && (
                           <span
-                            className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
-                              delay.tone === "on-time"
-                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
-                            }`}
+                            className={`block text-[0.625rem] leading-tight ${delay.tone === "on-time" ? "text-muted-foreground" : "text-foreground font-semibold"}`}
                           >
                             {delay.label}
                           </span>
@@ -275,7 +243,7 @@ function ChainGroupList({
                             "opening an activity" look like it always landed
                             on Photos. */}
                         <div onClick={(e) => { e.stopPropagation(); openDetail(row, "photos"); }} className="inline-flex">
-                          <ActivityPhotosBadge rungId={row.rungId} />
+                          <ActivityPhotosBadge rungId={row.rungId} count={row.photoCount} />
                         </div>
                       </div>
                     );
@@ -286,9 +254,11 @@ function ChainGroupList({
                 <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                      <tr className="text-left">
                         <th className="px-5 py-2">Activity</th>
                         <th className="px-3 py-2">Engineer</th>
+                        <th className="px-3 py-2">Tag</th>
+                        <th className="px-3 py-2">Priority</th>
                         <th className="px-3 py-2">Start Date</th>
                         <th className="px-3 py-2">Material</th>
                         <th className="px-3 py-2">Photos</th>
@@ -300,36 +270,41 @@ function ChainGroupList({
                         <tr
                           key={row.assignmentId}
                           onClick={() => openDetail(row, "overview")}
-                          className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
+                          className="cursor-pointer"
                         >
                           <td className="px-5 py-3">
-                            <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                              {row.sequenceNo}. {row.activityName}
+                            <span className="text-[0.8125rem] font-medium text-foreground flex items-center gap-2">
+                              <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-muted-foreground w-6 shrink-0">{row.sequenceNo}</span>
+                              {row.activityName}
                               <QcBadge qcStatus={row.qcStatus} />
                               <AttemptBadge attemptNo={row.attemptNo} />
                             </span>
                           </td>
                           <td className="px-3 py-3">
                             <span className="flex items-center gap-1.5 text-xs text-foreground">
-                              <UserRound size={11} className="text-muted-foreground shrink-0" />
                               {row.engineerNames || <span className="text-muted-foreground italic">Unassigned</span>}
                             </span>
                           </td>
                           <td className="px-3 py-3">
-                            <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
-                              <CalendarDays size={11} className="text-muted-foreground shrink-0" />
-                              {row.startDate ? new Date(row.startDate).toLocaleDateString() : "—"}
+                            {row.tagName ? (
+                              <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground whitespace-nowrap">{row.tagName}</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                            <AssignmentPrioritySelect rungId={row.rungId} priority={row.priority} />
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap tabular-nums">
+                              {row.startDate ? new Date(row.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                             </span>
                             {(() => {
                               const delay = startDelayInfo(row.startDate, row.firstReportedAt);
                               if (!delay) return null;
                               return (
                                 <span
-                                  className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
-                                    delay.tone === "on-time"
-                                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                      : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
-                                  }`}
+                                  className={`mt-1 block text-[0.625rem] leading-tight ${delay.tone === "on-time" ? "text-muted-foreground" : "text-foreground font-semibold"}`}
                                 >
                                   {delay.label}
                                 </span>
@@ -343,7 +318,6 @@ function ChainGroupList({
                               <div className="flex flex-col gap-0.5">
                                 {row.materials.map((m, i) => (
                                   <span key={i} className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
-                                    <Package size={11} className="text-muted-foreground shrink-0" />
                                     {m.name}
                                     <span className="text-muted-foreground">
                                       · {m.quantity}
@@ -361,10 +335,11 @@ function ChainGroupList({
                               openDetail(row, "photos");
                             }}
                           >
-                            <ActivityPhotosBadge rungId={row.rungId} />
+                            <ActivityPhotosBadge rungId={row.rungId} count={row.photoCount} />
                           </td>
                           <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
-                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
+                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
+                            <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} className="mt-1" />
                           </td>
                         </tr>
                       ))}
@@ -419,16 +394,201 @@ function RoomActivities({
   return <ChainGroupList items={items} openDetail={openDetail} />;
 }
 
+const autoNameOf = (r: ReportedAssignment) =>
+  dependencyAutoName({ flatName: r.flatName, alias: r.alias, roomName: r.roomName, storey: r.storey, activityName: r.activityName });
+
+// A separate "find one activity" box: type an Auto Name (or any words of it), pick the match, and that
+// activity's details show in their own card below — without opening the location tree at all.
+function AutoNameLookup({
+  openDetail,
+}: {
+  openDetail: (row: ReportedAssignment, tab?: "overview" | "blueprint" | "photos") => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [picked, setPicked] = useState<ReportedAssignment | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const q = query.trim();
+      setDebounced(q.length >= 2 ? q : "");
+    }, 350);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const { data: matches = [], isFetching } = useQuery({
+    queryKey: ["civilworkdpr-activity-reporting", "auto-name-lookup", debounced],
+    queryFn: () => getReportedAssignments({ search: debounced, limit: 25 }),
+    enabled: !!debounced,
+    placeholderData: (prev) => prev,
+  });
+
+  // Keep what's shown fresh (status changes, new progress) by re-reading the picked activity.
+  const { data: fresh } = useQuery({
+    queryKey: ["civilworkdpr-activity-reporting", "auto-name-picked", picked?.rungId],
+    queryFn: async () => (await getReportedAssignments({ rungId: picked!.rungId }))[0] ?? null,
+    enabled: !!picked,
+  });
+  const shown = fresh ?? picked;
+
+  return (
+    <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Find an activity by auto name</span>
+        <span className="hidden sm:inline text-[0.6875rem] text-muted-foreground">flat, room and activity, in any order</span>
+      </div>
+      <div className="px-4 py-4 space-y-3">
+        <div className="relative">
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && matches[0]) {
+                setPicked(matches[0]);
+                setQuery("");
+              }
+            }}
+            placeholder="e.g. NS/n1/101, Hall Room and 2.1 Column and Beam…"
+            className="w-full h-10 pl-8 pr-8 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none"
+          />
+          {query && (
+            <button onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear search">
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        {debounced && (
+          <div>
+            {isFetching && matches.length === 0 ? (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 size={12} className="animate-spin" /> Searching…</p>
+            ) : matches.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">No activity matches "{debounced}".</p>
+            ) : (
+              <>
+                <p className="text-[0.6875rem] text-muted-foreground mb-1.5">
+                  {matches.length}{matches.length === 25 ? "+" : ""} match{matches.length === 1 ? "" : "es"} — pick one to see its details
+                </p>
+                <ul className="divide-y divide-border/70 border border-foreground max-h-64 overflow-y-auto">
+                  {matches.map((m) => (
+                    <li key={m.assignmentId}>
+                      <button
+                        onClick={() => {
+                          setPicked(m);
+                          setQuery("");
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-primary/10 transition-colors"
+                      >
+                        <p className="text-sm font-medium text-foreground">{autoNameOf(m)}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground">
+                          {m.projectName ? `${m.projectName} > ` : ""}{m.scopePath} · {STATUS_META[m.status]?.label ?? m.status}
+                          {m.attemptNo > 1 ? ` · attempt ${m.attemptNo}` : ""}
+                        </p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+
+        {shown && (
+          <div className="overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+            <div className="flex flex-wrap items-start justify-between gap-2 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <div className="min-w-0">
+                <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Auto name</p>
+                <p className="text-sm font-semibold text-foreground break-words">{autoNameOf(shown)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {shown.projectName ? `${shown.projectName} > ` : ""}{shown.scopePath}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="font-heading text-xs font-semibold tabular-nums text-foreground">{Math.round(shown.progressPercent * 10) / 10}% done</span>
+                <button onClick={() => setPicked(null)} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <X size={12} /> Close
+                </button>
+              </div>
+            </div>
+            <ChainGroupList items={[shown]} openDetail={openDetail} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | "ALL">("ALL");
   const [search, setSearch] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [detailRow, setDetailRow] = useState<ReportedAssignment | null>(null);
   const [detailTab, setDetailTab] = useState<"overview" | "blueprint" | "photos">("overview");
   const openDetail = (row: ReportedAssignment, tab: "overview" | "blueprint" | "photos" = "overview") => {
     setDetailRow(row);
     setDetailTab(tab);
   };
+
+  // Opened from a report row (?rung=): open that activity's detail straight away, once. When the link says where
+  // it came from (router state `returnTo`, e.g. the Civil Work DPR Query page), closing the popup goes back there.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const returnToRef = useRef<string | null>((location.state as { returnTo?: string } | null)?.returnTo ?? null);
+  const openedFromLinkRef = useRef(false);
+  const closeDetail = () => {
+    setDetailRow(null);
+    if (openedFromLinkRef.current && returnToRef.current) {
+      openedFromLinkRef.current = false;
+      const target = returnToRef.current;
+      // The popup's own history entry (see useOverlayBackClose) is removed with an asynchronous history.back() when
+      // it closes — go back to the origin only after that has settled, or it would pop the page we just opened.
+      let done = false;
+      const go = () => {
+        if (done) return;
+        done = true;
+        window.removeEventListener("popstate", go);
+        clearTimeout(timer);
+        navigate(target);
+      };
+      const timer = setTimeout(go, 300);
+      window.addEventListener("popstate", go);
+    }
+  };
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedRung = readChainLink(searchParams).rungId;
+  useEffect(() => {
+    if (!linkedRung || !rights.canView) return;
+    let cancelled = false;
+    getReportedAssignments({ rungId: linkedRung })
+      .then((rows) => {
+        if (cancelled) return;
+        if (rows[0]) {
+          openedFromLinkRef.current = true;
+          openDetail(rows[0]);
+        } else toast.error("That activity is not in Activity Reporting (it may be outside your projects or its chain retired).");
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : "Could not open that activity.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("rung");
+            next.delete("chain");
+            return next;
+          },
+          { replace: true },
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedRung, rights.canView]);
 
   // Debounced so the search box doesn't fire a fresh GROUP BY over the
   // whole (342,000+ row, in production) table on every keystroke.
@@ -448,11 +608,12 @@ export default function ActivityReporting() {
   // room are only ever fetched on demand, by RoomActivities, once that
   // room's node is expanded (see its own comment above).
   const { data: summary, isLoading } = useQuery({
-    queryKey: ["civilworkdpr-activity-reporting", "summary", statusFilter, debouncedSearch],
+    queryKey: ["civilworkdpr-activity-reporting", "summary", statusFilter, debouncedSearch, projectId],
     queryFn: () =>
       getActivityScopeSummary({
         status: statusFilter !== "ALL" ? statusFilter : undefined,
         search: debouncedSearch || undefined,
+        projectId: projectId ? Number(projectId) : undefined,
       }),
     enabled: rights.canView,
     // Keep showing the previous tree while the next search is fetched instead
@@ -467,6 +628,12 @@ export default function ActivityReporting() {
   // narrow result opens itself; a broad one stays collapsed for the user to open.
   const MAX_AUTO_EXPAND_ROOMS = 6;
   const autoExpand = !!debouncedSearch && rooms.length <= MAX_AUTO_EXPAND_ROOMS;
+  const { data: projects = [] } = useQuery({
+    queryKey: ["civilworkdpr-scope-projects"],
+    queryFn: getScopeProjects,
+    enabled: rights.canView,
+    staleTime: 10 * 60 * 1000,
+  });
   const statusCounts = summary?.statusCounts ?? {};
   const total = summary?.total ?? 0;
 
@@ -478,26 +645,44 @@ export default function ActivityReporting() {
           { label: "Reporting" },
         ]}
       />
-      <CivilWorkDprShell
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
         title="Reporting"
-        subtitle="Every activity assigned an engineer or material from Work Allocation, tracked through to completion"
-        icon={ClipboardList}
+        subtitle="Every activity given an engineer or material in Work Allocation, followed through to completion."
       >
         {!rights.canView ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          <div className="bg-card p-8 text-center text-sm text-muted-foreground" style={{ border: "1px dashed hsl(var(--border))" }}>
             You don't have access to this page.
           </div>
         ) : (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3 px-3.5 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-muted/30">
-              <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
+          <>
+          <AutoNameLookup openDetail={openDetail} />
+          <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <p className="flex items-baseline gap-2.5">
+                <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Assigned activities</span>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{total.toLocaleString("en-IN")}</span>
+              </p>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
+              {projects.length > 0 && (
+                <select
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  className="h-9 px-2.5 w-full sm:w-52 text-xs border border-foreground/40 focus:border-foreground bg-card text-foreground outline-none"
+                >
+                  <option value="">All projects</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name || `Project ${p.id}`}</option>
+                  ))}
+                </select>
+              )}
               <div className="relative w-full sm:w-auto">
                 <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search flat or activity…"
-                  className="pl-7 pr-7 py-1.5 w-full sm:w-56 text-xs rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  placeholder="Search Auto Name — flat, room or activity…"
+                  className="pl-7 pr-7 h-9 w-full sm:w-64 text-xs border border-foreground/40 focus:border-foreground bg-card text-foreground placeholder:text-muted-foreground/70 outline-none"
                 />
                 {search && (
                   <button
@@ -509,6 +694,7 @@ export default function ActivityReporting() {
                   </button>
                 )}
               </div>
+              </div>
             </div>
 
             {/* Mobile: one horizontally-scrolling row (swipe to see the rest,
@@ -516,16 +702,14 @@ export default function ActivityReporting() {
                 letting 9 pills wrap into 3-4 full-width rows a user has to
                 scroll past before reaching any actual content. Desktop keeps
                 the original wrapping layout — there's room for it there. */}
-            <div className="flex sm:flex-wrap items-center gap-1.5 px-3.5 sm:px-5 py-2.5 sm:py-3 border-b border-border bg-muted/10 overflow-x-auto sm:overflow-visible thin-scroll">
+            <div className="flex sm:flex-wrap items-center gap-1.5 px-4 py-3 overflow-x-auto sm:overflow-visible thin-scroll" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
               {FILTER_OPTIONS.map((opt) => {
-                const meta = STATUS_TILE_META[opt.value];
                 const count = opt.value === "ALL" ? total : (statusCounts[opt.value] ?? 0);
                 return (
                   <StatusTile
                     key={opt.value}
                     label={opt.label}
-                    icon={meta.icon}
-                    accentColor={meta.accentColor}
+                    stopped={opt.value === "CANCELLED"}
                     active={statusFilter === opt.value}
                     count={count}
                     onClick={() => setStatusFilter(opt.value)}
@@ -544,7 +728,7 @@ export default function ActivityReporting() {
                   ? "No activities have been assigned yet — click an activity chip in Work Allocation's Link Dependency chain to assign one."
                   : debouncedSearch
                     ? `No activities match "${debouncedSearch}".`
-                    : "No activities match this status."}
+                    : "No activities match these filters."}
               </div>
             ) : (
               <div className="p-2 sm:p-4">
@@ -566,10 +750,11 @@ export default function ActivityReporting() {
               </div>
             )}
           </div>
+          </>
         )}
-      </CivilWorkDprShell>
+      </SheetShell>
       {detailRow && (
-        <ActivityDetailModal row={detailRow} initialTab={detailTab} onClose={() => setDetailRow(null)} />
+        <ActivityDetailModal row={detailRow} initialTab={detailTab} onClose={closeDetail} />
       )}
     </>
   );

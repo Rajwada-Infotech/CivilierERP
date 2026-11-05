@@ -19,7 +19,7 @@
 //   node scripts/cloneChainForChainlessRooms.js --all            # every project with rooms, read from the DB
 
 const { connectDB, getPool, sql, closeDB } = require("../db");
-const { floorLabelOf } = require("../services/unitLayout");
+const { floorLabelOf, chainFloorLabel } = require("../services/unitLayout");
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
 const APPLY = process.argv.includes("--apply");
@@ -65,7 +65,15 @@ async function main() {
   if (!rule.tower || !rule.flat || !(rule.floorLabel || rule.floorNo)) {
     throw new Error("existing chains don't follow one consistent tower/flat/floor format — refusing to guess");
   }
-  const floorOf = (fno) => (rule.floorLabel ? String(floorLabelOf(fno)) : String(fno));
+  // A unit's chain Floor — by its floor, or, for a unit with none, by its
+  // project type (services/unitLayout.js chainFloorLabel). Cached per unit.
+  const floorCache = new Map();
+  const floorOf = async (t) => {
+    if (!floorCache.has(t.UnitId)) floorCache.set(t.UnitId, chainFloorLabel(pool, t, { asLabel: rule.floorLabel }).then((v) => ({ v }), (e) => ({ e })));
+    const r = await floorCache.get(t.UnitId);
+    if (r.e) throw r.e;
+    return r.v;
+  };
   // Alias format is free text in the app, so it is LEARNED from the existing
   // chains: for each one, find the separator (read from the alias itself, the
   // character right after the unit's first segment) and the letter case of the
@@ -129,12 +137,14 @@ async function main() {
     const donor = template.get(t.RoomCategoryId);
     if (!donor) { totals.noTemplate++; noTpl.set(t.RoomName.replace(/\s*\d+$/, ""), (noTpl.get(t.RoomName.replace(/\s*\d+$/, "")) || 0) + 1); continue; }
     const alias = build(aliasFormat, t.UnitName, t.RoomName);
+    let floor;
+    try { floor = await floorOf(t); } catch (e) { totals.problems++; console.log(`   !! ${alias}: ${e.message}`); continue; }
     const tx = pool.transaction();
     await tx.begin();
     try {
       const dupe = await tx.request().input("r", sql.Int, t.Id).query("SELECT TOP 1 Id FROM dbo.DependencyMaster WHERE RoomId = @r");
       if (dupe.recordset.length) throw new Error("room already has a chain");
-      const ins = await tx.request().input("P", sql.Int, pid).input("T", sql.Int, t.BlockId).input("Fl", sql.NVarChar(50), floorOf(t.FloorNo))
+      const ins = await tx.request().input("P", sql.Int, pid).input("T", sql.Int, t.BlockId).input("Fl", sql.NVarChar(50), floor)
         .input("F", sql.Int, t.UnitId).input("R", sql.Int, t.Id).input("A", sql.NVarChar(200), alias).input("W", sql.NVarChar(20), donor.WorkType).input("By", sql.NVarChar(300), ACTOR)
         .query(`INSERT INTO dbo.DependencyMaster (ProjectId, TowerId, Floor, FlatId, RoomId, Alias, WorkType, CreatedBy, CreatedAt)
                 OUTPUT INSERTED.Id AS id VALUES (@P, @T, @Fl, @F, @R, @A, @W, @By, SYSDATETIME())`);

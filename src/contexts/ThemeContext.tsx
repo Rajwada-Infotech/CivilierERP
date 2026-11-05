@@ -7,9 +7,9 @@ import React, {
   useMemo,
 } from "react";
 
-export type Theme = "dark" | "light" | "midnight" | "root" | "glass" | "bw";
+export type Theme = "dark" | "light" | "glass" | "bw" | "sage";
 
-const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw"];
+const themes: Theme[] = ["dark", "light", "glass", "bw", "sage"];
 
 /**
  * Themes whose surface is light (white/near-white background). Components that
@@ -17,7 +17,7 @@ const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw"];
  * instead of `theme === "light"` so the BW theme (light background, black
  * accents) is treated correctly.
  */
-export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw";
+export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw" || t === "glass" || t === "sage";
 
 /**
  * Fixed 3-tone chart palette for the BW theme: maroon / green / orange.
@@ -40,10 +40,9 @@ export const bwChartColor = (
 export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
   dark: { bg: "#4f46e5", label: "Dark" },
   light: { bg: "#a78bfa", label: "Light" },
-  midnight: { bg: "#2dd4bf", label: "Midnight" },
-  root: { bg: "#f0a500", label: "Root" },
-  glass: { bg: "#a5b4fc", label: "Glass" },
+  glass: { bg: "#f3e6cf", label: "Glass" },
   bw: { bg: "#111111", label: "BW" },
+  sage: { bg: "#9caf88", label: "Sage" },
 };
 
 interface ThemeContextType {
@@ -61,7 +60,7 @@ export const useTheme = () => {
 
 const getInitialTheme = (): Theme => {
   const stored = localStorage.getItem("civilier-theme") as Theme | null;
-  return stored && themes.includes(stored) ? stored : "dark";
+  return stored && themes.includes(stored) ? stored : "sage";
 };
 
 // Apply theme to <html> element.

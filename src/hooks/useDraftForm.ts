@@ -14,6 +14,10 @@ import React, { useEffect, useState } from "react";
  * silently reappearing over a different row after a refresh, since which
  * record was being edited isn't itself persisted.
  */
+// Never written to the browser's storage: bank account numbers, IFSC, PAN / Aadhaar, passwords and PINs. A restored
+// draft just has them empty again.
+const SENSITIVE_KEY = /account.?(no|num)|ifsc|^pan(no|number)?$|aadha?ar|password|passcode|^pin$|cvv/i;
+
 export function useDraftForm<T extends object>(
   storageKey: string,
   emptyValue: T,
@@ -90,7 +94,7 @@ export function useDraftFormSync<T extends object>(
       (k) => String((values as any)[k] ?? "") !== String((emptyValue as any)[k] ?? ""),
     );
     try {
-      if (isDirty) localStorage.setItem(key, JSON.stringify(values));
+      if (isDirty) localStorage.setItem(key, JSON.stringify(values, (k, v) => (SENSITIVE_KEY.test(k) ? undefined : v)));
       else localStorage.removeItem(key);
     } catch {
       // localStorage unavailable — the draft simply won't persist.
@@ -127,12 +131,23 @@ export function preventEnterSubmit(e: React.KeyboardEvent<HTMLElement>) {
  * draft still sits in localStorage silently hijacks the link into always
  * opening the form instead of the list.
  */
+// The reload belongs to the page that was open when it happened. The browser keeps reporting the navigation as a
+// "reload" for as long as the tab lives, so without these two guards every later visit to a form page inside the app
+// would count as a reload and reopen its draft.
+const pathAtLoad = typeof window !== "undefined" ? window.location.pathname : "";
+let reloadUsed = false;
+
 export function wasPageReloaded(): boolean {
   try {
+    if (reloadUsed) return false;
     const [entry] = performance.getEntriesByType(
       "navigation",
     ) as PerformanceNavigationTiming[];
-    return entry?.type === "reload";
+    if (entry?.type !== "reload") return false;
+    if (window.location.pathname !== pathAtLoad) return false;
+    // Used up after this tick (not at once, so a development double-run of the same effect still agrees).
+    setTimeout(() => { reloadUsed = true; }, 0);
+    return true;
   } catch {
     return false;
   }

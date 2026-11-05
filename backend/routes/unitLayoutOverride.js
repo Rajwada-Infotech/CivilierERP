@@ -9,6 +9,8 @@
 //   POST   /reset     { scope..., LayoutTypeId }           reset + sync rooms
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool } = require("../db");
 const { assertProjectAllowed } = require("../services/projectScope");
 const { requirePageRight } = require("../middleware/requirePageRight");

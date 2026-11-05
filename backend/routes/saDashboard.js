@@ -1,13 +1,13 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const { applyLeadScope, isSaAdmin } = require("../services/saAccess");
+const { CLOSED_LEAD_SQL, countedInvoiceSql } = require("../constants/saStatuses");
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // Simple in-memory cache: { key: { data, expiresAt } }
 const _cache = {};
@@ -39,7 +39,7 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
           FROM dbo.SaMarketingInvoice i
           WHERE i.AdId = a.Id
             AND i.IsActive = 1
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
         ) inv
       ),
       booking_revenue AS (
@@ -148,12 +148,16 @@ router.get("/sales", requirePageRight("sa-leads", "view"), async (req, res) => {
 
     const salesPayload = {
       totalLeads: total,
+      statusCounts: statusMap,
       pendingLeads: statusMap["New"] || 0,
       assignedLeads: statusMap["Assigned"] || 0,
       contactedLeads: statusMap["Contacted"] || 0,
       hotLeads: classMap["Hot"] || 0,
       warmLeads: classMap["Warm"] || 0,
       coldLeads: classMap["Cold"] || 0,
+      // Every classification, so the dashboard can show the ones beyond
+      // Hot/Warm/Cold (Not Interested, Call Back Later) without new fields.
+      classCounts: classMap,
       siteVisitsScheduled: visits.recordset[0].Scheduled || 0,
       siteVisitsCompleted: visits.recordset[0].Completed || 0,
       bookingsGenerated: bookingCount,
@@ -210,7 +214,7 @@ router.get("/team-lead", requirePageRight("sa-lead-distribution", "view"), async
         COUNT(DISTINCT l.Id) AS LeadsAssigned,
         COUNT(DISTINCT c.Id) AS CallsMade,
         COUNT(DISTINCT v.Id) AS SiteVisits,
-        SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
+        COUNT(DISTINCT CASE WHEN l.CrmBookingId IS NOT NULL THEN l.Id END) AS Bookings
       FROM dbo.Users u
       LEFT JOIN dbo.SaLead l ON l.AssignedSalespersonId = u.id
       LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id
@@ -239,6 +243,52 @@ router.get("/team-lead", requirePageRight("sa-lead-distribution", "view"), async
     res.json(tlPayload);
   } catch (err) {
     console.error("[sa-dashboard/team-lead] error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /attention — what is stuck and needs someone to act, one count each.
+// Lead-based counts use the same row scope as the lead pages (a salesperson
+// sees their own, a team lead their team's, SA admins all). Not cached: it's
+// a to-do list, and a stale count sends people to an empty page.
+router.get("/attention", requirePageRight("sa-leads", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const admin = isSaAdmin(req);
+    const count = async (sqlFor) => {
+      const r = pool.request();
+      const scope = applyLeadScope(r, req, "l");
+      const out = await r.query(sqlFor(scope));
+      return out.recordset[0]?.Cnt || 0;
+    };
+
+    const [toDistribute, notCalled, followupsOverdue, visitsToday, tasksOverdue, transfersPending, commissionsPending] = await Promise.all([
+      // New, or with a team lead but no salesperson yet.
+      count((scope) => `SELECT COUNT(*) AS Cnt FROM dbo.SaLead l WHERE l.IsActive = 1 AND ${scope}
+        AND (l.Status = 'New' OR (l.Status = 'Assigned' AND l.AssignedSalespersonId IS NULL))`),
+      // With a salesperson for over a day and still never called.
+      count((scope) => `SELECT COUNT(*) AS Cnt FROM dbo.SaLead l WHERE l.IsActive = 1 AND ${scope}
+        AND l.Status = 'Assigned' AND l.AssignedSalespersonId IS NOT NULL
+        AND l.LastActivityAt IS NULL AND l.UpdatedAt < DATEADD(DAY, -1, SYSDATETIME())`),
+      // The lead's latest activity set a follow-up date that has passed —
+      // older activities are superseded by newer ones, so only the latest counts.
+      count((scope) => `SELECT COUNT(*) AS Cnt FROM dbo.SaLead l
+        CROSS APPLY (SELECT TOP 1 a.NextFollowupDate FROM dbo.SaLeadActivity a WHERE a.LeadId = l.Id ORDER BY a.CreatedAt DESC) last
+        WHERE l.IsActive = 1 AND ${scope} AND l.Status NOT IN ${CLOSED_LEAD_SQL}
+          AND last.NextFollowupDate < CAST(SYSDATETIME() AS DATE)`),
+      count((scope) => `SELECT COUNT(*) AS Cnt FROM dbo.SaSiteVisit v JOIN dbo.SaLead l ON l.Id = v.LeadId
+        WHERE v.IsActive = 1 AND ${scope} AND v.PreferredDate = CAST(SYSDATETIME() AS DATE)
+          AND v.Status NOT IN ('Completed','Cancelled')`),
+      count((scope) => `SELECT COUNT(*) AS Cnt FROM dbo.SaLeadTask t JOIN dbo.SaLead l ON l.Id = t.LeadId
+        WHERE ${scope} AND t.DueDate < SYSDATETIME() AND t.Status NOT IN ('Done','Cancelled')`),
+      // Approvals are SA-admin work and have no lead scope — null hides them for everyone else.
+      admin ? pool.request().query(`SELECT COUNT(*) AS Cnt FROM dbo.SaLeadTransferRequest WHERE Status = 'Pending'`).then((r) => r.recordset[0].Cnt) : null,
+      admin ? pool.request().query(`SELECT COUNT(*) AS Cnt FROM dbo.SaCommission WHERE Status = 'Pending'`).then((r) => r.recordset[0].Cnt) : null,
+    ]);
+
+    res.json({ toDistribute, notCalled, followupsOverdue, visitsToday, tasksOverdue, transfersPending, commissionsPending });
+  } catch (err) {
+    console.error("[sa-dashboard/attention] error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

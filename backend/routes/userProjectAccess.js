@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
@@ -16,44 +18,150 @@ router.get("/my", authMiddleware, async (req, res) => {
   }
 });
 
-// GET /:userId — projects explicitly assigned to a user (empty = unrestricted).
+// A table that may not exist yet (migration not applied) reads as "no rows".
+const rowsOrNone = async (request, query) => {
+  try {
+    return (await request.query(query)).recordset;
+  } catch (err) {
+    if (err.number === 208) return [];
+    throw err;
+  }
+};
+
+// Replace a user's / role's list in one transaction. An empty list removes it.
+// `table` / `keyCol` come from the two fixed call sites below, never from input.
+async function replaceList({ table, keyCol, keyVal, ids, actor }) {
+  const tx = new sql.Transaction(getPool());
+  try {
+    await tx.begin();
+    await new sql.Request(tx).input("k", sql.Int, keyVal).query(`DELETE FROM dbo.${table} WHERE ${keyCol} = @k`);
+    for (const pid of ids) {
+      await new sql.Request(tx)
+        .input("k", sql.Int, keyVal).input("pid", sql.Int, pid).input("by", sql.NVarChar(200), actor)
+        .query(`INSERT INTO dbo.${table} (${keyCol}, ProjectId, CreatedBy) VALUES (@k, @pid, @by)`);
+    }
+    await tx.commit();
+  } catch (err) {
+    try { await tx.rollback(); } catch (_) { /* not begun */ }
+    throw err;
+  }
+}
+
+const cleanIds = (v) => [...new Set((Array.isArray(v) ? v : []).map((x) => parseInt(x, 10)).filter(Number.isFinite))];
+const actorOf = (req) => req.user?.email || req.user?.name || "system";
+
+// GET /role/:roleId — projects assigned to a role (empty = unrestricted).
+router.get("/role/:roleId", authMiddleware, adminOnly, async (req, res) => {
+  const roleId = parseInt(req.params.roleId, 10);
+  if (!Number.isFinite(roleId)) return res.status(400).json({ error: "Invalid roleId" });
+  try {
+    const rows = await rowsOrNone(
+      getPool().request().input("rid", sql.Int, roleId),
+      "SELECT ProjectId FROM dbo.RoleProjectAccess WHERE RoleId = @rid",
+    );
+    res.json({ projectIds: rows.map((x) => Number(x.ProjectId)) });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load role project access" });
+  }
+});
+
+// PUT /role/:roleId  { projectIds: number[] } — replaces the role's list. It
+// applies to every user in the role who has no personal list. An empty list
+// removes the role's restriction.
+router.put("/role/:roleId", authMiddleware, adminOnly, async (req, res) => {
+  const roleId = parseInt(req.params.roleId, 10);
+  if (!Number.isFinite(roleId)) return res.status(400).json({ error: "Invalid roleId" });
+  if (!Array.isArray(req.body?.projectIds)) return res.status(400).json({ error: "projectIds must be an array" });
+  const ids = cleanIds(req.body.projectIds);
+  try {
+    await replaceList({ table: "RoleProjectAccess", keyCol: "RoleId", keyVal: roleId, ids, actor: actorOf(req) });
+    invalidateProjectScope(); // any member of the role may be affected
+    res.json({ success: true, projectIds: ids });
+  } catch (err) {
+    console.error("[user-project-access] role PUT error:", err.message);
+    res.status(500).json({ error: "Failed to save role project access" });
+  }
+});
+
+// GET /:userId — the user's OWN list (empty = none), plus the list of the role
+// they fall back to when they have none.
+// GET /project/:projectId — who can see this project, and why, by the same rule as getProjectScope: an
+// admin-tier role sees everything; otherwise the user's own list if they have one, else their role's list,
+// else no restriction. `without` counts the users whose list leaves the project out.
+router.get("/project/:projectId", authMiddleware, adminOnly, async (req, res) => {
+  const projectId = parseInt(req.params.projectId, 10);
+  if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ error: "Invalid project" });
+  try {
+    const pool = getPool();
+    const users = (await pool.request().query(`
+      SELECT u.id, u.name, u.RoleId AS roleId, r.RName AS roleName
+      FROM dbo.users u LEFT JOIN dbo.Role r ON r.RId = u.RoleId
+      ORDER BY u.name
+    `)).recordset;
+    const own = await rowsOrNone(pool.request(), "SELECT UserId, ProjectId FROM dbo.UserProjectAccess");
+    const byRole = await rowsOrNone(pool.request(), "SELECT RoleId, ProjectId FROM dbo.RoleProjectAccess");
+    const group = (rows, key) => rows.reduce((m, x) => m.set(Number(x[key]), (m.get(Number(x[key])) || new Set()).add(Number(x.ProjectId))), new Map());
+    const ownMap = group(own, "UserId");
+    const roleMap = group(byRole, "RoleId");
+    const roleKey = (name) => String(name || "").trim().toLowerCase().replace(/\s+/g, "_");
+    const UNRESTRICTED = new Set(["super_admin", "sa", "dba", "admin"]);
+
+    const withAccess = [];
+    let without = 0;
+    for (const u of users) {
+      let via;
+      if (UNRESTRICTED.has(roleKey(u.roleName))) via = "admin";
+      else if (ownMap.has(Number(u.id))) via = ownMap.get(Number(u.id)).has(projectId) ? "own" : null;
+      else if (roleMap.has(Number(u.roleId))) via = roleMap.get(Number(u.roleId)).has(projectId) ? "role" : null;
+      else via = "open";
+      if (via) withAccess.push({ id: u.id, name: u.name, role: u.roleName, via });
+      else without += 1;
+    }
+    res.json({ users: withAccess, without });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load who can see this project" });
+  }
+});
+
 router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
   const userId = parseInt(req.params.userId, 10);
   if (!Number.isFinite(userId)) return res.status(400).json({ error: "Invalid userId" });
   try {
-    const r = await getPool().request().input("uid", sql.Int, userId)
+    const own = await getPool().request().input("uid", sql.Int, userId)
       .query("SELECT ProjectId FROM dbo.UserProjectAccess WHERE UserId = @uid");
-    res.json({ projectIds: r.recordset.map((x) => Number(x.ProjectId)) });
+    const roleRow = (await getPool().request().input("uid", sql.Int, userId).query(
+      "SELECT u.RoleId AS roleId, r.RName AS roleName FROM dbo.users u LEFT JOIN dbo.Role r ON r.RId = u.RoleId WHERE u.id = @uid",
+    )).recordset[0];
+    const roleProjects = roleRow?.roleId != null
+      ? await rowsOrNone(
+          getPool().request().input("rid", sql.Int, roleRow.roleId),
+          "SELECT ProjectId FROM dbo.RoleProjectAccess WHERE RoleId = @rid",
+        )
+      : [];
+    res.json({
+      projectIds: own.recordset.map((x) => Number(x.ProjectId)),
+      roleId: roleRow?.roleId ?? null,
+      roleName: roleRow?.roleName ?? null,
+      roleProjectIds: roleProjects.map((x) => Number(x.ProjectId)),
+    });
   } catch (err) {
     res.status(500).json({ error: "Failed to load project access" });
   }
 });
 
-// PUT /:userId  { projectIds: number[] } — replaces the user's assignments.
-// An empty list removes all restrictions for that user.
+// PUT /:userId  { projectIds: number[] } — replaces the user's own list. An
+// empty list leaves the user with no personal list, so they follow their role's
+// list (or see everything if the role has none).
 router.put("/:userId", authMiddleware, adminOnly, async (req, res) => {
   const userId = parseInt(req.params.userId, 10);
   if (!Number.isFinite(userId)) return res.status(400).json({ error: "Invalid userId" });
   if (!Array.isArray(req.body?.projectIds)) return res.status(400).json({ error: "projectIds must be an array" });
-  const ids = [...new Set(req.body.projectIds.map((v) => parseInt(v, 10)).filter(Number.isFinite))];
-  const actor = req.user?.email || req.user?.name || "system";
-
-  const pool = getPool();
-  const tx = new sql.Transaction(pool);
+  const ids = cleanIds(req.body.projectIds);
   try {
-    await tx.begin();
-    await new sql.Request(tx).input("uid", sql.Int, userId)
-      .query("DELETE FROM dbo.UserProjectAccess WHERE UserId = @uid");
-    for (const pid of ids) {
-      await new sql.Request(tx)
-        .input("uid", sql.Int, userId).input("pid", sql.Int, pid).input("by", sql.NVarChar(200), actor)
-        .query("INSERT INTO dbo.UserProjectAccess (UserId, ProjectId, CreatedBy) VALUES (@uid, @pid, @by)");
-    }
-    await tx.commit();
+    await replaceList({ table: "UserProjectAccess", keyCol: "UserId", keyVal: userId, ids, actor: actorOf(req) });
     invalidateProjectScope(userId);
     res.json({ success: true, projectIds: ids });
   } catch (err) {
-    try { await tx.rollback(); } catch (_) { /* not begun */ }
     console.error("[user-project-access] PUT error:", err.message);
     res.status(500).json({ error: "Failed to save project access" });
   }

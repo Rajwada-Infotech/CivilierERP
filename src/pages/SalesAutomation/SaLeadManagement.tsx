@@ -5,14 +5,30 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { CheckCircle2, IndianRupee, LayoutList, Kanban, GitMerge, ArrowRightLeft, Clock, Printer } from "lucide-react";
+
+let unitOptionsPromise: Promise<{ kinds: { Code: string; Name: string }[]; layouts: string[] }> | null = null;
+const fetchUnitOptions = () => {
+  unitOptionsPromise ??= fetchWithAuth("/api/project-master/unit-options")
+    .then((r) => (r.ok ? r.json() : { kinds: [], layouts: [] }))
+    .catch(() => ({ kinds: [], layouts: [] }));
+  return unitOptionsPromise;
+};
+import { CheckCircle2, IndianRupee, Kanban, ArrowRightLeft, Clock, Printer, Filter, MessageSquarePlus, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Link } from "react-router-dom";
+import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
+import { LeadMessageForm } from "@/components/sa/LeadMessageForm";
+import { LeadImportDialog } from "@/components/sa/LeadImportDialog";
+import { LEAD_CLASSIFICATIONS, LEAD_STAGES, LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
+import { MoneyView, StageCell, TitleCell } from "@/components/sa/saCells";
+import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
 
 const API = "/api/sa/leads";
 
@@ -74,17 +90,39 @@ async function fetchChannelPartnerOptions(): Promise<{ value: string; label: str
   } catch { return []; }
 }
 
+// Sections -> MasterPage shows the form as tabs instead of one long scroll.
 const fields: FieldDef[] = [
+  { name: "_customer", label: "Customer", type: "section" },
   { name: "CustomerName", label: "Customer Name", type: "text", required: true },
-  { name: "Mobile", label: "Mobile Number", type: "text", required: true },
-  { name: "AltMobile", label: "Alternate Mobile", type: "text" },
+  { name: "Mobile", label: "Mobile Number", type: "text", required: true, placeholder: "98765 43210, or +971 50 123 4567 from abroad" },
+  { name: "AltMobile", label: "Other Mobile", type: "text" },
   { name: "Email", label: "Email", type: "text" },
-  { name: "DateGenerated", label: "Date Generated", type: "date" },
-  { name: "PlatformId", label: "Source Platform", type: "select", asyncOptions: fetchPlatformOptions },
-  { name: "SourceType", label: "Lead Source Type", type: "select", options: ["Ad","WalkIn","Referral","PortalInquiry","ColdCall","Website","EventLead","Other"] },
+  { name: "DateGenerated", label: "Received On", type: "date" },
+  { name: "CustomerRemarks", label: "What the customer said", type: "textarea", fullWidth: true },
+
+  { name: "_need", label: "Requirement", type: "section" },
+  { name: "BudgetMin", label: "Budget From", type: "number", prefix: "₹" },
+  { name: "BudgetMax", label: "Budget To", type: "number", prefix: "₹" },
+  // From the masters: unit kinds (Unit Master › Unit kinds) and layouts (Unit Composition).
+  { name: "PropertyType", label: "Property Type", type: "select", asyncOptions: async () => (await fetchUnitOptions()).kinds.map((k) => ({ value: k.Name, label: k.Name })) },
+  { name: "BhkPreference", label: "BHK", type: "select", asyncOptions: async () => (await fetchUnitOptions()).layouts.map((l) => ({ value: l, label: l })) },
+  { name: "PreferredLocation", label: "Preferred Location", type: "text" },
+  { name: "PurchaseTimeline", label: "Buying When", type: "select", options: ["Immediate","3Months","6Months","1Year","JustExploring"] },
+
+  { name: "_owner", label: "Stage & Owner", type: "section" },
+  { name: "Status", label: "Stage", type: "select", options: LEAD_STATUS_KEYS, defaultValue: "New" },
+  { name: "Classification", label: "Interest", type: "select", options: LEAD_CLASSIFICATIONS },
+  { name: "AssignedTeamLeadId", label: "Team Lead", type: "select", asyncOptions: fetchTeamLeadOptions },
+  { name: "AssignedSalespersonId", label: "Salesperson", type: "select", asyncOptions: fetchSalespersonOptions },
+
+  { name: "_source", label: "Source", type: "section" },
+  { name: "SourceType", label: "How they came", type: "select", options: ["Ad","WalkIn","Referral","PortalInquiry","ColdCall","Website","EventLead","Other"] },
+  { name: "PlatformId", label: "Platform", type: "select", asyncOptions: fetchPlatformOptions },
   { name: "CampaignId", label: "Campaign", type: "select", asyncOptions: fetchCampaignOptions },
-  { name: "AdId", label: "Advertisement", type: "select", asyncOptions: fetchAdOptions },
+  { name: "AdId", label: "Ad", type: "select", asyncOptions: fetchAdOptions },
   { name: "ChannelPartnerId", label: "Channel Partner", type: "select", asyncOptions: fetchChannelPartnerOptions },
+
+  { name: "_tracking", label: "Tracking", type: "section" },
   { name: "ExternalLeadId", label: "External Lead ID", type: "text" },
   { name: "LeadFormName", label: "Lead Form Name", type: "text" },
   { name: "SourceCampaignName", label: "Source Campaign Name", type: "text" },
@@ -97,33 +135,26 @@ const fields: FieldDef[] = [
   { name: "UtmContent", label: "UTM Content", type: "text" },
   { name: "UtmTerm", label: "UTM Term", type: "text" },
   { name: "CapturedAt", label: "Captured At", type: "date" },
-  { name: "AssignedTeamLeadId", label: "Assigned Team Lead", type: "select", asyncOptions: fetchTeamLeadOptions },
-  { name: "AssignedSalespersonId", label: "Assigned Salesperson", type: "select", asyncOptions: fetchSalespersonOptions },
-  { name: "Status", label: "Lead Status", type: "select", options: ["New","Assigned","Contacted","FollowUp","VisitScheduled","Visited","Booking","Lost"], defaultValue: "New" },
-  { name: "Classification", label: "Classification", type: "select", options: ["Hot","Warm","Cold","NotInterested","CallBackLater"] },
-  { name: "BudgetMin", label: "Budget Min", type: "number" },
-  { name: "BudgetMax", label: "Budget Max", type: "number" },
-  { name: "PropertyType", label: "Property Type", type: "select", options: ["Apartment","Villa","Commercial","Plot","Warehouse","Studio"] },
-  { name: "BhkPreference", label: "BHK Preference", type: "select", options: ["Studio","1BHK","2BHK","3BHK","4BHK+"] },
-  { name: "PreferredLocation", label: "Preferred Location", type: "text" },
-  { name: "PurchaseTimeline", label: "Purchase Timeline", type: "select", options: ["Immediate","3Months","6Months","1Year","JustExploring"] },
-  { name: "CustomerRemarks", label: "Customer Remarks", type: "textarea", fullWidth: true },
 ];
 
 const columns = [
-  { key: "LeadUid", label: "Lead ID" },
-  { key: "CustomerName", label: "Customer Name" },
-  { key: "Mobile", label: "Mobile" },
-  { key: "PlatformName", label: "Source", hideOnMobile: true },
-  { key: "SourceType", label: "Type", hideOnMobile: true },
-  { key: "CampaignName", label: "Campaign", hideOnMobile: true },
-  { key: "AdName", label: "Ad", hideOnMobile: true },
-  { key: "PreferredLocation", label: "Location", hideOnMobile: true },
+  { key: "CustomerName", label: "Lead" },
+  { key: "CampaignName", label: "Came from", hideOnMobile: true },
+  { key: "Status", label: "Stage" },
+  { key: "Classification", label: "Interest", hideOnMobile: true },
+  { key: "SalespersonName", label: "With", hideOnMobile: true },
+  { key: "LastActivityAt", label: "Last touch", hideOnMobile: true },
   { key: "LeadScore", label: "Score", hideOnMobile: true },
-  { key: "Status", label: "Status" },
-  { key: "Classification", label: "Classification", hideOnMobile: true },
-  { key: "SalespersonName", label: "Salesperson", hideOnMobile: true },
 ];
+
+const fmtDay = (d: unknown) =>
+  d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+const fmtWhen = (d: unknown) =>
+  d ? new Date(String(d)).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+// The lead form's source fields, reused by Import from file to tag a whole file at once.
+const IMPORT_SOURCE_FIELDS = fields.filter((f) => ["SourceType", "PlatformId", "CampaignId", "AdId", "ChannelPartnerId"].includes(f.name));
+
+const actionBtn = "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors";
 
 const exportColumns: ExportColumn[] = [
   { header: "Lead ID", accessor: "LeadUid" },
@@ -165,13 +196,22 @@ const SaLeadManagement: React.FC = () => {
   usePageRights("sa-leads");
   const queryClient = useQueryClient();
   const [handoffLoading, setHandoffLoading] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"list" | "pipeline" | "tracking" | "audit">("list");
   const [auditLeadId, setAuditLeadId] = useState<string | null>(null);
+  // Lets staff log a call/WhatsApp/etc straight from a row instead of
+  // leaving this page for Lead Activities or Follow-Ups just to do that.
+  const [interactionLead, setInteractionLead] = useState<{ id: string; uid: string; mobile?: string; email?: string } | null>(null);
+  // Was a standalone "Tracking" tab with its own two hand-rolled tables —
+  // same information, now a one-click filter on the grid itself instead of
+  // a separate tab/page round-trip.
+  const [quickFilter, setQuickFilter] = useState<"all" | "inFollowup" | "booked">("all");
+  const [stageFilter, setStageFilter] = useState("All");
+  const [transferSearch, setTransferSearch] = useState("");
 
   // Transfer leads state
   const { currentUser, canDoAction } = useAuth();
   const isTL = currentUser?.role === "sales_team_lead";
   const [transferOpen, setTransferOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [transferSelectedIds, setTransferSelectedIds] = useState<Set<string>>(new Set());
   const [transferToTLId, setTransferToTLId] = useState("");
   const [transferNotes, setTransferNotes] = useState("");
@@ -187,6 +227,20 @@ const SaLeadManagement: React.FC = () => {
     staleTime: 5 * 60_000,
     enabled: isTL,
   });
+
+  // Was invisible from this page entirely — a TL submitting a transfer here
+  // had no way to see that its approval lives on a separate page/route.
+  const { data: myTransferRequests = [] } = useQuery({
+    queryKey: ["sa-my-transfer-requests"],
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/sa/lead-transfers");
+      if (!r.ok) return [];
+      return r.json().catch(() => []);
+    },
+    staleTime: 60_000,
+    enabled: isTL,
+  });
+  const pendingTransferCount = (myTransferRequests as any[]).filter((t) => t.Status === "Pending").length;
 
   const toggleTransferLead = (id: string) => {
     setTransferSelectedIds((prev) => {
@@ -349,8 +403,7 @@ const SaLeadManagement: React.FC = () => {
   const invalidateLeadFlow = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["sa-leads"] }),
-      queryClient.invalidateQueries({ queryKey: ["sa-dashboard-sales"] }),
-      queryClient.invalidateQueries({ queryKey: ["sa-dashboard-marketing"] }),
+      queryClient.invalidateQueries({ queryKey: ["sa-dashboard"] }),
       queryClient.invalidateQueries({ queryKey: ["sa-report"] }),
     ]);
   };
@@ -370,257 +423,133 @@ const SaLeadManagement: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading leads...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load leads.</div>;
-
-  const PIPELINE_STAGES = [
-    { key: "New", label: "New", color: "border-slate-400 bg-slate-50 dark:bg-slate-900/30" },
-    { key: "Assigned", label: "Assigned", color: "border-blue-400 bg-blue-50 dark:bg-blue-900/20" },
-    { key: "Contacted", label: "Contacted", color: "border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20" },
-    { key: "FollowUp", label: "Follow Up", color: "border-orange-400 bg-orange-50 dark:bg-orange-900/20" },
-    { key: "VisitScheduled", label: "Visit Scheduled", color: "border-purple-400 bg-purple-50 dark:bg-purple-900/20" },
-    { key: "Visited", label: "Visited", color: "border-indigo-400 bg-indigo-50 dark:bg-indigo-900/20" },
-    { key: "Booking", label: "Booking", color: "border-green-400 bg-green-50 dark:bg-green-900/20" },
-    { key: "Lost", label: "Lost", color: "border-red-400 bg-red-50 dark:bg-red-900/20" },
-  ];
-
-  const stageMap: Record<string, RecordWithId[]> = {};
-  PIPELINE_STAGES.forEach((s) => {
-    stageMap[s.key] = mappedData.filter((l) => l.Status === s.key);
-  });
+  if (isLoading || error) return (
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Leads", "All Leads"]} title="All Leads">
+      <div className={`p-6 text-sm ${error ? "text-red-500" : "text-muted-foreground"}`}>
+        {error ? "Couldn't load leads. Refresh the page to try again." : "Loading leads…"}
+      </div>
+    </SalesAutoShell>
+  );
 
   const inFollowup = mappedData.filter((l) => l.FollowupCustomerId);
   const booked = mappedData.filter((l) => l.BookingId);
+  const byQuick =
+    quickFilter === "inFollowup" ? inFollowup :
+    quickFilter === "booked" ? booked :
+    mappedData;
+  const displayedData = stageFilter === "All" ? byQuick : byQuick.filter((l) => l.Status === stageFilter);
+  const stageCount = (k: string) => byQuick.filter((l) => l.Status === k).length;
+  const unowned = mappedData.filter((l) => !l.AssignedSalespersonId && !l.AssignedTeamLeadId && l.Status === "New").length;
+  const tq = transferSearch.trim().toLowerCase();
+  const transferList = tq ? mappedData.filter((l) => [l.CustomerName, l.Mobile, l.LeadUid].some((v) => String(v ?? "").toLowerCase().includes(tq))) : mappedData;
 
   return (
-    <SalesAutoShell title="Lead Management" subtitle="Track, assign and manage the complete lead lifecycle"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Leads", "All Leads"]} title="All Leads"
+      subtitle={`${mappedData.length} leads · ${unowned} new and not yet given to anyone · ${booked.length} booked`}
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Lead Management"]} />
       <style>{`@media print { nav, header, aside, .print\\:hidden { display: none !important; } }`}</style>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            {/* Transfer Leads — Team Lead only */}
-            {isTL && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {canDoAction("sa-leads", "create") && (
               <button
-                onClick={() => { setTransferOpen(true); setTransferSelectedIds(new Set()); }}
+                onClick={() => setImportOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
               >
-                <ArrowRightLeft size={13} /> Transfer Leads
+                <Upload size={13} /> Import from file
               </button>
             )}
-            {/* Tab switcher */}
-          <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
-            {([
-              { key: "list",     icon: LayoutList, label: "List" },
-              { key: "pipeline", icon: Kanban,     label: "Pipeline" },
-              { key: "tracking", icon: GitMerge,   label: "Tracking" },
-              { key: "audit",    icon: Clock,     label: "Audit" },
-            ] as const).map(({ key, icon: Icon, label }) => (
-              <button
-                key={key}
-                onClick={() => setActiveTab(key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                <Icon size={13} /> {label}
-              </button>
-            ))}
-          </div>
-          {activeTab === "list" && (
-            <button
-              onClick={() => window.print()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors print:hidden"
-              title="Print leads table"
+            {/* Transfer Leads — Team Lead only. Used to have zero visibility
+                into its own approval status; now links straight to it. */}
+            {isTL && (
+              <>
+                <button
+                  onClick={() => { setTransferOpen(true); setTransferSelectedIds(new Set()); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  <ArrowRightLeft size={13} /> Transfer Leads
+                </button>
+                <Link
+                  to="/sales-automation/lead-transfers"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  <Clock size={13} /> My Transfer Requests
+                  {pendingTransferCount > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[0.625rem] font-semibold bg-amber-500/15 text-amber-600">{pendingTransferCount} pending</span>
+                  )}
+                </Link>
+              </>
+            )}
+            {/* Was one of four tabs on this page — the Kanban board is its
+                own page now so this page is CRUD-grid-only. */}
+            <Link
+              to="/sales-automation/pipeline"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
             >
-              <Printer size={13} /> Print
-            </button>
-          )}
+              <Kanban size={13} /> View Pipeline
+            </Link>
+            {/* Was a standalone "Tracking" tab's two tables — same data,
+                now a one-click filter on this grid instead of a separate
+                tab round-trip. */}
+            <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
+              {([
+                { key: "all", label: "All" },
+                { key: "inFollowup", label: `In CRM App (${inFollowup.length})` },
+                { key: "booked", label: `Booked (${booked.length})` },
+              ] as const).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setQuickFilter(key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${quickFilter === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {key === "all" && <Filter size={12} />} {label}
+                </button>
+              ))}
+            </div>
           </div>
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors print:hidden"
+            title="Print leads table"
+          >
+            <Printer size={13} /> Print
+          </button>
         </div>
 
-        {/* ── PIPELINE TAB ── */}
-        {activeTab === "pipeline" && (
-          <div className="overflow-x-auto pb-4">
-            <div className="flex gap-3 min-w-max">
-              {PIPELINE_STAGES.map((stage) => {
-                const stageLeads = stageMap[stage.key] || [];
-                return (
-                  <div key={stage.key} className={`w-52 shrink-0 rounded-lg border-t-2 border border-border ${stage.color}`}>
-                    <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-                      <span className="text-xs font-semibold text-foreground">{stage.label}</span>
-                      <span className="text-xs font-bold text-muted-foreground bg-background rounded-full px-2 py-0.5 border border-border">{stageLeads.length}</span>
-                    </div>
-                    <div className="p-2 space-y-1.5 max-h-[calc(100vh-300px)] overflow-y-auto">
-                      {stageLeads.length === 0 ? (
-                        <p className="text-[0.6875rem] text-muted-foreground text-center py-4">No leads</p>
-                      ) : stageLeads.map((l) => (
-                        <div key={l._id} className="bg-background rounded-md border border-border p-2 space-y-1">
-                          <p className="text-xs font-medium text-foreground truncate">{String(l.CustomerName)}</p>
-                          <p className="text-[0.625rem] text-muted-foreground">{String(l.Mobile)}</p>
-                          {l.Classification && (
-                            <span className={`text-[0.5625rem] font-semibold px-1.5 py-0.5 rounded-full inline-block ${
-                              l.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
-                              l.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
-                              "bg-blue-500/10 text-blue-500"
-                            }`}>{String(l.Classification)}</span>
-                          )}
-                          {l.SalespersonName && <p className="text-[0.625rem] text-muted-foreground truncate">{String(l.SalespersonName)}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {/* Stage chips — counts follow the quick filter above */}
+        <div className="flex flex-wrap gap-1 print:hidden">
+          <button onClick={() => setStageFilter("All")}
+            className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${stageFilter === "All" ? "bg-primary/10 border-primary/30 text-primary font-medium" : "border-border text-muted-foreground hover:bg-muted"}`}>
+            All stages <span className="tabular-nums opacity-70">{byQuick.length}</span>
+          </button>
+          {LEAD_STAGES.filter((s) => stageCount(s.key) > 0).map((s) => (
+            <button key={s.key} onClick={() => setStageFilter(s.key)} title={s.hint}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition-colors ${stageFilter === s.key ? "bg-primary/10 border-primary/30 text-primary font-medium" : "border-border text-muted-foreground hover:bg-muted"}`}>
+              <span className="w-2 h-2 rounded-full" style={{ background: s.hex }} />
+              {s.label} <span className="tabular-nums opacity-70">{stageCount(s.key)}</span>
+            </button>
+          ))}
+        </div>
 
-        {/* ── TRACKING TAB ── */}
-        {activeTab === "tracking" && (
-          <div className="space-y-6">
-            {/* In Follow-up */}
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground">Picked Into CRM Application ({inFollowup.length})</h3>
-                <span className="text-xs text-muted-foreground">Converted leads a CRM Application has already been started from</span>
-              </div>
-              {inFollowup.length === 0 ? (
-                <div className="p-6 text-center text-muted-foreground text-sm">No leads picked into an application yet</div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/20">
-                    <tr>
-                      {["Lead ID", "Customer", "Mobile", "Application ID", "Status", "Salesperson"].map((h) => (
-                        <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {inFollowup.map((l) => (
-                      <tr key={l._id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                        <td className="p-3 text-xs font-mono text-muted-foreground">{String(l.LeadUid)}</td>
-                        <td className="p-3 font-medium text-foreground">{String(l.CustomerName)}</td>
-                        <td className="p-3 text-muted-foreground">{String(l.Mobile)}</td>
-                        <td className="p-3 text-xs font-mono text-emerald-600">{String(l.FollowupCustomerId)}</td>
-                        <td className="p-3">
-                          <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600">{String(l.Status)}</span>
-                        </td>
-                        <td className="p-3 text-muted-foreground">{(l.SalespersonName as string) || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* Booked */}
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground">Booked ({booked.length})</h3>
-                <span className="text-xs text-muted-foreground">Leads confirmed into bookings</span>
-              </div>
-              {booked.length === 0 ? (
-                <div className="p-6 text-center text-muted-foreground text-sm">No bookings yet</div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/20">
-                    <tr>
-                      {["Lead ID", "Customer", "Mobile", "Booking ID", "Campaign", "Salesperson"].map((h) => (
-                        <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {booked.map((l) => (
-                      <tr key={l._id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                        <td className="p-3 text-xs font-mono text-muted-foreground">{String(l.LeadUid)}</td>
-                        <td className="p-3 font-medium text-foreground">{String(l.CustomerName)}</td>
-                        <td className="p-3 text-muted-foreground">{String(l.Mobile)}</td>
-                        <td className="p-3 text-xs font-mono text-amber-600">{String(l.BookingId)}</td>
-                        <td className="p-3 text-muted-foreground">{(l.CampaignName as string) || "—"}</td>
-                        <td className="p-3 text-muted-foreground">{(l.SalespersonName as string) || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── AUDIT TAB ── */}
-        {activeTab === "audit" && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <label className="text-xs text-muted-foreground shrink-0">Select Lead:</label>
-              <select
-                value={auditLeadId ?? ""}
-                onChange={(e) => setAuditLeadId(e.target.value || null)}
-                className="text-sm border border-border rounded-lg px-3 py-1.5 bg-background flex-1 max-w-xs"
-              >
-                <option value="">— choose a lead —</option>
-                {mappedData.map((l) => (
-                  <option key={l._id} value={l._id}>
-                    {String(l.LeadUid)} — {String(l.CustomerName)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {auditLeadId && (
-              <div className="rounded-lg border border-border overflow-hidden">
-                <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Audit Trail — {String(mappedData.find((l) => l._id === auditLeadId)?.LeadUid ?? "")}
-                  </h3>
-                  <span className="text-xs text-muted-foreground">{auditLog.length} change{auditLog.length !== 1 ? "s" : ""}</span>
-                </div>
-                {auditLog.length === 0 ? (
-                  <div className="p-6 text-center text-sm text-muted-foreground">No changes recorded yet</div>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/20">
-                      <tr>
-                        {["Field", "Old Value", "New Value", "Changed By", "When"].map((h) => (
-                          <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(auditLog as any[]).map((row: any) => (
-                        <tr key={row.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                          <td className="p-3 font-medium text-foreground text-xs">{row.Field}</td>
-                          <td className="p-3 text-xs text-muted-foreground">{row.OldValue ?? <span className="italic opacity-50">—</span>}</td>
-                          <td className="p-3 text-xs text-foreground">{row.NewValue ?? <span className="italic opacity-50">—</span>}</td>
-                          <td className="p-3 text-xs text-muted-foreground">{row.ChangedByName ?? "System"}</td>
-                          <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
-                            {new Date(row.ChangedAt).toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-
-            {!auditLeadId && (
-              <div className="p-10 text-center text-muted-foreground text-sm border border-dashed border-border rounded-lg">
-                Select a lead above to view its change history
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── LIST TAB ── */}
-        {activeTab === "list" && <><MasterPage
+        <MasterPage
           title="Lead"
           fields={fields}
           columns={columns}
+          collapsibleAddForm
+          gridCols={3}
+          columnRenderers={{
+            CustomerName: (v, r) => TitleCell(v, [r.LeadUid, r.Mobile].filter(Boolean).join(" · ")),
+            CampaignName: (v, r) => TitleCell(v || r.ChannelPartnerName || r.SourceType || "—", [r.AdName, r.PlatformName].filter(Boolean).join(" · ")),
+            Status: StageCell,
+            Classification: (v) => (v ? <StatusBadge status={String(v)} /> : <span className="text-muted-foreground text-xs">—</span>),
+            SalespersonName: (v, r) => TitleCell(v || (r.TeamLeadName ? "Not yet given out" : "Unassigned"), r.TeamLeadName ? `TL ${r.TeamLeadName}` : ""),
+            LastActivityAt: (v) => <span className="text-xs text-muted-foreground whitespace-nowrap">{v ? fmtDay(v) : "Never"}</span>,
+            LeadScore: (v) => <span className="tabular-nums text-sm">{Number(v) || "—"}</span>,
+          }}
           canCreate={canDoAction("sa-leads", "create")}
           canEdit={canDoAction("sa-leads", "edit")}
           canDelete={false /* leads are a permanent record — can be edited, never deleted */}
-          initialData={mappedData}
+          initialData={displayedData}
           onDataEvent={handleDataEvent}
           exportConfig={{ title: "Lead Management", filename: "lead-management", columns: exportColumns }}
           rowActions={(row) => {
@@ -636,18 +565,20 @@ const SaLeadManagement: React.FC = () => {
             const hasFollowup = Boolean(row.FollowupCustomerId); // CrmApplicationId, aliased in mappedData above
             const hasBooking = Boolean(row.BookingId);
             const auditBtn = (
-              <button
-                type="button"
-                onClick={() => { setAuditLeadId(row._id); setActiveTab("audit"); }}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
-                title="View audit trail"
-              >
-                <Clock size={13} />
+              <button type="button" onClick={() => setAuditLeadId(row._id)} className={actionBtn} title="Every change made to this lead">
+                <Clock size={13} /> Changes
+              </button>
+            );
+            const interactionBtn = (
+              <button type="button" onClick={() => setInteractionLead({ id: row._id, uid: String(row.LeadUid), mobile: row.Mobile ? String(row.Mobile) : undefined, email: row.Email ? String(row.Email) : undefined })} className={actionBtn}
+                title="Log a call, WhatsApp or meeting and see past ones">
+                <MessageSquarePlus size={13} /> Log call
               </button>
             );
             if (hasBooking) {
               return (
                 <>
+                  {interactionBtn}
                   {auditBtn}
                   <span className="px-2 py-1 text-[0.625rem] font-medium rounded-full bg-emerald-500/10 text-emerald-600">
                     Booked
@@ -657,16 +588,17 @@ const SaLeadManagement: React.FC = () => {
             }
             return (
               <>
+                {interactionBtn}
                 {auditBtn}
                 {!isConverted && !hasFollowup && (
                   <button
                     type="button"
                     onClick={() => promoteToFollowup(row)}
                     disabled={handoffLoading === `followup-${row._id}`}
-                    className="p-1.5 rounded-lg text-emerald-500 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
-                    title="Convert Lead — puts it in the CRM Leads pool"
+                    className={`${actionBtn} text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700 disabled:opacity-40`}
+                    title="Hand to CRM — puts it in the CRM Leads pool"
                   >
-                    <CheckCircle2 size={13} />
+                    <CheckCircle2 size={13} /> {handoffLoading === `followup-${row._id}` ? "Sending…" : "Send to CRM"}
                   </button>
                 )}
                 {isConverted && !hasFollowup && (
@@ -678,10 +610,10 @@ const SaLeadManagement: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => window.open("/crm/applications", "_blank")}
-                    className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors"
-                    title="Continue in CRM Application — unit, rate, payment plan, and admin approval all happen there now"
+                    className={`${actionBtn} text-amber-600 hover:bg-amber-500/10 hover:text-amber-700`}
+                    title="Unit, rate, payment plan and approval happen in the CRM application"
                   >
-                    <IndianRupee size={13} />
+                    <IndianRupee size={13} /> Open in CRM
                   </button>
                 )}
               </>
@@ -713,11 +645,11 @@ const SaLeadManagement: React.FC = () => {
               { key: "UtmTerm", label: "UTM Term" },
               { key: "CapturedAt", label: "Captured At" },
               { key: "DateGenerated", label: "Date Generated" },
-              { key: "Status", label: "Status" },
-              { key: "Classification", label: "Classification" },
+              { key: "Status", label: "Stage", render: (v) => StageCell(v) },
+              { key: "Classification", label: "Interest", render: (v) => (v ? <StatusBadge status={String(v)} /> : <p className="text-sm">—</p>) },
               { key: "LeadScore", label: "Lead Score" },
-              { key: "BudgetMin", label: "Budget Min" },
-              { key: "BudgetMax", label: "Budget Max" },
+              { key: "BudgetMin", label: "Budget From", render: MoneyView },
+              { key: "BudgetMax", label: "Budget To", render: MoneyView },
               { key: "PropertyType", label: "Property Type" },
               { key: "BhkPreference", label: "BHK Preference" },
               { key: "PreferredLocation", label: "Preferred Location" },
@@ -725,14 +657,61 @@ const SaLeadManagement: React.FC = () => {
               { key: "LastActivityAt", label: "Last Activity" },
               { key: "TeamLeadName", label: "Team Lead" },
               { key: "SalespersonName", label: "Salesperson" },
-              { key: "FollowupCustomerId", label: "Follow-up Customer ID" },
+              { key: "FollowupCustomerId", label: "CRM Application ID" },
               { key: "BookingId", label: "Booking ID" },
               { key: "CustomerRemarks", label: "Remarks" },
             ],
           }}
         />
-        </>}
       </div>
+
+      {/* Audit trail — was a whole separate tab with its own lead-picker;
+          now a per-row action opening a drawer, same data (GET /:id/audit). */}
+      <CrmSideDrawer
+        open={!!auditLeadId}
+        onClose={() => setAuditLeadId(null)}
+        title="Audit Trail"
+        subtitle={mappedData.find((l) => l._id === auditLeadId)?.LeadUid ? String(mappedData.find((l) => l._id === auditLeadId)?.LeadUid) : undefined}
+      >
+        {auditLog.length === 0 ? (
+          <div className="p-6 text-center text-sm text-muted-foreground">No changes recorded yet</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted/20">
+              <tr>
+                {["Field", "Old Value", "New Value", "Changed By", "When"].map((h) => (
+                  <th key={h} className="p-2 text-left text-xs font-medium text-muted-foreground">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(auditLog as any[]).map((row: any) => (
+                <tr key={row.Id} className="border-t border-border">
+                  <td className="p-2 font-medium text-foreground text-xs">{row.Field}</td>
+                  <td className="p-2 text-xs text-muted-foreground">{row.OldValue ?? <span className="italic opacity-50">—</span>}</td>
+                  <td className="p-2 text-xs text-foreground">{row.NewValue ?? <span className="italic opacity-50">—</span>}</td>
+                  <td className="p-2 text-xs text-muted-foreground">{row.ChangedByName ?? "System"}</td>
+                  <td className="p-2 text-xs text-muted-foreground whitespace-nowrap">{fmtWhen(row.ChangedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CrmSideDrawer>
+
+      {/* Log interaction — same shared form/history Lead Activities and
+          Follow-Ups use (see useLeadActivities.ts), reachable in one click
+          from the row it's about instead of leaving this page. */}
+      <CrmSideDrawer
+        open={!!interactionLead}
+        onClose={() => setInteractionLead(null)}
+        title="Log or Send"
+        subtitle={interactionLead?.uid}
+      >
+        {interactionLead && <LeadInteractionPanelContent leadId={parseInt(interactionLead.id)} mobile={interactionLead.mobile} email={interactionLead.email} />}
+      </CrmSideDrawer>
+
+      <LeadImportDialog open={importOpen} onClose={() => setImportOpen(false)} sourceFields={IMPORT_SOURCE_FIELDS} />
 
       {/* Transfer Leads Dialog */}
       <Dialog open={transferOpen} onOpenChange={(o) => { if (!o) { setTransferOpen(false); setTransferSelectedIds(new Set()); setTransferToTLId(""); setTransferNotes(""); } }}>
@@ -768,20 +747,25 @@ const SaLeadManagement: React.FC = () => {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-muted-foreground">Select Leads to Transfer ({transferSelectedIds.size} selected)</label>
-                <button
-                  onClick={() => {
-                    if (transferSelectedIds.size === mappedData.length) {
-                      setTransferSelectedIds(new Set());
-                    } else {
-                      setTransferSelectedIds(new Set(mappedData.map((l) => l._id)));
-                    }
-                  }}
-                  className="text-xs text-primary hover:underline"
-                >
-                  {transferSelectedIds.size === mappedData.length ? "Deselect all" : "Select all"}
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <label className="text-xs text-muted-foreground">Leads to move ({transferSelectedIds.size} ticked)</label>
+                <div className="flex items-center gap-2">
+                  <input value={transferSearch} onChange={(e) => setTransferSearch(e.target.value)} placeholder="Name, mobile or lead ID"
+                    className="w-48 text-xs border border-border rounded-md px-2 py-1 bg-background" />
+                  <button
+                    onClick={() => {
+                      const all = transferList.every((l) => transferSelectedIds.has(l._id));
+                      setTransferSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        transferList.forEach((l) => (all ? next.delete(l._id) : next.add(l._id)));
+                        return next;
+                      });
+                    }}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    {transferList.length && transferList.every((l) => transferSelectedIds.has(l._id)) ? "Untick shown" : "Tick shown"}
+                  </button>
+                </div>
               </div>
               <div className="rounded-lg border border-border overflow-hidden">
                 <table className="w-full text-sm">
@@ -794,9 +778,9 @@ const SaLeadManagement: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {mappedData.length === 0 ? (
-                      <tr><td colSpan={6} className="px-4 py-4 text-center text-muted-foreground text-xs">No leads available</td></tr>
-                    ) : mappedData.map((l) => (
+                    {transferList.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-4 text-center text-muted-foreground text-xs">{tq ? "No leads match." : "No leads available"}</td></tr>
+                    ) : transferList.map((l) => (
                       <tr
                         key={l._id}
                         onClick={() => toggleTransferLead(l._id)}
@@ -808,15 +792,9 @@ const SaLeadManagement: React.FC = () => {
                         <td className="px-3 py-2 text-xs font-mono text-muted-foreground">{String(l.LeadUid)}</td>
                         <td className="px-3 py-2 font-medium text-foreground">{String(l.CustomerName)}</td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">{String(l.Mobile)}</td>
-                        <td className="px-3 py-2 text-xs">{String(l.Status)}</td>
+                        <td className="px-3 py-2 text-xs">{StageCell(l.Status)}</td>
                         <td className="px-3 py-2 text-xs">
-                          {l.Classification && (
-                            <span className={`px-1.5 py-0.5 rounded-full text-[0.625rem] font-semibold ${
-                              l.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
-                              l.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
-                              "bg-blue-500/10 text-blue-500"
-                            }`}>{String(l.Classification)}</span>
-                          )}
+                          {l.Classification && <StatusBadge status={String(l.Classification)} className="text-[0.625rem] px-1.5 py-0.5" />}
                         </td>
                       </tr>
                     ))}
@@ -842,6 +820,40 @@ const SaLeadManagement: React.FC = () => {
         </DialogContent>
       </Dialog>
     </SalesAutoShell>
+  );
+};
+
+// Small history + form combo for the "Log Interaction" drawer above — not
+// hoisted into useLeadActivities.ts/LeadInteractionForm.tsx since this is
+// the only call site; if a second one shows up, promote it there instead
+// of copying this.
+const LeadInteractionPanelContent: React.FC<{ leadId: number; mobile?: string; email?: string }> = ({ leadId, mobile, email }) => {
+  const { data: history = [] } = useLeadActivityHistory(leadId);
+  return (
+    <div className="space-y-4">
+      <LeadInteractionForm leadId={leadId} variant="compact" />
+      <div className="rounded-lg border border-border p-3 space-y-2">
+        <h3 className="text-xs font-semibold text-foreground">Send message</h3>
+        <LeadMessageForm leadId={leadId} mobile={mobile} email={email} />
+      </div>
+      <div className="rounded-lg border border-border overflow-hidden">
+        <div className="px-3 py-2 bg-muted/30 border-b border-border">
+          <h3 className="text-xs font-semibold text-foreground">History ({history.length})</h3>
+        </div>
+        {history.length === 0 ? (
+          <div className="p-4 text-center text-muted-foreground text-xs">No activity logged yet</div>
+        ) : (history as any[]).map((h) => (
+          <div key={h.Id} className="px-3 py-2.5 border-b border-border last:border-0">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">{h.ActivityType}</span>
+              <span className="text-xs text-muted-foreground">{fmtWhen(h.CreatedAt)}</span>
+            </div>
+            {h.Summary && <p className="text-xs text-muted-foreground mt-1">{h.Summary}</p>}
+            {h.NextFollowupDate && <p className="text-xs text-amber-600 mt-0.5">Next reminder: {fmtDay(h.NextFollowupDate)}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 };
 

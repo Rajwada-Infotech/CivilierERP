@@ -1,11 +1,13 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { logAudit } = require("../utils/auditLog");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+// A unit (by id) and any project / block given must be inside the user's projects.
+require("../services/projectScope").setupScopeGuard(router, { idPaths: [["/kinds", null], ["/", "unit"]] });
 const { getPool, sql } = require("../db");
 const { getUnitLockReason, getUnitHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
@@ -64,7 +66,11 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const req0 = pool.request();
-    const where = req.query.isActive != null ? "WHERE u.IsActive = 1" : "";
+    // Only the user's projects (the cache key carries the scope). Every project's units used to come back to everyone.
+    const conds = [];
+    if (req.query.isActive != null) conds.push("u.IsActive = 1");
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "u.ProjectId", "").trim());
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
     const result = await req0.query(`
       SELECT
         u.Id,
@@ -96,7 +102,12 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         tags.PlanIds AS PaymentPlanIds,
         tags.PlanNames AS PaymentPlanNames,
         bk.BookingNo AS LockBookingNo,
-        h.Id AS LockHoldId
+        h.Id AS LockHoldId,
+        -- Land (a plot kept as a unit row) and a villa built on a plot — the
+        -- DPR pickers hide land and list villas under their own "Villas" floor.
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind AND k.IsLand = 1) THEN 1 ELSE 0 END AS BIT) AS IsLand,
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id AND pl.IsActive = 1) THEN 1 ELSE 0 END AS BIT) AS IsVilla,
+        (SELECT TOP 1 vt.Code FROM dbo.VillaTypeMaster vt WHERE vt.Id = u.VillaTypeId) AS VillaTypeCode
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise  ep ON ep.id = u.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster  b ON b.Id  = u.BlockId
@@ -108,7 +119,7 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         WHERE upp.UnitId = u.Id AND upp.IsActive = 1
       ) tags
       LEFT JOIN dbo.CrmBooking bk
-        ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
+        ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmInventoryHold h
         ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
       LEFT JOIN dbo.BlockUnitTypeSpec spec
@@ -124,14 +135,14 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
 });
 
 // GET projects dropdown (enterprise where business_type = P)
-router.get("/projects", cache("unit-master-projects", 600), async (req, res) => {
+router.get("/projects", cache("unit-master-projects", 600, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT id AS Id, name AS Name, company_id AS CompanyId
       FROM dbo.enterprise
       WHERE business_type = 'P'
-        AND ISNULL(discontinue, 0) = 0
+        AND ISNULL(discontinue, 0) = 0${require("../services/projectScope").projectPredicate(req.projectScope, "id")}
       ORDER BY name
     `);
     res.json(result.recordset);
@@ -150,7 +161,7 @@ router.get("/blocks", async (req, res) => {
     let query = `
       SELECT Id, BlockName AS Name, ProjectId
       FROM dbo.BlockMaster
-      WHERE IsActive = 1
+      WHERE IsActive = 1${require("../services/projectScope").projectPredicate(req.projectScope, "ProjectId")}
     `;
     if (Number.isFinite(projectId) && projectId > 0) {
       request.input("ProjectId", sql.Int, projectId);
@@ -191,23 +202,57 @@ router.get("/applicable-payment-plans", async (req, res) => {
 // a fixed list. Land kinds belong to Plot Master, so they're refused here.
 // Undefined / "" means "leave the unit's kind as it is".
 async function applyUnitKind(db, unitId, rawKind) {
-  if (rawKind === undefined || rawKind === null || String(rawKind).trim() === "") return;
+  if (rawKind === undefined || rawKind === null || String(rawKind).trim() === "") {
+    // No kind chosen: the unit keeps its current one (or the default) — still
+    // has to be something this project's type sells.
+    const u = (await db.request().input("id", sql.Int, unitId).query("SELECT ProjectId, BlockId, UnitKind FROM dbo.UnitMaster WHERE Id = @id")).recordset[0];
+    const isLand = u && u.UnitKind && (await db.request().input("c", sql.NVarChar(20), u.UnitKind)
+      .query("SELECT IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @c")).recordset[0]?.IsLand;
+    if (u && u.UnitKind && !isLand) { // legacy land rows are Plot Master's business
+      const ok = await unitKindSvc.allowedKinds(db, { projectId: u.ProjectId, blockId: u.BlockId });
+      if (ok.length && !ok.some((x) => x.Code === String(u.UnitKind).toUpperCase())) {
+        throw new LayoutValidationError(`This project's type doesn't sell "${u.UnitKind}" units — pick a Unit Kind it does sell.`);
+      }
+    }
+    return;
+  }
   const code = String(rawKind).trim().toUpperCase();
   const k = (await db.request().input("c", sql.NVarChar(20), code)
     .query("SELECT TOP 1 Code, IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @c AND IsActive = 1")).recordset[0];
   if (!k) throw new LayoutValidationError(`Unit kind "${code}" is not defined (or inactive) in the unit kind master.`);
   if (k.IsLand) throw new LayoutValidationError(`"${code}" is a land kind — land is managed in Plot Master, not as a unit.`);
+  const unit = (await db.request().input("id", sql.Int, unitId).query("SELECT ProjectId, BlockId FROM dbo.UnitMaster WHERE Id = @id")).recordset[0];
+  if (unit) {
+    const ok = await unitKindSvc.allowedKinds(db, { projectId: unit.ProjectId, blockId: unit.BlockId });
+    if (!ok.some((x) => x.Code === k.Code)) throw new LayoutValidationError(`This project's type doesn't sell "${code}" units — change the project type or pick another kind.`);
+  }
   await db.request().input("id", sql.Int, unitId).input("k", sql.NVarChar(20), k.Code)
     .query("UPDATE dbo.UnitMaster SET UnitKind = @k WHERE Id = @id");
 }
 
+// Unit kind master — managed here (Flat, Villa, Shop, Office… with Land /
+// Commercial flags). Shared logic in services/unitKind.js.
+const unitKindSvc = require("../services/unitKind");
+router.get("/kinds/manage", requirePageRight("followup-unit-master", "view"), async (_req, res) => {
+  try { res.json(await unitKindSvc.listKinds({ activeOnly: false })); }
+  catch (err) { console.error("[unit-master] GET kinds/manage:", err.message); res.status(500).json({ error: err.message }); }
+});
+router.post("/kinds", requirePageRight("followup-unit-master", "create"), async (req, res) => {
+  try { const r = await unitKindSvc.createKind(req.body, req.user?.userId); res.status(r.status).json(r.body); }
+  catch (err) { console.error("[unit-master] POST kinds:", err.message); res.status(500).json({ error: err.message }); }
+});
+router.put("/kinds/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
+  try { const r = await unitKindSvc.updateKind(Number(req.params.id), req.body, req.user?.userId); res.status(r.status).json(r.body); }
+  catch (err) { console.error("[unit-master] PUT kinds:", err.message); res.status(500).json({ error: err.message }); }
+});
+
 // GET /kinds — the active non-land unit kinds, for the Unit Master form.
-router.get("/kinds", requirePageRight("followup-unit-master", "view"), async (_req, res) => {
+// ?projectId= / ?blockId= narrows to what that project's type allows.
+router.get("/kinds", requirePageRight("followup-unit-master", "view"), async (req, res) => {
   try {
-    const r = await getPool().request().query(`
-      SELECT Code, Name, IsCommercial FROM dbo.CrmConstructedAssetKind
-      WHERE IsActive = 1 AND IsLand = 0 ORDER BY SortOrder, Name`);
-    res.json(r.recordset);
+    const n = (v) => (v === undefined || v === "" ? null : parseInt(v, 10));
+    const kinds = await unitKindSvc.allowedKinds(getPool(), { projectId: n(req.query.projectId), blockId: n(req.query.blockId) });
+    res.json(kinds.map((k) => ({ Code: k.Code, Name: k.Name, IsCommercial: !!k.IsCommercial })));
   } catch (err) {
     console.error("[unit-master] GET kinds error:", err.message);
     res.status(500).json({ error: err.message });
@@ -394,7 +439,8 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
 });
 
 // PUT — update unit
-router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
+// Also edited from Auto Project Setup's unit lists.
+router.put("/:id", requireAnyPageRight(["followup-unit-master", "crm-auto-project-setup"], "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, UnitName, FloorNo, LayoutTypeId, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
@@ -536,6 +582,32 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UPDATE dbo.RoomMaster SET ProjectId = @ProjectId, BlockId = @BlockId, Floor = @Floor
           WHERE UnitId = @Id AND (ProjectId <> @ProjectId OR BlockId <> @BlockId OR ISNULL(Floor, '') <> ISNULL(@Floor, ''))
         `);
+      // DependencyMaster (DPR work chains) carries its own copy of
+      // ProjectId/TowerId(=BlockId)/Floor, stamped once at chain creation
+      // (autoDprChains.js) and never re-joined through UnitMaster/RoomMaster
+      // afterward — DPR filtering, dashboards and attendance screens all key
+      // off these columns directly. Without this, moving a unit to a
+      // different block/project left its DPR chains permanently showing
+      // under the OLD block/floor, even though Room Master and Unit Master
+      // itself correctly show the new one. Only attempted when chains
+      // actually exist — chainFloorLabel can throw for a plot-built unit
+      // that isn't converted yet, which must not block an otherwise-normal
+      // edit of a unit that has no DPR work started at all.
+      const hasChains = (await tx.request().input("Id", sql.Int, parseInt(id))
+        .query("SELECT TOP 1 1 AS x FROM dbo.DependencyMaster WHERE FlatId = @Id")).recordset.length > 0;
+      if (hasChains) {
+        const { chainFloorLabel } = require("../services/unitLayout");
+        const newFloorLabel = await chainFloorLabel(tx, { UnitId: parseInt(id), UnitName, ProjectId: parseInt(ProjectId), BlockId: parseInt(BlockId), FloorNo: FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null });
+        await tx.request()
+          .input("Id",        sql.Int, parseInt(id))
+          .input("ProjectId", sql.Int, parseInt(ProjectId))
+          .input("BlockId",   sql.Int, parseInt(BlockId))
+          .input("Floor",     sql.NVarChar(50), newFloorLabel)
+          .query(`
+            UPDATE dbo.DependencyMaster SET ProjectId = @ProjectId, TowerId = @BlockId, Floor = @Floor
+            WHERE FlatId = @Id AND (ProjectId <> @ProjectId OR TowerId <> @BlockId OR ISNULL(Floor, '') <> ISNULL(@Floor, ''))
+          `);
+      }
       await moveUnitOverrides(tx, parseInt(id), parseInt(ProjectId), parseInt(BlockId));
       // Type changed: add the new layout's rooms, soft-deactivate rooms it
       // doesn't have — only those with no DPR work (kept ones are reported).
@@ -587,7 +659,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
 //      sys.foreign_keys), so even a HISTORICAL/terminal reference (e.g. a
 //      long-Cancelled Application) still physically blocks a hard DELETE.
 // Only once both come back clear does the row actually get removed.
-router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["followup-unit-master", "crm-auto-project-setup"], "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });

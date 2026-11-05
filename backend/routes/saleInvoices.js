@@ -1,8 +1,8 @@
 const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectParamGuard } = require("../services/projectScope");
 
@@ -99,7 +99,7 @@ const SI_SELECT = `
   LEFT JOIN dbo.enterprise          pr ON pr.id           = si.ProjectId
   LEFT JOIN dbo.FinYear             fy ON fy.FId          = si.fy_id
   LEFT JOIN dbo.TypeOfDoc           td ON td.TypeOfDocId  = si.DocTypeId
-  LEFT JOIN dbo.users               cu ON LOWER(cu.email) = LOWER(si.CreatedBy)
+  LEFT JOIN dbo.users               cu ON cu.email = si.CreatedBy
   WHERE si.IsDeleted = 0
 `;
 
@@ -107,7 +107,9 @@ const SI_SELECT = `
 router.get(
   "/",
   requirePageRight("sale-invoice", "view"),
-  cache("sale-invoices", 300, { shared: true }),
+  // dropOnAnyWrite: collecting a payment (POST /api/received-payment) changes an invoice's Received / status
+  // without bumping "sale-invoices", so the list showed the old status for up to 5 minutes.
+  cache("sale-invoices", 300, { shared: true, dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();

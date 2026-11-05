@@ -4,6 +4,7 @@
 // OTHER cart rows on the same item (getStockForRow on web) — kept 1:1.
 // Changing the godown resets the cart (web enforces this too, since stock
 // figures are godown-scoped). Dropped vs. web: CSV import/export, print.
+import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
@@ -38,7 +39,7 @@ type FormState = {
   reason: string; remarks: string;
 };
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() { return istToday(); }
 
 function blankForm(): FormState {
   return {

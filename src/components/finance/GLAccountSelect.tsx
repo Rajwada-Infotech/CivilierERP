@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Search, Check, ChevronsUpDown, X, BookOpen } from "lucide-react";
+import { useInSheet } from "@/components/sheet/useInSheet";
 
 export interface GLOption {
   id: number;
@@ -30,6 +31,8 @@ export const GLAccountSelect: React.FC<{
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
+  // On a drawing-sheet page the control is squared and inked to match; elsewhere it is drawn as before.
+  const sheet = useInSheet(triggerRef);
 
   useEffect(() => {
     fetchWithAuth("/api/general-ledger/options")
@@ -100,14 +103,16 @@ export const GLAccountSelect: React.FC<{
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-background hover:border-primary/40 text-sm transition-colors text-left focus:outline-none focus:ring-2 focus:ring-primary/20 ${className ?? ""}`}
+        className={sheet
+          ? `w-full flex items-center justify-between gap-2 px-3 py-2.5 border bg-card text-sm text-left focus:outline-none ${open ? "border-foreground" : "border-foreground/40 hover:border-foreground focus:border-foreground"} ${className ?? ""}`
+          : `w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border bg-background hover:border-primary/40 text-sm transition-colors text-left focus:outline-none focus:ring-2 focus:ring-primary/20 ${className ?? ""}`}
       >
         <span className={`flex items-center gap-2 min-w-0 ${selectedOption ? "text-foreground" : "text-muted-foreground/50"}`}>
           {selectedOption ? (
             <>
-              <BookOpen size={13} className="text-primary/70 shrink-0" />
-              <span className="truncate">{selectedOption.label}</span>
-              {selectedOption.code ? <span className="font-mono text-[0.625rem] text-muted-foreground/50 shrink-0">({selectedOption.code})</span> : null}
+              {!sheet && <BookOpen size={13} className="text-primary/70 shrink-0" />}
+              <span className={`truncate ${sheet ? "font-medium" : ""}`}>{selectedOption.label}</span>
+              {selectedOption.code ? <span className={`${sheet ? "font-heading tabular-nums text-muted-foreground" : "font-mono text-muted-foreground/50"} text-[0.625rem] shrink-0`}>({selectedOption.code})</span> : null}
             </>
           ) : (
             <span className="truncate">{placeholder}</span>
@@ -131,10 +136,10 @@ export const GLAccountSelect: React.FC<{
       {open && createPortal(
         <div
           ref={panelRef}
-          style={panelStyle}
-          className="flex flex-col rounded-xl border border-border bg-card shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95"
+          style={sheet ? { ...panelStyle, boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)" } : panelStyle}
+          className={`flex flex-col bg-card overflow-hidden animate-in fade-in-0 zoom-in-95 ${sheet ? "border border-foreground" : "rounded-xl border border-border shadow-2xl"}`}
         >
-          <div className="px-3 py-2.5 border-b border-border/60 shrink-0">
+          <div className={`px-3 py-2.5 shrink-0 border-b ${sheet ? "border-foreground" : "border-border/60"}`}>
             <div className="relative">
               <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 pointer-events-none" />
               <input
@@ -142,7 +147,9 @@ export const GLAccountSelect: React.FC<{
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name or code…"
-                className="w-full text-xs pl-7 pr-2 py-2 rounded-md bg-muted/40 border border-border/60 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                className={sheet
+                  ? "w-full text-xs pl-7 pr-2 py-2 bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+                  : "w-full text-xs pl-7 pr-2 py-2 rounded-md bg-muted/40 border border-border/60 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30"}
               />
             </div>
           </div>
@@ -161,13 +168,15 @@ export const GLAccountSelect: React.FC<{
                       onChange(o.id, o.label);
                       setOpen(false);
                     }}
-                    className={`flex items-center gap-2 px-3 py-2 mx-1.5 rounded text-xs cursor-pointer transition-colors ${
-                      isSelected ? "bg-primary/15 text-primary font-semibold" : "hover:bg-muted/60"
+                    className={`flex items-center gap-2 px-3 py-2 mx-1.5 text-xs cursor-pointer transition-colors ${sheet ? "" : "rounded"} ${
+                      isSelected
+                        ? sheet ? "bg-foreground text-card font-semibold" : "bg-primary/15 text-primary font-semibold"
+                        : sheet ? "text-foreground hover:bg-primary/10" : "hover:bg-muted/60"
                     }`}
                   >
                     {isSelected && <Check size={11} className="shrink-0" />}
                     <span className="flex-1 truncate">{o.label}</span>
-                    {o.code ? <span className="font-mono text-[0.625rem] text-muted-foreground/50 shrink-0">{o.code}</span> : null}
+                    {o.code ? <span className={`${sheet ? "font-heading tabular-nums opacity-70" : "font-mono text-muted-foreground/50"} text-[0.625rem] shrink-0`}>{o.code}</span> : null}
                   </div>
                 );
               })

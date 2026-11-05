@@ -6,13 +6,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getUserProfile,
   updateUserProfile,
-  updateUserPreferences,
   changePassword,
   getUserActivity,
   uploadAvatar,
   removeAvatar,
 } from "@/api/userProfileApi";
-import { Switch } from "@/components/ui/switch";
 import {
   ProfileShell,
   ProfileSection,
@@ -21,6 +19,7 @@ import {
   PasswordForm,
 } from "@/components/layout/ProfileShell";
 import { toast } from "sonner";
+import { ProfileSettings } from "@/components/profile/ProfileSettings";
 import {
   User,
   Activity,
@@ -33,7 +32,6 @@ import {
   Settings,
   Camera,
   Trash2,
-  Bell,
 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { BodyPortal } from "@/components/ui/body-portal";
@@ -120,7 +118,6 @@ export default function AdminProfile() {
     currentUser,
     updateCurrentUserName,
     updateCurrentUserAvatar,
-    updateCurrentUserShowLoginReminders,
   } = useAuth();
   const rights = usePageRights("admin-profile");
   const userId = currentUser?.id ? parseInt(currentUser.id) : 0;
@@ -174,20 +171,6 @@ export default function AdminProfile() {
       setEditingPassword(false);
     },
     onError: (e: Error) => toast.error(e.message),
-  });
-
-  const preferencesMutation = useMutation({
-    mutationFn: (showLoginReminders: boolean) =>
-      updateUserPreferences(userId, { showLoginReminders }),
-    onSuccess: (_data, showLoginReminders) => {
-      updateCurrentUserShowLoginReminders(showLoginReminders);
-      toast.success(
-        showLoginReminders
-          ? "Login reminders popup enabled"
-          : "Login reminders popup disabled",
-      );
-    },
-    onError: () => toast.error("Failed to update preference"),
   });
 
   const avatarUploadMutation = useMutation({
@@ -255,6 +238,7 @@ export default function AdminProfile() {
     { key: "profile", label: "Profile", icon: User },
     { key: "permissions", label: "Permissions", icon: Shield },
     { key: "activity", label: "Activity", icon: Activity },
+    { key: "settings", label: "Settings", icon: Settings },
   ];
 
   return (
@@ -295,26 +279,24 @@ export default function AdminProfile() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
       >
+        {/* SETTINGS TAB: one component for every profile page */}
+        {activeTab === "settings" && <ProfileSettings />}
+
         {/* PROFILE TAB */}
         {activeTab === "profile" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Identity card */}
             <div className="lg:col-span-1 space-y-4">
               <div className="rounded-2xl border border-border bg-card overflow-hidden">
-                <div
-                  className="h-16 w-full"
-                  style={{
-                    background: "linear-gradient(135deg, #1e3a5f, #1d4ed8)",
-                  }}
-                />
-                <div className="px-4 pb-4 -mt-8">
+                <div className="h-[3px] w-full" style={{ background: "#3b82f6" }} />
+                <div className="px-4 pb-4 pt-4">
                   <div className="flex items-end gap-3">
                     <div
-                      className="w-14 h-14 rounded-xl flex items-center justify-center text-white text-lg font-heading font-black shadow-lg ring-4 ring-card overflow-hidden shrink-0"
+                      className="w-14 h-14 rounded-xl flex items-center justify-center text-foreground text-lg font-heading font-black border-[1.5px] border-foreground overflow-hidden shrink-0"
                       style={{
                         background: profile?.avatar_url
                           ? "transparent"
-                          : "linear-gradient(135deg, #1d4ed8, #3b82f6)",
+                          : "hsl(var(--card))",
                       }}
                     >
                       {profile?.avatar_url ? (
@@ -491,26 +473,6 @@ export default function AdminProfile() {
                   />
                 )}
               </ProfileSection>
-
-              <ProfileSection title="Preferences" icon={Bell}>
-                <div className="flex items-center justify-between gap-4 py-1">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">
-                      Show reminders popup on login
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Pop up pending alerts (from the bell icon) right after you sign in.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={currentUser?.showLoginReminders !== false}
-                    disabled={preferencesMutation.isPending}
-                    onCheckedChange={(checked) =>
-                      preferencesMutation.mutate(checked)
-                    }
-                  />
-                </div>
-              </ProfileSection>
             </div>
           </div>
         )}
@@ -595,7 +557,7 @@ export default function AdminProfile() {
       {/* ── Avatar Upload Modal ───────────────────────────────────────────── */}
       {avatarModalOpen && (
         <BodyPortal><div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
@@ -605,7 +567,7 @@ export default function AdminProfile() {
             }
           }}
         >
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl overflow-hidden">
+          <div className="pf-modal w-full max-w-sm bg-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center">
@@ -639,13 +601,13 @@ export default function AdminProfile() {
             <div className="p-5 space-y-4">
               <div className="flex flex-col items-center gap-3">
                 <div
-                  className="w-24 h-24 rounded-2xl overflow-hidden flex items-center justify-center text-white text-2xl font-heading font-black shadow-lg"
+                  className="w-24 h-24 rounded-2xl overflow-hidden flex items-center justify-center text-foreground text-2xl font-heading font-black border-[1.5px] border-foreground"
                   style={{
                     background: avatarPreview
                       ? "transparent"
                       : profile?.avatar_url
                         ? "transparent"
-                        : "linear-gradient(135deg, #1d4ed8, #3b82f6)",
+                        : "hsl(var(--card))",
                   }}
                 >
                   {avatarPreview ? (

@@ -1,19 +1,8 @@
-import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { AdminShell } from "@/components/admin/AdminShell";
-import {
-  ShieldCheck,
-  Users,
-  UserCheck,
-  BarChart3,
-  RefreshCw,
-  Crown,
-} from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Shield, Lock } from "lucide-react";
+import { SHEET_CSS, Detail, Dimension, Skel, SheetMark } from "@/components/sheet/Sheet";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 interface AdminUser {
@@ -58,22 +47,6 @@ const getRelativeTime = (timestamp: string) => {
   return `${Math.floor(hours / 24)}d ago`;
 };
 
-const getRelativeTimeColor = (timestamp: string) => {
-  const diffMinutes = Math.floor(
-    (Date.now() - new Date(timestamp).getTime()) / 1000 / 60,
-  );
-  if (diffMinutes < 60) return "text-emerald-500";
-  if (diffMinutes < 240) return "text-amber-500";
-  return "text-muted-foreground";
-};
-
-const getActivityIcon = (event: string, actionType: string) => {
-  if (event === "login" || event === "logout") return UserCheck;
-  if (actionType === "settings_change") return Lock;
-  if (actionType === "delete") return Shield;
-  return BarChart3;
-};
-
 const getInitials = (name: string) =>
   name
     .split(" ")
@@ -81,17 +54,6 @@ const getInitials = (name: string) =>
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase())
     .join("") || "?";
-
-const AVATAR_PALETTE = [
-  "bg-blue-500/15 text-blue-600",
-  "bg-violet-500/15 text-violet-600",
-  "bg-emerald-500/15 text-emerald-600",
-  "bg-amber-500/15 text-amber-600",
-  "bg-rose-500/15 text-rose-600",
-  "bg-cyan-500/15 text-cyan-600",
-];
-const avatarColor = (seed: number) =>
-  AVATAR_PALETTE[seed % AVATAR_PALETTE.length];
 
 const PAGE_NAME_MAP: Record<string, string> = {
   login: "Login",
@@ -165,9 +127,11 @@ const getPageName = (resource?: string): string => {
 };
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
+const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n);
+const share = (part: number, whole: number) => (whole > 0 ? Math.min(100, Math.max(0, (part / whole) * 100)) : 0);
+
 export default function AdminDashboard() {
-  const rights = usePageRights("admin-dashboard");
-  const [justClicked, setJustClicked] = React.useState(false);
+  usePageRights("admin-dashboard");
   const {
     data: dashData,
     isLoading: dashLoading,
@@ -202,315 +166,173 @@ export default function AdminDashboard() {
 
   const loading = dashLoading || activityLoading;
 
-  const stats = dashData
+  const stats = dashData?.stats
     ? {
         totalUsers: dashData.stats.totalUsers,
         activeUsers: dashData.stats.activeUsers,
         inactiveUsers: dashData.stats.totalUsers - dashData.stats.activeUsers,
+        totalRoles: dashData.stats.totalRoles ?? 0,
         recentActions: activityData?.total ?? 0,
       }
-    : { totalUsers: 0, activeUsers: 0, inactiveUsers: 0, recentActions: 0 };
+    : { totalUsers: 0, activeUsers: 0, inactiveUsers: 0, totalRoles: 0, recentActions: 0 };
 
   const recentUsers = dashData?.recentUsers ?? [];
   const recentActivities = activityData?.data ?? [];
-
-  const activeRatio =
-    stats.totalUsers > 0
-      ? Math.round((stats.activeUsers / stats.totalUsers) * 100)
-      : 0;
-
-  const minorStats = [
-    {
-      title: "Active Users",
-      value: stats.activeUsers,
-      sub: "currently enabled",
-      icon: UserCheck,
-      color: "text-emerald-600",
-      bg: "bg-emerald-500/10",
-      ring: "ring-emerald-500/20",
-    },
-    {
-      title: "Inactive Users",
-      value: stats.inactiveUsers,
-      sub: "discontinued accounts",
-      icon: ShieldCheck,
-      color: "text-amber-600",
-      bg: "bg-[#ffe2021a]",
-      ring: "ring-amber-500/20",
-    },
-    {
-      title: "Activity Logs",
-      value: stats.recentActions,
-      sub: "all time entries",
-      icon: BarChart3,
-      color: "text-violet-600",
-      bg: "bg-violet-500/10",
-      ring: "ring-violet-500/20",
-    },
-  ];
-
-  const refreshAction = (
-    <div className="flex items-center gap-2">
-      {dataUpdatedAt > 0 && (
-        <span className="text-xs text-muted-foreground hidden sm:block">
-          Updated: {new Date(dataUpdatedAt).toLocaleTimeString("en-IN")}
-        </span>
-      )}
-      <button
-        onClick={() => {
-          setJustClicked(true);
-          setTimeout(() => setJustClicked(false), 600);
-          refetch();
-        }}
-        disabled={isFetching}
-        className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-500/50 text-blue-700 transition-all duration-200 active:scale-90 disabled:opacity-70 ${
-          justClicked ? "ring-2 ring-blue-500/30" : ""
-        }`}
-      >
-        <RefreshCw
-          size={13}
-          className={`transition-transform ${
-            isFetching || justClicked
-              ? "animate-spin duration-500"
-              : "duration-500 group-hover:rotate-180"
-          }`}
-        />
-        Refresh
-      </button>
-    </div>
-  );
+  const activePct = share(stats.activeUsers, stats.totalUsers);
+  const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
 
   return (
-    <>
+    <div>
+      <style>{SHEET_CSS}</style>
       <Breadcrumbs items={["Admin", "Dashboard"]} />
-      <AdminShell
-        title="Control Center"
-        subtitle="Live overview of users, access & system activity"
-        icon={Crown}
-        action={refreshAction}
-      >
-        {dashError && (
-          <div className="px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
-            Failed to load dashboard data — please try refreshing.
-          </div>
-        )}
 
-        {/* ── Stat row: one spotlight card + three compact cards ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Spotlight: Total Users with active-ratio progress ring */}
-          <div className="lg:col-span-1 relative overflow-hidden rounded-xl border border-blue-500/25 bg-gradient-to-br from-blue-600 to-indigo-600 text-white p-3.5 flex flex-col justify-between min-h-[100px]">
-            <div
-              className="absolute -bottom-10 -left-10 w-40 h-40 rounded-full pointer-events-none"
-              style={{
-                background:
-                  "radial-gradient(circle, rgba(255,255,255,0.12) 0%, transparent 70%)",
-              }}
-            />
-            <div className="relative z-10 flex items-center justify-between">
-              <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-white/70">
-                Total Users
-              </span>
-              <div className="p-1 rounded-md bg-white/15">
-                <Users size={13} />
-              </div>
+      <div className="crm-sheet sheet-in">
+        {/* Title block */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
+          <div style={{ flex: "1 1 320px", padding: "22px 22px 20px", minWidth: 0 }}>
+            <p className="label">CivilierERP · Admin</p>
+            <h1 className="title" style={{ fontSize: "clamp(28px, 3.4vw, 44px)", margin: "8px 0 0", lineHeight: 1.05 }}>Control center</h1>
+            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--ink-2)", maxWidth: "60ch" }}>
+              Who has an account, who can still sign in, and what was last done in the system.
+            </p>
+          </div>
+          <div className="mono titleblock" style={{ flex: "1 1 280px", maxWidth: 380, minWidth: 240, display: "grid", gridTemplateColumns: "1fr 1fr", borderLeft: "1px solid var(--ink)", fontSize: 13 }}>
+            <div style={{ gridColumn: "1 / -1", padding: "10px 14px", borderBottom: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Date</span>
+              {readAt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
             </div>
-            <div className="relative z-10">
-              {loading ? (
-                <div className="h-7 w-16 rounded-md bg-white/20 animate-pulse" />
-              ) : (
-                <div className="text-2xl font-bold tabular-nums leading-none">
-                  {stats.totalUsers.toLocaleString()}
-                </div>
-              )}
-              <p className="text-[0.6875rem] text-white/70 mt-0.5">
-                registered accounts
-              </p>
+            <div style={{ padding: "10px 14px", borderRight: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Read at</span>
+              {readAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
             </div>
-            <div className="relative z-10 mt-1.5">
-              <div className="flex items-center justify-between text-[0.625rem] text-white/70 mb-1">
-                <span>Active ratio</span>
-                <span className="font-semibold text-white">{activeRatio}%</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-white/15 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-white/80 transition-all duration-700"
-                  style={{ width: `${activeRatio}%` }}
-                />
-              </div>
+            <div style={{ padding: "10px 14px", display: "flex", alignItems: "flex-end" }}>
+              <button onClick={() => refetch()} disabled={isFetching} className="label link" style={{ color: "var(--blue)" }}>
+                {isFetching ? "Reading…" : "Re-read"}
+              </button>
             </div>
           </div>
-
-          {minorStats.map((stat) => (
-            <div
-              key={stat.title}
-              className={`rounded-xl border border-border bg-card p-3.5 flex flex-col justify-between min-h-[100px] hover:shadow-lg hover:-translate-y-0.5 transition-all ring-1 ring-transparent hover:${stat.ring}`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {stat.title}
-                </span>
-                <div className={`p-1 rounded-md ${stat.bg}`}>
-                  <stat.icon size={13} className={stat.color} />
-                </div>
-              </div>
-              {loading ? (
-                <div className="h-7 w-14 rounded-md bg-muted animate-pulse" />
-              ) : (
-                <div className="text-2xl font-bold tabular-nums text-foreground leading-none">
-                  {stat.value.toLocaleString()}
-                </div>
-              )}
-              <p className="text-[0.6875rem] text-muted-foreground">{stat.sub}</p>
-            </div>
-          ))}
         </div>
 
-        {/* ── Recent Users + Recent Activity ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
-          <div className="lg:col-span-2 rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-3.5 py-2 border-b border-border/60 flex items-center gap-2">
-              <Users size={13} className="text-blue-600" />
-              <h2 className="text-sm font-semibold">Recent Users</h2>
-            </div>
-            <div>
-              {loading ? (
-                <ul className="space-y-2 p-4">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <li
-                      key={i}
-                      className="h-10 rounded-md bg-muted animate-pulse"
-                    />
-                  ))}
-                </ul>
-              ) : recentUsers.length === 0 ? (
-                <p className="p-4 text-sm text-muted-foreground">
-                  No users found.
-                </p>
-              ) : (
-                <ul className="divide-y divide-border/40">
-                  {recentUsers.map((user, i) => (
-                    <li
-                      key={user.id}
-                      className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-muted/40 transition-colors"
-                    >
-                      <div
-                        className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ${avatarColor(i)}`}
-                      >
-                        {getInitials(user.name)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium text-xs truncate">
-                          {user.name}
-                        </p>
-                        <p className="text-[0.6875rem] text-muted-foreground truncate">
-                          {user.email}
-                        </p>
-                      </div>
-                      <span
-                        className={`flex items-center gap-1.5 text-[0.625rem] font-semibold shrink-0 ${
-                          !user.discontinue
-                            ? "text-emerald-600"
-                            : "text-rose-600"
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            !user.discontinue
-                              ? "bg-emerald-500"
-                              : "bg-rose-500"
-                          }`}
-                        />
-                        {!user.discontinue ? "Active" : "Inactive"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
+        {dashError && <div className="cell" style={{ color: "var(--red)", fontSize: 13 }}>Could not load the dashboard. Use Re-read to try again.</div>}
 
-          <div className="lg:col-span-3 rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-3.5 py-2 border-b border-border/60 flex items-center gap-2">
-              <BarChart3 size={13} className="text-violet-600" />
-              <h2 className="text-sm font-semibold">Recent Activity</h2>
-            </div>
-            <div>
-              {loading ? (
-                <div className="space-y-2 p-4">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="h-14 rounded-lg bg-muted animate-pulse"
-                    />
-                  ))}
-                </div>
-              ) : recentActivities.length === 0 ? (
-                <p className="p-4 text-sm text-muted-foreground">
-                  No activity found.
-                </p>
-              ) : (
-                <div className="relative px-3.5 py-2">
-                  {/* Vertical timeline rail */}
-                  <div className="absolute left-[22px] top-2 bottom-2 w-px bg-border" />
-                  <div className="space-y-1.5">
-                    {recentActivities.map((activity, i) => {
-                      const Icon = getActivityIcon(
-                        activity.event,
-                        activity.actionType,
-                      );
-                      const pageName = getPageName(activity.resource);
-                      const subDetail =
-                        activity.details ||
-                        (activity.actionType
-                          ? activity.actionType.replace(/_/g, " ")
-                          : activity.event);
-                      return (
-                        <div
-                          key={activity.id || i}
-                          className="relative flex items-start gap-2.5 pl-0"
-                        >
-                          <div className="relative z-10 w-6 h-6 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0">
-                            <Icon className="h-3 w-3 text-violet-600" />
-                          </div>
-                          <div className="min-w-0 flex-1 rounded-lg bg-muted/30 px-2.5 py-1.5 hover:bg-muted/50 transition-colors">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="font-semibold text-foreground text-xs truncate">
-                                {pageName}
-                              </p>
-                              <Badge
-                                variant="outline"
-                                className={`text-[0.5625rem] px-1.5 py-0 whitespace-nowrap shrink-0 ${getRelativeTimeColor(activity.timestamp)}`}
-                              >
-                                {getRelativeTime(activity.timestamp)}
-                              </Badge>
-                            </div>
-                            <p className="text-[0.6875rem] text-muted-foreground truncate">
-                              {subDetail}
-                            </p>
-                            <p className="text-[0.625rem] text-muted-foreground/70">
-                              by {activity.userName || activity.userEmail} •{" "}
-                              {new Date(activity.timestamp).toLocaleString(
-                                "en-IN",
-                                {
-                                  year: "numeric",
-                                  month: "short",
-                                  day: "numeric",
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                },
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })}
+        {/* A + B */}
+        <div className="grid2">
+          <Detail tag="A" title="Accounts" note="All time">
+            {loading ? (<><Skel h={54} w="60%" /><Skel h={28} /><Skel w="70%" /></>) : (
+              <>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 36px", alignItems: "flex-end" }}>
+                  <div>
+                    <span className="label" style={{ display: "block", marginBottom: 8 }}>Users</span>
+                    <span className="figure" style={{ display: "block", fontSize: "clamp(36px, 4.6vw, 62px)" }}>{fmtNum(stats.totalUsers)}</span>
+                  </div>
+                  <div>
+                    <span className="label" style={{ display: "block", marginBottom: 8 }}>Can sign in</span>
+                    <span className="figure" style={{ display: "block", fontSize: "clamp(36px, 4.6vw, 62px)", color: "var(--ink-2)" }}>{fmtNum(stats.activeUsers)}</span>
+                  </div>
+                  <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                    <span className="label" style={{ display: "block", marginBottom: 8 }}>Active</span>
+                    <span className="figure" style={{ fontSize: "clamp(24px, 2.8vw, 36px)", color: "var(--blue)" }}>
+                      {Math.round(activePct)}<span style={{ fontSize: "0.5em", fontWeight: 500, marginLeft: 3 }}>%</span>
+                    </span>
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
+
+                {/* every account, measured out: active solid, discontinued hatched */}
+                <div style={{ marginTop: 22 }}>
+                  <div className="hatch" style={{ display: "flex", height: 30, border: "1.5px solid var(--ink)", backgroundColor: "var(--sheet)" }} role="img"
+                    aria-label={`${stats.activeUsers} active, ${stats.inactiveUsers} discontinued`}>
+                    <div className="grow" style={{ width: `${activePct}%`, background: "var(--blue)" }} title={`Active: ${fmtNum(stats.activeUsers)}`} />
+                  </div>
+                  <div style={{ display: "flex" }}>
+                    <div style={{ width: `${Math.min(Math.max(activePct, 24), 76)}%`, minWidth: 0, overflow: "hidden" }}>
+                      <Dimension from={0} to={100} text={`${fmtNum(stats.activeUsers)} active`} color="var(--blue)" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                      <Dimension from={0} to={100} text={`${fmtNum(stats.inactiveUsers)} discontinued`} />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </Detail>
+
+          <Detail tag="B" title="On record">
+            {loading ? (<><Skel h={40} /><Skel h={40} /><Skel h={40} /></>) : (
+              <div>
+                {[
+                  { label: "Roles", value: stats.totalRoles, sub: "that rights are granted to" },
+                  { label: "Discontinued", value: stats.inactiveUsers, sub: stats.inactiveUsers ? "accounts that can no longer sign in" : "every account can sign in" },
+                  { label: "Activity logged", value: stats.recentActions, sub: "entries in the activity log" },
+                ].map((s, i) => (
+                  <div key={s.label} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "13px 0", borderTop: i ? "1px solid var(--rule-soft)" : 0 }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span className="label" style={{ color: "var(--ink)" }}>{s.label}</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 4 }}>{s.sub}</span>
+                    </span>
+                    <span className="figure" style={{ fontSize: 28, whiteSpace: "nowrap" }}>{fmtNum(s.value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Detail>
         </div>
-      </AdminShell>
-    </>
+
+        {/* C + D */}
+        <div className="grid2">
+          <Detail tag="C" title="Latest activity" note={`${fmtNum(stats.recentActions)} in all`}>
+            {loading ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : recentActivities.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>Nothing has been logged yet.</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ minWidth: 520 }}>
+                  <thead><tr><th>Page</th><th>By</th><th className="num">When</th></tr></thead>
+                  <tbody>
+                    {recentActivities.map((a, i) => {
+                      const sub = a.details || (a.actionType ? a.actionType.replace(/_/g, " ") : a.event);
+                      return (
+                        <tr key={a.id || i}>
+                          <td style={{ maxWidth: 300 }}>
+                            <span style={{ display: "block", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getPageName(a.resource)}</span>
+                            {sub && <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</span>}
+                          </td>
+                          <td style={{ color: "var(--ink-2)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.userName || a.userEmail || "—"}</td>
+                          <td className="num" style={{ whiteSpace: "nowrap" }}>
+                            <span style={{ display: "block" }}>{getRelativeTime(a.timestamp)}</span>
+                            <span style={{ display: "block", fontSize: 11, color: "var(--graphite)" }}>
+                              {new Date(a.timestamp).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Detail>
+
+          <Detail tag="D" title="Newest accounts">
+            {loading ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : recentUsers.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No users found.</p>
+            ) : (
+              <div>
+                {recentUsers.map((u, i) => (
+                  <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: i ? "1px solid var(--rule-soft)" : 0 }}>
+                    <span className="mono" style={{ width: 28, height: 28, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--ink)", fontSize: 10, fontWeight: 700 }}>
+                      {getInitials(u.name)}
+                    </span>
+                    <span style={{ minWidth: 0, flex: 1 }}>
+                      <span style={{ display: "block", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</span>
+                      <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email}</span>
+                    </span>
+                    {u.discontinue ? <span className="label">Discontinued</span> : <SheetMark text="Active" tone="done" />}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Detail>
+        </div>
+      </div>
+    </div>
   );
 }

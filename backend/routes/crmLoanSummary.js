@@ -1,13 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const { getPool, sql } = require("../db");
-const { CrmStatus } = require("../constants/crmStatuses");
-const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+const { getPool, sql } = require("../db");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
+const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // GET / -- flat join of all active bookings with their CrmLoanDetail row
 // (nullable). A dedicated route file avoids the /:id collision in crmBookings.js.
@@ -15,15 +15,13 @@ router.use(apiRateLimit);
 router.get("/", requirePageRight("crm-loan-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cancelled = CrmStatus.CANCELLED;
-    const rejected  = CrmStatus.REJECTED;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [
       "b.IsActive = 1",
-      `b.Status NOT IN ('${cancelled}', '${rejected}')`,
+      `b.Status NOT IN ${DEAD_BOOKING_SQL}`,
     ];
     // Not paginated — status-tab counts and disbursed totals are computed
     // client-side from the full set (see CrmLoanTracking.tsx), same
@@ -31,6 +29,7 @@ router.get("/", requirePageRight("crm-loan-details", "view"), async (req, res) =
     // server-side instead.
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     const sql2 = [
       "SELECT",
@@ -49,7 +48,7 @@ router.get("/", requirePageRight("crm-loan-details", "view"), async (req, res) =
       "    JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId",
       "    WHERE m.BookingId = b.Id AND r.PaymentMode = 'Home Loan'",
       "  ), 0) + ISNULL((",
-      "    SELECT SUM(o.Amount) FROM dbo.CrmOnAccountPayment o",
+      "    SELECT SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN o.Amount ELSE 0 END) FROM dbo.CrmOnAccountPayment o",
       "    WHERE o.BookingId = b.Id AND o.PaymentMode = 'Home Loan'",
       "  ), 0) AS DisbursedAmount",
       "FROM dbo.CrmBooking b",

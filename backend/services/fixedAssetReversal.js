@@ -36,6 +36,7 @@
  * confirmation to the user, not something executeReversal() trusts blindly.
  */
 
+const { ebCoversGrnSql } = require("./expenseGrnLink");
 const { sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 // Reused rather than re-implemented — same PO-status-revert logic the
@@ -135,7 +136,7 @@ async function buildReversalPlan(pool, assetId) {
     const grnId = batch.SourceId;
     const expCheck = await pool.request().input("GRNID", sql.Int, grnId).query(`
       SELECT COUNT(*) AS cnt FROM dbo.ExpenseBooking
-      WHERE ESourceType = 'GRN' AND ESourceId = @GRNID AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+      WHERE ${ebCoversGrnSql("", "@GRNID")} AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
     `);
     if (Number(expCheck.recordset[0]?.cnt) > 0) {
       return { reversible: false, reason: "has_expense",
@@ -221,7 +222,7 @@ async function executeReversal(pool, assetId, email) {
       const grnId = batch.SourceId;
       const expCheck = await tx.request().input("GRNID", sql.Int, grnId).query(`
         SELECT COUNT(*) AS cnt FROM dbo.ExpenseBooking
-        WHERE ESourceType = 'GRN' AND ESourceId = @GRNID AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
+        WHERE ${ebCoversGrnSql("", "@GRNID")} AND ISNULL(EStatus, '') NOT IN ('Deleted', 'Draft')
       `);
       if (Number(expCheck.recordset[0]?.cnt) > 0) {
         const err = new Error("This item's GRN has a linked Expense Booking — can't reverse.");

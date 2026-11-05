@@ -1,10 +1,11 @@
 import React, { useRef, useState } from "react";
-import { Notification } from "iconsax-react";
-import { CheckCheck, Megaphone } from "lucide-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
+import { CheckCheck } from "lucide-react";
 import { useSaNotifications } from "@/hooks/useSaNotifications";
-import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { NAV_PANEL_CSS, GENIE_CSS } from "./navPanelStyles";
+import { useGeniePanel } from "./useGeniePanel";
 
 function timeAgo(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -21,6 +22,7 @@ export const SaNotificationBell: React.FC = () => {
   const { notifications, unreadCount, markRead, markAllRead } = useSaNotifications();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const { closing, close } = useGeniePanel(open, setOpen);
 
   const recent = notifications.slice(0, 10);
 
@@ -32,88 +34,80 @@ export const SaNotificationBell: React.FC = () => {
       else if (n.refType === "crm_booking_amendment") navigate("/crm/booking-amendments");
       else if (n.refType === "crm_service_ticket") navigate("/crm/service-tickets");
       else if (n.refType === "crm_handover") navigate("/crm/handover");
+      else if (n.refType === "crm_payment") navigate(`/crm/payments?bookingId=${n.refId}`);
+      else if (n.refType === "crm_booking") navigate(`/crm/bookings?view=${n.refId}`);
       else if (n.refType?.startsWith("crm_")) navigate("/crm/dashboard");
     }
-    setOpen(false);
+    close();
   };
 
   return (
     <div className="relative" ref={ref}>
-      {/* Same button chrome as ReminderBell (the other bell right next to
-          this one) — plain icon + hover ring, no resting border/background
-          box — so the two read as a matched pair instead of one looking
-          like a separate chip. Badge stays orange (vs. ReminderBell's red)
-          as the one deliberate difference, so the two are still tellable
-          apart at a glance. */}
+      {/* Same button chrome as ReminderBell, right next to it; the count tag is ink here (red on Reminders) so the two
+          stay tellable apart at a glance. */}
       <button
-        onClick={() => setOpen((p) => !p)}
-        className="relative p-2.5 hover:bg-muted rounded-full transition-all active:scale-95"
-        title="Notifications"
+        onClick={() => (open ? close() : setOpen(true))}
+        className={`relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors ${open && !closing ? "genie-rub" : ""}`}
+        title="Sales notifications"
       >
-        <Notification
-          size={20}
-          variant={unreadCount > 0 ? "Bold" : "Outline"}
-          color={unreadCount > 0 ? "#f97316" : "hsl(var(--muted-foreground))"}
-        />
+        <ChromeIcons.announce size={18} style={{ color: unreadCount > 0 ? "hsl(var(--foreground))" : undefined }} />
         {unreadCount > 0 && (
-          <span className="absolute top-1.5 right-1.5 flex h-4 min-w-[16px]">
-            <span className="relative inline-flex rounded-full h-4 min-w-[16px] px-0.5 bg-orange-600 text-[0.625rem] font-bold text-white items-center justify-center border-2 border-background">
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
+          <span className="absolute -top-0.5 -right-1 min-w-[15px] h-[15px] px-0.5 flex items-center justify-center bg-foreground text-card font-heading text-[0.5625rem] font-semibold tabular-nums leading-none">
+            {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
         <>
+          <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS + GENIE_CSS }} />
           {/* backdrop */}
-          <BodyPortal><div className="fixed inset-0 z-40" onClick={() => setOpen(false)} /></BodyPortal>
-          <div className="absolute right-0 top-full mt-3 z-50 w-80 rounded-2xl border border-border bg-popover shadow-xl overflow-hidden">
-            {/* header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
-              <div className="flex items-center gap-2">
-                <Megaphone size={14} className="text-orange-500" />
-                <span className="text-sm font-heading font-semibold text-foreground">Notifications</span>
-                {unreadCount > 0 && (
-                  <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-500">
-                    {unreadCount} new
-                  </span>
-                )}
+          <BodyPortal><div className="fixed inset-0 z-40" onClick={close} /></BodyPortal>
+          {/* Phones: a panel fixed under the top bar, centred on the screen (pinned to the bell it ran off the
+              right edge, and the phone rule capping w-[…] boxes to their parent squeezed it to the bell's width).
+              Wider screens: dropped from the bell as before. Width set inline so that rule can't touch it. */}
+          <div
+            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-full -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50"
+            style={{ width: "min(calc(100vw - 1.5rem), 360px)" }}
+          >
+          <div className={`np-sheet genie ${closing ? "genie-close" : "genie-open"} flex flex-col`}>
+            {/* Title block: what this is, how many are unread, and mark-all-read */}
+            <div className="np-head">
+              <div className="min-w-0">
+                <p className="np-label">CivilierERP · Notifications</p>
+                <p className="np-count">
+                  <span className="np-figure">{unreadCount}</span>
+                  <span className="np-label">unread</span>
+                </p>
               </div>
               {unreadCount > 0 && (
-                <button
-                  onClick={markAllRead}
-                  className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
-                  title="Mark all read"
-                >
-                  <CheckCheck size={13} /> All read
+                <button onClick={markAllRead} className="np-key" title="Mark all read">
+                  <CheckCheck size={12} /> All read
                 </button>
               )}
             </div>
 
-            {/* list */}
-            <div className="max-h-72 overflow-y-auto">
+            <div className="np-list thin-scroll" style={{ maxHeight: "min(60vh, 380px)" }}>
               {recent.length === 0 ? (
-                <div className="p-6 text-center text-sm text-muted-foreground">No notifications yet</div>
-              ) : recent.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => handleClick(n)}
-                  className={`w-full text-left px-4 py-3 border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${!n.isRead ? "bg-orange-500/5" : ""}`}
-                >
-                  <div className="flex items-start gap-2">
-                    {!n.isRead && (
-                      <span className="mt-1.5 w-2 h-2 rounded-full bg-orange-500 shrink-0" />
-                    )}
-                    <div className={!n.isRead ? "" : "pl-4"}>
-                      <p className="text-xs font-medium text-foreground leading-snug">{n.title}</p>
-                      {n.body && <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-snug">{n.body}</p>}
-                      <p className="text-[0.625rem] text-muted-foreground mt-1">{timeAgo(n.createdAt)}</p>
-                    </div>
-                  </div>
-                </button>
-              ))}
+                <div className="np-empty">
+                  <p className="np-label ink">Nothing yet</p>
+                  <p>New notifications will show here.</p>
+                </div>
+              ) : (
+                recent.map((n, i) => (
+                  <button key={n.id} type="button" onClick={() => handleClick(n)} className={`np-row ${n.isRead ? "read" : ""}`}>
+                    <span className="np-num">{String(i + 1).padStart(2, "0")}</span>
+                    <i className={`np-dot ${n.isRead ? "" : "solid"}`} title={n.isRead ? "Read" : "Unread"} />
+                    <span className="np-text">
+                      <span className="np-name">{n.title}</span>
+                      {n.body && <span className="np-sub">{n.body}</span>}
+                    </span>
+                    <span className="np-label" style={{ whiteSpace: "nowrap", paddingTop: 2 }}>{timeAgo(n.createdAt)}</span>
+                  </button>
+                ))
+              )}
             </div>
+          </div>
           </div>
         </>
       )}

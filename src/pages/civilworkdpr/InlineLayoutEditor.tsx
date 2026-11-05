@@ -152,29 +152,29 @@ export function InlineLayoutEditor({
   }, [requestClose]);
 
   if (!type) {
-    return <div className="px-4 py-2 text-xs text-muted-foreground bg-muted/20 border-y border-border">No units with a Unit Type here.</div>;
+    return <div className="px-4 py-2 text-xs text-muted-foreground border-y border-dashed border-foreground/40">No units with a Unit Type here.</div>;
   }
 
-  const btn = "inline-flex items-center gap-1 text-[0.6875rem] font-medium px-2.5 py-1 rounded-md transition-colors disabled:opacity-40";
+  const btn = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center gap-1.5 h-7 px-2.5 transition-colors disabled:opacity-40";
   const impact = (p: OverridePreview, verb: string) => (
     <span>
       <span className="font-semibold">{p.unitsChanged}</span> of {p.unitsInScope} unit(s) {verb} ·{" "}
-      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">+{p.roomsToAdd}</span> /{" "}
-      <span className="text-amber-600 dark:text-amber-400 font-semibold">−{p.roomsToRemove}</span> room(s)
+      <span className="text-foreground font-semibold">+{p.roomsToAdd}</span> /{" "}
+      <span className="text-destructive font-semibold">−{p.roomsToRemove}</span> room(s)
       {p.unitsShadowed > 0 && <span className="text-muted-foreground"> · {p.unitsShadowed} keep their own layout</span>}
       {p.roomsKeptWithWork.length > 0 && (
-        <span className="text-amber-600 dark:text-amber-400"> · keeps {p.roomsKeptWithWork.length} room(s) with DPR work
+        <span className="text-foreground font-medium"> · keeps {p.roomsKeptWithWork.length} room(s) with DPR work
           <span className="text-muted-foreground"> ({p.roomsKeptWithWork.slice(0, 3).join(", ")}{p.roomsKeptWithWork.length > 3 ? "…" : ""})</span></span>
       )}
     </span>
   );
 
   return (
-    <div className="border-y border-cyan-500/30 bg-cyan-500/[0.04] px-4 py-2.5 space-y-2 text-xs" style={{ paddingLeft: 16 + (RANK_DEPTH[level] + 1) * 20 }}>
+    <div className="border-y border-dashed border-foreground/60 bg-primary/[0.03] px-4 py-2.5 space-y-2 text-xs" style={{ paddingLeft: 16 + (RANK_DEPTH[level] + 1) * 20 }}>
       <div className="flex flex-wrap items-center gap-2">
         {types.length > 1 ? (
           <select value={type.layoutTypeId} onChange={(e) => setTypeId(Number(e.target.value))} disabled={busy !== ""}
-            className="h-7 rounded-md border border-border bg-background px-1.5 text-[0.6875rem]">
+            className="h-7 border border-foreground/40 focus:border-foreground bg-card px-1.5 text-[0.6875rem] text-foreground outline-none">
             {types.map((t) => <option key={t.layoutTypeId} value={t.layoutTypeId}>{t.label} ({t.units})</option>)}
           </select>
         ) : (
@@ -183,15 +183,15 @@ export function InlineLayoutEditor({
         {categories.map((c) => {
           const n = qty[c.id] ?? 0;
           return (
-            <span key={c.id} className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 ${n !== (currentMap.get(c.id) ?? 0) ? "border-cyan-500/60" : "border-border"} ${n === 0 ? "opacity-60" : ""}`}>
+            <span key={c.id} className={`inline-flex items-center gap-1 border px-1.5 py-0.5 ${n !== (currentMap.get(c.id) ?? 0) ? "border-foreground" : "border-foreground/25"} ${n === 0 ? "opacity-60" : ""}`}>
               <span>{c.alias}</span>
               <button type="button" aria-label={`Fewer ${c.alias}`} disabled={!canEdit || busy !== "" || n <= 0}
                 onClick={() => setQty((q) => ({ ...q, [c.id]: Math.max(0, n - 1) }))}
-                className="w-5 h-5 rounded border border-border flex items-center justify-center disabled:opacity-30"><Minus size={10} /></button>
+                className="w-5 h-5 border border-foreground/40 hover:border-foreground flex items-center justify-center disabled:opacity-30"><Minus size={10} /></button>
               <span className="w-4 text-center font-semibold tabular-nums">{n}</span>
               <button type="button" aria-label={`More ${c.alias}`} disabled={!canEdit || busy !== "" || n >= MAX_ROOM_QTY}
                 onClick={() => setQty((q) => ({ ...q, [c.id]: Math.min(MAX_ROOM_QTY, n + 1) }))}
-                className="w-5 h-5 rounded border border-border flex items-center justify-center disabled:opacity-30"><Plus size={10} /></button>
+                className="w-5 h-5 border border-foreground/40 hover:border-foreground flex items-center justify-center disabled:opacity-30"><Plus size={10} /></button>
             </span>
           );
         })}
@@ -199,7 +199,7 @@ export function InlineLayoutEditor({
           <label className="inline-flex items-center gap-1 text-muted-foreground">
             up to floor
             <input value={upTo} onChange={(e) => setUpTo(e.target.value)} type="number" min={position.floorNo ?? 0} placeholder={String(position.floorNo)}
-              disabled={!canEdit || busy !== ""} className="h-6 w-14 rounded border border-border bg-background px-1 text-[0.6875rem]" />
+              disabled={!canEdit || busy !== ""} className="h-6 w-14 border border-foreground/40 focus:border-foreground bg-card px-1 text-[0.6875rem] text-foreground outline-none" />
           </label>
         )}
       </div>
@@ -241,25 +241,25 @@ export function InlineLayoutEditor({
         </div>
         {canEdit && (resetImpact ? (
           <>
-            <button type="button" onClick={confirmReset} disabled={busy !== ""} className={`${btn} bg-amber-500 text-white hover:bg-amber-600`}>
+            <button type="button" onClick={confirmReset} disabled={busy !== ""} className={`${btn} bg-destructive text-destructive-foreground border border-destructive`}>
               {busy === "reset" ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Confirm reset
             </button>
-            <button type="button" onClick={() => setResetImpact(null)} disabled={busy !== ""} className={`${btn} border border-border hover:bg-muted`}>Back</button>
+            <button type="button" onClick={() => setResetImpact(null)} disabled={busy !== ""} className={`${btn} border border-foreground/40 text-foreground hover:border-foreground`}>Back</button>
           </>
         ) : (
           <>
             {own && (
-              <button type="button" onClick={askReset} disabled={busy !== ""} className={`${btn} border border-border hover:bg-muted`}>
+              <button type="button" onClick={askReset} disabled={busy !== ""} className={`${btn} border border-foreground/40 text-foreground hover:border-foreground`}>
                 {busy === "reset-preview" ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Reset to inherited
               </button>
             )}
             <button type="button" onClick={save} disabled={busy !== "" || !dirty || total === 0 || !previewReady || !!preview?.data.overlap}
-              className={`${btn} btn-module text-white hover:opacity-90`}>
+              className={`${btn} bg-foreground text-card border border-foreground`}>
               {busy === "save" ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} Save
             </button>
           </>
         ))}
-        <button type="button" onClick={requestClose} disabled={busy !== ""} className={`${btn} border border-border hover:bg-muted`}>
+        <button type="button" onClick={requestClose} disabled={busy !== ""} className={`${btn} border border-foreground/40 text-foreground hover:border-foreground`}>
           <X size={11} /> {canEdit ? "Cancel" : "Close"}
         </button>
       </div>

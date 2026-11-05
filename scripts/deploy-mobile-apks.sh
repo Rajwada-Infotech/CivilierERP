@@ -59,6 +59,7 @@ build_and_fetch mobile-supplier         CivilierERPSupplier.apk
 build_and_fetch mobile-Fixed-Asset      CivilierERPFixedAsset.apk
 build_and_fetch mobile-follow-up        CivilierERPFollowUp.apk
 build_and_fetch mobile-maintenance      CivilierERPMaintenance.apk
+build_and_fetch mobile-cwd              CivilierERPWorkDPR.apk
 
 APKS=(
   CivilierERP.apk
@@ -67,6 +68,7 @@ APKS=(
   CivilierERPFixedAsset.apk
   CivilierERPFollowUp.apk
   CivilierERPMaintenance.apk
+  CivilierERPWorkDPR.apk
 )
 
 echo "==> Uploading to $EC2_USER@$EC2_HOST:$EC2_REMOTE_PATH"

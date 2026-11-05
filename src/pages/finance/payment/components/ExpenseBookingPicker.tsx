@@ -16,6 +16,7 @@ export function ExpenseBookingPicker({
   jvLines = [],
   jvLinesLoading = false,
   selectedJVLine = null,
+  savedTag = null,
   onJVLineSelect,
   onJVLineClear,
   onMergeConfirm,
@@ -35,6 +36,9 @@ export function ExpenseBookingPicker({
   jvLines?: PayableJVLine[];
   jvLinesLoading?: boolean;
   selectedJVLine?: PayableJVLine | null;
+  /** What a saved payment being edited is already tagged to, until another is picked. A fully paid invoice or JV is no
+   *  longer among the options, so it can't be found there. */
+  savedTag?: { kind: string; label: string } | null;
   onJVLineSelect?: (line: PayableJVLine) => void;
   onJVLineClear?: () => void;
   /** "Merge invoices into one payment" — called with the full, validated
@@ -84,7 +88,7 @@ export function ExpenseBookingPicker({
   }, []);
 
   const selected = options.find((o) => o.id === value);
-  const hasSelection = !!selected || !!selectedContract || !!selectedJVLine || !!mergedSummary;
+  const hasSelection = !!selected || !!selectedContract || !!selectedJVLine || !!mergedSummary || !!savedTag;
 
   // A search like "194" also matches ledger names ("TDS SECTION 194H"), which
   // buried JV-2026-00194 itself under dozens of unrelated lines — so lines
@@ -160,11 +164,15 @@ export function ExpenseBookingPicker({
   const normCompanyId = (v: unknown) => (v == null || v === "" ? null : Number(v));
   const normSupplierId = (v: unknown) => (v == null || v === "" ? null : Number(v));
   const normProjectName = (v: unknown) => String(v ?? "").trim().toLowerCase();
+  // A different project is fine when both are Project Master projects: the invoices are the same company's,
+  // so it is on both (e.g. Delta Realty's Boulevard and Magnus invoices). The server re-checks the tagging.
+  const sameOrTaggedProject = (o: ExpenseOption, a: ExpenseOption) =>
+    normProjectName(o.projectName) === normProjectName(a.projectName) || (o.projectId != null && a.projectId != null);
   const isMergeCompatible = (o: ExpenseOption) =>
     !mergeAnchor ||
     (normCompanyId(o.companyId) !== null &&
       normCompanyId(o.companyId) === normCompanyId(mergeAnchor.companyId) &&
-      normProjectName(o.projectName) === normProjectName(mergeAnchor.projectName) &&
+      sameOrTaggedProject(o, mergeAnchor) &&
       normSupplierId(o.supplierId) !== null &&
       normSupplierId(o.supplierId) === normSupplierId(mergeAnchor.supplierId));
   // Pinpoints exactly which field disagrees — shown in the UI instead of a
@@ -176,7 +184,7 @@ export function ExpenseBookingPicker({
     if (normCompanyId(o.companyId) !== normCompanyId(mergeAnchor.companyId)) {
       return `Company differs (${o.companyId ?? "—"} vs ${mergeAnchor.companyId ?? "—"})`;
     }
-    if (normProjectName(o.projectName) !== normProjectName(mergeAnchor.projectName)) {
+    if (!sameOrTaggedProject(o, mergeAnchor)) {
       return `Project differs ("${o.projectName ?? "—"}" vs "${mergeAnchor.projectName ?? "—"}")`;
     }
     if (normSupplierId(o.supplierId) === null) return "Could not resolve this invoice's supplier";
@@ -217,10 +225,10 @@ export function ExpenseBookingPicker({
   return (
     <div className="space-y-1.5">
       <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
-        Select Invoice / Contract
+        Select Invoice / Contract / JV
       </label>
       <p className="text-[0.6875rem] text-muted-foreground -mt-1">
-        Choose an invoice or contract — auto-fills project, company &amp; amount.
+        Choose an invoice, contract or journal voucher — fills in the company, project &amp; amount.
       </p>
       <div className="relative" ref={ref}>
         {/* Trigger */}
@@ -240,33 +248,40 @@ export function ExpenseBookingPicker({
               <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-primary/10 text-primary border border-primary/20">
                 <Layers size={9} /> {mergedSummary.count}
               </span>
-              <span className="font-mono text-xs text-primary font-semibold truncate">
+              <span className="font-heading tabular-nums text-xs text-primary font-semibold truncate">
                 {mergedSummary.label} · ₹{mergedSummary.totalAmount.toLocaleString("en-IN")}
               </span>
             </span>
           ) : selectedJVLine ? (
             <span className="flex items-center gap-2 min-w-0">
-              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-teal-500/10 text-teal-600 border border-teal-500/20">JV</span>
-              <span className="font-mono text-xs text-teal-600 dark:text-teal-400 font-semibold truncate">
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-primary/10 text-foreground border border-foreground/40">JV</span>
+              <span className="font-heading tabular-nums text-xs text-foreground font-semibold truncate">
                 {selectedJVLine.JVNo || `JV-${selectedJVLine.JVID}`} · {selectedJVLine.LHeadName}
               </span>
             </span>
           ) : selectedContract ? (
             <span className="flex items-center gap-2 min-w-0">
-              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
-              <span className="font-mono text-xs text-violet-600 dark:text-violet-400 font-semibold truncate">
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-muted/60 text-foreground border border-border">CON</span>
+              <span className="font-heading tabular-nums text-xs text-foreground font-semibold truncate">
                 {selectedContract.DocNo} · {selectedContract.ContactPerson}
               </span>
             </span>
           ) : selected ? (
             <span className="flex items-center gap-2 min-w-0">
-              <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${selected.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
+              <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${selected.type === "emi" ? "bg-muted/60 text-foreground border border-border" : "bg-primary/10 text-primary border border-primary/20"}`}>
                 {selected.type === "emi" ? "EMI" : "EXB"}
               </span>
-              <span className="font-mono text-xs text-primary font-semibold truncate">{selected.label}</span>
+              <span className="font-heading tabular-nums text-xs text-primary font-semibold truncate">{selected.label}</span>
+            </span>
+          ) : savedTag ? (
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-[0.625rem] font-heading font-semibold border border-foreground text-foreground">
+                {savedTag.kind}
+              </span>
+              <span className="font-heading tabular-nums text-xs text-foreground font-semibold truncate">{savedTag.label}</span>
             </span>
           ) : (
-            <span className="text-muted-foreground">— Choose invoice or contract —</span>
+            <span className="text-muted-foreground">— Choose an invoice, contract or JV —</span>
           )}
           <ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
@@ -274,13 +289,13 @@ export function ExpenseBookingPicker({
         {selectedJVLine && (
           <p className="mt-1.5 px-0.5 text-[0.6875rem] flex items-center gap-3">
             <span className="text-muted-foreground">
-              Liability <span className="font-mono font-semibold text-foreground/80">₹{Number(selectedJVLine.CreditAmount || 0).toLocaleString("en-IN")}</span>
+              Liability <span className="font-heading tabular-nums font-semibold text-foreground/80">₹{Number(selectedJVLine.CreditAmount || 0).toLocaleString("en-IN")}</span>
             </span>
-            <span className="text-emerald-600 dark:text-emerald-400">
-              Already paid <span className="font-mono font-semibold">₹{Number(selectedJVLine.PaidAmount || 0).toLocaleString("en-IN")}</span>
+            <span className="text-foreground">
+              Already paid <span className="font-heading tabular-nums font-semibold">₹{Number(selectedJVLine.PaidAmount || 0).toLocaleString("en-IN")}</span>
             </span>
             <span className="text-amber-600 dark:text-amber-400">
-              Pending <span className="font-mono font-semibold">₹{Number(Math.max(selectedJVLine.RemainingAmount || 0, 0)).toLocaleString("en-IN")}</span>
+              Pending <span className="font-heading tabular-nums font-semibold">₹{Number(Math.max(selectedJVLine.RemainingAmount || 0, 0)).toLocaleString("en-IN")}</span>
             </span>
           </p>
         )}
@@ -288,13 +303,13 @@ export function ExpenseBookingPicker({
         {selectedContract && (selectedContract.TotalPaid > 0 || selectedContract.PendingAmount != null) && (
           <p className="mt-1.5 px-0.5 text-[0.6875rem] flex items-center gap-3">
             <span className="text-muted-foreground">
-              Contract value <span className="font-mono font-semibold text-foreground/80">₹{Number(selectedContract.ContractAmount || 0).toLocaleString("en-IN")}</span>
+              Contract value <span className="font-heading tabular-nums font-semibold text-foreground/80">₹{Number(selectedContract.ContractAmount || 0).toLocaleString("en-IN")}</span>
             </span>
-            <span className="text-emerald-600 dark:text-emerald-400">
-              Already paid <span className="font-mono font-semibold">₹{Number(selectedContract.TotalPaid || 0).toLocaleString("en-IN")}</span>
+            <span className="text-foreground">
+              Already paid <span className="font-heading tabular-nums font-semibold">₹{Number(selectedContract.TotalPaid || 0).toLocaleString("en-IN")}</span>
             </span>
             <span className="text-amber-600 dark:text-amber-400">
-              Pending <span className="font-mono font-semibold">₹{Number(Math.max(selectedContract.PendingAmount || 0, 0)).toLocaleString("en-IN")}</span>
+              Pending <span className="font-heading tabular-nums font-semibold">₹{Number(Math.max(selectedContract.PendingAmount || 0, 0)).toLocaleString("en-IN")}</span>
             </span>
           </p>
         )}
@@ -339,11 +354,11 @@ export function ExpenseBookingPicker({
                     const cls = t === "partial"
                       ? isActive ? "bg-amber-500/15 text-amber-600 border-amber-500/40" : "bg-muted text-muted-foreground border-border hover:border-amber-500/30"
                       : t === "emi"
-                        ? isActive ? "bg-violet-500/15 text-violet-600 border-violet-500/30" : "bg-muted text-muted-foreground border-border hover:border-primary/20"
+                        ? isActive ? "bg-muted/60 text-foreground border-border" : "bg-muted text-muted-foreground border-border hover:border-primary/20"
                         : isActive ? "bg-primary/10 text-primary border-primary/30" : "bg-muted text-muted-foreground border-border hover:border-primary/20";
                     return (
                       <button key={t} type="button" onClick={() => setTypeFilter(t)}
-                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[0.6875rem] font-heading font-semibold transition-all border ${cls}`}
+                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-none text-[0.6875rem] font-heading font-semibold transition-all border ${cls}`}
                       >
                         {t === "partial" && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />}
                         {t === "all" ? "All" : t === "booking" ? "Bookings" : t === "emi" ? "EMI" : "Partial"}
@@ -362,8 +377,8 @@ export function ExpenseBookingPicker({
                           onRefreshOptions?.();
                         }
                       }}
-                      title="Pay off several invoices from the same company, project &amp; supplier in one payment"
-                      className={`ml-auto flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[0.6875rem] font-heading font-semibold transition-all border ${
+                      title="Pay off several invoices of the same company &amp; supplier in one payment (across the company's projects too)"
+                      className={`ml-auto flex items-center gap-1 px-2.5 py-0.5 rounded-none text-[0.6875rem] font-heading font-semibold transition-all border ${
                         mergeMode
                           ? "bg-primary/10 text-primary border-primary/30"
                           : "bg-muted text-muted-foreground border-border hover:border-primary/20"
@@ -412,21 +427,21 @@ export function ExpenseBookingPicker({
                         {mergeChecked && <span className="w-2 h-2 rounded-sm bg-white" />}
                       </span>
                     ) : (
-                      <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
+                      <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${o.type === "emi" ? "bg-muted/60 text-foreground border border-border" : "bg-primary/10 text-primary border border-primary/20"}`}>
                         {o.type === "emi" ? "EMI" : "EXB"}
                       </span>
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="font-mono text-xs font-semibold text-foreground truncate">{o.label}</p>
+                      <p className="font-heading tabular-nums text-xs font-semibold text-foreground truncate">{o.label}</p>
                       {o.projectName && <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{o.projectName}</p>}
                       {o.supplierName && o.supplierName !== o.projectName && <p className="text-[0.625rem] text-primary/60 mt-0.5 truncate">{o.supplierName}</p>}
-                      {o.type === "emi" && o.installmentNo && <p className="text-[0.625rem] text-violet-500 mt-0.5">Installment #{o.installmentNo}</p>}
+                      {o.type === "emi" && o.installmentNo && <p className="text-[0.625rem] text-foreground mt-0.5">Installment #{o.installmentNo}</p>}
                       {mergeMode && o.type === "emi" && <p className="text-[0.625rem] text-muted-foreground mt-0.5 italic">Not mergeable — paid via its own installments</p>}
                       {mergeMode && o.type !== "emi" && mergeAnchor && !mergeChecked && !isMergeCompatible(o) && (
                         <p className="text-[0.625rem] text-amber-600 dark:text-amber-400 mt-0.5 italic">{mergeIncompatibleReason(o)}</p>
                       )}
                       {isPartiallyPaid(o) && (
-                        <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/25">
+                        <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-none text-[0.625rem] font-heading font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/25">
                           <span className="w-1 h-1 rounded-full bg-amber-500 inline-block" />
                           Partial
                           {(o.remainingAmount ?? 0) > 0 && (
@@ -453,7 +468,7 @@ export function ExpenseBookingPicker({
                           : payable;
                       return (
                         displayAmt != null && (
-                          <span className="shrink-0 text-[0.6875rem] font-mono font-semibold text-foreground/70 mt-0.5">₹{displayAmt.toLocaleString("en-IN")}</span>
+                          <span className="shrink-0 text-[0.6875rem] font-heading tabular-nums font-semibold text-foreground/70 mt-0.5">₹{displayAmt.toLocaleString("en-IN")}</span>
                         )
                       );
                     })()}
@@ -481,21 +496,21 @@ export function ExpenseBookingPicker({
                     setOpen(false);
                     setSearch("");
                   }}
-                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedContract?.ContractId === c.ContractId ? "bg-violet-500/5" : ""}`}
+                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedContract?.ContractId === c.ContractId ? "bg-muted/60" : ""}`}
                 >
-                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
+                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-muted/60 text-foreground border border-border">CON</span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-mono text-xs font-semibold text-foreground truncate">{c.DocNo || `CON-${c.ContractId}`}</p>
+                    <p className="font-heading tabular-nums text-xs font-semibold text-foreground truncate">{c.DocNo || `CON-${c.ContractId}`}</p>
                     {c.ContactPerson && <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{c.ContactPerson}</p>}
                     {(c.Reason || c.NatureOfContract) && <p className="text-[0.625rem] text-muted-foreground/70 mt-0.5 truncate">{c.Reason || c.NatureOfContract}</p>}
                     {(c.TotalPaid > 0 || c.PendingAmount != null) && (
                       <p className="text-[0.625rem] mt-1 flex items-center gap-2">
-                        <span className="text-emerald-600 dark:text-emerald-400">Paid ₹{Number(c.TotalPaid || 0).toLocaleString("en-IN")}</span>
+                        <span className="text-foreground">Paid ₹{Number(c.TotalPaid || 0).toLocaleString("en-IN")}</span>
                         <span className="text-amber-600 dark:text-amber-400">Pending ₹{Number(Math.max(c.PendingAmount || 0, 0)).toLocaleString("en-IN")}</span>
                       </p>
                     )}
                   </div>
-                  {c.ContractAmount != null && <span className="shrink-0 text-[0.6875rem] font-mono font-semibold text-violet-600/80 mt-0.5">₹{Number(c.ContractAmount).toLocaleString("en-IN")}</span>}
+                  {c.ContractAmount != null && <span className="shrink-0 text-[0.6875rem] font-heading tabular-nums font-semibold text-foreground mt-0.5">₹{Number(c.ContractAmount).toLocaleString("en-IN")}</span>}
                 </button>
               ))
               ) : (
@@ -513,21 +528,21 @@ export function ExpenseBookingPicker({
                     setOpen(false);
                     setSearch("");
                   }}
-                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedJVLine?.LineID === l.LineID ? "bg-teal-500/5" : ""}`}
+                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedJVLine?.LineID === l.LineID ? "bg-primary/10" : ""}`}
                 >
-                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-teal-500/10 text-teal-600 border border-teal-500/20">JV</span>
+                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-primary/10 text-foreground border border-foreground/40">JV</span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-mono text-xs font-semibold text-foreground truncate">{l.JVNo || `JV-${l.JVID}`} · {l.LHeadName}</p>
+                    <p className="font-heading tabular-nums text-xs font-semibold text-foreground truncate">{l.JVNo || `JV-${l.JVID}`} · {l.LHeadName}</p>
                     {(l.ProjectName || l.CompanyName) && <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{l.ProjectName || l.CompanyName}</p>}
-                    {l.Narration && <p className="text-[0.625rem] text-teal-600/60 mt-0.5 truncate">{l.Narration}</p>}
+                    {l.Narration && <p className="text-[0.625rem] text-foreground mt-0.5 truncate">{l.Narration}</p>}
                     {l.PaidAmount > 0 && (
-                      <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/25">
+                      <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-none text-[0.625rem] font-heading font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/25">
                         <span className="w-1 h-1 rounded-full bg-amber-500 inline-block" />
                         Partly paid · ₹{Number(l.RemainingAmount).toLocaleString("en-IN")} left
                       </span>
                     )}
                   </div>
-                  <span className="shrink-0 text-[0.6875rem] font-mono font-semibold text-teal-600/80 mt-0.5">₹{Number(l.RemainingAmount).toLocaleString("en-IN")}</span>
+                  <span className="shrink-0 text-[0.6875rem] font-heading tabular-nums font-semibold text-foreground mt-0.5">₹{Number(l.RemainingAmount).toLocaleString("en-IN")}</span>
                 </button>
               ))
               )}
@@ -540,7 +555,7 @@ export function ExpenseBookingPicker({
                 <span className="text-[0.6875rem] text-muted-foreground">
                   {mergeSelectedOptions.length === 0
                     ? "Check invoices to merge"
-                    : <>{mergeSelectedOptions.length} selected · <span className="font-mono font-semibold text-foreground">₹{mergeTotal.toLocaleString("en-IN")}</span></>}
+                    : <>{mergeSelectedOptions.length} selected · <span className="font-heading tabular-nums font-semibold text-foreground">₹{mergeTotal.toLocaleString("en-IN")}</span></>}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button type="button" onClick={exitMergeMode}

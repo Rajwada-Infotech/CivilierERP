@@ -572,7 +572,7 @@ export function generateEmiSchedule(netAmount: number, installmentCount: number,
   const lastAmount = Math.round((netAmount - baseAmount * (installmentCount - 1)) * 100) / 100;
   return Array.from({ length: installmentCount }, (_, i) => {
     const d = new Date(startDate);
-    d.setMonth(d.getMonth() + i);
+    d.setUTCMonth(d.getUTCMonth() + i); // startDate is a plain date (UTC midnight): keep the calendar math in UTC too
     const padded = String(i + 1).padStart(2, "0");
     return {
       installmentNo: i + 1,

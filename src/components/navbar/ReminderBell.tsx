@@ -1,7 +1,7 @@
 import React from "react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Notification } from "iconsax-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import {
   RefreshCw,
   ShoppingCart,
@@ -20,23 +20,24 @@ import { useReminders, formatRelative, formatDate, REMINDER_TYPE_MODULE } from "
 import { useModule } from "@/contexts/ModuleContext";
 import { getModuleAccent } from "@/lib/moduleColors";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { GENIE_CSS } from "./navPanelStyles";
+import { useGeniePanel } from "./useGeniePanel";
 
 type ReminderMeta = {
   icon: React.ElementType;
   label: string;
-  color: string;
 };
 
 const TYPE_META: Record<string, ReminderMeta> = {
-  purchase_order: { icon: ShoppingCart, label: "PO", color: "text-violet-500" },
-  work_order: { icon: HardHat, label: "WO", color: "text-orange-500" },
-  tds: { icon: FileWarning, label: "TDS", color: "text-rose-500" },
-  grn: { icon: Package, label: "GRN", color: "text-emerald-500" },
-  emi_installment: { icon: Lock, label: "EMI", color: "text-purple-500" },
-  material_request: { icon: ClipboardList, label: "MR", color: "text-blue-500" },
-  pdc: { icon: Landmark, label: "PDC", color: "text-sky-500" },
-  followup: { icon: CalendarClock, label: "Follow-Up", color: "text-teal-500" },
-  loan_emi: { icon: Banknote, label: "Loan EMI", color: "text-green-500" },
+  purchase_order: { icon: ShoppingCart, label: "PO" },
+  work_order: { icon: HardHat, label: "WO" },
+  tds: { icon: FileWarning, label: "TDS" },
+  grn: { icon: Package, label: "GRN" },
+  emi_installment: { icon: Lock, label: "EMI" },
+  material_request: { icon: ClipboardList, label: "MR" },
+  pdc: { icon: Landmark, label: "PDC" },
+  followup: { icon: CalendarClock, label: "Follow-Up" },
+  loan_emi: { icon: Banknote, label: "Loan EMI" },
 };
 
 const ALL_TABS = [
@@ -52,6 +53,92 @@ const ALL_TABS = [
   "loan_emi",
 ];
 
+// The reminders panel drawn on the sheet: a square card with an ink border and a hard shadow on the faint grid, a
+// title block under a strip in the current module's colour, squared filter tabs with counts, reminders split into
+// Overdue / Due today / Coming up, and numbered rows with a square due mark: red when overdue, solid when due today,
+// hatched when still to come. Colours come from the theme, so every theme matches.
+const RB_CSS = GENIE_CSS + `
+@keyframes fullSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.animate-spin-full { animation: fullSpin 0.6s cubic-bezier(0.15, 0, 0, 1); }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+.rb-sheet {
+  --rb-ink: hsl(var(--foreground));
+  --rb-graphite: hsl(var(--muted-foreground));
+  --rb-rule: hsl(var(--border));
+  --rb-rule-soft: hsl(var(--border) / 0.55);
+  --rb-paper: hsl(var(--card));
+  --rb-wash: hsl(var(--primary) / 0.10);
+  --rb-red: hsl(var(--destructive));
+  background-color: var(--rb-paper);
+  background-image:
+    linear-gradient(hsl(var(--foreground) / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--foreground) / 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--rb-ink);
+  border: 1.5px solid var(--rb-ink);
+  border-top: 3px solid var(--rb-accent);
+  box-shadow: 6px 6px 0 hsl(var(--foreground) / 0.14);
+  font-family: "DM Sans", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.rb-sheet .rb-label {
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--rb-graphite);
+}
+.rb-sheet .rb-label.ink { color: var(--rb-ink); }
+.rb-sheet .rb-label.red { color: var(--rb-red); }
+.rb-sheet .rb-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 14px 16px 12px; border-bottom: 1.5px solid var(--rb-ink); }
+.rb-sheet .rb-count { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+.rb-sheet .rb-figure { font-family: "Sora", sans-serif; font-weight: 600; font-size: 28px; line-height: 1; letter-spacing: -0.02em; color: var(--rb-ink); }
+.rb-sheet .rb-key {
+  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  border: 1px solid var(--rb-ink); color: var(--rb-ink); background: var(--rb-paper); transition: background-color .15s, color .15s;
+}
+.rb-sheet .rb-key:hover:not(:disabled) { background: var(--rb-ink); color: var(--rb-paper); }
+.rb-sheet .rb-key:disabled { opacity: 0.6; }
+.rb-sheet .rb-key.red { border-color: var(--rb-red); color: var(--rb-red); }
+.rb-sheet .rb-tabs { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--rb-rule); }
+.rb-sheet .rb-arrow { width: 20px; height: 24px; display: inline-flex; align-items: center; justify-content: center; color: var(--rb-ink); flex-shrink: 0; }
+.rb-sheet .rb-arrow:disabled { color: var(--rb-rule); cursor: default; }
+.rb-sheet .rb-seg { flex: 1; min-width: 0; display: flex; overflow-x: auto; border: 1px solid var(--rb-ink); }
+.rb-sheet .rb-seg button {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; white-space: nowrap;
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--rb-graphite); transition: background-color .15s, color .15s;
+}
+.rb-sheet .rb-seg button + button { border-left: 1px solid var(--rb-ink); }
+.rb-sheet .rb-seg button:hover { color: var(--rb-ink); background: var(--rb-wash); }
+.rb-sheet .rb-seg button.on { background: var(--rb-ink); color: var(--rb-paper); }
+.rb-sheet .rb-seg .rb-n { letter-spacing: 0; opacity: 0.75; }
+.rb-sheet .rb-list { overflow-y: auto; max-height: min(60vh, 440px); overscroll-behavior: contain; }
+.rb-sheet .rb-sec { display: flex; align-items: center; gap: 10px; padding: 12px 16px 6px; }
+.rb-sheet .rb-rule { flex: 1; height: 1px; background: var(--rb-rule); }
+.rb-sheet .rb-row {
+  display: grid; grid-template-columns: 20px 28px minmax(0, 1fr) auto; align-items: start; gap: 10px; width: 100%;
+  padding: 10px 16px; text-align: left; border-bottom: 1px solid var(--rb-rule-soft); transition: background-color .12s;
+}
+.rb-sheet .rb-row:hover, .rb-sheet .rb-row:focus-visible { background: var(--rb-wash); box-shadow: inset 3px 0 0 var(--rb-ink); outline: none; }
+.rb-sheet .rb-num { font-family: "Sora", sans-serif; font-size: 10px; font-weight: 600; color: var(--rb-graphite); padding-top: 8px; }
+.rb-sheet .rb-mark {
+  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--rb-rule); background: var(--rb-paper); color: var(--rb-ink);
+}
+.rb-sheet .rb-row:hover .rb-mark { border-color: var(--rb-ink); }
+.rb-sheet .rb-text { display: flex; flex-direction: column; min-width: 0; }
+.rb-sheet .rb-title { font-size: 13px; font-weight: 600; color: var(--rb-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rb-sheet .rb-sub { font-size: 11px; color: var(--rb-graphite); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.rb-sheet .rb-due { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; }
+.rb-sheet .rb-dot { width: 8px; height: 8px; border: 1px solid var(--rb-ink); flex-shrink: 0; }
+.rb-sheet .rb-dot.red { background: var(--rb-red); border-color: var(--rb-red); }
+.rb-sheet .rb-dot.solid { background: var(--rb-ink); }
+.rb-sheet .rb-dot.hatch { background: repeating-linear-gradient(135deg, var(--rb-ink) 0, var(--rb-ink) 1px, transparent 1px, transparent 3px); }
+.rb-sheet .rb-date { font-size: 11px; color: var(--rb-graphite); }
+.rb-sheet .rb-amt { font-family: "Sora", sans-serif; font-weight: 600; font-size: 13px; letter-spacing: -0.01em; color: var(--rb-ink); white-space: nowrap; padding-top: 1px; }
+.rb-sheet .rb-empty { margin: 18px 16px; padding: 22px; text-align: center; border: 1px dashed var(--rb-rule); font-size: 12px; color: var(--rb-graphite); }
+.rb-sheet .rb-empty p + p { margin-top: 4px; }
+`;
+
 export const ReminderBell = () => {
   const navigate = useNavigate();
   const { activeModule } = useModule();
@@ -62,6 +149,7 @@ export const ReminderBell = () => {
     pollingInterval: 0,
   });
 
+  const { closing, close } = useGeniePanel(open, setOpen);
   const bellButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -104,18 +192,20 @@ export const ReminderBell = () => {
       ) {
         return;
       }
-      setOpen(false);
+      close();
     };
     document.addEventListener("mousedown", handleMouseDown);
     return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, [open]);
+  }, [open, close]);
 
   const handleNotificationClick = useCallback(() => {
-    setOpen((prev) => {
-      if (!prev) refresh(true);
-      return !prev;
-    });
-  }, [refresh]);
+    if (open) {
+      close();
+    } else {
+      refresh(true);
+      setOpen(true);
+    }
+  }, [open, close, refresh]);
 
   // Home (activeModule === null) is the one consolidated view — everywhere
   // else the bell only ever shows the current module's own reminders, per
@@ -139,60 +229,36 @@ export const ReminderBell = () => {
   const filtered =
     filter === "all" ? scoped : scoped.filter((r) => r.type === filter);
 
-  // CSS custom properties drive every accent-tinted style below, so the
-  // whole panel re-themes to whichever module the user is currently in
-  // without a single hardcoded color or any mouseenter/leave JS.
-  const accentVars = {
-    "--rb-accent": accent,
-    "--rb-accent-10": `${accent}1A`,
-    "--rb-accent-20": `${accent}33`,
-    "--rb-accent-30": `${accent}4D`,
-  } as React.CSSProperties;
+  const countByType = new Map<string, number>();
+  for (const r of scoped) countByType.set(r.type, (countByType.get(r.type) ?? 0) + 1);
+  const overdueCount = scoped.filter((r) => r.urgency === "overdue").length;
+
+  // Overdue first, then what is due today, then everything still to come.
+  const sections = [
+    { key: "overdue", title: "Overdue", items: filtered.filter((r) => r.urgency === "overdue") },
+    { key: "today", title: "Due today", items: filtered.filter((r) => r.urgency === "today") },
+    { key: "later", title: "Coming up", items: filtered.filter((r) => r.urgency === "soon" || r.urgency === "upcoming") },
+  ];
+
+  // The strip along the panel's top edge takes the module the user is in.
+  const accentVars = { "--rb-accent": accent } as React.CSSProperties;
+
+  let rowNo = 0;
 
   return (
     <div className="relative">
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `
-        @keyframes periodicJingle {
-          0% { transform: rotate(0deg); }
-          2% { transform: rotate(15deg); }
-          4% { transform: rotate(-15deg); }
-          6% { transform: rotate(15deg); }
-          8% { transform: rotate(-15deg); }
-          10% { transform: rotate(10deg); }
-          12% { transform: rotate(-10deg); }
-          14% { transform: rotate(0deg); }
-          100% { transform: rotate(0deg); }
-        }
-        @keyframes fullSpin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .animate-jingle-periodic { animation: periodicJingle 4s ease-in-out infinite; }
-        .animate-spin-full { animation: fullSpin 0.6s cubic-bezier(0.15, 0, 0, 1); }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-      `,
-        }}
-      />
+      <style dangerouslySetInnerHTML={{ __html: RB_CSS }} />
 
       <button
         ref={bellButtonRef}
         onClick={handleNotificationClick}
-        className="relative p-2.5 hover:bg-muted rounded-full transition-all active:scale-95"
+        className={`relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors ${open && !closing ? "genie-rub" : ""}`}
+        title="Reminders"
       >
-        <Notification
-          size={20}
-          variant={scoped.length > 0 ? "Bold" : "Outline"}
-          className={scoped.length > 0 ? "animate-jingle-periodic" : ""}
-          color={scoped.length > 0 ? "#f59e0b" : "hsl(var(--muted-foreground))"}
-        />
+        <ChromeIcons.bell size={18} style={{ color: scoped.length > 0 ? "hsl(var(--foreground))" : undefined }} />
         {scoped.length > 0 && (
-          <span className="absolute top-1.5 right-1.5 flex h-4 w-4">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-4 w-4 bg-red-600 text-[0.625rem] font-bold text-white items-center justify-center border-2 border-background">
-              {scoped.length}
-            </span>
+          <span className="absolute -top-0.5 -right-1 min-w-[15px] h-[15px] px-0.5 flex items-center justify-center bg-destructive text-destructive-foreground font-heading text-[0.5625rem] font-semibold tabular-nums leading-none">
+            {scoped.length > 99 ? "99+" : scoped.length}
           </span>
         )}
       </button>
@@ -202,186 +268,113 @@ export const ReminderBell = () => {
           {/* Mobile scrim — tapping outside the panel closes it */}
           <BodyPortal><div
             className="fixed inset-0 z-40 sm:hidden"
-            onClick={() => setOpen(false)}
+            onClick={close}
           /></BodyPortal>
 
           <div
             ref={panelRef}
-            style={accentVars}
-            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 w-[min(92vw,420px)] bg-card border border-[var(--rb-accent-20)] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top sm:origin-top-right"
+            // Width inline: the small-screen rule in index.css caps w-[…] boxes inside the fixed top bar to their
+            // parent's width, which squeezed this panel to the 32px bell on tablets.
+            style={{ width: "min(calc(100vw - 1.5rem), 440px)" }}
+            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50"
           >
-            {/* Header — gradient wash + live count, tinted to the active module */}
-            <div className="relative px-4 py-3.5 border-b border-[var(--rb-accent-20)] bg-gradient-to-br from-[var(--rb-accent-10)] via-card to-card overflow-hidden">
-              <div
-                className="absolute -top-10 -right-10 w-32 h-32 rounded-full pointer-events-none"
-                style={{
-                  background: `radial-gradient(circle, ${accent}28 0%, transparent 70%)`,
-                }}
-              />
-              <div className="relative z-10 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-7 h-7 rounded-lg border border-[var(--rb-accent-30)] bg-[var(--rb-accent-10)] flex items-center justify-center shrink-0">
-                    <Notification size={13} variant="Bold" color="var(--rb-accent)" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold tracking-wide text-foreground truncate">
-                      Reminders
-                    </p>
-                    <p className="text-[0.625rem] text-muted-foreground truncate">
-                      {scoped.length} pending alert
-                      {scoped.length === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (!isLocked) refresh(true);
-                  }}
-                  disabled={loading || isLocked}
-                  className={`p-1.5 rounded-lg transition-all active:scale-90 shrink-0 ${
-                    isLocked
-                      ? "bg-red-500/10 text-red-400"
-                      : "text-muted-foreground hover:bg-[var(--rb-accent-10)] hover:text-[var(--rb-accent)]"
-                  }`}
-                >
-                  {isLocked ? (
-                    <Lock size={14} />
-                  ) : (
-                    <RefreshCw
-                      size={14}
-                      className={loading ? "animate-spin-full text-[var(--rb-accent)]" : ""}
-                    />
-                  )}
-                </button>
+          <div style={accentVars} className={`rb-sheet genie ${closing ? "genie-close" : "genie-open"} flex flex-col`}>
+            {/* Title block: what this is, how many are waiting, and refresh */}
+            <div className="rb-head">
+              <div className="min-w-0">
+                <p className="rb-label">CivilierERP · Reminders</p>
+                <p className="rb-count">
+                  <span className="rb-figure">{scoped.length}</span>
+                  <span className="rb-label">pending</span>
+                  {overdueCount > 0 && <span className="rb-label red">· {overdueCount} overdue</span>}
+                </p>
               </div>
+              <button
+                onClick={() => {
+                  if (!isLocked) refresh(true);
+                }}
+                disabled={loading || isLocked}
+                className={`rb-key ${isLocked ? "red" : ""}`}
+                title={isLocked ? "Refresh is locked for a moment" : "Refresh"}
+              >
+                {isLocked ? <Lock size={13} /> : <RefreshCw size={13} className={loading ? "animate-spin-full" : ""} />}
+              </button>
             </div>
 
-            {/* Filter tabs */}
-            <div className="border-b border-[var(--rb-accent-20)] bg-muted/30 px-3 py-2.5 flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => scrollTabs(-1)}
-                disabled={!canScrollLeft}
-                className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-all ${
-                  canScrollLeft
-                    ? "text-[var(--rb-accent)] hover:bg-[var(--rb-accent-10)] active:scale-90"
-                    : "text-muted-foreground/25 cursor-default"
-                }`}
-              >
+            {/* Type filter: squared tabs, each with its own count */}
+            <div className="rb-tabs">
+              <button type="button" onClick={() => scrollTabs(-1)} disabled={!canScrollLeft} className="rb-arrow" aria-label="Scroll filters left">
                 <ChevronLeft size={12} />
               </button>
-
-              <div
-                ref={tabsRef}
-                className="flex-1 flex gap-1 overflow-x-auto no-scrollbar"
-              >
+              <div ref={tabsRef} className="rb-seg no-scrollbar">
                 {availableTabs.map((t) => {
-                  const active = filter === t;
                   const meta = t !== "all" ? TYPE_META[t] : null;
-                  const Icon = meta?.icon;
+                  const count = t === "all" ? scoped.length : (countByType.get(t) ?? 0);
                   return (
-                    <button
-                      key={t}
-                      onClick={() => setFilter(t)}
-                      className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 text-[0.625rem] font-semibold rounded-lg transition-all duration-150 ${
-                        active
-                          ? "bg-[var(--rb-accent)] text-white shadow-sm"
-                          : "bg-card/60 text-muted-foreground hover:bg-card hover:text-foreground border border-border/60"
-                      }`}
-                    >
-                      {Icon && <Icon size={10} className={active ? "text-white/80" : meta?.color} />}
+                    <button key={t} type="button" onClick={() => setFilter(t)} className={filter === t ? "on" : ""}>
                       {t === "all" ? "All" : meta?.label || t.toUpperCase()}
+                      <span className="rb-n">{count}</span>
                     </button>
                   );
                 })}
               </div>
-
-              <button
-                type="button"
-                onClick={() => scrollTabs(1)}
-                disabled={!canScrollRight}
-                className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-all ${
-                  canScrollRight
-                    ? "text-[var(--rb-accent)] hover:bg-[var(--rb-accent-10)] active:scale-90"
-                    : "text-muted-foreground/25 cursor-default"
-                }`}
-              >
+              <button type="button" onClick={() => scrollTabs(1)} disabled={!canScrollRight} className="rb-arrow" aria-label="Scroll filters right">
                 <ChevronRight size={12} />
               </button>
             </div>
 
-            <div className="overflow-y-auto max-h-[60vh] sm:max-h-[400px] scrollbar-none">
+            <div className="rb-list thin-scroll">
               {filtered.length === 0 ? (
-                <div className="py-12 px-4 text-center">
-                  <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
-                    <Notification size={18} variant="Outline" color="rgb(52 211 153 / 0.6)" />
-                  </div>
-                  <p className="text-xs font-semibold text-foreground">
-                    All caught up
-                  </p>
-                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                    No alerts to show right now.
-                  </p>
+                <div className="rb-empty">
+                  <p className="rb-label ink">All caught up</p>
+                  <p>No reminders to show right now.</p>
                 </div>
               ) : (
-                <div className="p-2 space-y-1.5">
-                  {filtered.map((r) => {
-                    const meta = TYPE_META[r.type];
-                    const overdue = r.urgency === "overdue";
-                    return (
-                      <div
-                        key={r.id}
-                        onClick={() => {
-                          setOpen(false);
-                          navigate(r.path);
-                        }}
-                        className="group relative flex gap-3 p-3 rounded-xl border border-transparent hover:border-[var(--rb-accent-30)] hover:bg-muted/40 hover:shadow-sm transition-all cursor-pointer"
-                      >
-                        <div
-                          className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-current/10 ${meta?.color ?? "text-muted-foreground"} transition-transform group-hover:scale-110`}
-                        >
-                          {React.createElement(meta?.icon || Package, {
-                            size: 15,
-                          })}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between gap-2 items-baseline">
-                            <span className="truncate font-bold text-[0.6875rem] text-foreground group-hover:text-[var(--rb-accent)] transition-colors">
-                              {r.title}
+                sections.map((sec) =>
+                  sec.items.length === 0 ? null : (
+                    <section key={sec.key}>
+                      <header className="rb-sec">
+                        <span className={`rb-label ${sec.key === "overdue" ? "red" : "ink"}`}>{sec.title}</span>
+                        <span className="rb-rule" />
+                        <span className="rb-label">{sec.items.length}</span>
+                      </header>
+                      {sec.items.map((r) => {
+                        const meta = TYPE_META[r.type];
+                        const tone = r.urgency === "overdue" ? "red" : r.urgency === "today" ? "solid" : "hatch";
+                        rowNo += 1;
+                        return (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => {
+                              close();
+                              navigate(r.path);
+                            }}
+                            className="rb-row"
+                          >
+                            <span className="rb-num">{String(rowNo).padStart(2, "0")}</span>
+                            <span className="rb-mark" title={meta?.label}>
+                              {React.createElement(meta?.icon || Package, { size: 14, strokeWidth: 1.75 })}
                             </span>
-                            {r.amount && (
-                              <span className="text-emerald-600 text-[0.6875rem] font-bold shrink-0">
-                                ₹{r.amount.toLocaleString()}
+                            <span className="rb-text">
+                              <span className="rb-title">{r.title}</span>
+                              {r.subtitle && <span className="rb-sub">{r.subtitle}</span>}
+                              <span className="rb-due">
+                                <i className={`rb-dot ${tone}`} />
+                                <span className={`rb-label ${tone === "red" ? "red" : "ink"}`}>{formatRelative(r.dueDate)}</span>
+                                <span className="rb-date">{formatDate(r.dueDate)}</span>
                               </span>
-                            )}
-                          </div>
-                          <p className="text-[0.625rem] text-muted-foreground truncate mt-0.5">
-                            {r.subtitle}
-                          </p>
-                          <div className="mt-2 flex gap-1.5 items-center flex-wrap">
-                            <span
-                              className={`inline-flex items-center gap-1 text-[0.5625rem] font-bold px-1.5 py-0.5 rounded-full ${
-                                overdue
-                                  ? "bg-red-500/10 text-red-600"
-                                  : "bg-[#ffe2021a] text-amber-600"
-                              }`}
-                            >
-                              <span
-                                className={`w-1 h-1 rounded-full ${overdue ? "bg-red-500" : "bg-amber-500"}`}
-                              />
-                              {formatRelative(r.dueDate)}
                             </span>
-                            <span className="text-[0.5625rem] text-muted-foreground/60 font-medium">
-                              {formatDate(r.dueDate)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                            {r.amount ? <span className="rb-amt">₹{r.amount.toLocaleString("en-IN")}</span> : <span />}
+                          </button>
+                        );
+                      })}
+                    </section>
+                  ),
+                )
               )}
             </div>
+          </div>
           </div>
         </>
       )}

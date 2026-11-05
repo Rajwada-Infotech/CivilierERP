@@ -41,39 +41,40 @@
 }
 
 @layer base {
-    /* DARK THEME (default) */
+    /* DARK THEME (default): neutral graphite rather than violet-black, so ink rules, hairlines, capital labels and
+       the one red all read on it. Hairlines and muted text are lifted; the red is light enough to be legible as text. */
     :root {
-        --background: 240 20% 6%;
-        --foreground: 220 20% 92%;
-        --card: 240 18% 10%;
-        --card-foreground: 220 20% 92%;
-        --popover: 240 18% 10%;
-        --popover-foreground: 220 20% 92%;
+        --background: 225 14% 7%;
+        --foreground: 220 14% 88%;
+        --card: 225 13% 10.5%;
+        --card-foreground: 220 14% 88%;
+        --popover: 225 13% 11.5%;
+        --popover-foreground: 220 14% 88%;
         --primary: 239 84% 67%;
         --primary-foreground: 0 0% 100%;
         --secondary: 263 70% 58%;
         --secondary-foreground: 0 0% 100%;
-        --muted: 240 15% 15%;
-        --muted-foreground: 220 10% 55%;
+        --muted: 225 11% 16%;
+        --muted-foreground: 220 9% 64%;
         --accent: 239 84% 67%;
         --accent-foreground: 0 0% 100%;
-        --destructive: 0 72% 51%;
+        --destructive: 0 74% 58%;
         --destructive-foreground: 0 0% 100%;
-        --border: 240 15% 18%;
-        --input: 240 15% 18%;
+        --border: 225 10% 24%;
+        --input: 225 10% 26%;
         --ring: 239 84% 67%;
         --radius: 0.625rem;
-        --surface: 240 18% 12%;
+        --surface: 225 13% 12.5%;
         --accent-1: 239 84% 67%;
         --accent-2: 263 70% 58%;
         --accent-3: 217 91% 60%;
-        --sidebar-background: 240 20% 8%;
-        --sidebar-foreground: 220 20% 85%;
+        --sidebar-background: 225 15% 8.5%;
+        --sidebar-foreground: 220 14% 84%;
         --sidebar-primary: 239 84% 67%;
         --sidebar-primary-foreground: 0 0% 100%;
-        --sidebar-accent: 240 15% 14%;
-        --sidebar-accent-foreground: 220 20% 92%;
-        --sidebar-border: 240 15% 16%;
+        --sidebar-accent: 225 11% 14.5%;
+        --sidebar-accent-foreground: 220 14% 90%;
+        --sidebar-border: 225 10% 19%;
         --sidebar-ring: 239 84% 67%;
     }
 
@@ -185,40 +186,82 @@
         --sidebar-ring: 43 96% 52%;
     }
 
-    /* GLAS THEME — Premium Glassmorphism */
-    [data-theme="glass"] {
-        --background: 240 35% 7%;
-        --foreground: 220 20% 94%;
-        --card: 240 30% 12%;
-        --card-foreground: 220 20% 94%;
-        --popover: 240 30% 10%;
-        --popover-foreground: 220 20% 94%;
-        --primary: 258 90% 66%;
+    /* SAGE THEME — calm, light, built around sage green (#9CAF88).
+       Pale sage-tinted paper for the page, a deeper sage (#47674F) for anything that carries white text
+       (buttons, links, focus), sage itself kept for soft fills and highlights, and a warm clay as the one
+       complementary accent. Text contrast: foreground on background ~14:1, muted text ~5:1, white on primary ~6:1. */
+    [data-theme="sage"] {
+        --background: 94 20% 94%;
+        --foreground: 150 20% 11%;
+        --card: 90 26% 98%;
+        --card-foreground: 150 20% 11%;
+        --popover: 90 26% 98%;
+        --popover-foreground: 150 20% 11%;
+        --primary: 138 24% 33%;
         --primary-foreground: 0 0% 100%;
-        --secondary: 217 91% 60%;
+        --secondary: 22 42% 42%;
         --secondary-foreground: 0 0% 100%;
-        --muted: 240 25% 16%;
-        --muted-foreground: 220 15% 58%;
-        --accent: 258 90% 66%;
-        --accent-foreground: 0 0% 100%;
-        --destructive: 0 72% 51%;
+        --muted: 94 16% 89%;
+        --muted-foreground: 140 9% 35%;
+        --accent: 96 24% 82%;
+        --accent-foreground: 140 28% 20%;
+        --destructive: 0 62% 44%;
         --destructive-foreground: 0 0% 100%;
-        --border: 240 20% 22%;
-        --input: 240 25% 18%;
-        --ring: 258 90% 66%;
-        --radius: 0.75rem;
-        --surface: 240 28% 11%;
-        --accent-1: 258 90% 66%;
-        --accent-2: 217 91% 60%;
-        --accent-3: 280 85% 65%;
-        --sidebar-background: 240 35% 8%;
-        --sidebar-foreground: 220 20% 88%;
-        --sidebar-primary: 258 90% 66%;
+        --border: 95 15% 80%;
+        --input: 95 15% 80%;
+        --ring: 138 24% 33%;
+        --radius: 0.625rem;
+        --surface: 93 18% 91%;
+        --accent-1: 138 24% 33%;
+        --accent-2: 22 42% 42%;
+        --accent-3: 205 32% 42%;
+        --sidebar-background: 96 18% 90%;
+        --sidebar-foreground: 150 18% 18%;
+        --sidebar-primary: 138 24% 33%;
         --sidebar-primary-foreground: 0 0% 100%;
-        --sidebar-accent: 240 28% 14%;
-        --sidebar-accent-foreground: 220 20% 94%;
-        --sidebar-border: 240 20% 18%;
-        --sidebar-ring: 258 90% 66%;
+        --sidebar-accent: 96 20% 84%;
+        --sidebar-accent-foreground: 140 28% 18%;
+        --sidebar-border: 95 15% 78%;
+        --sidebar-ring: 138 24% 33%;
+    }
+
+    /* GLAS THEME — Premium Glassmorphism */
+    /* Glass — light, cream, Apple-style frosted glass. Warm cream page,
+       milky translucent surfaces (see the GLASS THEME block below for the
+       blur), dark readable text, soft blue accents. */
+    [data-theme="glass"] {
+        --background: 220 20% 97%;
+        --foreground: 222 35% 9%;
+        --card: 220 25% 99%;
+        --card-foreground: 222 35% 9%;
+        --popover: 220 25% 99%;
+        --popover-foreground: 222 35% 9%;
+        --primary: 211 90% 50%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 220 16% 93%;
+        --secondary-foreground: 222 30% 12%;
+        --muted: 220 16% 94%;
+        --muted-foreground: 220 14% 30%;
+        --accent: 211 90% 50%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 0 72% 50%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 220 16% 86%;
+        --input: 220 16% 91%;
+        --ring: 211 90% 50%;
+        --radius: 0.85rem;
+        --surface: 220 20% 98%;
+        --accent-1: 211 90% 50%;
+        --accent-2: 196 85% 46%;
+        --accent-3: 262 65% 60%;
+        --sidebar-background: 220 20% 97%;
+        --sidebar-foreground: 222 30% 12%;
+        --sidebar-primary: 211 90% 50%;
+        --sidebar-primary-foreground: 0 0% 100%;
+        --sidebar-accent: 220 16% 92%;
+        --sidebar-accent-foreground: 222 35% 9%;
+        --sidebar-border: 220 16% 87%;
+        --sidebar-ring: 211 90% 50%;
     }
 
     /* BW THEME — strictly black & white SaaS / Web3 dashboard.
@@ -251,14 +294,14 @@
         --accent-1: 0 0% 12%;
         --accent-2: 0 0% 32%;
         --accent-3: 0 0% 46%;
-        /* Black sidebar — the BW signature (matches the design reference) */
-        --sidebar-background: 0 0% 7%;
-        --sidebar-foreground: 0 0% 72%;
-        --sidebar-primary: 0 0% 100%;
-        --sidebar-primary-foreground: 0 0% 7%;
-        --sidebar-accent: 0 0% 14%;
+        /* Charcoal-grey sidebar with light text (softer than pure black) */
+        --sidebar-background: 0 0% 21%;
+        --sidebar-foreground: 0 0% 86%;
+        --sidebar-primary: 0 0% 98%;
+        --sidebar-primary-foreground: 0 0% 12%;
+        --sidebar-accent: 0 0% 28%;
         --sidebar-accent-foreground: 0 0% 98%;
-        --sidebar-border: 0 0% 18%;
+        --sidebar-border: 0 0% 30%;
         --sidebar-ring: 0 0% 70%;
     }
 }
@@ -410,6 +453,13 @@
         background: linear-gradient(135deg, #ea6c0a, #f97316);
         box-shadow: 0 4px 14px rgba(249,115,22,0.35);
     }
+    .gradient-civilworkdpr {
+        background: linear-gradient(135deg, #0891b2, #06b6d4);
+    }
+    .gradient-civilworkdpr:hover {
+        background: linear-gradient(135deg, #0e7490, #0891b2);
+        box-shadow: 0 4px 14px rgba(8,145,178,0.35);
+    }
     .gradient-maintenance {
         background: linear-gradient(135deg, #65a30d, #84cc16);
     }
@@ -440,60 +490,130 @@
     animation: slide-up 0.3s ease-out;
 }
 
-/* ── GLAS THEME — glass effects ─────────────────────────────────────────────── */
+/* ── GLASS THEME — "glass over water" (Apple-style, light) ────────────────
+   A soft water-colour page (aqua / sky / cream / peach pools) sits behind
+   clear, light glass panels: high transparency + strong blur, a diagonal
+   sheen, bright rim and inner highlight — so the colours behind refract
+   through every surface. */
 
-/* Page background: deep indigo-to-purple gradient */
 [data-theme="glass"] body {
-    background: linear-gradient(
-        135deg,
-        hsl(240 55% 5%) 0%,
-        hsl(258 60% 9%) 35%,
-        hsl(240 50% 7%) 65%,
-        hsl(220 55% 6%) 100%
-    ) !important;
+    background:
+        radial-gradient(44rem 34rem at 8% 0%, rgba(186, 230, 253, 0.40), transparent 62%),
+        radial-gradient(40rem 32rem at 96% 6%, rgba(199, 210, 254, 0.35), transparent 60%),
+        radial-gradient(46rem 34rem at 80% 95%, rgba(167, 243, 208, 0.22), transparent 62%),
+        radial-gradient(40rem 32rem at 10% 98%, rgba(203, 213, 225, 0.45), transparent 60%),
+        linear-gradient(160deg, #f5f7fa 0%, #eef1f5 50%, #f4f6f9 100%) !important;
     background-attachment: fixed !important;
 }
 
-/* The main layout wrapper uses bg-background — make it transparent so the body gradient shows */
 [data-theme="glass"] .bg-background {
     background-color: transparent !important;
 }
 
-/* Cards: frosted glass */
-[data-theme="glass"] .bg-card {
-    background: rgba(255, 255, 255, 0.055) !important;
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border-color: rgba(255, 255, 255, 0.09) !important;
+/* Clear glass panels with a 3D pearl finish: an iridescent pearl sheen over
+   high transparency + strong blur; a bright top rim and a soft inner shade
+   at the bottom for curvature; layered shadows (tight contact + wide soft
+   drop) so the panel sits raised above the water. */
+[data-theme="glass"] :is(.bg-card, .bg-sidebar, [class^="bg-card/"], [class*=" bg-card/"]) {
+    background:
+        linear-gradient(115deg,
+            rgba(255, 255, 255, 0.30) 0%,
+            rgba(214, 233, 255, 0.22) 30%,
+            rgba(214, 255, 244, 0.20) 55%,
+            rgba(255, 255, 255, 0.26) 80%,
+            rgba(255, 255, 255, 0.24) 100%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.46) 0%, rgba(255, 255, 255, 0.12) 60%, rgba(255, 255, 255, 0.24) 100%) !important;
+    backdrop-filter: blur(28px) saturate(190%) brightness(1.04);
+    -webkit-backdrop-filter: blur(28px) saturate(190%) brightness(1.04);
+    border: 1px solid rgba(255, 255, 255, 0.85) !important;
+    box-shadow:
+        inset 0 1.5px 0 rgba(255, 255, 255, 1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+        inset 0 -10px 18px -12px rgba(30, 64, 110, 0.18),
+        inset 10px 0 18px -14px rgba(255, 255, 255, 0.9),
+        0 1px 2px rgba(30, 64, 110, 0.08),
+        0 4px 10px -2px rgba(30, 64, 110, 0.10),
+        0 18px 40px -12px rgba(30, 64, 110, 0.24),
+        0 30px 60px -30px rgba(120, 90, 160, 0.22) !important;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+/* Clickable cards lift a little on hover */
+[data-theme="glass"] :is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"]):is(a, button, [role="button"], .cursor-pointer):hover {
+    transform: translateY(-2px);
+    box-shadow:
+        inset 0 1.5px 0 rgba(255, 255, 255, 1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+        inset 0 -10px 18px -12px rgba(30, 64, 110, 0.18),
+        0 2px 4px rgba(30, 64, 110, 0.08),
+        0 10px 22px -6px rgba(30, 64, 110, 0.16),
+        0 28px 56px -16px rgba(30, 64, 110, 0.30) !important;
 }
 
-/* Popovers / dropdowns: darker glass */
+/* Header bar: thin clear glass */
+[data-theme="glass"] header {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.28)) !important;
+    backdrop-filter: blur(26px) saturate(190%);
+    -webkit-backdrop-filter: blur(26px) saturate(190%);
+    border-color: rgba(255, 255, 255, 0.7) !important;
+    box-shadow: 0 6px 24px -10px rgba(30, 64, 110, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.6);
+}
+
+/* Menus / dropdowns: a little denser so text stays crisp */
 [data-theme="glass"] .bg-popover {
-    background: rgba(12, 10, 28, 0.88) !important;
-    backdrop-filter: blur(28px) saturate(180%);
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
-    border-color: rgba(255, 255, 255, 0.1) !important;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.62)) !important;
+    backdrop-filter: blur(32px) saturate(190%);
+    -webkit-backdrop-filter: blur(32px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.8) !important;
+    box-shadow: 0 16px 44px -8px rgba(30, 64, 110, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
-/* Muted surfaces */
+/* Dialogs / drawers: glass sheet over a soft watery veil */
+[data-theme="glass"] [role="dialog"]:is(.bg-background, .crm-dialog) {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.26)) !important;
+    backdrop-filter: blur(40px) saturate(200%);
+    -webkit-backdrop-filter: blur(40px) saturate(200%);
+    border: 1px solid rgba(255, 255, 255, 0.85) !important;
+    box-shadow: 0 30px 70px -16px rgba(30, 64, 110, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+[data-theme="glass"] .dlg-sticky :is([data-dlg-head], [data-dlg-foot]) {
+    background: rgba(255, 255, 255, 0.42) !important;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+[data-theme="glass"] [data-radix-dialog-overlay],
+[data-theme="glass"] .fixed.inset-0[class*="bg-black"],
+[data-theme="glass"] .fixed.inset-0[class*="bg-background/"],
+[data-theme="glass"] .absolute.inset-0[class*="bg-black"],
+[data-theme="glass"] .fixed .flex-1[class*="bg-black/"] {
+    background: rgba(214, 236, 245, 0.35) !important;
+    backdrop-filter: blur(8px) saturate(140%);
+    -webkit-backdrop-filter: blur(8px) saturate(140%);
+}
+
+/* Muted surfaces & inputs: faint warm tint */
 [data-theme="glass"] .bg-muted {
-    background: rgba(255, 255, 255, 0.045) !important;
+    background: rgba(255, 255, 255, 0.38) !important;
+}
+[data-theme="glass"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+    background-color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.85);
+    box-shadow: inset 0 1px 2px rgba(30, 64, 110, 0.06);
 }
 
 /* Scrollbar */
 [data-theme="glass"] ::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
 }
 [data-theme="glass"] ::-webkit-scrollbar-track {
     background: transparent;
 }
 [data-theme="glass"] ::-webkit-scrollbar-thumb {
-    background: rgba(139, 92, 246, 0.35);
-    border-radius: 3px;
+    background: rgba(30, 64, 110, 0.18);
+    border-radius: 4px;
 }
 [data-theme="glass"] ::-webkit-scrollbar-thumb:hover {
-    background: rgba(139, 92, 246, 0.6);
+    background: rgba(30, 64, 110, 0.3);
 }
 
 /* ── Sidebar scrollbar — thin, pill-shaped, visible on all themes ─────────── */
@@ -564,63 +684,29 @@
 /* All dark-background themes (dark/midnight/root/glass): icon is inverted via
    Tailwind class → white icon. Light theme needs a reset to keep the native
    dark icon visible on its white background. */
-[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
-[data-theme="light"]
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) input[type="date"]::-webkit-calendar-picker-indicator,
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"])
     input[type="datetime-local"]::-webkit-calendar-picker-indicator,
-[data-theme="light"] input[type="month"]::-webkit-calendar-picker-indicator,
-[data-theme="light"] input[type="week"]::-webkit-calendar-picker-indicator,
-[data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) input[type="month"]::-webkit-calendar-picker-indicator,
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) input[type="week"]::-webkit-calendar-picker-indicator,
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) input[type="time"]::-webkit-calendar-picker-indicator {
     filter: none !important;
     opacity: 0.6;
 }
 
-/* ── Sonner toast — close button top-right ────────────────────────────────── */
-[data-sonner-toast] [data-close-button] {
-    left: auto !important;
-    right: -8px !important;
-    top: -8px !important;
-    width: 20px !important;
-    height: 20px !important;
-    background: #ef4444 !important;
-    border: 2px solid #fff !important;
-    border-radius: 50% !important;
-    color: #fff !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    box-shadow: 0 2px 6px rgba(239, 68, 68, 0.45) !important;
-    transition:
-        transform 0.15s ease,
-        background 0.15s ease,
-        box-shadow 0.15s ease !important;
-    animation: toast-close-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both !important;
+/* ── Sage theme: small touches that tokens cannot do ──────────────────────── */
+[data-theme="sage"] ::selection {
+    background: hsl(96 26% 76%);
+    color: hsl(150 20% 11%);
 }
-
-[data-sonner-toast] [data-close-button]:hover {
-    background: #dc2626 !important;
-    transform: scale(1.2) !important;
-    box-shadow: 0 3px 10px rgba(239, 68, 68, 0.6) !important;
+[data-theme="sage"] * {
+    scrollbar-color: hsl(96 14% 66%) transparent;
 }
-
-[data-sonner-toast] [data-close-button]:active {
-    transform: scale(0.95) !important;
-}
-
-[data-sonner-toast] [data-close-button] svg {
-    width: 10px !important;
-    height: 10px !important;
-    stroke-width: 2.5 !important;
-}
-
-@keyframes toast-close-pop {
-    from {
-        transform: scale(0);
-        opacity: 0;
-    }
-    to {
-        transform: scale(1);
-        opacity: 1;
-    }
+[data-theme="sage"] body {
+    background-image:
+        radial-gradient(60rem 36rem at 8% -6%, hsl(96 30% 86% / 0.7), transparent 62%),
+        radial-gradient(48rem 30rem at 100% 0%, hsl(40 36% 88% / 0.55), transparent 60%);
+    background-attachment: fixed;
 }
 
 /* ── Module-scoped accent overrides ─────────────────────────────────────────
@@ -639,32 +725,32 @@
 ────────────────────────────────────────────────────────────────────────── */
 
 /* Material — emerald */
-[data-module="material"]       { --ring: 160 84% 39%; --accent-foreground: 160 84% 28%; }
-.dark [data-module="material"] { --ring: 160 84% 45%; --accent-foreground: 160 84% 65%; }
+[data-module="material"]       { --ring: 140 80% 40%; --accent-foreground: 140 80% 26%; }
+.dark [data-module="material"] { --ring: 140 80% 46%; --accent-foreground: 140 80% 70%; }
 
 /* Finance — indigo */
-[data-module="finance"]       { --ring: 239 84% 67%; --accent-foreground: 239 84% 40%; }
-.dark [data-module="finance"] { --ring: 239 84% 67%; --accent-foreground: 239 84% 80%; }
+[data-module="finance"]       { --ring: 243 80% 50%; --accent-foreground: 243 80% 36%; }
+.dark [data-module="finance"] { --ring: 243 80% 56%; --accent-foreground: 243 80% 80%; }
 
 /* Engineering — orange */
-[data-module="engineering"]       { --ring: 25 95% 53%; --accent-foreground: 25 95% 35%; }
-.dark [data-module="engineering"] { --ring: 25 95% 53%; --accent-foreground: 25 95% 68%; }
+[data-module="engineering"]       { --ring: 24 80% 50%; --accent-foreground: 24 80% 36%; }
+.dark [data-module="engineering"] { --ring: 24 80% 56%; --accent-foreground: 24 80% 80%; }
 
 /* Follow-up — teal */
-[data-module="followup"]       { --ring: 174 82% 31%; --accent-foreground: 174 82% 22%; }
-.dark [data-module="followup"] { --ring: 174 82% 31%; --accent-foreground: 174 72% 55%; }
+[data-module="followup"]       { --ring: 164 80% 40%; --accent-foreground: 164 80% 26%; }
+.dark [data-module="followup"] { --ring: 164 80% 46%; --accent-foreground: 164 80% 70%; }
 
 /* Ticket — pink */
-[data-module="ticket"]       { --ring: 330 81% 60%; --accent-foreground: 330 81% 38%; }
-.dark [data-module="ticket"] { --ring: 330 81% 60%; --accent-foreground: 330 81% 76%; }
+[data-module="ticket"]       { --ring: 318 80% 50%; --accent-foreground: 318 80% 36%; }
+.dark [data-module="ticket"] { --ring: 318 80% 56%; --accent-foreground: 318 80% 80%; }
 
 /* Sales — purple */
-[data-module="sales"]       { --ring: 271 91% 65%; --accent-foreground: 271 91% 38%; }
-.dark [data-module="sales"] { --ring: 271 91% 65%; --accent-foreground: 271 91% 80%; }
+[data-module="sales"]       { --ring: 265 80% 50%; --accent-foreground: 265 80% 36%; }
+.dark [data-module="sales"] { --ring: 265 80% 56%; --accent-foreground: 265 80% 80%; }
 
 /* Admin — blue */
-[data-module="admin"]       { --ring: 217 91% 60%; --accent-foreground: 217 91% 38%; }
-.dark [data-module="admin"] { --ring: 217 91% 60%; --accent-foreground: 217 91% 76%; }
+[data-module="admin"]       { --ring: 222 80% 50%; --accent-foreground: 222 80% 36%; }
+.dark [data-module="admin"] { --ring: 222 80% 56%; --accent-foreground: 222 80% 80%; }
 
 /* ── CRM dialog theme ──────────────────────────────────────────────────────
    The shared <DialogContent accent="crm"> gets the `.crm-dialog` class (see
@@ -738,10 +824,10 @@
 .crm-dialog input[type="time"] {
     color-scheme: dark;
 }
-[data-theme="light"] .crm-dialog input[type="date"],
-[data-theme="light"] .crm-dialog input[type="number"],
-[data-theme="light"] .crm-dialog input[type="datetime-local"],
-[data-theme="light"] .crm-dialog input[type="time"],
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) .crm-dialog input[type="date"],
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) .crm-dialog input[type="number"],
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) .crm-dialog input[type="datetime-local"],
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) .crm-dialog input[type="time"],
 [data-theme="bw"] .crm-dialog input[type="date"],
 [data-theme="bw"] .crm-dialog input[type="number"],
 [data-theme="bw"] .crm-dialog input[type="datetime-local"],
@@ -807,6 +893,20 @@
   main :not(table *):is([class^="min-w-["], [class*=" min-w-["]) {
     min-width: 0 !important;
   }
+  /* …except the top bar's drop-down panels (notifications, account, theme): the
+     cap above sized them to their 32px icon. On a phone they hang under the
+     bar across the screen instead. */
+  .fixed .np-sheet.absolute {
+    position: fixed;
+    top: calc(3.5rem + 6px);
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+    margin-top: 0;
+    max-height: calc(100dvh - 3.5rem - 16px);
+    overflow-y: auto;
+  }
 
   /* Fixed 3–6 column grids (forms, stat rows) reflow into as many columns
      as fit, down to one. */
@@ -850,21 +950,22 @@
   --mod-to: hsl(var(--primary));
   --mod-shadow: hsl(var(--primary) / 0.25);
 }
-[data-module="finance"]          { --mod-from: #6366f1; --mod-via: #8b5cf6; --mod-to: #a855f7; --mod-shadow: rgba(99,102,241,.25); }
-[data-module="material"]         { --mod-from: #10b981; --mod-via: #2dd4bf; --mod-to: #06b6d4; --mod-shadow: rgba(16,185,129,.25); }
-[data-module="fixed-asset"]      { --mod-from: #eab308; --mod-via: #f59e0b; --mod-to: #ea580c; --mod-shadow: rgba(234,179,8,.25); }
-[data-module="loan"]             { --mod-from: #22c55e; --mod-via: #10b981; --mod-to: #0d9488; --mod-shadow: rgba(34,197,94,.25); }
-[data-module="engineering"]      { --mod-from: #f97316; --mod-via: #f59e0b; --mod-to: #ea580c; --mod-shadow: rgba(249,115,22,.25); }
-[data-module="civilworkdpr"]     { --mod-from: #0891b2; --mod-via: #0ea5e9; --mod-to: #2563eb; --mod-shadow: rgba(8,145,178,.25); }
-[data-module="followup"]         { --mod-from: #0d9488; --mod-via: #10b981; --mod-to: #0891b2; --mod-shadow: rgba(13,148,136,.25); }
-[data-module="ticket"]           { --mod-from: #ec4899; --mod-via: #fb7185; --mod-to: #d946ef; --mod-shadow: rgba(236,72,153,.25); }
-[data-module="sales"]            { --mod-from: #a855f7; --mod-via: #8b5cf6; --mod-to: #d946ef; --mod-shadow: rgba(168,85,247,.25); }
-[data-module="sales-automation"] { --mod-from: #f59e0b; --mod-via: #fb923c; --mod-to: #ea580c; --mod-shadow: rgba(245,158,11,.25); }
-[data-module="crm"]              { --mod-from: #0ea5e9; --mod-via: #22d3ee; --mod-to: #3b82f6; --mod-shadow: rgba(14,165,233,.25); }
-[data-module="maintenance"]      { --mod-from: #65a30d; --mod-via: #22c55e; --mod-to: #059669; --mod-shadow: rgba(101,163,13,.25); }
-[data-module="hr-payroll"]       { --mod-from: #eab308; --mod-via: #f59e0b; --mod-to: #f97316; --mod-shadow: rgba(234,179,8,.25); }
-[data-module="records"]          { --mod-from: #e11d48; --mod-via: #ec4899; --mod-to: #f43f5e; --mod-shadow: rgba(225,29,72,.25); }
-[data-module="admin"]            { --mod-from: #3b82f6; --mod-via: #6366f1; --mod-to: #0ea5e9; --mod-shadow: rgba(59,130,246,.25); }
+[data-module="finance"]          { --mod-from: #2419e6; --mod-via: #5c3cec; --mod-to: #8d5ff2; --mod-shadow: rgba(36,25,230,.28); }
+[data-module="material"]         { --mod-from: #14b84b; --mod-via: #16df74; --mod-to: #2feea2; --mod-shadow: rgba(20,184,75,.28); }
+[data-module="fixed-asset"]      { --mod-from: #a57e12; --mod-via: #ccb414; --mod-to: #eded1d; --mod-shadow: rgba(165,126,18,.28); }
+[data-module="loan"]             { --mod-from: #43a512; --mod-via: #39cc14; --mod-to: #2aed1d; --mod-shadow: rgba(67,165,18,.28); }
+[data-module="engineering"]      { --mod-from: #e66b19; --mod-via: #ec9a3c; --mod-to: #f2c15f; --mod-shadow: rgba(230,107,25,.28); }
+[data-module="civilworkdpr"]     { --mod-from: #14a2b8; --mod-via: #16a9df; --mod-to: #2fa2ee; --mod-shadow: rgba(20,162,184,.28); }
+[data-module="followup"]         { --mod-from: #14b88c; --mod-via: #16dfc4; --mod-to: #2feeee; --mod-shadow: rgba(20,184,140,.28); }
+[data-module="ticket"]           { --mod-from: #e619a8; --mod-via: #ec3ca0; --mod-to: #f25f9e; --mod-shadow: rgba(230,25,168,.28); }
+[data-module="sales"]            { --mod-from: #6e19e6; --mod-via: #9d3cec; --mod-to: #c35ff2; --mod-shadow: rgba(110,25,230,.28); }
+[data-module="sales-automation"] { --mod-from: #e6195d; --mod-via: #ec3c5f; --mod-to: #f25f68; --mod-shadow: rgba(230,25,93,.28); }
+[data-module="crm"]              { --mod-from: #1990e6; --mod-via: #3c8bec; --mod-to: #5f8df2; --mod-shadow: rgba(25,144,230,.28); }
+[data-module="maintenance"]      { --mod-from: #88a512; --mod-via: #8fcc14; --mod-to: #8ced1d; --mod-shadow: rgba(136,165,18,.28); }
+[data-module="hr-payroll"]       { --mod-from: #ca19e6; --mod-via: #ec3cec; --mod-to: #f25fde; --mod-shadow: rgba(202,25,230,.28); }
+[data-module="legal"]            { --mod-from: #7c4a2e; --mod-via: #a06a3f; --mod-to: #c48e5c; --mod-shadow: rgba(124,74,46,.28); }
+[data-module="records"]          { --mod-from: #e61919; --mod-via: #ec533c; --mod-to: #f2865f; --mod-shadow: rgba(230,25,25,.28); }
+[data-module="admin"]            { --mod-from: #1957e6; --mod-via: #3c59ec; --mod-to: #5f64f2; --mod-shadow: rgba(25,87,230,.28); }
 
 .btn-module {
   background-color: var(--mod-from);
@@ -884,7 +985,7 @@
   border-radius: 0.5rem;
   transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
 }
-[data-module="crm"] main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):focus {
+[data-module="crm"] main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea):focus {
   outline: none;
   border-color: rgba(14, 165, 233, 0.6);
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
@@ -929,16 +1030,21 @@
   overflow-wrap: normal;
   word-break: keep-all;
 }
+/* A table nested in a cell (the Trial Balance entries under an account) has cells of its own that carry these classes:
+   those cells stay table cells — as inline-blocks they dropped out of their columns (debit and credit ended up side by
+   side under "Debit", the narration under "Credit"). So the two layout rules below skip td / th / tr. */
 /* …but never wider than their cell: an over-long code / reference / pill is
    cut with "…" (the hover tooltip shows it in full) instead of spilling
    over the neighbouring column. */
-:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"], time) {
+:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"], time):not(td, th, tr):not(:empty) {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: middle;
 }
-:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"]):not(:is(.flex, .inline-flex, .grid)) {
+/* Inline-block for spans and pills only: a plain div / p is its own line (a number over its date), and inline
+   it ran into the line above. */
+:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"]):not(td, th, tr):not(:is(.flex, .inline-flex, .grid)):not(:empty):not(:has(> .h-full)):not(:is(div, p):not(.rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"])) {
   display: inline-block;
 }
 /* Flex pills (icon + text): let the text part shrink and truncate too. */
@@ -1034,17 +1140,17 @@
   .ai-c-mod > div:last-child { flex-direction: column; align-items: flex-start; gap: 0; }
 }
 
-/* Laptop & wider: the single-row table — every detail in its own column,
-   with headers. Between 52rem and 76rem it's a denser version (below). */
-@container (min-width: 60rem) {
+/* Wide screens: the single-row table — every detail in its own column, with headers. Narrower than this the row
+   splits in two (below) instead of squeezing eight columns into one line. */
+@container (min-width: 76rem) {
   .ai-head { display: flex; }
   .ai-row {
     grid-template-columns:
-      minmax(0, 1.4fr) minmax(0, 0.75fr) minmax(0, 1.1fr) minmax(0, 1fr)
-      minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 0.85fr) auto;
+      minmax(0, 1.3fr) minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 0.9fr)
+      minmax(0, 0.8fr) minmax(0, 1.25fr) minmax(0, 1.2fr) 18rem;
     grid-template-areas: none;
-    gap: 0.5rem;
-    padding: 0.875rem 1rem 0.875rem 0.75rem;
+    gap: 1.25rem;
+    padding: 1.125rem 1rem 1.125rem 0.75rem;
   }
   .ai-row-head { padding-top: 0.625rem; padding-bottom: 0.625rem; }
   .ai-c-mod, .ai-c-status, .ai-c-actions, .ai-meta { grid-area: auto; }
@@ -1069,39 +1175,30 @@
   }
 }
 
-/* Dense table (52–76rem): same single row, scaled down so all columns and
-   the Approve / Reject buttons fit on laptops, Windows display scaling and
-   with the sidebars open. */
-@container (min-width: 60rem) and (max-width: 75.99rem) {
+/* Tablets and laptops (40–76rem): two tiers per row. On top the record, its status and the actions; under it the
+   details as a labelled grid, so nothing is cut short and the buttons keep their full size. */
+@container (min-width: 40rem) and (max-width: 75.99rem) {
   .ai-row {
-    grid-template-columns:
-      minmax(0, 1.4fr) minmax(0, 0.75fr) minmax(0, 1fr) minmax(0, 1fr)
-      minmax(0, 0.85fr) minmax(0, 0.9fr) minmax(0, 0.85fr) auto;
-    gap: 0.375rem;
-    padding: 0.5rem 0.75rem 0.5rem 0.5rem;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+    grid-template-areas:
+      "mod  status actions"
+      "meta meta   meta";
+    column-gap: 1.25rem;
+    row-gap: 0.75rem;
+    padding: 1rem 1rem 1rem 0.75rem;
   }
-  .ai-row-head { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-  .ai-row-head p { font-size: 0.5625rem; letter-spacing: 0.08em; }
-  .ai-c-mod { gap: 0.5rem; }
-  .ai-c-mod > div:first-child { padding: 0.375rem; border-radius: 0.5rem; }
-  .ai-c-mod > div:first-child svg { width: 0.8125rem; height: 0.8125rem; }
-  .ai-c-mod p:first-child { font-size: 0.75rem; }
-  .ai-c-mod p:last-child,
-  .ai-meta :is(p, span) { font-size: 0.6875rem; }
-  .ai-c-amount > div:last-child { padding: 0.125rem 0.375rem; }
-  .ai-c-amount p { font-size: 0.75rem; }
-  .ai-c-status span { font-size: 0.625rem; padding: 0.125rem 0.375rem; }
-  /* Smaller action buttons (eye / Approve / Reject / open). */
-  .ai-c-actions { gap: 0.25rem; }
-  .ai-c-actions button,
-  .ai-c-actions a {
-    font-size: 0.6875rem;
-    padding: 0.3125rem 0.5rem;
-    height: auto;
-    min-height: 0;
-    gap: 0.25rem;
+  .ai-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+    gap: 0.625rem 1.25rem;
+    padding: 0.625rem 0 0 2.6rem;
+    border-top: 1px dashed hsl(var(--foreground) / 0.15);
   }
-  .ai-c-actions svg { width: 0.75rem; height: 0.75rem; }
+  .ai-meta > div { display: block; overflow: hidden; }
+  .ai-meta > div + div::before { content: none; }
+  .ai-meta span.ai-label { display: block; margin-bottom: 0.125rem; font-size: 0.5625rem; }
+  .ai-meta > div :is(p, span) { overflow: hidden; text-overflow: ellipsis; }
+  .ai-c-status { justify-self: end; text-align: right; }
 }
 
 
@@ -1133,14 +1230,14 @@
     padding: 0.125rem 0.375rem;
   }
   /* Row action buttons (view / edit / delete / approve / reject) */
-  [data-module="admin"] main table tbody td :is(button, a[class*="px-"]) {
+  [data-module="admin"] main table tbody td :is(button:not([role="checkbox"]):not([role="switch"]), a[class*="px-"]) {
     font-size: 0.6875rem;
     padding: 0.3125rem 0.5rem;
     min-height: 0;
     height: auto;
     gap: 0.25rem;
   }
-  [data-module="admin"] main table tbody td :is(button, a) svg {
+  [data-module="admin"] main table tbody td :is(button:not([role="checkbox"]):not([role="switch"]), a) svg {
     width: 0.8125rem;
     height: 0.8125rem;
   }
@@ -1289,6 +1386,18 @@
 .crm-dialog[class*="dlg-sticky"] :is([data-dlg-head], [data-dlg-foot]) {
   background: hsl(var(--card));
 }
+/* Phones: a dialog takes the whole screen less a small margin, whatever height cap the page gave it, so its
+   content is never cut short; wide content (tables, item grids) scrolls sideways inside it instead of being
+   clipped. The bottom bar steps aside while a dialog is open (MobileNav). */
+@media (max-width: 639px) {
+  .dlg-sticky {
+    width: calc(100% - 1rem) !important;
+    max-width: calc(100% - 1rem) !important;
+    max-height: calc(100dvh - 1rem) !important;
+  }
+  .dlg-sticky table { min-width: max-content; }
+  .dlg-sticky :has(> table) { overflow-x: auto; }
+}
 /* The × lives in a zero-height sticky strip at the top of the scroll box. */
 .dlg-close-anchor {
   position: sticky;
@@ -1320,3 +1429,1269 @@
   overflow-wrap: normal;
   word-break: keep-all;
 }
+
+/* ── Phones: hand-built tables become compact cards (see markCardTables) ─
+   Each row is a small card: the first column is the title with the row's
+   actions beside it; the other values sit two per row, each with its column
+   name in small type above it. Blank / dash-only values are hidden, so a
+   long list stays quick to scroll. Full-width rows (group headers, "no
+   records") stay full width. */
+@media (max-width: 767px) {
+  :is(main, [role="dialog"]) table.auto-cards {
+    display: block;
+    overflow: visible;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+  table.auto-cards thead { display: none; }
+  table.auto-cards tbody { display: block; }
+  table.auto-cards tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 0.75rem;
+    row-gap: 0.375rem;
+    margin: 0.5rem 0.625rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.625rem;
+    background: hsl(var(--card));
+  }
+  table.auto-cards tbody td {
+    display: block;
+    padding: 0 !important;
+    border: 0 !important;
+    text-align: left;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    position: static !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  table.auto-cards tbody td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.5625rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: hsl(var(--muted-foreground));
+    margin-bottom: 0.0625rem;
+  }
+  table.auto-cards tbody td[data-empty]:not(:first-child) { display: none; }
+  /* Title: first column, full row width minus the actions */
+  table.auto-cards tbody td:first-child {
+    grid-column: 1 / 2;
+    grid-row: 1;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    align-self: center;
+  }
+  table.auto-cards tbody td:first-child::before { display: none; }
+  table.auto-cards tbody td[data-label=""]:not(.sticky-act)::before { display: none; }
+  /* Actions: top-right, on the title line */
+  table.auto-cards tbody td:is(.sticky-act, [data-label="Actions"], [data-label="Action"]) {
+    grid-column: 2 / 3;
+    grid-row: 1;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    overflow: visible;
+  }
+  table.auto-cards tbody td:is(.sticky-act, [data-label="Actions"], [data-label="Action"])::before { display: none; }
+  table.auto-cards tbody td:is(.sticky-act, [data-label="Actions"], [data-label="Action"]) :is(button, a) {
+    padding: 0.25rem;
+  }
+  /* Full-width rows (group headers, empty state) */
+  table.auto-cards tbody tr:has(> td[colspan]:only-child) {
+    display: block;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    margin: 0.5rem 0.625rem 0;
+  }
+  table.auto-cards tbody td[colspan] { grid-column: 1 / -1; }
+}
+
+/* Tabbed master forms on phones: two fields per row, compact labels. */
+@media (max-width: 767px) {
+  .mp-tabbed label {
+    font-size: 0.5625rem;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* ── Dropdowns: no focus outline / ring when clicked ─────────────────────
+   Native <select>s and the Radix select / combobox triggers drop the
+   outline and focus ring (from Tailwind focus:ring-* classes and module
+   styles); the border just darkens slightly so the active field is still
+   discernible. */
+select:focus,
+select:focus-visible,
+button[role="combobox"]:focus,
+button[role="combobox"]:focus-visible,
+[data-radix-select-trigger]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-width: 0px !important;
+}
+select:focus,
+button[role="combobox"]:focus {
+  border-color: hsl(var(--foreground) / 0.25) !important;
+}
+
+/* Glass: dialog fields and labels stay crisp on the clearer glass */
+[data-theme="glass"] [role="dialog"] :is(label, .text-muted-foreground) {
+    color: hsl(220 14% 28%);
+}
+[data-theme="glass"] [role="dialog"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+    background-color: rgba(255, 255, 255, 0.45);
+    color: hsl(222 35% 9%);
+}
+
+/* Glass: Setup (masters) dropdown tiles — small pearl-glass buttons with a
+   pearl icon bubble, lifting on hover. */
+[data-theme="glass"] .setup-item {
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.32), rgba(214, 233, 255, 0.24) 45%, rgba(214, 255, 244, 0.22) 75%, rgba(255, 255, 255, 0.30)),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.22)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.85) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 1),
+        inset 0 -6px 12px -8px rgba(30, 64, 110, 0.16),
+        0 1px 2px rgba(30, 64, 110, 0.06),
+        0 6px 14px -6px rgba(30, 64, 110, 0.16);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+[data-theme="glass"] .setup-item:hover {
+    transform: translateY(-2px);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 1),
+        inset 0 -6px 12px -8px rgba(30, 64, 110, 0.16),
+        0 2px 4px rgba(30, 64, 110, 0.08),
+        0 12px 24px -8px rgba(30, 64, 110, 0.24);
+}
+[data-theme="glass"] .setup-item > div > div:first-child {
+    background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.35) 60%, rgba(214, 233, 255, 0.35)) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 2px 6px rgba(30, 64, 110, 0.12);
+}
+
+/* Glass: floating panels (header dropdowns like Setup / Reports, menus,
+   pop-overs) sit above page content. A panel inside the blurred header can't
+   blur the page behind it (nested backdrop-filter), so it gets a nearly
+   opaque pearl surface — same sheen, rim and 3D shadow, but nothing from the
+   page shows through. */
+[data-theme="glass"] :is(.absolute, .fixed)[class*="z-"]:is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"]),
+[data-theme="glass"] header :is(.absolute, .fixed):is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"]) {
+    background:
+        linear-gradient(115deg,
+            rgba(255, 255, 255, 0.55) 0%,
+            rgba(226, 238, 255, 0.45) 35%,
+            rgba(226, 252, 244, 0.40) 65%,
+            rgba(255, 255, 255, 0.50) 100%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(255, 255, 255, 0.95)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.95) !important;
+    box-shadow:
+        inset 0 1.5px 0 rgba(255, 255, 255, 1),
+        inset 0 -12px 22px -14px rgba(30, 64, 110, 0.16),
+        0 2px 4px rgba(30, 64, 110, 0.08),
+        0 18px 44px -10px rgba(30, 64, 110, 0.30),
+        0 40px 80px -30px rgba(120, 90, 160, 0.28) !important;
+}
+[data-theme="glass"] .bg-popover {
+    background:
+        linear-gradient(115deg, rgba(255, 255, 255, 0.5), rgba(226, 238, 255, 0.4) 40%, rgba(255, 255, 255, 0.45)),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(255, 255, 255, 0.95)) !important;
+}
+
+/* ── Glass: water-pearl icons ─────────────────────────────────────────────
+   Small icon badges (square / round containers holding just an icon — page
+   & section headers, cards, sidebar, module strip) become glossy pearl
+   bubbles: white specular highlight top-left, faint iridescent body, bright
+   rim and soft drop shadow. Every icon gets a subtle embossed glint.
+   Coloured action buttons (module gradients, solid fills) are untouched. */
+[data-theme="glass"] :is(.rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-full):is(.w-5, .w-6, .w-7, .w-8, .w-9, .w-10, .w-11, .w-12, .w-14):has(> svg:only-child):not(.btn-module):not(.gradient-accent):not([class*="bg-red-"]):not([class*="bg-green-"]):not([class*="bg-emerald-6"]):not([class*="bg-primary"]):not(.bg-destructive):not(.login-page *):not(.text-white):not([class*="text-white/"]):not(:has(> svg.text-white)):not([class*="-400"]):not([class*="-500"]):not([class*="-600"]):not([class*="-700"]):not([class*="-800"]):not([class*="bg-[#"]):not([style*="background"]) {
+    background:
+        radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.55) 28%, transparent 58%),
+        linear-gradient(140deg, rgba(255, 255, 255, 0.55), rgba(214, 233, 255, 0.55) 45%, rgba(208, 250, 238, 0.5) 75%, rgba(255, 255, 255, 0.55)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.95) !important;
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 1),
+        inset 0 -4px 8px -3px rgba(30, 64, 110, 0.18),
+        0 2px 5px rgba(30, 64, 110, 0.12),
+        0 6px 14px -6px rgba(30, 64, 110, 0.22) !important;
+}
+/* Embossed glint on icons */
+[data-theme="glass"] :is(svg.lucide, svg[class*="icon"], :is(aside, nav, header, .setup-item, button, a) svg:not([class*="recharts"])):not(.login-page *) {
+    filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.85)) drop-shadow(0 1px 1.5px rgba(30, 64, 110, 0.18));
+}
+/* …but not on icons inside solid coloured buttons / badges */
+[data-theme="glass"] :is(.btn-module, .gradient-accent, [class*="bg-red-6"], [class*="bg-emerald-6"], [class*="bg-green-6"], .bg-destructive, .text-white) svg {
+    filter: none;
+}
+
+/* A checkpoint Quality Check rated Poor on the previous attempt — the one to redo. */
+@keyframes cpReworkBlink {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); border-color: rgba(245, 158, 11, 0.35); }
+    50% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35); border-color: rgba(245, 158, 11, 0.95); }
+}
+.cp-rework-blink {
+    animation: cpReworkBlink 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .cp-rework-blink { animation: none; box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.6); }
+}
+
+/* Glass: page-shell "glass" cards (module dashboards, shells, stat tiles)
+   draw their own surface inline — a backdrop blur over a ~75% white fill.
+   In the Glass theme those become the same clear, blurred pearl glass as
+   regular cards: far more transparent, stronger blur, pearl sheen, bright
+   rim and 3D shadow. Full-screen overlays are excluded. */
+[data-theme="glass"] main [style*="backdrop-filter"]:not(.fixed):not(.inset-0):not([class*="inset-0"]) {
+    background:
+        linear-gradient(115deg,
+            rgba(255, 255, 255, 0.22) 0%,
+            rgba(214, 233, 255, 0.16) 30%,
+            rgba(214, 255, 244, 0.14) 55%,
+            rgba(255, 255, 255, 0.18) 80%,
+            rgba(255, 255, 255, 0.16) 100%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.10) 60%, rgba(255, 255, 255, 0.20) 100%) !important;
+    backdrop-filter: blur(30px) saturate(200%) brightness(1.04) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(200%) brightness(1.04) !important;
+    border-color: rgba(255, 255, 255, 0.8) !important;
+    box-shadow:
+        inset 0 1.5px 0 rgba(255, 255, 255, 1),
+        inset 0 -10px 18px -12px rgba(30, 64, 110, 0.16),
+        0 1px 2px rgba(30, 64, 110, 0.07),
+        0 4px 10px -2px rgba(30, 64, 110, 0.09),
+        0 18px 40px -12px rgba(30, 64, 110, 0.22) !important;
+}
+
+/* ── Glass: fully tumbled glass — final layer ────────────────────────────
+   Tumbled glass = thick, textured, frosted glass: the scene behind is
+   heavily diffused but still visibly there, the surface has a coarse matte
+   grain, and the thick edges catch light. So:
+   • a lively cool backdrop (blue / teal / violet shapes, no cream) for the
+     glass to diffuse;
+   • panels almost fully transparent with a heavy blur;
+   • a coarse light+dark frosted grain on every glass surface;
+   • thick-glass edges: bright top-left rim, deeper bottom-right edge. */
+[data-theme="glass"] {
+    --glass-grain: linear-gradient(transparent, transparent);
+    --glass-edge:
+        inset 1.5px 1.5px 0 rgba(255, 255, 255, 0.95),
+        inset -1px -1px 0 rgba(15, 40, 80, 0.10),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+        inset 0 -16px 28px -18px rgba(15, 40, 80, 0.22),
+        inset 14px 14px 28px -20px rgba(255, 255, 255, 0.9);
+    --glass-drop:
+        0 1px 2px rgba(15, 40, 80, 0.10),
+        0 6px 14px -4px rgba(15, 40, 80, 0.14),
+        0 22px 46px -14px rgba(15, 40, 80, 0.30);
+}
+[data-theme="glass"] body {
+    background: #f2f8f9 !important;
+}
+[data-theme="glass"] :is(.bg-card, .bg-sidebar, [class^="bg-card/"], [class*=" bg-card/"]),
+[data-theme="glass"] main [style*="backdrop-filter"]:not(.fixed):not(.inset-0):not([class*="inset-0"]) {
+    background:
+        var(--glass-grain),
+        linear-gradient(145deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.04) 50%, rgba(255, 255, 255, 0.10) 100%) !important;
+    backdrop-filter: blur(30px) saturate(140%) brightness(1.03) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(140%) brightness(1.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.6) !important;
+    box-shadow: var(--glass-edge), var(--glass-drop) !important;
+}
+[data-theme="glass"] header {
+    background: var(--glass-grain), linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.08)) !important;
+    backdrop-filter: blur(34px) saturate(160%) brightness(1.06) !important;
+    -webkit-backdrop-filter: blur(34px) saturate(160%) brightness(1.06) !important;
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.7), 0 8px 24px -12px rgba(15, 40, 80, 0.25) !important;
+}
+/* Floating panels: same tumbled texture, but dense enough to read over the
+   page (they can't blur through the header). */
+[data-theme="glass"] :is(.absolute, .fixed)[class*="z-"]:is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"]),
+[data-theme="glass"] header :is(.absolute, .fixed):is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"]),
+[data-theme="glass"] .bg-popover {
+    background: var(--glass-grain), linear-gradient(150deg, rgba(250, 252, 255, 0.95), rgba(238, 243, 250, 0.93)) !important;
+    box-shadow: var(--glass-edge), 0 24px 54px -14px rgba(15, 40, 80, 0.35) !important;
+}
+/* Dialogs: thick tumbled glass sheet over a blurred veil */
+[data-theme="glass"] [role="dialog"]:is(.bg-background, .crm-dialog) {
+    background: var(--glass-grain), linear-gradient(150deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.12)) !important;
+    backdrop-filter: blur(40px) saturate(160%) brightness(1.06) !important;
+    -webkit-backdrop-filter: blur(40px) saturate(160%) brightness(1.06) !important;
+    border: 1px solid rgba(255, 255, 255, 0.7) !important;
+    box-shadow: var(--glass-edge), 0 34px 80px -18px rgba(15, 40, 80, 0.40) !important;
+}
+[data-theme="glass"] [data-radix-dialog-overlay],
+[data-theme="glass"] .fixed.inset-0[class*="bg-black"],
+[data-theme="glass"] .fixed .flex-1[class*="bg-black/"] {
+    background: rgba(203, 213, 225, 0.22) !important;
+    backdrop-filter: blur(14px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+}
+/* Setup tiles & icon bubbles: little tumbled-glass pebbles */
+[data-theme="glass"] .setup-item {
+    background: var(--glass-grain), linear-gradient(150deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.22)) !important;
+    box-shadow: var(--glass-edge), 0 6px 14px -6px rgba(15, 40, 80, 0.22) !important;
+}
+[data-theme="glass"] :is(.rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-full):is(.w-5, .w-6, .w-7, .w-8, .w-9, .w-10, .w-11, .w-12, .w-14):has(> svg:only-child):not(.btn-module):not(.gradient-accent):not([class*="bg-red-"]):not([class*="bg-green-"]):not([class*="bg-emerald-6"]):not([class*="bg-primary"]):not(.bg-destructive):not(.login-page *):not(.text-white):not([class*="text-white/"]):not(:has(> svg.text-white)):not([class*="-400"]):not([class*="-500"]):not([class*="-600"]):not([class*="-700"]):not([class*="-800"]):not([class*="bg-[#"]):not([style*="background"]) {
+    background:
+        radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.5) 30%, transparent 60%),
+        var(--glass-grain),
+        linear-gradient(150deg, rgba(255, 255, 255, 0.6), rgba(207, 250, 254, 0.40)) !important;
+}
+/* Muted surfaces & table headers: faint frosted strips */
+[data-theme="glass"] .bg-muted {
+    background: var(--glass-grain), rgba(255, 255, 255, 0.18) !important;
+}
+
+/* ── Glass: visibility fixes (progress bars, pinned cells, rows, sections) */
+/* Progress-bar tracks (thin rounded muted bars) get a visible aqua track */
+[data-theme="glass"] .rounded-full.bg-muted:is(.h-1, .h-1\.5, .h-2, .h-2\.5, .h-3),
+[data-theme="glass"] .rounded-full:is(.h-1, .h-1\.5, .h-2, .h-2\.5, .h-3)[class*="bg-muted/"] {
+    background: rgba(14, 116, 144, 0.14) !important;
+    box-shadow: inset 0 1px 1px rgba(15, 40, 80, 0.10);
+}
+/* Pinned Status / Actions cells: frosted aqua-white glass instead of grey */
+[data-theme="glass"] .table-sticky-actions :is(.sticky-act, .sticky-status) {
+    background-color: rgba(247, 252, 253, 0.92) !important;
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    box-shadow: -10px 0 18px -12px rgba(14, 116, 144, 0.30) !important;
+}
+[data-theme="glass"] .table-sticky-actions thead :is(.sticky-act, .sticky-status) {
+    background-color: rgba(236, 248, 250, 0.95) !important;
+}
+[data-theme="glass"] .table-sticky-actions tbody tr:nth-child(even) > :is(.sticky-act, .sticky-status) {
+    background-color: rgba(242, 250, 251, 0.93) !important;
+}
+[data-theme="glass"] .table-sticky-actions tbody tr:hover > :is(.sticky-act, .sticky-status) {
+    background-color: rgba(224, 247, 250, 0.96) !important;
+}
+[data-theme="glass"] .table-sticky-actions tr:has(> .sticky-status) > .sticky-act {
+    box-shadow: none !important;
+}
+/* Rows: aqua tint on hover / alternate rows instead of grey */
+[data-theme="glass"] main table tbody tr:hover {
+    background-color: rgba(34, 211, 238, 0.07) !important;
+}
+[data-theme="glass"] main table tbody tr[class*="even:bg-muted"]:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.22) !important;
+}
+[data-theme="glass"] main table thead tr {
+    background: rgba(255, 255, 255, 0.35) !important;
+}
+/* Sections: a touch more body + clearer rim so each card reads as its own pane */
+[data-theme="glass"] :is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"]),
+[data-theme="glass"] main [style*="backdrop-filter"]:not(.fixed):not(.inset-0):not([class*="inset-0"]) {
+    background:
+        var(--glass-grain),
+        linear-gradient(145deg, rgba(255, 255, 255, 0.30) 0%, rgba(255, 255, 255, 0.12) 50%, rgba(255, 255, 255, 0.20) 100%) !important;
+    border-color: rgba(255, 255, 255, 0.85) !important;
+}
+
+
+/* ── Glass: performance ───────────────────────────────────────────────────
+   Many stacked backdrop blurs + per-surface generated grain + a fixed body
+   background (repainted on every scroll) overloaded the GPU, so pages could
+   paint blank or lag. Same look, far cheaper:
+   • the water-colour backdrop is one fixed layer (never repainted);
+   • the tumbled grain is one fixed overlay instead of per surface;
+   • only top-level panels blur, with a lighter radius; nested cards,
+     table cells and small elements don't add blurs of their own. */
+/* Water tint follows the active module (data-module on <body> carries its
+   --mod-from / --mod-via / --mod-to colours): Material glows green, Finance
+   indigo, CRM sky… softly faded. Home / no module: aqua water. */
+[data-theme="glass"] body {
+    --gt-a: #22d3ee;
+    --gt-b: #67e8f9;
+    --gt-c: #2dd4bf;
+}
+[data-theme="glass"] body[data-module] {
+    --gt-a: var(--mod-from);
+    --gt-b: var(--mod-via);
+    --gt-c: var(--mod-to);
+}
+[data-theme="glass"] body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+        radial-gradient(30rem 26rem at 12% 8%, color-mix(in srgb, var(--gt-a) 24%, transparent), transparent 65%),
+        radial-gradient(34rem 28rem at 88% 12%, color-mix(in srgb, var(--gt-b) 20%, transparent), transparent 65%),
+        radial-gradient(36rem 30rem at 70% 62%, color-mix(in srgb, var(--gt-c) 18%, transparent), transparent 65%),
+        radial-gradient(30rem 26rem at 16% 80%, color-mix(in srgb, var(--gt-a) 16%, transparent), transparent 65%),
+        radial-gradient(26rem 22rem at 46% 34%, color-mix(in srgb, var(--gt-b) 16%, transparent), transparent 65%),
+        linear-gradient(160deg, #f5f9fa 0%, #f2f6f8 50%, #f6f9fa 100%);
+}
+[data-theme="glass"] body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 2147483000;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.22'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    opacity: 0.35;
+}
+[data-theme="glass"] :is(.bg-card, .bg-sidebar, [class^="bg-card/"], [class*=" bg-card/"]),
+[data-theme="glass"] main [style*="backdrop-filter"]:not(.fixed):not(.inset-0):not([class*="inset-0"]) {
+    backdrop-filter: blur(18px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(140%) !important;
+}
+/* Nested glass inside glass: no extra blur pass */
+[data-theme="glass"] :is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"], [style*="backdrop-filter"]) :is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"], [style*="backdrop-filter"]):not(.fixed):not(.absolute),
+[data-theme="glass"] .table-sticky-actions :is(.sticky-act, .sticky-status),
+[data-theme="glass"] :is(td, th, li, .setup-item) {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+[data-theme="glass"] header {
+    backdrop-filter: blur(18px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(140%) !important;
+}
+[data-theme="glass"] [role="dialog"]:is(.bg-background, .crm-dialog) {
+    backdrop-filter: blur(24px) saturate(140%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(140%) !important;
+}
+[data-theme="glass"] [data-radix-dialog-overlay],
+[data-theme="glass"] .fixed.inset-0[class*="bg-black"],
+[data-theme="glass"] .fixed .flex-1[class*="bg-black/"] {
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+}
+/* Icon glint removed: a drop-shadow filter on every icon (hundreds per
+   page) was repainted constantly — too costly for a barely visible effect. */
+[data-theme="glass"] svg {
+    filter: none !important;
+}
+
+/* Glass: sidebar hover / active highlight in the active module's colour
+   (instead of the neutral grey sidebar-accent). */
+[data-theme="glass"] [class*="hover:bg-sidebar-accent"]:hover,
+[data-theme="glass"] [class*="hover:bg-muted"]:is(aside *, nav *):hover {
+    background-color: color-mix(in srgb, var(--mod-from, #22d3ee) 14%, transparent) !important;
+}
+[data-theme="glass"] :is(.bg-sidebar-accent, [class*=" bg-sidebar-accent/"], [class^="bg-sidebar-accent/"]) {
+    background-color: color-mix(in srgb, var(--mod-from, #22d3ee) 18%, transparent) !important;
+}
+
+/* ── No text overflow outside tables ─────────────────────────────────────
+   1) A flex / grid child that contains truncating text may shrink, so
+      .truncate / line-clamp always ends in "…" instead of pushing past its
+      card (flex items otherwise refuse to shrink below their content).
+   2) Blocks holding headings / paragraphs may shrink too, and those break
+      only a word that can't fit on a line by itself (long IDs / numbers)
+      instead of overflowing their container. Normal words are unaffected;
+      tables, buttons and pills keep their own rules. */
+main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clamp-2, .line-clamp-3):not(.shrink-0),
+[role="dialog"] :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clamp-2, .line-clamp-3):not(.shrink-0) {
+    min-width: 0;
+}
+:is(main, [role="dialog"]) :is(.flex, .inline-flex, .grid) > :has(> :is(h1, h2, h3, h4, h5, h6, p)):not(.shrink-0):not(table *) {
+    min-width: 0;
+}
+:is(main, [role="dialog"]) :is(h1, h2, h3, h4, h5, h6, p):not(table *):not(button *):not(.truncate) {
+    overflow-wrap: break-word;
+}
+
+
+/* ── BW theme: neutral fills, colour only in text & accent bars ─────────
+   Replaces the old "grey out everything" overlay. In B&W:
+   • every faded / tinted background (Tailwind tint utilities in any hue,
+     arbitrary hex tints, page-shell glows and gradients, coloured icon
+     badges) becomes neutral white / grey;
+   • colour survives only in TEXT and in thin accent bars (left / top
+     stripes), status dots and progress fills;
+   • module-gradient buttons become solid black. */
+[data-theme="bw"]::after {
+    display: none !important;
+}
+[data-theme="bw"] header.fixed.top-0 > *:not(:first-child),
+[data-theme="bw"] .expense-preview-modal > *,
+[data-theme="bw"] .bw-modal-topmost > *,
+[data-theme="bw"] .bw-login-lift > *:not(:last-child),
+[data-theme="bw"] .bw-login-lift .p-6 > *:not(:first-child),
+[data-theme="bw"] .bw-login-lift .text-center > *:not(:first-child) {
+    filter: none !important;
+}
+[data-theme="bw"] header.fixed.top-0 {
+    z-index: 50;
+}
+
+/* Tinted utility backgrounds → neutral grey */
+[data-theme="bw"] :is(
+    [class*="bg-red-50 "],
+    [class$="bg-red-50"],
+    [class*="bg-red-50/"],
+    [class*="bg-red-100"],
+    [class*="bg-red-200"],
+    [class*="bg-red-300/"],
+    [class*="bg-red-400/"],
+    [class*="bg-red-500/"],
+    [class*="bg-red-600/"],
+    [class*="bg-red-700/"],
+    [class*="bg-red-800/"],
+    [class*="bg-red-900/"],
+    [class*="bg-red-950/"],
+    [class*="bg-orange-50 "],
+    [class$="bg-orange-50"],
+    [class*="bg-orange-50/"],
+    [class*="bg-orange-100"],
+    [class*="bg-orange-200"],
+    [class*="bg-orange-300/"],
+    [class*="bg-orange-400/"],
+    [class*="bg-orange-500/"],
+    [class*="bg-orange-600/"],
+    [class*="bg-orange-700/"],
+    [class*="bg-orange-800/"],
+    [class*="bg-orange-900/"],
+    [class*="bg-orange-950/"],
+    [class*="bg-amber-50 "],
+    [class$="bg-amber-50"],
+    [class*="bg-amber-50/"],
+    [class*="bg-amber-100"],
+    [class*="bg-amber-200"],
+    [class*="bg-amber-300/"],
+    [class*="bg-amber-400/"],
+    [class*="bg-amber-500/"],
+    [class*="bg-amber-600/"],
+    [class*="bg-amber-700/"],
+    [class*="bg-amber-800/"],
+    [class*="bg-amber-900/"],
+    [class*="bg-amber-950/"],
+    [class*="bg-yellow-50 "],
+    [class$="bg-yellow-50"],
+    [class*="bg-yellow-50/"],
+    [class*="bg-yellow-100"],
+    [class*="bg-yellow-200"],
+    [class*="bg-yellow-300/"],
+    [class*="bg-yellow-400/"],
+    [class*="bg-yellow-500/"],
+    [class*="bg-yellow-600/"],
+    [class*="bg-yellow-700/"],
+    [class*="bg-yellow-800/"],
+    [class*="bg-yellow-900/"],
+    [class*="bg-yellow-950/"],
+    [class*="bg-lime-50 "],
+    [class$="bg-lime-50"],
+    [class*="bg-lime-50/"],
+    [class*="bg-lime-100"],
+    [class*="bg-lime-200"],
+    [class*="bg-lime-300/"],
+    [class*="bg-lime-400/"],
+    [class*="bg-lime-500/"],
+    [class*="bg-lime-600/"],
+    [class*="bg-lime-700/"],
+    [class*="bg-lime-800/"],
+    [class*="bg-lime-900/"],
+    [class*="bg-lime-950/"],
+    [class*="bg-green-50 "],
+    [class$="bg-green-50"],
+    [class*="bg-green-50/"],
+    [class*="bg-green-100"],
+    [class*="bg-green-200"],
+    [class*="bg-green-300/"],
+    [class*="bg-green-400/"],
+    [class*="bg-green-500/"],
+    [class*="bg-green-600/"],
+    [class*="bg-green-700/"],
+    [class*="bg-green-800/"],
+    [class*="bg-green-900/"],
+    [class*="bg-green-950/"],
+    [class*="bg-emerald-50 "],
+    [class$="bg-emerald-50"],
+    [class*="bg-emerald-50/"],
+    [class*="bg-emerald-100"],
+    [class*="bg-emerald-200"],
+    [class*="bg-emerald-300/"],
+    [class*="bg-emerald-400/"],
+    [class*="bg-emerald-500/"],
+    [class*="bg-emerald-600/"],
+    [class*="bg-emerald-700/"],
+    [class*="bg-emerald-800/"],
+    [class*="bg-emerald-900/"],
+    [class*="bg-emerald-950/"],
+    [class*="bg-teal-50 "],
+    [class$="bg-teal-50"],
+    [class*="bg-teal-50/"],
+    [class*="bg-teal-100"],
+    [class*="bg-teal-200"],
+    [class*="bg-teal-300/"],
+    [class*="bg-teal-400/"],
+    [class*="bg-teal-500/"],
+    [class*="bg-teal-600/"],
+    [class*="bg-teal-700/"],
+    [class*="bg-teal-800/"],
+    [class*="bg-teal-900/"],
+    [class*="bg-teal-950/"],
+    [class*="bg-cyan-50 "],
+    [class$="bg-cyan-50"],
+    [class*="bg-cyan-50/"],
+    [class*="bg-cyan-100"],
+    [class*="bg-cyan-200"],
+    [class*="bg-cyan-300/"],
+    [class*="bg-cyan-400/"],
+    [class*="bg-cyan-500/"],
+    [class*="bg-cyan-600/"],
+    [class*="bg-cyan-700/"],
+    [class*="bg-cyan-800/"],
+    [class*="bg-cyan-900/"],
+    [class*="bg-cyan-950/"],
+    [class*="bg-sky-50 "],
+    [class$="bg-sky-50"],
+    [class*="bg-sky-50/"],
+    [class*="bg-sky-100"],
+    [class*="bg-sky-200"],
+    [class*="bg-sky-300/"],
+    [class*="bg-sky-400/"],
+    [class*="bg-sky-500/"],
+    [class*="bg-sky-600/"],
+    [class*="bg-sky-700/"],
+    [class*="bg-sky-800/"],
+    [class*="bg-sky-900/"],
+    [class*="bg-sky-950/"],
+    [class*="bg-blue-50 "],
+    [class$="bg-blue-50"],
+    [class*="bg-blue-50/"],
+    [class*="bg-blue-100"],
+    [class*="bg-blue-200"],
+    [class*="bg-blue-300/"],
+    [class*="bg-blue-400/"],
+    [class*="bg-blue-500/"],
+    [class*="bg-blue-600/"],
+    [class*="bg-blue-700/"],
+    [class*="bg-blue-800/"],
+    [class*="bg-blue-900/"],
+    [class*="bg-blue-950/"],
+    [class*="bg-indigo-50 "],
+    [class$="bg-indigo-50"],
+    [class*="bg-indigo-50/"],
+    [class*="bg-indigo-100"],
+    [class*="bg-indigo-200"],
+    [class*="bg-indigo-300/"],
+    [class*="bg-indigo-400/"],
+    [class*="bg-indigo-500/"],
+    [class*="bg-indigo-600/"],
+    [class*="bg-indigo-700/"],
+    [class*="bg-indigo-800/"],
+    [class*="bg-indigo-900/"],
+    [class*="bg-indigo-950/"],
+    [class*="bg-violet-50 "],
+    [class$="bg-violet-50"],
+    [class*="bg-violet-50/"],
+    [class*="bg-violet-100"],
+    [class*="bg-violet-200"],
+    [class*="bg-violet-300/"],
+    [class*="bg-violet-400/"],
+    [class*="bg-violet-500/"],
+    [class*="bg-violet-600/"],
+    [class*="bg-violet-700/"],
+    [class*="bg-violet-800/"],
+    [class*="bg-violet-900/"],
+    [class*="bg-violet-950/"],
+    [class*="bg-purple-50 "],
+    [class$="bg-purple-50"],
+    [class*="bg-purple-50/"],
+    [class*="bg-purple-100"],
+    [class*="bg-purple-200"],
+    [class*="bg-purple-300/"],
+    [class*="bg-purple-400/"],
+    [class*="bg-purple-500/"],
+    [class*="bg-purple-600/"],
+    [class*="bg-purple-700/"],
+    [class*="bg-purple-800/"],
+    [class*="bg-purple-900/"],
+    [class*="bg-purple-950/"],
+    [class*="bg-fuchsia-50 "],
+    [class$="bg-fuchsia-50"],
+    [class*="bg-fuchsia-50/"],
+    [class*="bg-fuchsia-100"],
+    [class*="bg-fuchsia-200"],
+    [class*="bg-fuchsia-300/"],
+    [class*="bg-fuchsia-400/"],
+    [class*="bg-fuchsia-500/"],
+    [class*="bg-fuchsia-600/"],
+    [class*="bg-fuchsia-700/"],
+    [class*="bg-fuchsia-800/"],
+    [class*="bg-fuchsia-900/"],
+    [class*="bg-fuchsia-950/"],
+    [class*="bg-pink-50 "],
+    [class$="bg-pink-50"],
+    [class*="bg-pink-50/"],
+    [class*="bg-pink-100"],
+    [class*="bg-pink-200"],
+    [class*="bg-pink-300/"],
+    [class*="bg-pink-400/"],
+    [class*="bg-pink-500/"],
+    [class*="bg-pink-600/"],
+    [class*="bg-pink-700/"],
+    [class*="bg-pink-800/"],
+    [class*="bg-pink-900/"],
+    [class*="bg-pink-950/"],
+    [class*="bg-rose-50 "],
+    [class$="bg-rose-50"],
+    [class*="bg-rose-50/"],
+    [class*="bg-rose-100"],
+    [class*="bg-rose-200"],
+    [class*="bg-rose-300/"],
+    [class*="bg-rose-400/"],
+    [class*="bg-rose-500/"],
+    [class*="bg-rose-600/"],
+    [class*="bg-rose-700/"],
+    [class*="bg-rose-800/"],
+    [class*="bg-rose-900/"],
+    [class*="bg-rose-950/"],
+    [class*="bg-[#"]
+):not(.w-0\.5, .w-1, .w-\[2px\], .w-\[3px\], .w-1\.5, .w-2, .h-0\.5, .h-1, .h-\[2px\], .h-\[3px\], .h-1\.5, .h-2, .h-full) {
+    background-color: hsl(0 0% 94%) !important;
+    background-image: none !important;
+}
+/* Coloured gradient fills (bg-gradient-to-*) → neutral, except thin bars */
+[data-theme="bw"] [class*="bg-gradient-to-"]:not(.w-0\.5, .w-1, .w-\[2px\], .w-\[3px\], .w-1\.5, .w-2, .h-0\.5, .h-1, .h-\[2px\], .h-\[3px\], .h-1\.5, .h-2, .h-full):not(.btn-module) {
+    background-image: none !important;
+    background-color: hsl(0 0% 94%) !important;
+}
+/* Inline-styled glows / tints / badges from page shells → neutral */
+[data-theme="bw"] main [style*="background"]:not(:empty):not(.w-0\.5, .w-1, .w-\[2px\], .w-\[3px\], .w-1\.5, .w-2, .h-0\.5, .h-1, .h-\[2px\], .h-\[3px\], .h-1\.5, .h-2, .h-full):not(.btn-module):not(img):not([style*="url("]):not(button):not(a):not([class*="text-white"]) {
+    background: hsl(0 0% 100% / 0.92) !important;
+}
+[data-theme="bw"] main [style*="radial-gradient"]:not(.w-0\.5, .w-1, .w-\[2px\], .w-\[3px\], .w-1\.5, .w-2, .h-0\.5, .h-1, .h-\[2px\], .h-\[3px\], .h-1\.5, .h-2, .h-full) {
+    background: transparent !important;
+}
+/* Module-coloured buttons → black */
+[data-theme="bw"] {
+    --mod-from: hsl(0 0% 9%);
+    --mod-via: hsl(0 0% 14%);
+    --mod-to: hsl(0 0% 20%);
+    --mod-shadow: rgba(0, 0, 0, 0.25);
+}
+[data-theme="bw"] [data-module] {
+    --mod-from: hsl(0 0% 9%);
+    --mod-via: hsl(0 0% 14%);
+    --mod-to: hsl(0 0% 20%);
+    --mod-shadow: rgba(0, 0, 0, 0.25);
+}
+
+
+/* ── BW theme: texture ────────────────────────────────────────────────────
+   A matte paper grain over the whole UI (one fixed overlay — cheap) and a
+   fine linen weave on the sidebar panels. Monochrome only. */
+[data-theme="bw"] body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 2147483000;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='p'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.14'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23p)'/></svg>");
+    opacity: 0.55;
+    mix-blend-mode: multiply;
+}
+[data-theme="bw"] .bg-sidebar,
+[data-theme="bw"] :is(aside, [class*="bg-sidebar"]) {
+    background-image:
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 6px),
+        repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 6px) !important;
+}
+[data-theme="bw"] .bg-card {
+    border-color: hsl(0 0% 86%);
+}
+
+/* BW: a different subtle monochrome texture on each card, rotating through
+   five patterns so neighbouring cards differ: dot grid, diagonal pinstripe,
+   linen crosshatch, horizontal hairlines, plain paper (grain overlay). */
+/* BW page background: don't tile the top glow into bands on short pages */
+[data-theme="bw"] body {
+    background-repeat: no-repeat !important;
+    background-color: hsl(var(--background)) !important;
+}
+
+/* BW cards: eight different grey fades (warm, cool, silver, graphite, fog,
+   ash, pewter, pearl), each with a subtle texture, rotating card by card. */
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+1) {
+    background-image: radial-gradient(rgba(0, 0, 0, 0.07) 0.7px, transparent 0.8px), linear-gradient(180deg, #ffffff 0%, #efece8 100%) !important;
+    background-size: 9px 9px, 100% 100% !important;
+}
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+2) {
+    background-image: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.035) 0 1px, transparent 1px 7px), linear-gradient(135deg, #e7eaee 0%, #ffffff 60%, #f3f4f6 100%) !important;
+}
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+3) {
+    background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.025) 0 1px, transparent 1px 5px), repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.025) 0 1px, transparent 1px 5px), radial-gradient(120% 120% at 50% 40%, #ffffff 0%, #eeeeee 60%, #e2e2e2 100%) !important;
+}
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+4) {
+    background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.035) 0 1px, transparent 1px 6px), linear-gradient(180deg, #ffffff 0%, #f1f1f1 55%, #dadada 100%) !important;
+}
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+5) {
+    background-image: linear-gradient(160deg, #fbfbfb 0%, #f4f4f4 100%) !important;
+}
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+6) {
+    background-image: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.03) 0 1px, transparent 1px 8px), linear-gradient(90deg, #e4e3e1 0%, #f6f6f5 45%, #ffffff 100%) !important;
+}
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+7) {
+    background-image: radial-gradient(rgba(0, 0, 0, 0.07) 0.7px, transparent 0.8px), linear-gradient(135deg, #d9dadc 0%, #eeeeef 40%, #ffffff 100%) !important;
+    background-size: 9px 9px, 100% 100% !important;
+}
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+8) {
+    background-image: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.035) 0 1px, transparent 1px 7px), linear-gradient(0deg, #e9e7e4 0%, #f8f7f6 55%, #ffffff 100%) !important;
+}
+
+/* BW: grey gradient + fine texture on the top navbar and every dialog/modal/sheet. */
+[data-theme="bw"] header.fixed.top-0 {
+    background-color: #f4f4f4 !important;
+    background-image:
+        repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.03) 0 1px, transparent 1px 7px),
+        linear-gradient(180deg, #ffffff 0%, #ececec 100%) !important;
+}
+[data-theme="bw"] :is([role="dialog"], [role="alertdialog"]):not([data-radix-popper-content-wrapper] *) {
+    background-color: #f7f7f7 !important;
+    background-image:
+        repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.02) 0 1px, transparent 1px 6px),
+        repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.02) 0 1px, transparent 1px 6px),
+        linear-gradient(160deg, #ffffff 0%, #f1f1f1 55%, #e2e2e2 100%) !important;
+}
+[data-theme="bw"] :is([role="dialog"], [role="alertdialog"]) :is([data-dlg-head], [data-dlg-foot]) {
+    background-color: #f2f2f2 !important;
+    background-image: linear-gradient(180deg, #fafafa 0%, #ebebeb 100%) !important;
+}
+
+/* BW: gradient text (bg-clip-text + text-transparent) → solid dark, readable on grey fades. */
+[data-theme="bw"] :is(.bg-clip-text, .text-transparent) {
+    background: none !important;
+    color: hsl(0 0% 10%) !important;
+    -webkit-text-fill-color: hsl(0 0% 10%) !important;
+}
+
+/* BW: white text/icons sitting on a gradient that BW turned light grey (avatars, chips) → dark. */
+[data-theme="bw"] [class*="bg-gradient-to-"]:not(.btn-module):not(.h-full):not(.w-1):not(.w-0\.5) :is(.text-white, [class*="text-white/"]),
+[data-theme="bw"] [class*="bg-gradient-to-"]:not(.btn-module):not(.h-full):not(.w-1):not(.w-0\.5):is(.text-white, [class*="text-white/"]) {
+    color: hsl(0 0% 15%) !important;
+}
+[data-theme="bw"] [class*="bg-gradient-to-"]:is(.rounded-full, .rounded-xl, .rounded-lg, .rounded-2xl):not(.btn-module):has(> .text-white, > svg) {
+    background-color: hsl(0 0% 88%) !important;
+    border: 1px solid hsl(0 0% 78%);
+}
+
+/* Glass: dialogs / modals / sheets — frosted, dense enough to read; keeps glass edge, sheen & tint. */
+[data-theme="glass"] :is([role="dialog"], [role="alertdialog"]):not([data-radix-popper-content-wrapper] *):not(.bg-transparent) {
+    background:
+        var(--glass-grain, none),
+        linear-gradient(150deg,
+            color-mix(in srgb, var(--gt-a, #7dd3fc) 10%, rgba(255, 255, 255, 0.94)) 0%,
+            rgba(248, 251, 253, 0.9) 50%,
+            color-mix(in srgb, var(--gt-b, #5eead4) 10%, rgba(244, 248, 251, 0.92)) 100%) !important;
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 30px 70px -16px rgba(20, 50, 90, 0.38), inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, 0.35) !important;
+}
+[data-theme="glass"] :is([role="dialog"], [role="alertdialog"]) :is([data-dlg-head], [data-dlg-foot]) {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 250, 252, 0.88)) !important;
+}
+
+/* Glass: custom overlay modals (fixed inset-0 > panel) get the same frosted, readable sheet. */
+[data-theme="glass"] .fixed.inset-0 > :is(.bg-card, .bg-background, [class*="bg-card/"], [class*="bg-background/"]):not(.inset-0) {
+    background:
+        var(--glass-grain, none),
+        linear-gradient(150deg,
+            color-mix(in srgb, var(--gt-a, #7dd3fc) 10%, rgba(255, 255, 255, 0.94)) 0%,
+            rgba(248, 251, 253, 0.9) 50%,
+            color-mix(in srgb, var(--gt-b, #5eead4) 10%, rgba(244, 248, 251, 0.92)) 100%) !important;
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 30px 70px -16px rgba(20, 50, 90, 0.38), inset 0 1px 0 #fff !important;
+}
+[data-theme="glass"] .fixed.inset-0 > :is(.bg-card, .bg-background) :is(.sticky.bg-card, .sticky.bg-background, .sticky[class*="bg-card/"]) {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 250, 252, 0.9)) !important;
+    backdrop-filter: blur(20px);
+}
+
+@supports not (appearance: base-select) {
+/* One arrow only: when a native <select> sits beside a custom chevron icon, hide the browser's arrow. */
+:has(> select):has(> :is(.lucide-chevron-down, .lucide-chevrons-up-down, .lucide-chevron-up-down), > :is(span, i, .absolute, .pointer-events-none):not(select) > :is(.lucide-chevron-down, .lucide-chevrons-up-down)) > select:not([multiple]) {
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    padding-right: 2rem;
+}
+}
+
+/* Every table scrolls sideways when its columns don't fit (instead of being
+   clipped under the pinned Actions column). The table's own box becomes the
+   scroll container, so the sticky Status/Actions cells stay pinned. */
+:is(main, [role="dialog"], .fixed) :has(> table):not(table, thead, tbody, tr, td, th) {
+    overflow-x: auto;
+    max-width: 100%;
+    min-width: 0;
+    overscroll-behavior-x: contain;
+}
+:is(main, [role="dialog"], .fixed) :has(> table) > table:not(.auto-cards) {
+    min-width: max-content;
+}
+:is(main, [role="dialog"], .fixed) :has(> table) > table.w-full:not(.auto-cards) {
+    min-width: 100%;
+}
+
+/* Glass: every floating menu / popover / select list (Radix portals) is dense frosted glass,
+   so the page behind never shows through (Export menu, dropdowns, pickers). */
+[data-theme="glass"] [data-radix-popper-content-wrapper] > :is(.bg-card, .bg-popover, .bg-background, [class*="bg-card/"], [class*="bg-popover/"], [role="menu"], [role="listbox"], [role="dialog"]),
+[data-theme="glass"] :is([role="menu"], [role="listbox"]):is(.absolute, .fixed) {
+    background: var(--glass-grain, none), linear-gradient(150deg, rgba(250, 252, 255, 0.97), rgba(238, 243, 250, 0.95)) !important;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 24px 54px -14px rgba(15, 40, 80, 0.35), inset 0 1px 0 #fff !important;
+}
+
+/* Toggles: the OFF track must be visible on every theme (bg-muted/bg-input were near-invisible on glass). */
+:is(button, [role="switch"]).rounded-full:has(> span.rounded-full[class*="translate-x"]):is(.bg-muted, .bg-input, [class*="bg-muted/"], .bg-gray-200, .bg-gray-300, .bg-slate-200, .bg-slate-300, .bg-border),
+[role="switch"][data-state="unchecked"] {
+    background-color: hsl(var(--muted-foreground) / 0.38) !important;
+    box-shadow: inset 0 0 0 1px hsl(var(--muted-foreground) / 0.25), inset 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+:is(button, [role="switch"]).rounded-full > span.rounded-full[class*="translate-x"],
+[role="switch"] > span {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Glass: cards INSIDE any overlay/dialog (modals built from shell cards on a transparent
+   wrapper) are dense frosted glass too, so the page behind never bleeds through. */
+[data-theme="glass"] :is(.fixed.inset-0, [role="dialog"]) :is(.bg-card, [class*="bg-card/"], .glass-card, [style*="backdrop-filter"]):not(button):not(.rounded-full):not(.inset-0) {
+    background:
+        var(--glass-grain, none),
+        linear-gradient(150deg,
+            color-mix(in srgb, var(--gt-a, #7dd3fc) 8%, rgba(255, 255, 255, 0.95)) 0%,
+            rgba(248, 251, 253, 0.92) 55%,
+            color-mix(in srgb, var(--gt-b, #5eead4) 8%, rgba(244, 248, 251, 0.94)) 100%) !important;
+    backdrop-filter: blur(24px) saturate(170%);
+    -webkit-backdrop-filter: blur(24px) saturate(170%);
+}
+/* nested cards inside those: plain light fill, no second blur */
+[data-theme="glass"] :is(.fixed.inset-0, [role="dialog"]) :is(.bg-card, [class*="bg-card/"]) :is(.bg-card, [class*="bg-card/"]):not(button):not(.rounded-full) {
+    background: rgba(255, 255, 255, 0.7) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+/* Themed dropdown lists. Browsers that support customizable <select> (Chrome 135+)
+   get a list that follows the theme and module colour instead of the OS's white box
+   and royal-blue highlight. Others keep the native list. */
+@supports (appearance: base-select) {
+    select:not([multiple]):not([size]):not([aria-hidden="true"]),
+    select:not([multiple]):not([size]):not([aria-hidden="true"])::picker(select) {
+        -webkit-appearance: base-select !important;
+        appearance: base-select !important;
+    }
+    select:not([multiple]):not([size]):not([aria-hidden="true"]) {
+        display: inline-flex;
+        align-items: center;
+        min-height: 2rem;
+        /* One line, never wrap ("Select / project…"): long values end in an ellipsis. */
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+    }
+    select:not([multiple]):not([size]) selectedcontent {
+        display: block;
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    /* Arrow pinned to the right edge, so long text can't push it out of view. */
+    select:not([multiple]):not([size]):not([aria-hidden="true"]) { position: relative; padding-right: 2rem; }
+    select:not([aria-hidden="true"])::picker-icon { position: absolute; right: 0.7rem; top: 50%; translate: 0 -50%; margin: 0; }
+    select:is(.w-full, [class*="w-full"]):not([aria-hidden="true"]) { display: flex; }
+    /* our own chevron is drawn beside these, so hide the built-in one */
+    select.appearance-none::picker-icon { display: none; }
+    /* selects that paint their own arrow as a background image (wo-/wd-select-arrow) */
+    select[class*="select-arrow"]::picker-icon { display: none; }
+    :has(> select):has(> :is(.lucide-chevron-down, .lucide-chevrons-up-down), > :is(span, i, .absolute, .pointer-events-none):not(select) > :is(.lucide-chevron-down, .lucide-chevrons-up-down)) > select::picker-icon {
+        display: none;
+    }
+    select:not([aria-hidden="true"])::picker-icon {
+        content: "";
+        width: 0.9rem; height: 0.9rem; margin-left: auto;
+        background: currentColor;
+        opacity: 0.55;
+        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+        transition: rotate .15s;
+    }
+    select:open::picker-icon { rotate: 180deg; }
+
+    ::picker(select) {
+        background: hsl(var(--popover));
+        color: hsl(var(--popover-foreground));
+        border: 1px solid hsl(var(--border));
+        border-radius: 0.75rem;
+        padding: 0.25rem;
+        margin-block: 0.25rem;
+        max-height: min(22rem, 60vh);
+        box-shadow: 0 18px 44px -12px rgba(15, 30, 60, 0.3);
+        font-size: 0.875rem;
+    }
+    select option {
+        padding: 0.45rem 0.65rem;
+        border-radius: 0.5rem;
+        gap: 0.5rem;
+        cursor: pointer;
+        min-block-size: 2rem;
+    }
+    select option:hover,
+    select option:focus-visible {
+        background: color-mix(in srgb, var(--mod-from, hsl(var(--primary))) 14%, transparent);
+        outline: none;
+    }
+    select option:checked {
+        background: color-mix(in srgb, var(--mod-from, hsl(var(--primary))) 20%, transparent);
+        font-weight: 600;
+    }
+    select option::checkmark { color: var(--mod-from, hsl(var(--primary))); }
+    select option:disabled { opacity: 0.45; }
+
+    [data-theme="glass"] ::picker(select) {
+        background: var(--glass-grain, none), linear-gradient(150deg, rgba(250, 252, 255, 0.97), rgba(238, 243, 250, 0.95));
+        backdrop-filter: blur(24px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        box-shadow: 0 24px 54px -14px rgba(15, 40, 80, 0.35), inset 0 1px 0 #fff;
+    }
+    [data-theme="bw"] select option:is(:hover, :focus-visible) { background: hsl(0 0% 92%); }
+    [data-theme="bw"] select option:checked { background: hsl(0 0% 86%); }
+    [data-theme="bw"] select option::checkmark { color: hsl(0 0% 10%); }
+}
+
+/* Hidden form <select>s (Radix Select's BubbleSelect) must stay invisible. */
+select[aria-hidden="true"] {
+    appearance: auto !important;
+    display: block;
+    min-height: 0 !important;
+    padding: 0 !important;
+}
+
+/* Every box that contains a table may shrink to its container (grid/flex items
+   default to min-width:auto and grow to the table's width, so the table got
+   clipped instead of scrolling inside its own scroll box). */
+:is(main, [role="dialog"], [role="alertdialog"], .fixed) :has(table):not(table, thead, tbody, tfoot, tr, td, th, table *) {
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* Radix ScrollArea: its inner wrapper is display:table / min-width:100%, which
+   stretches to the widest child — tables inside then can't scroll sideways and
+   get clipped. Make it a normal block so each table scrolls in its own box. */
+[data-radix-scroll-area-viewport] > div {
+    display: block !important;
+    min-width: 0 !important;
+}
+/* DataTable search/toolbar stays pinned while rows scroll inside a dialog or scroll area. */
+:is([data-radix-scroll-area-viewport], [role="dialog"], .fixed.inset-0) .dt-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: hsl(var(--card));
+}
+[data-theme="glass"] :is([data-radix-scroll-area-viewport], [role="dialog"], .fixed.inset-0) .dt-toolbar {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 252, 0.93)) !important;
+    backdrop-filter: blur(16px);
+}
+
+/* Glass: portal panels positioned with an inline `position: fixed` style
+   (CompanyFilterCombo and similar custom pickers) are dense frosted glass too. */
+[data-theme="glass"] :is(.bg-card, .bg-popover, .bg-background, [class*="bg-card/"], [class*="bg-popover/"])[style*="position: fixed"]:not(.inset-0) {
+    background: var(--glass-grain, none), linear-gradient(150deg, rgba(250, 252, 255, 0.97), rgba(238, 243, 250, 0.95)) !important;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 24px 54px -14px rgba(15, 40, 80, 0.35), inset 0 1px 0 #fff !important;
+}
+
+/* Module page headers (CrmShell, GlassShell, …): title + action buttons share a row only while both fit.
+   The title keeps a readable minimum width; when buttons don't fit they wrap onto the next line, right-aligned —
+   instead of squeezing the title to one letter per line. */
+.shell-head > :first-child { flex: 1 1 18rem; min-width: 0; }
+.shell-head > :not(:first-child) { flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: auto; }
+.shell-head > :not(:first-child):is(.flex, [class*="flex "], [class^="flex"]) { flex-wrap: wrap; justify-content: flex-end; }
+.shell-head > :not(:first-child) > .flex:only-child { flex-wrap: wrap; justify-content: flex-end; }
+
+/* One arrow only, for custom dropdowns too (SearchableNativeSelect / SearchableSelect draw their own chevron):
+   when a page also overlays an absolutely-positioned chevron next to one, hide the page's extra copy. */
+:has(> :not(select):is(button, div) .lucide-chevron-down) > svg.lucide-chevron-down.absolute,
+:has(> :not(select):is(button, div) .lucide-chevrons-up-down) > svg.lucide-chevron-down.absolute {
+    display: none !important;
+}
+
+/* Dropdown hover / highlighted / checked rows follow the ACTIVE MODULE's colour (--mod-from is set on
+   <body data-module>, so portalled lists inherit it): SearchableSelect, Radix Select, dropdown menus. */
+.ss-opt-active,
+[role="option"][data-highlighted],
+[role="option"]:focus-visible,
+[role="menuitem"][data-highlighted],
+[role="menuitem"]:focus,
+[role="menuitemcheckbox"][data-highlighted],
+[role="menuitemradio"][data-highlighted] {
+    background-color: color-mix(in srgb, var(--mod-from, hsl(var(--primary))) 14%, transparent) !important;
+    color: hsl(var(--foreground)) !important;
+}
+.mod-text,
+[role="option"] [data-radix-select-item-indicator] svg,
+[role="option"] .lucide-check { color: var(--mod-from, hsl(var(--primary))) !important; }
+
+/* ═══════════ HR & Payroll — module design layer (scoped: only inside this module) ═══════════
+   Same markup every HR page already renders (cards, MasterPage forms & tables, badges, inputs);
+   this only restyles it — softer, rounder cards, module-tinted tables, focus and controls. */
+[data-module="hr-payroll"] main :is(.rounded-xl.border, .rounded-lg.border):is([class*="bg-card"]) {
+    border-radius: 1rem;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -14px color-mix(in srgb, var(--mod-from) 40%, transparent);
+}
+/* Card headers (border-b strips at the top of a card) get a faint module tint */
+[data-module="hr-payroll"] main [class*="bg-card"] > :first-child:is(.border-b) {
+    background: color-mix(in srgb, var(--mod-from) 5%, transparent) !important;
+}
+/* Tables: tinted header, module-coloured row hover, comfortable rows */
+[data-module="hr-payroll"] main table thead tr {
+    background: color-mix(in srgb, var(--mod-from) 6%, transparent) !important;
+}
+[data-module="hr-payroll"] main table thead th {
+    color: color-mix(in srgb, var(--mod-from) 55%, hsl(var(--muted-foreground))) !important;
+    letter-spacing: 0.08em;
+}
+[data-module="hr-payroll"] main table tbody tr { transition: background-color .15s ease; }
+[data-module="hr-payroll"] main table tbody tr:hover {
+    background: color-mix(in srgb, var(--mod-from) 5%, transparent) !important;
+}
+/* Inputs / selects / textareas: module focus ring, rounder */
+[data-module="hr-payroll"] main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select, textarea) {
+    border-radius: 0.65rem;
+}
+[data-module="hr-payroll"] main :is(input, select, textarea, button[role="combobox"]):focus-visible {
+    outline: none !important;
+    border-color: color-mix(in srgb, var(--mod-from) 55%, transparent) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--mod-from) 18%, transparent) !important;
+}
+/* Checkboxes, radios and switches in the module colour */
+[data-module="hr-payroll"] :is(main, [role="dialog"]) :is(input[type="checkbox"], input[type="radio"], input[type="range"]) {
+    accent-color: var(--mod-from);
+}
+[data-module="hr-payroll"] [role="switch"][data-state="checked"],
+[data-module="hr-payroll"] button[role="checkbox"][data-state="checked"] {
+    background-color: var(--mod-from) !important;
+    border-color: var(--mod-from) !important;
+}
+/* Section labels inside forms (MasterPage "section" headers) */
+[data-module="hr-payroll"] main [data-section-label],
+[data-module="hr-payroll"] main .text-\[0\.625rem\].uppercase.tracking-widest.font-heading {
+    color: color-mix(in srgb, var(--mod-from) 65%, hsl(var(--muted-foreground)));
+}
+/* Status pills: rounder, a touch bolder */
+[data-module="hr-payroll"] main :is(span, div).rounded-full.border.text-\[0\.6875rem\] { font-weight: 600; padding-inline: 0.6rem; }
+/* Empty-state rows read as a calm placeholder, not a blank strip */
+[data-module="hr-payroll"] main table tbody td[colspan] {
+    padding-block: 2.5rem !important;
+    color: hsl(var(--muted-foreground));
+    background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--mod-from) 3%, transparent) 10px 20px);
+}
+/* HR tab cards: active card gets a module-coloured outline */
+[data-module="hr-payroll"] .hr-tab-card[data-state="active"] {
+    box-shadow: 0 0 0 2px var(--mod-from), 0 10px 24px -14px var(--mod-from) !important;
+    background: color-mix(in srgb, var(--mod-from) 6%, hsl(var(--card))) !important;
+}
+
+/* BW: the module sidebar is a dark matte brick wall. The panel and
+   its items paint with --card / --foreground / --border, so re-point those tokens inside it. */
+[data-theme="bw"] .app-sidebar {
+    --card: 0 0% 29%;
+    --foreground: 0 0% 95%;
+    --muted-foreground: 0 0% 72%;
+    --border: 0 0% 40%;
+    --primary: 0 0% 95%;
+    --sidebar-foreground: 0 0% 90%;
+    color: hsl(var(--foreground));
+    background-color: #1c1d1f !important;
+    /* dark matte brick wall: soft top-down light falloff + seamless brick tile + fine grain */
+    background-image:
+        radial-gradient(120% 60% at 50% 0%, rgba(255, 255, 255, 0.06) 0%, rgba(0, 0, 0, 0.35) 100%),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.10'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23g)'/></svg>"),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='32'><rect width='64' height='32' fill='%23121314'/><g fill='%232a2c2f'><rect x='1' y='1' width='30' height='14' rx='1'/><rect x='33' y='1' width='30' height='14' rx='1'/><rect x='-15' y='17' width='30' height='14' rx='1'/><rect x='17' y='17' width='30' height='14' rx='1'/><rect x='49' y='17' width='30' height='14' rx='1'/></g><g fill='%23ffffff' fill-opacity='0.035'><rect x='1' y='1' width='30' height='2'/><rect x='33' y='1' width='30' height='2'/><rect x='17' y='17' width='30' height='2'/><rect x='-15' y='17' width='30' height='2'/><rect x='49' y='17' width='30' height='2'/></g></svg>") !important;
+    background-size: 100% 100%, 160px 160px, 64px 32px !important;
+    border-color: hsl(0 0% 18%) !important;
+}
+/* Module header + accents: a deep module hue (e.g. Finance blue) is unreadable on stone — go light. */
+[data-theme="bw"] .app-sidebar .sb-head {
+    background: rgba(0, 0, 0, 0.22) !important;
+    border-bottom-color: hsl(0 0% 22%) !important;
+}
+[data-theme="bw"] .app-sidebar .sb-head-label { color: hsl(0 0% 97%) !important; }
+[data-theme="bw"] .app-sidebar .sb-head-icon {
+    color: hsl(0 0% 97%) !important;
+    border-color: hsl(0 0% 85%) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+[data-theme="bw"] .app-sidebar > .absolute.top-0 { background: hsl(0 0% 92%) !important; }
+[data-theme="bw"] .app-sidebar [style*="inset 3px"] {
+    background: rgba(255, 255, 255, 0.10) !important;
+    box-shadow: inset 3px 0 0 hsl(0 0% 96%) !important;
+}
+[data-theme="bw"] .app-sidebar .tabular-nums[style*="color"] { color: hsl(0 0% 75%) !important; }
+[data-theme="bw"] .app-sidebar .hover\:bg-primary\/10:hover,
+[data-theme="bw"] .app-sidebar [class*="hover:bg-"]:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Legal — land enquiry rows tinted by status (LandEnquiryPage). Plain classes so they always ship. */
+.legal-enq-review    { background-color: rgba(14,165,233,.07);  box-shadow: inset 3px 0 0 #0ea5e9; }
+.legal-enq-interest  { background-color: rgba(16,185,129,.08);  box-shadow: inset 3px 0 0 #10b981; }
+.legal-enq-hold      { background-color: rgba(245,158,11,.10);  box-shadow: inset 3px 0 0 #f59e0b; }
+.legal-enq-rejected  { background-color: rgba(244,63,94,.08);   box-shadow: inset 3px 0 0 #f43f5e; color: hsl(var(--muted-foreground)); }
+.legal-enq-converted { background-color: rgba(124,74,46,.07);   box-shadow: inset 3px 0 0 #7c4a2e; }
+
+/* Legal — "Download PDF" prints only the copied sheet (printLegalSheet): A4, plain white, full width. */
+.legal-print-host { display: none; }
+@media print {
+  @page { size: A4; margin: 14mm 12mm; }
+  body.legal-printing { background: #fff !important; }
+  body.legal-printing > *:not(.legal-print-host) { display: none !important; }
+  body.legal-printing .legal-print-host { display: block; }
+  body.legal-printing .legal-print-host .legal-print {
+    width: 100%; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none;
+    background: #fff !important; color: #111; font-size: 10pt; backdrop-filter: none;
+  }
+  body.legal-printing .legal-print-host * { color: #111 !important; background: transparent !important; box-shadow: none !important; }
+  body.legal-printing .legal-print-host .text-muted-foreground, body.legal-printing .legal-print-host th, body.legal-printing .legal-print-host dt { color: #555 !important; }
+  body.legal-printing .legal-print-host h3 { color: #7c4a2e !important; }
+  body.legal-printing .legal-print-host dl { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  body.legal-printing .legal-print-host table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+  body.legal-printing .legal-print-host th { border-bottom: 1px solid #999; }
+  body.legal-printing .legal-print-host td { border-top: 1px solid #ddd !important; }
+  body.legal-printing .legal-print-host .overflow-x-auto { overflow: visible !important; }
+  body.legal-printing .legal-print-host tr, body.legal-printing .legal-print-host dl > div { break-inside: avoid; }
+  body.legal-printing .legal-print-host section { break-inside: auto; border-top: 1px solid #bbb; }
+  body.legal-printing .legal-print-host h3 { break-after: avoid; }
+}
+
+
+/* ── Animation choices (Settings on every profile page; see src/lib/uiPrefs.ts) ─────────────────────────────────────────────────────
+   <html data-anim-menus / data-anim-pages / data-anim-counts="off"> is set for whatever the person switched off on this device.
+   "none" takes the element straight to its resting state, so nothing is left half drawn. */
+html[data-anim-menus="off"] .genie-open,
+html[data-anim-menus="off"] .genie-close,
+html[data-anim-menus="off"] .genie-rub svg,
+html[data-anim-menus="off"] .genie-pop { animation: none !important; }
+html[data-anim-pages="off"] .sheet-in,
+html[data-anim-pages="off"] .sheet-in > *,
+html[data-anim-pages="off"] .sheet-in .title,
+html[data-anim-pages="off"] .sheet-in .cell > header > span:nth-child(3),
+html[data-anim-pages="off"] .crm-sheet .grow,
+html[data-anim-pages="off"] .crm-sheet .draw,
+html[data-anim-pages="off"] .animate-in { animation: none !important; }

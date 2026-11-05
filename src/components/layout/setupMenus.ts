@@ -32,12 +32,12 @@ import {
   ReceiptIndianRupee,
   RotateCcw,
   Ruler,
-  ShieldCheck,
   SlidersHorizontal,
   Tag,
   Target,
   TrendingUp,
   Truck,
+  Upload,
   UserSquare,
   Users,
   UsersRound,
@@ -47,6 +47,7 @@ import {
   Zap,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
+import { LEGAL_SETUP_MASTERS, legalMasterPath } from "@/pages/legal/legalMasters";
 
 // ─── Setup Items ──────────────────────────────────────────────────────────────
 export type SetupItem = {
@@ -106,6 +107,13 @@ export const financeSetupItems: SetupItem[] = [
     path: "/masters/financial-year",
     color: "text-purple-400",
     pageKey: "financial-year-master",
+  },
+  {
+    icon: CalendarClock,
+    label: "Year-End Close",
+    path: "/finance/year-end-close",
+    color: "text-purple-500",
+    pageKey: "year-end-close",
   },
   {
     icon: BookOpen,
@@ -328,12 +336,24 @@ export const fixedAssetSetupItems: SetupItem[] = [
     color: "text-yellow-500",
     pageKey: "id-template-master",
   },
+  {
+    icon: Upload,
+    label: "Inventory Import",
+    path: "/fixed-asset/inventory-import",
+    color: "text-amber-500",
+    pageKey: "fixed-asset-inventory-import",
+  },
 ];
 
 export const followupSetupItems: SetupItem[] = [
-  // "Task Master" was moved from here into the Follow-Up module sidebar
-  // (see sidebars/FollowupSidebar.ts) — it's the module's core master list,
-  // not a set-and-forget configuration. Route/pageKey unchanged.
+  // Task Master moved back to Setup — it is a reference/config list, not a daily transaction.
+  {
+    icon: ClipboardList,
+    label: "Task Master",
+    path: "/followup/setup/task-master",
+    color: "text-teal-500",
+    pageKey: "task-master",
+  },
   {
     icon: Users,
     label: "Department Master",
@@ -376,6 +396,13 @@ export const civilWorkDprSetupItems: SetupItem[] = [
     pageKey: "activity-master",
   },
   {
+    icon: Tag,
+    label: "DPR Tag Master",
+    path: "/civilworkdpr/dpr-tag-master",
+    color: "text-cyan-500",
+    pageKey: "dpr-tag-master",
+  },
+  {
     icon: LayoutGrid,
     label: "Unit Composition",
     path: "/civilworkdpr/room-composition",
@@ -384,14 +411,14 @@ export const civilWorkDprSetupItems: SetupItem[] = [
   },
   {
     icon: DoorOpen,
-    label: "Room Master",
+    label: "Room Category Master",
     path: "/civilworkdpr/room-category-master",
     color: "text-cyan-500",
     pageKey: "room-category-master",
   },
   {
-    icon: Tag,
-    label: "Flat Master",
+    icon: LayoutGrid,
+    label: "Room Master",
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
     pageKey: "civilworkdpr-room-master",
@@ -435,11 +462,11 @@ export const salesAutomationSetupItems: SetupItem[] = [
     pageKey: "sa-teams",
   },
   {
-    icon: ShieldCheck,
-    label: "Role Master",
-    path: "/sales-automation/role-master",
-    color: "text-orange-500",
-    pageKey: "sa-role-master",
+    icon: Handshake,
+    label: "Channel Partners",
+    path: "/sales-automation/channel-partners",
+    color: "text-emerald-500",
+    pageKey: "sa-channel-partners",
   },
 ];
 
@@ -543,21 +570,16 @@ export const crmSetupItems: SetupItem[] = [
     color: "text-pink-500",
     pageKey: "followup-extra-charge-master",
   },
-  {
-    icon: Activity,
-    label: "Pending Tasks",
-    path: "/crm/setup/pending-tasks",
-    color: "text-purple-500",
-    pageKey: "followup-pending-tasks",
-  },
-  {
-    icon: Calendar,
-    label: "Reminders",
-    path: "/crm/setup/reminders",
-    color: "text-indigo-500",
-    pageKey: "followup-reminders",
-  },
 ];
+
+// Legal: the Setup masters, grouped Locations → Land records → Ownership → Legal & Financial → Deed & Registration → Workflow → Parties.
+export const legalSetupItems: SetupItem[] = LEGAL_SETUP_MASTERS.map((m) => ({
+  icon: m.icon,
+  label: m.label,
+  path: legalMasterPath(m.key),
+  color: "text-[#7c4a2e] dark:text-[#c48e5c]",
+  pageKey: m.pageKey,
+}));
 
 export const adminSetupItems: SetupItem[] = [
   {

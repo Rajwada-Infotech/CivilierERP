@@ -1,859 +1,236 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { formatCompactINR } from "@/utils/formatCurrency";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
-import {
-  GlassShell,
-  GlassCard,
-  GlassSection,
-  GlassCardSkeleton,
-} from "@/components/dashboard/GlassShell";
-import {
-  HardHat,
-  RefreshCw,
-  AlertCircle,
-  ClipboardList,
-  Building2,
-  CheckCircle2,
-  Clock,
-  Hammer,
-  TrendingUp,
-  BarChart3,
-} from "lucide-react";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Legend,
-} from "recharts";
+import { DataTable } from "@/components/ui/DataTable";
+import { SHEET_CSS, Detail, Skel, statusTone } from "@/components/sheet/Sheet";
+import { type EngineeringDashboardData, type StatusRow, normalise, fmt, fmtNum, share, WO_COLS, BOQ_COLS, WD_COLS } from "./dashboard/shared";
+import { FortnightPlot } from "./dashboard/FortnightPlot";
 
-const ACCENT = "#f97316"; // orange — matches Engineering's ModuleStrip color
-const SECONDARY = "#ef4444"; // rose bloom
-const STATUS_PALETTE = ["#f97316", "#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ef4444", "#94a3b8"];
+type Recent = "wos" | "boqs" | "wds";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const fmt = (n: number) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(n ?? 0);
-
-const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n ?? 0);
-
-// ─── Status badge ─────────────────────────────────────────────────────────────
-const statusColors: Record<string, string> = {
-  Approved: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  Closed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  Completed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  "Fully Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  Pending: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
-  "In Progress": "bg-blue-500/10 text-blue-600 border-blue-400/20",
-  Draft: "bg-muted text-muted-foreground border-border",
-  Open: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-  "Partially Received": "bg-blue-500/10 text-blue-600 border-blue-400/20",
-  Rejected: "bg-red-500/10 text-red-500 border-red-400/20",
-  Cancelled: "bg-red-500/10 text-red-500 border-red-400/20",
+const RECENT: Record<Recent, { label: string; path: string; key: keyof EngineeringDashboardData; cols: any; empty: string }> = {
+  wos: { label: "Work orders", path: "/engineering/work-order", key: "recentWOs", cols: WO_COLS, empty: "No work orders yet." },
+  boqs: { label: "BOQs", path: "/engineering/boq", key: "recentBOQs", cols: BOQ_COLS, empty: "No BOQs yet." },
+  wds: { label: "Work done", path: "/engineering/work-done", key: "recentWorkDone", cols: WD_COLS, empty: "No work done entries yet." },
 };
 
-function StatusBadge({ status }: { status: string }) {
-  const cls =
-    statusColors[status] ?? "bg-muted text-muted-foreground border-border";
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cls}`}
-    >
-      {status || "Draft"}
-    </span>
-  );
-}
+const SHORTCUTS = [
+  { label: "Work orders", path: "/engineering/work-order" },
+  { label: "BOQ", path: "/engineering/boq" },
+  { label: "Work done", path: "/engineering/work-done" },
+];
 
-// ─── Empty State ──────────────────────────────────────────────────────────────
-function EmptyState({ label }: { label: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
-      <AlertCircle size={28} className="opacity-30" />
-      <p className="text-xs">{label}</p>
-    </div>
-  );
-}
+const fillFor = (status: string): React.CSSProperties => {
+  const tone = statusTone(status);
+  return tone === "done" ? { background: "var(--blue)" } : tone === "stopped" ? { background: "var(--red)" } : {};
+};
 
-// ─── Table Skeleton ───────────────────────────────────────────────────────────
-function TableSkeleton({ rows = 4, cols = 4 }: { rows?: number; cols?: number }) {
+function StatusList({ rows, empty, unit }: { rows: StatusRow[]; empty: string; unit: string }) {
+  const total = rows.reduce((s, r) => s + Number(r.Count), 0);
+  if (!rows.length) return <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>{empty}</p>;
   return (
-    <div className="p-4 space-y-2 animate-pulse">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="flex gap-3">
-          {Array.from({ length: cols }).map((_, j) => (
-            <div key={j} className="h-4 bg-muted rounded flex-1" />
-          ))}
+    <div>
+      {rows.map((r) => (
+        <div key={r.Status} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--rule-soft)" }}>
+          <i className={statusTone(r.Status || "Draft") === "waiting" ? "hatch" : ""} style={{ width: 10, height: 10, flexShrink: 0, border: "1px solid var(--ink)", ...fillFor(r.Status || "Draft") }} />
+          <span className="label" style={{ color: "var(--ink)", flex: 1, minWidth: 0 }}>{r.Status || "Draft"}</span>
+          <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}>
+            {fmtNum(Number(r.Count))} · {Math.round(share(Number(r.Count), total))}%
+          </span>
+          <span className="figure" style={{ fontSize: 15, minWidth: 110, textAlign: "right" }}>{fmt(Number(r.TotalValue))}</span>
         </div>
       ))}
+      <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--graphite)" }}>{fmtNum(total)} {unit} in all</p>
     </div>
   );
 }
 
-// ─── Status Breakdown ─────────────────────────────────────────────────────────
-function StatusBreakdown({
-  data,
-  label,
-}: {
-  data: { Status: string; Count: number; TotalValue?: number }[];
-  label: string;
-}) {
-  if (!data?.length)
-    return <p className="text-xs text-muted-foreground py-2">No {label} yet</p>;
-  const total = data.reduce((s, r) => s + Number(r.Count), 0);
-  return (
-    <div className="space-y-2 mt-3">
-      {data.map((row) => {
-        const pct = total > 0 ? Math.round((Number(row.Count) / total) * 100) : 0;
-        return (
-          <div key={row.Status}>
-            <div className="flex justify-between text-[0.625rem] text-muted-foreground mb-0.5">
-              <span>{row.Status || "Draft"}</span>
-              <span className="font-medium text-foreground">{row.Count}</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full rounded-full"
-                style={{ width: `${pct}%`, background: ACCENT }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Donut chart card ─────────────────────────────────────────────────────────
-interface DonutPoint {
-  name: string;
-  value: number;
-  color: string;
-}
-
-const DonutCard: React.FC<{
-  title: string;
-  icon: React.ElementType;
-  accentColor: string;
-  data: DonutPoint[];
-  isDark: boolean;
-  glassStyle: React.CSSProperties;
-  formatValue?: (n: number) => string;
-}> = ({ title, icon: Icon, accentColor, data, isDark, glassStyle, formatValue = fmt }) => {
-  const { theme } = useTheme();
-  const total = data.reduce((s, d) => s + d.value, 0);
-  return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
-      <div
-        className="flex items-center gap-2 px-4 py-3 border-b"
-        style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}
-      >
-        <div
-          className="w-5 h-5 rounded-md flex items-center justify-center"
-          style={{ background: `${accentColor}26` }}
-        >
-          <Icon size={11} style={{ color: accentColor }} />
-        </div>
-        <span className="text-xs font-heading font-semibold text-foreground">
-          {title}
-        </span>
-      </div>
-      <div className="p-4">
-        {total === 0 ? (
-          <div className="text-center text-muted-foreground py-10 text-sm">
-            No data yet
-          </div>
-        ) : (
-          <div className="flex flex-col sm:flex-row items-center gap-4">
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie
-                  data={data}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={45}
-                  outerRadius={75}
-                  paddingAngle={2}
-                  strokeWidth={0}
-                >
-                  {data.map((d, i) => (
-                    <Cell key={i} fill={bwChartColor(theme, i, d.color)} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const d = payload[0];
-                    return (
-                      <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
-                        <p className="text-xs font-heading font-semibold text-foreground">
-                          {d.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatValue(d.value as number)}
-                        </p>
-                      </div>
-                    );
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d, i) => (
-                <div key={d.name} className="flex items-center gap-2">
-                  <div
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ background: bwChartColor(theme, i, d.color) }}
-                  />
-                  <span className="text-xs text-foreground whitespace-nowrap">
-                    {d.name}
-                  </span>
-                  <span className="text-xs text-muted-foreground ml-auto sm:ml-3">
-                    {formatValue(d.value)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ─── Trend (line) chart card ──────────────────────────────────────────────────
-interface TrendSeries {
-  key: string;
-  name: string;
-  color: string;
-}
-
-const TrendCard: React.FC<{
-  title: string;
-  icon: React.ElementType;
-  accentColor: string;
-  data: { date: string; [key: string]: number | string }[];
-  series: TrendSeries[];
-  isDark: boolean;
-  glassStyle: React.CSSProperties;
-}> = ({ title, icon: Icon, accentColor, data, series, isDark, glassStyle }) => {
-  const { theme } = useTheme();
-  const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
-  return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
-      <div
-        className="flex items-center gap-2 px-4 py-3 border-b"
-        style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}
-      >
-        <div
-          className="w-5 h-5 rounded-md flex items-center justify-center"
-          style={{ background: `${accentColor}26` }}
-        >
-          <Icon size={11} style={{ color: accentColor }} />
-        </div>
-        <span className="text-xs font-heading font-semibold text-foreground">
-          {title}
-        </span>
-      </div>
-      <div className="p-4">
-        {!hasData ? (
-          <div className="text-center text-muted-foreground py-10 text-sm">
-            No activity in the last 14 days
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"}
-                vertical={false}
-              />
-              <XAxis
-                dataKey="date"
-                tickFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
-                axisLine={false}
-                tickLine={false}
-                interval={Math.max(0, Math.floor(data.length / 6) - 1)}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
-                axisLine={false}
-                tickLine={false}
-                width={40}
-                tickFormatter={formatCompactINR}
-              />
-              <Tooltip
-                labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                formatter={(value: number, name: string) => [fmt(value), name]}
-                contentStyle={{
-                  background: isDark ? "rgba(15,17,26,0.95)" : "rgba(255,255,255,0.95)",
-                  border: `1px solid ${accentColor}30`,
-                  borderRadius: 8,
-                  fontSize: 12,
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              {series.map((s, i) => (
-                <Line
-                  key={s.key}
-                  type="monotone"
-                  dataKey={s.key}
-                  name={s.name}
-                  stroke={bwChartColor(theme, i, s.color)}
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ─── Table column defs ────────────────────────────────────────────────────────
-const WO_DASH_COLS: ColumnDef<any>[] = [
-  {
-    id: "DocNo",
-    accessorKey: "DocNo",
-    header: "Doc No",
-    cell: ({ getValue }) => (
-      <span className="font-mono text-[0.6875rem] text-primary">
-        {(getValue() as string) || "—"}
-      </span>
-    ),
-  },
-  {
-    id: "ContractorName",
-    accessorKey: "ContractorName",
-    header: "Contractor",
-    cell: ({ getValue }) => (
-      <span className="text-xs truncate max-w-[120px] block">
-        {(getValue() as string) || "—"}
-      </span>
-    ),
-  },
-  {
-    id: "Status",
-    accessorKey: "Status",
-    header: "Status",
-    cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
-  },
-  {
-    id: "TotalAmount",
-    accessorKey: "TotalAmount",
-    header: "Amount",
-    cell: ({ getValue }) => (
-      <span className="text-xs font-medium">{fmt(getValue() as number)}</span>
-    ),
-  },
-];
-
-const BOQ_DASH_COLS: ColumnDef<any>[] = [
-  {
-    id: "DocNo",
-    accessorKey: "DocNo",
-    header: "Doc No",
-    cell: ({ getValue }) => (
-      <span className="font-mono text-[0.6875rem] text-primary">
-        {(getValue() as string) || "—"}
-      </span>
-    ),
-  },
-  {
-    id: "ProjectName",
-    accessorKey: "ProjectName",
-    header: "Project",
-    cell: ({ getValue }) => (
-      <span className="text-xs truncate max-w-[120px] block">
-        {(getValue() as string) || "—"}
-      </span>
-    ),
-  },
-  {
-    id: "Status",
-    accessorKey: "Status",
-    header: "Status",
-    cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
-  },
-  {
-    id: "TotalValue",
-    accessorKey: "TotalValue",
-    header: "Value",
-    cell: ({ getValue }) => (
-      <span className="text-xs font-medium">{fmt(getValue() as number)}</span>
-    ),
-  },
-];
-
-const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
-  {
-    id: "DocNo",
-    accessorKey: "DocNo",
-    header: "Doc No",
-    cell: ({ getValue }) => (
-      <span className="font-mono text-[0.6875rem] text-primary">
-        {(getValue() as string) || "—"}
-      </span>
-    ),
-  },
-  {
-    id: "WorkOrderNo",
-    accessorKey: "WorkOrderNo",
-    header: "WO Ref",
-    cell: ({ getValue }) => (
-      <span className="text-xs text-muted-foreground">
-        {(getValue() as string) || "—"}
-      </span>
-    ),
-  },
-  {
-    id: "Status",
-    accessorKey: "Status",
-    header: "Status",
-    cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
-  },
-  {
-    id: "CertifiedAmount",
-    accessorKey: "CertifiedAmount",
-    header: "Certified",
-    cell: ({ getValue }) => (
-      <span className="text-xs font-medium">{fmt(getValue() as number)}</span>
-    ),
-  },
-];
-
-// ─── Dashboard component ──────────────────────────────────────────────────────
 export default function EngineeringDashboard() {
-  const rights = usePageRights("engineering-dashboard");
+  usePageRights("engineering-dashboard");
   const navigate = useNavigate();
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  const [recent, setRecent] = useState<Recent>("wos");
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery<EngineeringDashboardData>({
     queryKey: ["engineering-dashboard"],
     queryFn: async () => {
       const res = await fetchWithAuth("/api/engineering/dashboard");
       if (!res.ok) {
-        let msg = `Request failed (${res.status})`;
-        try {
-          const b = await res.json();
-          msg = b.error ?? b.message ?? msg;
-        } catch {
-          /* ignore */
-        }
-        throw new Error(msg);
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b?.error ?? b?.message ?? `Request failed (${res.status})`);
       }
-      return res.json().catch(() => ({}));
+      return normalise(await res.json().catch(() => ({})));
     },
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
     refetchOnWindowFocus: true,
+    refetchInterval: 30_000,
   });
 
-  const workOrders = data?.workOrders ?? { total: 0, open: 0, thisMonth: 0, totalValue: 0 };
-  const boq = data?.boq ?? { total: 0, approved: 0, totalValue: 0 };
-  const workDone = data?.workDone ?? { total: 0, pending: 0, certifiedAmount: 0 };
-  const projects = data?.projects ?? { total: 0, active: 0 };
+  const d = data;
+  const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
 
-  const tableGlass = {
-    background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? `1px solid ${ACCENT}26` : `1px solid ${ACCENT}2e`,
-    backdropFilter: "blur(16px) saturate(150%)",
-    WebkitBackdropFilter: "blur(16px) saturate(150%)",
-    boxShadow: isDark
-      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : `0 4px 24px ${ACCENT}0f, inset 0 1px 0 rgba(255,255,255,0.9)`,
-  };
+  const figures: { path?: string; label: string; value: string; sub: string }[] = d
+    ? [
+        { path: "/engineering/work-order", label: "Work orders", value: fmtNum(d.workOrders.total), sub: `${fmtNum(d.workOrders.thisMonth)} raised this month` },
+        { path: "/engineering/work-order", label: "Not yet approved", value: fmtNum(d.workOrders.open), sub: "work orders in draft or awaiting approval" },
+        { path: "/engineering/work-order", label: "Work order value", value: fmt(d.workOrders.totalValue), sub: "rejected ones left out" },
+        { path: "/engineering/boq", label: "BOQ value", value: fmt(d.boq.totalValue), sub: `${fmtNum(d.boq.total)} BOQs · ${fmtNum(d.boq.approved)} approved` },
+        { path: "/engineering/work-done", label: "Work done certified", value: fmt(d.workDone.certifiedAmount), sub: "approved entries only" },
+        { path: "/engineering/work-done", label: "Work done awaiting approval", value: fmtNum(d.workDone.pending), sub: `of ${fmtNum(d.workDone.total)} entries` },
+        { label: "Active projects", value: fmtNum(d.projects.active), sub: `${fmtNum(d.projects.total)} projects in all` },
+      ]
+    : [];
+
+  // The three values against each other, measured on the largest.
+  const values = d
+    ? [
+        { label: "BOQ", sub: "estimated", value: d.boq.totalValue, fill: { background: "var(--blue)" } as React.CSSProperties },
+        { label: "Work orders", sub: "contracted", value: d.workOrders.totalValue, fill: { background: "var(--blue)", opacity: 0.6 } as React.CSSProperties },
+        { label: "Work done", sub: "certified", value: d.workDone.certifiedAmount, fill: { background: "var(--ink)" } as React.CSSProperties },
+      ]
+    : [];
+  const maxValue = Math.max(1, ...values.map((v) => v.value));
+  const hasTimeline = !!d && d.timeline.some((t) => t.workOrders > 0 || t.workDone > 0);
+  const recentRows = (d?.[RECENT[recent].key] as any[]) ?? [];
 
   return (
-    <>
+    <div>
+      <style>{SHEET_CSS}</style>
       <Breadcrumbs items={["Dashboard", "Engineering"]} />
-      <GlassShell
-        title="Engineering Overview"
-        subtitle="Work orders, BOQ, site activity and work done"
-        icon={HardHat}
-        accentColor={ACCENT}
-        secondaryColor={SECONDARY}
-        action={
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 active:scale-90 disabled:opacity-50"
-            style={{ borderColor: `${ACCENT}4d`, color: ACCENT }}
-          >
-            <RefreshCw size={12} className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`} />
-            Refresh
-          </button>
-        }
-      >
-        {isError && (
-          <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 flex items-center gap-2 text-sm text-red-600">
-            <AlertCircle size={16} className="shrink-0" />
-            <span>
-              {(error as Error)?.message ?? "Failed to load dashboard data. Please refresh."}
-            </span>
-            <button onClick={() => refetch()} className="ml-auto text-xs underline hover:no-underline">
-              Retry
-            </button>
+      <div className="crm-sheet sheet-in">
+        {/* Title block */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
+          <div style={{ flex: "1 1 320px", padding: "22px 22px 20px", minWidth: 0 }}>
+            <p className="label">CivilierERP · Engineering</p>
+            <h1 className="title" style={{ fontSize: "clamp(28px, 3.4vw, 44px)", margin: "8px 0 0", lineHeight: 1.05 }}>Engineering overview</h1>
+            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--ink-2)", maxWidth: "60ch" }}>
+              What has been estimated, contracted and certified across your projects, and what is still waiting for approval.
+            </p>
+          </div>
+          <div className="mono titleblock" style={{ flex: "1 1 280px", maxWidth: 380, minWidth: 240, display: "grid", gridTemplateColumns: "1fr 1fr", borderLeft: "1px solid var(--ink)", fontSize: 13 }}>
+            <div style={{ gridColumn: "1 / -1", padding: "10px 14px", borderBottom: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Date</span>
+              {readAt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            </div>
+            <div style={{ padding: "10px 14px", borderRight: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Read at</span>
+              {readAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            <div style={{ padding: "10px 14px", display: "flex", alignItems: "flex-end" }}>
+              <button onClick={() => refetch()} disabled={isFetching} className="label link" style={{ color: "var(--blue)" }}>
+                {isFetching ? "Reading…" : "Re-read"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {isError && !d && (
+          <div className="cell" style={{ color: "var(--red)", fontSize: 13 }}>
+            Could not load the engineering figures{(error as Error)?.message ? ` (${(error as Error).message})` : ""}. Use Re-read to try again.
           </div>
         )}
 
-        {/* ── KPI Cards ──────────────────────────────────────────────────────── */}
-        <GlassSection title="Overview" icon={HardHat} accentColor={ACCENT}>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {isLoading
-              ? Array.from({ length: 4 }).map((_, i) => <GlassCardSkeleton key={i} />)
-              : [
-                  {
-                    label: "Work Orders",
-                    value: fmtNum(workOrders.total),
-                    sub: `${workOrders.open} open · ${workOrders.thisMonth} this month`,
-                    icon: HardHat,
-                    accentColor: ACCENT,
-                    trend: "up" as const,
-                    onClick: () => navigate("/engineering/work-order"),
-                  },
-                  {
-                    label: "BOQ Value",
-                    value: fmt(boq.totalValue),
-                    sub: `${boq.total} BOQs · ${boq.approved} approved`,
-                    icon: ClipboardList,
-                    accentColor: "#3b82f6",
-                    onClick: () => navigate("/engineering/boq"),
-                  },
-                  {
-                    label: "Work Done (Certified)",
-                    value: fmt(workDone.certifiedAmount),
-                    sub: `${workDone.total} entries · ${workDone.pending} pending`,
-                    icon: CheckCircle2,
-                    accentColor: "#10b981",
-                    onClick: () => navigate("/engineering/work-done"),
-                  },
-                  {
-                    label: "Active Projects",
-                    value: fmtNum(projects.active),
-                    sub: `${projects.total} total projects`,
-                    icon: Building2,
-                    accentColor: "#8b5cf6",
-                  },
-                ].map((s) => <GlassCard key={s.label} {...s} />)}
-          </div>
-        </GlassSection>
+        {/* A — figures */}
+        <Detail tag="A" title="Right now" note="Open a figure for its register">
+          {isLoading ? (
+            <div className="grid4" style={{ gap: 16 }}>{Array.from({ length: 7 }).map((_, i) => <Skel key={i} h={58} />)}</div>
+          ) : (
+            <div className="grid4" style={{ rowGap: 22, columnGap: 24 }}>
+              {figures.map((f) => (
+                <button key={f.label} onClick={() => f.path && navigate(f.path)} disabled={!f.path} style={{ textAlign: "left", minWidth: 0, cursor: f.path ? "pointer" : "default" }}>
+                  <span className={`label${f.path ? " link" : ""}`} style={{ display: "inline-block", marginBottom: 8 }}>{f.label}</span>
+                  <span className="figure" style={{ display: "block", fontSize: "clamp(22px, 2.4vw, 32px)" }}>{f.value}</span>
+                  <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{f.sub}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </Detail>
 
-        {/* ── Secondary metric strip ─────────────────────────────────────────── */}
-        <GlassSection title="Totals" icon={ClipboardList} accentColor={ACCENT}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {isLoading
-              ? Array.from({ length: 4 }).map((_, i) => <GlassCardSkeleton key={i} />)
-              : [
-                  {
-                    label: "WO Total Value",
-                    value: fmt(workOrders.totalValue),
-                    icon: HardHat,
-                    accentColor: ACCENT,
-                  },
-                  {
-                    label: "Open Work Orders",
-                    value: fmtNum(workOrders.open),
-                    icon: Clock,
-                    accentColor: "#f59e0b",
-                  },
-                  {
-                    label: "BOQ Approved",
-                    value: fmtNum(boq.approved),
-                    icon: CheckCircle2,
-                    accentColor: "#10b981",
-                  },
-                  {
-                    label: "Work Done (Pending)",
-                    value: fmtNum(workDone.pending),
-                    icon: AlertCircle,
-                    accentColor: "#ef4444",
-                  },
-                ].map((s) => (
-                  <GlassCard key={s.label} label={s.label} value={s.value} icon={s.icon} accentColor={s.accentColor} />
+        {/* B + C */}
+        <div className="grid2">
+          <Detail tag="B" title="Estimated, contracted, certified">
+            {isLoading || !d ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : (
+              <div>
+                {values.map((v) => (
+                  <div key={v.label} style={{ padding: "10px 0", borderBottom: "1px solid var(--rule-soft)" }}>
+                    <span style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+                      <span>
+                        <span className="label" style={{ color: "var(--ink)" }}>{v.label}</span>
+                        <span style={{ fontSize: 11.5, color: "var(--graphite)", marginLeft: 8 }}>{v.sub}</span>
+                      </span>
+                      <span className="figure" style={{ fontSize: 18, whiteSpace: "nowrap" }}>{fmt(v.value)}</span>
+                    </span>
+                    <span className="hatch" style={{ display: "block", height: 9, marginTop: 7, border: "1px solid var(--ink)" }}>
+                      <span className="grow" style={{ display: "block", height: "100%", width: `${share(v.value, maxValue)}%`, ...v.fill }} />
+                    </span>
+                  </div>
                 ))}
-          </div>
-        </GlassSection>
-
-        {/* ── Breakdown charts ──────────────────────────────────────────────── */}
-        <GlassSection title="Breakdown" icon={BarChart3} accentColor={ACCENT}>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <DonutCard
-              title="BOQ vs Work Order vs Work Done Value"
-              icon={BarChart3}
-              accentColor={ACCENT}
-              isDark={isDark}
-              glassStyle={tableGlass}
-              data={[
-                { name: "BOQ", value: boq.totalValue, color: "#3b82f6" },
-                { name: "Work Orders", value: workOrders.totalValue, color: ACCENT },
-                { name: "Work Done", value: workDone.certifiedAmount, color: "#10b981" },
-              ]}
-            />
-            <DonutCard
-              title="Work Orders by Status"
-              icon={HardHat}
-              accentColor={ACCENT}
-              isDark={isDark}
-              glassStyle={tableGlass}
-              formatValue={(n) => `${n}`}
-              data={(data?.woStatusBreakdown ?? []).map(
-                (r: { Status: string; Count: number }, i: number) => ({
-                  name: r.Status || "Draft",
-                  value: Number(r.Count),
-                  color: STATUS_PALETTE[i % STATUS_PALETTE.length],
-                }),
-              )}
-            />
-          </div>
-          <div className="mt-4">
-            <TrendCard
-              title="Work Orders & Work Done Value — Last 14 Days"
-              icon={TrendingUp}
-              accentColor={ACCENT}
-              isDark={isDark}
-              glassStyle={tableGlass}
-              data={data?.timeline ?? []}
-              series={[
-                { key: "workOrders", name: "Work Orders", color: ACCENT },
-                { key: "workDone", name: "Work Done", color: "#10b981" },
-              ]}
-            />
-          </div>
-        </GlassSection>
-
-        {/* ── Recent Work Orders + Recent BOQ ────────────────────────────────── */}
-        <GlassSection title="Recent Activity" icon={HardHat} accentColor={ACCENT}>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-xl overflow-hidden" style={tableGlass}>
-              <div
-                className="flex items-center justify-between px-4 py-3 border-b"
-                style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-5 h-5 rounded-md flex items-center justify-center"
-                    style={{ background: `${ACCENT}26` }}
-                  >
-                    <HardHat size={11} style={{ color: ACCENT }} />
-                  </div>
-                  <span className="text-xs font-heading font-semibold text-foreground">
-                    Recent Work Orders
-                  </span>
-                </div>
-                <button
-                  onClick={() => navigate("/engineering/work-order")}
-                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
-                  style={{ color: ACCENT }}
-                >
-                  View all →
-                </button>
+                <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--graphite)" }}>
+                  {Math.round(share(d.workDone.certifiedAmount, d.workOrders.totalValue))}% of the contracted value has been certified as done.
+                </p>
               </div>
-              {isLoading ? (
-                <TableSkeleton rows={4} cols={4} />
-              ) : !data?.recentWOs?.length ? (
-                <EmptyState label="No work orders yet" />
-              ) : (
-                <DataTable
-                  data={data.recentWOs}
-                  columns={WO_DASH_COLS}
-                  searchable={false}
-                  paginated={false}
-                  emptyMessage="No recent Work Orders."
-                />
-              )}
-            </div>
+            )}
+          </Detail>
 
-            <div className="rounded-xl overflow-hidden" style={tableGlass}>
-              <div
-                className="flex items-center justify-between px-4 py-3 border-b"
-                style={{ borderColor: isDark ? "rgba(59,130,246,0.18)" : "rgba(59,130,246,0.12)" }}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-5 h-5 rounded-md flex items-center justify-center"
-                    style={{ background: "rgba(59,130,246,0.18)" }}
-                  >
-                    <ClipboardList size={11} style={{ color: "#3b82f6" }} />
-                  </div>
-                  <span className="text-xs font-heading font-semibold text-foreground">
-                    Recent BOQ
-                  </span>
-                </div>
-                <button
-                  onClick={() => navigate("/engineering/boq")}
-                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
-                  style={{ color: "#3b82f6" }}
-                >
-                  View all →
-                </button>
-              </div>
-              {isLoading ? (
-                <TableSkeleton rows={4} cols={4} />
-              ) : !data?.recentBOQs?.length ? (
-                <EmptyState label="No BOQ entries yet" />
-              ) : (
-                <DataTable
-                  data={data.recentBOQs}
-                  columns={BOQ_DASH_COLS}
-                  searchable={false}
-                  paginated={false}
-                  emptyMessage="No recent BOQs."
-                />
-              )}
-            </div>
-          </div>
-        </GlassSection>
+          <Detail tag="C" title="Work orders by status">
+            {isLoading || !d ? (<><Skel h={26} /><Skel h={26} /></>) : (
+              <StatusList rows={d.woStatusBreakdown} empty="No work orders yet." unit="work orders" />
+            )}
+          </Detail>
+        </div>
 
-        {/* ── Recent Work Done + Status Breakdowns ───────────────────────────── */}
-        <GlassSection title="Work Done & Status" icon={Hammer} accentColor="#10b981">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-xl overflow-hidden" style={tableGlass}>
-              <div
-                className="flex items-center justify-between px-4 py-3 border-b"
-                style={{ borderColor: isDark ? "rgba(16,185,129,0.18)" : "rgba(16,185,129,0.12)" }}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-5 h-5 rounded-md flex items-center justify-center"
-                    style={{ background: "rgba(16,185,129,0.18)" }}
-                  >
-                    <Hammer size={11} style={{ color: "#10b981" }} />
-                  </div>
-                  <span className="text-xs font-heading font-semibold text-foreground">
-                    Recent Work Done
-                  </span>
-                </div>
-                <button
-                  onClick={() => navigate("/engineering/work-done")}
-                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
-                  style={{ color: "#10b981" }}
-                >
-                  View all →
-                </button>
-              </div>
-              {isLoading ? (
-                <TableSkeleton rows={4} cols={4} />
-              ) : !data?.recentWorkDone?.length ? (
-                <EmptyState label="No work done entries yet" />
-              ) : (
-                <DataTable
-                  data={data.recentWorkDone}
-                  columns={WORKDONE_DASH_COLS}
-                  searchable={false}
-                  paginated={false}
-                  emptyMessage="No recent Work Done."
-                />
-              )}
-            </div>
+        {/* D */}
+        <Detail tag="D" title="Fourteen days" note="Work order value raised and work done certified each day">
+          {isLoading ? <Skel h={220} /> : !hasTimeline ? (
+            <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No work orders were raised and no work done was certified in the last fourteen days.</p>
+          ) : <FortnightPlot rows={d!.timeline} />}
+        </Detail>
 
-            <div className="grid grid-cols-1 gap-4">
-              <div className="rounded-xl overflow-hidden p-4" style={tableGlass}>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <HardHat size={14} style={{ color: ACCENT }} />
-                    <p className="text-sm font-heading font-semibold text-foreground">
-                      WO Status Breakdown
-                    </p>
-                  </div>
-                </div>
-                {isLoading ? (
-                  <div className="space-y-2 animate-pulse mt-2">
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <div key={i} className="h-5 bg-muted rounded" />
-                    ))}
-                  </div>
-                ) : (
-                  <StatusBreakdown data={data?.woStatusBreakdown ?? []} label="work orders" />
-                )}
-              </div>
+        {/* E */}
+        <Detail tag="E" title="Work done by status">
+          {isLoading || !d ? (<><Skel h={26} /><Skel h={26} /></>) : (
+            <StatusList rows={d.workDoneStatusBreakdown} empty="No work done entries yet." unit="entries" />
+          )}
+        </Detail>
 
-              <div className="rounded-xl overflow-hidden p-4" style={tableGlass}>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <Hammer size={14} style={{ color: "#10b981" }} />
-                    <p className="text-sm font-heading font-semibold text-foreground">
-                      Work Done Status
-                    </p>
-                  </div>
-                </div>
-                {isLoading ? (
-                  <div className="space-y-2 animate-pulse mt-2">
-                    {Array.from({ length: 3 }).map((_, i) => (
-                      <div key={i} className="h-5 bg-muted rounded" />
-                    ))}
-                  </div>
-                ) : (
-                  <StatusBreakdown data={data?.workDoneStatusBreakdown ?? []} label="work done entries" />
-                )}
-              </div>
-            </div>
-          </div>
-        </GlassSection>
+        {/* F — latest documents */}
+        <section className="cell">
+          <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <span className="tag">F</span>
+            <h2 className="label" style={{ color: "var(--ink)", margin: 0 }}>Latest documents</h2>
+            <span style={{ flex: 1, height: 1, background: "var(--rule)", minWidth: 20 }} />
+            <span className="seg noscroll" style={{ overflowX: "auto", maxWidth: "100%" }}>
+              {(Object.keys(RECENT) as Recent[]).map((k) => (
+                <button key={k} className={recent === k ? "on" : ""} aria-pressed={recent === k} onClick={() => setRecent(k)}>{RECENT[k].label}</button>
+              ))}
+            </span>
+          </header>
+          {isLoading ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : recentRows.length === 0 ? (
+            <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>{RECENT[recent].empty}</p>
+          ) : (
+            <DataTable data={recentRows} columns={RECENT[recent].cols} searchable={false} paginated={false} emptyMessage={RECENT[recent].empty} />
+          )}
+          <button onClick={() => navigate(RECENT[recent].path)} className="label link" style={{ marginTop: 12, color: "var(--blue)" }}>
+            All {RECENT[recent].label.toLowerCase()} →
+          </button>
+        </section>
 
-        {/* ── Quick Actions ──────────────────────────────────────────────────── */}
-        <GlassSection title="Quick Actions" icon={ClipboardList} accentColor={ACCENT}>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {[
-              { label: "Work Order", icon: HardHat, path: "/engineering/work-order", color: ACCENT },
-              { label: "BOQ", icon: ClipboardList, path: "/engineering/boq", color: "#3b82f6" },
-              { label: "Work Done", icon: Hammer, path: "/engineering/work-done", color: "#10b981" },
-            ].map(({ label, icon: Icon, path, color }) => (
-              <button
-                key={path}
-                onClick={() => navigate(path)}
-                className="group flex flex-col items-center gap-3 py-5 rounded-xl transition-all duration-200 active:scale-95"
-                style={{
-                  background: isDark ? `${color}0A` : `${color}08`,
-                  border: `1px solid ${color}25`,
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = `${color}18`;
-                  (e.currentTarget as HTMLElement).style.borderColor = `${color}40`;
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = isDark ? `${color}0A` : `${color}08`;
-                  (e.currentTarget as HTMLElement).style.borderColor = `${color}25`;
-                }}
-              >
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
-                  style={{ background: `${color}20`, border: `1px solid ${color}35` }}
-                >
-                  <Icon size={18} style={{ color }} />
-                </div>
-                <span
-                  className="text-xs font-medium text-center leading-tight"
-                  style={{ color: isDark ? "#cbd5e1" : "#475569" }}
-                >
-                  {label}
-                </span>
+        {/* G — shortcuts */}
+        <Detail tag="G" title="Go to">
+          <div className="grid4" style={{ gap: 0 }}>
+            {SHORTCUTS.map((s) => (
+              <button key={s.path} onClick={() => navigate(s.path)} className="row"
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 10px", borderBottom: "1px solid var(--rule-soft)" }}>
+                <span className="label link" style={{ color: "var(--ink)" }}>{s.label}</span>
+                <span style={{ color: "var(--graphite)", fontSize: 13 }}>→</span>
               </button>
             ))}
           </div>
-        </GlassSection>
-      </GlassShell>
-    </>
+        </Detail>
+      </div>
+    </div>
   );
 }

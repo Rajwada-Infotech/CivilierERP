@@ -1,9 +1,8 @@
 const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
 const { generateMoneyReceiptPdf, getMoneyReceiptByReceivedPaymentId } = require("./moneyReceiptPdf");
-const { STAGE_REVIEW, stageLabel } = require("./crmBookingStageService");
+const { STAGE_REVIEW, STAGE_CONFIRMED, stageLabel } = require("./crmBookingStageService");
 
-const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 
 class MoneyReceiptError extends Error {
   constructor(message, status = 400) {
@@ -12,8 +11,13 @@ class MoneyReceiptError extends Error {
   }
 }
 
-function isMoneyReceiptApprover(role) {
-  return APPROVER_ROLES.includes(String(role || "").trim().toLowerCase());
+// The booking-amount money receipt has no approval of its own: it is handed
+// to Finance automatically when the Director approves the booking (see
+// crmBookingStageService), and Finance's approval of the Received Payment is
+// the one check on the money. Approval Setup's "crm-money-receipts" names only
+// who may bounce a receipt before that hand-off.
+function isMoneyReceiptApprover(role, userId) {
+  return require("./approvalService").isApproverFor("crm-money-receipts", userId, role);
 }
 
 function cleanString(v) {
@@ -66,7 +70,7 @@ async function assertDataReviewComplete(pool, bookingId) {
   `);
   const row = booking.recordset[0];
   if (!row) throw new MoneyReceiptError("Booking not found", 404);
-  if (row.IsActive === 0 || ["Cancelled", "Rejected"].includes(row.Status)) {
+  if (row.IsActive === 0 || row.IsActive === false || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(row.Status)) {
     throw new MoneyReceiptError(`This booking has been ${row.Status} - money receipt actions are blocked`);
   }
   // The booking must have been submitted for approval (Confirm & Book /
@@ -181,12 +185,54 @@ async function createMoneyReceiptAfterDataReview(pool, bookingId, actorUserId) {
   return createMoneyReceiptForBooking(pool, bookingId, {}, actorUserId, { skipIfExists: true });
 }
 
+/**
+ * The booking's money receipt is drawn from the booking's token amount,
+ * payment mode and cheque / transaction details when the booking is first
+ * sent. A booking sent back to Data Review can have those corrected (the
+ * application's re-submit copies them onto the booking); when it is sent
+ * again, the receipt still waiting (Pending / Bounced, not yet with Finance)
+ * is redrawn from the booking, so it does not carry the old amount to
+ * Finance. Once with Finance it never changes here. Called by
+ * PUT /api/crm/bookings/:id/ready-for-approval.
+ */
+async function refreshUnsentMoneyReceipt(pool, bookingId) {
+  const mr = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 Id, Amount FROM dbo.CrmMoneyReceipt
+    WHERE BookingId = @bid AND Status IN ('Pending', 'Bounced') AND ReceivedPaymentId IS NULL
+    ORDER BY CreatedAt DESC`)).recordset[0];
+  if (!mr) return null;
+  const d = await getBookingReceiptDefaults(pool, bookingId);
+  const amount = Number(d.TokenValue != null ? d.TokenValue : d.BookingAmount);
+  if (!(amount > 0)) return null;
+  const mode = cleanString(d.PaymentMode) || "Other";
+  await updateMoneyReceipt(pool, mr.Id, {
+    Amount: amount, PaymentMode: mode,
+    ChequeNo: mode === "Cheque" ? cleanString(d.ChequeNo) || cleanString(d.TransactionRef) : null,
+    ChequeDate: mode === "Cheque" ? d.ChequeDate : null,
+    TransactionRef: mode === "Cheque" ? null : cleanString(d.TransactionRef),
+    DepositBankName: cleanString(d.DepositBankName),
+  });
+  // The GST split follows the amount (updateMoneyReceipt keeps the old split).
+  const g = await getBookingGstInputs(pool, bookingId);
+  const { gstAmount, baseAmount } = splitGstByRateOrBlend(amount, {
+    gstRate: g.UnitParkingGstRate, totalGstAmount: g.TotalGstAmount, grandTotal: g.GrandTotal,
+  });
+  await pool.request().input("id", sql.Int, mr.Id).input("gst", sql.Decimal(18, 2), gstAmount).input("base", sql.Decimal(18, 2), baseAmount)
+    .query("UPDATE dbo.CrmMoneyReceipt SET GSTAmount = @gst, BaseAmount = @base WHERE Id = @id AND ReceivedPaymentId IS NULL");
+  await generateMoneyReceiptPdf(pool, mr.Id);
+  return { id: mr.Id, from: Number(mr.Amount), to: amount };
+}
+
 // ── Edit / resubmit / bounce (Pending <-> Bounced, pre-approval only) ──────
 
 async function updateMoneyReceipt(pool, receiptId, data, actorUserId) {
-  const cur = await pool.request().input("id", sql.Int, receiptId).query(`
+  const tx = new sql.Transaction(pool);
+  try {
+  await tx.begin();
+  const cur = await tx.request().input("id", sql.Int, receiptId).query(`
     SELECT Id, Status, BookingId, ReceivedPaymentId
     FROM dbo.CrmMoneyReceipt
+    WITH (UPDLOCK, HOLDLOCK)
     WHERE Id = @id
   `);
   const row = cur.recordset[0];
@@ -202,7 +248,7 @@ async function updateMoneyReceipt(pool, receiptId, data, actorUserId) {
   if (amount != null && amount <= 0) throw new MoneyReceiptError("Amount must be greater than 0");
   const paymentMode = cleanString(data.PaymentMode);
 
-  await pool.request()
+  await tx.request()
     .input("id", sql.Int, receiptId)
     .input("amt", sql.Decimal(18, 2), amount)
     .input("mode", sql.NVarChar(30), paymentMode)
@@ -224,8 +270,13 @@ async function updateMoneyReceipt(pool, receiptId, data, actorUserId) {
         Remarks = ISNULL(@rem, Remarks),
         BouncedReason = CASE WHEN Status = 'Bounced' THEN BouncedReason ELSE NULL END,
         UpdatedAt = SYSDATETIME()
-      WHERE Id = @id
+      WHERE Id = @id AND Status IN ('Pending', 'Bounced') AND ReceivedPaymentId IS NULL
     `);
+  await tx.commit();
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* rolled back or already committed */ }
+    throw e;
+  }
 
   await generateMoneyReceiptPdf(pool, receiptId);
   return { success: true };
@@ -270,9 +321,13 @@ async function bounceMoneyReceipt(pool, receiptId, reason, actorUserId) {
   return result.recordset[0];
 }
 
-// ── Approve (Booking Amount's Pending MR -> Finance Approval Inbox) ────────
-
-async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
+// ── Send to Finance (Booking Amount's Pending MR -> Finance Approval Inbox) ─
+//
+// Runs when the Director approves the booking, and again from the sweep for
+// any receipt that hand-off missed. The receipt stays Pending: its status
+// follows Finance's Received Payment from here (deriveStatus — Approved when
+// Finance approves, Bounced when Finance rejects).
+async function sendMoneyReceiptToFinance(pool, receiptId, actorUserId, actorEmail) {
   const tx = new sql.Transaction(pool);
   let mrRow;
   let rp;
@@ -293,16 +348,12 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
     `);
     mrRow = cur.recordset[0];
     if (!mrRow) throw new MoneyReceiptError("Money receipt not found", 404);
-    if (mrRow.Status !== "Pending") throw new MoneyReceiptError(`Cannot approve from status "${mrRow.Status}"`);
-    if (mrRow.ReceivedPaymentId) throw new MoneyReceiptError("Money receipt is already linked to Finance Received Payment");
-    // Gate: booking must have been submitted for approval (past Review) — it
-    // does NOT need to wait for Director/Level-2 sign-off. Finance records the
-    // payment as soon as first-level verification is done; the booking's own
-    // L1/L2 approval is a business-terms sign-off, independent of whether the
-    // money was received. A still-at-Review booking has not been verified at all
-    // and should not yet have a payable Money Receipt.
-    if (mrRow.WorkflowStage === STAGE_REVIEW) {
-      throw new MoneyReceiptError("Booking must be submitted for approval (Verify & Send for Approval) before the Money Receipt can be approved");
+    if (mrRow.Status !== "Pending") throw new MoneyReceiptError(`Cannot send a money receipt to Finance from status "${mrRow.Status}"`);
+    if (mrRow.ReceivedPaymentId) throw new MoneyReceiptError("Money receipt is already with Finance");
+    // Gate: the booking is fully approved. Until then it can still be deleted,
+    // which cancels this receipt — so Finance gets nothing it would have to undo.
+    if (mrRow.WorkflowStage !== STAGE_CONFIRMED) {
+      throw new MoneyReceiptError(`The money receipt goes to Finance when the Director approves the booking (it is at ${stageLabel(mrRow.WorkflowStage || STAGE_REVIEW)})`);
     }
 
     // Payment goes to On Account — NOT directly to a milestone.
@@ -324,7 +375,7 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       RPTransactionID: mrRow.PaymentMode === "Cheque" ? null : mrRow.TransactionRef,
       RPCheckNumber: mrRow.PaymentMode === "Cheque" ? mrRow.ChequeNo : null,
       RPChequeDate: mrRow.PaymentMode === "Cheque" ? mrRow.ChequeDate : null,
-      RPRemarks: mrRow.Remarks || `CRM Money Receipt ${mrRow.ReceiptNo} - ${mrRow.BookingNo}`,
+      RPRemarks: [`CRM Money Receipt ${mrRow.ReceiptNo} - ${mrRow.BookingNo}`, mrRow.Remarks].filter(Boolean).join(" — "),
       // Same rule as every CRM payment: no deposit bank from CRM (the
       // Application form no longer asks for one) — Accounts sets it on the
       // Received Payment before approval (receivedPayment.js PATCH
@@ -351,10 +402,7 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       .input("by", sql.Int, actorUserId || null)
       .query(`
         UPDATE dbo.CrmMoneyReceipt SET
-          Status = 'Approved',
           ReceivedPaymentId = @rpid,
-          ApprovedBy = @by,
-          ApprovedAt = SYSDATETIME(),
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -371,13 +419,9 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
 
   await generateMoneyReceiptPdf(pool, receiptId);
 
-  // No demand-raise here on purpose. This milestone's own status doesn't
-  // flip to Paid until Finance separately approves the linked
-  // ReceivedPayment (receivedPayment.js PUT /:id/approve ->
-  // applyCrmMilestonePaymentApproval), and THAT already calls
-  // handleMilestoneBecamePaid, which correctly raises the true next
-  // milestone's demand (MilestoneNo > this one). Raising it here too would
-  // just re-target this same still-unpaid milestone.
+  // No demand-raise here on purpose: a payment never raises a demand. Demands
+  // are raised when a milestone falls due (services/crmDemandScheduler.js);
+  // money received before that stays On Account.
 
   return { success: true, ReceivedPaymentId: rp.RPPaymentID, RPDocNo: rp.RPDocNo };
 }
@@ -397,7 +441,7 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
 //
 // Idempotent by ReceivedPaymentId: the Booking Amount's first payment still
 // goes through the separate Pending-MR-first flow above (createMoneyReceipt
-// AfterDataReview -> approveMoneyReceipt), which already links its MR to
+// AfterDataReview -> sendMoneyReceiptToFinance), which already links its MR to
 // the ReceivedPayment it creates — for that one case this just refreshes
 // the PDF instead of creating a duplicate document for the same money.
 // Every other payment (a top-up on an already-partly-paid milestone, any
@@ -406,6 +450,10 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
 async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, actorUserId) {
   const existing = await getMoneyReceiptByReceivedPaymentId(pool, receivedPaymentId);
   if (existing) {
+    // The booking-amount receipt sent to Finance: Finance's approval is its approval.
+    await pool.request().input("id", sql.Int, existing.Id).input("by", sql.Int, actorUserId || null).query(`
+      UPDATE dbo.CrmMoneyReceipt SET Status = 'Approved', ApprovedBy = @by, ApprovedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
+      WHERE Id = @id AND Status = 'Pending'`);
     await generateMoneyReceiptPdf(pool, existing.Id);
     return { existing: true, id: existing.Id };
   }
@@ -460,14 +508,39 @@ async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, act
   return { existing: false, id };
 }
 
+async function retryConfirmedPendingMoneyReceipts(pool, actorEmail = "CRM system") {
+  const pending = await pool.request().query(`
+    SELECT TOP (50) mr.Id
+    FROM dbo.CrmMoneyReceipt mr
+    JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
+    WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL
+      AND b.WorkflowStage = 'Confirmed' AND b.Status = 'Approved'
+    ORDER BY mr.CreatedAt, mr.Id
+  `);
+  let processed = 0;
+  let failed = 0;
+  for (const row of pending.recordset) {
+    try {
+      await sendMoneyReceiptToFinance(pool, row.Id, null, actorEmail);
+      processed++;
+    } catch (err) {
+      failed++;
+      console.warn(`[crm-money-receipt] confirmed receipt ${row.Id} retry failed:`, err.message);
+    }
+  }
+  return { scanned: pending.recordset.length, processed, failed };
+}
+
 module.exports = {
   MoneyReceiptError,
   isMoneyReceiptApprover,
   createMoneyReceiptForBooking,
   createMoneyReceiptAfterDataReview,
+  refreshUnsentMoneyReceipt,
   updateMoneyReceipt,
   resubmitMoneyReceipt,
   bounceMoneyReceipt,
-  approveMoneyReceipt,
+  sendMoneyReceiptToFinance,
   ensureMoneyReceiptForApprovedPayment,
+  retryConfirmedPendingMoneyReceipts,
 };

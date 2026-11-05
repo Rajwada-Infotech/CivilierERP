@@ -1,3 +1,5 @@
+import { KEY_LINE } from "@/components/sheet/sheetParts";
+import { SheetStats, PRIORITY_TONES, STATUS_TONES } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -32,28 +34,19 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const REPORT_API = "/api/task-performance-report";
-const ACCENT = "#0d9488";
-const ACCENT_SOFT = "#2dd4bf";
+const ACCENT = "hsl(var(--foreground))";
+const ACCENT_SOFT = "hsl(var(--foreground))";
 
 const STATUSES = ["Active", "Hold", "Cancel", "Closed"] as const;
 const PRIORITIES = ["Very Important", "Important", "Normal"] as const;
 
-const PRIORITY_COLORS: Record<string, string> = {
-  "Very Important": "#ef4444",
-  Important: "#22c55e",
-  Normal: "#3b82f6",
-};
+const PRIORITY_COLORS = PRIORITY_TONES;
 
 // Status vocabulary in this schema is Active/Hold/Cancel/Closed (no literal
 // "Pending"/"Ongoing" columns) — Hold reads as "Pending" (paused/awaiting)
 // and Active reads as "Ongoing" (in progress), matching the same mapping
 // used by the Task Transfer feature.
-const STATUS_COLORS: Record<string, string> = {
-  Active: "#3b82f6",
-  Hold: "#f59e0b",
-  Cancel: "#64748b",
-  Closed: "#22c55e",
-};
+const STATUS_COLORS = STATUS_TONES;
 const STATUS_LABELS: Record<string, string> = {
   Active: "Ongoing",
   Hold: "Pending",
@@ -173,18 +166,12 @@ function useGlass() {
   const isDark = !isLightTheme(theme);
   const glassCard = isDark
     ? {
-        background: "rgba(6, 20, 19, 0.45)",
-        border: "1px solid rgba(13,148,136,0.18)",
-        backdropFilter: "blur(20px) saturate(160%)",
-        WebkitBackdropFilter: "blur(20px) saturate(160%)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--foreground) / 0.18)",
       }
     : {
-        background: "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(13,148,136,0.20)",
-        backdropFilter: "blur(20px) saturate(180%)",
-        WebkitBackdropFilter: "blur(20px) saturate(180%)",
-        boxShadow: "0 8px 32px rgba(13,148,136,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--foreground) / 0.20)",
       };
   return { isDark, glassCard };
 }
@@ -193,7 +180,7 @@ function Badge({ label, color }: { label: string; color: string }) {
   return (
     <span
       className="inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
-      style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
+      style={{ borderColor: `color-mix(in srgb, ${color} 30%, transparent)`, color, background: `color-mix(in srgb, ${color} 10%, transparent)` }}
     >
       {label}
     </span>
@@ -202,42 +189,19 @@ function Badge({ label, color }: { label: string; color: string }) {
 
 function DelayBadge({ row }: { row: ReportRow }) {
   if (row.Status === "Closed") {
-    if (row.DelayDays == null) return <Badge label="On Time" color="#22c55e" />;
+    if (row.DelayDays == null) return <Badge label="On Time" color="hsl(var(--foreground))" />;
     return row.DelayDays > 0 ? (
-      <Badge label={`${row.DelayDays}d Late`} color="#ef4444" />
+      <Badge label={`${row.DelayDays}d Late`} color="hsl(var(--destructive))" />
     ) : (
-      <Badge label="On Time" color="#22c55e" />
+      <Badge label="On Time" color="hsl(var(--foreground))" />
     );
   }
   if (row.DelayDays != null && row.DelayDays > 0) {
-    return <Badge label={`${row.DelayDays}d Overdue`} color="#ef4444" />;
+    return <Badge label={`${row.DelayDays}d Overdue`} color="hsl(var(--destructive))" />;
   }
-  return <Badge label="In Progress" color="#64748b" />;
+  return <Badge label="In Progress" color="hsl(var(--muted-foreground))" />;
 }
 
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  color,
-}: {
-  label: string;
-  value: string | number;
-  icon: React.ElementType;
-  color: string;
-}) {
-  return (
-    <div className="rounded-xl bg-card border border-border p-3.5 flex items-center gap-3 min-w-0">
-      <div className="p-2 rounded-lg shrink-0" style={{ background: `${color}1A`, color }}>
-        <Icon size={15} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[0.625rem] text-muted-foreground font-heading uppercase tracking-wider truncate">{label}</p>
-        <p className="text-base font-bold font-mono text-foreground mt-0.5 truncate">{value}</p>
-      </div>
-    </div>
-  );
-}
 
 const selectCls =
   "w-full appearance-none pl-7 pr-2 py-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all";
@@ -338,7 +302,7 @@ const TaskPerformanceReport: React.FC = () => {
         header: "Task ID",
         size: 110,
         cell: ({ row }) => (
-          <span className="font-mono text-xs text-foreground">{row.original.TaskNo || `#${row.original.Id}`}</span>
+          <span className="tabular-nums text-xs text-foreground">{row.original.TaskNo || `#${row.original.Id}`}</span>
         ),
       },
       {
@@ -347,7 +311,7 @@ const TaskPerformanceReport: React.FC = () => {
         header: "Case ID",
         size: 110,
         cell: ({ row }) => (
-          <span className="font-mono text-xs text-muted-foreground">{row.original.CaseNumber || "—"}</span>
+          <span className="tabular-nums text-xs text-muted-foreground">{row.original.CaseNumber || "—"}</span>
         ),
       },
       { id: "ProjectName", accessorKey: "ProjectName", header: "Project", size: 140, cell: ({ getValue }) => (getValue() as string) || "—" },
@@ -389,7 +353,7 @@ const TaskPerformanceReport: React.FC = () => {
         size: 90,
         cell: ({ getValue }) => {
           const v = getValue() as number | null;
-          return <span className="font-mono">{v == null ? "—" : v}</span>;
+          return <span className="tabular-nums">{v == null ? "—" : v}</span>;
         },
       },
       {
@@ -397,7 +361,7 @@ const TaskPerformanceReport: React.FC = () => {
         accessorKey: "FollowUpAttendCount",
         header: "Follow-Ups",
         size: 90,
-        cell: ({ getValue }) => <span className="font-mono">{getValue() as number}</span>,
+        cell: ({ getValue }) => <span className="tabular-nums">{getValue() as number}</span>,
       },
       {
         id: "Progress",
@@ -409,9 +373,9 @@ const TaskPerformanceReport: React.FC = () => {
           return (
             <div className="flex items-center gap-2">
               <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden shrink-0">
-                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 100 ? "#22c55e" : ACCENT }} />
+                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 100 ? "hsl(var(--foreground))" : ACCENT }} />
               </div>
-              <span className="text-xs font-mono">{pct}%</span>
+              <span className="text-xs tabular-nums">{pct}%</span>
             </div>
           );
         },
@@ -423,7 +387,7 @@ const TaskPerformanceReport: React.FC = () => {
         size: 100,
         cell: ({ getValue }) => {
           const s = getValue() as string;
-          return <Badge label={STATUS_LABELS[s] || s} color={STATUS_COLORS[s] || "#64748b"} />;
+          return <Badge label={STATUS_LABELS[s] || s} color={STATUS_COLORS[s] || "hsl(var(--muted-foreground))"} />;
         },
       },
       {
@@ -433,7 +397,7 @@ const TaskPerformanceReport: React.FC = () => {
         size: 110,
         cell: ({ getValue }) => {
           const p = getValue() as string;
-          return <Badge label={p} color={PRIORITY_COLORS[p] || "#64748b"} />;
+          return <Badge label={p} color={PRIORITY_COLORS[p] || "hsl(var(--muted-foreground))"} />;
         },
       },
       {
@@ -486,7 +450,7 @@ const TaskPerformanceReport: React.FC = () => {
       action={
         <button
           onClick={handlePrint}
-          className="no-print h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
+          className={`no-print ${KEY_LINE} h-9 px-4`}
         >
           <Printer size={12} /> Print
         </button>
@@ -502,14 +466,18 @@ const TaskPerformanceReport: React.FC = () => {
 
       <div id="tpr-printable">
         {/* ── Summary cards ─────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 mb-5">
-          <StatCard label="Total Tasks" value={summary.total} icon={ClipboardList} color="#0d9488" />
-          <StatCard label="Completed" value={summary.completed} icon={CheckCircle2} color="#22c55e" />
-          <StatCard label="Pending" value={summary.pending} icon={Clock} color="#f59e0b" />
-          <StatCard label="Ongoing" value={summary.ongoing} icon={Activity} color="#3b82f6" />
-          <StatCard label="Overdue" value={summary.overdue} icon={AlertTriangle} color="#ef4444" />
-          <StatCard label="Avg. Completion Days" value={summary.avgCompletionDays} icon={TrendingUp} color="#8b5cf6" />
-          <StatCard label="Total Follow-Ups" value={summary.totalFollowUps} icon={MessageSquare} color="#ec4899" />
+        <div className="mb-5">
+          <SheetStats
+            items={[
+              { label: "Total Tasks", value: summary.total },
+              { label: "Completed", value: summary.completed },
+              { label: "Pending", value: summary.pending },
+              { label: "Ongoing", value: summary.ongoing },
+              { label: "Overdue", value: summary.overdue, red: summary.overdue > 0 },
+              { label: "Avg. Completion Days", value: summary.avgCompletionDays },
+              { label: "Total Follow-Ups", value: summary.totalFollowUps },
+            ]}
+          />
         </div>
 
         {/* ── Filters ────────────────────────────────────────────────────── */}
@@ -618,7 +586,7 @@ const TaskPerformanceReport: React.FC = () => {
             </FilterField>
           </div>
 
-          {dateError && <p className="text-xs mt-2" style={{ color: "#ef4444" }}>{dateError}</p>}
+          {dateError && <p className="text-xs mt-2" style={{ color: "hsl(var(--destructive))" }}>{dateError}</p>}
         </div>
 
         {/* ── Data table ─────────────────────────────────────────────────── */}

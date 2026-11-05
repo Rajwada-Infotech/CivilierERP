@@ -1,4 +1,4 @@
-import { BadgePercent, TrendingUp, ToggleLeft, ToggleRight } from "lucide-react";
+import { BadgePercent, ToggleLeft, ToggleRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Field, PriceBreakdownPanel } from "./FormPrimitives";
 import { SectionHeader, RateInput } from "./PickerPrimitives";
@@ -71,8 +71,8 @@ export function AmountGstSection({
       <SectionHeader label="Amount & GST" />
       {/* Info banner — for PO/WO_PO show auto-filled GST summary */}
       {isPOorWO && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-xs">
-          <BadgePercent size={12} className="text-emerald-500 shrink-0" />
+        <div className="flex items-center gap-2 px-3 py-2 border border-foreground/40 text-xs">
+          <BadgePercent size={12} className="text-foreground shrink-0" />
           {(selectedDoc!.derivedIgstRate ?? 0) > 0 ? (
             <span className="text-foreground">
               GST auto-filled from linked{" "}
@@ -137,14 +137,14 @@ export function AmountGstSection({
                 <button
                   type="button"
                   onClick={() => onChangeGstMode("cgst_sgst")}
-                  className={`px-2.5 py-1 text-[0.6875rem] font-semibold transition-colors ${gstMode === "cgst_sgst" ? "bg-emerald-500 text-white" : "bg-background text-muted-foreground hover:text-foreground"}`}
+                  className={`px-2.5 py-1 text-[0.6875rem] font-semibold transition-colors ${gstMode === "cgst_sgst" ? "bg-foreground text-card" : "bg-background text-muted-foreground hover:text-foreground"}`}
                 >
                   CGST + SGST
                 </button>
                 <button
                   type="button"
                   onClick={() => onChangeGstMode("igst")}
-                  className={`px-2.5 py-1 text-[0.6875rem] font-semibold transition-colors border-l border-border ${gstMode === "igst" ? "bg-emerald-500 text-white" : "bg-background text-muted-foreground hover:text-foreground"}`}
+                  className={`px-2.5 py-1 text-[0.6875rem] font-semibold transition-colors border-l border-border ${gstMode === "igst" ? "bg-foreground text-card" : "bg-background text-muted-foreground hover:text-foreground"}`}
                 >
                   IGST
                 </button>
@@ -208,7 +208,7 @@ export function AmountGstSection({
                 if (isPOorWO || (!isGRN && selectedDoc?.amount)) return;
                 onChangeBasicAmount(parseFloat(e.target.value) || 0);
               }}
-              className={`pl-7 font-mono ${isPOorWO || (!isGRN && selectedDoc?.amount != null) ? "bg-muted/30 cursor-not-allowed" : ""}`}
+              className={`pl-7 font-heading tabular-nums ${isPOorWO || (!isGRN && selectedDoc?.amount != null) ? "bg-muted/30 cursor-not-allowed" : ""}`}
               placeholder="0.00"
             />
           </div>
@@ -278,22 +278,18 @@ export function AmountGstSection({
                 : discount.applicable
             }
           />
-          <div className="rounded-xl bg-emerald-500/[0.08] border border-emerald-500/20 px-5 py-4 space-y-1">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TrendingUp size={15} className="text-emerald-500" />
-                <span className="text-sm font-heading font-semibold text-foreground">
-                  Net Payable Amount
-                </span>
-              </div>
-              <span className="font-mono text-xl font-bold text-emerald-600 dark:text-emerald-400">
+          {/* The one inked block on the form: what is actually payable */}
+          <div className="bg-foreground text-card px-5 py-4">
+            <div className="flex items-end justify-between gap-4 flex-wrap">
+              <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] opacity-80">Net payable</span>
+              <span className="font-heading tabular-nums text-2xl sm:text-3xl font-semibold leading-none tracking-tight">
                 ₹{fmt(Math.max(0, bd.netAmount - tdsAmount))}
               </span>
             </div>
             {tdsAmount > 0 && (
-              <div className="flex items-center justify-between text-xs text-muted-foreground pl-5">
-                <span>Gross ₹{fmt(bd.netAmount)} — TDS withheld ₹{fmt(tdsAmount)}</span>
-              </div>
+              <p className="text-xs mt-2 opacity-75 text-right">
+                Gross ₹{fmt(bd.netAmount)} less TDS withheld ₹{fmt(tdsAmount)}
+              </p>
             )}
           </div>
         </>

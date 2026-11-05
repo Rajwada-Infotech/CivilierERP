@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -11,7 +11,7 @@ const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEdit, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { postJournalVoucherApproval, hasPosting, reversePostingBySource } = require("../services/generalLedger");
 const { projectPredicate, projectParamGuard, assertProjectRawAllowed } = require("../services/projectScope");
@@ -120,6 +120,11 @@ router.get("/", authenticateToken, async (req, res) => {
              co.name AS CompanyName, pr.name AS ProjectName,
              jv.Status, jv.CreatedBy, jv.CreatedAt,
              (SELECT SUM(DebitAmount) FROM dbo.JournalVoucherLines WHERE JVID = jv.JVID) AS TotalAmount,
+             -- Account heads on the voucher's lines, so the list can be searched by name.
+             (SELECT STRING_AGG(ISNULL(ahm.DisplayName, ahm.LHeadName), ', ')
+                FROM dbo.JournalVoucherLines l
+                JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = l.LHeadId
+               WHERE l.JVID = jv.JVID) AS AccountNames,
              CASE WHEN EXISTS (
                SELECT 1 FROM dbo.GeneralLedgerEntry gle
                WHERE gle.SourceType = 'JournalVoucher' AND gle.SourceId = jv.JVID AND gle.IsReversed = 0
@@ -230,6 +235,11 @@ router.get("/payable-lines", authenticateToken, async (req, res) => {
              ISNULL((
                SELECT SUM(np.PAmount) FROM dbo.NewPayment np
                WHERE np.JVLineId = jvl.LineID AND np.Status = 'Approved'
+             ), 0)
+             -- A payment settling several JV lines (migration 620) gives each its own share.
+             + ISNULL((
+               SELECT SUM(l.Amount) FROM dbo.PaymentJvLineLink l JOIN dbo.NewPayment np ON np.PPaymentID = l.PPaymentID
+               WHERE l.JVLineId = jvl.LineID AND np.Status = 'Approved'
              ), 0) AS PaidAmount
       FROM dbo.JournalVoucherLines jvl
       JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
@@ -272,7 +282,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
         SELECT jv.*, co.name AS CompanyName, pr.name AS ProjectName, bk.LHeadName AS BankName,
                COALESCE(cu.name, jv.CreatedBy) AS CreatedByName
         FROM dbo.JournalVoucher jv
-        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(jv.CreatedBy)
+        LEFT JOIN dbo.users cu ON cu.email = jv.CreatedBy
         LEFT JOIN dbo.enterprise co ON co.id = jv.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = jv.ProjectId
         LEFT JOIN dbo.AccountHeadMaster bk ON bk.LHeadId = jv.BankId
@@ -443,13 +453,16 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
 
     let wasApproved = false;
     let wasRejected = false;
+    let wasPending = false;
     let beforeSnapshot = null;
     try {
       const allowPostApproval = await resolveAllowPostApproval(req, "journal-voucher");
-      await guardEdit("journal-voucher", id, { allowPostApproval });
-      const currentStatus = await getRecordStatus("journal-voucher", id);
+      // Any stage is editable: Draft/Rejected as before, Approved reopens for approval (its GL
+      // posting is reversed below), and Pending simply stays Pending.
+      const currentStatus = await guardEditAnyStage("journal-voucher", id, { allowPostApproval });
       wasApproved = currentStatus === "Approved";
       wasRejected = currentStatus === "Rejected";
+      wasPending = currentStatus === "Pending";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(pool, "dbo.JournalVoucher", "JVID", id);
       }
@@ -496,9 +509,12 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
       const payCheck = await pool
         .request()
         .input("id", sql.Int, id).query(`
-          SELECT COUNT(*) AS cnt FROM dbo.NewPayment np
-          JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
-          WHERE jvl.JVID = @id
+          SELECT (SELECT COUNT(*) FROM dbo.NewPayment np
+                  JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
+                  WHERE jvl.JVID = @id)
+               + (SELECT COUNT(*) FROM dbo.PaymentJvLineLink l
+                  JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = l.JVLineId
+                  WHERE jvl.JVID = @id) AS cnt
         `);
       if (Number(payCheck.recordset[0]?.cnt) > 0) {
         return res.status(409).json({
@@ -601,6 +617,16 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
       }
     }
 
+    // Edited while Pending: it stays Pending, but earlier sign-offs were given to the old
+    // numbers — start a fresh approval cycle so the edited voucher is reviewed from level 1.
+    if (wasPending) {
+      try {
+        await restartApprovalCycle("journal-voucher", id, user, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+      } catch (cycleErr) {
+        console.error("[journal-voucher] could not restart approval cycle after pending edit:", cycleErr.message);
+      }
+    }
+
     // A corrected, previously-Rejected voucher goes straight back into the
     // approval queue on save — no separate "Submit" click. transition()'s
     // Pending branch writes a fresh Level=0 marker, which restarts approval
@@ -623,6 +649,8 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     res.json({
       message: wasApproved
         ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
+        : wasPending
+          ? "Journal Voucher updated — still pending approval (approval restarted from level 1)"
         : resubmitted
           ? "Journal Voucher updated and re-submitted for approval"
           : "Journal Voucher updated",
@@ -654,9 +682,12 @@ router.delete("/:id", authenticateToken, requirePageRight("journal-voucher", "de
     const payCheck = await pool
       .request()
       .input("id", sql.Int, id).query(`
-        SELECT COUNT(*) AS cnt FROM dbo.NewPayment np
-        JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
-        WHERE jvl.JVID = @id
+        SELECT (SELECT COUNT(*) FROM dbo.NewPayment np
+                JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
+                WHERE jvl.JVID = @id)
+             + (SELECT COUNT(*) FROM dbo.PaymentJvLineLink l
+                JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = l.JVLineId
+                WHERE jvl.JVID = @id) AS cnt
       `);
     if (Number(payCheck.recordset[0]?.cnt) > 0) {
       return res.status(409).json({

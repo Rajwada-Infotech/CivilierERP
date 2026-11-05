@@ -1,13 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
+router.use(apiRateLimit);
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 router.get("/", requirePageRight("crm-construction-updates", "view"), async (req, res) => {
   try {
@@ -18,6 +18,7 @@ router.get("/", requirePageRight("crm-construction-updates", "view"), async (req
     // projectId is the real link (FK to the Unit Master project); project
     // (a ProjectName string) is kept only for old callers/back-compat.
     if (projectId) { req0.input("pid", sql.Int, parseInt(projectId)); conds.push("u.ProjectId = @pid"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "u.ProjectId", "").trim());
     else if (project) { req0.input("p", sql.NVarChar(200), project); conds.push("u.ProjectName = @p"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
@@ -39,16 +40,26 @@ router.post("/", requirePageRight("crm-construction-updates", "create"), async (
     const pool = getPool();
     const b = req.body;
     if (!b.ProjectId) return res.status(400).json({ error: "ProjectId is required — select a project from Unit Master" });
+    // Customers see these in the portal - only for a project the user may access.
+    if (!require("../services/projectScope").assertProjectAllowed(req, res, parseInt(b.ProjectId))) return;
 
     const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
       .query("SELECT name FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
     if (!proj.recordset.length) return res.status(400).json({ error: "Selected project does not exist" });
 
+    // Customer-portal-visible, so a typo'd 150 or a stray decimal shift
+    // shows up directly to buyers — PercentComplete is a percentage, not
+    // a free-form number.
+    const pctComplete = b.PercentComplete != null && b.PercentComplete !== "" ? parseFloat(b.PercentComplete) : null;
+    if (pctComplete != null && (!Number.isFinite(pctComplete) || pctComplete < 0 || pctComplete > 100)) {
+      return res.status(400).json({ error: "Percent Complete must be between 0 and 100" });
+    }
+
     await pool.request()
       .input("pid",  sql.Int,           parseInt(b.ProjectId))
       .input("proj", sql.NVarChar(200), proj.recordset[0].name)
       .input("dt",   sql.Date,          b.UpdateDate || null)
-      .input("pct",  sql.Decimal(5,2),  b.PercentComplete != null && b.PercentComplete !== "" ? parseFloat(b.PercentComplete) : null)
+      .input("pct",  sql.Decimal(5,2),  pctComplete)
       .input("stage",sql.NVarChar(100), b.Stage || null)
       .input("sum",  sql.NVarChar(sql.MAX), b.Summary || null)
       .input("photos",sql.NVarChar(sql.MAX), b.PhotoUrls ? JSON.stringify(b.PhotoUrls) : null)

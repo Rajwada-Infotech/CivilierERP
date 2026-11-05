@@ -1,11 +1,45 @@
 const express = require("express");
 const router = express.Router();
+
+// ── "Auto Name" search ───────────────────────────────────────────────────────
+// An activity's Auto Name is "<flat>, <room> and <activity>" (e.g. "NS/n1/101, Hall Room and
+// 2.1 Column and Beam Fiver net Fix"). Searching splits what was typed into words (dropping the
+// joining "and") and requires EVERY word to match somewhere in the activity, flat, room, tower,
+// project, chain alias (or, where asked, an engineer's name) — so a whole Auto Name or any pieces of
+// it, in any order, finds the activity. A single word behaves exactly as the old search did.
+function searchTokens(search) {
+  return String(search || "").toLowerCase().split(/[\s,>]+/).filter((t) => t && t !== "and").slice(0, 8);
+}
+function bindSearchTokens(request, tokens) {
+  tokens.forEach((t, i) => request.input(`st${i}`, sql.NVarChar(200), `%${t.replace(/[[\]%_]/g, (c) => `[${c}]`)}%`));
+}
+// SQL (no leading AND) matching every token; `withEngineer` also lets a token match an engineer's name.
+function tokenSearchCond(tokens, withEngineer) {
+  return tokens
+    .map((_, i) => `(
+        am.activity_name LIKE @st${i} OR dm.Alias LIKE @st${i} OR ep.name LIKE @st${i} OR
+        bm.BlockName LIKE @st${i} OR um.UnitName LIKE @st${i} OR rm.RoomName LIKE @st${i}${
+          withEngineer
+            ? ` OR EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer sdae JOIN dbo.users su ON su.id = sdae.EngineerId
+                WHERE sdae.AssignmentId = daa.Id AND su.name LIKE @st${i})`
+            : ""
+        }
+      )`)
+    .join(" AND ");
+}
+
 const multer = require("multer");
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { invalidateThread } = require("../services/activityThread");
+const { findOrCreateTag } = require("./dprTagMaster");
+const { bumpCacheVersion } = require("../redis");
+const { makeColumnProbe } = require("../services/columnProbe");
+const { cache } = require("../middleware/cache");
+// ResumedAt arrives with migration 536; this code must keep working on a server that hasn't run it.
+const hasResumedAt = makeColumnProbe("dbo.DependencyActivityAssignment", "ResumedAt");
 
 // ── Project scoping ──────────────────────────────────────────────────────────
 // A rung / checkpoint / checkpoint-update belongs to the project of its
@@ -29,6 +63,23 @@ const projectGuard = (sqlText) => async (req, res, next, value) => {
   }
 };
 router.param("rungId", projectGuard(`SELECT dm.ProjectId ${RUNG_TO_PROJECT} WHERE dma.Id = @id`));
+// A retired chain (its room / unit removed, or a villa conversion undone) takes
+// no more work: allocating, reporting or approving a step on it would record
+// progress against something that no longer exists. Reading it stays allowed.
+router.param("rungId", async (req, res, next, value) => {
+  if (req.method === "GET") return next();
+  const id = parseInt(value, 10);
+  if (!Number.isFinite(id)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, id).query(`SELECT dm.IsActive, dm.Alias ${RUNG_TO_PROJECT} WHERE dma.Id = @id`);
+    if (r.recordset.length && !r.recordset[0].IsActive) {
+      return res.status(409).json({ error: `"${r.recordset[0].Alias}" has been retired — no more work can be recorded on it.` });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 const CHECKPOINT_TO_PROJECT = `
   FROM dbo.DependencyActivityCheckpoint cp
   JOIN dbo.DependencyActivityAssignment daa ON daa.Id = cp.AssignmentId
@@ -48,6 +99,32 @@ const PHOTO_PHASES = new Set(["before", "after"]);
 const STATUS_VALUES = new Set(["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
 
+// A chain's rungs are strictly linear (dependencyMaster.js's own header
+// comment) — a rung may be allocated only once every rung before it
+// (by SequenceNo, same DependencyMasterId) is done. Reporting is not gated. "Done" means
+// Completed, Approved, or Cancelled (a cancelled predecessor can't block
+// the chain forever). Returns a user-facing error string, or null when
+// the rung is clear to proceed (no predecessor, or chain not found).
+const DONE_PREDECESSOR_STATUSES = ["COMPLETED", "APPROVED", "CANCELLED"];
+async function predecessorBlockReason(pool, rungId) {
+  const row = (await pool.request().input("rungId", sql.Int, rungId).query(`
+    SELECT dma.DependencyMasterId, dma.SequenceNo FROM dbo.DependencyMasterActivity dma WHERE dma.Id = @rungId
+  `)).recordset[0];
+  if (!row) return null;
+  const pred = (await pool.request().input("chainId", sql.Int, row.DependencyMasterId).input("seq", sql.Int, row.SequenceNo).query(`
+    SELECT TOP 1 pdma.Id, am.activity_name AS activityName, ISNULL(pdaa.Status, 'PENDING') AS status
+    FROM dbo.DependencyMasterActivity pdma
+    LEFT JOIN dbo.DependencyActivityAssignment pdaa ON pdaa.DependencyMasterActivityId = pdma.Id AND pdaa.IsCurrent = 1
+    LEFT JOIN dbo.ActivityMaster am ON am.Id = pdma.ActivityId
+    WHERE pdma.DependencyMasterId = @chainId AND pdma.SequenceNo < @seq AND pdma.SequenceNo >= 0
+    ORDER BY pdma.SequenceNo DESC
+  `)).recordset[0];
+  if (!pred || DONE_PREDECESSOR_STATUSES.includes(pred.status)) return null;
+  return `${pred.activityName || "The previous step"} must be completed first (currently ${pred.status})`;
+}
+// Activity Priority set on the Work Allocation form (dbo.DependencyActivityAssignment.Priority; NULL = none).
+const PRIORITY_VALUES = new Set(["Low", "High", "Urgent", "Very Urgent"]);
+
 // Rework forks a brand-new assignment attempt instead of mutating the
 // rejected one in place (see migration 488's own comment) — the redo goes
 // through the exact same Work Allocation -> Reporting -> QC -> Approval
@@ -59,7 +136,7 @@ const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
 async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, source, actor) {
   const old = (await new sql.Request(tx).input("id", sql.Int, oldAssignmentId).query(`
     SELECT AttemptNo, LabourSource, MaterialSource, LabourContractorId, MaterialContractorId,
-           Description, ApprovalLevelsJson
+           Description, ApprovalLevelsJson, Priority
     FROM dbo.DependencyActivityAssignment WHERE Id = @id
   `)).recordset[0];
 
@@ -90,16 +167,17 @@ async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, sour
     .input("materialContractorId", sql.Int, old?.MaterialContractorId ?? null)
     .input("description", sql.NVarChar(500), old?.Description || null)
     .input("approvalLevelsJson", sql.NVarChar(sql.MAX), old?.ApprovalLevelsJson || "[]")
+    .input("priority", sql.NVarChar(20), old?.Priority || null)
     .input("by", sql.NVarChar(200), actor)
     .query(`
       INSERT INTO dbo.DependencyActivityAssignment
         (DependencyMasterActivityId, Status, AttemptNo, ReworkFromAssignmentId,
          LabourSource, MaterialSource, LabourContractorId, MaterialContractorId,
-         Description, ApprovalLevelsJson, CreatedBy)
+         Description, ApprovalLevelsJson, Priority, CreatedBy)
       OUTPUT INSERTED.Id AS id
       VALUES (@rungId, 'PENDING', @attemptNo, @reworkFrom,
               @labourSource, @materialSource, @labourContractorId, @materialContractorId,
-              @description, @approvalLevelsJson, @by)
+              @description, @approvalLevelsJson, @priority, @by)
     `);
   const newAssignmentId = ins.recordset[0].id;
 
@@ -118,6 +196,45 @@ async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, sour
     INSERT INTO dbo.DependencyActivityQcAssignee (AssignmentId, QcUserId)
     SELECT @new, QcUserId FROM dbo.DependencyActivityQcAssignee WHERE AssignmentId = @old
   `);
+  // Sent back by Quality Check: the checkpoints that passed (Good / Excellent) stay ticked on the
+  // new attempt; only the ones rated Poor were un-ticked (by the QC decision, just before this) and
+  // are the ones to redo — Work Allocation flags those. A rework from an Approval rejection has no
+  // per-checkpoint verdict, so that attempt re-seeds its checklist fresh from the template instead.
+  if (source === "QC") {
+    await new sql.Request(tx).input("old", sql.Int, oldAssignmentId).input("new", sql.Int, newAssignmentId).query(`
+      INSERT INTO dbo.DependencyActivityCheckpoint
+        (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsDaily, IsChecked, CheckedAt, CheckedBy)
+      SELECT @new, c.CheckpointId, c.FieldName, c.SortOrder, c.MinWaitDays, c.IsDaily,
+             -- ticked if it was, or if Quality Check passed it (Good / Excellent); a Poor one is not
+             CASE WHEN c.IsChecked = 1 OR EXISTS (
+                    SELECT 1 FROM dbo.DependencyActivityQcCheck ck
+                    WHERE ck.AssignmentCheckpointId = c.Id AND ck.Passed = 1
+                      AND ck.QcId = (SELECT TOP 1 q.Id FROM dbo.DependencyActivityQc q WHERE q.AssignmentId = @old ORDER BY q.QcAt DESC, q.Id DESC)
+                  ) THEN 1 ELSE 0 END,
+             c.CheckedAt, c.CheckedBy
+      FROM dbo.DependencyActivityCheckpoint c WHERE c.AssignmentId = @old
+    `);
+  }
+
+  // Restored after a cancel: the work is the same allocation, started over — same checklist with
+  // nothing ticked, the planned dates kept, and back at Allocated (Pending if nobody is on it) with
+  // the bar at 0, so it is reported up to Completed again and then goes through QC / Approval afresh.
+  if (source === "RESTORE") {
+    await new sql.Request(tx).input("old", sql.Int, oldAssignmentId).input("new", sql.Int, newAssignmentId).query(`
+      INSERT INTO dbo.DependencyActivityCheckpoint
+        (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsDaily, IsChecked)
+      SELECT @new, c.CheckpointId, c.FieldName, c.SortOrder, c.MinWaitDays, c.IsDaily, 0
+      FROM dbo.DependencyActivityCheckpoint c WHERE c.AssignmentId = @old;
+
+      UPDATE n SET
+        StartDate = o.StartDate, EndDate = o.EndDate, Days = o.Days,
+        Status = CASE WHEN EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer e WHERE e.AssignmentId = @new)
+                      THEN 'ALLOCATED' ELSE 'PENDING' END
+      FROM dbo.DependencyActivityAssignment n
+      JOIN dbo.DependencyActivityAssignment o ON o.Id = @old
+      WHERE n.Id = @new;
+    `);
+  }
 
   return newAssignmentId;
 }
@@ -172,6 +289,17 @@ router.get(
   const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
   const fromDate = req.query.fromDate ? String(req.query.fromDate) : null;
   const toDate = req.query.toDate ? String(req.query.toDate) : null;
+  // Narrowing for the mobile app, so it can page small slices instead of pulling everything:
+  //   search  — activity, project, chain, block/unit/room, or an engineer's name
+  //   qcPending — Completed activities still waiting for a Quality Check pass
+  //   overdue / dueSoon — same definitions as the Civil Work DPR dashboard's counts
+  //   rungId  — exactly one activity (its current attempt)
+  const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : null;
+  const overdueOnly = req.query.overdue === "1";
+  const dueSoonOnly = req.query.dueSoon === "1";
+  // Quality Check's queue: Completed work that hasn't already passed QC (a passed one is waiting on approval).
+  const qcPending = req.query.qcPending === "1";
+  const rungIdFilter = req.query.rungId ? parseInt(req.query.rungId, 10) : null;
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit, 10) || DEFAULT_LIMIT));
   const offset = (page - 1) * limit;
@@ -181,10 +309,14 @@ router.get(
     // Always the current attempt — a reworked rung can have older,
     // superseded assignment rows sitting alongside it (see migration 488),
     // and every list/tile/queue in the app should only ever see the live one.
+    // Retired chains take no more work, so they leave the work lists too —
+    // unless one specific chain is asked for, which still shows its history.
     const conds = ["daa.IsCurrent = 1"];
     if (Number.isFinite(dependencyMasterId)) {
       request.input("dependencyMasterId", sql.Int, dependencyMasterId);
       conds.push("dm.Id = @dependencyMasterId");
+    } else if (!Number.isFinite(rungIdFilter)) {
+      conds.push("dm.IsActive = 1");
     }
     if (roomIdIsNull) {
       conds.push("dm.RoomId IS NULL");
@@ -205,6 +337,23 @@ router.get(
       request.input("projectId", sql.Int, projectId);
       conds.push("dm.ProjectId = @projectId");
     }
+    if (Number.isFinite(rungIdFilter)) {
+      request.input("rungIdFilter", sql.Int, rungIdFilter);
+      conds.push("daa.DependencyMasterActivityId = @rungIdFilter");
+    }
+    const tokens = search ? searchTokens(search) : [];
+    if (tokens.length) {
+      bindSearchTokens(request, tokens);
+      conds.push(`(${tokenSearchCond(tokens, true)})`);
+    }
+    if (qcPending) {
+      conds.push("ISNULL((SELECT TOP 1 qcp.Decision FROM dbo.DependencyActivityQc qcp WHERE qcp.AssignmentId = daa.Id ORDER BY qcp.QcAt DESC, qcp.Id DESC), '') <> 'APPROVED'");
+    }
+    if (overdueOnly) {
+      conds.push("daa.Status IN ('ALLOCATED','IN_PROGRESS','HOLD','REWORK') AND daa.EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE))");
+    } else if (dueSoonOnly) {
+      conds.push("daa.Status IN ('ALLOCATED','IN_PROGRESS','HOLD') AND daa.EndDate >= CAST(GETDATE() AS DATE) AND daa.EndDate <= DATEADD(DAY, 2, CAST(GETDATE() AS DATE))");
+    }
     if (req.projectScope) conds.push(projectPredicate(req.projectScope, "dm.ProjectId", "").trim());
     if (fromDate && !Number.isNaN(Date.parse(fromDate))) {
       request.input("fromDate", sql.Date, fromDate);
@@ -217,18 +366,44 @@ router.get(
     request.input("limit", sql.Int, limit);
     request.input("offset", sql.Int, offset);
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+    const resumedExpr = (await hasResumedAt(pool)) ? "daa.ResumedAt" : "CAST(NULL AS DATETIME2)";
+    // Two steps. First the page's rows — only the joins the filters and the search need — then the details
+    // (names, materials, QC, photo count, each a sub-query) for just those rows. In one step the details were
+    // worked out for every candidate row before the page was cut: a search took 11 seconds and read
+    // ~10 million pages, on ~340,000 current activities.
     const r = await request.query(`
+      WITH pageRows AS (
+        SELECT daa.Id, daa.UpdatedAt
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+        ${where}
+        ORDER BY daa.UpdatedAt DESC, daa.Id DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      )
       SELECT
         daa.Id AS assignmentId,
         daa.DependencyMasterActivityId AS rungId,
+        ${resumedExpr} AS resumedAt,
         daa.StartDate AS startDate,
         daa.Days AS days,
         daa.EndDate AS endDate,
         daa.FirstReportedAt AS firstReportedAt,
         daa.LabourSource AS labourSource,
         daa.MaterialSource AS materialSource,
+        -- Who that actually is: the project's developer company, or the named contractor.
+        CASE daa.LabourSource WHEN 'CONTRACTOR' THEN lc.LHeadName WHEN 'DEVELOPER' THEN dev.name END AS labourSourceName,
+        CASE daa.MaterialSource WHEN 'CONTRACTOR' THEN mc.LHeadName WHEN 'DEVELOPER' THEN dev.name END AS materialSourceName,
         daa.Description AS description,
         daa.Remarks AS remarks,
+        daa.Priority AS priority,
+        COALESCE(dma.TagId, am.TagId) AS tagId,
+        (SELECT t.TagName FROM dbo.DprTagMaster t WHERE t.Id = COALESCE(dma.TagId, am.TagId)) AS tagName,
         daa.Status AS status,
         daa.PreCancelStatus AS preCancelStatus,
         daa.ProgressPercent AS progressPercent,
@@ -244,10 +419,13 @@ router.get(
         dm.TowerId AS towerId, bm.BlockName AS towerName,
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
-        dm.RoomId AS roomId, rm.RoomName AS roomName,
+        dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
+        -- The row's photo badge reads this, instead of each row downloading every photo just to count them.
+        (SELECT COUNT(*) FROM dbo.ActivityPhoto ph WHERE ph.DependencyMasterActivityId = dma.Id) AS photoCount,
         CONCAT(
-          ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
-          ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+          ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
+          ' > ', ISNULL(um.UnitName, '—'), ' > ',
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN UPPER(rm.Storey) = 'ROOF' THEN 'Roof terrace · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
         ) AS scopePath,
         (
           SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
@@ -275,17 +453,19 @@ router.get(
           ORDER BY img.M_Name ASC
           FOR JSON PATH
         ) AS materialsJson
-      FROM dbo.DependencyActivityAssignment daa
+      FROM pageRows p
+      JOIN dbo.DependencyActivityAssignment daa ON daa.Id = p.Id
       JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+      LEFT JOIN dbo.enterprise  dev ON dev.id = ep.company_id
+      LEFT JOIN dbo.AccountHeadMaster lc ON lc.LHeadId = daa.LabourContractorId
+      LEFT JOIN dbo.AccountHeadMaster mc ON mc.LHeadId = daa.MaterialContractorId
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-      ${where}
-      ORDER BY daa.UpdatedAt DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      ORDER BY p.UpdatedAt DESC, p.Id DESC
     `);
     const rows = r.recordset.map(({ materialsJson, ...row }) => ({
       ...row,
@@ -327,20 +507,23 @@ router.get(
   "/scope-summary",
   authMiddleware,
   requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "view"),
+  // The same counts for everyone with the same project access (the cache keys by it), read again after any
+  // save. Uncached it ran ~8,400 times — recounted after every progress update, by every open Reporting page.
+  cache("dependency-activity-scope", 120, { shared: true, dropOnAnyWrite: true }),
   async (req, res) => {
     const statusFilter = req.query.status ? String(req.query.status).toUpperCase() : null;
     const search = req.query.search ? String(req.query.search).trim() : null;
+    const projectFilterId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     try {
       const pool = await getPool();
 
-      const searchCond = search ? `
-          AND (
-            am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
-            bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search
-          )` : "";
+      const projectCond = Number.isFinite(projectFilterId) ? " AND dm.ProjectId = @projectFilterId" : "";
+      const tokens = search ? searchTokens(search) : [];
+      const searchCond = tokens.length ? ` AND ${tokenSearchCond(tokens, false)}` : "";
 
       const countsReq = pool.request();
-      if (search) countsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (tokens.length) bindSearchTokens(countsReq, tokens);
+      if (projectCond) countsReq.input("projectFilterId", sql.Int, projectFilterId);
       // Started now, awaited below: the status counts and the room list are
       // independent aggregates over the same tables, so they run in parallel
       // instead of one after the other (the search made this the slow call).
@@ -354,11 +537,12 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 1 AND dm.IsActive = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
         GROUP BY daa.Status
       `);
       const roomsReq = pool.request();
-      if (search) roomsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (tokens.length) bindSearchTokens(roomsReq, tokens);
+      if (projectCond) roomsReq.input("projectFilterId", sql.Int, projectFilterId);
       if (statusFilter && STATUS_VALUES.has(statusFilter)) roomsReq.input("statusFilter", sql.NVarChar(20), statusFilter);
       const roomsPromise = roomsReq.query(`
         SELECT
@@ -366,7 +550,7 @@ router.get(
           dm.TowerId AS towerId, bm.BlockName AS towerName,
           dm.Floor AS floor,
           dm.FlatId AS flatId, um.UnitName AS flatName,
-          dm.RoomId AS roomId, rm.RoomName AS roomName,
+          dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
           COUNT(*) AS activityCount
         FROM dbo.DependencyActivityAssignment daa
         JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
@@ -376,9 +560,9 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 1 AND dm.IsActive = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
           ${statusFilter && STATUS_VALUES.has(statusFilter) ? "AND daa.Status = @statusFilter" : ""}
-        GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName
+        GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName, rm.Storey
       `);
 
       const [countsRes, roomsRes] = await Promise.all([countsPromise, roomsPromise]);
@@ -397,12 +581,44 @@ router.get(
   },
 );
 
+// GET /scope-summary/projects — the project dropdown's options: every project
+// the caller has a current activity in. Its own cheap call (a project has far
+// fewer chains than there are assignments, and EXISTS stops at the first
+// hit) so it never runs on each filter change, only once per page visit.
+router.get(
+  "/scope-summary/projects",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "view"),
+  async (req, res) => {
+    try {
+      const pool = await getPool();
+      const r = await pool.request().query(`
+        SELECT ep.id AS id, ep.name AS name
+        FROM dbo.enterprise ep
+        WHERE ep.business_type = 'P'
+          AND EXISTS (
+            SELECT 1
+            FROM dbo.DependencyMaster dm
+            JOIN dbo.DependencyMasterActivity dma ON dma.DependencyMasterId = dm.Id
+            JOIN dbo.DependencyActivityAssignment daa ON daa.DependencyMasterActivityId = dma.Id AND daa.IsCurrent = 1
+            WHERE dm.ProjectId = ep.id AND dm.IsActive = 1
+          )${projectPredicate(req.projectScope, "ep.id")}
+        ORDER BY ep.name
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /scope-summary/projects error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // GET /amendments — Civil Work DPR's Amendment page: every superseded
 // assignment attempt (IsCurrent = 0) across every chain, newest first.
-// Every such row exists ONLY because it was reworked (see migration 488's
-// fork-on-rework design — the only way IsCurrent ever becomes 0), so this
-// is already exactly "every reworked activity", no extra status filter
-// needed. currentStatus/currentAttemptNo describe whatever attempt
+// Such a row exists because it was reworked (see migration 488's
+// fork-on-rework design) or because a Cancelled activity was restored and
+// started over (ReworkSource = 'RESTORE', migration 577) — those aren't
+// rework, so they're left out and this is exactly "every reworked activity". currentStatus/currentAttemptNo describe whatever attempt
 // eventually replaced it, so this reads as a log ("attempt 2 was sent
 // back for rework by QC on this date; attempt 3 is now In Progress"), not
 // just a pile of orphaned rows.
@@ -431,10 +647,11 @@ router.get(
           dm.TowerId AS towerId, bm.BlockName AS towerName,
           dm.Floor AS floor,
           dm.FlatId AS flatId, um.UnitName AS flatName,
-          dm.RoomId AS roomId, rm.RoomName AS roomName,
+          dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
           CONCAT(
-            ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
-            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+            ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
+            ' > ', ISNULL(um.UnitName, '—'), ' > ',
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN UPPER(rm.Storey) = 'ROOF' THEN 'Roof terrace · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
           ) AS scopePath,
           (
             SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
@@ -454,7 +671,7 @@ router.get(
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
         LEFT JOIN dbo.DependencyActivityAssignment cur
           ON cur.DependencyMasterActivityId = daa.DependencyMasterActivityId AND cur.IsCurrent = 1
-        WHERE daa.IsCurrent = 0${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 0 AND ISNULL(daa.ReworkSource, '') <> 'RESTORE'${projectPredicate(req.projectScope, "dm.ProjectId")}
         ORDER BY daa.UpdatedAt DESC
       `);
       res.json(r.recordset);
@@ -471,8 +688,70 @@ router.get(
 // there's nothing left for a new engineer to do.
 const TRANSFERABLE_STATUSES = ["ALLOCATED", "IN_PROGRESS", "HOLD", "REWORK"];
 
+// Shared by the paged list and by "select all". Joins from the engineer's own index entries
+// (migration 541), so cost follows what THEY hold, not the size of the table.
+const transferFilters = (req, request) => {
+  const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+  const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : "";
+  let cond = "";
+  if (Number.isFinite(projectId)) {
+    request.input("projectId", sql.Int, projectId);
+    cond += " AND dm.ProjectId = @projectId";
+  }
+  // One exact activity (a report row opened in Work Transfer).
+  const rungId = req.query.rungId ? parseInt(req.query.rungId, 10) : null;
+  if (Number.isFinite(rungId)) {
+    request.input("rungFilter", sql.Int, rungId);
+    cond += " AND dma.Id = @rungFilter";
+  }
+  const tokens = search ? searchTokens(search) : [];
+  if (tokens.length) {
+    bindSearchTokens(request, tokens);
+    cond += ` AND ${tokenSearchCond(tokens, false)}`;
+  }
+  return cond;
+};
+const TRANSFER_FROM = `
+  FROM dbo.DependencyActivityEngineer dae
+  JOIN dbo.DependencyActivityAssignment daa ON daa.Id = dae.AssignmentId
+  JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+  JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+  JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+  LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+  LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+  LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+  LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId`;
+
+// GET /transfer/candidates/ids?engineerId=&projectId=&search= — every matching assignment id (for "select all").
+router.get(
+  "/transfer/candidates/ids",
+  authMiddleware,
+  requirePageRight("civilworkdpr-work-transfer", "view"),
+  async (req, res) => {
+    const engineerId = parseInt(req.query.engineerId, 10);
+    if (!Number.isFinite(engineerId)) return res.status(400).json({ error: "engineerId is required" });
+    try {
+      const pool = await getPool();
+      const request = pool.request().input("engineerId", sql.Int, engineerId);
+      const cond = transferFilters(req, request);
+      const r = await request.query(`
+        SELECT TOP 2000 daa.Id AS id
+        ${TRANSFER_FROM}
+        WHERE dae.EngineerId = @engineerId AND daa.IsCurrent = 1 AND dm.IsActive = 1
+          AND daa.Status IN (${TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ")})${cond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        ORDER BY daa.Id
+      `);
+      res.json({ ids: r.recordset.map((x) => x.id) });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /transfer/candidates/ids error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // GET /transfer/candidates?engineerId=&projectId= — current activities the
-// given engineer holds that can still be transferred.
+// given engineer holds that can still be transferred. With ?page= (and optional
+// limit / search) it is paged and returns { rows, total, projects } instead of the whole array.
 router.get(
   "/transfer/candidates",
   authMiddleware,
@@ -481,6 +760,74 @@ router.get(
     const engineerId = parseInt(req.query.engineerId, 10);
     if (!Number.isFinite(engineerId)) return res.status(400).json({ error: "engineerId is required" });
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    if (req.query.page != null) {
+      try {
+        const pool = await getPool();
+        const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+        const offset = (Math.max(1, parseInt(req.query.page, 10) || 1) - 1) * limit;
+        const statuses = TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ");
+        const scope = projectPredicate(req.projectScope, "dm.ProjectId");
+        const base = `WHERE dae.EngineerId = @engineerId AND daa.IsCurrent = 1 AND dm.IsActive = 1 AND daa.Status IN (${statuses})${scope}`;
+
+        const listReq = pool.request().input("engineerId", sql.Int, engineerId);
+        const cond = transferFilters(req, listReq);
+        listReq.input("offset", sql.Int, offset).input("limit", sql.Int, limit);
+        // Page first (ids only), then fetch details and engineer names for just those rows.
+        const pageRes = await listReq.query(`
+          SELECT daa.Id AS assignmentId
+          ${TRANSFER_FROM}
+          ${base}${cond}
+          ORDER BY ep.name, dm.ProjectId, dm.Id, dma.SequenceNo, daa.Id
+          OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+        `);
+        const totalReq = pool.request().input("engineerId", sql.Int, engineerId);
+        const totalCond = transferFilters(req, totalReq);
+        const totalPromise = totalReq.query(`SELECT COUNT(*) AS total ${TRANSFER_FROM} ${base}${totalCond}`);
+        // Project chips: counts across ALL of the engineer's transferable work (ignores the project/search filter).
+        const projPromise = pool.request().input("engineerId", sql.Int, engineerId).query(`
+          SELECT dm.ProjectId AS id, MAX(ep.name) AS name, COUNT(*) AS count
+          ${TRANSFER_FROM}
+          ${base}
+          GROUP BY dm.ProjectId
+          ORDER BY MAX(ep.name)
+        `);
+        const ids = pageRes.recordset.map((x) => Number(x.assignmentId));
+        let rows = [];
+        if (ids.length) {
+          const detail = await pool.request().query(`
+            SELECT
+              daa.Id AS assignmentId, daa.DependencyMasterActivityId AS rungId, daa.Status AS status,
+              daa.ProgressPercent AS progressPercent, daa.StartDate AS startDate, daa.EndDate AS endDate,
+              am.activity_name AS activityName, dm.ProjectId AS projectId, ep.name AS projectName,
+              CONCAT(
+                ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > Plot ' END, dm.Floor,
+                ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+              ) AS scopePath,
+              (
+                SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+                FROM dbo.DependencyActivityEngineer d2 JOIN dbo.users u ON u.id = d2.EngineerId
+                WHERE d2.AssignmentId = daa.Id
+              ) AS engineerNames
+            FROM dbo.DependencyActivityAssignment daa
+            JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+            JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+            JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+            LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+            LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+            LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+            LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+            WHERE daa.Id IN (${ids.join(",")})
+          `);
+          const byId = new Map(detail.recordset.map((x) => [Number(x.assignmentId), x]));
+          rows = ids.map((id) => byId.get(id)).filter(Boolean);
+        }
+        const [totalRes, projRes] = await Promise.all([totalPromise, projPromise]);
+        return res.json({ rows, total: totalRes.recordset[0].total, projects: projRes.recordset });
+      } catch (err) {
+        console.error("[dependency-activity-assignment] GET /transfer/candidates (paged) error:", err.message);
+        return res.status(500).json({ error: err.message });
+      }
+    }
     try {
       const pool = await getPool();
       const request = pool.request().input("engineerId", sql.Int, engineerId);
@@ -500,8 +847,9 @@ router.get(
           am.activity_name AS activityName,
           dm.ProjectId AS projectId, ep.name AS projectName,
           CONCAT(
-            ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
-            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+            ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
+            ' > ', ISNULL(um.UnitName, '—'), ' > ',
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN UPPER(rm.Storey) = 'ROOF' THEN 'Roof terrace · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
           ) AS scopePath,
           (
             SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
@@ -518,9 +866,9 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1
+        WHERE daa.IsCurrent = 1 AND dm.IsActive = 1
           AND daa.Status IN (${TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ")})${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
-        ORDER BY ep.name, scopePath, am.activity_name
+        ORDER BY ep.name, dm.ProjectId, scopePath, am.activity_name
       `);
       res.json(r.recordset);
     } catch (err) {
@@ -637,7 +985,7 @@ router.get(
                COALESCE(u.name, qc.QcBy) AS qcBy
         FROM dbo.DependencyActivityQc qc
         JOIN dbo.DependencyActivityAssignment daa ON daa.Id = qc.AssignmentId
-        LEFT JOIN dbo.users u ON LOWER(u.email) = LOWER(qc.QcBy)
+        LEFT JOIN dbo.users u ON u.email = qc.QcBy
         WHERE daa.DependencyMasterActivityId = @rungId
         ORDER BY qc.QcAt DESC, qc.Id DESC
       `);
@@ -1217,6 +1565,62 @@ router.get(
 // further ProgressPercent change is accepted at all, forward or back. A
 // mistaken 100% now has to go through QC sending it back for rework (a
 // fresh attempt, not editing this one), not a drag on the same bar.
+// PUT /:rungId/priority — change the Priority of the activity's current allocation (the same column the Work Allocation
+// form saves), so Reporting and Work Allocation always agree. null / blank clears it.
+router.put(
+  "/:rungId/priority",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isInteger(rungId)) return res.status(400).json({ error: "Invalid activity" });
+    const priority = req.body?.priority || null;
+    if (priority && !PRIORITY_VALUES.has(priority)) {
+      return res.status(400).json({ error: `priority must be one of: ${[...PRIORITY_VALUES].join(", ")}` });
+    }
+    try {
+      const pool = await getPool();
+      const r = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("priority", sql.NVarChar(20), priority)
+        .input("by", sql.NVarChar(200), req.user?.email || req.user?.name || "system")
+        .query(`UPDATE dbo.DependencyActivityAssignment SET Priority = @priority, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+                WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1`);
+      if (!r.rowsAffected[0]) return res.status(404).json({ error: "This activity has no allocation yet" });
+      res.json({ priority });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] PUT /:rungId/priority error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// PUT /:rungId/tag — tag this reported activity (a new name is saved to the DPR Tag Master; blank clears it, and the
+// activity falls back to its Activity Master tag).
+router.put(
+  "/:rungId/tag",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isInteger(rungId)) return res.status(400).json({ error: "Invalid activity" });
+    try {
+      const pool = await getPool();
+      const tagId = await findOrCreateTag(pool, req.body?.tagName, req.user?.email || req.user?.name);
+      const r = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("tagId", sql.Int, tagId)
+        .query("UPDATE dbo.DependencyMasterActivity SET TagId = @tagId WHERE Id = @rungId");
+      if (!r.rowsAffected[0]) return res.status(404).json({ error: "Activity not found" });
+      await bumpCacheVersion("dpr-tag-master");
+      res.json({ message: "Tag saved", tagId });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] PUT /:rungId/tag error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 router.patch(
   "/:rungId/status",
   authMiddleware,
@@ -1237,6 +1641,9 @@ router.patch(
     return res.status(400).json({ error: `status must be one of: ${[...STATUS_VALUES].join(", ")}` });
   }
   const remarks = hasRemarks ? String(req.body.remarks || "").slice(0, 1000) : null;
+  // append: this is one more remark, not an edit of the earlier one — the day's logbook
+  // entry keeps every remark of the day instead of being overwritten by the last.
+  const appendRemark = hasRemarks && req.body?.append === true && !!remarks.trim();
   const progressPercent = hasProgress ? parseInt(req.body.progressPercent, 10) : null;
   if (hasProgress && (!Number.isFinite(progressPercent) || progressPercent < 0 || progressPercent > 100)) {
     return res.status(400).json({ error: "progressPercent must be an integer between 0 and 100" });
@@ -1259,6 +1666,17 @@ router.patch(
       current = cur.recordset[0]?.Status;
       currentProgress = cur.recordset[0]?.ProgressPercent;
     }
+
+    // Work is reported by the engineer it was given to — a step nobody was
+    // assigned can't be started or progressed (cancelling it still can).
+    if ((hasProgress || (hasStatus && status !== "CANCELLED")) && assignmentId != null) {
+      const eng = (await pool.request().input("aid", sql.Int, assignmentId)
+        .query("SELECT COUNT(*) AS n FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @aid")).recordset[0].n;
+      if (!eng) return res.status(400).json({ error: "Assign an engineer to this step first — nobody has been given this work yet." });
+    }
+
+    // Reporting is not tied to the chain's order: work on site happens in whatever order it happens, so any
+    // allocated rung can be reported on whether or not the rungs before it are done.
 
     if (hasProgress) {
       if (current === "COMPLETED") {
@@ -1321,6 +1739,11 @@ router.patch(
     if (hasRemarks) setClauses.push("Remarks = @remarks");
     if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
     if (isFirstReport) setClauses.push("FirstReportedAt = CAST(SYSDATETIME() AS DATE)");
+    // Put back In Progress after a hold = Resumed; going on hold again clears it.
+    if (hasStatus && (await hasResumedAt(pool))) {
+      if (current === "HOLD" && status === "IN_PROGRESS") setClauses.push("ResumedAt = SYSDATETIME()");
+      else if (status === "HOLD") setClauses.push("ResumedAt = NULL");
+    }
     const capturingPreCancel = hasStatus && status === "CANCELLED" && current && current !== "CANCELLED";
     if (capturingPreCancel) setClauses.push("PreCancelStatus = @preCancelStatus");
     const request = pool.request()
@@ -1379,19 +1802,51 @@ router.patch(
         .input("rungId", sql.Int, rungId)
         .input("progressPercent", sql.Int, final.ProgressPercent ?? null)
         .input("remarks", sql.NVarChar(1000), final.Remarks ?? null)
+        .input("append", sql.Bit, appendRemark ? 1 : 0)
         .input("by", sql.NVarChar(200), actor).query(`
           MERGE dbo.DependencyActivityDailyLog AS target
           USING (VALUES (@rungId, CAST(SYSDATETIME() AS DATE))) AS src (RungId, LogDate)
             ON target.DependencyMasterActivityId = src.RungId AND target.LogDate = src.LogDate
           WHEN MATCHED THEN
-            UPDATE SET ProgressPercent = @progressPercent, Remarks = @remarks, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+            UPDATE SET ProgressPercent = @progressPercent,
+                       Remarks = CASE WHEN @append = 1 AND ISNULL(target.Remarks, N'') <> N''
+                                      THEN RIGHT(target.Remarks + NCHAR(10) + @remarks, 1000)
+                                      ELSE @remarks END,
+                       UpdatedBy = @by, UpdatedAt = SYSDATETIME()
           WHEN NOT MATCHED THEN
             INSERT (DependencyMasterActivityId, LogDate, ProgressPercent, Remarks, CreatedBy)
             VALUES (src.RungId, src.LogDate, @progressPercent, @remarks, @by);
         `);
     }
 
-    res.json({ success: true, status: effectiveStatus, remarks, progressPercent });
+    // Dates the allocation left blank are worked out from the reporting itself, never over what someone entered:
+    //   Start date - the first day work was reported (FirstReportedAt; the same day the logbook's first entry has).
+    //   End date   - the day it reaches 100% - the same day as the start, or later; never before the start.
+    //   Days       - start to end, counting both days (the same count the allocation form uses).
+    let dates = null;
+    if (hasProgress && progressPercent > 0) {
+      const d = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("done", sql.Bit, progressPercent === 100 ? 1 : 0).query(`
+          DECLARE @today DATE = CAST(SYSDATETIME() AS DATE);
+          UPDATE dbo.DependencyActivityAssignment
+            SET StartDate = COALESCE(FirstReportedAt, @today)
+            WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1 AND StartDate IS NULL;
+          IF @done = 1
+            UPDATE dbo.DependencyActivityAssignment
+              SET EndDate = CASE WHEN StartDate > @today THEN StartDate ELSE @today END
+              WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1 AND EndDate IS NULL AND StartDate IS NOT NULL;
+          UPDATE dbo.DependencyActivityAssignment
+            SET Days = DATEDIFF(DAY, StartDate, EndDate) + 1
+            WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1 AND Days IS NULL
+              AND StartDate IS NOT NULL AND EndDate IS NOT NULL AND EndDate >= StartDate;
+          SELECT CONVERT(VARCHAR(10), StartDate, 23) AS startDate, CONVERT(VARCHAR(10), EndDate, 23) AS endDate, Days AS days
+            FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1;
+        `);
+      dates = d.recordset[0] || null;
+    }
+
+    res.json({ success: true, status: effectiveStatus, remarks, progressPercent, ...(dates ? { startDate: dates.startDate, endDate: dates.endDate, days: dates.days } : {}) });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1490,10 +1945,11 @@ router.delete(
 // this is meant to be a rare, deliberate override, not something granted
 // out via Menu Rights. Restores to APPROVED if that's genuinely what it
 // was before being cancelled (PreCancelStatus, captured by the status
-// PATCH above); anything else — it was never actually approved — comes
-// back at IN_PROGRESS regardless of exactly where it was, so it has to go
-// through Reporting/QC/Approval again rather than silently resuming
-// wherever it happened to be.
+// PATCH above). Anything else — it was never actually approved — starts
+// over: the cancelled attempt is kept as history and a fresh one is forked
+// (forkAssignmentForRework, source RESTORE) at Allocated with the bar at 0,
+// so it is reported again from zero and goes through QC/Approval afresh,
+// rather than resuming with the old Work Done (and any old QC pass) still on it.
 router.post("/:rungId/restore", authMiddleware, async (req, res) => {
   if (req.user?.role !== "super_admin") {
     return res.status(403).json({ error: "Only a super admin can restore a Cancelled activity." });
@@ -1510,19 +1966,32 @@ router.post("/:rungId/restore", authMiddleware, async (req, res) => {
     if (cur.recordset[0].Status !== "CANCELLED") {
       return res.status(400).json({ error: "Only a Cancelled activity can be restored." });
     }
-    const restoredStatus = cur.recordset[0].PreCancelStatus === "APPROVED" ? "APPROVED" : "IN_PROGRESS";
     const actor = req.user?.email || req.user?.name || "system";
 
-    await pool.request()
-      .input("id", sql.Int, cur.recordset[0].Id)
-      .input("status", sql.NVarChar(20), restoredStatus)
-      .input("by", sql.NVarChar(200), actor)
-      .query(`
-        UPDATE dbo.DependencyActivityAssignment
-        SET Status = @status, PreCancelStatus = NULL, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    res.json({ success: true, status: restoredStatus });
+    if (cur.recordset[0].PreCancelStatus === "APPROVED") {
+      await pool.request()
+        .input("id", sql.Int, cur.recordset[0].Id)
+        .input("by", sql.NVarChar(200), actor)
+        .query(`
+          UPDATE dbo.DependencyActivityAssignment
+          SET Status = 'APPROVED', PreCancelStatus = NULL, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      return res.json({ success: true, status: "APPROVED" });
+    }
+
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      const newId = await forkAssignmentForRework(tx, cur.recordset[0].Id, rungId, "Cancelled, then restored — started over", "RESTORE", actor);
+      const st = (await new sql.Request(tx).input("id", sql.Int, newId)
+        .query("SELECT Status FROM dbo.DependencyActivityAssignment WHERE Id = @id")).recordset[0].Status;
+      await tx.commit();
+      res.json({ success: true, status: st, assignmentId: newId });
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw e;
+    }
   } catch (err) {
     console.error("[dependency-activity-assignment] POST /:rungId/restore error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1588,7 +2057,9 @@ router.get("/engineers", authMiddleware, async (req, res) => {
   try {
     const pool = await getPool();
     const r = await pool.request().query(`
-      SELECT id, name FROM dbo.users WHERE ISNULL(discontinue, 0) = 0 ORDER BY name ASC
+      -- Staff only: a login linked to a supplier / contractor / customer
+      -- account (LinkedLHeadId) is an external portal user, never site staff.
+      SELECT id, name FROM dbo.users WHERE ISNULL(discontinue, 0) = 0 AND LinkedLHeadId IS NULL ORDER BY name ASC
     `);
     res.json(r.recordset);
   } catch (err) {
@@ -1649,6 +2120,15 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
     if (!rungRes.recordset.length) return res.status(404).json({ error: "Activity rung not found" });
     const activityId = rungRes.recordset[0].ActivityId;
 
+    // "Days of Completion" from the Activity Master — the default for this allocation's Days.
+    // (Column arrives with migration 533; a server that hasn't applied it just has no default.)
+    let daysOfCompletion = null;
+    try {
+      const dayRes = await pool.request().input("activityId", sql.Int, activityId)
+        .query("SELECT days_of_completion FROM dbo.ActivityMaster WHERE id = @activityId");
+      daysOfCompletion = dayRes.recordset[0]?.days_of_completion ?? null;
+    } catch (_) { /* column not there yet */ }
+
     const itemsRes = await pool.request().input("activityId", sql.Int, activityId).query(`
       SELECT img.M_Id AS itemId, img.M_Name AS itemName, img.M_code AS itemCode, img.M_UOM AS uom
       FROM dbo.ActivityItems ai
@@ -1662,10 +2142,60 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         Id AS assignmentId, StartDate AS startDate, Days AS days, EndDate AS endDate,
         LabourSource AS labourSource, MaterialSource AS materialSource,
         LabourContractorId AS labourContractorId, MaterialContractorId AS materialContractorId,
-        Description AS description, Remarks AS remarks, ApprovalLevelsJson AS approvalLevelsJson
+        Description AS description, Remarks AS remarks, Priority AS priority, ApprovalLevelsJson AS approvalLevelsJson,
+        ReworkFromAssignmentId AS reworkFromAssignmentId
       FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1
     `);
     const assignment = assignRes.recordset[0] || null;
+
+    // Whose labour / material it is, by name: the project's developer company, or the named
+    // contractor — so a reviewer sees a company, not just "Developer".
+    let labourSourceName = null;
+    let materialSourceName = null;
+    let qcStatus = null;
+    if (assignment) {
+      const devRes = await pool.request().input("rungId", sql.Int, rungId).query(`
+        SELECT c.name AS developerName
+        FROM dbo.DependencyMasterActivity dma
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        LEFT JOIN dbo.enterprise p ON p.id = dm.ProjectId
+        LEFT JOIN dbo.enterprise c ON c.id = p.company_id
+        WHERE dma.Id = @rungId
+      `);
+      const developerName = devRes.recordset[0]?.developerName ?? null;
+      const contractorIds = [assignment.labourContractorId, assignment.materialContractorId].filter((v) => v != null);
+      const contractorName = new Map();
+      if (contractorIds.length) {
+        const cr = await pool.request().query(
+          `SELECT LHeadId AS id, LHeadName AS name FROM dbo.AccountHeadMaster WHERE LHeadId IN (${contractorIds.map((v) => parseInt(v, 10)).join(",")})`,
+        );
+        cr.recordset.forEach((r) => contractorName.set(r.id, r.name));
+      }
+      const nameFor = (source, contractorId) =>
+        source === "DEVELOPER" ? developerName : source === "CONTRACTOR" ? contractorName.get(contractorId) ?? null : null;
+      labourSourceName = nameFor(assignment.labourSource, assignment.labourContractorId);
+      materialSourceName = nameFor(assignment.materialSource, assignment.materialContractorId);
+
+      // QC: the latest decision on THIS attempt, if any (none yet = not reviewed).
+      const qcRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
+        SELECT TOP 1 qc.Id AS id, qc.Decision AS decision, qc.Remarks AS remarks, qc.QcAt AS qcAt,
+               COALESCE(u.name, qc.QcBy) AS qcBy
+        FROM dbo.DependencyActivityQc qc
+        LEFT JOIN dbo.users u ON u.email = qc.QcBy
+        WHERE qc.AssignmentId = @assignmentId
+        ORDER BY qc.QcAt DESC, qc.Id DESC
+      `);
+      qcStatus = qcRes.recordset[0] || null;
+      if (qcStatus) {
+        // Each checkpoint's rating (Poor / Good / Excellent) from that same decision.
+        const checksRes = await pool.request().input("qcId", sql.Int, qcStatus.id).query(`
+          SELECT FieldName AS fieldName, Passed AS passed, Rating AS rating, Note AS note
+          FROM dbo.DependencyActivityQcCheck WHERE QcId = @qcId ORDER BY Id
+        `);
+        qcStatus = { ...qcStatus, checks: checksRes.recordset.map((c) => ({ ...c, passed: !!c.passed })) };
+        delete qcStatus.id;
+      }
+    }
 
     let materials = [];
     let engineerIds = [];
@@ -1736,12 +2266,30 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         FROM dbo.DependencyActivityCheckpoint c WHERE c.AssignmentId = @assignmentId
         ORDER BY c.SortOrder ASC, c.Id ASC
       `);
-      checkpoints = cpRes.recordset.map((c) => ({ ...c, isChecked: !!c.isChecked, isDaily: !!c.isDaily }));
+      // On a rework attempt, the checkpoints Quality Check rated Poor last time (and that aren't
+      // ticked again yet) are the ones to redo — flagged so the screens can make them blink.
+      const reworkFields = new Set();
+      if (assignment.reworkFromAssignmentId) {
+        const rw = await pool.request().input("old", sql.Int, assignment.reworkFromAssignmentId).query(`
+          SELECT ck.FieldName AS fieldName
+          FROM dbo.DependencyActivityQcCheck ck
+          WHERE ck.Rating = 'POOR'
+            AND ck.QcId = (SELECT TOP 1 Id FROM dbo.DependencyActivityQc WHERE AssignmentId = @old ORDER BY QcAt DESC, Id DESC)
+        `);
+        rw.recordset.forEach((r) => reworkFields.add(r.fieldName));
+      }
+      checkpoints = cpRes.recordset.map((c) => ({
+        ...c,
+        isChecked: !!c.isChecked,
+        isDaily: !!c.isDaily,
+        needsRework: !c.isChecked && reworkFields.has(c.fieldName),
+      }));
     }
 
     res.json({
       rungId,
       activityId,
+      daysOfCompletion,
       candidateItems: itemsRes.recordset,
       assignment: assignment
         ? {
@@ -1755,8 +2303,12 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
             materialSource: assignment.materialSource,
             labourContractorId: assignment.labourContractorId,
             materialContractorId: assignment.materialContractorId,
+            labourSourceName,
+            materialSourceName,
+            qcStatus,
             description: assignment.description,
             remarks: assignment.remarks,
+            priority: assignment.priority ?? null,
             materials,
             checkpoints,
           }
@@ -1779,8 +2331,23 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
 
   const {
     engineerIds, qcUserIds, approvalLevels, startDate, days, endDate, labourSource, materialSource,
-    labourContractorId, materialContractorId, description, remarks, materials, checkpoints,
+    labourContractorId, materialContractorId, description, remarks, materials, checkpoints, priority,
   } = req.body;
+
+  // Only gate the moment this rung is actually being STARTED (still
+  // Pending and engineers are being put on it) — a later edit to an
+  // already-allocated/in-progress rung's materials/dates/remarks isn't
+  // re-blocked just because some earlier rung is now, separately, not done.
+  if (Array.isArray(engineerIds) && engineerIds.length) {
+    const poolForCheck = await getPool();
+    const curStatus = (await poolForCheck.request().input("rungId", sql.Int, rungId)
+      .query("SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1"))
+      .recordset[0]?.Status ?? "PENDING";
+    if (curStatus === "PENDING") {
+      const blockReason = await predecessorBlockReason(poolForCheck, rungId);
+      if (blockReason) return res.status(400).json({ error: blockReason });
+    }
+  }
 
   if (engineerIds != null && !Array.isArray(engineerIds)) {
     return res.status(400).json({ error: "engineerIds must be an array" });
@@ -1789,6 +2356,18 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
     return res.status(400).json({ error: "qcUserIds must be an array" });
   }
   if (!Array.isArray(materials)) return res.status(400).json({ error: "materials must be an array" });
+  // Engineers, QC checkers and approvers are staff — never an external portal
+  // login (a supplier / contractor / customer account user).
+  {
+    const picked = [...(engineerIds || []), ...(qcUserIds || []),
+      ...(Array.isArray(approvalLevels) ? approvalLevels.flatMap((l) => (Array.isArray(l?.userIds) ? l.userIds : [])) : [])]
+      .map(Number).filter(Number.isInteger);
+    if (picked.length) {
+      const ext = (await (await getPool()).request().query(
+        `SELECT name FROM dbo.users WHERE id IN (${[...new Set(picked)].join(",")}) AND (LinkedLHeadId IS NOT NULL OR ISNULL(discontinue, 0) = 1)`)).recordset;
+      if (ext.length) return res.status(400).json({ error: `${ext.map((u) => u.name).join(", ")} can't be put on site work — only active staff (not supplier / contractor / customer logins)` });
+    }
+  }
   if (checkpoints != null && !Array.isArray(checkpoints)) {
     return res.status(400).json({ error: "checkpoints must be an array" });
   }
@@ -1841,6 +2420,9 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
   if (materialSource && !SOURCE_VALUES.has(materialSource)) {
     return res.status(400).json({ error: `materialSource must be one of: ${[...SOURCE_VALUES].join(", ")}` });
   }
+  if (priority && !PRIORITY_VALUES.has(priority)) {
+    return res.status(400).json({ error: `priority must be one of: ${[...PRIORITY_VALUES].join(", ")}` });
+  }
 
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -1865,6 +2447,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .input("materialContractorId", sql.Int, Number.isFinite(materialContractorId) ? materialContractorId : null)
         .input("description", sql.NVarChar(500), description || null)
         .input("remarks", sql.NVarChar(1000), remarks || null)
+        .input("priority", sql.NVarChar(20), priority || null)
         .input("approvalLevelsJson", sql.NVarChar(sql.MAX), approvalLevelsJson);
 
     let assignmentId;
@@ -1878,7 +2461,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
           SET StartDate = @startDate, Days = @days, EndDate = @endDate,
               LabourSource = @labourSource, MaterialSource = @materialSource,
               LabourContractorId = @labourContractorId, MaterialContractorId = @materialContractorId,
-              Description = @description, Remarks = @remarks, ApprovalLevelsJson = @approvalLevelsJson,
+              Description = @description, Remarks = @remarks, Priority = @priority, ApprovalLevelsJson = @approvalLevelsJson,
               UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
@@ -1889,10 +2472,10 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .query(`
           INSERT INTO dbo.DependencyActivityAssignment
             (DependencyMasterActivityId, StartDate, Days, EndDate, LabourSource, MaterialSource,
-             LabourContractorId, MaterialContractorId, Description, Remarks, ApprovalLevelsJson, CreatedBy)
+             LabourContractorId, MaterialContractorId, Description, Remarks, Priority, ApprovalLevelsJson, CreatedBy)
           OUTPUT INSERTED.Id AS id
           VALUES (@rungId, @startDate, @days, @endDate, @labourSource, @materialSource,
-                  @labourContractorId, @materialContractorId, @description, @remarks, @approvalLevelsJson, @createdBy)
+                  @labourContractorId, @materialContractorId, @description, @remarks, @priority, @approvalLevelsJson, @createdBy)
         `);
       assignmentId = inserted.recordset[0].id;
     }
@@ -2066,6 +2649,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const isRealDate = (d) => DATE_RE.test(d) && !Number.isNaN(new Date(d + "T00:00:00Z").getTime());
 
 // GET /checkpoint/:cpId/updates — the dates that have an update (no binary).
+// loggedTime is always IST (UTC+5:30), whatever timezone the SQL server runs in.
 router.get("/checkpoint/:cpId/updates", authMiddleware, async (req, res) => {
   const cpId = parseInt(req.params.cpId, 10);
   if (!Number.isFinite(cpId)) return res.status(400).json({ error: "Invalid checkpoint id" });
@@ -2074,7 +2658,8 @@ router.get("/checkpoint/:cpId/updates", authMiddleware, async (req, res) => {
     const r = await pool.request().input("cpId", sql.Int, cpId).query(`
       SELECT Id AS id, CONVERT(VARCHAR(10), UpdateDate, 23) AS date,
              CAST(CASE WHEN Photo IS NULL THEN 0 ELSE 1 END AS BIT) AS hasPhoto,
-             Note AS note, CreatedBy AS createdBy, CreatedAt AS createdAt
+             Note AS note, CreatedBy AS createdBy, CreatedAt AS createdAt,
+             CONVERT(VARCHAR(5), DATEADD(MINUTE, 330 - DATEDIFF(MINUTE, SYSUTCDATETIME(), SYSDATETIME()), COALESCE(UpdatedAt, CreatedAt)), 108) AS loggedTime
       FROM dbo.DependencyActivityCheckpointUpdate
       WHERE AssignmentCheckpointId = @cpId
       ORDER BY UpdateDate DESC
@@ -2097,10 +2682,15 @@ router.post("/checkpoint/:cpId/updates", authMiddleware, upload.single("photo"),
   const photo = req.file || null;
   if (photo && !/^image\//i.test(photo.mimetype)) return res.status(400).json({ error: "The update photo must be an image" });
 
-  // No future dates (one day of slack for timezone differences between browser and server).
-  const limit = new Date();
-  limit.setUTCDate(limit.getUTCDate() + 1);
-  if (date > limit.toISOString().slice(0, 10)) return res.status(400).json({ error: "You can't log an update for a future date" });
+  // A daily update can only be logged for today (one day of slack either side for timezone
+  // differences between the browser and the server).
+  const lo = new Date();
+  lo.setUTCDate(lo.getUTCDate() - 1);
+  const hi = new Date();
+  hi.setUTCDate(hi.getUTCDate() + 1);
+  if (date < lo.toISOString().slice(0, 10) || date > hi.toISOString().slice(0, 10)) {
+    return res.status(400).json({ error: "A daily update can only be logged for today" });
+  }
 
   const actor = req.user?.email || req.user?.name || "system";
   try {
@@ -2387,6 +2977,65 @@ router.get("/:rungId/photos", authMiddleware, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// POST /:rungId/photos/carry-forward — day 1's After photos become day 2's Before.
+// Done here, in one INSERT…SELECT, rather than by the browser downloading and re-uploading
+// each photo: it happens whenever anyone opens the Photos tab or shoots a photo on a new
+// day, with no dependence on the right screen being opened first. Idempotent — once a
+// Before newer than that last After exists (the carried copy, or one the engineer took),
+// nothing more is added. Only After photos from an EARLIER day are carried; same-day
+// photos stay as shot.
+const CARRIED_FORWARD_NOTE = "Carried forward from previous After";
+router.post(
+  "/:rungId/photos/carry-forward",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const r = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("note", sql.NVarChar(500), CARRIED_FORWARD_NOTE)
+        .input("by", sql.NVarChar(200), "system").query(`
+          DECLARE @today DATE = CAST(SYSDATETIME() AS DATE);
+          DECLARE @n INT = 0;
+          DECLARE @lastDay DATE = (
+            SELECT MAX(COALESCE(LogDate, CAST(CapturedAt AS DATE))) FROM dbo.ActivityPhoto
+            WHERE DependencyMasterActivityId = @rungId AND Phase = 'after'
+              AND COALESCE(LogDate, CAST(CapturedAt AS DATE)) < @today);
+          IF @lastDay IS NOT NULL
+          BEGIN
+            DECLARE @lastAt DATETIME2 = (
+              SELECT MAX(CapturedAt) FROM dbo.ActivityPhoto
+              WHERE DependencyMasterActivityId = @rungId AND Phase = 'after'
+                AND COALESCE(LogDate, CAST(CapturedAt AS DATE)) = @lastDay);
+            IF NOT EXISTS (SELECT 1 FROM dbo.ActivityPhoto
+                           WHERE DependencyMasterActivityId = @rungId AND Phase = 'before' AND CapturedAt >= @lastAt)
+            BEGIN
+              INSERT INTO dbo.ActivityPhoto
+                (DependencyMasterActivityId, Phase, FileName, MimeType, FileData, Note, CapturedBy, CapturedAt, LogDate)
+              SELECT DependencyMasterActivityId, 'before', FileName, MimeType, FileData, @note, @by, SYSDATETIME(), @today
+              FROM dbo.ActivityPhoto
+              WHERE DependencyMasterActivityId = @rungId AND Phase = 'after'
+                AND COALESCE(LogDate, CAST(CapturedAt AS DATE)) = @lastDay;
+              SET @n = @@ROWCOUNT;
+            END
+          END
+          SELECT @n AS carried;
+        `);
+      const carried = r.recordset[0]?.carried ?? 0;
+      // Opening the Photos tab calls this every time; only a carry that copied photos is anyone's change.
+      if (!carried) res.locals.noChange = true;
+      else res.locals.activityMessage = `Carried ${carried} After photo${carried === 1 ? "" : "s"} forward as today's Before`;
+      res.json({ carried });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] POST /:rungId/photos/carry-forward error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // GET /:rungId/photos/:photoId — one photo's base64 data, always reached
 // through fetchWithAuth (never a bare <img src>) for the same auth-token

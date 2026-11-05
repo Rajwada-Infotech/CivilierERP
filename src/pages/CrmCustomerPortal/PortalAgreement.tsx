@@ -375,8 +375,9 @@ const PortalAgreement: React.FC = () => {
   const mandatoryOutstanding = needsAction.some((d: any) => d.IsMandatory);
 
   const respond = async (type: "agreement" | "salesDeed", decision: "Approve" | "Recheck", remarks: string) => {
-    // The customer-facing UI calls it "Recheck"; the backend stores it as "Reject"
-    const apiDecision: "Approve" | "Reject" = decision === "Approve" ? "Approve" : "Reject";
+    // The server takes Approve or Recheck (it refused the old "Reject", so a
+    // customer could never ask for a recheck).
+    const apiDecision: "Approve" | "Recheck" = decision;
     try {
       if (type === "agreement") await respondAgreement(applicationId, apiDecision, remarks);
       else await respondSalesDeed(applicationId, apiDecision, remarks);
@@ -454,7 +455,7 @@ const PortalAgreement: React.FC = () => {
             <InfoField label="Project" value={agreement.ProjectName} />
             <InfoField label="Unit" value={agreement.UnitNo} />
             <InfoField label="Total Value" value={fmtMoney(agreement.TotalValue)} />
-            <InfoField label="PAN" value={agreement.PanNo} mono />
+            <InfoField label="PAN (Permanent Account Number)" value={agreement.PanNo} mono />
             <InfoField label="Aadhaar" value={maskAadhaar(agreement.AadhaarNo)} mono />
             <InfoField label="Agreement Date" value={fmtDate(agreement.AgreementDate) || "Not yet finalized"} />
             {agreement.LegalAddress && <InfoField label="Registered Address" value={agreement.LegalAddress} />}

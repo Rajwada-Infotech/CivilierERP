@@ -1,11 +1,14 @@
 const express = require("express");
+const { round2, sumMoney } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, { "/on-account/": crmViaBookingSql("CrmOnAccountPayment"), default: crmViaBookingSql("CrmPaymentMilestone") }); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
@@ -13,10 +16,13 @@ const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking
 const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
-const { areEarlierMilestonesCoveredByOnAccount, getBookingOnAccountCoverage } = require("../services/crmOnAccountCoverage");
+const { areEarlierMilestonesCoveredByOnAccount, getBookingOnAccountCoverage, pendingVerificationEntries, returnedEntries } = require("../services/crmOnAccountCoverage");
+const { getBookingFunding, onAccountAvailableSql, onAccountWithAvailableSql } = require("../services/crmPaymentFunding");
+const { bulkDemandSchema } = require("../validation/crmBookingSchemas");
+const ON_ACCOUNT_AVAILABLE_SQL = onAccountAvailableSql("o");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Spec: "BROKER PAYMENT -> NEXT MILESTONE DUE". Business confirmed this should
 // be a soft warning, not a hard block (a customer's payment must never be
@@ -83,18 +89,9 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   // GrandTotal (all milestones combined), not just the one milestone being
   // adjusted. Only once the whole booking is fully funded can staff start
   // sweeping it onto individual milestones in order.
-  const totals = await pool.request().input("bid", sql.Int, targetRow.BookingId).query(`
-    SELECT
-      ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid), 0) AS TotalReceived,
-      ISNULL(GrandTotal, TotalValue) AS BookingTotal
-    FROM dbo.CrmBooking WHERE Id = @bid
-  `);
-  const { TotalReceived, BookingTotal } = totals.recordset[0] || {};
-  const totalReceived = Number(TotalReceived) || 0;
-  const bookingTotal = Number(BookingTotal) || 0;
-  if (bookingTotal > 0 && totalReceived < bookingTotal) {
-    const shortfall = Math.round((bookingTotal - totalReceived) * 100) / 100;
-    return { error: `Cannot adjust On Account yet — the full booking amount hasn't been received. ₹${shortfall.toLocaleString("en-IN")} more is needed (₹${totalReceived.toLocaleString("en-IN")} received of ₹${bookingTotal.toLocaleString("en-IN")}) before any milestone can be settled.` };
+  const funding = await getBookingFunding(pool, targetRow.BookingId);
+  if (funding.requiredAmount > 0 && funding.totalFunded + 0.005 < funding.requiredAmount) {
+    return { error: `Cannot adjust On Account yet — ₹${funding.shortfall.toLocaleString("en-IN")} is still due after counting milestone payments and available on-account funds.` };
   }
 
   // Same "earlier milestone must be settled first" predicate as
@@ -112,6 +109,13 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
     `);
   if (earlier.recordset.length) {
     return { error: `Cannot apply to "${targetRow.MilestoneName}" — "${earlier.recordset[0].MilestoneName}" is still due first` };
+  }
+  // A villa on the buyer's own plot is one property: the plot's balance is the
+  // first part of the villa's schedule, so it is settled before any villa milestone.
+  const landFirst = (await require("../services/villaLand").propertyOfBooking(pool, targetRow.BookingId)).schedule
+    .find((m) => m.Part === "Land" && m.BookingId !== targetRow.BookingId && !["Paid", "Waived"].includes(m.Status));
+  if (landFirst) {
+    return { error: `Cannot apply to "${targetRow.MilestoneName}" — the plot's balance "${landFirst.MilestoneName}" (${landFirst.BookingNo}) is settled first` };
   }
 
   // Required flow: Payment -> On Account -> Demand -> On Account Adjustment
@@ -146,11 +150,53 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   try {
     await tx.begin();
 
+    // Booking-level mutex shared with the bounce unwind: a bounce can reverse
+    // allocations from every deposit on this booking, so per-deposit locks
+    // alone do not serialize it against an apply using a different deposit.
+    await tx.request().input("bid", sql.Int, targetRow.BookingId).query(`
+      SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
+    `);
+    // Refund/transfer claim creation serializes on the source deposit row.
+    // Lock every deposit before measuring booking funding so a claim on a
+    // different deposit cannot appear between the funding check and apply.
+    await tx.request().input("bid", sql.Int, targetRow.BookingId).query(`
+      SELECT Id FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK)
+      WHERE BookingId = @bid ORDER BY Id
+    `);
+    const lockedFunding = await getBookingFunding(tx, targetRow.BookingId);
+    if (lockedFunding.requiredAmount > 0 && lockedFunding.totalFunded + 0.005 < lockedFunding.requiredAmount) {
+      await tx.rollback();
+      return { error: `Cannot adjust On Account yet — ₹${lockedFunding.shortfall.toLocaleString("en-IN")} is still due after counting milestone payments and available on-account funds.` };
+    }
+
     const oa = await tx.request().input("id", sql.Int, onAccountId).query(`
-      SELECT Amount, AppliedAmount FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+      SELECT Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
     `);
     const oaRow = oa.recordset[0];
-    remaining = Number(oaRow.Amount) - Number(oaRow.AppliedAmount);
+    if (!oaRow) {
+      await tx.rollback();
+      return { error: "On-account payment not found" };
+    }
+    if (["Bounced", "Held", "Void", "Cancelled", "Refunded"].includes(oaRow.Status)) {
+      await tx.rollback();
+      return { error: `This on-account payment is ${oaRow.Status.toLowerCase()} and cannot be applied` };
+    }
+    remaining = round2(Number(oaRow.Amount) - Number(oaRow.AppliedAmount));
+    // Refunds and re-booking transfers reserve on-account funds before they
+    // are actually paid/applied. Do not let a manual adjustment or the
+    // automatic full-funding sweep spend those same rupees while a claim is
+    // still live. This runs after locking the deposit row, in the same
+    // transaction as the receipt and AppliedAmount update.
+    const claims = await tx.request().input("id", sql.Int, onAccountId).query(`
+      SELECT
+        ISNULL((SELECT SUM(GrossAmount) FROM dbo.CrmRefund
+          WHERE SourceOnAccountId = @id AND Status NOT IN ('Rejected', 'Paid')), 0) AS ReservedByRefunds,
+        ISNULL((SELECT SUM(Amount) FROM dbo.CrmRebookingTransfer
+          WHERE HeldOnAccountId = @id AND Status NOT IN ('Rejected', 'Applied')), 0) AS ReservedByTransfers
+    `);
+    const reserved = Number(claims.recordset[0]?.ReservedByRefunds || 0)
+      + Number(claims.recordset[0]?.ReservedByTransfers || 0);
+    remaining = Math.max(0, Math.round((remaining - reserved) * 100) / 100);
 
     const m = await tx.request().input("id", sql.Int, milestoneId).query(`
       SELECT AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
@@ -168,9 +214,9 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
       await tx.rollback();
       return { error: `Cannot apply to "${targetRow.MilestoneName}" — it has been Waived` };
     }
-    const milestoneBalance = Number(m.recordset[0].AmountDue) - Number(m.recordset[0].AmountPaid || 0);
+    const milestoneBalance = round2(Number(m.recordset[0].AmountDue) - Number(m.recordset[0].AmountPaid || 0));
 
-    requested = Math.min(remaining, milestoneBalance, amount != null ? amount : Infinity);
+    requested = round2(Math.min(remaining, milestoneBalance, amount != null ? amount : Infinity));
     if (!requested || requested <= 0) {
       await tx.rollback();
       return { error: "Nothing to apply" };
@@ -275,17 +321,32 @@ async function autoApplyOnAccount(pool, bookingId, actorUserId, actorEmail) {
   for (let i = 0; i < 50; i++) {
     const deposit = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT TOP 1 Id FROM dbo.CrmOnAccountPayment
-      WHERE BookingId = @bid AND Amount > AppliedAmount
+      WHERE BookingId = @bid
+        AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
+        AND Amount > ISNULL(AppliedAmount, 0)
       ORDER BY CreatedAt ASC
     `);
     if (!deposit.recordset.length) break;
 
     const milestone = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone
+      SELECT TOP 1 Id, DemandStatus,
+             CASE WHEN DueDate <= CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END AS IsDue
+      FROM dbo.CrmPaymentMilestone
       WHERE BookingId = @bid AND Status NOT IN ('${CrmStatus.PAID}', 'Waived') AND AmountDue > ISNULL(AmountPaid, 0)
       ORDER BY MilestoneNo ASC
     `);
     if (!milestone.recordset.length) break;
+    // Only reached once the full price is in (autoApplyOnAccountIfFullyFunded).
+    // A demand is raised when its milestone falls due (crmDemandScheduler.js), so
+    // a milestone not yet demanded and not yet due stops the sweep: the rest of
+    // the money stays On Account until that milestone's due date. A due one whose
+    // demand the hourly run has not reached yet is raised here — the trail stays
+    // Payment -> Demand -> Adjustment -> Invoice.
+    if (milestone.recordset[0].DemandStatus === CrmStatus.PENDING) {
+      if (!milestone.recordset[0].IsDue) break;
+      try { await raiseDemandForMilestone(pool, milestone.recordset[0].Id, "Auto-raised — full booking amount received"); }
+      catch (e) { console.error("[crm-payments] autoApplyOnAccount: demand auto-raise failed —", e.message, `| milestoneId=${milestone.recordset[0].Id}`); break; }
+    }
 
     const outcome = await applyOnAccountToMilestone(pool, {
       onAccountId: deposit.recordset[0].Id, milestoneId: milestone.recordset[0].Id,
@@ -305,8 +366,9 @@ async function autoApplyOnAccount(pool, bookingId, actorUserId, actorEmail) {
   return results;
 }
 
-// Gate for autoApplyOnAccount: only sweep once the on-account pool actually
-// covers the booking's entire GrandTotal. Called after every approved
+// Gate for autoApplyOnAccount: only sweep once settled milestone receipts
+// plus remaining valid on-account funds cover all non-waived dues. Called
+// after every approved
 // deposit lands — most deposits won't cross the threshold and this is a
 // no-op; the one that does triggers the full sweep immediately, in the same
 // request, so staff see every eligible milestone flip to Paid without a
@@ -316,16 +378,8 @@ async function autoApplyOnAccount(pool, bookingId, actorUserId, actorEmail) {
 // fallback since it enforces this identical gate).
 async function autoApplyOnAccountIfFullyFunded(pool, bookingId, actorUserId, actorEmail) {
   try {
-    const totals = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT
-        ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid), 0) AS TotalReceived,
-        ISNULL(GrandTotal, TotalValue) AS BookingTotal
-      FROM dbo.CrmBooking WHERE Id = @bid
-    `);
-    const { TotalReceived, BookingTotal } = totals.recordset[0] || {};
-    const totalReceived = Number(TotalReceived) || 0;
-    const bookingTotal = Number(BookingTotal) || 0;
-    if (bookingTotal > 0 && totalReceived >= bookingTotal) {
+    const funding = await getBookingFunding(pool, bookingId);
+    if (funding.requiredAmount > 0 && funding.totalFunded + 0.005 >= funding.requiredAmount) {
       const results = await autoApplyOnAccount(pool, bookingId, actorUserId, actorEmail);
       if (results.length) {
         console.log(`[crm-payments] auto-adjusted ${results.length} milestone(s) for booking ${bookingId} — full booking amount received`);
@@ -359,9 +413,12 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
     const req0 = pool.request();
     const conds = [
       "b.IsActive = 1",
-      "b.Status NOT IN ('Cancelled', 'Rejected')",
+      // Dead bookings owe nothing — a resold seller's or an expired booking's
+      // unpaid instalments are not dues to chase.
+      `b.Status NOT IN ${DEAD_BOOKING_SQL}`,
       "m.Status NOT IN ('Waived')",
     ];
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (view !== "all") {
       conds.push("(m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0");
     }
@@ -406,13 +463,15 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
         overdueCount: 0, overdueAmount: 0,
       };
       for (const r of rows) {
-        const balance = Math.max(0, Number(r.AmountDue || 0) - Number(r.AmountPaid || 0));
+        const balance = Math.max(0, round2(Number(r.AmountDue || 0) - Number(r.AmountPaid || 0)));
         const paid = Number(r.AmountPaid || 0);
         if (r.DemandStatus === CrmStatus.PENDING) { summary.pendingCount++; summary.pendingAmount += balance; }
         else if (r.DemandStatus === CrmStatus.DEMANDED) { summary.demandedCount++; summary.demandedAmount += balance; }
         else if (r.DemandStatus === CrmStatus.PAID) { summary.paidCount++; summary.paidAmount += paid; }
         if (r.IsOverdue && r.DemandStatus !== CrmStatus.PAID) { summary.overdueCount++; summary.overdueAmount += balance; }
       }
+      // Running totals, to the paisa.
+      for (const k of ["pendingAmount", "demandedAmount", "paidAmount", "overdueAmount"]) summary[k] = round2(summary[k]);
       return summary;
     }
 
@@ -443,7 +502,7 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
         WHERE b.IsActive = 1
-          AND b.Status NOT IN ('Cancelled', 'Rejected')
+          AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
           AND m.Status NOT IN ('Waived')
           ${view !== "all" ? "AND (m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0" : ""}
           AND (@st IS NULL OR m.DemandStatus = @st)
@@ -526,15 +585,14 @@ async function raiseDemandForMilestone(pool, milestoneId, notes) {
 }
 
 // Shared side-effects for "this milestone just became Paid" — auto-create
-// the Sales Deed / Brokerage where applicable, auto-raise the NEXT
-// milestone's demand if it's still Pending, and surface the broker-unpaid
-// warning. Previously this whole block only lived inline inside
+// the Sales Deed / Brokerage where applicable and surface the broker-unpaid
+// warning. The NEXT milestone's demand is not raised here: demands are raised
+// when a milestone falls due (services/crmDemandScheduler.js), not when the
+// previous one is paid. Previously this whole block only lived inline inside
 // applyCrmMilestonePaymentApproval, so a milestone settled via the
 // on-account sweep (applyOnAccountToMilestone / autoApplyOnAccount) — a
 // manual deposit, an overpayment overflow, or a manual on-account apply —
-// never triggered any of it. That meant the next milestone's demand simply
-// never got raised on that path, and nobody was notified: a bug, not
-// intentional behavior. Both settlement paths now call this exact same
+// never triggered any of it. Both settlement paths now call this exact same
 // function so the outcome can't depend on which one happened to clear the
 // balance.
 async function handleMilestoneBecamePaid(pool, { bookingId, bookingNo, milestoneNo, actorUserId }) {
@@ -545,22 +603,6 @@ async function handleMilestoneBecamePaid(pool, { bookingId, bookingNo, milestone
   // Sync parking PaymentStatus — only triggers transition if all milestones now settled
   try { await syncParkingPaymentStatus(pool, bookingId); } catch (e) {
     console.error("[crm-payments] syncParkingPaymentStatus failed:", e.message);
-  }
-  try {
-    const next = await pool.request()
-      .input("bid", sql.Int, bookingId)
-      .input("mno", sql.Int, milestoneNo)
-      .query(`
-        SELECT TOP 1 Id, DemandStatus, Status FROM dbo.CrmPaymentMilestone
-        WHERE BookingId = @bid AND MilestoneNo > @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
-        ORDER BY MilestoneNo
-      `);
-    const nextRow = next.recordset[0];
-    if (nextRow && nextRow.DemandStatus === CrmStatus.PENDING) {
-      await raiseDemandForMilestone(pool, nextRow.Id, `Auto-raised — milestone #${milestoneNo} payment settled for Booking ${bookingNo || bookingId}`);
-    }
-  } catch (demandErr) {
-    console.error("[crm-payments] next-milestone demand auto-raise failed:", demandErr.message);
   }
   const brokerWarning = await warnIfBrokerUnpaid(pool, bookingId, actorUserId);
   return { brokerWarning };
@@ -575,26 +617,46 @@ async function handleMilestoneBecamePaid(pool, { bookingId, bookingNo, milestone
 router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (req, res) => {
   try {
     const pool = getPool();
+    // Input validation
+    const parsed = bulkDemandSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid request body" });
+    }
     const { projectName, milestoneName } = req.body || {};
+    const int = (v) => (v != null && v !== "" && Number.isInteger(Number(v)) ? Number(v) : null);
+    const companyId = int(req.body?.companyId), projectId = int(req.body?.projectId), blockId = int(req.body?.blockId);
 
     const req0 = pool.request();
+    // The same milestones the Demands list shows as "ready to raise": live bookings, not waived, a balance left — and
+    // only in the user's projects (it used to raise across every project, and on dead bookings the list leaves out).
     const conds = [
       "m.DemandStatus = 'Pending'",
+      "m.Status NOT IN ('Waived')",
       "b.IsActive = 1",
+      `b.Status NOT IN ${DEAD_BOOKING_SQL}`,
       "a.Status NOT IN ('Cancelled','Rejected','Expired')",
       "(m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0",
     ];
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (projectName) {
+      if (req.projectScope) {
+        const { assertProjectRawAllowed } = require("../services/projectScope");
+        if (!await assertProjectRawAllowed(req, res, projectName)) return;
+      }
       req0.input("pname", sql.NVarChar(200), projectName);
       // Filter by ProjectId via enterprise master so a renamed project still matches.
       conds.push("b.ProjectId IN (SELECT id FROM dbo.enterprise WHERE name = @pname AND business_type = 'P')");
     }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (milestoneName) {
       req0.input("mname", sql.NVarChar(200), milestoneName);
       conds.push("m.MilestoneName = @mname");
     }
     const rows = await req0.query(`
-      SELECT m.Id
+      SELECT m.Id, m.BookingId
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -617,6 +679,9 @@ router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (re
         else { errors.push({ id, message: e.message }); console.error("[crm-payments] bulk demand error for milestone", id, e.message); }
       }
     }
+    // Same as a single demand: a booking already paid in full settles now.
+    const bookingIds = [...new Set(rows.recordset.map((r) => r.BookingId).filter((x) => x != null))];
+    for (const b of bookingIds) await autoApplyOnAccountIfFullyFunded(pool, b, actorId(req), req.user?.email || req.user?.name || null);
     res.json({ raised, skipped, errors });
   } catch (e) {
     console.error("[crm-payments] POST /demands/bulk error:", e.message);
@@ -634,7 +699,11 @@ router.post("/:id/demand", requirePageRight("crm-payments", "edit"), async (req,
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await raiseDemandForMilestone(pool, id, req.body?.Notes);
-    res.json({ success: true, ...result });
+    // If the full price is already on account, settle now (the sweep is
+    // otherwise only triggered by a newly approved payment).
+    const bk = (await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmPaymentMilestone WHERE Id = @id")).recordset[0];
+    const settled = bk ? await autoApplyOnAccountIfFullyFunded(pool, bk.BookingId, actorId(req), req.user?.email || req.user?.name || null) : [];
+    res.json({ success: true, ...result, settled: settled.length });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
     console.error("[crm-payments] POST /:id/demand error:", e.message);
@@ -756,14 +825,16 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
   // would make it impossible to ever submit a payment past Milestone 1.
   // Virtual coverage (money genuinely on-account, even if not yet swept)
   // is the right predecessor check instead.
-  if (!(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo))) {
+  // Money already entered and waiting for Finance counts: payments are entered
+  // one after another, and verified in any order (crmOnAccountCoverage.js).
+  if (!(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
     const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
       .query(`
         SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
         WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
         ORDER BY MilestoneNo
       `);
-    throw new ReceiptError(`Cannot pay "${targetRow.MilestoneName}" — "${earlier.recordset[0]?.MilestoneName || "an earlier milestone"}" is still due first`);
+    throw new ReceiptError(`Cannot pay "${targetRow.MilestoneName}" — "${earlier.recordset[0]?.MilestoneName || "an earlier milestone"}" is still due first — enter its payment first (it may still be waiting for Finance)`);
   }
 
   // Every CRM payment now submits into Finance's existing Received Payment
@@ -797,7 +868,8 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
   let rp;
   try {
     await tx.begin();
-    rp = await createReceivedPaymentInternal(tx, {
+    try {
+      rp = await createReceivedPaymentInternal(tx, {
       RPReceivedFrom: targetRow.ApplicantName,
       RPCustomerName: targetRow.ApplicantName,
       RPProjectName: targetRow.ProjectName,
@@ -816,13 +888,18 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
       RPTransactionID: data.TransactionRef || null,
       RPCheckNumber: data.PaymentMode === "Cheque" ? (data.TransactionRef || null) : null,
       RPChequeDate: data.ChequeDate || null,
-      RPRemarks: data.Notes || `CRM — ${targetRow.BookingNo} / ${targetRow.MilestoneName}`,
+      // The booking / milestone always leads, so Finance sees what it's for; a typed note follows it.
+      RPRemarks: [`CRM — ${targetRow.BookingNo} / ${targetRow.MilestoneName}`, data.Notes].filter(Boolean).join(" — "),
       RPDepositBankId: null, // set by Accounts before approval (see above)
       RPDepositBankName: null,
       CrmMilestoneId: milestoneId,
       CrmBookingId: targetRow.BookingId,
       CrmApplicationId: targetRow.ApplicationId,
-    }, actorEmail || String(actorUserId));
+      }, actorEmail || String(actorUserId));
+    } catch (createErr) {
+      if (createErr.status) throw new ReceiptError(createErr.message, createErr.status);
+      throw createErr;
+    }
     await tx.request().input("rpid", sql.Int, rp.RPPaymentID)
       .query("UPDATE dbo.ReceivedPayment SET RPStatus = 'Pending' WHERE RPPaymentID = @rpid AND RPStatus = 'Draft'");
     await tx.commit();
@@ -849,6 +926,46 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
 // (applyCrmOnAccountPaymentApproval). The predecessor-milestone check is
 // re-run here (not just at submission) since two payments can be approved
 // out of submission order.
+// A payment Finance verifies after its booking was cancelled (it was still
+// with Finance then): the money is real, so it is recorded and posted as any
+// receipt, then rolled into the cancellation's held credit and refund — never
+// onto the dead booking's milestones. Returns true when it did that.
+async function holdIfBookingCancelled(pool, bookingId, onAccountId, actorUserId, actorEmail) {
+  const cxl = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 c.Id FROM dbo.CrmCancellation c JOIN dbo.CrmBooking b ON b.Id = c.BookingId
+    WHERE c.BookingId = @bid AND c.Status = '${CrmStatus.APPROVED}' AND b.Status = '${CrmStatus.CANCELLED}' ORDER BY c.Id DESC`)).recordset[0];
+  if (!cxl) return false;
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const rolled = await tx.request().input("id", sql.Int, onAccountId).query(`
+      UPDATE dbo.CrmOnAccountPayment
+      SET AppliedAmount = Amount, Status = 'Applied',
+          Notes = ISNULL(Notes,'') + char(10) + 'Verified after the booking was cancelled - rolled into its held credit / refund.'
+      OUTPUT INSERTED.Amount
+      WHERE Id = @id AND ISNULL(Status, 'Unapplied') = 'Unapplied' AND ISNULL(AppliedAmount, 0) = 0`);
+    // Already rolled on an earlier attempt: nothing more to do (idempotent).
+    if (rolled.recordset.length) {
+      await require("../services/crmLedger").syncCrmOnAccountLedger(tx, onAccountId, actorEmail || "system", "Rolled into held credit - booking cancelled");
+      await require("./crmCancellations").holdCancellationCredit(tx, {
+        cancellationId: cxl.Id, bookingId, amount: Number(rolled.recordset[0].Amount), actorUserId, addToCancellation: true,
+      });
+    }
+    await tx.commit();
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* already rolled back */ }
+    throw e;
+  }
+  return true;
+}
+
+// A cancelled booking's later-verified payment goes to its refund, so it does
+// not wait on the old schedule's milestone order.
+async function isBookingCancelled(pool, bookingId) {
+  return !!(await pool.request().input("bid", sql.Int, bookingId)
+    .query(`SELECT 1 AS x FROM dbo.CrmBooking WHERE Id = @bid AND Status = '${CrmStatus.CANCELLED}'`)).recordset.length;
+}
+
 async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmail) {
   const target = await pool.request().input("id", sql.Int, rp.CrmMilestoneId).query(`
     SELECT m.Id, m.BookingId, m.MilestoneNo, m.MilestoneName, m.AmountDue, b.BookingNo
@@ -861,7 +978,10 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
   // Same virtual-coverage predecessor check as submission time (see
   // createReceiptForMilestone above) — real Status can't be the gate here
   // either, for the same reason.
-  if (!(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo))) {
+  // Money already entered and waiting for Finance counts: payments are entered
+  // one after another, and verified in any order (crmOnAccountCoverage.js).
+  if (!(await isBookingCancelled(pool, targetRow.BookingId))
+      && !(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
     const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
       .query(`
         SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
@@ -902,20 +1022,24 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
         VALUES (@no, @bid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @note, @cb, SYSDATETIME(), @bkid, @bkname, @srp)
       `);
     onAccountId = oaResult.recordset[0].Id;
-
-    try {
-      const outcome = await postCrmOnAccountToGL(pool, onAccountId, actorEmail);
-      await recordGLPosting("crm-on-account-payment", onAccountId, outcome, actorEmail);
-    } catch (glErr) {
-      await recordGLPosting("crm-on-account-payment", onAccountId, { failed: true, reason: glErr.message }, actorEmail);
-    }
   }
 
-  // Stays in On Account unless this deposit was the one that tipped the
-  // booking's total over its full GrandTotal — in that case every eligible
-  // milestone is auto-adjusted right now, in order (see
-  // autoApplyOnAccountIfFullyFunded above).
-  await autoApplyOnAccountIfFullyFunded(pool, targetRow.BookingId, actorUserId, actorEmail);
+  // Run even when the source row already exists: a prior attempt may have
+  // inserted the deposit and then failed before its best-effort GL posting.
+  try {
+    const outcome = await postCrmOnAccountToGL(pool, onAccountId, actorEmail);
+    await recordGLPosting("crm-on-account-payment", onAccountId, outcome, actorEmail);
+  } catch (glErr) {
+    await recordGLPosting("crm-on-account-payment", onAccountId, { failed: true, reason: glErr.message }, actorEmail);
+  }
+
+  // Booking cancelled meanwhile: the money goes to its refund, not the schedule.
+  // Otherwise it stays in On Account unless this deposit was the one that
+  // tipped the booking's total over its full GrandTotal — then every eligible
+  // milestone is auto-adjusted right now, in order (autoApplyOnAccountIfFullyFunded).
+  if (!(await holdIfBookingCancelled(pool, targetRow.BookingId, onAccountId, actorUserId, actorEmail))) {
+    await autoApplyOnAccountIfFullyFunded(pool, targetRow.BookingId, actorUserId, actorEmail);
+  }
 
   // Every approved CRM payment gets its own Money Receipt — not just the
   // Booking Amount's first one. Idempotent (see ensureMoneyReceiptForApproved
@@ -985,10 +1109,12 @@ async function applyCrmOnAccountPaymentApproval(pool, rp, actorUserId, actorEmai
     glOutcome = {};
   }
 
-  // Stays in On Account unless this deposit was the one that tipped the
-  // booking's total over its full GrandTotal (see
-  // autoApplyOnAccountIfFullyFunded above).
-  await autoApplyOnAccountIfFullyFunded(pool, rp.CrmBookingId, actorUserId, actorEmail);
+  // Booking cancelled meanwhile: the money goes to its refund. Otherwise it
+  // stays in On Account unless this deposit tipped the booking's total over
+  // its full GrandTotal (autoApplyOnAccountIfFullyFunded).
+  if (!(await holdIfBookingCancelled(pool, rp.CrmBookingId, onAccountId, actorUserId, actorEmail))) {
+    await autoApplyOnAccountIfFullyFunded(pool, rp.CrmBookingId, actorUserId, actorEmail);
+  }
 
   // Same "every approved CRM payment gets its own Money Receipt" rule as
   // applyCrmMilestonePaymentApproval — an on-account deposit is real money
@@ -1019,7 +1145,7 @@ router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (
   } catch (e) {
     if (e instanceof ReceiptError) return res.status(e.status).json({ error: e.message });
     console.error("[crm-payments] POST /:id/receipts error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -1040,7 +1166,7 @@ router.post("/escalate-overdue", requirePageRight("crm-payments", "edit"), async
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
-        AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+        AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
     `);
 
     const { normalizeRole } = require("../middleware/role");
@@ -1124,15 +1250,21 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       // applyOnAccountToMilestone above) — surfaced here so the frontend can
       // show how much of the booking's GrandTotal is actually on hand yet.
       pool.request().input("bid", sql.Int, bid).query(`
-        SELECT ISNULL(SUM(Amount), 0) AS OnAccountTotalReceived FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+        SELECT
+          ISNULL(SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN o.Amount ELSE 0 END), 0) AS OnAccountTotalReceived,
+          ISNULL(SUM(o.AvailableAmount), 0) AS OnAccountAvailable
+        FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = @bid
       `),
     ]);
     if (!bkRes.recordset[0]) return res.status(404).json({ error: "Booking not found" });
 
     // Compute summary
-    const totalDue  = milRes.recordset.reduce((s, m) => s + (m.AmountDue  || 0), 0);
-    const totalPaid = milRes.recordset.reduce((s, m) => s + (m.AmountPaid || 0), 0);
-    const overdue   = milRes.recordset.filter((m) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length;
+    const activeMilestones = milRes.recordset.filter((m) => m.Status !== "Waived");
+    const waivedMilestones = milRes.recordset.filter((m) => m.Status === "Waived");
+    const totalDue  = sumMoney(activeMilestones, (m) => m.AmountDue);
+    const totalPaid = sumMoney(milRes.recordset, (m) => m.AmountPaid);
+    const balance = sumMoney(activeMilestones, (m) => Math.max(0, round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0))));
+    const waivedDue = sumMoney(waivedMilestones, (m) => m.AmountDue);
 
     // VirtuallyCovered: money is genuinely on-account for this milestone
     // even though the real sweep (Status='Paid') only fires automatically
@@ -1140,13 +1272,57 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
     // "customer has paid this" transparently instead of a misleading
     // Pending/Overdue on money that's already, verifiably, in hand.
     const { milestones: coverage } = await getBookingOnAccountCoverage(pool, bid);
-    const coverageByNo = new Map(coverage.map((c) => [c.MilestoneNo, c.VirtuallyCovered]));
-    const milestones = milRes.recordset.map((m) => ({ ...m, VirtuallyCovered: !!coverageByNo.get(m.MilestoneNo) }));
+    const coverageById = new Map(coverage.map((c) => [c.Id, c.VirtuallyCovered]));
+    // The same, counting money entered but not yet verified by Finance.
+    const { milestones: entered } = await getBookingOnAccountCoverage(pool, bid, { withPendingVerification: true });
+    const enteredById = new Map(entered.map((c) => [c.Id, c.VirtuallyCovered]));
+
+    // Each milestone's money stage — one answer, so the screen never guesses:
+    //   Adjusted        settled on the milestone
+    //   Verified        Finance-verified money held On Account covers it
+    //   InVerification  covered once the entries waiting for Finance are verified
+    //   null            nothing entered for it yet
+    const stageOf = (m) => {
+      if (m.Status === "Waived") return "Waived";
+      if (m.Status === CrmStatus.PAID || Number(m.AmountPaid || 0) >= Number(m.AmountDue || 0)) return "Adjusted";
+      if (coverageById.get(m.Id)) return "Verified";
+      if (enteredById.get(m.Id)) return "InVerification";
+      return null;
+    };
+    const milestones = milRes.recordset.map((m) => ({ ...m, VirtuallyCovered: !!coverageById.get(m.Id), MoneyStage: stageOf(m) }));
+    // Overdue = past due with no money for it, verified or entered.
+    const overdue = milestones.filter((m) => m.MoneyStage == null && m.DueDate && new Date(m.DueDate) < new Date()).length;
+
+    // The booking's money by stage. Collected = everything Finance has
+    // verified (adjusted onto milestones + held On Account).
+    const pending = await pendingVerificationEntries(pool, bid);
+    const held = Number(oaRes.recordset[0]?.OnAccountAvailable) || 0;
+    const inVerification = round2(pending.reduce((a, r) => a + Number(r.RPAmount || 0), 0));
+    const collected = round2(totalPaid + held);
+    const money = {
+      adjusted: round2(totalPaid), held, collected,
+      inVerification, inVerificationCount: pending.length,
+      toCollect: Math.max(0, round2(totalDue - collected - inVerification)),
+      entries: pending.map((r) => ({
+        id: r.RPPaymentID, docNo: r.RPDocNo, amount: Number(r.RPAmount), mode: r.RPMode, date: r.RPDocDate,
+        ref: r.RPTransactionID, milestone: r.MilestoneName || null, enteredBy: r.RPCreatedBy, enteredAt: r.RPCreatedAt,
+      })),
+      returned: (await returnedEntries(pool, bid)).map((r) => ({
+        id: r.RPPaymentID, docNo: r.RPDocNo, amount: Number(r.RPAmount), mode: r.RPMode, date: r.RPDocDate,
+        ref: r.RPTransactionID, milestone: r.MilestoneName || null, enteredBy: r.RPCreatedBy,
+        returnedBy: r.RPRejectedBy, returnedAt: r.RPRejectedAt, reason: r.RPRejectionNote,
+      })),
+    };
 
     res.json({
-      booking: { ...bkRes.recordset[0], OnAccountTotalReceived: Number(oaRes.recordset[0]?.OnAccountTotalReceived) || 0 },
+      booking: {
+        ...bkRes.recordset[0],
+        OnAccountTotalReceived: Number(oaRes.recordset[0]?.OnAccountTotalReceived) || 0,
+        OnAccountAvailable: Number(oaRes.recordset[0]?.OnAccountAvailable) || 0,
+      },
       milestones,
-      summary: { totalDue, totalPaid, balance: totalDue - totalPaid, overdue },
+      summary: { totalDue, totalPaid, balance, waivedDue, waivedCount: waivedMilestones.length, overdue },
+      money,
     });
   } catch (e) {
     console.error("[crm-payments] GET /booking/:id error:", e.message);
@@ -1162,28 +1338,44 @@ router.post("/booking/:bookingId", requirePageRight("crm-payments", "create"), a
     if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
     if (!b.MilestoneName?.trim()) return res.status(400).json({ error: "MilestoneName is required" });
+    const amountDue = b.AmountDue != null && b.AmountDue !== "" ? Number(b.AmountDue) : 0;
+    if (!Number.isFinite(amountDue) || amountDue <= 0) {
+      return res.status(400).json({ error: "Amount Due must be greater than zero" });
+    }
 
-    const activeErr = await requireActiveBooking(pool, bid);
-    if (activeErr) return res.status(400).json({ error: activeErr });
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      // Serialize schedule creation with cancellation and other booking-level
+      // mutations; the preflight eligibility read alone is subject to a race.
+      await tx.request().input("bid", sql.Int, bid).query(`
+        SELECT Id FROM dbo.CrmBooking WITH (XLOCK, HOLDLOCK) WHERE Id = @bid
+      `);
+      const activeErr = await requireActiveBooking(tx, bid);
+      if (activeErr) throw Object.assign(new Error(activeErr), { status: 409 });
+      const noRes = await tx.request().input("bid", sql.Int, bid)
+        .query("SELECT ISNULL(MAX(MilestoneNo),0) + 1 AS NextNo FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+      const nextNo = noRes.recordset[0].NextNo;
 
-    // Get next MilestoneNo
-    const noRes = await pool.request().input("bid", sql.Int, bid)
-      .query("SELECT ISNULL(MAX(MilestoneNo),0) + 1 AS NextNo FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-    const nextNo = noRes.recordset[0].NextNo;
-
-    await pool.request()
+      await tx.request()
       .input("bid",   sql.Int,           bid)
       .input("mno",   sql.Int,           nextNo)
       .input("mname", sql.NVarChar(200), b.MilestoneName.trim())
       .input("due",   sql.Date,          b.DueDate || null)
-      .input("amt",   sql.Decimal(18,2), b.AmountDue != null && b.AmountDue !== "" ? parseFloat(b.AmountDue) : 0)
+      .input("amt",   sql.Decimal(18,2), amountDue)
       .input("rdocs", sql.NVarChar(sql.MAX), b.RequiredDocuments || null)
       .input("dept",  sql.NVarChar(100), b.ResponsibleDepartment || null)
       .input("cb",    sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, DueDate, AmountDue, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
-        VALUES (@bid, @mno, @mname, @due, @amt, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
+        VALUES (@bid, @mno, @mname, @due, @amt, @rdocs, @dept, '${CrmStatus.PENDING}', @cb, SYSDATETIME())
       `);
+      await tx.commit();
+    } catch (txError) {
+      try { await tx.rollback(); } catch {}
+      if (txError.status) return res.status(txError.status).json({ error: txError.message });
+      throw txError;
+    }
     res.status(201).json({ success: true });
   } catch (e) {
     console.error("[crm-payments] POST error:", e.message);
@@ -1204,6 +1396,9 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
 
     const paidRaw = b.AmountPaid != null && b.AmountPaid !== "" ? parseFloat(b.AmountPaid) : null;
     const amountDueOverride = b.AmountDue != null && b.AmountDue !== "" ? parseFloat(b.AmountDue) : null;
+    if (amountDueOverride != null && (!Number.isFinite(amountDueOverride) || amountDueOverride < 0)) {
+      return res.status(400).json({ error: "Amount Due must be a valid non-negative amount" });
+    }
 
     // Fetch the current row up front — needed for the AmountDue override's
     // %-recompute against the booking's GrandTotal.
@@ -1275,6 +1470,14 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     await tx.begin();
     let updated, staleDemandsRecordset = [];
     try {
+      // The earlier active-booking check is only a fast preflight. Serialize
+      // this schedule write with cancellation and validate again under the
+      // booking lock before changing the milestone or redistributing dues.
+      await tx.request().input("bid", sql.Int, curRow.BookingId).query(`
+        SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
+      `);
+      const lockedActiveError = await requireActiveBooking(tx, curRow.BookingId);
+      if (lockedActiveError) throw Object.assign(new Error(lockedActiveError), { status: 409 });
       const result = await tx.request()
         .input("id",    sql.Int,           id)
         .input("mname", sql.NVarChar(200), b.MilestoneName || null)
@@ -1284,6 +1487,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
         .input("rdocs", sql.NVarChar(sql.MAX), b.RequiredDocuments || null)
         .input("dept",  sql.NVarChar(100), b.ResponsibleDepartment || null)
         .input("rem",   sql.NVarChar(sql.MAX), b.Remarks || null)
+        .input("remSet", sql.Bit, "Remarks" in b ? 1 : 0)
         .input("ub",    sql.Int,           actorId(req))
         .query(`
           UPDATE dbo.CrmPaymentMilestone SET
@@ -1293,7 +1497,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
             [Percent]      = ISNULL(@pct,   [Percent]),
             RequiredDocuments = ISNULL(@rdocs, RequiredDocuments),
             ResponsibleDepartment = ISNULL(@dept, ResponsibleDepartment),
-            Remarks   = @rem,
+            Remarks   = CASE WHEN @remSet = 1 THEN @rem ELSE Remarks END,
             UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           OUTPUT INSERTED.BookingId
           WHERE Id = @id
@@ -1383,7 +1587,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
   } catch (e) {
     if (e instanceof ReceiptError) return res.status(e.status).json({ error: e.message });
     console.error("[crm-payments] PUT error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -1407,19 +1611,34 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
     // the one gap, letting a milestone on a Cancelled/inactive booking be
     // waived after the fact (its balance is already being handled through
     // the Cancellation/refund flow, not this one).
-    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-
-    const result = await pool.request()
-      .input("id",  sql.Int, id)
-      .input("rem", sql.NVarChar(sql.MAX), b.Reason)
-      .input("ub",  sql.Int, actorId(req))
-      .query(`
-        UPDATE dbo.CrmPaymentMilestone SET
-          Status = 'Waived', Remarks = @rem, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        OUTPUT INSERTED.BookingId, INSERTED.MilestoneNo
-        WHERE Id = @id
+    const bookingId = cur.recordset[0].BookingId;
+    const tx = pool.transaction();
+    await tx.begin();
+    let result;
+    try {
+      await tx.request().input("bid", sql.Int, bookingId).query(`
+        SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
       `);
+      const activeErr = await requireActiveBooking(tx, bookingId);
+      if (activeErr) throw Object.assign(new Error(activeErr), { status: 409 });
+      result = await tx.request()
+        .input("id",  sql.Int, id)
+        .input("rem", sql.NVarChar(sql.MAX), b.Reason)
+        .input("ub",  sql.Int, actorId(req))
+        .query(`
+          UPDATE dbo.CrmPaymentMilestone SET
+            Status = 'Waived', Remarks = @rem, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          OUTPUT INSERTED.BookingId, INSERTED.MilestoneNo
+          WHERE Id = @id AND Status <> '${CrmStatus.PAID}'
+        `);
+      if (!result.recordset.length) {
+        throw Object.assign(new Error("This milestone was paid before the waiver could be applied"), { status: 409 });
+      }
+      await tx.commit();
+    } catch (txError) {
+      try { await tx.rollback(); } catch {}
+      throw txError;
+    }
 
     const { BookingId: waivedBookingId, MilestoneNo: waivedMilestoneNo } = result.recordset[0];
     // Auto-flow: a waived milestone can also be the last one outstanding.
@@ -1436,7 +1655,7 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
     res.json({ success: true, status: "Waived" });
   } catch (e) {
     console.error("[crm-payments] waive error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -1445,13 +1664,15 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
 // Booking Details tab to show "customer has ₹X sitting on account" instead
 // of that money just disappearing into a milestone it wasn't actually
 // meant for yet.
-router.get("/booking/:bookingId/on-account", requirePageRight("crm-payments", "view"), async (req, res) => {
+// The Invoices page reads it to invoice an on-account payment.
+router.get("/booking/:bookingId/on-account", requireAnyPageRight(["crm-payments", "crm-invoices"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);
     if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT o.*, cu.name AS CreatedByName,
+      SELECT o.*, CAST(${ON_ACCOUNT_AVAILABLE_SQL} AS DECIMAL(18,2)) AS AvailableBalance,
+             cu.name AS CreatedByName,
              inv.Id AS InvoiceId, inv.InvoiceNo, inv.InvoiceDate, inv.Status AS InvoiceStatus
       FROM dbo.CrmOnAccountPayment o
       LEFT JOIN dbo.Users cu ON cu.id = o.CreatedBy
@@ -1462,11 +1683,11 @@ router.get("/booking/:bookingId/on-account", requirePageRight("crm-payments", "v
       -- also double-match a deposit that has both a voided and a live
       -- invoice, duplicating the row in the result set.
       LEFT JOIN dbo.CrmInvoice inv ON inv.OnAccountPaymentId = o.Id AND inv.Status <> 'Void'
-      WHERE o.BookingId = @bid
+      WHERE o.BookingId = @bid AND ISNULL(o.Status, '') <> 'Held'
       ORDER BY o.CreatedAt DESC
     `);
     const rows = result.recordset;
-    const available = rows.reduce((s, r) => s + (Number(r.Amount) - Number(r.AppliedAmount)), 0);
+    const available = sumMoney(rows, (r) => r.AvailableBalance);
     res.json({ payments: rows, availableBalance: available });
   } catch (e) {
     console.error("[crm-payments] GET /booking/:id/on-account error:", e.message);
@@ -1541,7 +1762,7 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
         RPAmount: amount,
         RPBankName: bankNameForMode(b.PaymentMode, b.BankName),
         RPTransactionID: b.TransactionRef || null,
-        RPRemarks: b.Notes || `CRM on-account deposit — ${booking.BookingNo}`,
+        RPRemarks: [`CRM on-account deposit — ${booking.BookingNo}`, b.Notes].filter(Boolean).join(" — "),
         // No deposit bank from CRM — Accounts sets it on the Received
         // Payment before approval (receivedPayment.js PATCH /:id/deposit-bank).
         RPDepositBankId: null,
@@ -1561,7 +1782,7 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
     res.status(201).json({ success: true, submitted: true, ReceivedPaymentId: rp.RPPaymentID, RPDocNo: rp.RPDocNo });
   } catch (e) {
     console.error("[crm-payments] POST /booking/:id/on-account error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -1598,76 +1819,68 @@ router.put("/on-account/:id/apply", requirePageRight("crm-payments", "edit"), as
 // GET /on-account — global list of all CRM on-account deposits across all bookings.
 // Supports filters: status, projectId, search (applicant name / booking no), dateFrom, dateTo.
 // Used by the On Account management page.
+// The On Account list's filters, built once onto any request — the list, its count and the summary all use it, so
+// they always agree. Project scope included: these listed every project's deposits to a restricted user.
+// 'Held' rows are frozen cancellation credit managed from the Refunds page — out unless asked for.
+const OA_FROM = `
+  FROM dbo.CrmOnAccountPayment o
+  JOIN dbo.CrmBooking b ON b.Id = o.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+  LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'`;
+function onAccountWhere(request, query, projectScope, { withStatus = true } = {}) {
+  const { status, projectId, companyId, blockId, search, dateFrom, dateTo, mode } = query;
+  let where = "WHERE o.BookingId IS NOT NULL";
+  if (projectScope) where += ` AND ${require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim()}`;
+  if (withStatus && status) { where += " AND o.Status = @status"; request.input("status", sql.NVarChar(30), status); }
+  else                      { where += " AND ISNULL(o.Status,'') <> 'Held'"; }
+  if (projectId) { where += " AND b.ProjectId = @pid";    request.input("pid",  sql.Int, parseInt(projectId, 10)); }
+  if (companyId) { where += " AND b.CompanyId = @cid";    request.input("cid",  sql.Int, parseInt(companyId, 10)); }
+  if (blockId)   { where += " AND b.BlockId = @bid2";     request.input("bid2", sql.Int, parseInt(blockId, 10)); }
+  if (dateFrom)  { where += " AND o.ReceivedDate >= @df"; request.input("df",   sql.Date, dateFrom); }
+  if (dateTo)    { where += " AND o.ReceivedDate <= @dt"; request.input("dt",   sql.Date, dateTo); }
+  // Payment mode was filtered on the page over the 50 rows it had, so the count and the other pages ignored it.
+  if (mode)      { where += " AND o.PaymentMode = @mode"; request.input("mode", sql.NVarChar(50), mode); }
+  if (search) {
+    where += " AND (a.ApplicantName LIKE @s OR a.Mobile LIKE @s OR b.BookingNo LIKE @s OR o.ReceiptNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
+    request.input("s", sql.NVarChar(200), `%${search}%`);
+  }
+  return where;
+}
+
 router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, projectId, companyId, blockId, search, dateFrom, dateTo } = req.query;
     const { page, pageSize, offset } = applyPagination(req, 50);
 
     const req_ = pool.request()
       .input("pageSize", sql.Int, pageSize)
       .input("offset",   sql.Int, offset);
-
-    let where = "WHERE o.BookingId IS NOT NULL";
-    // 'Held' rows are frozen cancellation credit managed from the Refunds page —
-    // keep them out of the normal On Account list unless explicitly asked for.
-    if (status)    { where += " AND o.Status = @status";     req_.input("status",    sql.NVarChar(30), status); }
-    else           { where += " AND ISNULL(o.Status,'') <> 'Held'"; }
-    if (projectId) { where += " AND b.ProjectId = @pid";     req_.input("pid",       sql.Int, parseInt(projectId)); }
-    if (companyId) { where += " AND b.CompanyId = @cid";     req_.input("cid",       sql.Int, parseInt(companyId)); }
-    if (blockId)   { where += " AND b.BlockId = @bid2";     req_.input("bid2",      sql.Int, parseInt(blockId)); }
-    if (dateFrom)  { where += " AND o.ReceivedDate >= @df";  req_.input("df",        sql.Date, dateFrom); }
-    if (dateTo)    { where += " AND o.ReceivedDate <= @dt";  req_.input("dt",        sql.Date, dateTo); }
-    if (search) {
-      where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
-      req_.input("s", sql.NVarChar(200), `%${search}%`);
-    }
-
-    const result = await req_.query(`
-      SELECT
-        o.Id, o.ReceiptNo, o.BookingId, o.Amount, o.AppliedAmount,
-        CAST(o.Amount - o.AppliedAmount AS DECIMAL(18,2)) AS AvailableBalance,
-        o.Status, o.ReceivedDate, o.PaymentMode, o.TransactionRef, o.Notes,
-        o.CreatedAt, o.DepositBankId, o.DepositBankName, o.SourceReceivedPaymentId,
-        b.BookingNo, b.ProjectId,
-        COALESCE(proj.name, b.ProjectName) AS ProjectName,
-        COALESCE(um.UnitName, b.UnitNo) AS UnitNo,
-        b.GrandTotal,
-        a.ApplicantName, a.Mobile,
-        u.name AS CreatedByName
-      FROM dbo.CrmOnAccountPayment o
-      JOIN dbo.CrmBooking b ON b.Id = o.BookingId
-      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-      LEFT JOIN dbo.Users u ON u.id = o.CreatedBy
-      ${where}
-      ORDER BY o.CreatedAt DESC
-      OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
-    `);
-
+    const where = onAccountWhere(req_, req.query, req.projectScope);
     const countReq = pool.request();
-    let countWhere = "WHERE o.BookingId IS NOT NULL";
-    if (status)    { countWhere += " AND o.Status = @status";     countReq.input("status",    sql.NVarChar(30), status); }
-    else           { countWhere += " AND ISNULL(o.Status,'') <> 'Held'"; }
-    if (projectId) { countWhere += " AND b.ProjectId = @pid";     countReq.input("pid",       sql.Int, parseInt(projectId)); }
-    if (companyId) { countWhere += " AND b.CompanyId = @cid";     countReq.input("cid",       sql.Int, parseInt(companyId)); }
-    if (blockId)   { countWhere += " AND b.BlockId = @bid2";     countReq.input("bid2",      sql.Int, parseInt(blockId)); }
-    if (dateFrom)  { countWhere += " AND o.ReceivedDate >= @df";  countReq.input("df",        sql.Date, dateFrom); }
-    if (dateTo)    { countWhere += " AND o.ReceivedDate <= @dt";  countReq.input("dt",        sql.Date, dateTo); }
-    if (search) {
-      countWhere += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
-      countReq.input("s", sql.NVarChar(200), `%${search}%`);
-    }
-    const countResult = await countReq.query(`
-      SELECT COUNT(*) AS Total
-      FROM dbo.CrmOnAccountPayment o
-      JOIN dbo.CrmBooking b ON b.Id = o.BookingId
-      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-      ${countWhere}
-    `);
+    const countWhere = onAccountWhere(countReq, req.query, req.projectScope);
+
+    const [result, countResult] = await Promise.all([
+      req_.query(`
+        SELECT
+          o.Id, o.ReceiptNo, o.BookingId, o.Amount, o.AppliedAmount,
+          CAST(${ON_ACCOUNT_AVAILABLE_SQL} AS DECIMAL(18,2)) AS AvailableBalance,
+          o.Status, o.ReceivedDate, o.PaymentMode, o.TransactionRef, o.Notes,
+          o.CreatedAt, o.DepositBankId, o.DepositBankName, o.SourceReceivedPaymentId,
+          b.BookingNo, b.ProjectId,
+          COALESCE(proj.name, b.ProjectName) AS ProjectName,
+          COALESCE(um.UnitName, b.UnitNo) AS UnitNo,
+          b.GrandTotal,
+          a.ApplicantName, a.Mobile,
+          u.name AS CreatedByName
+        ${OA_FROM}
+        LEFT JOIN dbo.Users u ON u.id = o.CreatedBy
+        ${where}
+        ORDER BY o.CreatedAt DESC
+        OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
+      `),
+      countReq.query(`SELECT COUNT(*) AS Total ${OA_FROM} ${countWhere}`),
+    ]);
 
     res.json({
       deposits: result.recordset,
@@ -1681,23 +1894,27 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
   }
 });
 
-// GET /on-account/summary — aggregate totals for the On Account dashboard tiles.
+// GET /on-account/summary — the On Account figures, for the same filters as the list (status aside) and the
+// user's projects. It used to total every project, ignore the filters and count 'Held' cancellation credit.
 router.get("/on-account/summary", requirePageRight("crm-payments", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const request = pool.request();
+    const where = onAccountWhere(request, req.query, req.projectScope, { withStatus: false });
+    const result = await request.query(`
       SELECT
         COUNT(*)                                                          AS TotalCount,
-        ISNULL(SUM(o.Amount), 0)                                        AS TotalReceived,
-        ISNULL(SUM(o.Amount - o.AppliedAmount), 0)                      AS TotalAvailable,
-        ISNULL(SUM(o.AppliedAmount), 0)                                 AS TotalApplied,
-        SUM(CASE WHEN o.Status = 'Unapplied'        THEN 1 ELSE 0 END) AS UnappliedCount,
-        SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN 1 ELSE 0 END) AS PartialCount,
-        SUM(CASE WHEN o.Status = 'Applied'          THEN 1 ELSE 0 END) AS AppliedCount,
-        ISNULL(SUM(CASE WHEN o.Status = 'Unapplied'        THEN o.Amount - o.AppliedAmount ELSE 0 END), 0) AS UnappliedBalance,
-        ISNULL(SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN o.Amount - o.AppliedAmount ELSE 0 END), 0) AS PartialBalance
-      FROM dbo.CrmOnAccountPayment o
-      JOIN dbo.CrmBooking b ON b.Id = o.BookingId AND b.IsActive = 1
+        ISNULL(SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN o.Amount ELSE 0 END), 0) AS TotalReceived,
+        ISNULL(SUM(o.AvailableAmount), 0) AS TotalAvailable,
+        ISNULL(SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN o.AppliedAmount ELSE 0 END), 0) AS TotalApplied,
+        ISNULL(SUM(CASE WHEN o.Status = 'Unapplied'        THEN 1 ELSE 0 END), 0) AS UnappliedCount,
+        ISNULL(SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN 1 ELSE 0 END), 0) AS PartialCount,
+        ISNULL(SUM(CASE WHEN o.Status = 'Applied'          THEN 1 ELSE 0 END), 0) AS AppliedCount,
+        ISNULL(SUM(CASE WHEN o.Status = 'Bounced'          THEN 1 ELSE 0 END), 0) AS BouncedCount,
+        ISNULL(SUM(CASE WHEN o.Status = 'Unapplied' THEN o.AvailableAmount ELSE 0 END), 0) AS UnappliedBalance,
+        ISNULL(SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN o.AvailableAmount ELSE 0 END), 0) AS PartialBalance
+      ${OA_FROM.replace("FROM dbo.CrmOnAccountPayment o", `FROM ${onAccountWithAvailableSql("o")}`)}
+      ${where}
     `);
     res.json(result.recordset[0]);
   } catch (e) {
@@ -1706,12 +1923,80 @@ router.get("/on-account/summary", requirePageRight("crm-payments", "view"), asyn
   }
 });
 
+// Retry CRM payment side-effects after ReceivedPayment approval has committed.
+// The approval route deliberately surfaces CRM follow-up failures as warnings
+// instead of rolling back Finance's already-recorded approval. These handlers
+// reuse the source-RP idempotency constraints, so revisiting approved rows is
+// safe and also retries GL, auto-application, and money-receipt work.
+async function settleApprovedCrmReceivedPayments(pool, actorEmail = "CRM recovery") {
+  // Rows whose CrmBookingId/CrmMilestoneId points at a since-deleted Booking
+  // or Milestone can never be recovered - normal app flow never hard-deletes
+  // a booking or milestone, so this only happens from a direct DB edit (a
+  // dev reset/reseed, manual cleanup, etc). Without this exclusion the
+  // recovery job retried and re-logged the same unfixable rows every 5
+  // minutes forever. Counted separately as "orphaned" so a caller can
+  // surface it once (e.g. at server start) instead of as a recurring
+  // "failed" count.
+  const rows = (await pool.request().query(`
+    SELECT rp.RPPaymentID, rp.RPAmount, rp.RPDocDate, rp.RPMode, rp.RPTransactionID, rp.RPRemarks,
+           rp.RPDepositBankId, rp.RPDepositBankName, rp.CrmMilestoneId, rp.CrmBookingId
+    FROM dbo.ReceivedPayment rp
+    WHERE rp.RPStatus = 'Approved' AND rp.CrmBookingId IS NOT NULL
+      AND EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.Id = rp.CrmBookingId)
+      AND (rp.CrmMilestoneId IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.Id = rp.CrmMilestoneId))
+      AND (
+        NOT EXISTS (SELECT 1 FROM dbo.CrmOnAccountPayment oa WHERE oa.SourceReceivedPaymentId = rp.RPPaymentID)
+        OR NOT EXISTS (SELECT 1 FROM dbo.CrmMoneyReceipt mr WHERE mr.ReceivedPaymentId = rp.RPPaymentID)
+        OR EXISTS (
+          SELECT 1 FROM dbo.CrmOnAccountPayment oa
+          WHERE oa.SourceReceivedPaymentId = rp.RPPaymentID
+            AND ISNULL(oa.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
+            AND NOT EXISTS (
+              SELECT 1 FROM dbo.GeneralLedgerEntry gle
+              WHERE gle.SourceType = 'CrmOnAccountPayment' AND gle.SourceId = oa.Id AND gle.IsReversed = 0
+            )
+        )
+      )
+    ORDER BY RPPaymentID
+  `)).recordset;
+  const orphanedRes = await pool.request().query(`
+    SELECT COUNT(*) AS c
+    FROM dbo.ReceivedPayment rp
+    WHERE rp.RPStatus = 'Approved' AND rp.CrmBookingId IS NOT NULL
+      AND (
+        NOT EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.Id = rp.CrmBookingId)
+        OR (rp.CrmMilestoneId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.Id = rp.CrmMilestoneId))
+      )
+  `);
+  const orphaned = Number(orphanedRes.recordset[0]?.c) || 0;
+  let settled = 0, failed = 0;
+  for (const rp of rows) {
+    try {
+      const outcome = rp.CrmMilestoneId != null
+        ? await applyCrmMilestonePaymentApproval(pool, rp, null, actorEmail)
+        : await applyCrmOnAccountPaymentApproval(pool, rp, null, actorEmail);
+      await recordGLPosting("crm-received-payment", rp.RPPaymentID, outcome, actorEmail);
+      settled++;
+    } catch (err) {
+      failed++;
+      await recordGLPosting("crm-received-payment", rp.RPPaymentID, { failed: true, reason: err.message }, actorEmail);
+      console.error(`[crm-payments] approved payment recovery failed for RP ${rp.RPPaymentID}:`, err.message);
+    }
+  }
+  if (rows.length) {
+    try { await require("./receivedPayment").invalidateReceivedPaymentWorkflowCaches(); } catch {}
+  }
+  return { scanned: rows.length, settled, failed, orphaned };
+}
+
 module.exports = router;
 // Reused by crmEntityCreation.js's createCrmBookingRecord to sync an
 // Application-stage token payment onto the new Booking's first milestone.
 module.exports.createReceiptForMilestone = createReceiptForMilestone;
 module.exports.applyCrmMilestonePaymentApproval = applyCrmMilestonePaymentApproval;
 module.exports.applyCrmOnAccountPaymentApproval = applyCrmOnAccountPaymentApproval;
+module.exports.settleApprovedCrmReceivedPayments = settleApprovedCrmReceivedPayments;
 module.exports.autoApplyOnAccount = autoApplyOnAccount;
 module.exports.ReceiptError = ReceiptError;
 module.exports.raiseDemandForMilestone = raiseDemandForMilestone;
+module.exports.autoApplyOnAccountIfFullyFunded = autoApplyOnAccountIfFullyFunded;

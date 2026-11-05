@@ -19,30 +19,14 @@
  */
 const { getPool, sql } = require("../db");
 const { emitNotification } = require("./notify");
-const { advanceApplicationStatus, syncApplicationOnBookingTerminal } = require("./crmApplicationWorkflow");
-const { logCrmAudit } = require("./crmAudit");
-const { findActiveHold, releaseHold } = require("./crmHoldService");
-const { releaseAllParkingForBooking } = require("../routes/crmParking");
+
+// Phone apps that show CRM follow-up work; SLA reminders are pushed to these only.
+const SLA_PUSH = { push: true, apps: ["follow-up", "admin"] };
 const logger = require("../logger");
 
 const INTERVAL_MS = 60 * 60 * 1000; // hourly, same cadence as escalationEngine.js
-const COOLDOWN_HOURS = 24; // don't re-notify the same overdue record within this window
 
-// Customer side has no Users.id to notify through — a CrmCommunicationLog
-// entry is the customer-facing record of the reminder (visible to staff on
-// the Communicator page, and to the customer via the portal timeline's
-// active-hold banner, which always reflects live HoldUntil regardless of
-// when this last ran).
-async function logCustomerNotice(pool, applicationId, subject, summary) {
-  await pool.request()
-    .input("aid", sql.Int, applicationId)
-    .input("subj", sql.NVarChar(300), subject)
-    .input("sum", sql.NVarChar(sql.MAX), summary)
-    .query(`
-      INSERT INTO dbo.CrmCommunicationLog (ApplicationId, Channel, Direction, Subject, Summary, ContactedAt, CreatedAt)
-      VALUES (@aid, 'System', 'Outbound', @subj, @sum, SYSDATETIME(), SYSDATETIME())
-    `);
-}
+const COOLDOWN_HOURS = 24; // don't re-notify the same overdue record within this window
 
 // Shared de-dup clause: an entity is only "due for escalation" if it hasn't
 // already been escalated within the cooldown window.
@@ -73,7 +57,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_ticket_overdue",
         "Ticket SLA Breached",
         `${row.TicketNo}: ${row.Subject} (${row.ApplicantName} · ${row.BookingNo}) is past its SLA due date.`,
-        row.Id, "service_ticket");
+        row.Id, "service_ticket", SLA_PUSH);
       return true;
     },
   },
@@ -96,7 +80,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_payment_overdue",
         "Payment Overdue",
         `${row.ApplicantName} · ${row.BookingNo} — ${row.MilestoneName} overdue (₹${balance.toLocaleString("en-IN")} pending)`,
-        row.Id, "payment_milestone");
+        row.Id, "payment_milestone", SLA_PUSH);
       return true;
     },
   },
@@ -121,145 +105,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_followup_call_due",
         "Follow-up Call Overdue",
         `${row.ApplicantName} · ${row.BookingNo} — scheduled follow-up call is overdue.`,
-        row.Id, "crm_booking");
-      return true;
-    },
-  },
-  {
-    // Fires once per Active hold, whenever this run first sees it past
-    // HoldUntil. Flips it back to Available (Status='Expired') and notifies
-    // both the assigned salesperson and the customer — this is the actual
-    // "auto switch back to Available after N days" the hold engine promises.
-    entityType: "crm-hold-expiry",
-    async fetch(pool) {
-      const r = await pool.request().query(`
-        SELECT h.Id, h.EntityType, h.EntityId, h.ApplicationId, h.HoldUntil,
-               a.ApplicantName, a.AssignedTo,
-               u.UnitName, s.SlotNo
-        FROM dbo.CrmInventoryHold h
-        JOIN dbo.CrmApplication a ON a.Id = h.ApplicationId
-        LEFT JOIN dbo.UnitMaster u ON h.EntityType = 'Unit' AND u.Id = h.EntityId
-        LEFT JOIN dbo.ParkingSlot s ON h.EntityType = 'Parking' AND s.Id = h.EntityId
-        WHERE h.Status = 'Active' AND h.HoldUntil < SYSDATETIME()
-      `);
-      return r.recordset;
-    },
-    async notify(pool, row) {
-      // Re-check status atomically before writing — a staff member could have
-      // converted this hold into a real Booking (flipping it to 'Converted')
-      // in the narrow window between this run's fetch() and this write.
-      // Same guard pattern as crm-booking-confirm-expiry below.
-      const claimed = await pool.request().input("id", sql.Int, row.Id)
-        .query("UPDATE dbo.CrmInventoryHold SET Status = 'Expired' OUTPUT INSERTED.Id WHERE Id = @id AND Status = 'Active'");
-      if (!claimed.recordset.length) return false; // already Converted/Released — skip cascade
-      const label = row.EntityType === "Unit" ? `Unit ${row.UnitName}` : `Parking slot ${row.SlotNo}`;
-      await logCustomerNotice(pool, row.ApplicationId, "Hold Expired",
-        `Your hold on ${label} has expired and it is now available to other buyers.`);
-      if (row.AssignedTo) {
-        await emitNotification(pool, row.AssignedTo, "crm_hold_expired",
-          "Hold Expired",
-          `${label} — hold for ${row.ApplicantName} has expired and is now back to Available.`,
-          row.Id, "crm_inventory_hold");
-      }
-
-      // If this was the LAST thing keeping the Application open — no other
-      // still-Active hold, and it never got Approved into a real Booking —
-      // move the Application itself into a distinct terminal status instead
-      // of leaving it sitting in Draft/Pending forever with no visible sign
-      // anything happened. Never deletes the row — status-only, same as
-      // every other terminal transition here, so the Application stays in
-      // CrmApplicationStatusLog's audit trail permanently. Scoped to
-      // Draft/Pending only: an Approved application already has a real
-      // Booking (its hold would have been Converted, not still Active), so
-      // this can never fire against a live sale.
-      const app = await pool.request().input("aid", sql.Int, row.ApplicationId)
-        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
-      if (app.recordset.length && ["Draft", "Pending"].includes(app.recordset[0].Status)) {
-        const otherActive = await pool.request().input("aid", sql.Int, row.ApplicationId)
-          .query("SELECT TOP 1 Id FROM dbo.CrmInventoryHold WHERE ApplicationId = @aid AND Status = 'Active'");
-        if (!otherActive.recordset.length) {
-          await advanceApplicationStatus(pool, row.ApplicationId, "Expired",
-            "HoldExpiry", `Auto-expired — ${label} hold expired with no other active hold on this application.`,
-            null, { force: true });
-        }
-      }
-      return true;
-    },
-  },
-  {
-    // A Booking existing does NOT mean "Booked" anymore — the Unit/Parking
-    // Matrix only shows Booked once it's Approved AND its booking-amount
-    // milestone is Paid (see unitMatrix.js/parkingMatrix.js). Until then it
-    // still occupies the SAME 3-day window the original hold promised
-    // (ConfirmDeadline, snapshotted at Booking creation — see
-    // crmEntityCreation.js). If that window passes with the Booking still
-    // unconfirmed, the Booking itself auto-expires here — the Unit/Parking
-    // genuinely frees up for someone else, exactly like an unconverted hold
-    // would, instead of sitting Pending forever with inventory silently
-    // locked behind it.
-    entityType: "crm-booking-confirm-expiry",
-    async fetch(pool) {
-      const r = await pool.request().query(`
-        SELECT bk.Id, bk.BookingNo, bk.ApplicationId, bk.UnitId, bk.AssignedTo,
-               a.ApplicantName, u.UnitName
-        FROM dbo.CrmBooking bk
-        JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
-        LEFT JOIN dbo.UnitMaster u ON u.Id = bk.UnitId
-        WHERE bk.IsActive = 1 AND bk.Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired')
-          AND bk.ConfirmDeadline IS NOT NULL AND bk.ConfirmDeadline < SYSDATETIME()
-      `);
-      return r.recordset;
-    },
-    async notify(pool, row) {
-      // Re-check-and-write in one statement rather than trusting the fetch()
-      // snapshot — staff could have approved/cancelled/rejected this exact
-      // Booking in the moments between this run's fetch and this write (the
-      // engine runs hourly, but the window isn't zero). Only actually
-      // expires it, and only runs the release cascade below, if it's still
-      // genuinely in a state this sweep should touch.
-      const claimed = await pool.request().input("id", sql.Int, row.Id).query(`
-        UPDATE dbo.CrmBooking SET Status = 'Expired'
-        OUTPUT INSERTED.Id
-        WHERE Id = @id AND IsActive = 1 AND Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired')
-      `);
-      if (!claimed.recordset.length) return false;
-
-      await logCrmAudit(pool, "Booking", row.Id, null, [
-        { field: "Status", oldVal: "Pending", newVal: "Expired" },
-      ]);
-
-      // Free the Unit back up — release its hold if the sweep hasn't
-      // already caught it separately (it may still be 'Converted', not
-      // 'Active', since guardAndConvertHold ran at Booking creation; only
-      // release what's actually still Active).
-      const unitHold = await findActiveHold(pool, "Unit", row.UnitId);
-      if (unitHold) await releaseHold(pool, unitHold.Id, null);
-
-      // Same cascade a real Booking cancellation performs for parking
-      // (crmCancellations.js) — an unpaid milestone tied to a now-dead
-      // Booking must go too, or it'd sit forever demanding payment for a
-      // sale that no longer exists.
-      try { await releaseAllParkingForBooking(pool, row.Id); }
-      catch (parkErr) { console.error("[crm-sla-engine] parking release on booking expiry failed:", parkErr.message); }
-
-      // Same reasoning as the Application-expiry cascade above and the
-      // manual cancel/reject cascades in crmCancellations.js/crmBookings.js
-      // — the Application was force-advanced to 'Approved' the instant this
-      // Booking was created and nothing has touched it since. Without this
-      // it would sit at 'Approved' forever with an Expired Booking
-      // underneath, indistinguishable from a genuinely active sale.
-      await syncApplicationOnBookingTerminal(pool, row.Id, "Expired", "BookingConfirmExpiry",
-        `Auto-expired — its Booking (${row.BookingNo}) was never confirmed in time.`, null);
-
-      const label = row.UnitName ? `Unit ${row.UnitName}` : row.BookingNo;
-      await logCustomerNotice(pool, row.ApplicationId, "Booking Expired",
-        `Your booking for ${label} was not confirmed (approved and paid) in time and has expired. It is now available to other buyers.`);
-      if (row.AssignedTo) {
-        await emitNotification(pool, row.AssignedTo, "crm_booking_confirm_expired",
-          "Booking Expired — Not Confirmed In Time",
-          `${row.BookingNo} (${row.ApplicantName}) — ${label} was never approved/paid within its window and has expired.`,
-          row.Id, "crm_booking");
-      }
+        row.Id, "crm_booking", SLA_PUSH);
       return true;
     },
   },
@@ -290,7 +136,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_registration_overdue",
         "Sale Deed Registration Overdue",
         `${row.DeedNo} (${row.BookingNo} · ${row.ApplicantName}) — registration deadline was ${deadline}. RegistrationNo not yet recorded.`,
-        row.Id, "crm_sales_deed");
+        row.Id, "crm_sales_deed", SLA_PUSH);
       return true;
     },
   },
@@ -320,40 +166,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_possession_response_overdue",
         "Possession Notice Response Overdue",
         `${row.NoticeNo} (${row.BookingNo} · ${row.ApplicantName}) — response deadline was ${deadline} and the customer has neither acknowledged nor disputed.`,
-        row.Id, "crm_possession_notice");
-      return true;
-    },
-  },
-  {
-    // Daily reminder while a hold is still active — the 24h cooldown via
-    // CrmSlaEscalationLog is what turns the hourly engine tick into an
-    // actual once-a-day cadence for this entry.
-    entityType: "crm-hold-reminder",
-    async fetch(pool) {
-      const r = await pool.request().query(`
-        SELECT h.Id, h.EntityType, h.EntityId, h.ApplicationId, h.HoldUntil,
-               a.ApplicantName, a.AssignedTo,
-               u.UnitName, s.SlotNo
-        FROM dbo.CrmInventoryHold h
-        JOIN dbo.CrmApplication a ON a.Id = h.ApplicationId
-        LEFT JOIN dbo.UnitMaster u ON h.EntityType = 'Unit' AND u.Id = h.EntityId
-        LEFT JOIN dbo.ParkingSlot s ON h.EntityType = 'Parking' AND s.Id = h.EntityId
-        WHERE h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
-          AND ${NOT_RECENTLY_ESCALATED("'crm-hold-reminder'", "h.Id")}
-      `);
-      return r.recordset;
-    },
-    async notify(pool, row) {
-      const label = row.EntityType === "Unit" ? `Unit ${row.UnitName}` : `Parking slot ${row.SlotNo}`;
-      const daysLeft = Math.max(0, Math.ceil((new Date(row.HoldUntil) - Date.now()) / 86400000));
-      await logCustomerNotice(pool, row.ApplicationId, "Hold Reminder",
-        `Reminder: your hold on ${label} expires in ${daysLeft} day(s) (${new Date(row.HoldUntil).toLocaleDateString("en-IN")}). Confirm your booking before it releases.`);
-      if (row.AssignedTo) {
-        await emitNotification(pool, row.AssignedTo, "crm_hold_reminder",
-          "Hold Reminder",
-          `${label} — hold for ${row.ApplicantName} expires in ${daysLeft} day(s). Follow up before it auto-releases.`,
-          row.Id, "crm_inventory_hold");
-      }
+        row.Id, "crm_possession_notice", SLA_PUSH);
       return true;
     },
   },

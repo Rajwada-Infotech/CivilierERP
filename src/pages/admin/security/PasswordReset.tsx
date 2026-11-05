@@ -1,57 +1,25 @@
 import React, { useState, useCallback, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import {
-  Eye,
-  EyeOff,
-  KeyRound,
-  RefreshCw,
-  Search,
-  ShieldCheck,
-  User,
-  Users,
-  UserCheck,
-  UserX,
-  X,
-  Lock,
-  CheckCircle2,
-  AlertCircle,
-} from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { Eye, EyeOff, KeyRound, RefreshCw, Search, X, CheckCircle2, AlertCircle } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { resetUserPassword, getUsers } from "@/api/userApi";
 
+// ─── Drawing-sheet ink ──────────────────────────────────────────────────────────
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const TAG = "inline-flex items-center font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
+const INPUT = "w-full h-10 px-3 text-sm bg-card border text-foreground placeholder:text-muted-foreground/60 focus:outline-none transition-colors";
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  super_admin: { bg: "bg-purple-500/15", text: "text-purple-600 dark:text-purple-400", border: "border-purple-400/30" },
-  admin:       { bg: "bg-blue-500/15",   text: "text-blue-600 dark:text-blue-400",   border: "border-blue-400/30"   },
-  dba:         { bg: "bg-emerald-500/15",text: "text-emerald-600 dark:text-emerald-400",border: "border-emerald-400/30"},
-  manager:     { bg: "bg-amber-500/15",  text: "text-amber-600 dark:text-amber-400", border: "border-amber-400/30"  },
-  director:    { bg: "bg-rose-500/15",   text: "text-rose-600 dark:text-rose-400",   border: "border-rose-400/30"   },
-};
-
-const AVATAR_COLORS = [
-  "from-blue-500 to-indigo-600",
-  "from-emerald-500 to-teal-600",
-  "from-purple-500 to-violet-600",
-  "from-rose-500 to-pink-600",
-  "from-amber-500 to-orange-600",
-  "from-cyan-500 to-sky-600",
-];
-
-function avatarGradient(name: string) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
 
 function getInitials(name: string) {
   return name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
@@ -61,24 +29,20 @@ function roleLabel(role: string) {
   return role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function getRoleStyle(role: string) {
-  return ROLE_COLORS[role] ?? { bg: "bg-slate-500/15", text: "text-slate-600 dark:text-slate-400", border: "border-slate-400/30" };
-}
-
 // ─── Password strength ────────────────────────────────────────────────────────
 
-function passwordStrength(pw: string): { score: number; label: string; color: string } {
-  if (!pw) return { score: 0, label: "", color: "" };
+function passwordStrength(pw: string): { score: number; label: string } {
+  if (!pw) return { score: 0, label: "" };
   let score = 0;
   if (pw.length >= 6)  score++;
   if (pw.length >= 10) score++;
   if (/[A-Z]/.test(pw)) score++;
   if (/[0-9]/.test(pw)) score++;
   if (/[^A-Za-z0-9]/.test(pw)) score++;
-  if (score <= 1) return { score, label: "Weak",   color: "bg-red-500"    };
-  if (score <= 2) return { score, label: "Fair",   color: "bg-amber-500"  };
-  if (score <= 3) return { score, label: "Good",   color: "bg-blue-500"   };
-  return              { score, label: "Strong", color: "bg-emerald-500" };
+  if (score <= 1) return { score, label: "Weak" };
+  if (score <= 2) return { score, label: "Fair" };
+  if (score <= 3) return { score, label: "Good" };
+  return { score, label: "Strong" };
 }
 
 // ─── Reset Dialog ─────────────────────────────────────────────────────────────
@@ -108,11 +72,10 @@ function ResetDialog({
   }, [user?.id]);
 
   const strength    = passwordStrength(newPassword);
+  const weak        = strength.score <= 1;
   const matches     = newPassword && confirmPassword && newPassword === confirmPassword;
   const mismatch    = confirmPassword && newPassword !== confirmPassword;
   const canSubmit   = newPassword.length >= 6 && matches && !loading;
-  const grad        = user ? avatarGradient(user.name) : AVATAR_COLORS[0];
-  const initials    = user ? getInitials(user.name) : "?";
 
   const handleReset = async () => {
     if (!user || !canSubmit) return;
@@ -130,37 +93,23 @@ function ResetDialog({
 
   return (
     <Dialog open={!!user} onOpenChange={(o) => { if (!o && !loading) onClose(); }}>
-      <DialogContent className="p-0 gap-0 overflow-hidden max-w-sm w-[calc(100vw-2rem)]">
+      <DialogContent className="sheet-frame p-0 gap-0 overflow-hidden max-w-sm w-[calc(100vw-2rem)]" style={{ margin: 0 }}>
         <DialogTitle className="sr-only">Reset Password</DialogTitle>
         <DialogDescription className="sr-only">
           Set a new password for {user?.name}
         </DialogDescription>
 
-        {/* Header */}
-        <div className="relative px-6 pt-6 pb-5 bg-gradient-to-br from-blue-500/8 via-transparent to-transparent border-b border-border">
-          <div className="flex items-center gap-4">
-            {/* Avatar */}
-            <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${grad} flex items-center justify-center shrink-0 shadow-sm`}>
-              <span className="text-sm font-bold text-white">{initials}</span>
+        {/* Header: whose password */}
+        <div className="px-6 pt-6 pb-4" style={{ borderBottom: RULE }}>
+          <p className={LBL}>Reset password</p>
+          <div className="flex items-center gap-3 mt-2">
+            <div className="w-11 h-11 border border-foreground flex items-center justify-center shrink-0">
+              <span className="font-heading text-sm font-bold text-foreground">{user ? getInitials(user.name) : "?"}</span>
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
+              <p className="font-heading text-base font-bold tracking-tight text-foreground truncate">{user?.name}</p>
               <p className="text-[0.6875rem] text-muted-foreground truncate">{user?.email}</p>
-              {user?.role && (
-                <span className={`inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[0.625rem] font-medium border ${getRoleStyle(user.role).bg} ${getRoleStyle(user.role).text} ${getRoleStyle(user.role).border}`}>
-                  {roleLabel(user.role)}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 mt-4">
-            <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <Lock size={13} className="text-blue-500" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-foreground">Set new password</p>
-              <p className="text-[0.6875rem] text-muted-foreground">Must be at least 6 characters</p>
+              {user?.role && <span className={`${TAG} mt-1 text-foreground border-foreground/40`}>{roleLabel(user.role)}</span>}
             </div>
           </div>
         </div>
@@ -169,9 +118,7 @@ function ResetDialog({
         <div className="px-6 py-5 space-y-4">
           {/* New Password */}
           <div className="space-y-1.5">
-            <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
-              New Password
-            </label>
+            <label className={`${LBL} block`}>New password</label>
             <div className="relative">
               <input
                 type={showNew ? "text" : "password"}
@@ -179,11 +126,12 @@ function ResetDialog({
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="At least 6 characters"
                 autoFocus
-                className="w-full px-3 py-2.5 pr-9 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500/50 transition-all"
+                className={`${INPUT} pr-9 border-foreground/40 focus:border-foreground`}
               />
               <button
                 type="button"
                 onClick={() => setShowNew((v) => !v)}
+                aria-label={showNew ? "Hide password" : "Show password"}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
               >
                 {showNew ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -193,39 +141,35 @@ function ResetDialog({
             {/* Live length hint — shows as soon as they've typed something
                 too short, instead of only failing silently on submit. */}
             {newPassword && newPassword.length < 6 && (
-              <p className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-amber-500">
+              <p className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-foreground">
                 <AlertCircle size={11} />
                 {6 - newPassword.length} more character{6 - newPassword.length === 1 ? "" : "s"} needed
               </p>
             )}
 
-            {/* Strength bar */}
+            {/* Strength: five squares, inked as it gets stronger; red only while weak */}
             {newPassword && (
-              <div className="space-y-1 pt-0.5">
-                <div className="flex gap-1">
+              <div className="flex items-center gap-2 pt-0.5">
+                <div className="flex gap-1 flex-1">
                   {[1, 2, 3, 4, 5].map((i) => (
                     <div
                       key={i}
-                      className={`h-1 flex-1 rounded-full transition-all duration-300 ${i <= strength.score ? strength.color : "bg-muted"}`}
+                      className={`h-2 flex-1 border transition-colors ${
+                        i <= strength.score
+                          ? weak ? "bg-destructive border-destructive" : "bg-foreground border-foreground"
+                          : "border-foreground/30"
+                      }`}
                     />
                   ))}
                 </div>
-                <p className={`text-[0.625rem] font-medium ${
-                  strength.score <= 1 ? "text-red-500" :
-                  strength.score <= 2 ? "text-amber-500" :
-                  strength.score <= 3 ? "text-blue-500" : "text-emerald-500"
-                }`}>
-                  {strength.label}
-                </p>
+                <span className={`${LBL} ${weak ? "!text-destructive" : "!text-foreground"}`}>{strength.label}</span>
               </div>
             )}
           </div>
 
           {/* Confirm Password */}
           <div className="space-y-1.5">
-            <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
-              Confirm Password
-            </label>
+            <label className={`${LBL} block`}>Confirm password</label>
             <div className="relative">
               <input
                 type={showConfirm ? "text" : "password"}
@@ -233,17 +177,14 @@ function ResetDialog({
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Re-enter password"
                 onKeyDown={(e) => { if (e.key === "Enter" && canSubmit) handleReset(); }}
-                className={`w-full px-3 py-2.5 pr-9 text-sm rounded-xl border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 transition-all ${
-                  mismatch
-                    ? "border-red-400/60 focus:ring-red-400/20 focus:border-red-400/60"
-                    : matches
-                    ? "border-emerald-400/60 focus:ring-emerald-400/20 focus:border-emerald-400/60"
-                    : "border-border focus:ring-blue-500/25 focus:border-blue-500/50"
+                className={`${INPUT} pr-9 ${
+                  mismatch ? "border-destructive" : matches ? "border-foreground" : "border-foreground/40 focus:border-foreground"
                 }`}
               />
               <button
                 type="button"
                 onClick={() => setShowConfirm((v) => !v)}
+                aria-label={showConfirm ? "Hide password" : "Show password"}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
               >
                 {showConfirm ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -252,7 +193,7 @@ function ResetDialog({
 
             {/* Match indicator */}
             {confirmPassword && (
-              <div className={`flex items-center gap-1.5 text-[0.6875rem] font-medium ${matches ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+              <div className={`flex items-center gap-1.5 text-[0.6875rem] font-medium ${matches ? "text-foreground" : "text-destructive"}`}>
                 {matches ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
                 {matches ? "Passwords match" : "Passwords do not match"}
               </div>
@@ -261,27 +202,17 @@ function ResetDialog({
         </div>
 
         {/* Footer */}
-        <div className="px-6 pb-5 flex gap-2.5">
+        <div className="px-6 py-4 flex gap-2" style={{ borderTop: RULE }}>
           <button
             onClick={() => { if (!loading) onClose(); }}
             disabled={loading}
-            className="w-24 shrink-0 py-2.5 text-sm rounded-xl border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+            className={`${KEY_LINE} h-10 w-24 shrink-0`}
           >
             Cancel
           </button>
-          <button
-            onClick={handleReset}
-            disabled={!canSubmit}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-heading font-semibold rounded-xl btn-module shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${
- canSubmit && !loading ? "animate-breathe" : ""
-            }`}
-          >
-            {loading ? (
-              <RefreshCw size={13} className="animate-spin" />
-            ) : (
-              <KeyRound size={13} />
-            )}
-            {loading ? "Resetting…" : "Reset Password"}
+          <button onClick={handleReset} disabled={!canSubmit} className={`${KEY_INK} h-10 flex-1 whitespace-nowrap`}>
+            {loading ? <RefreshCw size={12} className="animate-spin" /> : <KeyRound size={12} />}
+            {loading ? "Resetting…" : "Reset password"}
           </button>
         </div>
       </DialogContent>
@@ -298,49 +229,23 @@ function UserCard({
   user: { id: string; name: string; email: string; role: string; isActive: boolean };
   onReset: () => void;
 }) {
-  const grad     = avatarGradient(user.name);
-  const initials = getInitials(user.name);
-  const roleStyle = getRoleStyle(user.role);
-
   return (
-    <div className="group relative rounded-2xl border border-border bg-card overflow-hidden hover:border-blue-400/40 hover:shadow-md transition-all duration-200">
-      {/* Top accent strip */}
-      <div className={`h-0.5 w-full bg-gradient-to-r ${grad}`} />
-
-      <div className="p-5">
-        {/* Avatar + status */}
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${grad} flex items-center justify-center shrink-0 shadow-sm`}>
-            <span className="text-sm font-bold text-white">{initials}</span>
+    <div className={`bg-card flex flex-col border ${user.isActive ? "border-foreground" : "border-dashed border-foreground/50"}`}>
+      <div className="p-4 flex-1">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className={`w-10 h-10 border flex items-center justify-center shrink-0 ${user.isActive ? "border-foreground text-foreground" : "border-foreground/40 text-muted-foreground"}`}>
+            <span className="font-heading text-sm font-bold">{getInitials(user.name)}</span>
           </div>
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border shrink-0 mt-0.5 ${
-            user.isActive
-              ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20 dark:text-emerald-400"
-              : "bg-red-500/10 text-red-500 border-red-400/20"
-          }`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${user.isActive ? "bg-emerald-500" : "bg-red-500"}`} />
-            {user.isActive ? "Active" : "Inactive"}
-          </span>
+          {user.isActive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
         </div>
-
-        {/* Name / email */}
-        <div className="mb-3">
-          <p className="font-semibold text-sm text-foreground truncate leading-tight">{user.name}</p>
-          <p className="text-[0.6875rem] text-muted-foreground truncate mt-0.5">{user.email}</p>
-        </div>
-
-        {/* Role badge */}
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[0.625rem] font-medium border mb-4 ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}>
-          {roleLabel(user.role)}
-        </span>
-
-        {/* Reset button */}
-        <button
-          onClick={onReset}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-xl border border-border bg-background hover:bg-blue-500/8 hover:border-blue-400/40 hover:text-blue-600 dark:hover:text-blue-400 transition-all group-hover:border-blue-400/30"
-        >
+        <p className={`font-semibold text-sm truncate leading-tight ${user.isActive ? "text-foreground" : "text-muted-foreground"}`}>{user.name}</p>
+        <p className="text-[0.6875rem] text-muted-foreground truncate mt-0.5">{user.email}</p>
+        <span className={`${TAG} mt-2 text-foreground border-foreground/40`}>{roleLabel(user.role)}</span>
+      </div>
+      <div className="px-4 py-3 border-t border-foreground/25">
+        <button onClick={onReset} className={`${KEY_LINE} w-full h-9`}>
           <KeyRound size={12} />
-          Reset Password
+          Reset password
         </button>
       </div>
     </div>
@@ -401,120 +306,89 @@ export default function PasswordReset() {
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Security", "Password Reset"]} />
 
-      <AdminShell
-        title="Password Reset"
-        subtitle="Search for a user and set a new password on their behalf"
-        icon={ShieldCheck}
+      <SheetShell
+        eyebrow="CivilierERP · Admin · Security"
+        title="Password reset"
+        subtitle="Find a person and set a new password on their behalf."
         action={
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="group flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-xl border border-border hover:bg-muted transition-all disabled:opacity-50"
-          >
-            <RefreshCw
-              size={12}
-              className={`transition-transform duration-500 ${refreshing ? "animate-spin" : "group-hover:rotate-180"}`}
-            />
+          <button onClick={handleRefresh} disabled={refreshing} className={`${KEY_LINE} h-9 px-4`}>
+            <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
             {refreshing ? "Loading…" : "Refresh"}
           </button>
         }
       >
-
-        {/* ── Stats row ── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {[
-            { icon: Users,     label: "Total Users",    value: allUsers.length,  color: "text-blue-500",    bg: "bg-blue-500/10"    },
-            { icon: UserCheck, label: "Active",         value: activeCount,      color: "text-emerald-500", bg: "bg-emerald-500/10" },
-            { icon: UserX,     label: "Inactive",       value: inactiveCount,    color: "text-red-500",     bg: "bg-red-500/10"     },
-          ].map(({ icon: Icon, label, value, color, bg }) => (
-            <div key={label} className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3">
-              <div className={`w-8 h-8 rounded-lg ${bg} flex items-center justify-center shrink-0`}>
-                <Icon size={14} className={color} />
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Users", value: allUsers.length, note: "on record" },
+              { label: "Active", value: activeCount, note: "can sign in" },
+              { label: "Inactive", value: inactiveCount, note: "sign-in blocked" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
               </div>
-              <div>
-                <p className="text-lg font-bold text-foreground leading-none">{value}</p>
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{label}</p>
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
-        {/* ── Search ── */}
-        <div className="relative max-w-sm">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search by name or email…"
-            className="w-full pl-9 pr-8 py-2.5 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500/50 transition-all"
-          />
-          {filter && (
-            <button
-              onClick={() => setFilter("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X size={12} />
-            </button>
-          )}
-        </div>
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+            <p className="flex items-baseline gap-2.5 mr-auto">
+              <span className={HEAD}>People</span>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">
+                {filter ? `${filtered.length} of ${allUsers.length}` : allUsers.length}
+              </span>
+            </p>
+            <div className="relative w-full sm:w-72">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Search by name or email…"
+                className={`${INPUT} h-9 pl-8 pr-8 border-foreground/40 focus:border-foreground`}
+              />
+              {filter && (
+                <button onClick={() => setFilter("")} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
 
-        {/* ── User grid ── */}
-        {filtered.length === 0 ? (
-          <div className="py-16 flex flex-col items-center gap-4 text-center rounded-2xl border border-dashed border-border bg-muted/20">
-            <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center">
-              {filter
-                ? <Search size={22} className="text-muted-foreground/50" />
-                : <User size={22} className="text-muted-foreground/50" />
-              }
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-foreground">
-                {filter ? "No users match your search" : "No users loaded yet"}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
-                {filter
-                  ? "Try a different name or email."
-                  : "Click Refresh to load the user list from the server."}
-              </p>
-            </div>
-            {!filter && (
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-xl border border-border hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
-                {refreshing ? "Loading…" : "Load Users"}
-              </button>
-            )}
-            {filter && (
-              <button
-                onClick={() => setFilter("")}
-                className="text-xs text-blue-500 hover:underline"
-              >
-                Clear search
-              </button>
+          <div className="p-4">
+            {filtered.length === 0 ? (
+              <div className="py-14 flex flex-col items-center gap-3 text-center border border-dashed border-foreground/40">
+                <p className="font-heading text-base font-bold tracking-tight text-foreground">
+                  {filter ? "No one matches that search" : "No users loaded yet"}
+                </p>
+                <p className="text-xs text-muted-foreground max-w-xs">
+                  {filter ? "Try a different name or email." : "Use Load users to fetch the list from the server."}
+                </p>
+                {filter ? (
+                  <button onClick={() => setFilter("")} className={`${KEY_LINE} h-9 px-4`}>Clear search</button>
+                ) : (
+                  <button onClick={handleRefresh} disabled={refreshing} className={`${KEY_INK} h-9 px-4`}>
+                    <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+                    {refreshing ? "Loading…" : "Load users"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,16rem),1fr))]">
+                {filtered.map((user) => (
+                  <UserCard
+                    key={user.id}
+                    user={user}
+                    onReset={() => setSelectedUser({ id: user.id, name: user.name, email: user.email, role: user.role })}
+                  />
+                ))}
+              </div>
             )}
           </div>
-        ) : (
-          <>
-            <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))]">
-              {filtered.map((user) => (
-                <UserCard
-                  key={user.id}
-                  user={user}
-                  onReset={() => setSelectedUser({ id: user.id, name: user.name, email: user.email, role: user.role })}
-                />
-              ))}
-            </div>
-            {filter && (
-              <p className="text-xs text-muted-foreground text-center">
-                Showing {filtered.length} of {allUsers.length} users
-              </p>
-            )}
-          </>
-        )}
-      </AdminShell>
+        </div>
+      </SheetShell>
 
       <ResetDialog user={selectedUser} onClose={() => setSelectedUser(null)} />
     </>

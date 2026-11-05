@@ -1,84 +1,23 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { usePageRights } from "@/hooks/usePageRights";
 import { useNavigate } from "react-router-dom";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DashboardBackground } from "@/components/DashboardBackground";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  RefreshCw,
-  CreditCard,
-  Landmark,
-  BookOpen,
-  Receipt,
-  BadgeDollarSign,
-  CheckCircle2,
-  Clock,
-  TrendingUp,
-} from "lucide-react";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Legend,
-} from "recharts";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { formatCompactINR } from "@/utils/formatCurrency";
-import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
-import {
-  FinanceShell,
-  FinanceGlassCard,
-  GlassSection,
-} from "@/components/finance/FinanceShell";
+import { SHEET_CSS, Detail, Dimension, Skel } from "@/components/sheet/Sheet";
+
+// Finance Dashboard, on the same drawing sheet as Home and CRM (components/sheet/Sheet).
+//
+// The one idea of the page is the cash line: money received is drawn solid above it, money paid out is drawn hatched
+// below it - in the totals (detail A) and day by day (detail C). Red is kept for a net outflow.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FinanceDashboardData {
-  paymentsMade: {
-    totalCount: number;
-    todayCount: number;
-    totalAmount: number;
-    todayAmount: number;
-  };
-  receivedPayments: {
-    totalCount: number;
-    todayCount: number;
-    totalAmount: number;
-    todayAmount: number;
-    approvedCount: number;
-    draftCount: number;
-  };
-  cheques: {
-    totalCount: number;
-    activeCount: number;
-    inactiveCount: number;
-  };
-  cards: {
-    totalCount: number;
-    activeCount: number;
-    inactiveCount: number;
-  };
-  banks: {
-    totalCount: number;
-    activeCount: number;
-  };
+  paymentsMade: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number };
+  receivedPayments: { totalCount: number; todayCount: number; totalAmount: number; todayAmount: number; approvedCount: number; draftCount: number };
+  cheques: { totalCount: number; activeCount: number; inactiveCount: number };
+  cards: { totalCount: number; activeCount: number; inactiveCount: number };
+  banks: { totalCount: number; activeCount: number };
   recentPaymentsMade: RecentPaymentMade[];
   recentPaymentsReceived: RecentPaymentReceived[];
   timeline: { date: string; made: number; received: number }[];
@@ -107,224 +46,6 @@ interface RecentPaymentReceived {
   RPCreatedAt: string;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const fmt = (n: number) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(n);
-
-const fmtDate = (d: string | null) =>
-  d
-    ? new Date(d).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-    : "—";
-
-interface DonutPoint {
-  name: string;
-  value: number;
-  color: string;
-}
-
-const DonutCard: React.FC<{
-  title: string;
-  icon: React.ElementType;
-  accentColor: string;
-  data: DonutPoint[];
-  isDark: boolean;
-  glassStyle: React.CSSProperties;
-  formatValue?: (n: number) => string;
-}> = ({ title, icon: Icon, accentColor, data, isDark, glassStyle, formatValue = fmt }) => {
-  const { theme } = useTheme();
-  const total = data.reduce((s, d) => s + d.value, 0);
-  return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
-      <div
-        className="flex items-center gap-2 px-4 py-3 border-b"
-        style={{
-          borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)",
-        }}
-      >
-        <div
-          className="w-5 h-5 rounded-md flex items-center justify-center"
-          style={{ background: `${accentColor}26` }}
-        >
-          <Icon size={11} style={{ color: accentColor }} />
-        </div>
-        <span
-          className="text-xs font-heading font-semibold"
-          style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
-        >
-          {title}
-        </span>
-      </div>
-      <div className="p-4">
-        {total === 0 ? (
-          <div className="text-center text-muted-foreground py-10 text-sm">
-            No data yet
-          </div>
-        ) : (
-          <div className="flex flex-col sm:flex-row items-center gap-4">
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie
-                  data={data}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={45}
-                  outerRadius={75}
-                  paddingAngle={2}
-                  strokeWidth={0}
-                >
-                  {data.map((d, i) => (
-                    <Cell key={i} fill={bwChartColor(theme, i, d.color)} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const d = payload[0];
-                    return (
-                      <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
-                        <p className="text-xs font-heading font-semibold text-foreground">
-                          {d.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatValue(d.value as number)}
-                        </p>
-                      </div>
-                    );
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d, i) => (
-                <div key={d.name} className="flex items-center gap-2">
-                  <div
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ background: bwChartColor(theme, i, d.color) }}
-                  />
-                  <span className="text-xs text-foreground whitespace-nowrap">
-                    {d.name}
-                  </span>
-                  <span className="text-xs text-muted-foreground ml-auto sm:ml-3">
-                    {formatValue(d.value)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-interface TrendSeries {
-  key: string;
-  name: string;
-  color: string;
-}
-
-const TrendCard: React.FC<{
-  title: string;
-  icon: React.ElementType;
-  accentColor: string;
-  data: { date: string; [key: string]: number | string }[];
-  series: TrendSeries[];
-  isDark: boolean;
-  glassStyle: React.CSSProperties;
-}> = ({ title, icon: Icon, accentColor, data, series, isDark, glassStyle }) => {
-  const { theme } = useTheme();
-  const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
-  return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
-      <div
-        className="flex items-center gap-2 px-4 py-3 border-b"
-        style={{
-          borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)",
-        }}
-      >
-        <div
-          className="w-5 h-5 rounded-md flex items-center justify-center"
-          style={{ background: `${accentColor}26` }}
-        >
-          <Icon size={11} style={{ color: accentColor }} />
-        </div>
-        <span
-          className="text-xs font-heading font-semibold"
-          style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
-        >
-          {title}
-        </span>
-      </div>
-      <div className="p-4">
-        {!hasData ? (
-          <div className="text-center text-muted-foreground py-10 text-sm">
-            No activity in the last 14 days
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"}
-                vertical={false}
-              />
-              <XAxis
-                dataKey="date"
-                tickFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
-                axisLine={false}
-                tickLine={false}
-                interval={Math.max(0, Math.floor(data.length / 6) - 1)}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
-                axisLine={false}
-                tickLine={false}
-                width={40}
-                tickFormatter={formatCompactINR}
-              />
-              <Tooltip
-                labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                formatter={(value: number, name: string) => [fmt(value), name]}
-                contentStyle={{
-                  background: isDark ? "rgba(15,17,26,0.95)" : "rgba(255,255,255,0.95)",
-                  border: `1px solid ${accentColor}30`,
-                  borderRadius: 8,
-                  fontSize: 12,
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              {series.map((s, i) => (
-                <Line
-                  key={s.key}
-                  type="monotone"
-                  dataKey={s.key}
-                  name={s.name}
-                  stroke={bwChartColor(theme, i, s.color)}
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ─── Monthly Income Growth (Trial Balance-derived) ────────────────────────────
 interface MonthlyIncomePoint {
   key: string;
   month: string;
@@ -333,166 +54,9 @@ interface MonthlyIncomePoint {
   trend: "growth" | "degrowth" | "neutral";
 }
 
-const INCOME_TREND_COLOR: Record<MonthlyIncomePoint["trend"], string> = {
-  growth: "#10b981",
-  degrowth: "#f43f5e",
-  neutral: "#6366f1",
-};
-// BW theme swaps the module-accent trend colours for the fixed maroon/green/orange
-// chart palette, keeping "growth" mapped to the palette's green for legibility.
-const BW_INCOME_TREND_COLOR: Record<MonthlyIncomePoint["trend"], string> = {
-  growth: "#008000",
-  degrowth: "#800000",
-  neutral: "#FFA500",
-};
-
-const MonthlyIncomeCard: React.FC<{
-  data: MonthlyIncomePoint[];
-  isDark: boolean;
-  glassStyle: React.CSSProperties;
-  isLoading: boolean;
-}> = ({ data, isDark, glassStyle, isLoading }) => {
-  const { theme } = useTheme();
-  const trendColor = theme === "bw" ? BW_INCOME_TREND_COLOR : INCOME_TREND_COLOR;
-  const hasData = data.some((d) => Math.abs(d.income) > 0.005);
-  return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
-      <div
-        className="flex items-center gap-2 px-4 py-3 border-b"
-        style={{
-          borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)",
-        }}
-      >
-        <div
-          className="w-5 h-5 rounded-md flex items-center justify-center"
-          style={{ background: "rgba(16,185,129,0.15)" }}
-        >
-          <TrendingUp size={11} style={{ color: "#10b981" }} />
-        </div>
-        <span
-          className="text-xs font-heading font-semibold"
-          style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
-        >
-          Monthly Income Growth
-        </span>
-        <span className="text-[0.625rem] text-muted-foreground ml-auto">
-          From Trial Balance · current FY
-        </span>
-      </div>
-      <div className="p-4">
-        {isLoading ? (
-          <Skeleton className="h-[260px] w-full" />
-        ) : !hasData ? (
-          <div className="text-center text-muted-foreground py-10 text-sm">
-            No income posted to the Trial Balance this financial year
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center gap-4 mb-3 flex-wrap">
-              {[
-                { label: "Growth", color: trendColor.growth },
-                { label: "Degrowth", color: trendColor.degrowth },
-                { label: "No change", color: trendColor.neutral },
-              ].map((l) => (
-                <div key={l.label} className="flex items-center gap-1.5">
-                  <div
-                    className="w-2.5 h-2.5 rounded-sm"
-                    style={{ background: l.color }}
-                  />
-                  <span className="text-[0.625rem] text-muted-foreground">{l.label}</span>
-                </div>
-              ))}
-            </div>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"}
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="month"
-                  tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={48}
-                  tickFormatter={(v) =>
-                    Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)
-                  }
-                />
-                <Tooltip
-                  cursor={{ fill: isDark ? "rgba(148,163,184,0.08)" : "rgba(100,116,139,0.08)" }}
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const d = payload[0].payload as MonthlyIncomePoint;
-                    const trendLabel =
-                      d.trend === "growth"
-                        ? "Growth"
-                        : d.trend === "degrowth"
-                          ? "Degrowth"
-                          : "No change";
-                    return (
-                      <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
-                        <p className="text-xs font-heading font-semibold text-foreground">
-                          {d.month} {d.year}
-                        </p>
-                        <p className="text-xs text-muted-foreground">{fmt(d.income)}</p>
-                        <p
-                          className="text-[0.6875rem] font-medium mt-0.5"
-                          style={{ color: trendColor[d.trend] }}
-                        >
-                          {trendLabel}
-                        </p>
-                      </div>
-                    );
-                  }}
-                />
-                <Bar dataKey="income" radius={[3, 3, 0, 0]} maxBarSize={40}>
-                  {data.map((d) => (
-                    <Cell key={d.key} fill={trendColor[d.trend]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const StatCardSkeleton = () => (
-  <div className="rounded-xl overflow-hidden border border-border/40 bg-card/40 backdrop-blur-sm p-4">
-    <div className="flex items-start justify-between mb-3">
-      <Skeleton className="h-3 w-24" />
-      <Skeleton className="h-7 w-7 rounded-lg" />
-    </div>
-    <Skeleton className="h-7 w-20 mb-2" />
-    <Skeleton className="h-3 w-32" />
-  </div>
-);
-
-// ─── Safe defaults (prevent crashes if API returns old / partial shape) ────────
 const EMPTY_DATA: FinanceDashboardData = {
-  paymentsMade: {
-    totalCount: 0,
-    todayCount: 0,
-    totalAmount: 0,
-    todayAmount: 0,
-  },
-  receivedPayments: {
-    totalCount: 0,
-    todayCount: 0,
-    totalAmount: 0,
-    todayAmount: 0,
-    approvedCount: 0,
-    draftCount: 0,
-  },
+  paymentsMade: { totalCount: 0, todayCount: 0, totalAmount: 0, todayAmount: 0 },
+  receivedPayments: { totalCount: 0, todayCount: 0, totalAmount: 0, todayAmount: 0, approvedCount: 0, draftCount: 0 },
   cheques: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
   cards: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
   banks: { totalCount: 0, activeCount: 0 },
@@ -504,7 +68,6 @@ const EMPTY_DATA: FinanceDashboardData = {
 /** Normalise whatever shape the backend returns into the new shape. */
 function normalise(raw: any): FinanceDashboardData {
   if (!raw || typeof raw !== "object") return EMPTY_DATA;
-
   // Support old backend shape (payments / purchaseOrders / grns …)
   const paymentsMade = raw.paymentsMade ?? {
     totalCount: raw.payments?.totalCount ?? 0,
@@ -512,7 +75,6 @@ function normalise(raw: any): FinanceDashboardData {
     totalAmount: raw.payments?.totalAmount ?? 0,
     todayAmount: raw.payments?.todayAmount ?? 0,
   };
-
   return {
     paymentsMade,
     receivedPayments: raw.receivedPayments ?? EMPTY_DATA.receivedPayments,
@@ -525,20 +87,162 @@ function normalise(raw: any): FinanceDashboardData {
   };
 }
 
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const n0 = (v: unknown) => Number(v) || 0;
+const fmtInt = (v: unknown) => n0(v).toLocaleString("en-IN");
+const split = (v: unknown) => {
+  const n = Math.abs(n0(v));
+  if (n >= 1_00_00_000) return { num: (n / 1_00_00_000).toFixed(2), unit: "Cr" };
+  if (n >= 1_00_000) return { num: (n / 1_00_000).toFixed(1), unit: "L" };
+  if (n >= 1_000) return { num: (n / 1_000).toFixed(0), unit: "K" };
+  return { num: n.toFixed(0), unit: "" };
+};
+const money = (v: unknown) => {
+  const m = split(v);
+  return `${n0(v) < 0 ? "−" : ""}₹${m.num}${m.unit ? ` ${m.unit}` : ""}`;
+};
+const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—");
+const share = (part: number, whole: number) => (whole > 0 ? Math.min(100, Math.max(0, (part / whole) * 100)) : 0);
+
+const Figure: React.FC<{ value: unknown; size?: string; color?: string }> = ({ value, size = "clamp(36px, 4.6vw, 62px)", color }) => {
+  const m = split(value);
+  return (
+    <span className="figure" style={{ fontSize: size, color }}>
+      <span style={{ fontSize: "0.5em", fontWeight: 500, marginRight: 3, opacity: 0.8 }}>₹</span>
+      {m.num}
+      {m.unit && <span style={{ fontSize: "0.36em", fontWeight: 500, marginLeft: 5, letterSpacing: 0 }}>{m.unit}</span>}
+    </span>
+  );
+};
+
+// ── C: fourteen days about the cash line — received above it, paid below ────
+const CashLinePlot: React.FC<{ rows: { date: string; made: number; received: number }[] }> = ({ rows }) => {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 760, H = 250, pad = 8, top = 16, bottom = 208, mid = (top + bottom) / 2;
+  const n = Math.max(1, rows.length);
+  const slot = (W - pad * 2) / n;
+  const max = Math.max(1, ...rows.map((r) => Math.max(n0(r.made), n0(r.received))));
+  const half = mid - top;
+  const cx = (i: number) => pad + slot * i + slot / 2;
+  const w = Math.min(26, slot * 0.56);
+  const net = rows.map((r, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${(mid - ((n0(r.received) - n0(r.made)) / max) * half).toFixed(1)}`).join(" ");
+  const active = hover != null ? rows[hover] : null;
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "baseline", minHeight: 22, marginBottom: 6 }}>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 10, height: 10, background: "var(--blue)", display: "inline-block" }} /> Received</span>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i className="hatch" style={{ width: 10, height: 10, border: "1px solid var(--ink)", display: "inline-block" }} /> Paid out</span>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 14, height: 2, background: "var(--ink)", display: "inline-block" }} /> Net for the day</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-2)" }}>
+          {active
+            ? `${fmtDate(active.date)} · ${money(active.received)} in · ${money(active.made)} out · net ${money(n0(active.received) - n0(active.made))}`
+            : "Hover a day for its figures"}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Money received and paid out each day, last fourteen days" onMouseLeave={() => setHover(null)}>
+        <defs>
+          <pattern id="fin-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="var(--ink)" strokeWidth="1" opacity="0.55" />
+          </pattern>
+        </defs>
+        <line x1={pad} x2={W - pad} y1={top} y2={top} stroke="var(--rule)" strokeDasharray="2 5" />
+        <line x1={pad} x2={W - pad} y1={bottom} y2={bottom} stroke="var(--rule)" strokeDasharray="2 5" />
+        <text x={pad + 2} y={top - 5} fontFamily="DM Sans, sans-serif" fontSize="10" fill="var(--graphite)">{money(max)} in</text>
+        <text x={pad + 2} y={bottom + 12} fontFamily="DM Sans, sans-serif" fontSize="10" fill="var(--graphite)">{money(max)} out</text>
+        {rows.map((r, i) => {
+          const up = (n0(r.received) / max) * half;
+          const down = (n0(r.made) / max) * half;
+          const d = new Date(r.date);
+          return (
+            <g key={r.date || i} onMouseEnter={() => setHover(i)}>
+              <rect x={pad + slot * i} y={0} width={slot} height={H} fill={hover === i ? "var(--blue-wash)" : "transparent"} />
+              <rect x={cx(i) - w / 2} y={mid - up} width={w} height={up} fill="var(--blue)" fillOpacity={hover == null || hover === i ? 0.92 : 0.4} />
+              <rect x={cx(i) - w / 2} y={mid} width={w} height={down} fill="url(#fin-hatch)" stroke="var(--ink)" strokeWidth="1" opacity={hover == null || hover === i ? 1 : 0.45} />
+              <text x={cx(i)} y={H - 14} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="10" fill={hover === i ? "var(--ink)" : "var(--graphite)"}>{d.getDate()}</text>
+              {(i === 0 || d.getDate() === 1) && (
+                <text x={cx(i)} y={H - 2} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="8" letterSpacing="1" fill="var(--faint)">
+                  {d.toLocaleDateString("en-IN", { month: "short" }).toUpperCase()}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        {/* the cash line itself */}
+        <line x1={pad} x2={W - pad} y1={mid} y2={mid} stroke="var(--ink)" strokeWidth="1.5" />
+        {rows.length > 1 && <path className="draw" d={net} fill="none" stroke="var(--ink)" strokeWidth="1.6" strokeDasharray="1 0" strokeLinejoin="round" pointerEvents="none" opacity="0.85" />}
+        {rows.map((r, i) => (
+          <circle key={i} cx={cx(i)} cy={mid - ((n0(r.received) - n0(r.made)) / max) * half} r={hover === i ? 4 : 2.6} fill="var(--sheet)" stroke="var(--ink)" strokeWidth="1.4" pointerEvents="none" />
+        ))}
+      </svg>
+    </div>
+  );
+};
+
+// ── E: income by month; a fall from the month before is drawn in red ────────
+const IncomePlot: React.FC<{ rows: MonthlyIncomePoint[] }> = ({ rows }) => {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 760, H = 210, pad = 8, top = 24, base = 170;
+  const n = Math.max(1, rows.length);
+  const slot = (W - pad * 2) / n;
+  const max = Math.max(1, ...rows.map((r) => Math.abs(n0(r.income))));
+  const cx = (i: number) => pad + slot * i + slot / 2;
+  const w = Math.min(40, slot * 0.56);
+  const active = hover != null ? rows[hover] : null;
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "baseline", minHeight: 22, marginBottom: 6 }}>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 10, height: 10, background: "var(--blue)", display: "inline-block" }} /> Up on the month before</span>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 10, height: 10, background: "var(--red)", display: "inline-block" }} /> Down</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-2)" }}>
+          {active ? `${active.month} ${active.year} · ${money(active.income)}` : "Hover a month for its figure"}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Income by month" onMouseLeave={() => setHover(null)}>
+        <line x1={pad} x2={W - pad} y1={base} y2={base} stroke="var(--ink)" />
+        <line x1={pad} x2={W - pad} y1={top} y2={top} stroke="var(--rule)" strokeDasharray="2 5" />
+        <text x={pad + 2} y={top - 6} fontFamily="DM Sans, sans-serif" fontSize="10" fill="var(--graphite)">{money(max)}</text>
+        {rows.map((r, i) => {
+          const h = (Math.abs(n0(r.income)) / max) * (base - top);
+          const fill = r.trend === "degrowth" ? "var(--red)" : r.trend === "growth" ? "var(--blue)" : "var(--blue-mid)";
+          return (
+            <g key={r.key || i} onMouseEnter={() => setHover(i)}>
+              <rect x={pad + slot * i} y={0} width={slot} height={H} fill={hover === i ? "var(--blue-wash)" : "transparent"} />
+              <rect x={cx(i) - w / 2} y={base - h} width={w} height={h} fill={fill} fillOpacity={hover == null || hover === i ? 0.92 : 0.4} />
+              <text x={cx(i)} y={base + 17} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="10" letterSpacing="1" fill={hover === i ? "var(--ink)" : "var(--graphite)"}>{String(r.month).slice(0, 3).toUpperCase()}</text>
+              <text x={cx(i)} y={base + 30} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="8" fill="var(--faint)">{String(r.year).slice(-2)}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
+
+/** One instrument: a bar measured out of its total, in use solid and the rest hatched. */
+const Measure: React.FC<{ name: string; live: number; total: number; liveWord: string; restWord: string; onOpen: () => void }> = ({ name, live, total, liveWord, restWord, onOpen }) => (
+  <button onClick={onOpen} style={{ display: "block", width: "100%", padding: "11px 0", borderBottom: "1px solid var(--rule-soft)" }}>
+    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+      <span className="label link" style={{ color: "var(--ink)" }}>{name}</span>
+      <span>
+        <span className="figure" style={{ fontSize: 22 }}>{fmtInt(live)}</span>
+        <span style={{ fontSize: 12, color: "var(--graphite)", marginLeft: 6 }}>of {fmtInt(total)}</span>
+      </span>
+    </div>
+    <div className="hatch" style={{ height: 9, marginTop: 8, border: "1px solid var(--ink)" }}>
+      <div className="grow" style={{ height: "100%", width: `${share(live, total)}%`, background: "var(--blue)" }} />
+    </div>
+    <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--graphite)" }}>
+      {fmtInt(live)} {liveWord} · {fmtInt(Math.max(0, total - live))} {restWord}
+    </div>
+  </button>
+);
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 const FinanceDashboard = () => {
   usePageRights("finance-dashboard");
   const navigate = useNavigate();
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
 
-  const {
-    data: rawData,
-    isLoading,
-    isError,
-    refetch,
-    isFetching,
-  } = useQuery<FinanceDashboardData>({
+  const { data: rawData, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useQuery<FinanceDashboardData>({
     queryKey: ["financeDashboard"],
     queryFn: async () => {
       const res = await fetchWithAuth("/api/finance-dashboard");
@@ -549,12 +253,9 @@ const FinanceDashboard = () => {
     refetchInterval: 2 * 60_000,
     refetchOnWindowFocus: true,
   });
+  const data = rawData ? normalise(rawData) : EMPTY_DATA;
 
-  const data = rawData ? normalise(rawData) : undefined;
-
-  const { data: monthlyIncome, isLoading: monthlyIncomeLoading } = useQuery<
-    MonthlyIncomePoint[]
-  >({
+  const { data: monthlyIncome, isLoading: monthlyIncomeLoading } = useQuery<MonthlyIncomePoint[]>({
     queryKey: ["financeMonthlyIncome"],
     queryFn: async () => {
       const res = await fetchWithAuth("/api/financial-statements/monthly-income");
@@ -566,486 +267,212 @@ const FinanceDashboard = () => {
     refetchInterval: 2 * 60_000,
     refetchOnWindowFocus: true,
   });
+  const income = monthlyIncome ?? [];
 
-  const tableGlass = {
-    background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark
-      ? "1px solid rgba(99,102,241,0.15)"
-      : "1px solid rgba(99,102,241,0.18)",
-    backdropFilter: "blur(16px) saturate(150%)",
-    WebkitBackdropFilter: "blur(16px) saturate(150%)",
-    boxShadow: isDark
-      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(99,102,241,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
-  };
+  const received = n0(data.receivedPayments.totalAmount);
+  const paid = n0(data.paymentsMade.totalAmount);
+  const net = received - paid;
+  const receivedPct = share(received, received + paid);
+  const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
+  const todayNet = n0(data.receivedPayments.todayAmount) - n0(data.paymentsMade.todayAmount);
 
   return (
-    <>
+    <div>
+      <style>{SHEET_CSS}</style>
       <Breadcrumbs items={["Dashboard", "Finance"]} />
-      <DashboardBackground />
-      <FinanceShell
-        title="Finance Overview"
-        subtitle="Payments, cheques, cards and bank accounts at a glance"
-        action={
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-all duration-200 active:scale-90 disabled:opacity-50"
-            style={{ color: "#818cf8" }}
-          >
-            <RefreshCw size={12} className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`} />
-            Refresh
-          </button>
-        }
-      >
-        {isError && (
-          <div className="px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
-            Failed to load dashboard data. Please refresh the page.
-          </div>
-        )}
 
-        {/* ── Primary stat cards ────────────────────────────────────────────── */}
-        <GlassSection
-          title="Cumulative Transfers"
-          icon={Receipt}
-          accentColor="#6366f1"
-        >
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {isLoading
-              ? Array.from({ length: 4 }).map((_, i) => (
-                  <StatCardSkeleton key={i} />
-                ))
-              : [
-                  {
-                    label: "Total Payments Made",
-                    value: fmt(data?.paymentsMade.totalAmount ?? 0),
-                    sub: `${data?.paymentsMade.totalCount ?? 0} transfers · all-time`,
-                    icon: Receipt,
-                    accentColor: "#f43f5e",
-                    onClick: () => navigate("/payments"),
-                    trend: "up" as const,
-                  },
-                  {
-                    label: "Total Received",
-                    value: fmt(data?.receivedPayments.totalAmount ?? 0),
-                    sub: `${data?.receivedPayments.totalCount ?? 0} receipts · all-time`,
-                    icon: BadgeDollarSign,
-                    accentColor: "#10b981",
-                    onClick: () => navigate("/received-payments"),
-                    trend: "up" as const,
-                  },
-                  {
-                    label: "Cheque Lots",
-                    value: data?.cheques.totalCount.toString() ?? "0",
-                    sub: `${data?.cheques.activeCount ?? 0} active · ${data?.cheques.inactiveCount ?? 0} inactive`,
-                    icon: BookOpen,
-                    accentColor: "#f59e0b",
-                    onClick: () => navigate("/masters/cheque"),
-                    trend: "neutral" as const,
-                  },
-                  {
-                    label: "Active Cards",
-                    value: data?.cards.activeCount.toString() ?? "0",
-                    sub: `${data?.cards.inactiveCount ?? 0} inactive · ${data?.cards.totalCount ?? 0} total`,
-                    icon: CreditCard,
-                    accentColor: "#8b5cf6",
-                    onClick: () => navigate("/masters/card"),
-                    trend: "neutral" as const,
-                  },
-                ].map((s) => <FinanceGlassCard key={s.label} {...s} />)}
+      <div className="crm-sheet sheet-in">
+        {/* Title block */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
+          <div style={{ flex: "1 1 320px", padding: "22px 22px 20px", minWidth: 0 }}>
+            <p className="label">CivilierERP · Finance</p>
+            <h1 className="title" style={{ fontSize: "clamp(28px, 3.4vw, 44px)", margin: "8px 0 0", lineHeight: 1.05 }}>Finance overview</h1>
+            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--ink-2)", maxWidth: "60ch" }}>
+              What has been received and paid, how the last fortnight ran, and the cheques, cards and banks behind it.
+            </p>
           </div>
-        </GlassSection>
+          <div className="mono titleblock" style={{ flex: "1 1 280px", maxWidth: 380, minWidth: 240, display: "grid", gridTemplateColumns: "1fr 1fr", borderLeft: "1px solid var(--ink)", fontSize: 13 }}>
+            <div style={{ gridColumn: "1 / -1", padding: "10px 14px", borderBottom: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Date</span>
+              {readAt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            </div>
+            <div style={{ padding: "10px 14px", borderRight: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Read at</span>
+              {readAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            <div style={{ padding: "10px 14px", display: "flex", alignItems: "flex-end" }}>
+              <button onClick={() => refetch()} disabled={isFetching} className="label link" style={{ color: "var(--blue)" }}>
+                {isFetching ? "Reading…" : "Re-read"}
+              </button>
+            </div>
+          </div>
+        </div>
 
-        {/* ── Banks / Totals row ────────────────────────────────────────────── */}
-        <GlassSection title="Totals" icon={Landmark} accentColor="#6366f1">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {isLoading ? (
-              Array.from({ length: 3 }).map((_, i) => (
-                <StatCardSkeleton key={i} />
-              ))
-            ) : (
+        {isError && <div className="cell" style={{ color: "var(--red)", fontSize: 13 }}>Could not load the finance figures. Use Re-read to try again.</div>}
+
+        {/* A + B */}
+        <div className="grid2">
+          <Detail tag="A" title="Received against paid" note="All time">
+            {isLoading ? (<><Skel h={54} w="60%" /><Skel h={28} /><Skel w="70%" /></>) : (
               <>
-                <FinanceGlassCard
-                  label="Bank Accounts"
-                  value={(data?.banks.activeCount ?? 0).toString()}
-                  sub={`${data?.banks.totalCount ?? 0} total bank heads`}
-                  icon={Landmark}
-                  accentColor="#3b82f6"
-                  onClick={() => navigate("/masters/banks")}
-                />
-                <FinanceGlassCard
-                  label="Total Payments Made"
-                  value={fmt(data?.paymentsMade.totalAmount ?? 0)}
-                  sub={`${data?.paymentsMade.totalCount ?? 0} entries all-time`}
-                  icon={Receipt}
-                  accentColor="#f43f5e"
-                  trend="neutral"
-                />
-                <FinanceGlassCard
-                  label="Total Received"
-                  value={fmt(data?.receivedPayments.totalAmount ?? 0)}
-                  sub={`${data?.receivedPayments.approvedCount ?? 0} approved · ${data?.receivedPayments.draftCount ?? 0} draft`}
-                  icon={BadgeDollarSign}
-                  accentColor="#10b981"
-                  trend="neutral"
-                />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 36px", alignItems: "flex-end" }}>
+                  <button onClick={() => navigate("/received-payments")}>
+                    <span className="label link" style={{ display: "inline-block", marginBottom: 8 }}>Received</span>
+                    <span style={{ display: "block" }}><Figure value={received} /></span>
+                  </button>
+                  <button onClick={() => navigate("/payments")}>
+                    <span className="label link" style={{ display: "inline-block", marginBottom: 8 }}>Paid out</span>
+                    <span style={{ display: "block" }}><Figure value={paid} color="var(--ink-2)" /></span>
+                  </button>
+                  <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                    <span className="label" style={{ display: "block", marginBottom: 8 }}>{net >= 0 ? "Net inflow" : "Net outflow"}</span>
+                    <Figure value={net} size="clamp(24px, 2.8vw, 36px)" color={net < 0 ? "var(--red)" : "var(--blue)"} />
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 22 }}>
+                  <div style={{ display: "flex", height: 30, border: "1.5px solid var(--ink)", background: "var(--sheet)" }} role="img"
+                    aria-label={`Received is ${Math.round(receivedPct)} percent of all money moved`}>
+                    <div className="grow" style={{ width: `${receivedPct}%`, background: "var(--blue)" }} />
+                    <div className="hatch" style={{ flex: 1, borderLeft: received + paid > 0 ? "1.5px solid var(--ink)" : 0 }} />
+                  </div>
+                  <div style={{ display: "flex" }}>
+                    <div style={{ width: `${Math.min(Math.max(receivedPct, 24), 76)}%`, minWidth: 0 }}>
+                      <Dimension from={0} to={100} text={`${fmtInt(data.receivedPayments.totalCount)} receipts`} color="var(--blue)" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                      <Dimension from={0} to={100} text={`${fmtInt(data.paymentsMade.totalCount)} payments`} />
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 22px", marginTop: 18, fontSize: 11.5, color: "var(--ink-2)" }}>
+                  <span><i style={{ display: "inline-block", width: 10, height: 10, background: "var(--blue)", marginRight: 6 }} />Received</span>
+                  <span><i className="hatch" style={{ display: "inline-block", width: 10, height: 10, border: "1px solid var(--ink)", marginRight: 6 }} />Paid out</span>
+                  <span>{fmtInt(data.receivedPayments.approvedCount)} receipts approved · {fmtInt(data.receivedPayments.draftCount)} in draft</span>
+                </div>
               </>
             )}
-          </div>
-        </GlassSection>
+          </Detail>
 
-        {/* ── Breakdown charts ──────────────────────────────────────────────── */}
-        <GlassSection title="Breakdown" icon={BadgeDollarSign} accentColor="#6366f1">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <DonutCard
-              title="Payments Made vs Received"
-              icon={BadgeDollarSign}
-              accentColor="#6366f1"
-              isDark={isDark}
-              glassStyle={tableGlass}
-              data={[
-                { name: "Made", value: data?.paymentsMade.totalAmount ?? 0, color: "#f43f5e" },
-                { name: "Received", value: data?.receivedPayments.totalAmount ?? 0, color: "#10b981" },
-              ]}
-            />
-            <DonutCard
-              title="Cheques & Cards Status"
-              icon={CreditCard}
-              accentColor="#8b5cf6"
-              isDark={isDark}
-              glassStyle={tableGlass}
-              formatValue={(n) => `${n}`}
-              data={[
-                { name: "Cheques Active", value: data?.cheques.activeCount ?? 0, color: "#f59e0b" },
-                { name: "Cheques Inactive", value: data?.cheques.inactiveCount ?? 0, color: "#f59e0b66" },
-                { name: "Cards Active", value: data?.cards.activeCount ?? 0, color: "#8b5cf6" },
-                { name: "Cards Inactive", value: data?.cards.inactiveCount ?? 0, color: "#8b5cf666" },
-              ]}
-            />
-          </div>
-          <div className="mt-4">
-            <TrendCard
-              title="Payments — Last 14 Days"
-              icon={TrendingUp}
-              accentColor="#6366f1"
-              isDark={isDark}
-              glassStyle={tableGlass}
-              data={data?.timeline ?? []}
-              series={[
-                { key: "made", name: "Made", color: "#f43f5e" },
-                { key: "received", name: "Received", color: "#10b981" },
-              ]}
-            />
-          </div>
-        </GlassSection>
-
-        {/* ── Monthly Income Growth (Trial Balance) ─────────────────────────── */}
-        <GlassSection
-          title="Monthly Income Growth"
-          icon={TrendingUp}
-          accentColor="#10b981"
-        >
-          <MonthlyIncomeCard
-            data={monthlyIncome ?? []}
-            isDark={isDark}
-            glassStyle={tableGlass}
-            isLoading={monthlyIncomeLoading}
-          />
-        </GlassSection>
-
-        {/* ── Recent tables ─────────────────────────────────────────────────── */}
-        <GlassSection
-          title="Recent Activity"
-          icon={Receipt}
-          accentColor="#6366f1"
-        >
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Recent Payments Made */}
-            <div className="rounded-xl overflow-hidden" style={tableGlass}>
-              <div
-                className="flex items-center justify-between px-4 py-3 border-b"
-                style={{
-                  borderColor: isDark
-                    ? "rgba(99,102,241,0.15)"
-                    : "rgba(99,102,241,0.12)",
-                }}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-5 h-5 rounded-md flex items-center justify-center"
-                    style={{ background: "rgba(244,63,94,0.15)" }}
-                  >
-                    <Receipt size={11} style={{ color: "#f43f5e" }} />
-                  </div>
-                  <span
-                    className="text-xs font-heading font-semibold"
-                    style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
-                  >
-                    Recent Payments Made
-                  </span>
-                </div>
-                <button
-                  onClick={() => navigate("/payments")}
-                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
-                  style={{ color: "#f43f5e" }}
-                >
-                  View all →
-                </button>
+          <Detail tag="B" title="Today">
+            {isLoading ? (<><Skel h={40} /><Skel h={40} /><Skel h={40} /></>) : (
+              <div>
+                {[
+                  { label: "Received today", value: money(data.receivedPayments.todayAmount), sub: `${fmtInt(data.receivedPayments.todayCount)} receipt${n0(data.receivedPayments.todayCount) === 1 ? "" : "s"}`, path: "/received-payments", color: undefined as string | undefined },
+                  { label: "Paid out today", value: money(data.paymentsMade.todayAmount), sub: `${fmtInt(data.paymentsMade.todayCount)} payment${n0(data.paymentsMade.todayCount) === 1 ? "" : "s"}`, path: "/payments", color: undefined },
+                  { label: "Net for today", value: money(todayNet), sub: todayNet < 0 ? "more went out than came in" : "in hand after today's payments", path: "/reports", color: todayNet < 0 ? "var(--red)" : undefined },
+                ].map((s, i) => (
+                  <button key={s.label} onClick={() => navigate(s.path)} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "13px 0", borderTop: i ? "1px solid var(--rule-soft)" : 0, width: "100%" }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span className="label link" style={{ color: "var(--ink)" }}>{s.label}</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 4 }}>{s.sub}</span>
+                    </span>
+                    <span className="figure" style={{ fontSize: 28, whiteSpace: "nowrap", color: s.color }}>{s.value}</span>
+                  </button>
+                ))}
               </div>
-              {isLoading ? (
-                <div className="p-4 space-y-2">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <Skeleton key={i} className="h-7 w-full" />
-                  ))}
-                </div>
-              ) : (data?.recentPaymentsMade.length ?? 0) === 0 ? (
-                <div className="text-center text-muted-foreground py-10 text-sm">
-                  No payments recorded yet
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow
-                        className="border-b"
-                        style={{
-                          borderColor: isDark
-                            ? "rgba(99,102,241,0.10)"
-                            : "rgba(99,102,241,0.08)",
-                        }}
-                      >
-                        <TableHead className="text-xs">Name</TableHead>
-                        <TableHead className="text-xs">Mode</TableHead>
-                        <TableHead className="text-xs text-right">
-                          Amount
-                        </TableHead>
-                        <TableHead className="text-xs">Date</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(data?.recentPaymentsMade ?? []).map((p) => (
-                        <TableRow
-                          key={p.PPaymentID}
-                          className="border-b border-indigo-500/5 hover:bg-indigo-500/5 transition-colors"
-                        >
-                          <TableCell className="text-xs font-medium truncate max-w-[120px]">
-                            {p.PPaymentName || "—"}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className="text-[0.625rem] border-rose-500/30 text-rose-500"
-                            >
-                              {p.PMode || "—"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell
-                            className="text-xs text-right font-semibold"
-                            style={{ color: "#f43f5e" }}
-                          >
-                            {p.PAmount != null ? fmt(p.PAmount) : "—"}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {fmtDate(p.PDate)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </div>
+            )}
+          </Detail>
+        </div>
 
-            {/* Recent Received Payments */}
-            <div className="rounded-xl overflow-hidden" style={tableGlass}>
-              <div
-                className="flex items-center justify-between px-4 py-3 border-b"
-                style={{
-                  borderColor: isDark
-                    ? "rgba(99,102,241,0.15)"
-                    : "rgba(99,102,241,0.12)",
-                }}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-5 h-5 rounded-md flex items-center justify-center"
-                    style={{ background: "rgba(16,185,129,0.15)" }}
-                  >
-                    <BadgeDollarSign size={11} style={{ color: "#10b981" }} />
-                  </div>
-                  <span
-                    className="text-xs font-heading font-semibold"
-                    style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
-                  >
-                    Recent Received Payments
-                  </span>
-                </div>
-                <button
-                  onClick={() => navigate("/received-payments")}
-                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
-                  style={{ color: "#10b981" }}
-                >
-                  View all →
-                </button>
+        {/* C + D */}
+        <div className="grid2">
+          <Detail tag="C" title="Fourteen days about the cash line" note="In above, out below">
+            {isLoading ? <Skel h={240} /> : data.timeline.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No payments in the last fourteen days.</p>
+            ) : <CashLinePlot rows={data.timeline} />}
+          </Detail>
+
+          <Detail tag="D" title="Instruments" note="In use against held">
+            {isLoading ? (<><Skel h={44} /><Skel h={44} /><Skel h={44} /></>) : (
+              <>
+                <Measure name="Bank accounts" live={n0(data.banks.activeCount)} total={n0(data.banks.totalCount)} liveWord="active" restWord="inactive" onOpen={() => navigate("/masters/banks")} />
+                <Measure name="Cheque lots" live={n0(data.cheques.activeCount)} total={n0(data.cheques.totalCount)} liveWord="active" restWord="inactive" onOpen={() => navigate("/masters/cheque")} />
+                <Measure name="Cards" live={n0(data.cards.activeCount)} total={n0(data.cards.totalCount)} liveWord="active" restWord="inactive" onOpen={() => navigate("/masters/card")} />
+              </>
+            )}
+          </Detail>
+        </div>
+
+        {/* E */}
+        <Detail tag="E" title="Income by month" note="From the trial balance">
+          {monthlyIncomeLoading ? <Skel h={200} /> : !income.some((m) => Math.abs(n0(m.income)) > 0.005) ? (
+            <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No income is posted for these months yet.</p>
+          ) : <IncomePlot rows={income} />}
+        </Detail>
+
+        {/* F + G */}
+        <div className="grid2">
+          <Detail tag="F" title="Latest payments made" note={`${fmtInt(data.paymentsMade.totalCount)} in all`}>
+            {isLoading ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : data.recentPaymentsMade.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No payments recorded yet.</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ minWidth: 460 }}>
+                  <thead><tr><th>Paid to</th><th>Mode</th><th>Date</th><th className="num">Amount</th></tr></thead>
+                  <tbody>
+                    {data.recentPaymentsMade.slice(0, 7).map((p) => (
+                      <tr key={p.PPaymentID} className="go" onClick={() => navigate("/payments")}>
+                        <td style={{ maxWidth: 240 }}>
+                          <span style={{ display: "block", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.PPaymentName || "—"}</span>
+                          {(p.PProject || p.PBankName) && <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[p.PProject, p.PBankName].filter(Boolean).join(" · ")}</span>}
+                        </td>
+                        <td className="label">{p.PMode || "—"}</td>
+                        <td style={{ color: "var(--ink-2)", whiteSpace: "nowrap" }}>{fmtDate(p.PDate)}</td>
+                        <td className="num figure" style={{ fontSize: 13 }}>{money(p.PAmount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              {isLoading ? (
-                <div className="p-4 space-y-2">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <Skeleton key={i} className="h-7 w-full" />
-                  ))}
-                </div>
-              ) : (data?.recentPaymentsReceived.length ?? 0) === 0 ? (
-                <div className="text-center text-muted-foreground py-10 text-sm">
-                  No received payments recorded yet
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow
-                        className="border-b"
-                        style={{
-                          borderColor: isDark
-                            ? "rgba(99,102,241,0.10)"
-                            : "rgba(99,102,241,0.08)",
-                        }}
-                      >
-                        <TableHead className="text-xs">From</TableHead>
-                        <TableHead className="text-xs">Mode</TableHead>
-                        <TableHead className="text-xs text-right">
-                          Amount
-                        </TableHead>
-                        <TableHead className="text-xs">Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(data?.recentPaymentsReceived ?? []).map((r) => (
-                        <TableRow
-                          key={r.RPPaymentID}
-                          className="border-b border-indigo-500/5 hover:bg-indigo-500/5 transition-colors"
-                        >
-                          <TableCell className="text-xs font-medium truncate max-w-[120px]">
-                            {r.RPReceivedFrom || "—"}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className="text-[0.625rem] border-emerald-500/30 text-emerald-500"
-                            >
-                              {r.RPMode || "—"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell
-                            className="text-xs text-right font-semibold"
-                            style={{ color: "#10b981" }}
-                          >
-                            {r.RPAmount != null ? fmt(r.RPAmount) : "—"}
-                          </TableCell>
-                          <TableCell>
-                            <span
-                              className={`text-[0.625rem] px-2 py-0.5 rounded-full font-medium ${
-                                r.RPStatus === "Approved"
-                                  ? "bg-emerald-500/15 text-emerald-500"
-                                  : r.RPStatus === "Draft" || !r.RPStatus
-                                    ? "bg-amber-500/15 text-amber-500"
-                                    : "bg-blue-500/15 text-blue-500"
-                              }`}
-                            >
-                              {r.RPStatus || "Draft"}
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </div>
-          </div>
-        </GlassSection>
+            )}
+            <button onClick={() => navigate("/payments")} className="label link" style={{ marginTop: 14, display: "inline-block" }}>All payments</button>
+          </Detail>
 
-        {/* ── Quick Actions ─────────────────────────────────────────────────── */}
-        <GlassSection
-          title="Quick Actions"
-          icon={CreditCard}
-          accentColor="#8b5cf6"
-        >
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <Detail tag="G" title="Latest receipts" note={`${fmtInt(data.receivedPayments.totalCount)} in all`}>
+            {isLoading ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : data.recentPaymentsReceived.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No receipts recorded yet.</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ minWidth: 420 }}>
+                  <thead><tr><th>Received from</th><th>Status</th><th>Date</th><th className="num">Amount</th></tr></thead>
+                  <tbody>
+                    {data.recentPaymentsReceived.slice(0, 7).map((p) => (
+                      <tr key={p.RPPaymentID} className="go" onClick={() => navigate("/received-payments")}>
+                        <td style={{ maxWidth: 220 }}>
+                          <span style={{ display: "block", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.RPReceivedFrom || "—"}</span>
+                          {(p.RPMode || p.RPBankName) && <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[p.RPMode, p.RPBankName].filter(Boolean).join(" · ")}</span>}
+                        </td>
+                        <td className="label" style={{ color: /reject|bounce|cancel/i.test(p.RPStatus || "") ? "var(--red)" : undefined }}>{p.RPStatus || "—"}</td>
+                        <td style={{ color: "var(--ink-2)", whiteSpace: "nowrap" }}>{fmtDate(p.RPDocDate)}</td>
+                        <td className="num figure" style={{ fontSize: 13 }}>{money(p.RPAmount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <button onClick={() => navigate("/received-payments")} className="label link" style={{ marginTop: 14, display: "inline-block" }}>All receipts</button>
+          </Detail>
+        </div>
+
+        {/* H */}
+        <Detail tag="H" title="Go to">
+          <div className="seg" style={{ flexWrap: "wrap" }}>
             {[
-              {
-                label: "New Payment",
-                icon: Receipt,
-                path: "/payments",
-                color: "#f43f5e",
-              },
-              {
-                label: "New Received",
-                icon: BadgeDollarSign,
-                path: "/received-payments",
-                color: "#10b981",
-              },
-              {
-                label: "Cheques",
-                icon: BookOpen,
-                path: "/masters/cheque",
-                color: "#f59e0b",
-              },
-              {
-                label: "Cards",
-                icon: CreditCard,
-                path: "/masters/card",
-                color: "#8b5cf6",
-              },
-              {
-                label: "Banks",
-                icon: Landmark,
-                path: "/masters/banks",
-                color: "#3b82f6",
-              },
-            ].map(({ label, icon: Icon, path, color }) => (
-              <button
-                key={path}
-                onClick={() => navigate(path)}
-                className="group flex flex-col items-center gap-3 py-5 rounded-xl transition-all duration-200 active:scale-95"
-                style={{
-                  background: isDark ? `${color}0A` : `${color}08`,
-                  border: `1px solid ${color}25`,
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.background =
-                    `${color}18`;
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    `${color}40`;
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = isDark
-                    ? `${color}0A`
-                    : `${color}08`;
-                  (e.currentTarget as HTMLElement).style.borderColor =
-                    `${color}25`;
-                }}
-              >
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
-                  style={{
-                    background: `${color}20`,
-                    border: `1px solid ${color}35`,
-                  }}
-                >
-                  <Icon size={18} style={{ color }} />
-                </div>
-                <span
-                  className="text-xs font-medium text-center leading-tight"
-                  style={{ color: isDark ? "#cbd5e1" : "#475569" }}
-                >
-                  {label}
-                </span>
-              </button>
+              { label: "New payment", path: "/payments" },
+              { label: "New receipt", path: "/received-payments" },
+              { label: "Cheques", path: "/masters/cheque" },
+              { label: "Cards", path: "/masters/card" },
+              { label: "Banks", path: "/masters/banks" },
+            ].map((q) => (
+              <button key={q.label} onClick={() => navigate(q.path)} style={{ padding: "9px 16px" }}>{q.label}</button>
             ))}
           </div>
-        </GlassSection>
-      </FinanceShell>
-    </>
+        </Detail>
+      </div>
+    </div>
   );
 };
 

@@ -1,8 +1,8 @@
 const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectParamGuard, assertProjectRawAllowed } = require("../services/projectScope");
 
@@ -16,32 +16,14 @@ const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
-const { recordGLPosting, hasApprovalInboxEditRight } = require("../services/approvalService");
+const { recordGLPosting } = require("../services/approvalService");
 const { areEarlierMilestonesCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { requireApprover } = require("../middleware/requireApprover");
 
-// Only these roles may approve/reject — mirrors APPROVER_ROLES in the shared
-// approval engine (services/approvalService.js). Without this, any user with
-// ReceivedPayments "edit" permission could approve a receipt and post it to
-// the ledger, because checkPermissionForMethod only checks CanEdit for a PUT.
-// "director" added — the Director role is already treated as approver-tier
-// elsewhere (crm-bookings' MODULE_APPROVER_ROLE_OVERRIDES in
-// approvalService.js, and the named-director comment in approvalInbox.js),
-// it was just never added to this module's own hardcoded list.
-const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head", "director"];
-
-// Approve/Reject gate — kept DYNAMIC, same rule as the shared approval engine
-// (approvalService.transition) and the ApprovalActions buttons: the default
-// approver roles above, OR anyone granted "edit" on the "approval-inbox" page
-// through Menu Rights (role-level or per-user). Rights assigned in Menu Rights
-// therefore take effect here with no code change.
-async function allowApprover(req, res, next) {
-  const role = String(req.user?.role || "").trim().toLowerCase();
-  if (APPROVER_ROLES.includes(role)) return next();
-  const userId = Number(req.user?.userId ?? req.user?.id) || null;
-  if (await hasApprovalInboxEditRight(userId)) return next();
-  return res.status(403).json({ error: "You don't have approval rights for Received Payments" });
-}
+// Approve/Reject gate: who approves received payments is set in Approval
+// Setup ("received-payment") — its roles or named people, or a super admin.
+const allowApprover = requireApprover("received-payment", "received payments");
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
@@ -90,13 +72,19 @@ async function getActiveFinYearName(pool) {
 }
 
 // ── GET / ─────────────────────────────────────────────────────────────────────
-router.get("/", cache("received-payment", 300), async (req, res) => {
+// Sale payments (Sales → Payment): the ones raised against a sale order - tagged "[SalePayment]" in the remarks or
+// received from an "SO-" document. Same test the Sales Payment page applied on the client.
+const SALE_PAYMENT_SQL = "(RPRemarks LIKE '%[[]SalePayment]%' OR RPReceivedFrom LIKE 'SO-%')";
+
+// dropOnAnyWrite: approvals from the Approval Inbox change RPStatus without bumping "received-payment".
+router.get("/", cache("received-payment", 300, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const statusFilter = req.query.status || null;
+    const salePaymentsOnly = req.query.salePayment === "1";
     const pool = getPool();
 
     const req2 = pool.request()
@@ -125,7 +113,7 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
           SUM(CASE WHEN RPStatus = 'Rejected' THEN 1 ELSE 0 END) OVER() AS _rejectedCount
         FROM dbo.ReceivedPayment
         WHERE (@companyId IS NULL OR RPCompanyId = @companyId)${projectPredicate(req.projectScope, "RPProjectId")}
-          AND (@status IS NULL OR RPStatus = @status)
+          AND (@status IS NULL OR RPStatus = @status)${salePaymentsOnly ? ` AND ${SALE_PAYMENT_SQL}` : ""}
         ORDER BY RPCreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -154,6 +142,25 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
   }
 });
 
+// ── GET /sale-order-paid ──────────────────────────────────────────────────────
+// Doc numbers of sale orders that already have an active (not Rejected) sale payment - the Sales Payment form
+// hides those from its order picker. Replaces downloading every received payment to work this out on the client.
+router.get("/sale-order-paid", cache("received-payment", 300, { dropOnAnyWrite: true }), async (req, res) => {
+  try {
+    const r = await getPool().request().query(`
+      SELECT DISTINCT RPReceivedFrom
+      FROM dbo.ReceivedPayment
+      WHERE ${SALE_PAYMENT_SQL}
+        AND ISNULL(RPStatus, '') <> 'Rejected'
+        AND ISNULL(RPReceivedFrom, '') <> ''${projectPredicate(req.projectScope, "RPProjectId")}
+    `);
+    res.json({ docNos: r.recordset.map((x) => x.RPReceivedFrom) });
+  } catch (err) {
+    console.error("GET /received-payment/sale-order-paid error:", err);
+    res.status(500).json({ error: "Failed to fetch paid sale orders" });
+  }
+});
+
 // ── GET /:id — single record, for deep links (Trial Balance's ledger
 // drill-down navigates here as /received-payments?view=<id>) ────────────────
 router.get("/:id", async (req, res) => {
@@ -174,7 +181,7 @@ router.get("/:id", async (req, res) => {
           SourceSaleInvoiceId, SourceSaleInvoiceDocNo, CrmBookingId,
           COALESCE(cu.name, RPCreatedBy) AS CreatedByName
         FROM dbo.ReceivedPayment
-        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(RPCreatedBy)
+        LEFT JOIN dbo.users cu ON cu.email = RPCreatedBy
         WHERE RPPaymentID = @id
       `);
     if (!result.recordset.length) return res.status(404).json({ error: "Received payment not found" });
@@ -302,6 +309,17 @@ router.get("/:id/posting", async (req, res) => {
 // below now just calls this and maps thrown errors to a response; behavior
 // is unchanged. Thrown errors carry a `.status` for the HTTP code to use.
 async function createReceivedPaymentInternal(pool, payload, createdBy) {
+    // A receipt created by CRM (money receipt approval, milestone receipt, on-account
+    // deposit) passes no document type, so it used to get no receipt number at
+    // all. It takes the active document type tagged for Received Payment — the
+    // same one the Received Payment screen resolves — so every receipt is numbered.
+    if (!payload.RPDocTypeId && (payload.CrmBookingId || payload.CrmMilestoneId || payload.CrmApplicationId)) {
+      const dt = await pool.request().query(`
+        SELECT TOP 1 TypeOfDocId FROM dbo.TypeOfDoc
+        WHERE IsActive = 1 AND links_to LIKE '%Received Payment%'
+        ORDER BY TypeOfDocId`);
+      if (dt.recordset[0]) payload = { ...payload, RPDocTypeId: dt.recordset[0].TypeOfDocId };
+    }
     const {
       RPCompanyName,
       RPCompanyId,
@@ -522,6 +540,7 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
     const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId, RPChequeDate, RPIsPostDated, CrmMilestoneId, CrmBookingId, CrmApplicationId`;
     const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId, @RPChequeDate, @RPIsPostDated, @CrmMilestoneId, @CrmBookingId, @CrmApplicationId`;
 
+    const crmBookingInsert = CrmBookingId != null;
     const result = await req2.query(`
       INSERT INTO dbo.ReceivedPayment (
         RPCompanyName, RPReceivedFrom, RPProjectName, RPDocDate, RPMode,
@@ -530,13 +549,29 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
         RPStatus, RPCreatedBy, RPCreatedAt ${extraCols}
       )
       OUTPUT INSERTED.*
-      VALUES (
-        @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode,
-        @RPAmount, @RPBankName, @RPTransactionID, @RPCheckNumber, @RPRemarks,
-        @RPIsEmi, @RPEmiTotal, @RPEmiMonths, @RPEmiStartDate, @RPEmiSchedule, @RPEmiPaying,
-        'Draft', @RPCreatedBy, GETDATE() ${extraVals}
-      )
+      ${crmBookingInsert ? `
+        SELECT @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode,
+          @RPAmount, @RPBankName, @RPTransactionID, @RPCheckNumber, @RPRemarks,
+          @RPIsEmi, @RPEmiTotal, @RPEmiMonths, @RPEmiStartDate, @RPEmiSchedule, @RPEmiPaying,
+          'Draft', @RPCreatedBy, GETDATE() ${extraVals}
+        FROM dbo.CrmBooking crmBooking WITH (UPDLOCK, HOLDLOCK)
+        WHERE crmBooking.Id = @CrmBookingId AND crmBooking.IsActive = 1
+          AND crmBooking.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+      ` : `
+        VALUES (
+          @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode,
+          @RPAmount, @RPBankName, @RPTransactionID, @RPCheckNumber, @RPRemarks,
+          @RPIsEmi, @RPEmiTotal, @RPEmiMonths, @RPEmiStartDate, @RPEmiSchedule, @RPEmiPaying,
+          'Draft', @RPCreatedBy, GETDATE() ${extraVals}
+        )
+      `}
     `);
+
+    if (crmBookingInsert && !result.recordset.length) {
+      const err = new Error("This booking is no longer active; the payment was not submitted.");
+      err.status = 409;
+      throw err;
+    }
 
     const row = result.recordset[0];
 
@@ -634,15 +669,24 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
     const beforeSnapshot = await snapshotRow(pool, "dbo.ReceivedPayment", "RPPaymentID", id);
     const wasApproved = beforeSnapshot?.RPStatus === "Approved";
 
+    // CRM approval writes a separate on-account deposit and GL posting keyed
+    // by that deposit. Re-queuing an approved source row without reversing and
+    // rebuilding those linked records would leave amount/bank/status data out
+    // of sync while the old CRM GL entry remains live. Bounce/reversal is the
+    // supported path for correcting an already-approved CRM receipt.
+    if (wasApproved && (beforeSnapshot?.CrmBookingId != null || beforeSnapshot?.CrmMilestoneId != null)) {
+      return res.status(409).json({
+        error: "This CRM-linked receipt is already approved and posted. Use the payment bounce/reversal workflow before entering a corrected replacement.",
+      });
+    }
+
     // Editing an already-Approved payment must go back through approval —
     // this UPDATE never touched RPStatus before, so an edited-Approved
     // receipt silently stayed Approved with no re-approval and no GL
     // reversal. Mirrors journalVoucher.js's wasApproved handling. Only
-    // reverses the standard (non-CRM) posting path — a CRM-linked receipt's
-    // actual GL legs live under CrmPaymentReceipt/CrmOnAccountPayment, keyed
-    // by their own id, not this one; editing still gets re-queued for
-    // approval, but re-approving a CRM-linked edit won't repost its GL
-    // (hasPosting() will still see the old, unreversed entries).
+    // reverses the standard (non-CRM) posting path. CRM-linked approved
+    // receipts were rejected above because their linked CRM records need a
+    // separate source-aware reversal.
     if (wasApproved) {
       const { reversePostingBySource } = require("../services/generalLedger");
       await reversePostingBySource(pool, "ReceivedPayment", id);
@@ -967,7 +1011,13 @@ router.put("/:id/approve", allowApprover, async (req, res) => {
       // once the WHOLE booking (money for every later milestone included) is
       // already on-account. Checking real Status here would make it
       // impossible to ever approve a payment past Milestone 1.
-      if (targetRow && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo))) {
+      // Entries still waiting for verification count, so Finance can verify
+      // a booking's payments in any order (crmOnAccountCoverage.js).
+      // A cancelled booking's payment goes to its refund (crmPayments.js
+      // holdIfBookingCancelled), so the old schedule's order doesn't apply.
+      const bookingCancelled = targetRow && (await tx.request().input("bid", sql.Int, targetRow.BookingId)
+        .query("SELECT 1 AS x FROM dbo.CrmBooking WHERE Id = @bid AND Status = 'Cancelled'")).recordset.length > 0;
+      if (targetRow && !bookingCancelled && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
         const predecessor = await tx.request()
           .input("mid", sql.Int, cur.recordset[0].CrmMilestoneId).query(`
             SELECT TOP 1 p.MilestoneName
@@ -1092,16 +1142,18 @@ router.put("/:id/reject", allowApprover, async (req, res) => {
   const pool = getPool();
 
   const tx = new sql.Transaction(pool);
+  let rejected = null;
   try {
     await tx.begin();
     const cur = await tx.request().input("id", sql.Int, pid).query(`
-      SELECT RPStatus FROM dbo.ReceivedPayment WITH (UPDLOCK, HOLDLOCK)
+      SELECT RPStatus, RPDocNo, RPAmount, RPCreatedBy, CrmBookingId FROM dbo.ReceivedPayment WITH (UPDLOCK, HOLDLOCK)
       WHERE RPPaymentID=@id
     `);
     if (!cur.recordset.length) {
       await tx.rollback();
       return res.status(404).json({ error: "Received payment not found" });
     }
+    rejected = cur.recordset[0];
     const status = cur.recordset[0].RPStatus;
     // A receipt already posted to the ledger must not be silently rejected —
     // that would strand the GL entry. Only Pending can be rejected.
@@ -1145,6 +1197,21 @@ router.put("/:id/reject", allowApprover, async (req, res) => {
     if (mr) await generateMoneyReceiptPdf(pool, mr.Id);
   } catch (mrErr) {
     console.error("[received-payment] Money Receipt PDF regeneration on reject failed:", mrErr.message);
+  }
+
+  // A CRM payment returned by Finance: tell whoever entered it, so it doesn't
+  // just drop out of the booking's "With Finance" list unnoticed.
+  if (rejected?.CrmBookingId) {
+    try {
+      const who = (await pool.request().input("c", sql.NVarChar(150), String(rejected.RPCreatedBy || "")).query(
+        "SELECT TOP 1 u.id FROM dbo.Users u WHERE u.email = @c OR u.name = @c OR CAST(u.id AS NVARCHAR(20)) = @c")).recordset[0];
+      const bk = (await pool.request().input("b", sql.Int, rejected.CrmBookingId).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @b")).recordset[0];
+      await require("../services/notify").emitNotification(pool, who?.id, "crm_payment_returned", "Payment returned by Finance",
+        `${rejected.RPDocNo || "A payment"} of Rs ${Number(rejected.RPAmount || 0).toLocaleString("en-IN")} on ${bk?.BookingNo || "a booking"} was returned${note ? `: ${String(note).slice(0, 200)}` : ""}. Enter it again once corrected.`,
+        rejected.CrmBookingId, "crm_payment");
+    } catch (nErr) {
+      console.error("[received-payment] return notification failed:", nErr.message);
+    }
   }
 
   res.json({ success: true });

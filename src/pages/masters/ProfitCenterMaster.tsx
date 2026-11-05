@@ -1,16 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   MasterPage,
   type FieldDef,
   type ColumnDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
-import { GLAccountMultiSelect } from "@/components/finance/GLAccountMultiSelect";
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
-import { TrendingUp, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import {
   getProfitCenters,
@@ -70,16 +69,6 @@ const ProfitCenterMaster: React.FC = () => {
       type: "textarea",
       fullWidth: true,
     },
-    {
-      name: "GLAccountIds",
-      label: "GL Accounts",
-      type: "custom",
-      fullWidth: true,
-      defaultValue: [],
-      render: ({ value, onChange }) => (
-        <GLAccountMultiSelect value={value} onChange={onChange} />
-      ),
-    },
     { name: "IsActive", label: "Status", type: "toggle", defaultValue: true },
   ];
 
@@ -94,7 +83,7 @@ const ProfitCenterMaster: React.FC = () => {
 
   const columnRenderers = {
     Code: (value: unknown) => (
-      <span className="font-mono text-xs font-semibold text-foreground">
+      <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">
         {String(value ?? "")}
       </span>
     ),
@@ -108,7 +97,7 @@ const ProfitCenterMaster: React.FC = () => {
           title={String(value ?? "")}
         >
           {String(value ?? "")}{" "}
-          <span className="text-primary font-medium">
+          <span className="font-heading font-semibold tabular-nums text-foreground">
             ({count})
           </span>
         </span>
@@ -124,22 +113,7 @@ const ProfitCenterMaster: React.FC = () => {
         {value ? String(value) : <span className="text-muted-foreground/50">Company-wide</span>}
       </span>
     ),
-    IsActive: (value: unknown) => (
-      <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
-          value
-            ? "bg-primary/10 text-primary border-primary/20"
-            : "bg-destructive/10 text-destructive border-destructive/20"
-        }`}
-      >
-        <span
-          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-            value ? "bg-primary" : "bg-destructive"
-          }`}
-        />
-        {value ? "Active" : "Inactive"}
-      </span>
-    ),
+    IsActive: (value: unknown) => <SheetMark text={value ? "Active" : "Inactive"} tone={value ? "done" : "none"} />,
   };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
@@ -177,11 +151,28 @@ const ProfitCenterMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Finance", "Setup", "Profit Center"]} />
-      <FinanceShell
-        title="Profit Center"
-        subtitle="Group GL accounts by profit center for revenue tracking"
-        icon={TrendingUp}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Profit centres"
+        subtitle="Group ledger accounts under a profit centre to follow revenue by line of business or project."
       >
+        {!loading && (
+          <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+            <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+              {[
+                { label: "Profit centres", value: rows.length, note: "in all" },
+                { label: "Active", value: rows.filter((r) => r.IsActive).length, note: "open for tagging" },
+                { label: "Ledgers grouped", value: rows.reduce((sum, r) => sum + Number(r.GLAccountCount ?? 0), 0), note: "across all centres" },
+              ].map((x) => (
+                <div key={x.label}>
+                  <p className="label">{x.label}</p>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
             <Loader2 size={18} className="animate-spin" />
@@ -219,7 +210,7 @@ const ProfitCenterMaster: React.FC = () => {
             }
           />
         )}
-      </FinanceShell>
+      </SheetShell>
     </>
   );
 };

@@ -1,6 +1,8 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmLegalMilestone")); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -8,9 +10,10 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { requireActiveBooking, requireApprovedBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
 const { applyPagination } = require("../services/crmListPagination");
+const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const STEPS = [
   "DocCollection", "LegalReview", "Drafting", "InternalApproval",
@@ -58,15 +61,9 @@ const LM_SELECT = `
     -- CrmLegalMilestones.tsx and getProjectSaleGate in crmWorkflowGuards.js.
     -- Never waives Agreement/AFS — that stays mandatory for every booking.
     proj.entity_type AS ProjectType, proj.status AS ProjectStatus,
-    -- Mirrors crmHandover.js POST /'s exact dues gate (same columns, same
-    -- condition) so the Handover stage here can't show "unlocked" for a
-    -- booking the real Handover page would reject for an outstanding balance.
-    CASE WHEN EXISTS (
-      SELECT 1 FROM dbo.CrmPaymentMilestone pm
-      WHERE pm.BookingId = m.BookingId
-        AND pm.Status NOT IN ('Paid', 'Waived')
-        AND pm.AmountDue > ISNULL(pm.AmountPaid, 0)
-    ) THEN 1 ELSE 0 END AS HasOutstandingDues,
+    -- Mirror the Handover net-funding gate so the legal workflow indicator
+    -- cannot disagree with the action page about on-account funds.
+    CASE WHEN ${bookingFullyFundedSql("m.BookingId")} THEN 0 ELSE 1 END AS HasOutstandingDues,
     -- No Objection Certificate is a SINGLE step per booking, not two — the
     -- bank's NOC and the developer's NOC serve the same purpose (clearing
     -- the booking for Possession/Handover); a booking only ever needs one,
@@ -85,7 +82,7 @@ const LM_SELECT = `
       WHEN orgNoc.Id  IS NOT NULL AND orgNoc.Status  <> 'Rejected' THEN 'Organisation'
       WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
         SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
       ) THEN 'Bank'
       ELSE 'Organisation'
     END AS NocResolvedType
@@ -126,18 +123,10 @@ const LM_SELECT = `
     SELECT TOP 1 Id, MutationNo, Status FROM dbo.CrmMutation
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) mut
-  -- Block-level OC/CC (migration 447) is authoritative when this booking's
-  -- own block has a Received cert of its own; falls back to the project's
-  -- blanket (BlockId IS NULL) cert otherwise — same fallback resolveOcCcGate
-  -- (crmWorkflowGuards.js) implements for single-booking JS lookups.
+  -- OC/CC for this booking - its own block(s), or the project when it has
+  -- no block; one rule for every screen (migration 577, vw_CrmBookingOcCc).
   OUTER APPLY (
-    SELECT CASE WHEN EXISTS (
-      SELECT 1 FROM dbo.CrmOccupancyCertificate oc
-      WHERE oc.Status = 'Received' AND (
-        (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
-        OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
-      )
-    ) THEN 1 ELSE 0 END AS HasReceived
+    SELECT ISNULL((SELECT v.Received FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id), 0) AS HasReceived
   ) occc
   OUTER APPLY (
     SELECT TOP 1 Status FROM dbo.CrmPrePossession
@@ -169,13 +158,18 @@ router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, re
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    // Rows and total share one set of inputs and conditions (the total used to repeat the filters without the project
+    // scope, so a restricted user's pages didn't add up).
     const req0 = pool.request();
+    const countReq = pool.request();
+    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); };
     const conds = [];
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
     }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
@@ -194,21 +188,13 @@ router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, re
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY m.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
+      countReq.query(`
           SELECT COUNT(*) AS total
           FROM dbo.CrmLegalMilestone m
           JOIN dbo.CrmBooking b ON b.Id = m.BookingId
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+          ${where}
         `),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
@@ -233,7 +219,7 @@ router.get("/eligible-bookings", requirePageRight("crm-legal-milestones", "view"
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      JOIN dbo.CrmAgreement agr ON agr.BookingId = b.Id
+      JOIN dbo.CrmAgreement agr ON agr.BookingId = b.Id AND agr.Status <> 'Cancelled'
       WHERE b.Status = 'Approved'
         AND b.IsActive = 1
         AND (b.IsFrozen = 0 OR (b.FreezeExpiresAt IS NOT NULL AND b.FreezeExpiresAt < SYSDATETIME()))
@@ -277,7 +263,7 @@ router.post("/", requirePageRight("crm-legal-milestones", "create"), async (req,
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const agr = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid AND Status <> 'Cancelled'");
     if (!agr.recordset.length) {
       return res.status(400).json({ error: "Legal milestone tracking requires an agreement to exist for this booking first" });
     }
@@ -327,13 +313,14 @@ router.put("/:id/:step", requirePageRight("crm-legal-milestones", "edit"), async
       .input("done", sql.Date, b.Done || null)
       .input("st",   sql.NVarChar(30), b.Status || null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
       .input("ub",   sql.Int,  actorId(req))
       .query(`
         UPDATE dbo.CrmLegalMilestone SET
           ${step}Due    = ISNULL(@due, ${step}Due),
           ${step}Done   = ISNULL(@done, ${step}Done),
           ${step}Status = ISNULL(@st, ${step}Status),
-          ${step}Notes  = @note,
+          ${step}Notes  = CASE WHEN @noteSet = 1 THEN @note ELSE ${step}Notes END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);

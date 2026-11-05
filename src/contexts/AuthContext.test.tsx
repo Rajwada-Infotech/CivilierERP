@@ -1,8 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./AuthContext";
+
+// Let the fetches a render starts finish inside act(), so their state updates don't land after the test.
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 // AuthProvider calls useQueryClient() (to clear cached queries on login/
 // logout — see AuthContext.tsx) so it must be rendered under a real
@@ -79,7 +82,7 @@ describe("AuthContext: real-time rights refresh via socket", () => {
     vi.restoreAllMocks();
   });
 
-  it("subscribes to permissions:updated on mount for a non-privileged user", () => {
+  it("subscribes to permissions:updated on mount for a non-privileged user", async () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({ rightsJson: [] }), { status: 200 })) as any;
 
     renderWithProviders(
@@ -92,6 +95,7 @@ describe("AuthContext: real-time rights refresh via socket", () => {
       "permissions:updated",
       expect.any(Function),
     );
+    await settle();
   });
 
   it("re-fetches and applies fresh pagePermissions the instant permissions:updated fires", async () => {
@@ -131,7 +135,7 @@ describe("AuthContext: real-time rights refresh via socket", () => {
     ]);
   });
 
-  it("does not subscribe at all for privileged roles (they always have full access)", () => {
+  it("does not subscribe at all for privileged roles (they always have full access)", async () => {
     sessionStorage.setItem(
       "user",
       JSON.stringify({
@@ -156,6 +160,7 @@ describe("AuthContext: real-time rights refresh via socket", () => {
       "permissions:updated",
       expect.any(Function),
     );
+    await settle();
   });
 
   it("cleans up the socket listener on unmount", () => {

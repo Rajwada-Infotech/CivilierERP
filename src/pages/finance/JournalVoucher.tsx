@@ -1,8 +1,9 @@
+import { useLiveData } from "@/hooks/useLiveData";
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,39 +70,12 @@ const emptyLine = (): JournalVoucherLineUI => ({
   Narration: "",
 });
 
-const STATUS_CFG: Record<string, { cls: string; dot: string; icon: React.ElementType }> = {
-  Draft:    { cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",   dot: "bg-slate-400",   icon: FileText },
-  Pending:  { cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",   dot: "bg-amber-400",   icon: Clock },
-  Approved: { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", dot: "bg-emerald-500", icon: CheckCircle2 },
-  Rejected: { cls: "bg-rose-500/10 text-rose-600 border-rose-400/20",     dot: "bg-rose-500",    icon: AlertCircle },
-};
-
 function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CFG[status] ?? STATUS_CFG.Draft;
-  return (
-    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border", cfg.cls)}>
-      <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
-      {status}
-    </span>
-  );
+  return <SheetMark text={status || "—"} tone={statusTone(status || "")} />;
 }
 
 function GLBadge({ status, postedToGL }: { status: string; postedToGL?: boolean }) {
-  if (status !== "Approved") {
-    return <span className="text-muted-foreground text-xs">--</span>;
-  }
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border",
-        postedToGL
-          ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
-          : "bg-rose-500/10 text-rose-600 border-rose-400/20",
-      )}
-    >
-      {postedToGL ? "Posted" : "Not posted"}
-    </span>
-  );
+  return <SheetMark text={postedToGL ? "Posted" : "Not posted"} tone={status !== "Approved" ? "none" : postedToGL ? "done" : "stopped"} />;
 }
 
 function fmtDate(d?: string | null) {
@@ -109,12 +83,25 @@ function fmtDate(d?: string | null) {
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+// What saving an edit does to the voucher, by its current status.
+const editTitle = (status: string) =>
+  status === "Approved"
+    ? "Edit (reverses its posting and reopens for approval)"
+    : status === "Pending"
+      ? "Edit (stays pending; approval restarts)"
+      : "Edit";
+
 export default function JournalVoucher() {
   const rights = usePageRights("journal-voucher");
   const [vouchers, setVouchers] = useState<JournalVoucherSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [ledgerOptions, setLedgerOptions] = useState<JournalVoucherLedgerOption[]>([]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const filtersOn = !!(search.trim() || statusFilter || dateFrom || dateTo);
+  const clearFilters = () => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); };
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -187,6 +174,12 @@ export default function JournalVoucher() {
       setLoading(false);
     }
   };
+
+  // A ledger or vendor added anywhere shows up in the line pickers straight away. On a failed live reload the list on
+  // screen is kept (the first load below still clears it on failure, as before).
+  useLiveData("ledgers", () => {
+    getJournalVoucherLedgerOptions().then(setLedgerOptions).catch(() => {});
+  });
 
   useEffect(() => {
     load();
@@ -378,9 +371,10 @@ export default function JournalVoucher() {
       if (editingId) {
         const result: any = await updateJournalVoucher(editingId, payload);
         toast.success(
-          result?.reopenedForApproval
-            ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
-            : "Journal Voucher updated",
+          result?.message ||
+            (result?.reopenedForApproval
+              ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
+              : "Journal Voucher updated"),
         );
       } else {
         await createJournalVoucher(payload);
@@ -419,26 +413,41 @@ export default function JournalVoucher() {
   ], []);
 
   // Filtered list
+  // Search matches number, narration, status, company, project, account heads
+  // and amount; status and the date range narrow it further.
   const filtered = useMemo(() => {
-    if (!search.trim()) return vouchers;
-    const q = search.toLowerCase();
-    return vouchers.filter(
-      (v) =>
-        (v.JVNo || "").toLowerCase().includes(q) ||
-        (v.Narration || "").toLowerCase().includes(q) ||
-        (v.Status || "").toLowerCase().includes(q),
-    );
-  }, [vouchers, search]);
+    const q = search.trim().toLowerCase();
+    const qDigits = q.replace(/[,\s₹]/g, "");
+    return vouchers.filter((v) => {
+      if (statusFilter && v.Status !== statusFilter) return false;
+      const d = (v.JVDate || "").slice(0, 10);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+      if (!q) return true;
+      return [v.JVNo, v.Narration, v.Status, v.CompanyName, v.ProjectName, v.AccountNames, v.CreatedByName]
+        .some((x) => (x || "").toLowerCase().includes(q))
+        || (!!qDigits && /^\d+(\.\d+)?$/.test(qDigits) && String(v.TotalAmount ?? "").includes(qDigits));
+    });
+  }, [vouchers, search, statusFilter, dateFrom, dateTo]);
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Journal Voucher"]} />
-      <FinanceShell
-        title="Journal Voucher"
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Journal vouchers"
         subtitle="Correct account-head mismatches with balanced multi-line entries"
-        icon={Scale}
         action={
           <div className="flex items-center gap-2">
+            {rights.canCreate && (
+              <Button
+                onClick={() => setDialogOpen(true)}
+                className="gap-1.5 shrink-0 bg-foreground text-card hover:bg-foreground/85 font-heading font-semibold uppercase tracking-[0.1em] text-[0.625rem] px-3 sm:px-4 py-2 h-auto"
+              >
+                <Plus size={13} />
+                <span className="hidden sm:inline">New voucher</span>
+              </Button>
+            )}
             <ExportMenu
               data={filtered as unknown as Record<string, unknown>[]}
               columns={exportColumns}
@@ -449,53 +458,41 @@ export default function JournalVoucher() {
             <button
               onClick={load}
               disabled={loading}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
+              title="Refresh"
+              className="w-8 h-8 flex items-center justify-center border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
             </button>
-            {rights.canCreate && (
-              <Button
-                onClick={() => setDialogOpen(true)}
-                className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-accent transition-all"
-              >
-                <Plus size={13} />
-                <span className="hidden sm:inline">New Journal Voucher</span>
-              </Button>
-            )}
           </div>
         }
       >
 
-        {/* ── Stat pills ── */}
+        {/* ── Counts ── */}
         {!loading && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+          <div className="statrow four">
             {[
-              { label: "Total",    value: stats.total,    color: "text-foreground",     bg: "bg-muted/30",          icon: FileText },
-              { label: "Approved", value: stats.approved, color: "text-emerald-600",    bg: "bg-emerald-500/5",     icon: CheckCircle2 },
-              { label: "Pending",  value: stats.pending,  color: "text-amber-600",      bg: "bg-amber-500/5",       icon: Clock },
-              { label: "Draft",    value: stats.draft,    color: "text-slate-500",      bg: "bg-slate-500/5",       icon: FileText },
-            ].map(({ label, value, color, bg, icon: Icon }) => (
-              <div key={label} className={cn("flex items-center gap-3 px-4 py-3 rounded-xl border border-border", bg)}>
-                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", bg)}>
-                  <Icon size={14} className={color} />
-                </div>
-                <div>
-                  <p className="text-lg font-bold text-foreground leading-none">{value}</p>
-                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{label}</p>
-                </div>
+              { label: "Vouchers", value: stats.total, note: "in all" },
+              { label: "Approved", value: stats.approved, note: "settled" },
+              { label: "Pending", value: stats.pending, note: "awaiting approval" },
+              { label: "Draft", value: stats.draft, note: "not yet submitted" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(22px, 2.4vw, 32px)", marginTop: 9 }}>{Number(x.value || 0).toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
               </div>
             ))}
           </div>
         )}
 
         {/* ── Search ── */}
-        <div className="relative mb-4">
+        <div className="relative">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by JV number, narration, or status…"
-            className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            placeholder="Search by JV number, account / company / project name, narration or amount…"
+            className="w-full pl-8 pr-8 py-2.5 border border-foreground/40 bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground transition-colors"
           />
           {search && (
             <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -504,8 +501,33 @@ export default function JournalVoucher() {
           )}
         </div>
 
+        {/* ── Filters ── */}
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Status</span>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-9 px-2 border border-foreground/40 bg-card text-sm focus:outline-none focus:border-foreground">
+              <option value="">All</option>
+              {["Draft", "Pending", "Approved", "Rejected"].map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">From</span>
+            <DateInput value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">To</span>
+            <DateInput value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </label>
+          {filtersOn && (
+            <button onClick={clearFilters} className="h-9 px-3 text-xs border border-border text-muted-foreground hover:text-foreground">
+              Clear filters
+            </button>
+          )}
+        </div>
+
         {/* ── Table ── */}
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
 
           {/* ── Mobile cards (< md) ─────────────────────────────────────────── */}
           <div className="md:hidden divide-y divide-border">
@@ -519,15 +541,15 @@ export default function JournalVoucher() {
                 <div className="flex flex-col items-center gap-3 text-muted-foreground">
                   <Scale size={36} className="opacity-20" />
                   <p className="text-sm font-medium">
-                    {search ? "No vouchers match your search" : "No journal vouchers yet"}
+                    {filtersOn ? "No vouchers match these filters" : "No journal vouchers yet"}
                   </p>
-                  {search && (
-                    <button onClick={() => setSearch("")} className="text-xs text-primary hover:underline">Clear search</button>
+                  {filtersOn && (
+                    <button onClick={clearFilters} className="text-xs text-primary hover:underline">Clear filters</button>
                   )}
-                  {!search && rights.canCreate && (
+                  {!filtersOn && rights.canCreate && (
                     <button
                       onClick={() => setDialogOpen(true)}
-                      className="flex items-center gap-1.5 mt-1 px-4 py-2 rounded-lg gradient-accent text-white text-xs font-semibold"
+                      className="flex items-center gap-1.5 mt-1 px-4 py-2 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
                     >
                       <Plus size={12} /> Create First Voucher
                     </button>
@@ -536,17 +558,15 @@ export default function JournalVoucher() {
               </div>
             ) : (
               filtered.map((v) => (
-                <div key={v.JVID} className="px-4 py-3.5 hover:bg-muted/20 transition-colors">
+                <div key={v.JVID} className="px-4 py-3.5 hover:bg-primary/[0.06] transition-colors">
                   {/* Row 1: JV No + date + amount */}
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
-                        {v.JVNo || `JV-${v.JVID}`}
-                      </span>
+                      <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{v.JVNo || `JV-${v.JVID}`}</span>
                       <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtDate(v.JVDate)}</span>
                     </div>
-                    <span className="font-mono text-sm font-semibold text-foreground tabular-nums shrink-0">
-                      {formatINR(v.TotalAmount || 0)}
+                    <span className="font-heading tabular-nums text-sm font-semibold text-foreground tabular-nums shrink-0">
+                      {formatINR(v.TotalAmount || 0, { decimals: 2 })}
                     </span>
                   </div>
                   {/* Row 2: company / project */}
@@ -567,11 +587,11 @@ export default function JournalVoucher() {
                       <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
                     </div>
                     <div className="flex gap-1">
-                      {v.Status !== "Pending" && rights.canEdit && (
+                      {rights.canEdit && (
                         <button
                           disabled={editLoading}
                           onClick={() => startEdit(v)}
-                          title={v.Status === "Approved" ? "Edit (reopens for approval)" : "Edit"}
+                          title={editTitle(v.Status)}
                           className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
                         >
                           <Pencil size={13} />
@@ -594,107 +614,105 @@ export default function JournalVoucher() {
           </div>
 
           {/* ── Desktop table (md+) ─────────────────────────────────────────── */}
-          <table className="w-full text-sm hidden md:table">
+          <table className="w-full text-sm hidden md:table" style={{ borderCollapse: "collapse" }}>
             <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">JV No</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Company / Project</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Narration</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">GL</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground">Actions</th>
+              <tr style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                {[
+                  { h: "No.", right: false },
+                  { h: "Voucher", right: false },
+                  { h: "Date", right: false },
+                  { h: "Company / project", right: false },
+                  { h: "Narration", right: false },
+                  { h: "Amount", right: true },
+                  { h: "Status", right: false },
+                  { h: "Ledger", right: false },
+                  { h: "", right: true },
+                ].map((c, i) => (
+                  <th key={i} className={`px-3 py-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground ${c.right ? "text-right" : "text-left"}`}>
+                    {c.h}
+                  </th>
+                ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center">
+                  <td colSpan={9} className="py-16 text-center">
                     <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
                     <p className="text-sm text-muted-foreground mt-2">Loading vouchers…</p>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-20 text-center">
+                  <td colSpan={9} className="py-20 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <Scale size={36} className="opacity-20" />
-                      <p className="text-sm font-medium">
-                        {search ? "No vouchers match your search" : "No journal vouchers yet"}
-                      </p>
-                      {search && (
-                        <button onClick={() => setSearch("")} className="text-xs text-primary hover:underline">
-                          Clear search
-                        </button>
+                      <p className="text-sm font-medium">{filtersOn ? "No vouchers match these filters" : "No journal vouchers yet"}</p>
+                      {filtersOn && (
+                        <button onClick={clearFilters} className="text-xs text-foreground underline">Clear filters</button>
                       )}
-                      {!search && rights.canCreate && (
+                      {!filtersOn && rights.canCreate && (
                         <button
                           onClick={() => setDialogOpen(true)}
-                          className="flex items-center gap-1.5 mt-1 px-4 py-2 rounded-lg gradient-accent text-white text-xs font-semibold"
+                          className="flex items-center gap-1.5 mt-1 px-4 py-2 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
                         >
-                          <Plus size={12} /> Create First Voucher
+                          <Plus size={12} /> Create first voucher
                         </button>
                       )}
                     </div>
                   </td>
                 </tr>
               ) : (
-                filtered.map((v) => (
+                filtered.map((v, i) => (
                   <tr
                     key={v.JVID}
                     onClick={() => openJVDetail(v.JVID)}
-                    className="hover:bg-muted/30 transition-colors group cursor-pointer"
+                    className="hover:bg-primary/[0.06] transition-colors cursor-pointer align-top"
+                    style={{ borderBottom: "1px solid hsl(var(--border) / 0.6)" }}
                   >
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
-                        {v.JVNo || `JV-${v.JVID}`}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{fmtDate(v.JVDate)}</td>
-                    <td className="px-4 py-3 text-sm">
+                    <td className="px-3 py-3 font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
+                    <td className="px-3 py-3 font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground whitespace-nowrap">{v.JVNo || `JV-${v.JVID}`}</td>
+                    <td className="px-3 py-3 text-[0.75rem] text-foreground tabular-nums whitespace-nowrap">{fmtDate(v.JVDate)}</td>
+                    <td className="px-3 py-3">
                       {v.CompanyName ? (
                         <>
-                          <p className="text-foreground truncate max-w-[160px]">{v.CompanyName}</p>
-                          {v.ProjectName && (
-                            <p className="text-[0.6875rem] text-muted-foreground truncate max-w-[160px]">{v.ProjectName}</p>
-                          )}
+                          <p className="text-[0.8125rem] font-semibold text-foreground truncate max-w-[180px]">{v.CompanyName}</p>
+                          {v.ProjectName && <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate max-w-[180px]">{v.ProjectName}</p>}
                         </>
                       ) : (
-                        <span className="italic text-muted-foreground/50">—</span>
+                        <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm text-foreground max-w-xs">
-                      <p className="truncate">{v.Narration || <span className="italic text-muted-foreground/50">—</span>}</p>
+                    <td className="px-3 py-3 text-[0.8125rem] text-foreground/85 max-w-xs">
+                      <p className="line-clamp-2">{v.Narration || <span className="text-muted-foreground">—</span>}</p>
                     </td>
-                    <td className="px-4 py-3 text-right font-medium text-foreground tabular-nums">
-                      {formatINR(v.TotalAmount || 0)}
+                    <td className="px-3 py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">{formatINR(v.TotalAmount || 0, { decimals: 2 })}</td>
+                    <td className="px-3 py-3"><SheetMark text={v.Status || "—"} tone={statusTone(v.Status || "")} /></td>
+                    <td className="px-3 py-3">
+                      <SheetMark
+                        text={v.PostedToGL ? "Posted" : "Not posted"}
+                        tone={v.Status !== "Approved" ? "none" : v.PostedToGL ? "done" : "stopped"}
+                      />
                     </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={v.Status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-3 py-3 text-right">
                       <div className="flex justify-end gap-1">
-                        {v.Status !== "Pending" && rights.canEdit && (
+                        {rights.canEdit && (
                           <button
                             disabled={editLoading}
                             onClick={(e) => { e.stopPropagation(); startEdit(v); }}
-                            title={v.Status === "Approved" ? "Edit (reopens for approval)" : "Edit"}
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
+                            title={editTitle(v.Status)}
+                            className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40"
                           >
-                            <Pencil size={13} />
+                            <Pencil size={12} />
                           </button>
                         )}
                         {rights.canDelete && (
                           <button
                             onClick={(e) => { e.stopPropagation(); setDeleteId(v.JVID); }}
                             title="Delete"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            className="p-1.5 border border-destructive/30 text-destructive/70 hover:text-destructive hover:border-destructive transition-colors"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={12} />
                           </button>
                         )}
                       </div>
@@ -705,31 +723,31 @@ export default function JournalVoucher() {
             </tbody>
           </table>
 
-          {!loading && filtered.length > 0 && search && (
-            <div className="px-4 py-2.5 border-t border-border bg-muted/20">
-              <p className="text-xs text-muted-foreground">
+          {!loading && filtered.length > 0 && filtersOn && (
+            <div className="px-3 py-2.5" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
+              <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Showing {filtered.length} of {vouchers.length} vouchers
               </p>
             </div>
           )}
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {/* ── New JV Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden" onKeyDown={preventEnterSubmit}>
-          <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
+        <DialogContent className="sheet-frame max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
+          <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-foreground">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">
                 <Scale size={15} className="text-primary" />
               </div>
               <div className="min-w-0">
-                <DialogTitle className="text-sm font-semibold">
+                <DialogTitle className="font-heading text-base font-bold tracking-tight">
                   {editingId ? "Edit Journal Voucher" : "New Journal Voucher"}
                 </DialogTitle>
                 <DialogDescription className="text-[0.6875rem] mt-0.5">
                   {editingId
-                    ? "Editing an already-approved voucher reverses its GL posting and sends it back for approval."
+                    ? "Every field can be changed. An approved voucher has its GL posting reversed and goes back for approval; a pending one stays pending and its approval restarts."
                     : "Debit total must equal credit total before saving."}
                 </DialogDescription>
               </div>
@@ -740,7 +758,7 @@ export default function JournalVoucher() {
             {/* Header fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Company *</label>
+                <label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Company *</label>
                 <Select
                   value={companyId}
                   onValueChange={(v) => { setCompanyId(v); setProjectId(""); }}
@@ -756,7 +774,7 @@ export default function JournalVoucher() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Project</label>
+                <label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Project</label>
                 <Select
                   value={projectId}
                   onValueChange={setProjectId}
@@ -773,11 +791,11 @@ export default function JournalVoucher() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Date</label>
+                <label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Date</label>
                 <DateInput value={jvDate} onChange={(e) => setJvDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Narration</label>
+                <label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Narration</label>
                 <Input value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this Journal Voucher" />
               </div>
             </div>
@@ -787,7 +805,7 @@ export default function JournalVoucher() {
             <div className="rounded-xl border border-border overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[480px]">
-                  <thead className="bg-muted/40 border-b border-border">
+                  <thead style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
                     <tr>
                       <th className="px-3 py-2 text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Account Head</th>
                       <th className="px-3 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Debit</th>
@@ -841,15 +859,15 @@ export default function JournalVoucher() {
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot className="border-t border-border bg-muted/20">
+                  <tfoot className="border-t border-foreground">
                     <tr>
                       <td className="px-3 py-2">
                         <button onClick={addLine} className="flex items-center gap-1 text-xs text-primary hover:underline">
                           <Plus size={11} /> Add line
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.debit)}</td>
-                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.credit)}</td>
+                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.debit, { decimals: 2 })}</td>
+                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.credit, { decimals: 2 })}</td>
                       <td />
                     </tr>
                   </tfoot>
@@ -861,9 +879,9 @@ export default function JournalVoucher() {
             <div className={cn(
               "flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-medium",
               totals.balanced
-                ? "border-emerald-400/30 bg-emerald-500/5 text-emerald-600"
+                ? "border-foreground/40 bg-primary/10 text-foreground"
                 : totals.debit > 0 || totals.credit > 0
-                ? "border-rose-400/30 bg-rose-500/5 text-rose-600"
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
                 : "border-border bg-muted/20 text-muted-foreground"
             )}>
               {totals.balanced
@@ -872,9 +890,9 @@ export default function JournalVoucher() {
                 ? <AlertCircle size={13} className="shrink-0" />
                 : <Scale size={13} className="shrink-0" />}
               {totals.balanced
-                ? `Balanced — ${formatINR(totals.debit)} each side`
+                ? `Balanced — ${formatINR(totals.debit, { decimals: 2 })} each side`
                 : totals.debit > 0 || totals.credit > 0
-                ? `Difference: ${formatINR(Math.abs(totals.debit - totals.credit))}`
+                ? `Difference: ${formatINR(Math.abs(totals.debit - totals.credit), { decimals: 2 })}`
                 : "Enter amounts on each line"}
             </div>
 
@@ -886,18 +904,18 @@ export default function JournalVoucher() {
             />
           </div>
 
-          <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/20">
+          <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-foreground">
             <button
               onClick={() => { setDialogOpen(false); resetForm(); }}
               disabled={saving}
-              className="w-full sm:w-auto px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+              className="w-full sm:w-auto px-4 py-2.5 border border-foreground/40 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={submit}
               disabled={saving || !totals.balanced}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground/85 transition-colors disabled:opacity-50"
             >
               {saving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
               {saving ? "Saving…" : editingId ? "Save Changes" : "Save & Submit"}
@@ -908,16 +926,16 @@ export default function JournalVoucher() {
 
       {/* ── Voucher detail ── */}
       <Dialog open={viewingJVLoading || !!viewingJV} onOpenChange={(o) => { if (!o) setViewingJV(null); }}>
-        <DialogContent className="max-w-lg p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden">
+        <DialogContent className="sheet-frame max-w-lg p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden" style={{ margin: 0 }}>
           {viewingJVLoading ? (
             <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground text-sm">
               <Loader2 size={16} className="animate-spin" /> Loading voucher…
             </div>
           ) : viewingJV ? (
             <>
-              <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
+              <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-foreground">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
+                  <span className="font-heading tabular-nums text-xs bg-muted px-2 py-1 rounded text-foreground">
                     {viewingJV.JVNo || `JV-${viewingJV.JVID}`}
                   </span>
                   <StatusBadge status={viewingJV.Status} />
@@ -954,13 +972,13 @@ export default function JournalVoucher() {
                     <p className="text-sm font-medium text-foreground">{viewingJV.Mode}</p>
                     {viewingJV.BankName && <p className="text-muted-foreground">Bank: {viewingJV.BankName}</p>}
                     {viewingJV.ChequeNo && (
-                      <p className="text-muted-foreground font-mono">
+                      <p className="text-muted-foreground font-heading tabular-nums">
                         {viewingJV.ChequeLotNumber ? `${viewingJV.ChequeLotNumber} · ` : ""}Cheque #{viewingJV.ChequeNo}
                         {viewingJV.ChequeDate ? ` · ${fmtDate(viewingJV.ChequeDate)}` : ""}
                       </p>
                     )}
                     {viewingJV.DigitalRefNumber && (
-                      <p className="text-muted-foreground font-mono">Ref: {viewingJV.DigitalRefNumber}</p>
+                      <p className="text-muted-foreground font-heading tabular-nums">Ref: {viewingJV.DigitalRefNumber}</p>
                     )}
                   </div>
                 )}
@@ -980,14 +998,14 @@ export default function JournalVoucher() {
                         className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 border-b border-border/50 last:border-0 items-center gap-1 sm:gap-2"
                       >
                         <div className="flex items-center gap-2 min-w-0 pl-1">
-                          <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDebit ? "bg-emerald-500" : "bg-rose-500"}`} />
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDebit ? "bg-foreground" : "bg-destructive"}`} />
                           <div className="min-w-0">
                             <p className="text-[0.6875rem] sm:text-xs text-foreground truncate flex items-center gap-1.5">
                               <span className="truncate">{l.LHeadName || "—"}</span>
                               {kind && (
-                                <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-none ${
                                   kind === "Investment"
-                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                    ? "bg-primary/10 text-foreground"
                                     : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                                 }`}>
                                   {kind}
@@ -999,31 +1017,31 @@ export default function JournalVoucher() {
                             )}
                           </div>
                         </div>
-                        <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
-                          {l.DebitAmount ? formatINR(l.DebitAmount) : ""}
+                        <span className="text-xs text-right font-heading tabular-nums text-foreground">
+                          {l.DebitAmount ? formatINR(l.DebitAmount, { decimals: 2 }) : ""}
                         </span>
-                        <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
-                          {l.CreditAmount ? formatINR(l.CreditAmount) : ""}
+                        <span className="text-xs text-right font-heading tabular-nums text-destructive">
+                          {l.CreditAmount ? formatINR(l.CreditAmount, { decimals: 2 }) : ""}
                         </span>
                       </div>
                     );
                   })}
                   <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
                     <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
-                    <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
-                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0))}
+                    <span className="text-right text-foreground font-heading tabular-nums">
+                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0), { decimals: 2 })}
                     </span>
-                    <span className="text-right text-rose-600 dark:text-rose-400 font-mono">
-                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.CreditAmount) || 0), 0))}
+                    <span className="text-right text-destructive font-heading tabular-nums">
+                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.CreditAmount) || 0), 0), { decimals: 2 })}
                     </span>
                   </div>
                 </div>
 
                 {viewingJV.Status === "Approved" && (
                   viewingJV.PostedToGL ? (
-                    <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-                      <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
-                      <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                    <div className="flex items-center gap-2.5 rounded-xl border border-foreground/40 bg-primary/10 px-4 py-3">
+                      <CheckCircle2 size={13} className="text-foreground flex-shrink-0" />
+                      <p className="text-xs text-foreground">
                         Posted to General Ledger. Entries are visible in the Trial Balance.
                       </p>
                     </div>
@@ -1038,10 +1056,10 @@ export default function JournalVoucher() {
                 )}
               </div>
 
-              <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/20">
+              <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-foreground">
                 <button
                   onClick={() => setViewingJV(null)}
-                  className="w-full sm:w-auto px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+                  className="w-full sm:w-auto px-4 py-2.5 border border-foreground/40 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                 >
                   Close
                 </button>

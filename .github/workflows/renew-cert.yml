@@ -19,6 +19,9 @@ on:
     - cron: "30 3 * * 1" # Mondays 03:30 UTC
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   renew:
     runs-on: ubuntu-latest

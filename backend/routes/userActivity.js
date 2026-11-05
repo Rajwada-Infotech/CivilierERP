@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const crypto = require("crypto");
 const { getPool, sql } = require("../db");
 const {
@@ -15,6 +15,7 @@ const {
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const { cache } = require("../middleware/cache");
+const { nameIds } = require("../services/activityNames");
 
 // Socket.io — lazy-loaded so the route module works even before initSocket()
 // is called (e.g. during unit tests).  getIo() will throw only if it's
@@ -215,13 +216,7 @@ router.get(
 
       const whereClause = whereConditions.join(" AND ");
 
-      const dataRequest = pool.request();
-      for (const [name, type, value] of queryInputs) {
-        dataRequest.input(name, type, value);
-      }
-
-      const dataResult = await dataRequest.query(`
-        SELECT
+      const { rows: pageRows, total } = await pageWithTotal(pool, queryInputs, whereClause, `
           Id AS id, UserId AS userId, UserName AS userName,
           UserEmail AS userEmail, UserRole AS userRole,
           EventType AS event, CreatedAt AS timestamp,
@@ -230,18 +225,10 @@ router.get(
           ActionType AS actionType, Resource AS resource,
           Details AS details, SessionId AS sessionId,
           SessionDuration AS sessionDuration,
-          RequestMethod AS requestMethod, RequestUrl AS requestUrl,
-          COUNT(*) OVER() AS totalCount
-        FROM dbo.UserActivityLog
-        WHERE ${whereClause}
-        ORDER BY ${sortColumn} ${order}
-        OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
-      `);
-
-      const total = dataResult.recordset[0]?.totalCount ?? 0;
+          RequestMethod AS requestMethod, RequestUrl AS requestUrl`, `${sortColumn} ${order}`, offset, limit);
 
       res.json({
-        data: dataResult.recordset.map(mapActivityRow),
+        data: await nameIds(pageRows.map(mapActivityRow)),
         total,
         page,
         limit,
@@ -262,6 +249,112 @@ router.get(
   },
 );
 
+// One page of the log and the total it belongs to, as two queries side by side. A COUNT(*) OVER() in the page
+// query made the database read every row of the period — Details and all — just to count it (~17,500 runs
+// at ~50 ms); a plain count reads the index only, and the page reads just its own rows. `inputs`: the
+// [name, type, value] the WHERE uses; `select` / `orderBy`: the page's columns and order.
+async function pageWithTotal(pool, inputs, where, select, orderBy, offset, limit) {
+  const withInputs = () => {
+    const r = pool.request();
+    for (const [name, type, value] of inputs) r.input(name, type, value);
+    return r;
+  };
+  const [count, rows] = await Promise.all([
+    withInputs().query(`SELECT COUNT(*) AS total FROM dbo.UserActivityLog WHERE ${where}`),
+    withInputs().query(`SELECT ${select} FROM dbo.UserActivityLog WHERE ${where}
+      ORDER BY ${orderBy} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`),
+  ]);
+  // From the count, so a page past the end still says how many there are.
+  return { rows: rows.recordset, total: count.recordset[0]?.total ?? 0 };
+}
+
+// ── User-wise view ─────────────────────────────────────────────────────────
+// Background calls the app makes by itself (usage pings, the activity log's own traffic) are not something the
+// person did, so they are left out unless ?noise=1 is sent. So are price quotes logged before they were treated
+// as look-ups (middleware/activityAudit.js LOOKUP) — a screen re-asking one logged 809 "creates" for one user.
+const NOISE_SQL = "(Resource IS NULL OR (Resource NOT LIKE '/api/home/usage%' AND Resource NOT LIKE '/api/user-activity%' AND Resource NOT LIKE '%/price-quote'))";
+
+function userViewFilters(req) {
+  const [periodFrom, periodTo] = computeDateRange(req.query.period);
+  const from = periodFrom ?? parseDateBoundary(req.query.dateFrom);
+  const to = periodTo ?? parseDateBoundary(req.query.dateTo, { exclusiveEnd: true });
+  const where = ["1 = 1"];
+  const inputs = [];
+  if (from) { where.push("CreatedAt >= @dateFrom"); inputs.push(["dateFrom", sql.DateTime2, from]); }
+  if (to) { where.push("CreatedAt < @dateTo"); inputs.push(["dateTo", sql.DateTime2, to]); }
+  if (req.query.noise !== "1") where.push(NOISE_SQL);
+  return { where, inputs };
+}
+
+// GET /users - one row per person: what they did in the period.
+router.get(
+  "/users",
+  checkPermission("UserActivity", "List", "CanView"),
+  async (req, res) => {
+    try {
+      const { where, inputs } = userViewFilters(req);
+      const search = String(req.query.search || "").trim().toLowerCase();
+      if (search) {
+        where.push("(LOWER(UserName) LIKE @q OR LOWER(UserEmail) LIKE @q)");
+        inputs.push(["q", sql.NVarChar, `%${search}%`]);
+      }
+      if (req.query.role) {
+        where.push("UserRole = @role");
+        inputs.push(["role", sql.NVarChar(50), String(req.query.role)]);
+      }
+      const request = getPool().request();
+      for (const [n, ty, v] of inputs) request.input(n, ty, v);
+      const result = await request.query(`
+        SELECT UserId AS userId, MAX(UserName) AS userName, MAX(UserEmail) AS userEmail, MAX(UserRole) AS userRole,
+               MAX(CreatedAt) AS lastSeen,
+               COUNT(DISTINCT SessionId) AS sessions,
+               SUM(CASE WHEN EventType = 'login' THEN 1 ELSE 0 END) AS logins,
+               SUM(CASE WHEN EventType = 'action' AND ActionType = 'read' THEN 1 ELSE 0 END) AS reads,
+               SUM(CASE WHEN EventType = 'action' AND ActionType = 'create' THEN 1 ELSE 0 END) AS creates,
+               SUM(CASE WHEN EventType = 'action' AND ActionType = 'update' THEN 1 ELSE 0 END) AS updates,
+               SUM(CASE WHEN EventType = 'action' AND ActionType = 'delete' THEN 1 ELSE 0 END) AS deletes,
+               SUM(CASE WHEN EventType = 'action' AND ActionType IN ('export', 'settings_change') THEN 1 ELSE 0 END) AS others
+        FROM dbo.UserActivityLog
+        WHERE ${where.join(" AND ")}
+        GROUP BY UserId
+        ORDER BY MAX(CreatedAt) DESC
+      `);
+      res.json(result.recordset);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch users' activity" });
+    }
+  },
+);
+
+// GET /user/:userId - one person's events, newest first. ?type=changes (create/update/delete/export/settings),
+// ?type=logins, default all.
+router.get(
+  "/user/:userId",
+  checkPermission("UserActivity", "List", "CanView"),
+  async (req, res) => {
+    try {
+      const { where, inputs } = userViewFilters(req);
+      where.push("UserId = @userId");
+      inputs.push(["userId", sql.NVarChar(50), String(req.params.userId)]);
+      const type = String(req.query.type || "all");
+      if (type === "changes") where.push("EventType = 'action' AND ActionType IN ('create','update','delete','export','settings_change')");
+      else if (type === "logins") where.push("EventType IN ('login','logout')");
+      else if (type === "reads") where.push("EventType = 'action' AND ActionType = 'read'");
+      const page = Math.max(1, normalizePositiveInt(req.query.page, 1));
+      const limit = Math.min(normalizePositiveInt(req.query.limit, 100), 500);
+      const { rows, total } = await pageWithTotal(getPool(), inputs, where.join(" AND "), `
+               Id AS id, UserId AS userId, UserName AS userName, UserEmail AS userEmail, UserRole AS userRole,
+               EventType AS event, CreatedAt AS timestamp, IpAddress AS ipAddress, DeviceInfo AS deviceInfo,
+               ActionType AS actionType, Resource AS resource, Details AS details, SessionId AS sessionId,
+               SessionDuration AS sessionDuration, RequestMethod AS requestMethod, RequestUrl AS requestUrl`,
+        "CreatedAt DESC", (page - 1) * limit, limit);
+      res.json({ data: await nameIds(rows.map(mapActivityRow)), total, page, limit, pages: Math.ceil(total / limit) });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch the user's activity" });
+    }
+  },
+);
+
 // Session timeline
 router.get(
   "/session/:sessionId",
@@ -277,7 +370,7 @@ router.get(
           "SELECT * FROM dbo.UserActivityLog WHERE SessionId = @sessionId ORDER BY CreatedAt ASC",
         );
 
-      res.json(result.recordset.map(mapActivityRow));
+      res.json(await nameIds(result.recordset.map(mapActivityRow)));
     } catch (err) {
       if (process.env.NODE_ENV === "development") {
         console.error("Session error:", err.message);
@@ -401,14 +494,10 @@ router.post("/", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
 
-    // Resolve the real client IP: trust X-Forwarded-For (set by proxies/load
-    // balancers) first, fall back to the socket remote address, then to the
-    // client-supplied value, and finally "unknown".
-    const serverIp =
-      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
-      req.socket?.remoteAddress ||
-      req.ip ||
-      null;
+    // The visitor's address as Express resolves it: counted back from the right of X-Forwarded-For past
+    // the trusted proxies (server.js "trust proxy"). Reading the header's first entry let anyone write
+    // the address recorded against them by sending their own X-Forwarded-For.
+    const serverIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "") || null;
     const resolvedIp =
       serverIp || normalizeNullableString(rest.ipAddress, 50) || "unknown";
 
@@ -538,3 +627,4 @@ router.post("/", authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.pageWithTotal = pageWithTotal;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { format } from "date-fns";
 import type { BankRecord } from "@/api/bankMasterApi";
@@ -15,6 +15,9 @@ const api = vi.hoisted(() => ({ fetchChequeLots: vi.fn(), fetchChequeNumbers: vi
 vi.mock("@/pages/finance/payment/api", () => api);
 
 import { SettlementModeSection } from "./SettlementModeSection";
+
+// Let the fetches a render starts finish inside act(), so their state updates don't land after the test.
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 describe("settlement helpers", () => {
   it("has no error without a mode, and needs the full cheque detail for cheque modes", () => {
@@ -148,6 +151,7 @@ describe("SettlementModeSection", () => {
     await screen.findByLabelText("Cheque lot");
     fireEvent.change(screen.getByLabelText("Bank account"), { target: { value: "59" } });
     expect(state()).toMatchObject({ bankId: "59", chequeLotId: null, chequeNo: "" });
+    await settle(); // the new bank's cheque lots load
   });
 
   it("keeps a voucher's own already-claimed leaf selectable when editing", async () => {

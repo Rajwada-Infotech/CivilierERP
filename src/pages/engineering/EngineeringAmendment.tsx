@@ -1,8 +1,16 @@
-import { EngineeringShell } from "@/components/engineering/EngineeringShell";
+import React from "react";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { AmendmentLogPage } from "@/components/amendment/AmendmentLogPage";
 import { usePageRights } from "@/hooks/usePageRights";
 
+// The amendment log takes whichever shell its module uses; Engineering is on the sheet.
+const EngineeringSheetShell: React.FC<{ title: string; subtitle?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }> = ({ title, subtitle, action, children }) => (
+  <SheetShell eyebrow="CivilierERP · Engineering" title={title} subtitle={typeof subtitle === "string" ? subtitle : undefined} action={action}>
+    {children}
+  </SheetShell>
+);
+
 export default function EngineeringAmendment() {
   usePageRights("engineering-amendment");
-  return <AmendmentLogPage module="engineering" title="Amendment" Shell={EngineeringShell} />;
+  return <AmendmentLogPage module="engineering" title="Amendments" Shell={EngineeringSheetShell} />;
 }

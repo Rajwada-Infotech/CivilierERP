@@ -11,6 +11,7 @@
  *   LHeadStatus, LBelongsTo (FK → AccountGroup.AGId), GroupName
  */
 
+import { panDisplay } from "@/lib/panDisplay";
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -165,8 +166,8 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Contact Person", accessor: "LHeadContactPerson" },
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },
-  { header: "GST Number", accessor: "LGST" },
-  { header: "PAN Number", accessor: "LHeadPan" },
+  { header: "GSTIN (GST Identification Number)", accessor: "LGST" },
+  { header: "PAN (Permanent Account Number)", accessor: "LHeadPan" },
   { header: "GST Type", accessor: "LGSTType" },
   { header: "GST State", accessor: "LGSTState" },
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
@@ -222,7 +223,7 @@ function buildCustomerColumns(
     },
     {
       accessorKey: "LGST",
-      header: "GST No.",
+      header: "GSTIN (GST Identification Number)",
       cell: ({ getValue }) => (
         <span className="font-mono text-xs font-semibold text-primary">
           {(getValue() as string) || "—"}
@@ -529,8 +530,8 @@ const CustomerMaster: React.FC = () => {
         <tr><td>Contact Person</td><td>${c.LHeadContactPerson || "—"}</td></tr>
         <tr><td>Phone</td><td>${c.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${c.LHeadEmail || "—"}</td></tr>
-        <tr><td>GST Number</td><td>${c.LGST || "—"}</td></tr>
-        <tr><td>PAN Number</td><td>${c.LHeadPan || "—"}</td></tr>
+        <tr><td>GSTIN (GST Identification Number)</td><td>${c.LGST || "—"}</td></tr>
+        <tr><td>PAN (Permanent Account Number)</td><td>${panDisplay(c.LHeadPan) || "—"}</td></tr>
         <tr><td>GST Type</td><td>${c.LGSTType || "—"}</td></tr>
         <tr><td>GST State</td><td>${c.LGSTState || "—"}</td></tr>
         <tr><td>Payment Terms</td><td>${c.LHeadPaymentTerms || "—"}</td></tr>
@@ -832,10 +833,10 @@ const CustomerMaster: React.FC = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
-                {/* GST Number */}
+                {/* GSTIN (GST Identification Number) */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    GST Number
+                    GSTIN (GST Identification Number)
                   </label>
                   <input
                     value={form.LGST}
@@ -854,7 +855,7 @@ const CustomerMaster: React.FC = () => {
                 {/* PAN */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    PAN Number
+                    PAN (Permanent Account Number)
                   </label>
                   <input
                     value={form.LHeadPan}
@@ -1024,7 +1025,7 @@ const CustomerMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -1058,13 +1059,13 @@ const CustomerMaster: React.FC = () => {
                 },
                 { label: "Email", value: viewRecord.LHeadEmail || "—" },
                 {
-                  label: "GST Number",
+                  label: "GSTIN (GST Identification Number)",
                   value: viewRecord.LGST || "—",
                   mono: true,
                 },
                 {
-                  label: "PAN Number",
-                  value: viewRecord.LHeadPan || "—",
+                  label: "PAN (Permanent Account Number)",
+                  value: panDisplay(viewRecord.LHeadPan) || "—",
                   mono: true,
                 },
                 { label: "GST Type", value: viewRecord.LGSTType || "—" },

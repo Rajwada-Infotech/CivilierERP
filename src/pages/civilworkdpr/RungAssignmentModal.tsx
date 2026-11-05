@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, ShieldCheck, Plus, Trash2, Users, Search } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, Link2, Flag, ShieldCheck, Plus, Trash2, Users, Search } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
@@ -18,15 +18,20 @@ import {
   type ApprovalLevel,
 } from "@/api/dependencyActivityAssignmentApi";
 import { getRoomBlueprint } from "@/api/roomMasterApi";
+import { chainFloorDisplay, roomDisplay } from "@/lib/floorLabel";
+import { dependencyAutoName } from "@/lib/dependencyAutoName";
+import { PRIORITY_META } from "@/components/civilworkdpr/PriorityBadge";
+import { ASSIGNMENT_PRIORITIES, type AssignmentPriority } from "@/api/dependencyActivityAssignmentApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { applyDefaultDays, changeDays, changeEnd, changeStart, type AllocDates } from "./allocationDates";
 
 const inputCls =
-  "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
-const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1.5";
+  "w-full px-3 py-2.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed";
+const labelCls = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1.5 mb-1.5";
 
 // Native <select multiple> renders as a raw OS listbox no amount of CSS can
 // soften — this pairs a styled trigger with a checkbox list in a Radix
@@ -34,7 +39,7 @@ const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking
 // the Engineers dropdown, the QC dropdown, and each Approval Level's own
 // picker below — same look everywhere a "pick some people" control appears
 // in this modal.
-function UserMultiSelect({
+export function UserMultiSelect({
   users, selected, onChange, placeholder = "Select…", noneLabel = "No one available.",
 }: {
   users: Engineer[]; selected: number[]; onChange: (ids: number[]) => void; placeholder?: string; noneLabel?: string;
@@ -74,7 +79,7 @@ function UserMultiSelect({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search…"
               autoFocus
-              className="w-full pl-7 pr-2 py-1.5 rounded-md text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+              className="w-full pl-7 pr-2 py-1.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none"
             />
           </div>
         )}
@@ -86,7 +91,7 @@ function UserMultiSelect({
           visibleUsers.map((u) => (
             <label
               key={u.id}
-              className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm text-foreground hover:bg-muted cursor-pointer transition-colors"
+              className="flex items-center gap-2.5 px-2.5 py-2 text-sm text-foreground hover:bg-primary/10 cursor-pointer transition-colors"
             >
               <Checkbox checked={selected.includes(u.id)} onCheckedChange={() => toggle(u.id)} />
               {u.name}
@@ -113,7 +118,7 @@ const newLevel = (index: number): ApprovalLevel => ({
 // "one-by-one, then either" chain. Whoever ends up named here (plus
 // super_admin, always) gets the right to approve this activity's finished
 // work — enforced where that approval action itself lives (Work Reporting).
-function ApprovalLevelsEditor({
+export function ApprovalLevelsEditor({
   levels, onChange, users,
 }: {
   levels: ApprovalLevel[]; onChange: (levels: ApprovalLevel[]) => void; users: Engineer[];
@@ -124,7 +129,7 @@ function ApprovalLevelsEditor({
   const addLevel = () => onChange([...levels, newLevel(levels.length)]);
 
   return (
-    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-3.5 space-y-2.5">
+    <div className="border border-dashed border-foreground/40 p-3.5 space-y-2.5">
       <div className="flex items-center justify-between">
         <label className={`${labelCls} mb-0`}>
           <ShieldCheck size={11} /> Approval Setup
@@ -132,7 +137,7 @@ function ApprovalLevelsEditor({
         <button
           type="button"
           onClick={addLevel}
-          className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 transition-colors"
+          className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-foreground underline underline-offset-2"
         >
           <Plus size={11} /> Add Approver Level
         </button>
@@ -164,10 +169,10 @@ function ApprovalLevelsEditor({
                     type="button"
                     onClick={() => updateLevel(level.id, { mode: level.mode === "any" ? "all" : "any" })}
                     title={level.mode === "any" ? "Any one of them can approve — click to require all" : "All must approve — click to allow any one of them"}
-                    className={`shrink-0 inline-flex items-center gap-1 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full transition-colors ${
+                    className={`shrink-0 inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 border transition-colors ${
                       level.mode === "any"
-                        ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
-                        : "bg-muted text-muted-foreground"
+                        ? "border-dashed border-foreground text-foreground"
+                        : "border-foreground bg-foreground text-card"
                     }`}
                   >
                     <Users size={10} /> {level.mode === "any" ? "Any one" : "All"}
@@ -176,7 +181,7 @@ function ApprovalLevelsEditor({
                 <button
                   type="button"
                   onClick={() => removeLevel(level.id)}
-                  className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  className="shrink-0 p-1.5 text-muted-foreground hover:text-destructive transition-colors"
                   title="Remove level"
                 >
                   <Trash2 size={12} />
@@ -220,7 +225,7 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
         <FileText size={11} /> Reference Blueprint
       </label>
       {blueprintLoading ? (
-        <div className="rounded-lg border border-border bg-muted/30 h-24 flex items-center justify-center">
+        <div className="border border-foreground/40 h-24 flex items-center justify-center">
           <Loader2 size={16} className="animate-spin text-muted-foreground" />
         </div>
       ) : !blueprint ? (
@@ -231,7 +236,7 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
         <button
           type="button"
           onClick={() => setEditorOpen(true)}
-          className="relative w-full max-w-[240px] rounded-lg border border-border overflow-hidden hover:border-primary/40 transition-colors group"
+          className="relative w-full max-w-[240px] border border-foreground/40 overflow-hidden hover:border-foreground transition-colors group"
         >
           {thumbnailSrc ? (
             <img src={thumbnailSrc} alt="Blueprint" className="w-full h-32 object-cover bg-white" />
@@ -241,7 +246,7 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
             </div>
           )}
           {annotation && (
-            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold bg-emerald-500/90 text-white">
+            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card">
               Marked
             </span>
           )}
@@ -267,19 +272,6 @@ interface Props {
   rung: LadderActivity;
   chain: DependencyMasterListRow;
   onClose: () => void;
-}
-
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function diffDays(startStr: string, endStr: string): number | null {
-  const s = new Date(`${startStr}T00:00:00`);
-  const e = new Date(`${endStr}T00:00:00`);
-  const diff = Math.round((e.getTime() - s.getTime()) / 86400000);
-  return diff >= 0 ? diff : null;
 }
 
 // "Given by" is one combined dropdown — Developer (the project itself) or
@@ -316,12 +308,15 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const [startDate, setStartDate] = useState<string>("");
   const [days, setDays] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+  // The start date was worked back from a typed end date (tentative), not typed itself.
+  const [startAuto, setStartAuto] = useState(false);
   const [labourSource, setLabourSource] = useState<SourceType | "">("");
   const [labourContractorId, setLabourContractorId] = useState<number | null>(null);
   const [materialSource, setMaterialSource] = useState<SourceType | "">("");
   const [materialContractorId, setMaterialContractorId] = useState<number | null>(null);
   const [description, setDescription] = useState<string>("");
   const [descriptionTouched, setDescriptionTouched] = useState(false);
+  const [priority, setPriority] = useState<AssignmentPriority | "">("");
   const [remarks, setRemarks] = useState<string>("");
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   // Read-only here — see the render block below. Tagged in Activity Master,
@@ -344,9 +339,15 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     queryFn: () => getRungAssignment(rungId),
   });
 
+  // Derived from the dependency itself (flat + room + activity) — read-only, never typed.
+  const autoName = useMemo(
+    () => dependencyAutoName({ flatName: chain.flatName, alias: chain.alias, roomName: chain.roomName, storey: chain.storey, activityName: rung.activityName }),
+    [chain, rung],
+  );
+
   const defaultDescription = useMemo(
     () =>
-      `Work for ${chain.projectName || "—"}, ${chain.towerName || "—"}, Floor ${chain.floor}, ${chain.flatName || "—"}, ${chain.roomName || "—"} and ${rung.activityName}`,
+      `Work for ${chain.projectName || "—"}, ${chain.towerName || "—"}, ${chainFloorDisplay(chain.floor)}, ${chain.flatName || "—"}, ${roomDisplay(chain.roomName, chain.storey)} and ${rung.activityName}`,
     [chain, rung],
   );
 
@@ -355,20 +356,32 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
       setDescription(defaultDescription);
       setQcUserIds([]);
       setApprovalLevels([]);
+      // Nothing allocated yet: Days starts at the Activity Master's Days of Completion.
+      if (detail?.daysOfCompletion != null) applyDates(applyDefaultDays(curDates(), detail.daysOfCompletion));
       return;
     }
     const a = detail.assignment;
     setEngineerIds(a.engineerIds);
     setQcUserIds(a.qcUserIds || []);
     setApprovalLevels(a.approvalLevels || []);
-    setStartDate(a.startDate ? a.startDate.slice(0, 10) : "");
-    setDays(a.days != null ? String(a.days) : "");
-    setEndDate(a.endDate ? a.endDate.slice(0, 10) : "");
+    // A saved allocation keeps its own dates; Days falls back to the Activity Master's if it has none.
+    applyDates(
+      applyDefaultDays(
+        {
+          startDate: a.startDate ? a.startDate.slice(0, 10) : "",
+          endDate: a.endDate ? a.endDate.slice(0, 10) : "",
+          days: a.days != null ? String(a.days) : "",
+          startAuto: false,
+        },
+        detail.daysOfCompletion,
+      ),
+    );
     setLabourSource(a.labourSource || "");
     setLabourContractorId(a.labourContractorId ?? null);
     setMaterialSource(a.materialSource || "");
     setMaterialContractorId(a.materialContractorId ?? null);
     setDescription(a.description || defaultDescription);
+    setPriority(a.priority || "");
     setRemarks(a.remarks || "");
     const qtyMap: Record<string, string> = {};
     for (const m of a.materials) qtyMap[m.itemId] = String(m.quantity);
@@ -377,26 +390,18 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
 
-  // Days drives End Date whenever Start Date is known; editing End Date
-  // directly recomputes Days the other way — whichever field the user last
-  // touched wins, no fighting over which is "the" source of truth.
-  const handleDaysChange = (value: string) => {
-    setDays(value);
-    const n = parseInt(value, 10);
-    if (startDate && Number.isFinite(n) && n >= 0) setEndDate(addDays(startDate, n));
+  // Days starts from the Activity Master. Type a Start Date and the End Date is worked out; type an
+  // End Date and a tentative Start Date is worked back from it (see allocationDates.ts).
+  const curDates = (): AllocDates => ({ startDate, endDate, days, startAuto });
+  const applyDates = (n: AllocDates) => {
+    setStartDate(n.startDate);
+    setEndDate(n.endDate);
+    setDays(n.days);
+    setStartAuto(n.startAuto);
   };
-  const handleStartDateChange = (value: string) => {
-    setStartDate(value);
-    const n = parseInt(days, 10);
-    if (value && Number.isFinite(n) && n >= 0) setEndDate(addDays(value, n));
-  };
-  const handleEndDateChange = (value: string) => {
-    setEndDate(value);
-    if (startDate && value) {
-      const d = diffDays(startDate, value);
-      if (d != null) setDays(String(d));
-    }
-  };
+  const handleDaysChange = (value: string) => applyDates(changeDays(curDates(), value));
+  const handleStartDateChange = (value: string) => applyDates(changeStart(curDates(), value));
+  const handleEndDateChange = (value: string) => applyDates(changeEnd(curDates(), value));
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -416,6 +421,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
         materialContractorId,
         description: description || null,
         remarks: remarks || null,
+        priority: priority || null,
         materials,
         checkpoints,
       });
@@ -441,17 +447,21 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   // never paint above the header no matter how high its own z-index is).
   // Same fix ActivityDetailModal.tsx already uses.
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-4xl bg-card border border-border rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <div>
-            <h3 className="font-heading font-semibold text-sm text-foreground">{rung.activityName}</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Assign engineers & material</p>
+      <div
+        className="sheet-frame relative w-full max-w-4xl bg-card flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150"
+        style={{ margin: 0, border: "1.5px solid hsl(var(--foreground))", boxShadow: "6px 6px 0 hsl(var(--foreground) / 0.12)" }}
+      >
+        <div className="flex items-end justify-between gap-3 px-6 py-4 shrink-0" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <div className="min-w-0">
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Work allocation · engineers and material</p>
+            <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{rung.activityName}</h3>
           </div>
           <button
             onClick={onClose}
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="Close"
+            className="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
           >
             <X size={15} />
           </button>
@@ -495,9 +505,19 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   onChange={(e) => handleStartDateChange(e.target.value)}
                   className={inputCls}
                 />
+                {startAuto && startDate && (
+                  <p className="text-[0.625rem] text-foreground font-medium mt-1">Tentative: worked back from the end date</p>
+                )}
               </div>
               <div>
-                <label className={labelCls}>Days</label>
+                <label className={labelCls}>
+                  Days
+                  {detail?.daysOfCompletion != null && (
+                    <span className="normal-case font-normal text-muted-foreground/70 tracking-normal">
+                      · {detail.daysOfCompletion} in Activity Master
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   min={0}
@@ -543,7 +563,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   </SearchableNativeSelect>
                   {labourSource && (
                     <span
-                      className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[labourSource].className}`}
+                      className={`shrink-0 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 ${SOURCE_META[labourSource].className}`}
                     >
                       {SOURCE_META[labourSource].label}
                     </span>
@@ -574,13 +594,41 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   </SearchableNativeSelect>
                   {materialSource && (
                     <span
-                      className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[materialSource].className}`}
+                      className={`shrink-0 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 ${SOURCE_META[materialSource].className}`}
                     >
                       {SOURCE_META[materialSource].label}
                     </span>
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Activity Priority */}
+            <div>
+              <label className={labelCls}>
+                <Flag size={11} /> Priority
+              </label>
+              <div className="flex items-center gap-2">
+                <select value={priority} onChange={(e) => setPriority(e.target.value as AssignmentPriority | "")} className={inputCls}>
+                  <option value="">Select priority…</option>
+                  {ASSIGNMENT_PRIORITIES.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                {priority && (
+                  <span className={`shrink-0 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 ${PRIORITY_META[priority].className}`}>
+                    {priority}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Auto Name — fetched from the dependency (flat, room) and its activity; read-only */}
+            <div>
+              <label className={labelCls}>
+                <Link2 size={11} /> Auto Name
+              </label>
+              <input value={autoName} readOnly tabIndex={-1} title="Fetched automatically from the dependency — not editable" className={`${inputCls} cursor-default opacity-90`} />
             </div>
 
             {/* Description — auto-filled from location + activity, editable */}
@@ -625,7 +673,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   {candidateItems.map((item) => (
                     <div
                       key={item.itemId}
-                      className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2"
+                      className="flex items-center gap-2.5 border border-foreground/40 px-3 py-2"
                     >
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-foreground truncate">{item.itemName}</p>
@@ -642,7 +690,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         onChange={(e) =>
                           setQuantities((q) => ({ ...q, [item.itemId]: e.target.value }))
                         }
-                        className="w-20 px-2 py-1.5 rounded-md text-xs bg-background border border-border text-foreground text-right focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                        className="w-20 px-2 py-1.5 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground text-right font-heading tabular-nums focus:outline-none"
                       />
                       {item.uom && <span className="text-[0.625rem] text-muted-foreground w-8 shrink-0">{item.uom}</span>}
                     </div>
@@ -668,23 +716,30 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   {checkpoints.map((cp, i) => (
                     <div
                       key={`${cp.checkpointId ?? "custom"}-${i}`}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
+                      className={`flex items-center gap-2 px-2.5 py-1.5 border ${
+                        cp.needsRework ? "border-destructive" : "border-foreground/30"
+                      }`}
                     >
                       <div
-                        className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                          cp.isChecked ? "bg-emerald-500 border-emerald-500 text-white" : "bg-background border-border text-transparent"
+                        className={`w-4 h-4 border flex items-center justify-center shrink-0 ${
+                          cp.isChecked ? "bg-foreground border-foreground text-card" : "bg-card border-foreground/50 text-transparent"
                         }`}
                       >
                         <Check size={9} strokeWidth={3} />
                       </div>
                       <span className="text-sm text-foreground flex-1 truncate">{cp.fieldName}</span>
+                      {cp.needsRework && (
+                        <span className="inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-destructive shrink-0">
+                          Redo — rated Poor
+                        </span>
+                      )}
                       {cp.isDaily && (
-                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full shrink-0">
+                        <span className="inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground shrink-0">
                           <CalendarDays size={9} /> Daily
                         </span>
                       )}
                       {cp.minWaitDays != null && cp.minWaitDays > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full shrink-0">
+                        <span className="inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground shrink-0">
                           <Timer size={9} /> {cp.minWaitDays}d wait
                         </span>
                       )}
@@ -710,11 +765,11 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-2 px-6 py-3.5 border-t border-border shrink-0">
+        <div className="flex items-center justify-end gap-2 px-6 py-3.5 shrink-0" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 border border-foreground text-foreground hover:bg-primary/10"
           >
             Cancel
           </button>
@@ -722,7 +777,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
             type="button"
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending || isLoading}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50"
+            className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0 h-9 px-5 bg-foreground text-card border border-foreground"
           >
             {saveMutation.isPending && <Loader2 size={12} className="animate-spin" />}
             Save

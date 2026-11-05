@@ -4,11 +4,12 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { actorId } = require("../services/saAccess");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Shared by POST / and PUT /:id. `items[0]` is always "Booking" — a fixed ₹
 // concept stored on the plan itself (BookingAmount) and never sourced from
@@ -22,7 +23,11 @@ router.use(apiRateLimit);
 // whatever the client happened to send.
 async function validateItems(pool, items) {
   if (!items.length) return { error: "At least one milestone item is required" };
-  const totalPct = items.reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
+  const percentages = items.slice(1).map((item) => Number(item.Percent));
+  if (percentages.some((pct) => !Number.isFinite(pct) || pct <= 0 || pct > 100)) {
+    return { error: "Each payment milestone percentage must be greater than 0 and no more than 100" };
+  }
+  const totalPct = percentages.reduce((sum, pct) => sum + pct, 0);
   if (Math.round(totalPct * 100) !== 10000) return { error: `Milestone percentages must sum to 100 (currently ${totalPct})` };
 
   // Guard against the same master milestone (e.g. "Foundation") being picked
@@ -105,12 +110,14 @@ const PLAN_SELECT = `
 // crmProjectBanks.js's syncBankProjectTags one tier over (Bank <-> Project)
 // and unitMaster.js's syncUnitPaymentPlanTags one tier below (Unit <->
 // Plan). Pass an empty array to clear all tags.
-async function syncPaymentPlanProjectTags(pool, planId, projectIds) {
-  await pool.request().input("pid", sql.Int, planId)
-    .query("UPDATE dbo.CrmPaymentPlanProject SET IsActive = 0 WHERE PlanId = @pid");
+// A user limited to some projects changes only the tags inside them: tags on other projects are neither removed nor
+// added, whatever is sent. Before, saving a plan wiped every tag the user couldn't see, and could tag any project.
+async function syncPaymentPlanProjectTags(db, planId, projectIds, scope) {
+  await db.request().input("pid", sql.Int, planId)
+    .query(`UPDATE dbo.CrmPaymentPlanProject SET IsActive = 0 WHERE PlanId = @pid${projectPredicate(scope, "ProjectId")}`);
   for (const projectId of projectIds) {
-    if (!Number.isFinite(projectId)) continue;
-    await pool.request()
+    if (!Number.isFinite(projectId) || !projectAllowed(scope, projectId)) continue;
+    await db.request()
       .input("pid", sql.Int, planId)
       .input("proj", sql.Int, projectId)
       .query(`
@@ -127,7 +134,8 @@ async function syncPaymentPlanProjectTags(pool, planId, projectIds) {
 // Master's tag picker and the Application wizard's dropdown); the plan
 // management page itself omits the param so it can still see/reactivate
 // inactive plans.
-router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) => {
+// Unit and Block Master tag units / blocks with plans from this list, so their users may read it too.
+router.get("/", requireAnyPageRight(["crm-payment-plans", "followup-unit-master", "followup-block-master"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const showAll = req.query.showAll === "true";
@@ -262,11 +270,11 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
         `);
     }
 
-    await tx.commit();
-
     if (Array.isArray(b.ProjectIds) && b.ProjectIds.length) {
-      await syncPaymentPlanProjectTags(pool, planId, b.ProjectIds.map((p) => parseInt(p, 10)));
+      await syncPaymentPlanProjectTags(tx, planId, b.ProjectIds.map((p) => parseInt(p, 10)), req.projectScope);
     }
+
+    await tx.commit();
 
     res.status(201).json({ success: true, id: planId });
   } catch (e) {
@@ -344,16 +352,14 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
       }
     }
 
-    await tx.commit();
-
-    // Only touches the Project tags if the caller actually sent the field —
-    // same "don't clobber on a partial edit" reasoning as BookingAmount
-    // above. An explicit empty array clears every tag; the key being absent
-    // entirely leaves whatever's already tagged untouched.
+    // Keep Project tag replacement atomic with the template edits. A failed
+    // tag write must not leave a committed plan update behind.
     if (Object.prototype.hasOwnProperty.call(b, "ProjectIds")) {
       const projectIds = Array.isArray(b.ProjectIds) ? b.ProjectIds.map((p) => parseInt(p, 10)) : [];
-      await syncPaymentPlanProjectTags(pool, id, projectIds);
+      await syncPaymentPlanProjectTags(tx, id, projectIds, req.projectScope);
     }
+
+    await tx.commit();
 
     const usage = await pool.request().input("id", sql.Int, id)
       .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmBooking WHERE PaymentPlanId = @id AND IsActive = 1");
@@ -390,6 +396,19 @@ router.delete("/:id", requirePageRight("crm-payment-plans", "delete"), async (re
     if (bookingUsage.recordset[0].Cnt > 0) {
       return res.status(409).json({ error: "This plan is applied to one or more active bookings — deactivate it instead of deleting." });
     }
+    // Any booking at all (cancelled too) holds a database key to the plan -
+    // the delete failed with a raw key error; an open application would be
+    // left pointing at a plan that no longer exists.
+    const [anyBooking, openApps] = await Promise.all([
+      pool.request().input("id", sql.Int, id).query("SELECT COUNT(*) AS Cnt FROM dbo.CrmBooking WHERE PaymentPlanId = @id"),
+      pool.request().input("id", sql.Int, id).query("SELECT COUNT(*) AS Cnt FROM dbo.CrmApplication WHERE PaymentPlanId = @id AND Status NOT IN ('Cancelled', 'Converted', 'Expired', 'Rejected')"),
+    ]);
+    if (anyBooking.recordset[0].Cnt > 0) {
+      return res.status(409).json({ error: "Past bookings (cancelled or closed) used this plan — deactivate it instead of deleting." });
+    }
+    if (openApps.recordset[0].Cnt > 0) {
+      return res.status(409).json({ error: "An open application uses this plan — deactivate it instead of deleting." });
+    }
     if (projectUsage.recordset[0].Cnt > 0) {
       return res.status(409).json({ error: "This plan is tagged to one or more active Projects — untag it or deactivate it instead of deleting." });
     }
@@ -399,6 +418,9 @@ router.delete("/:id", requirePageRight("crm-payment-plans", "delete"), async (re
     try {
       await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @id");
       await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmPaymentPlanProject WHERE PlanId = @id");
+      // Unit / block tags of a plan that no longer exists.
+      await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmUnitPaymentPlan WHERE PlanId = @id");
+      await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmBlockPaymentPlan WHERE PlanId = @id");
       await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmPaymentPlanTemplate WHERE Id = @id");
       await tx.commit();
     } catch (txErr) {

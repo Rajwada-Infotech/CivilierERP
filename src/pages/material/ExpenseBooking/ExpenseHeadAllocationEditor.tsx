@@ -80,7 +80,7 @@ export function ExpenseHeadAllocationEditor({ rows, onChange, targetAmount, read
               isDuplicate ? "border-amber-500/40 bg-amber-500/[0.06]" : "border-border/60 bg-muted/20"
             }`}
           >
-            <span className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-[0.6875rem] font-semibold font-mono">
+            <span className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-full border border-foreground text-foreground text-[0.625rem] font-semibold font-heading tabular-nums">
               {i + 1}
             </span>
 
@@ -133,7 +133,7 @@ export function ExpenseHeadAllocationEditor({ rows, onChange, targetAmount, read
           variant="outline"
           size="sm"
           onClick={addRow}
-          className="h-7 px-2.5 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10"
+          className="h-7 px-2.5 text-xs gap-1.5 border-foreground/40 text-foreground hover:bg-primary/10"
         >
           <Plus size={12} />
           Add Expense Head
@@ -153,7 +153,7 @@ export function ExpenseHeadAllocationEditor({ rows, onChange, targetAmount, read
         <div
           className={`flex items-center gap-1.5 text-[0.6875rem] font-medium px-2.5 py-1.5 rounded-lg ${
             balanced
-              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              ? "bg-primary/10 text-foreground"
               : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
           }`}
         >

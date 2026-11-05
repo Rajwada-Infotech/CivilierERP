@@ -171,7 +171,7 @@ export default function SupplierCompanyProfile() {
               <Landmark size={14} className="text-emerald-500" /> Financial Info
             </h2>
             <div className="mt-3 space-y-0">
-              <InfoRow icon={CreditCard} label="GST Number" value={profile.LGST} mono highlight />
+              <InfoRow icon={CreditCard} label="GSTIN (GST Identification Number)" value={profile.LGST} mono highlight />
               <InfoRow icon={MapPin} label="GST State" value={profile.LGSTState} />
               <InfoRow icon={FileText} label="Payment Terms" value={profile.LHeadPaymentTerms} />
               <InfoRow icon={Tag} label="Belongs To" value={profile.LBelongsTo} />

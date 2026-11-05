@@ -14,13 +14,13 @@ import type { BookingStatus } from "./types";
 // ─── Shared styles (matching PurchaseOrderMaster) ────────────────────────────
 
 export const inputCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+  "w-full text-sm rounded-lg border border-border px-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-foreground/20 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
 
 export const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
+  "w-full text-sm rounded-lg border border-border px-3 py-2 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-foreground/20 transition appearance-none";
 
 export const selectTriggerCls =
-  "w-full h-auto text-sm rounded-lg border border-border px-3 py-2 bg-background text-foreground hover:border-emerald-500/40 focus:ring-2 focus:ring-emerald-500/30 transition";
+  "w-full h-auto text-sm rounded-lg border border-border px-3 py-2 bg-background text-foreground hover:border-foreground focus:ring-2 focus:ring-foreground/20 transition";
 
 // ─── Small UI helpers ─────────────────────────────────────────────────────────
 export const SECTION_ICONS: Record<string, ElementType> = {

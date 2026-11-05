@@ -71,6 +71,14 @@ async function logStatusChange(pool, applicationId, fromStatus, toStatus, trigge
     `);
 }
 
+const APPLICATION_RELEASES_LINES = new Set(["Rejected", "Cancelled", "Expired"]);
+
+async function releaseApplicationLines(pool, applicationId) {
+  await pool.request().input("aid", sql.Int, applicationId).query(`
+    UPDATE dbo.CrmApplicationUnit SET Status = N'Cancelled' WHERE ApplicationId = @aid AND Status = N'Active';
+    UPDATE dbo.CrmApplicationPlot SET Status = N'Cancelled' WHERE ApplicationId = @aid AND Status = N'Active';`);
+}
+
 /**
  * Attempts a transition. Returns { ok: true, from, to } or { ok: false, error }.
  * `force` skips the transition-table check — used only by AutoBooking, where
@@ -96,6 +104,11 @@ async function advanceApplicationStatus(pool, applicationId, toStatus, trigger, 
     .input("st", sql.NVarChar(30), toStatus)
     .input("ub", sql.Int, actorId)
     .query("UPDATE dbo.CrmApplication SET Status = @st, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+
+  // A dead application lets go of what it applied for. One Active line per
+  // unit / plot is enforced, so a line left Active after a reject, cancel or
+  // expiry kept that flat, villa or plot from ever being applied for again.
+  if (APPLICATION_RELEASES_LINES.has(toStatus)) await releaseApplicationLines(pool, applicationId);
 
   await logStatusChange(pool, applicationId, fromStatus, toStatus, trigger, remarks, actorId);
   return { ok: true, from: fromStatus, to: toStatus };
@@ -129,4 +142,4 @@ async function syncApplicationOnBookingTerminal(pool, bookingId, toStatus, trigg
   }
 }
 
-module.exports = { APPLICATION_TRANSITIONS, logStatusChange, advanceApplicationStatus, syncApplicationOnBookingTerminal };
+module.exports = { APPLICATION_TRANSITIONS, logStatusChange, advanceApplicationStatus, syncApplicationOnBookingTerminal, releaseApplicationLines };

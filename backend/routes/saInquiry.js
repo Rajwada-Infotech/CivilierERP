@@ -1,16 +1,14 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // GET / — all inquiry calls (row-level scoped via the joined lead)
 router.get("/", requirePageRight("sa-inquiry", "view"), async (req, res) => {
@@ -33,7 +31,7 @@ router.get("/", requirePageRight("sa-inquiry", "view"), async (req, res) => {
       LEFT JOIN dbo.Users sp ON c.SalespersonId = sp.id
       LEFT JOIN dbo.SaSocialMediaPlatform p ON l.PlatformId = p.Id
       LEFT JOIN dbo.SaCampaign cam ON l.CampaignId = cam.Id
-      WHERE ${scope0}
+      WHERE l.IsActive = 1 AND ${scope0}
       ORDER BY c.CallTime DESC
     `);
     res.json(r.recordset);
@@ -65,7 +63,7 @@ router.get("/lead/:leadId", requirePageRight("sa-inquiry", "view"), async (req, 
         LEFT JOIN dbo.SaAd a ON l.AdId = a.Id
         LEFT JOIN dbo.Users tl ON l.AssignedTeamLeadId = tl.id
         LEFT JOIN dbo.Users sp ON l.AssignedSalespersonId = sp.id
-        WHERE l.Id = @lid AND ${scope}
+        WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}
       `);
     const calls = await pool.request()
       .input("lid", sql.Int, lid)
@@ -90,6 +88,13 @@ router.post("/:leadId/call", requirePageRight("sa-inquiry", "create"), async (re
     const pool = getPool();
     const lid = parseId(req.params.leadId);
     if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
+
+    const scopeReq = pool.request();
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const check = await scopeReq.input("lid", sql.Int, lid)
+      .query(`SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`);
+    if (!check.recordset.length) return res.status(403).json({ error: "Access denied or lead not found" });
+
     const b = req.body;
 
     await pool.request()

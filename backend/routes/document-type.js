@@ -3,8 +3,8 @@
 
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { checkPermission } = require("../middleware/permissions");
 const { previewNextDocNumber } = require("../utils/docNumberLock");
@@ -67,7 +67,7 @@ const MODULE_LINKS = {
 // gated this way — only auth (already applied globally) is required here.
 router.get(
   "/",
-  cache("document-type", 300, { shared: true }),
+  cache("document-type", 300, { shared: true, dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();

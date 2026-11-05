@@ -116,7 +116,7 @@ the job, the runner picks it up locally, and `deploy.sh` does its usual
 The artifact-based flow still works if you ever need to deploy without a
 working runner:
 
-1. **Build it.** In GitHub: Actions tab → "CI" workflow → "Run workflow" →
+1. **Build it.** In GitHub: Actions tab → "Build & Test" workflow → "Run workflow" →
    pick the branch (usually `main`) → Run. Wait for it to finish, open the
    run, and download the `.zip` under "Artifacts".
 2. **Deploy it.** Copy that `.zip` onto the EC2 box (`scp`, WinSCP,

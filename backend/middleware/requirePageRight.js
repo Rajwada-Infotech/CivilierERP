@@ -1,14 +1,14 @@
-﻿const { getEffectivePagePermissions } = require("./permissions");
+const { getEffectivePagePermissions } = require("./permissions");
 
 // Pages the marketing_head role can fully administer.
-// Uses prefix-matching for all SA pages plus explicit Sales page keys.
-const MARKETING_HEAD_SA_PREFIX  = "sa-";
-const MARKETING_HEAD_CRM_PREFIX = "crm-";
+// Uses prefix-matching for all SA pages plus explicit CRM and Sales page keys.
+const MARKETING_HEAD_SA_PREFIX   = "sa-";
+const MARKETING_HEAD_CRM_PAGES   = new Set(["crm-leads", "crm-dashboard"]);
 const MARKETING_HEAD_SALES_PAGES = new Set(["sale-order", "sale-invoice", "sales-payment"]);
 
 function isMarketingHeadAllowed(pageKey) {
   return pageKey.startsWith(MARKETING_HEAD_SA_PREFIX)
-    || pageKey.startsWith(MARKETING_HEAD_CRM_PREFIX)
+    || MARKETING_HEAD_CRM_PAGES.has(pageKey)
     || MARKETING_HEAD_SALES_PAGES.has(pageKey);
 }
 

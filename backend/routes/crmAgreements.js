@@ -3,9 +3,15 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
+// Project access: an agreement belongs to its booking's project.
+const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmAgreement ag JOIN dbo.CrmBooking b ON b.Id = ag.BookingId WHERE ag.Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
@@ -30,7 +36,6 @@ const AGREEMENT_TRANSITIONS = {
 };
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -50,7 +55,10 @@ const upload = multer({
 const AGR_SELECT = `
   SELECT
     ag.Id, ag.AgreementNo, ag.BookingId, ag.AgreementDate,
-    ag.LegalName, ag.LegalAddress, ag.PanNo, ag.AadhaarNo, ag.VersionNo,
+    ag.LegalName, ag.LegalAddress,
+    CASE WHEN LEN(ag.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(ag.PanNo) - 4), RIGHT(ag.PanNo, 4)) ELSE ag.PanNo END AS PanNo,
+    CASE WHEN LEN(ag.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(ag.AadhaarNo) - 4), RIGHT(ag.AadhaarNo, 4)) ELSE ag.AadhaarNo END AS AadhaarNo,
+    ag.VersionNo,
     ag.Status, ag.Notes, ag.CreatedAt, ag.UpdatedAt,
     ag.SeniorApprovalStatus, ag.SeniorApprovedAt, ag.SeniorApprovalRemarks,
     ag.CustomerApprovalStatus, ag.CustomerApprovedAt,
@@ -89,7 +97,13 @@ const AGR_SELECT = `
     -- These are surfaced as live fallbacks (not written into the agreement's
     -- own, deliberately version-stamped fields) so the Overview never shows
     -- an outright "—" for data the customer's already on file with.
-    bd.PanNo AS CustomerPanNo, bd.AadhaarNo AS CustomerAadhaarNo
+    CASE WHEN LEN(bd.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(bd.PanNo) - 4), RIGHT(bd.PanNo, 4)) ELSE bd.PanNo END AS CustomerPanNo,
+    CASE WHEN LEN(bd.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(bd.AadhaarNo) - 4), RIGHT(bd.AadhaarNo, 4)) ELSE bd.AadhaarNo END AS CustomerAadhaarNo,
+    -- Paper counts for the list (it showed "0 docs" on every row: nothing
+    -- sent a count) and for each row's stage: mandatory papers / uploaded.
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id) AS DocumentCount,
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1) AS MandatoryDocCount,
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1 AND dc.FileBase64 IS NOT NULL) AS MandatoryUploadedCount
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -170,14 +184,19 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    // Rows and total share one set of inputs and conditions (the total used to repeat the filters without the project
+    // scope, so a restricted user's pages didn't add up).
     const req0 = pool.request();
+    const countReq = pool.request();
+    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); };
     const conds = [];
-    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("ag.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    if (status) { bind("st", sql.NVarChar(30), status); conds.push("ag.Status = @st"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR ag.AgreementNo LIKE @search OR b.BookingNo LIKE @search)");
     }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
@@ -193,23 +212,13 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY ag.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(30), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
+      countReq.query(`
           SELECT COUNT(*) AS total
           FROM dbo.CrmAgreement ag
           JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@st2 IS NULL OR ag.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR ag.AgreementNo LIKE @search2 OR b.BookingNo LIKE @search2))
+          ${where}
         `),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
@@ -235,6 +244,7 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
 router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const candidates = await pool.request().query(`
       SELECT b.Id, b.BookingNo, a.ApplicantName,
              cust.CustomerName AS LegalName,
@@ -249,7 +259,8 @@ router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), a
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
       WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id)
+        ${scope}
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status <> 'Cancelled')
       ORDER BY b.BookingNo
     `);
 
@@ -289,10 +300,11 @@ async function buildAgreementDetail(pool, agreementId) {
               cu.name AS CreatedByName
        FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
     pool.request().input("id", sql.Int, id).query(
-      `SELECT ISNULL(SUM(AmountDue),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
+      `SELECT ISNULL(SUM(CASE WHEN Status <> 'Waived' THEN AmountDue ELSE 0 END),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
        FROM dbo.CrmPaymentMilestone WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
     pool.request().input("id", sql.Int, id).query(
-      `SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) AS AvailableBalance
+      `SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
+         THEN CASE WHEN Amount > ISNULL(AppliedAmount,0) THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END ELSE 0 END),0) AS AvailableBalance
        FROM dbo.CrmOnAccountPayment WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
     pool.request().input("id", sql.Int, id).query(
       `SELECT ISNULL(SUM(Amount),0) AS MRTotal FROM dbo.CrmMoneyReceipt
@@ -325,7 +337,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-agreements", "view"), as
     const bid = parseInt(req.params.bookingId, 10);
     if (!Number.isFinite(bid)) return res.status(400).json({ error: "Invalid bookingId" });
     const idRow = await pool.request().input("bid", sql.Int, bid)
-      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Id FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
     if (!idRow.recordset[0]) return res.json(null);
     const detail = await buildAgreementDetail(pool, idRow.recordset[0].Id);
     res.json(detail);
@@ -376,6 +388,9 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
 
     const bookingRow = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Status, IsActive FROM dbo.CrmBooking WHERE Id = @bid");
@@ -527,7 +542,7 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
     res.status(201).json({ success: true, id: agreementId, AgreementNo: agNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
-      return res.status(409).json({ error: "An agreement already exists for this booking" });
+      return res.status(409).json({ error: "This booking already has an agreement in progress or done — a new one can be made only after cancelling it" });
     console.error("[crm-agreements] POST error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
@@ -1238,6 +1253,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
         .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
         .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
         .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
         .input("bump",  sql.Int,           touchesLegalContent ? 1 : 0)
         .input("leg",   sql.Int,           newLegalExecutiveId)
         .input("ub",    sql.Int,           actor)
@@ -1247,7 +1263,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
             LegalAddress = ISNULL(@laddr, LegalAddress),
             PanNo = ISNULL(@pan, PanNo),
             AadhaarNo = ISNULL(@aadh, AadhaarNo),
-            Notes = @note, VersionNo = VersionNo + @bump,
+            Notes = CASE WHEN @noteSet = 1 THEN @note ELSE Notes END, VersionNo = VersionNo + @bump,
             LegalExecutiveId = @leg,
             UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
@@ -1355,7 +1371,8 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT BookingId, Status, AgreementDate, SeniorApprovalStatus, CustomerApprovalStatus, LegalExecutiveId
+      SELECT BookingId, Status, AgreementDate, SeniorApprovalStatus, CustomerApprovalStatus, LegalExecutiveId,
+             ProposedDateStatus, DateApprovalStatus
       FROM dbo.CrmAgreement WHERE Id = @id
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
@@ -1368,6 +1385,10 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
       return res.status(400).json({ error: "Both senior and customer approval must be Approved before execution" });
     }
     if (!row.AgreementDate) {
+      // Say which step the date is actually waiting on.
+      if (row.ProposedDateStatus === "Matched" && row.DateApprovalStatus !== CrmStatus.APPROVED) {
+        return res.status(400).json({ error: "The agreement date is agreed with the customer and is waiting for Date Approval — approve it (Approval Inbox › Agreement Date) before marking executed" });
+      }
       return res.status(400).json({ error: "Both sides must agree on an agreement date first — propose a date and wait for the customer's matching response before marking executed" });
     }
     // A legally executed contract must have a named responsible party on
@@ -1607,7 +1628,9 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
         .input("url",   sql.NVarChar(2000), b.DocumentUrl  || null)
         .input("fname", sql.NVarChar(300),  b.FileName     || null)
         .input("iby",   sql.NVarChar(200),  b.IssuedBy     || null)
-        .input("st",    sql.NVarChar(30),   b.Status || "Uploaded")
+        // A new upload always starts Uploaded - Verified / Rejected only come
+        // from the review route (the screen never sends a status here).
+        .input("st",    sql.NVarChar(30),   "Uploaded")
         .input("rem",   sql.NVarChar(sql.MAX), b.Remarks   || null)
         .input("uat",   sql.DateTime2(3),   b.UploadedAt   || null)
         .input("ver",   sql.Int,            nextVersion)
@@ -1741,7 +1764,32 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
       await tx.begin();
       const inserted = [];
       try {
-        for (const file of req.files) {
+        // A requested slot of this type still waiting for its file (e.g. the
+        // mandatory Sale Agreement) is filled by the first upload, the same
+        // way /attach fills it — a new row beside it would leave the slot
+        // empty and the agreement's mandatory paperwork never complete.
+        const open = (await tx.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), docType).query(`
+          SELECT TOP 1 Id FROM dbo.CrmAgreementDocument WITH (UPDLOCK, HOLDLOCK)
+          WHERE AgreementId = @agid AND DocumentType = @dtype AND Status IN ('Requested', 'Rejected')
+          ORDER BY IsMandatory DESC, Id`)).recordset[0];
+        const files = [...req.files];
+        if (open) {
+          const file = files.shift();
+          await tx.request()
+            .input("id",    sql.Int, open.Id)
+            .input("fname", sql.NVarChar(300), file.originalname)
+            .input("fb64",  sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
+            .input("fs",    sql.BigInt, file.size)
+            .input("mt",    sql.NVarChar(150), file.mimetype)
+            .input("iby",   sql.NVarChar(200), req.body?.IssuedBy || null)
+            .input("rem",   sql.NVarChar(sql.MAX), req.body?.Remarks || null)
+            .query(`
+              UPDATE dbo.CrmAgreementDocument SET FileName = @fname, FileBase64 = @fb64, FileSize = @fs, MimeType = @mt,
+                IssuedBy = ISNULL(@iby, IssuedBy), Remarks = ISNULL(@rem, Remarks), Status = 'Uploaded', UploadedAt = SYSDATETIME()
+              WHERE Id = @id`);
+          inserted.push(open.Id);
+        }
+        for (const file of files) {
           nextVersion += 1;
           const result = await tx.request()
             .input("agid",  sql.Int, agreementId)
@@ -1866,6 +1914,7 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     // Includes the agreement-level lifecycle fields (senior/customer approval,
     // send/date state) and the Legal Executive assignment — not just the
@@ -2467,11 +2516,16 @@ router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), 
       const docId = parseInt(rawId);
       try {
         const cur = await pool.request().input("id", sql.Int, docId).query(`
-          SELECT d.Status, d.AgreementId, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
-          FROM dbo.CrmAgreementDocument d WHERE d.Id = @id
+          SELECT d.Status, d.AgreementId, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile, b.ProjectId
+          FROM dbo.CrmAgreementDocument d
+          JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+          JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+          WHERE d.Id = @id
         `);
         if (!cur.recordset.length) { results.skipped.push({ docId, reason: "Document not found" }); continue; }
         const row = cur.recordset[0];
+        // Ids come from the body - the per-route project guard never sees them.
+        if (!projectAllowed(req.projectScope, row.ProjectId)) { results.skipped.push({ docId, reason: "Outside your projects" }); continue; }
 
         const lockReason = await getAgreementBookingLockReason(pool, row.AgreementId);
         if (lockReason) { results.skipped.push({ docId, reason: `Booking ${lockReason}` }); continue; }

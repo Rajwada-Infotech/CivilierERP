@@ -14,6 +14,10 @@ export interface DbPayment {
   PBankName: string | null;
   PProject: string | null;
   PProjectName?: string | null;
+  /** A merged payment's projects, comma-joined (its invoices can span the company's projects). */
+  PMergedProjectNames?: string | null;
+  /** A merged payment's invoice numbers (list endpoint only). */
+  MergedInvoiceDocNos?: string[];
   PCompany: string | null;
   // Resolved company name (see newPayment.js: ISNULL(ec.name, np.PCompany)) —
   // PCompany itself is often just the raw enterprise id as text (set that
@@ -184,6 +188,10 @@ export interface PaymentRecord {
   project: string;
   company: string;
   projectSite: string;
+  /** Every project of a merged payment ("Boulevard, Magnus") — shown instead of project when set. */
+  mergedProjects?: string;
+  /** A merged payment's invoice numbers — shown under "Against" in the list. */
+  mergedDocNos?: string[];
   expenseRef: string;
   expenseId: string;
   // Journal Voucher doc number this payment settles, if any (see JVNo on
@@ -259,6 +267,7 @@ export interface MergedInvoiceSelection {
   /** This invoice's own due amount (gross − TDS − already paid), full
    *  settlement — merging never partially pays a subset. */
   amount: number;
+  projectName?: string;
 }
 
 export const PAYMENT_MODES = [
@@ -270,6 +279,8 @@ export const PAYMENT_MODES = [
   "RTGS",
   "IMPS",
   "Card",
+  // Charges the bank debited itself: a bank account, no cheque or reference.
+  "Bank Charges",
 ] as const;
 
 export type PaymentMode = (typeof PAYMENT_MODES)[number];

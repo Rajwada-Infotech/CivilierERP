@@ -12,6 +12,10 @@ const {
   getPredictedRPM,
 } = require("../redis");
 
+// Version bumped by middleware/writeInvalidator.js after every successful write; caches made with
+// { dropOnAnyWrite: true } fold it into their key.
+const ANY_WRITE_NAMESPACE = "any-write";
+
 // ─── IN-PROCESS VERSION CACHE ─────────────────────────────────────────────────
 // Avoids a Redis GET for the version number on every request.
 // Re-fetches from Redis at most every VERSION_TTL_MS.
@@ -140,16 +144,34 @@ async function computeDynamicTtl(fallback = 300) {
  *   router.get("/", cache("grns", 300), async (req, res) => { ... })
  *
  * Options:
- *   shared: true  — one cache entry for all users (master data routes).
+ *   shared: true    — one cache entry for all users (master data routes).
+ *   dropOnAnyWrite: true — also dropped whenever ANY write succeeds anywhere in the API (see
+ *                    middleware/writeInvalidator.js). For lists, dashboards and reports built from many tables,
+ *                    whose writers can't all be made to bump this namespace.
+ *   fixedTtl: true  — keep exactly `ttl` (skip the load-based dynamic TTL, which can only lengthen it to 60–300 s).
  *
  * Adds req.timing stages when req.timing is present:
  *   cache.version_check  cache.lookup  cache.lock  cache.write
  */
-function cache(namespace, ttl = 300, { shared = false } = {}) {
+const FRESH_AFTER_SAVE_MS = 3000;
+function wantsFreshRead(req, dropOnAnyWrite) {
+  const v = req.headers["x-fresh"];
+  if (!v) return false;
+  if (!dropOnAnyWrite) return true;
+  const ms = Number(v);
+  return !Number.isFinite(ms) || ms < FRESH_AFTER_SAVE_MS; // an older tab's "1" still means "skip"
+}
+
+function cache(namespace, ttl = 300, { shared = false, fixedTtl = false, dropOnAnyWrite = false } = {}) {
   return async (req, res, next) => {
     try {
-      // Fast-exit: Redis is down, skip all cache logic
-      if (circuitIsOpen()) {
+      // Fast-exit: Redis is down, skip all cache logic. Also skipped when the browser asks for fresh data:
+      // it does for a minute after the person saves something (lib/queryClient.ts; X-Fresh = ms since that
+      // save), so a list that save touched shows it even if the route that wrote it did not refresh this
+      // list's cache. A cache that clears on every save (dropOnAnyWrite) is already fresh by then; it skips
+      // itself only in the first moments after the save, while that clearing may still be on its way — else
+      // whoever saves often (progress updates all day) never used it.
+      if (circuitIsOpen() || wantsFreshRead(req, dropOnAnyWrite)) {
         res.setHeader("X-Cache", "BYPASS");
         return next();
       }
@@ -169,7 +191,10 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
 
       // Version check — served from memory, rarely touches Redis
       const vStart = req.timing?.startStage();
-      const version = await redisOp(() => localVersionCache.get(namespace), 0);
+      const nsVersion = await redisOp(() => localVersionCache.get(namespace), 0);
+      const version = dropOnAnyWrite
+        ? `${nsVersion}.${await redisOp(() => localVersionCache.get(ANY_WRITE_NAMESPACE), 0)}`
+        : nsVersion;
       if (vStart) req.timing.mark("cache.version_check", vStart);
 
       const key = `cache:${namespace}:v${version}:${scopeId}:${routeScope}`;
@@ -259,7 +284,7 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
           if (res.statusCode >= 200 && res.statusCode < 300) {
             const writeStart = req.timing?.startStage();
             const jsonStr = JSON.stringify(data);
-            const finalTtl = (await getCachedDynamicTtl(ttl)) || ttl;
+            const finalTtl = fixedTtl ? ttl : (await getCachedDynamicTtl(ttl)) || ttl;
 
             let valueToStore = jsonStr;
             if (jsonStr.length > 1024) {
@@ -296,4 +321,4 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
   };
 }
 
-module.exports = { cache, localVersionCache };
+module.exports = { cache, localVersionCache, ANY_WRITE_NAMESPACE, wantsFreshRead };

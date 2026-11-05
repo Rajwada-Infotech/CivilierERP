@@ -16,34 +16,47 @@
 const bcrypt = require("bcrypt");
 const { sql } = require("../db");
 
-async function ensurePortalUser(pool, applicationId) {
-  // Resolve ApplicationId → CrmCustomer (preferred) → Email + Mobile.
-  // CrmCustomer is the canonical identity record; falls back to Application's
-  // own snapshot only if CustomerId is somehow null (shouldn't happen post-181).
-  const app = await pool.request().input("aid", sql.Int, applicationId).query(`
-    SELECT
-      a.Id          AS ApplicationId,
-      a.CustomerId,
-      COALESCE(c.Email,   a.Email)  AS Email,
-      COALESCE(c.Mobile,  a.Mobile) AS Mobile
-    FROM dbo.CrmApplication a
-    LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
-    WHERE a.Id = @aid AND a.IsActive = 1
-  `);
-  if (!app.recordset.length) return { created: false, error: "Application not found" };
-  const row = app.recordset[0];
+async function ensurePortalUser(pool, applicationId, customerId = null) {
+  let row = null;
+  if (customerId) {
+    const cust = await pool.request().input("cid", sql.Int, customerId).query(`
+      SELECT Id AS CustomerId, Email, Mobile
+      FROM dbo.CrmCustomer
+      WHERE Id = @cid AND IsActive = 1
+    `);
+    if (!cust.recordset.length) return { created: false, error: "Customer not found" };
+    row = cust.recordset[0];
+  } else if (applicationId) {
+    // Resolve ApplicationId → CrmCustomer (preferred) → Email + Mobile.
+    // CrmCustomer is the canonical identity record; falls back to Application's
+    // own snapshot only if CustomerId is somehow null (shouldn't happen post-181).
+    const app = await pool.request().input("aid", sql.Int, applicationId).query(`
+      SELECT
+        a.Id          AS ApplicationId,
+        a.CustomerId,
+        COALESCE(c.Email,   a.Email)  AS Email,
+        COALESCE(c.Mobile,  a.Mobile) AS Mobile
+      FROM dbo.CrmApplication a
+      LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+      WHERE a.Id = @aid AND a.IsActive = 1
+    `);
+    if (!app.recordset.length) return { created: false, error: "Application not found" };
+    row = app.recordset[0];
+  } else {
+    return { created: false, error: "Either applicationId or customerId is required" };
+  }
 
   if (!row.CustomerId) return { created: false, error: "Application has no linked Customer record — cannot provision portal login" };
   if (!row.Mobile)     return { created: false, error: "Customer has no mobile on file — cannot provision portal login" };
   if (!row.Email)      return { created: false, error: "Customer has no email on file — cannot provision portal login" };
 
-  const customerId = row.CustomerId;
+  const resolvedCustomerId = row.CustomerId;
 
   // Idempotent: if a portal account already exists for this CustomerId, reuse
   // it — a second Agreement on the same customer simply picks up the existing
   // login without changing anything. The ApplicationId column is no longer
   // written here (it's nullable and unused for routing since migration 254).
-  const existing = await pool.request().input("cid", sql.Int, customerId)
+  const existing = await pool.request().input("cid", sql.Int, resolvedCustomerId)
     .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE CustomerId = @cid");
   if (existing.recordset.length) {
     const portalId = existing.recordset[0].Id;
@@ -58,10 +71,12 @@ async function ensurePortalUser(pool, applicationId) {
   // New customer — create their portal account keyed to CustomerId.
   // Password seed = Mobile number (hashed), same as before.
   const email = row.Email.trim().toLowerCase();
-  const passwordHash = await bcrypt.hash(row.Mobile, 10);
+  // Normalize: strip non-digits and take last 10 digits
+  const normalizedMobile = (row.Mobile || '').replace(/\D/g, '').slice(-10);
+  const passwordHash = await bcrypt.hash(normalizedMobile, 10);
 
   const result = await pool.request()
-    .input("cid",  sql.Int,          customerId)
+    .input("cid",  sql.Int,          resolvedCustomerId)
     .input("em",   sql.NVarChar(200), email)
     .input("hash", sql.NVarChar(200), passwordHash)
     .query(`

@@ -18,8 +18,8 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
@@ -33,7 +33,9 @@ const {
 const { transition, writeAuditLog } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { makeColumnProbe } = require("../services/columnProbe");
 const { poExistsForMR } = require("../utils/materialChainGuard");
+const { multiMrReady, mrQtySource, poTaggedToMr } = require("../services/poMrLinks");
 const {
   getMRItemFulfillment,
   summarize,
@@ -416,7 +418,10 @@ router.get("/", authenticateToken, async (req, res) => {
       LEFT JOIN  dbo.FinYear     fy  WITH (NOLOCK) ON fy.FId = mr.FinYearId
       LEFT JOIN  dbo.MaterialRequestItems mri WITH (NOLOCK) ON mri.MRId = mr.MRId
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
-        AND (@statusFilter = '' OR mr.Status = @statusFilter)
+        AND (@statusFilter = '' OR mr.Status = @statusFilter
+             -- "Overdue" tab: past its required-by date and not yet fully ordered (same rule as the Material dashboard).
+             OR (@statusFilter = 'Overdue' AND mr.RequiredByDate < CAST(GETDATE() AS DATE) AND mr.ShortClosedAt IS NULL
+                 AND ISNULL(mr.Status, '') IN ('', 'Draft', 'Pending', 'Approved', 'Partially Fulfilled', 'Partially Ordered')))
         AND (@companyId IS NULL OR mr.CompanyId = @companyId)
         AND (@projectId IS NULL OR mr.ProjectId = @projectId)${projectPredicate(req.projectScope, "mr.ProjectId")}
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,
@@ -510,6 +515,68 @@ router.get("/approved-list", authenticateToken, async (req, res) => {
   }
 });
 
+// ── Work-order terms for a PO ──────────────────────────────────────────────────
+// A Material Request raised from a Work Order carries the work order's own rate, GST rate and per-line
+// supplier for each material. The PO form uses them as the starting rate / GST / supplier instead of 0,
+// so the buyer only has to confirm or change them. Per item (+unit) the work order may list the same
+// material under several activities: the rate and GST are quantity-weighted averages, and a supplier is
+// only suggested when every one of those lines names the same one.
+async function attachWorkOrderTerms(pool, mrId, items) {
+  const none = { items, workOrder: null };
+  if (!(await hasSourceWO(pool))) return none;
+  const mr = (await pool.request().input("id", sql.Int, mrId)
+    .query("SELECT SourceWOId, SourceWODocNo FROM dbo.MaterialRequests WHERE MRId = @id")).recordset[0];
+  if (!mr?.SourceWOId) return none;
+
+  const lines = (await pool.request().input("wo", sql.Int, mr.SourceWOId).query(`
+    SELECT CONVERT(NVARCHAR(100), m.ItemId) AS ItemId, uom.UOMCode,
+           SUM(ISNULL(m.Quantity, 0)) AS Qty,
+           SUM(ISNULL(m.Quantity, 0) * ISNULL(m.Rate, 0)) AS Value,
+           SUM(ISNULL(m.Quantity, 0) * ISNULL(m.GSTRate, 0)) AS GstWeighted,
+           MIN(m.SupplierIdPerLine) AS MinSupplier, MAX(m.SupplierIdPerLine) AS MaxSupplier,
+           SUM(CASE WHEN m.SupplierIdPerLine IS NULL THEN 1 ELSE 0 END) AS NoSupplier,
+           MAX(sup.LHeadName) AS SupplierName
+    FROM dbo.WorkOrderActivityMaterials m
+    JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
+    LEFT JOIN dbo.UOMMaster uom ON uom.Id = m.UOMId
+    LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = m.SupplierIdPerLine
+    WHERE a.WorkOrderHeaderId = @wo AND m.ItemId IS NOT NULL
+    GROUP BY m.ItemId, uom.UOMCode
+  `)).recordset;
+
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const byKey = new Map();
+  for (const l of lines) {
+    const qty = Number(l.Qty) || 0;
+    const oneSupplier = Number(l.NoSupplier) === 0 && l.MinSupplier != null && l.MinSupplier === l.MaxSupplier;
+    byKey.set(`${String(l.ItemId).toLowerCase()}|${l.UOMCode || ""}`, {
+      WoRate: qty > 0 ? round2(Number(l.Value) / qty) : 0,
+      WoGstRate: qty > 0 ? round2(Number(l.GstWeighted) / qty) : 0,
+      WoSupplierId: oneSupplier ? l.MinSupplier : null,
+      WoSupplierName: oneSupplier ? l.SupplierName || null : null,
+    });
+  }
+
+  const enriched = items.map((it) => {
+    const terms = byKey.get(`${String(it.ItemId).toLowerCase()}|${it.UOMCode || ""}`);
+    return terms ? { ...it, ...terms } : it;
+  });
+
+  // One supplier for the whole PO only when every line agrees on it.
+  const supplierIds = new Set(enriched.map((it) => it.WoSupplierId ?? null));
+  const sole = supplierIds.size === 1 ? [...supplierIds][0] : null;
+  const soleItem = sole != null ? enriched.find((it) => it.WoSupplierId === sole) : null;
+  return {
+    items: enriched,
+    workOrder: {
+      WorkOrderId: mr.SourceWOId,
+      WorkOrderDocNo: mr.SourceWODocNo,
+      WorkOrderSupplierId: sole,
+      WorkOrderSupplierName: soleItem?.WoSupplierName ?? null,
+    },
+  };
+}
+
 // ── GET /by-docno/:docNo ───────────────────────────────────────────────────────
 // Look up an Approved MR by its document number and return PO prefill data.
 // Used by the PO form's "Load from MR" input.
@@ -587,6 +654,7 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
       })
       .filter((it) => it.PendingQty > 0);
 
+    const withTerms = await attachWorkOrderTerms(pool, mrId, itemsWithPending);
     res.json({
       MRId: mr.MRId,
       DocNo: mr.DocNo,
@@ -596,7 +664,8 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
       ProjectName: mr.ProjectName,
       FinYearId: mr.FinYearId,
       Remarks: mr.Remarks,
-      items: itemsWithPending,
+      ...(withTerms.workOrder ?? {}),
+      items: withTerms.items,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -612,6 +681,7 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
 router.get("/pending-summary", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    const poQty = mrQtySource(await multiMrReady(pool));
     // SQL Server refuses SUM(ISNULL((SELECT SUM(...) ... WHERE correlated), 0))
     // outright — "Cannot perform an aggregate function on an expression
     // containing an aggregate or a subquery" — even though the inner
@@ -630,7 +700,7 @@ router.get("/pending-summary", authenticateToken, async (req, res) => {
       JOIN dbo.MaterialRequests mr ON mr.MRId = mri.MRId
       OUTER APPLY (
         SELECT SUM(poi.Quantity) AS OrderedQty
-        FROM dbo.PurchaseOrderItems poi
+        FROM ${poQty} poi
         JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
         WHERE poi.MRItemId = mri.MRItemId
           AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
@@ -665,6 +735,8 @@ router.get("/pending-summary", authenticateToken, async (req, res) => {
 router.get("/pending-report", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    const multiMr = await multiMrReady(pool);
+    const poQty = mrQtySource(multiMr);
     const request = pool.request();
     const conditions = [
       "mr.Status IN ('Approved', 'Partially Fulfilled')",
@@ -703,7 +775,7 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
         mri.MRItemId, mri.ItemName, mri.UOMCode, mri.Quantity AS RequestedQty,
         ISNULL((
           SELECT SUM(poi.Quantity)
-          FROM dbo.PurchaseOrderItems poi
+          FROM ${poQty} poi
           JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
           WHERE poi.MRItemId = mri.MRItemId
             AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
@@ -719,7 +791,7 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
         (
           SELECT STRING_AGG(po2.DocNo, ', ')
           FROM dbo.PurchaseOrders po2
-          WHERE po2.SourceMRId = mr.MRId
+          WHERE ${poTaggedToMr(multiMr, "mr.MRId", "po2")}
             AND ISNULL(po2.Status, '') NOT IN ('Deleted', 'Rejected')
         ) AS LinkedPOs,
         (
@@ -838,6 +910,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       Reason,
       Remarks,
       DocTypeId: clientDocTypeId,
+      SourceWOId: clientSourceWOId,
       items = [],
     } = req.body;
 
@@ -846,6 +919,15 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       return res.status(400).json({ error: "Reason is required" });
     if (!items.length)
       return res.status(400).json({ error: "At least one item required" });
+
+    // Raised from an approved Work Order: the link is checked here, not trusted from the client.
+    let sourceWO = null;
+    if (clientSourceWOId != null && clientSourceWOId !== "") {
+      const woId = parseInt(clientSourceWOId, 10);
+      if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid SourceWOId" });
+      sourceWO = await loadWorkOrderForMR(req, res, pool, woId);
+      if (!sourceWO) return;
+    }
 
     if (RequiredByDate) {
       const minDate = await computeMinRequiredByDate(
@@ -905,13 +987,15 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
         .input("DocTypeId", sql.Int, dtId || null)
         .input("DocNo", sql.NVarChar(50), lockedDocNo || null)
+        .input("SourceWOId", sql.Int, sourceWO ? sourceWO.Id : null)
+        .input("SourceWODocNo", sql.NVarChar(100), sourceWO ? sourceWO.woNo : null)
         .input("CreatedBy", sql.NVarChar(200), user).query(`
           INSERT INTO dbo.MaterialRequests
             (CompanyId, ProjectId, FinYearId, RequestDate, RequiredByDate,
-             Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy)
+             Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy${sourceWO ? ", SourceWOId, SourceWODocNo" : ""})
           OUTPUT INSERTED.MRId
           VALUES (@CompanyId, @ProjectId, @FinYearId, @RequestDate, @RequiredByDate,
-                  @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy)
+                  @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy${sourceWO ? ", @SourceWOId, @SourceWODocNo" : ""})
         `);
 
       newId = insertHdr.recordset[0].MRId;
@@ -987,6 +1071,93 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
   }
 });
 
+// ── Material Request raised from an approved Work Order ───────────────────────
+// The Work Order page opens the normal Material Request form pre-filled from GET
+// /from-work-order/:woId/prefill (items summed per item + unit); the user can change anything, and
+// POST / then stores SourceWOId / SourceWODocNo so the document chain starts at the Work Order.
+// One live MR per Work Order: while the first is not Rejected/Cancelled a second is refused (409).
+const hasSourceWO = makeColumnProbe("dbo.MaterialRequests", "SourceWOId");
+
+// Loads the approved Work Order a Material Request may be raised from. On any problem it has already
+// answered the request and returns null.
+async function loadWorkOrderForMR(req, res, pool, woId) {
+  if (!(await hasSourceWO(pool))) {
+    res.status(503).json({ error: "Material Requests from Work Orders need migration 545 — ask an administrator to run the database migrations." });
+    return null;
+  }
+  const wo = (await pool.request().input("id", sql.Int, woId).query(`
+    SELECT Id, DocumentNumber, DocNo, Status, CompanyId, ProjectId
+    FROM dbo.WorkOrderHeader WHERE Id = @id
+  `)).recordset[0];
+  if (!wo) {
+    res.status(404).json({ error: "Work order not found" });
+    return null;
+  }
+  if (!assertProjectAllowed(req, res, wo.ProjectId)) return null;
+  if (wo.Status !== "Approved") {
+    res.status(400).json({ error: "A Material Request can only be raised from an approved work order." });
+    return null;
+  }
+  const existing = (await pool.request().input("id", sql.Int, woId).query(`
+    SELECT TOP 1 MRId, DocNo, Status FROM dbo.MaterialRequests
+    WHERE SourceWOId = @id AND Status NOT IN ('Rejected', 'Cancelled')
+    ORDER BY MRId DESC
+  `)).recordset[0];
+  if (existing) {
+    res.status(409).json({
+      error: `Material Request ${existing.DocNo || "#" + existing.MRId} already exists for this work order.`,
+      mrId: existing.MRId,
+      docNo: existing.DocNo,
+      status: existing.Status,
+    });
+    return null;
+  }
+  return { ...wo, woNo: wo.DocNo || wo.DocumentNumber || `WO-${woId}` };
+}
+
+router.get("/from-work-order/:woId/prefill", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
+  const woId = parseInt(req.params.woId, 10);
+  if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid work order id" });
+  try {
+    const pool = getPool();
+    await ensureTablesExist(pool);
+    const wo = await loadWorkOrderForMR(req, res, pool, woId);
+    if (!wo) return;
+
+    const mats = (await pool.request().input("id", sql.Int, woId).query(`
+      SELECT m.ItemId, MAX(img.M_Name) AS ItemName, uom.UOMCode, SUM(ISNULL(m.Quantity, 0)) AS Quantity
+      FROM dbo.WorkOrderActivityMaterials m
+      JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
+      LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = m.ItemId
+      LEFT JOIN dbo.UOMMaster uom ON uom.Id = m.UOMId
+      WHERE a.WorkOrderHeaderId = @id AND m.ItemId IS NOT NULL
+      GROUP BY m.ItemId, uom.UOMCode
+      HAVING SUM(ISNULL(m.Quantity, 0)) > 0
+      ORDER BY MAX(img.M_Name), m.ItemId
+    `)).recordset;
+    if (!mats.length) {
+      return res.status(400).json({ error: "This work order has no material items to request." });
+    }
+
+    res.json({
+      WOId: woId,
+      WODocNo: wo.woNo,
+      CompanyId: wo.CompanyId || null,
+      ProjectId: wo.ProjectId || null,
+      Reason: `Materials for Work Order ${wo.woNo}`,
+      Remarks: `Raised from approved Work Order ${wo.woNo}`,
+      items: mats.map((m) => ({
+        ItemId: String(m.ItemId),
+        ItemName: m.ItemName || null,
+        UOMCode: m.UOMCode || null,
+        Quantity: parseFloat(m.Quantity) || 0,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── PUT /:id ───────────────────────────────────────────────────────────────────
 router.put("/:id", authenticateToken, requirePageRight("material-request", "edit"), async (req, res) => {
   const user = requireUser(req, res);
@@ -1025,6 +1196,23 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     if (!statusCheck.recordset.length)
       return res.status(404).json({ error: "Not found" });
     const currentMRStatus = statusCheck.recordset[0].Status;
+
+    // Chain guard: a Purchase Order already raised against this MR must be
+    // deleted first — editing quantities/items here after a PO exists would
+    // silently drift the MR out of sync with what the PO already locked in.
+    // Checked before the status guard: ordering moves the MR on to Partially
+    // Fulfilled / Completed, and the status message ("only Draft, Pending,
+    // Approved or Rejected can be edited") never said the PO was the reason.
+    const blockingPO = await poExistsForMR(pool, id);
+    if (blockingPO)
+      return res.status(409).json({
+        error: `Cannot edit: ${blockingPO} is linked to this Material Request. Delete it first, then edit the request.`,
+      });
+    if (["Partially Fulfilled", "Completed"].includes(currentMRStatus))
+      return res.status(409).json({
+        error: `Cannot edit: this Material Request is ${currentMRStatus.toLowerCase()} — it has already been ordered on a Purchase Order. Delete that Purchase Order first, then edit the request.`,
+      });
+
     if (!["Draft", "Pending", "Approved", "Rejected"].includes(currentMRStatus))
       return res.status(409).json({
         error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Pending, Approved, or Rejected requests can be edited.`,
@@ -1045,15 +1233,6 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
       : null;
-
-    // Chain guard: a Purchase Order already raised against this MR must be
-    // deleted first — editing quantities/items here after a PO exists would
-    // silently drift the MR out of sync with what the PO already locked in.
-    const blockingPO = await poExistsForMR(pool, id);
-    if (blockingPO)
-      return res.status(409).json({
-        error: `Cannot edit: ${blockingPO} is linked to this Material Request. Delete it first, then edit the request.`,
-      });
 
     if (RequiredByDate) {
       const minDate = await computeMinRequiredByDate(
@@ -1235,7 +1414,7 @@ router.delete("/:id", authenticateToken, requirePageRight("material-request", "d
       .request()
       .input("id", sql.Int, id)
       .query(
-        "SELECT TOP 1 DocNo FROM dbo.PurchaseOrders WHERE SourceMRId = @id",
+        `SELECT TOP 1 DocNo FROM dbo.PurchaseOrders po WHERE ${poTaggedToMr(await multiMrReady(pool), "@id")}`,
       );
     if (poCheck.recordset.length)
       return res.status(409).json({
@@ -1339,6 +1518,7 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
       })
       .filter((it) => it.PendingQty > 0);
 
+    const withTerms = await attachWorkOrderTerms(pool, id, itemsWithPending);
     res.json({
       MRId: mr.MRId,
       DocNo: mr.DocNo,
@@ -1349,7 +1529,8 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
       FinYearId: mr.FinYearId,
       FinYearName: mr.FinYearName,
       Remarks: mr.Remarks,
-      items: itemsWithPending,
+      ...(withTerms.workOrder ?? {}),
+      items: withTerms.items,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1470,14 +1651,17 @@ router.get("/:id/linked-pos", authenticateToken, async (req, res) => {
     );
     const totalRequested = Number(totalReqRes.recordset[0]?.TotalRequested) || 0;
 
+    // A PO may draw on several MRs (migration 585): only what it takes from THIS MR's lines counts here.
+    const multiMr = await multiMrReady(pool);
     const poRes = await pool.request().input("MRId", sql.Int, id).query(`
       SELECT
         po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status,
         ISNULL(SUM(poi.Quantity), 0) AS OrderedQty
       FROM dbo.PurchaseOrders po
-      LEFT JOIN dbo.PurchaseOrderItems poi
-        ON poi.PurchaseOrderID = po.PurchaseOrderID AND poi.MRItemId IS NOT NULL
-      WHERE po.SourceMRId = @MRId
+      LEFT JOIN ${mrQtySource(multiMr)} poi
+        ON poi.PurchaseOrderID = po.PurchaseOrderID
+       AND poi.MRItemId IN (SELECT MRItemId FROM dbo.MaterialRequestItems WHERE MRId = @MRId)
+      WHERE ${poTaggedToMr(multiMr, "@MRId")}
       GROUP BY po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status
       ORDER BY po.PurchaseOrderID ASC
     `);

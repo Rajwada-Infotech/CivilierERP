@@ -1,13 +1,12 @@
 const express = require("express");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
@@ -47,6 +46,8 @@ function cpbParams(req, { companyCol, projectCol, blockCol } = {}) {
   if (companyId && companyCol) clauses.push(`${companyCol} = @cpbCompanyId`);
   if (projectId && projectCol) clauses.push(`${projectCol} = @cpbProjectId`);
   if (blockId && blockCol) clauses.push(`${blockCol} = @cpbBlockId`);
+  // A project-restricted user's reports cover only their projects.
+  if (req.projectScope && projectCol) clauses.push(require("../services/projectScope").projectPredicate(req.projectScope, projectCol, "").trim());
   return {
     clauses,
     bind(r) {
@@ -63,7 +64,7 @@ router.get("/booking-register", requirePageRight("crm-bookings", "view"), async 
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(b.BookingDate AS DATE)");
     const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
-    const conds = ["b.IsActive = 1", `b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')`, ...dr.clauses, ...cpb.clauses];
+    const conds = ["b.IsActive = 1", `b.Status NOT IN ${DEAD_BOOKING_SQL}`, ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
     const result = await r.query(`
@@ -87,7 +88,7 @@ router.get("/payment-collection", requirePageRight("crm-payments", "view"), asyn
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(m.DueDate AS DATE)");
     const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
-    const conds = ["b.IsActive = 1", `b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')`, ...dr.clauses, ...cpb.clauses];
+    const conds = ["b.IsActive = 1", `b.Status NOT IN ${DEAD_BOOKING_SQL}`, ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
     const result = await r.query(`
@@ -174,7 +175,7 @@ router.get("/overdue-payments", requirePageRight("crm-payments", "view"), async 
       WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
+        AND b.Status NOT IN ${DEAD_BOOKING_SQL}
         ${cpb.clauses.length ? "AND " + cpb.clauses.join(" AND ") : ""}
       ORDER BY m.DueDate ASC
     `);
@@ -283,6 +284,8 @@ router.get("/customer-report", requirePageRight("crm-customers", "view"), async 
                  JOIN dbo.PlotMaster pm ON pm.Id = app.PlotId
                  WHERE ap2.CustomerId = c.Id AND pm.BlockId = @cpbBlockId)
     )`); }
+    // A project-restricted user sees only customers with an application in their projects.
+    if (req.projectScope) conds.push(`EXISTS (SELECT 1 FROM dbo.CrmApplication aps WHERE aps.CustomerId = c.Id${require("../services/projectScope").projectPredicate(req.projectScope, "aps.ProjectId")})`);
     const result = await r.query(`
       SELECT c.CustomerNo, c.CustomerName, c.Mobile, c.Email,
         (SELECT COUNT(*) FROM dbo.CrmBooking bk JOIN dbo.CrmApplication ap ON ap.Id = bk.ApplicationId
@@ -301,7 +304,7 @@ router.get("/application-funnel", requirePageRight("crm-applications", "view"), 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(a.CreatedAt AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "a.CompanyId", projectCol: "a.ProjectId", blockCol: "b.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "a.CompanyId", projectCol: "a.ProjectId", blockCol: "um.BlockId" }); // no alias b here — the block comes from the picked unit
     const conds = ["a.IsActive = 1", ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -512,6 +515,7 @@ router.get("/parking-report", requirePageRight("crm-parking-booking", "view"), a
     // — skipped for this report rather than half-implemented.
     if (companyId) { req0.input("cpbCompanyId", sql.Int, companyId); conds.push("(a.CompanyId = @cpbCompanyId OR b.CompanyId = @cpbCompanyId)"); }
     if (projectId) { req0.input("cpbProjectId", sql.Int, projectId); conds.push("(a.ProjectId = @cpbProjectId OR b.ProjectId = @cpbProjectId)"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "ISNULL(b.ProjectId, a.ProjectId)", "").trim());
     const result = await req0.query(`
       SELECT ISNULL(b.BookingNo, '(Standalone)') AS BookingNo,
         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, pa.ParkingSlotNo, pa.Quantity,
@@ -588,6 +592,7 @@ router.get("/construction-updates", requirePageRight("crm-construction-updates",
     const r = pool.request();
     dr.bind(r);
     if (projectId) { r.input("cpbProjectId", sql.Int, projectId); conds.push("u.ProjectId = @cpbProjectId"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "u.ProjectId", "").trim());
     const result = await r.query(`
       SELECT u.ProjectName, CAST(u.UpdateDate AS DATE) AS UpdateDate,
         u.PercentComplete, u.Stage, u.Summary
@@ -625,7 +630,7 @@ router.get("/aging-analysis", requirePageRight("crm-payments", "view"), async (r
       WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}', 'Expired','Transferred')
         ${cpb.clauses.length ? "AND " + cpb.clauses.join(" AND ") : ""}
       ORDER BY DaysOverdue DESC
     `);
@@ -643,22 +648,30 @@ router.get("/inventory-status", requirePageRight("crm-bookings", "view"), async 
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
-    const conds = ["u.IsActive = 1"];
+    // Land rows (plots kept as units) are plot inventory, not units — counting
+    // them here doubled every plotted project's totals.
+    const conds = ["u.IsActive = 1",
+      "NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)"];
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "u.ProjectId", "").trim());
     if (projectId) { req0.input("cpbProjectId", sql.Int, projectId); conds.push("u.ProjectId = @cpbProjectId"); }
     if (blockId) { req0.input("cpbBlockId", sql.Int, blockId); conds.push("u.BlockId = @cpbBlockId"); }
     const result = await req0.query(`
       SELECT
         ep.name AS ProjectName,
-        u.UnitType,
+        t.UnitType,
         COUNT(u.Id) AS TotalUnits,
-        SUM(CASE WHEN bk.Id IS NOT NULL THEN 1 ELSE 0 END) AS BookedUnits,
-        SUM(CASE WHEN bk.Id IS NULL THEN 1 ELSE 0 END) AS AvailableUnits
+        SUM(bk.Booked) AS BookedUnits,
+        SUM(1 - bk.Booked) AS AvailableUnits
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise ep ON ep.id = u.ProjectId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
+      -- SQL Server can't GROUP BY a subquery: resolve the type name first.
+      OUTER APPLY (SELECT COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind)) AS UnitType) t
+      -- one flag per unit, so a unit is never counted twice
+      OUTER APPLY (SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.UnitId = u.Id AND b.IsActive = 1
+        AND b.Status NOT IN ${DEAD_BOOKING_SQL}) THEN 1 ELSE 0 END AS Booked) bk
       WHERE ${conds.join(" AND ")}
-      GROUP BY ep.name, u.UnitType
-      ORDER BY ep.name, u.UnitType
+      GROUP BY ep.name, t.UnitType
+      ORDER BY ep.name, t.UnitType
     `);
     res.json(result.recordset);
   } catch (err) { res.status(500).json({ error: err.message }); }

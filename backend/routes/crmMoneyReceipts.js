@@ -15,11 +15,15 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmMoneyReceipt")); }
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { getMoneyReceiptPdfBuffer, deriveStatus } = require("../services/moneyReceiptPdf");
 const {
   MoneyReceiptError,
@@ -28,16 +32,19 @@ const {
   updateMoneyReceipt,
   resubmitMoneyReceipt,
   bounceMoneyReceipt,
-  approveMoneyReceipt,
+  sendMoneyReceiptToFinance,
 } = require("../services/crmMoneyReceiptWorkflow");
 const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
 const RECEIPT_STATUSES = [CrmStatus.PENDING, CrmStatus.APPROVED, "Bounced"];
+// The status a receipt shows (deriveStatus in SQL): Finance's Received Payment decides it once the receipt is
+// still Pending here. Filtering and counting on mr.Status alone put a Finance-approved receipt under "Pending".
+const STATUS_SQL = `CASE WHEN mr.Status = 'Approved' THEN 'Approved' WHEN mr.Status = 'Bounced' THEN 'Bounced'
+  WHEN rp.RPStatus = 'Approved' THEN 'Approved' WHEN rp.RPStatus = 'Rejected' THEN 'Bounced' ELSE 'Pending' END`;
 
 function actorEmail(req) {
   return req.user?.email || req.user?.name || null;
@@ -51,9 +58,9 @@ function handleError(res, e, context) {
   return res.status(500).json({ error: e.message });
 }
 
-function requireMoneyReceiptApprover(req, res) {
-  if (isMoneyReceiptApprover(req.user?.role)) return true;
-  res.status(403).json({ error: "Only Finance / Account's Head approvers can perform this action" });
+async function requireMoneyReceiptApprover(req, res) {
+  if (await isMoneyReceiptApprover(req.user?.role, Number(req.user?.userId ?? req.user?.id) || null)) return true;
+  res.status(403).json({ error: "You are not a money-receipt approver in Approval Setup" });
   return false;
 }
 
@@ -63,9 +70,10 @@ function requireMoneyReceiptApprover(req, res) {
 // blocks tend to (that was the actual bug risk in the previous version —
 // nothing here changes what filters exist, only that there's one definition
 // of them instead of two).
-function applyReceiptFilters(request, query) {
+function applyReceiptFilters(request, query, projectScope = null) {
   const { bookingId, status, companyId, projectId, blockId, search, fromDate, toDate } = query;
   const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
 
   if (bookingId) {
     request.input("bid", sql.Int, parseInt(bookingId, 10));
@@ -73,7 +81,7 @@ function applyReceiptFilters(request, query) {
   }
   if (status && RECEIPT_STATUSES.includes(status)) {
     request.input("st", sql.NVarChar(20), status);
-    conds.push("mr.Status = @st");
+    conds.push(`${STATUS_SQL} = @st`);
   }
   if (fromDate) {
     request.input("fromDate", sql.Date, fromDate);
@@ -129,6 +137,7 @@ const COUNT_SELECT = `
   JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+  LEFT JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = mr.ReceivedPaymentId
 `;
 
 function shapeReceipts(rows) {
@@ -158,7 +167,8 @@ async function withConcurrency(items, limit, worker) {
 
 // ── List / read ─────────────────────────────────────────────────────────────
 
-router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res) => {
+// Payment Milestones shows a booking's token receipt from this list, so its right reads it too.
+router.get("/", requireAnyPageRight(["crm-money-receipts", "crm-payments"], "view"), async (req, res) => {
   try {
     const pool = getPool();
 
@@ -167,7 +177,7 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
     // by definition, it's not a page of the main list.
     if (req.query.bookingId && !req.query.page) {
       const dataReq = pool.request();
-      const where = applyReceiptFilters(dataReq, req.query);
+      const where = applyReceiptFilters(dataReq, req.query, req.projectScope);
       const result = await dataReq.query(`${BASE_SELECT} ${where} ORDER BY mr.CreatedAt DESC`);
       return res.json(shapeReceipts(result.recordset));
     }
@@ -179,19 +189,25 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
     const { page, pageSize, offset } = applyPagination(req);
 
     const dataReq = pool.request();
-    const where = applyReceiptFilters(dataReq, req.query);
+    const where = applyReceiptFilters(dataReq, req.query, req.projectScope);
     dataReq.input("offset", sql.Int, offset);
     dataReq.input("pageSize", sql.Int, pageSize);
 
     const countReq = pool.request();
-    applyReceiptFilters(countReq, req.query); // same filter logic, fresh param bindings
+    applyReceiptFilters(countReq, req.query, req.projectScope); // same filter logic, fresh param bindings
+    // Per-status counts for the same filters, status aside — the page's figures and tabs.
+    const statusReq = pool.request();
+    const statusWhere = applyReceiptFilters(statusReq, { ...req.query, status: undefined }, req.projectScope);
 
-    const [result, countResult] = await Promise.all([
+    const [result, countResult, statusResult] = await Promise.all([
       dataReq.query(`${BASE_SELECT} ${where} ORDER BY mr.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       countReq.query(`${COUNT_SELECT} ${where}`),
+      statusReq.query(`SELECT ${STATUS_SQL} AS S, COUNT(*) AS n, SUM(mr.Amount) AS amt ${COUNT_SELECT.replace(/^\s*SELECT COUNT\(\*\) AS total/, "")} ${statusWhere} GROUP BY ${STATUS_SQL}`),
     ]);
+    const statusCounts = Object.fromEntries(RECEIPT_STATUSES.map((st) => [st, { count: 0, amount: 0 }]));
+    for (const r of statusResult.recordset) statusCounts[r.S] = { count: r.n, amount: Number(r.amt) || 0 };
 
-    res.json({ rows: shapeReceipts(result.recordset), total: countResult.recordset[0].total, page, pageSize });
+    res.json({ rows: shapeReceipts(result.recordset), total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
     handleError(res, e, "GET /");
   }
@@ -253,6 +269,8 @@ router.post("/", requirePageRight("crm-money-receipts", "create"), async (req, r
       : req.body?.bookingId;
     const bookingId = parseInt(rawBookingId, 10);
     if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "BookingId is required" });
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
     const row = await createMoneyReceiptForBooking(pool, bookingId, req.body || {}, actorId(req), { skipIfExists: true });
     res.status(row.existing ? 200 : 201).json({ success: true, ...row });
   } catch (e) {
@@ -288,7 +306,7 @@ router.put("/:id/resubmit", requirePageRight("crm-money-receipts", "edit"), asyn
 
 router.put("/:id/bounce", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
-    if (!requireMoneyReceiptApprover(req, res)) return;
+    if (!(await requireMoneyReceiptApprover(req, res))) return;
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
@@ -304,7 +322,7 @@ router.put("/:id/bounce", requirePageRight("crm-money-receipts", "edit"), async 
 // them would be a routing change, not a restructure, so left alone.
 router.put("/:id/reject", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
-    if (!requireMoneyReceiptApprover(req, res)) return;
+    if (!(await requireMoneyReceiptApprover(req, res))) return;
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
@@ -316,51 +334,40 @@ router.put("/:id/reject", requirePageRight("crm-money-receipts", "edit"), async 
   }
 });
 
-router.put("/:id/approve", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
-  try {
-    if (!requireMoneyReceiptApprover(req, res)) return;
-    const pool = getPool();
-    const id = parseId(req.params.id);
-    if (id === null) return res.status(400).json({ error: "Invalid id" });
-    const result = await approveMoneyReceipt(pool, id, actorId(req), actorEmail(req));
-    res.json(result);
-  } catch (e) {
-    handleError(res, e, "PUT /:id/approve");
-  }
-});
-
 // ── Admin backfill ───────────────────────────────────────────────────────────
 
 const SWEEP_CONCURRENCY = 5;
 
-// POST /sweep-pending — admin backfill for already-confirmed bookings whose
-// MRs are stuck in Pending with ReceivedPaymentId = NULL (created before the
-// on-confirm auto-sweep was wired up). Safe to run multiple times —
-// approveMoneyReceipt guards against double-processing with its own Status
-// and ReceivedPaymentId checks.
+// POST /sweep-pending — retry for fully approved bookings whose receipt is
+// still Pending with ReceivedPaymentId = NULL (the hand-off on Director
+// approval failed, or the booking predates it). Only repeats that automatic
+// hand-off, so it needs the page's edit right, not an approver. Safe to run
+// multiple times — sendMoneyReceiptToFinance guards against double-processing
+// with its own Status and ReceivedPaymentId checks.
 //
 // Change from before: processes up to SWEEP_CONCURRENCY receipts in
-// parallel instead of strictly one at a time. Each approveMoneyReceipt call
+// parallel instead of strictly one at a time. Each sendMoneyReceiptToFinance call
 // takes its own row-level transaction lock on a *different* MoneyReceipt
 // row, so concurrent execution across rows is safe; this just stops a
 // large backlog from being gated by round-trip latency one row at a time.
 router.post("/sweep-pending", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    if (!isMoneyReceiptApprover(req.user?.roleName)) {
-      return res.status(403).json({ error: "Accounts Head or Admin access required" });
-    }
+    // Only the projects the user may work in — the sweep approved receipts across every project.
+    const scopeSql = req.projectScope
+      ? ` AND ${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()}`
+      : "";
     const stuckMrs = await pool.request().query(`
       SELECT mr.Id
       FROM dbo.CrmMoneyReceipt mr
       JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
       WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL
-        AND b.WorkflowStage = 'Confirmed' AND b.IsActive = 1
+        AND b.WorkflowStage = 'Confirmed' AND b.IsActive = 1${scopeSql}
     `);
 
     const outcomes = await withConcurrency(stuckMrs.recordset, SWEEP_CONCURRENCY, async (row) => {
       try {
-        await approveMoneyReceipt(pool, row.Id, actorId(req), actorEmail(req));
+        await sendMoneyReceiptToFinance(pool, row.Id, actorId(req), actorEmail(req));
         return { ok: true };
       } catch (e) {
         return { ok: false, id: row.Id, error: e.message };

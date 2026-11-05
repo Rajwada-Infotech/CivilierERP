@@ -1,24 +1,27 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin, applyLeadScope } = require("../services/saAccess");
+const { requireApprover } = require("../middleware/requireApprover");
+const { isApproverFor } = require("../services/approvalService");
+
+const APPROVE = requireApprover("sa-lead-transfers", "lead transfers");
+const { alertAssignedMany } = require("../services/saMessaging");
 
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
-router.use(authMiddleware);
+const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // ── GET / ──────────────────────────────────────────────────────────────────
-// Admin: all requests.  TL: only requests they raised.
+// Admins and lead-transfer approvers (Approval Setup): all requests. TL: only requests they raised.
 router.get("/", requirePageRight("sa-lead-transfers", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
     let whereClause = "";
-    if (!isSaAdmin(req)) {
+    if (!isSaAdmin(req) && !(await isApproverFor("sa-lead-transfers", actorId(req), req.user?.role))) {
       request.input("ActorId", sql.Int, actorId(req));
       whereClause = "WHERE r.RequestedByUserId = @ActorId";
     }
@@ -159,10 +162,8 @@ router.post("/", requirePageRight("sa-lead-transfers", "create"), async (req, re
 });
 
 // ── POST /:id/approve ──────────────────────────────────────────────────────
-// Admin approves: reassigns all leads to the destination TL
-router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), async (req, res) => {
-  if (!isSaAdmin(req)) return res.status(403).json({ error: "Only admins can approve transfer requests" });
-
+// A lead-transfer approver (Approval Setup) approves: reassigns all leads to the destination TL
+router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), APPROVE, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { AdminNotes } = req.body;
@@ -186,14 +187,25 @@ router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), async
         .input("RequestId", sql.Int, id)
         .query("SELECT LeadId FROM dbo.SaLeadTransferRequestItem WHERE TransferRequestId = @RequestId");
 
-      // Reassign each lead: AssignedToUserId = ToTeamLeadId (TL re-distributes via Distribution module)
+      // Reassign each lead to the destination TL and clear the salesperson —
+      // the TL re-distributes via the Distribution module. AssignedToUserId
+      // doesn't exist anywhere else in the app (saLeads.js, saDashboard.js,
+      // and the scope-check helper saAccess.js all read AssignedTeamLeadId/
+      // AssignedSalespersonId) — writing it there made approval a no-op:
+      // the request flipped to Approved, but the lead never actually moved
+      // and stayed invisible to the new TL's scope query. Clearing
+      // AssignedSalespersonId also matters: saAccess.js's scope check gives
+      // the OLD salesperson access via that column regardless of
+      // AssignedTeamLeadId, so leaving it set would keep them seeing a lead
+      // that's supposed to be the new TL's to redistribute.
       for (const item of items.recordset) {
         await tx.request()
           .input("LeadId", sql.Int, item.LeadId)
           .input("ToTLId", sql.Int, tfReq.ToTeamLeadId)
           .query(`
             UPDATE dbo.SaLead SET
-              AssignedToUserId = @ToTLId,
+              AssignedTeamLeadId   = @ToTLId,
+              AssignedSalespersonId = NULL,
               UpdatedAt        = GETDATE()
             WHERE Id = @LeadId
           `);
@@ -225,6 +237,7 @@ router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), async
 
       await tx.commit();
       res.json({ message: `${items.recordset.length} lead(s) transferred successfully` });
+      alertAssignedMany(pool, items.recordset.map((i) => ({ leadId: i.LeadId, userId: tfReq.ToTeamLeadId })));
     } catch (innerErr) {
       await tx.rollback();
       throw innerErr;
@@ -236,9 +249,7 @@ router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), async
 });
 
 // ── POST /:id/reject ───────────────────────────────────────────────────────
-router.post("/:id/reject", requirePageRight("sa-lead-transfers", "edit"), async (req, res) => {
-  if (!isSaAdmin(req)) return res.status(403).json({ error: "Only admins can reject transfer requests" });
-
+router.post("/:id/reject", requirePageRight("sa-lead-transfers", "edit"), APPROVE, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { AdminNotes } = req.body;

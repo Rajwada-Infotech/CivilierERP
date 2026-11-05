@@ -3,25 +3,17 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { AdminShell } from "@/components/admin/AdminShell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   Trash2,
   Edit3,
   UploadCloud,
-  PenLine,
   X,
   Image as ImageIcon,
   CheckCircle2,
   Plus,
-  User,
-  Tag,
   Loader2,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,6 +26,17 @@ interface SignatureItem {
   AddedAt: string;
 }
 
+const MAX_BYTES = 2 * 1024 * 1024;
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const FIELD = "w-full h-9 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground transition-colors disabled:opacity-40";
+
 export default function Signature() {
   const qc = useQueryClient();
   const rights = usePageRights("admin-signatures");
@@ -43,6 +46,7 @@ export default function Signature() {
     imagePreview: "",
   });
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -52,7 +56,8 @@ export default function Signature() {
     queryFn: async () => {
       const res = await fetchWithAuth("/api/signatures");
       if (!res.ok) throw new Error("Failed to load");
-      return res.json().catch(() => ({}));
+      const json = await res.json().catch(() => []);
+      return Array.isArray(json) ? json : [];
     },
     staleTime: 5 * 60_000,
   });
@@ -105,15 +110,25 @@ export default function Signature() {
       });
       if (!res.ok) throw new Error("Failed");
     },
-    onSuccess: () => {
+    onSuccess: (_d, id) => {
       toast.success("Signature deleted");
+      setDeleteId(null);
+      if (editingId === id) resetForm();
       qc.invalidateQueries({ queryKey: ["signatures"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const readFile = (file: File) => {
-    if (!file.type.startsWith("image/")) return;
+    if (!/^image\/(png|jpe?g)$/.test(file.type)) {
+      toast.error("Choose a PNG or JPG image");
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      toast.error("The image is larger than 2 MB");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (e) =>
       setFormData((p) => ({
@@ -141,322 +156,272 @@ export default function Signature() {
 
   const isEditing = editingId !== null;
   const activeCount = signatures.filter((s) => s.Status === "active").length;
+  const showForm = isEditing ? rights.canEdit : rights.canCreate;
 
   return (
     <>
       <Breadcrumbs items={["Admin", "Signatures"]} />
-      <AdminShell
-        title="Digital Signatures"
-        subtitle="Manage signatures used for document approvals"
-        icon={PenLine}
-        action={
-          <div className="flex items-center gap-2 text-xs font-body text-muted-foreground">
-            <span className="px-2.5 py-1 rounded-full bg-muted border border-border">
-              {signatures.length} total
-            </span>
-            <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-              {activeCount} active
-            </span>
-          </div>
-        }
+      <SheetShell
+        eyebrow="CivilierERP · Admin"
+        title="Digital signatures"
+        subtitle="Signatures printed on approved documents, and who each one belongs to."
       >
-        <div className="rounded-2xl border border-border bg-card overflow-hidden">
-          <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
-            {isEditing ? (
-              <Edit3 size={14} className="text-primary" />
-            ) : (
-              <UploadCloud size={14} className="text-primary" />
-            )}
-            <span className="text-sm font-heading font-semibold text-foreground">
-              {isEditing ? "Edit Signature" : "Add New Signature"}
-            </span>
-            {isEditing && (
-              <Badge className="ml-auto text-[0.625rem] font-heading bg-primary/10 text-primary border border-primary/20 px-2">
-                Editing
-              </Badge>
-            )}
-          </div>
-          <div className="p-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor="sig-name"
-                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
-                  >
-                    <Tag size={10} /> Signature Name{" "}
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="sig-name"
-                    placeholder="e.g. CEO Approval Signature"
-                    value={formData.name}
-                    onChange={(e) =>
-                      setFormData((p) => ({ ...p, name: e.target.value }))
-                    }
-                    className="font-body"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor="sig-owner"
-                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
-                  >
-                    <User size={10} /> Owner{" "}
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="sig-owner"
-                    placeholder="e.g. John Doe"
-                    value={formData.owner}
-                    onChange={(e) =>
-                      setFormData((p) => ({ ...p, owner: e.target.value }))
-                    }
-                    className="font-body"
-                  />
-                </div>
-                <div className="flex items-center gap-3 pt-2">
-                  <Button
-                    onClick={() => saveMutation.mutate()}
-                    disabled={
-                      !formData.name.trim() ||
-                      !formData.owner.trim() ||
-                      saveMutation.isPending
-                    }
-                    className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
-                  >
-                    {saveMutation.isPending ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : justSaved ? (
-                      <CheckCircle2 size={14} />
-                    ) : isEditing ? (
-                      <Edit3 size={14} />
-                    ) : (
-                      <Plus size={14} />
-                    )}
-                    {saveMutation.isPending
-                      ? "Saving…"
-                      : justSaved
-                        ? "Saved!"
-                        : isEditing
-                          ? "Update Signature"
-                          : "Add Signature"}
-                  </Button>
-                  {isEditing && (
-                    <Button
-                      variant="outline"
-                      onClick={resetForm}
-                      className="font-heading text-sm"
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                </div>
+        {/* Counts */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Signatures", value: signatures.length, note: "in the library" },
+              { label: "Active", value: activeCount, note: "available to documents" },
+              { label: "Inactive", value: signatures.length - activeCount, note: "kept, not offered" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
               </div>
+            ))}
+          </div>
+        </div>
 
-              <div className="space-y-1.5">
-                <Label className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">
-                  <UploadCloud size={10} /> Signature Image
-                </Label>
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                  }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragOver(false);
-                    const f = e.dataTransfer.files?.[0];
-                    if (f) readFile(f);
-                  }}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`relative flex flex-col items-center justify-center w-full h-40 rounded-xl border-2 border-dashed cursor-pointer transition-all duration-200 ${dragOver ? "border-primary bg-primary/5 scale-[1.01]" : formData.imagePreview ? "border-primary/30 bg-muted/20" : "border-border hover:border-primary/50 hover:bg-muted/30"}`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/jpg"
-                    className="sr-only"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
+        {/* Form */}
+        {showForm && (
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="flex items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+              <span className={HEAD}>{isEditing ? "Edit signature" : "Add a signature"}</span>
+              {isEditing && (
+                <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border border-dashed border-foreground text-foreground">
+                  Editing
+                </span>
+              )}
+            </div>
+            <div className="p-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label htmlFor="sig-name" className={`${LBL} block`}>
+                      Signature name <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      id="sig-name"
+                      placeholder="e.g. CEO Approval Signature"
+                      value={formData.name}
+                      onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))}
+                      className={FIELD}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="sig-owner" className={`${LBL} block`}>
+                      Owner <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      id="sig-owner"
+                      placeholder="e.g. John Doe"
+                      value={formData.owner}
+                      onChange={(e) => setFormData((p) => ({ ...p, owner: e.target.value }))}
+                      className={FIELD}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => saveMutation.mutate()}
+                      disabled={!formData.name.trim() || !formData.owner.trim() || saveMutation.isPending}
+                      className={`${KEY_INK} h-9 px-5`}
+                    >
+                      {saveMutation.isPending ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : justSaved ? (
+                        <CheckCircle2 size={13} />
+                      ) : isEditing ? (
+                        <Edit3 size={13} />
+                      ) : (
+                        <Plus size={13} />
+                      )}
+                      {saveMutation.isPending ? "Saving…" : justSaved ? "Saved" : isEditing ? "Update signature" : "Add signature"}
+                    </button>
+                    {isEditing && (
+                      <button type="button" onClick={resetForm} className={`${KEY_LINE} h-9 px-4`}>
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className={`${LBL} block`}>Signature image</span>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Upload a signature image"
+                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && fileInputRef.current?.click()}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOver(true);
+                    }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragOver(false);
+                      const f = e.dataTransfer.files?.[0];
                       if (f) readFile(f);
                     }}
-                  />
-                  {formData.imagePreview ? (
-                    <>
-                      <img
-                        src={formData.imagePreview}
-                        alt="Preview"
-                        className="max-h-32 max-w-full object-contain px-6"
-                      />
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setFormData((p) => ({ ...p, imagePreview: "" }));
-                          if (fileInputRef.current)
-                            fileInputRef.current.value = "";
-                        }}
-                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-destructive/90 text-white flex items-center justify-center hover:bg-destructive transition-colors"
-                      >
-                        <X size={11} />
-                      </button>
-                    </>
-                  ) : (
-                    <div className="flex flex-col items-center gap-2.5 text-center px-4 pointer-events-none">
-                      <div className="w-11 h-11 rounded-xl bg-muted flex items-center justify-center">
-                        <UploadCloud
-                          size={20}
-                          className="text-muted-foreground/60"
-                        />
-                      </div>
-                      <div>
-                        <p className="text-sm font-body text-muted-foreground">
-                          <span className="font-semibold text-primary">
-                            Click to upload
-                          </span>{" "}
-                          or drag &amp; drop
-                        </p>
-                        <p className="text-[0.625rem] font-body text-muted-foreground/50 mt-0.5">
-                          PNG, JPG up to 2 MB
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <h2 className="text-base font-heading font-semibold text-foreground">
-              Signature Library
-            </h2>
-            <span className="text-xs font-body text-muted-foreground">
-              ({signatures.length})
-            </span>
-          </div>
-
-          {isLoading ? (
-            <div className="flex justify-center py-16">
-              <Loader2
-                size={24}
-                className="animate-spin text-muted-foreground"
-              />
-            </div>
-          ) : signatures.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 rounded-2xl border-2 border-dashed border-border bg-muted/10">
-              <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
-                <ImageIcon size={24} className="text-muted-foreground/40" />
-              </div>
-              <p className="text-sm font-heading font-semibold text-muted-foreground">
-                No signatures yet
-              </p>
-              <p className="text-xs font-body text-muted-foreground/60 mt-1">
-                Use the form above to add your first signature
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {signatures.map((sig) => (
-                <div
-                  key={sig.Id}
-                  className={`group flex flex-col rounded-2xl border bg-card overflow-hidden transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 ${editingId === sig.Id ? "border-primary shadow-lg shadow-primary/10 ring-1 ring-primary/20" : "border-border hover:border-primary/30"}`}
-                >
-                  <div className="relative h-36 bg-gradient-to-br from-muted/80 to-muted flex items-center justify-center p-4 overflow-hidden">
-                    <div
-                      className="absolute inset-0 opacity-[0.04]"
-                      style={{
-                        backgroundImage:
-                          "repeating-linear-gradient(0deg,currentColor,currentColor 1px,transparent 1px,transparent 28px),repeating-linear-gradient(90deg,currentColor,currentColor 1px,transparent 1px,transparent 28px)",
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`relative flex flex-col items-center justify-center w-full h-40 border cursor-pointer transition-colors bg-card ${dragOver ? "border-foreground bg-primary/5" : formData.imagePreview ? "border-foreground/60" : "border-dashed border-foreground/50 hover:border-foreground"}`}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg"
+                      className="sr-only"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) readFile(f);
                       }}
                     />
-                    {sig.ImageData ? (
-                      <img
-                        src={sig.ImageData}
-                        alt={sig.Name}
-                        className="relative max-h-full max-w-full object-contain drop-shadow-sm"
-                      />
+                    {formData.imagePreview ? (
+                      <>
+                        <img src={formData.imagePreview} alt="Preview" className="max-h-32 max-w-full object-contain px-6" />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFormData((p) => ({ ...p, imagePreview: "" }));
+                            if (fileInputRef.current) fileInputRef.current.value = "";
+                          }}
+                          className={`absolute top-2 right-2 ${ACT} bg-card border-foreground/40 hover:text-destructive hover:border-destructive`}
+                          aria-label="Remove image"
+                          title="Remove image"
+                        >
+                          <X size={12} />
+                        </button>
+                      </>
                     ) : (
-                      <div className="relative flex flex-col items-center gap-2 opacity-30 group-hover:opacity-50 transition-opacity">
-                        <ImageIcon size={28} className="text-foreground" />
+                      <div className="flex flex-col items-center gap-2 text-center px-4 pointer-events-none">
+                        <UploadCloud size={20} className="text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">
+                          <span className="font-semibold text-foreground underline underline-offset-2">Click to upload</span> or drag and drop
+                        </p>
+                        <p className="text-[0.625rem] text-muted-foreground">PNG or JPG, up to 2 MB</p>
                       </div>
                     )}
-                    <span
-                      className={`absolute top-3 right-3 w-2.5 h-2.5 rounded-full ring-2 ring-card ${sig.Status === "active" ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
-                    />
-                  </div>
-                  <Separator className="opacity-50" />
-                  <div className="flex flex-col gap-3 p-4">
-                    <div className="min-w-0">
-                      <p className="text-sm font-heading font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-                        {sig.Name}
-                      </p>
-                      <p className="text-xs font-body text-muted-foreground mt-0.5 truncate flex items-center gap-1.5">
-                        <User size={10} className="flex-shrink-0" />
-                        {sig.Owner}
-                      </p>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={sig.Status === "active"}
-                          onCheckedChange={() =>
-                            toggleMutation.mutate({
-                              id: sig.Id,
-                              status:
-                                sig.Status === "active" ? "inactive" : "active",
-                            })
-                          }
-                          className="data-[state=checked]:bg-primary h-5 w-9"
-                        />
-                        <Badge
-                          variant={
-                            sig.Status === "active" ? "default" : "secondary"
-                          }
-                          className="text-[0.625rem] font-heading uppercase tracking-wide px-2 py-0.5"
-                        >
-                          {sig.Status}
-                        </Badge>
-                      </div>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => startEditing(sig)}
-                          className="h-8 w-8 p-0 hover:bg-primary/10 hover:text-primary"
-                        >
-                          <Edit3 size={13} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => deleteMutation.mutate(sig.Id)}
-                          disabled={deleteMutation.isPending}
-                          className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive"
-                        >
-                          <Trash2 size={13} />
-                        </Button>
-                      </div>
-                    </div>
-                    <p className="text-[0.625rem] font-body text-muted-foreground/50 border-t border-border/50 pt-2.5 mt-0.5">
-                      Added{" "}
-                      {new Date(sig.AddedAt).toLocaleDateString("en-GB", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </p>
                   </div>
                 </div>
-              ))}
+              </div>
             </div>
-          )}
+          </div>
+        )}
+
+        {/* Library */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="px-4 py-3" style={{ borderBottom: RULE }}>
+            <span className={HEAD}>
+              Signature library <span className="font-normal text-muted-foreground tabular-nums ml-1">{signatures.length}</span>
+            </span>
+          </div>
+          <div className="p-4">
+            {isLoading ? (
+              <div className="flex justify-center py-16">
+                <Loader2 size={20} className="animate-spin text-muted-foreground" />
+              </div>
+            ) : signatures.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 border border-dashed border-foreground/40">
+                <p className="text-sm text-muted-foreground">No signatures yet.</p>
+                {rights.canCreate && <p className="text-xs text-muted-foreground mt-1">Add the first one with the form above.</p>}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {signatures.map((sig) => {
+                  const active = sig.Status === "active";
+                  const confirming = deleteId === sig.Id;
+                  return (
+                    <div
+                      key={sig.Id}
+                      className={`flex flex-col bg-card border ${editingId === sig.Id ? "border-foreground border-2" : active ? "border-foreground" : "border-dashed border-foreground/50"}`}
+                    >
+                      <div
+                        className="relative h-36 flex items-center justify-center p-4 overflow-hidden"
+                        style={{
+                          borderBottom: "1px solid hsl(var(--foreground) / 0.2)",
+                          backgroundImage:
+                            "linear-gradient(hsl(var(--foreground) / 0.05) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--foreground) / 0.05) 1px, transparent 1px)",
+                          backgroundSize: "24px 24px",
+                        }}
+                      >
+                        {sig.ImageData ? (
+                          <img src={sig.ImageData} alt={sig.Name} className={`relative max-h-full max-w-full object-contain ${active ? "" : "opacity-50"}`} />
+                        ) : (
+                          <ImageIcon size={26} className="text-muted-foreground/50" />
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-3 p-3.5">
+                        <div className="min-w-0">
+                          <p className="font-heading text-sm font-bold tracking-tight text-foreground truncate">{sig.Name}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5 truncate">{sig.Owner}</p>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          {rights.canEdit ? (
+                            <div className="inline-flex items-stretch border border-foreground" role="group" aria-label={`${sig.Name} status`}>
+                              {(["active", "inactive"] as const).map((s, i) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  aria-pressed={sig.Status === s}
+                                  disabled={toggleMutation.isPending}
+                                  onClick={() => sig.Status !== s && toggleMutation.mutate({ id: sig.Id, status: s })}
+                                  className={`${KEY} h-7 px-2.5 ${i ? "border-l border-foreground" : ""} ${sig.Status === s ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"}`}
+                                >
+                                  {s === "active" ? "Active" : "Inactive"}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <SheetMark text={active ? "Active" : "Inactive"} tone={active ? "done" : "waiting"} />
+                          )}
+                          {confirming ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[0.6875rem] text-destructive mr-1">Delete?</span>
+                              <button
+                                type="button"
+                                onClick={() => deleteMutation.mutate(sig.Id)}
+                                disabled={deleteMutation.isPending}
+                                className={`${ACT} text-destructive border-destructive hover:bg-destructive/10`}
+                                aria-label="Confirm delete"
+                                title="Confirm delete"
+                              >
+                                {deleteMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                              </button>
+                              <button type="button" onClick={() => setDeleteId(null)} className={`${ACT} hover:text-foreground hover:border-foreground`} aria-label="Keep" title="Keep">
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex gap-1">
+                              {rights.canEdit && (
+                                <button type="button" onClick={() => startEditing(sig)} className={`${ACT} hover:text-foreground hover:border-foreground`} aria-label={`Edit ${sig.Name}`} title="Edit">
+                                  <Edit3 size={13} />
+                                </button>
+                              )}
+                              {rights.canDelete && (
+                                <button type="button" onClick={() => setDeleteId(sig.Id)} className={`${ACT} hover:text-destructive hover:border-destructive`} aria-label={`Delete ${sig.Name}`} title="Delete">
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-[0.625rem] text-muted-foreground tabular-nums pt-2.5 border-t border-foreground/10">
+                          Added{" "}
+                          {new Date(sig.AddedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
-      </AdminShell>
+      </SheetShell>
     </>
   );
 }

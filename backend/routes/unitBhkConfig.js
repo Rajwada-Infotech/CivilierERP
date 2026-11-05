@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -33,7 +33,15 @@ router.get("/types", authMiddleware, async (req, res) => {
   try {
     const pool = await getPool();
     const types = await listLayoutTypes(pool);
+    // Layouts a villa type owns (migration 539) stay listed — units built to
+    // them resolve through this list — but are marked so pickers hide them.
+    let owned = new Map();
+    try {
+      const o = await pool.request().query("SELECT Id, OwnerVillaTypeId FROM dbo.RoomLayoutType WHERE OwnerVillaTypeId IS NOT NULL");
+      owned = new Map(o.recordset.map((r) => [r.Id, r.OwnerVillaTypeId]));
+    } catch (_) { /* before migration 539: nothing is owned */ }
     res.json(types.map((t) => ({
+      ownerVillaTypeId: owned.get(t.id) ?? null,
       id: t.id,
       typeKey: t.typeKey,
       label: t.label,
@@ -112,6 +120,11 @@ router.delete("/types/:typeKey", authMiddleware, requirePageRight("room-composit
       .query(`SELECT Id, Label, IsSystem FROM dbo.RoomLayoutType WHERE TypeKey = @typeKey AND IsActive = 1`);
     if (!typeRes.recordset.length) return res.status(404).json({ error: "Layout type not found" });
     const type = typeRes.recordset[0];
+    // A villa type's own layout follows its floor-by-floor plan (migration
+    // 539) — edited only in Plot Master > Villa types > Rooms, never here.
+    const owner = (await pool.request().input("lt", sql.Int, type.Id).query(
+      "IF COL_LENGTH('dbo.RoomLayoutType', 'OwnerVillaTypeId') IS NOT NULL EXEC sp_executesql N'SELECT OwnerVillaTypeId FROM dbo.RoomLayoutType WHERE Id = @lt', N'@lt INT', @lt = @lt")).recordset?.[0]?.OwnerVillaTypeId;
+    if (owner) return res.status(409).json({ error: "This is a villa type's own layout — edit its rooms floor by floor in Plot Master > Villa types > Rooms." });
 
     if (type.IsSystem) {
       return res.status(400).json({ error: `"${type.Label}" is a default layout type and can't be removed.` });
@@ -215,6 +228,11 @@ router.post(
         return res.status(404).json({ error: "This layout type isn't registered — add it first." });
       }
       const layoutTypeId = typeCheck.recordset[0].Id;
+      // A villa type's own layout follows its floor-by-floor plan (migration
+      // 539) — edited only in Plot Master > Villa types > Rooms, never here.
+      const owner = (await pool.request().input("lt", sql.Int, layoutTypeId).query(
+        "IF COL_LENGTH('dbo.RoomLayoutType', 'OwnerVillaTypeId') IS NOT NULL EXEC sp_executesql N'SELECT OwnerVillaTypeId FROM dbo.RoomLayoutType WHERE Id = @lt', N'@lt INT', @lt = @lt")).recordset?.[0]?.OwnerVillaTypeId;
+      if (owner) return res.status(409).json({ error: "This is a villa type's own layout — edit its rooms floor by floor in Plot Master > Villa types > Rooms." });
 
       // Config row + its composition rows are one atomic save.
       const tx = pool.transaction();

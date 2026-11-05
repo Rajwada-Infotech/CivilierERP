@@ -169,7 +169,14 @@ async function checkRoomSync() {
   const roomsByUnit = new Map();
   for (const r of rooms) (roomsByUnit.get(r.UnitId) || roomsByUnit.set(r.UnitId, []).get(r.UnitId)).push(r);
 
-  const out = { missingRooms: [], surplusRemovable: [], surplusBlockedByWork: [], uncategorized: [], flatNoLayout: [], layoutNoComposition: [], unitTypeTextOnly: [] };
+  const out = { missingRooms: [], surplusRemovable: [], surplusBlockedByWork: [], uncategorized: [], flatNoLayout: [], roomlessByKind: [], layoutNoComposition: [], unitTypeTextOnly: [] };
+  // Kinds that carry no rooms by design — land and commercial (shops, offices…),
+  // read from the unit kind master, not listed here.
+  const roomlessKinds = new Set(["PLOT"]);
+  if (hasCol("CrmConstructedAssetKind", "IsLand")) {
+    const flags = ["IsLand", hasCol("CrmConstructedAssetKind", "IsCommercial") ? "IsCommercial" : null].filter(Boolean).map((c) => `${c} = 1`).join(" OR ");
+    for (const k of await q(`SELECT Code FROM dbo.CrmConstructedAssetKind WHERE ${flags}`)) roomlessKinds.add(String(k.Code).toUpperCase());
+  }
   const perProject = new Map();
   const bump = (u, key) => {
     const p = perProject.get(u.ProjectId) || perProject.set(u.ProjectId, { project: u.ProjectName, units: 0, inSync: 0, outOfSync: 0 }).get(u.ProjectId);
@@ -183,7 +190,11 @@ async function checkRoomSync() {
     const unitRooms = roomsByUnit.get(u.Id) || [];
     const active = unitRooms.filter((r) => r.IsActive);
     if (!layout) {
-      if (u.UnitKind === "PLOT") { bump(u, "inSync"); continue; } // plots have no rooms by design
+      if (roomlessKinds.has(String(u.UnitKind || "").toUpperCase())) { // land / commercial: no rooms by design
+        out.roomlessByKind.push({ unitId: u.Id, where, kind: u.UnitKind });
+        bump(u, "inSync");
+        continue;
+      }
       out.flatNoLayout.push({ unitId: u.Id, where, unitType: u.UnitType, layoutTypeId: u.LayoutTypeId, activeRooms: active.length });
       bump(u, "outOfSync");
       continue;
@@ -249,6 +260,7 @@ async function checkRoomSync() {
   record(sec, "Units with SURPLUS empty rooms beyond their layout  [fix: Room Master > Generate]", out.surplusRemovable);
   record(sec, "Units with surplus rooms that HAVE WORK (Generate keeps them; needs a human decision)", out.surplusBlockedByWork);
   record(sec, "Flats with NO layout type (no rooms can be generated)", out.flatNoLayout);
+  record(sec, "Land / commercial units without rooms (by design — kind from the unit kind master)", out.roomlessByKind, { severity: "INFO" });
   record(sec, "Units whose layout has NO composition defined", out.layoutNoComposition);
   record(sec, "Active rooms with no category (never counted or synced — renamed/manual rooms)", out.uncategorized, { severity: "INFO" });
   record(sec, "Units typed by UnitType text only, not linked by LayoutTypeId", out.unitTypeTextOnly, { severity: "INFO" });
@@ -315,9 +327,24 @@ async function checkWorkflow() {
   await check(sec, "Chain's Room/Flat/Tower/Floor/Project don't line up", [["DependencyMaster"]],
     `SELECT d.Id, d.Alias, d.TowerId, d.Floor, d.FlatId, d.RoomId FROM dbo.DependencyMaster d
      LEFT JOIN dbo.RoomMaster r ON r.Id = d.RoomId LEFT JOIN dbo.UnitMaster u ON u.Id = d.FlatId LEFT JOIN dbo.BlockMaster b ON b.Id = d.TowerId
-     WHERE ((d.RoomId IS NOT NULL AND (r.UnitId <> d.FlatId OR ISNULL(r.Floor,'~') <> ISNULL(d.Floor,'~')))
+     WHERE ((d.RoomId IS NOT NULL AND (r.UnitId <> d.FlatId OR (ISNULL(r.Floor,'~') <> ISNULL(d.Floor,'~')
+        -- a floorless villa's chain is placed by its plot(s) (unitLayout.chainFloorLabel)
+        AND NOT (r.Floor IS NULL AND d.Floor = (SELECT N'Plot ' + STRING_AGG(p.PlotName, '+') WITHIN GROUP (ORDER BY p.PlotName)
+                                                  FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = d.FlatId AND p.IsActive = 1)))))
         OR (d.FlatId IS NOT NULL AND (u.BlockId <> d.TowerId OR u.ProjectId <> d.ProjectId))
         OR (d.TowerId IS NOT NULL AND b.ProjectId <> d.ProjectId)) ${projectFilter("d.ProjectId")}`);
+  await check(sec, "Plot linked to a villa that is missing or inactive (convert / undo left it half-done)", [["PlotMaster", "ConvertedUnitId"]],
+    `SELECT p.Id, p.PlotName, p.ConvertedUnitId FROM dbo.PlotMaster p LEFT JOIN dbo.UnitMaster u ON u.Id = p.ConvertedUnitId
+     WHERE p.IsActive = 1 AND p.ConvertedUnitId IS NOT NULL AND (u.Id IS NULL OR u.IsActive = 0) ${projectFilter("p.ProjectId")}`);
+  await check(sec, "Villa room with no DPR chain although its room type has one elsewhere  [fix: cloneChainForChainlessRooms]", [["PlotMaster", "ConvertedUnitId"]],
+    `SELECT r.Id, r.RoomName, u.UnitName FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId AND u.IsActive = 1
+     WHERE r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL ${projectFilter("r.ProjectId")}
+       AND EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)
+       AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id AND d.IsActive = 1)
+       AND EXISTS (SELECT 1 FROM dbo.DependencyMaster d2 JOIN dbo.RoomMaster r2 ON r2.Id = d2.RoomId
+                   WHERE d2.IsActive = 1 AND r2.RoomCategoryId = r.RoomCategoryId)`);
+  await check(sec, "Chain whose Floor was saved as the text 'null' (floorless unit)", [["DependencyMaster"]],
+    `SELECT d.Id, d.Alias, d.FlatId FROM dbo.DependencyMaster d WHERE d.Floor IN (N'null', N'undefined', N'') ${projectFilter("d.ProjectId")}`);
   await check(sec, "Active chain on an inactive room / flat / tower", [["DependencyMaster"]],
     `SELECT d.Id, d.Alias, r.IsActive AS RoomActive, u.IsActive AS FlatActive, b.IsActive AS TowerActive FROM dbo.DependencyMaster d
      LEFT JOIN dbo.RoomMaster r ON r.Id = d.RoomId LEFT JOIN dbo.UnitMaster u ON u.Id = d.FlatId LEFT JOIN dbo.BlockMaster b ON b.Id = d.TowerId

@@ -3,16 +3,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import { CrmShell } from "@/components/crm/CrmShell";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, CheckCircle2, Circle, ExternalLink, Lock } from "lucide-react";
+import { Check, ExternalLink, Info, Lock, Plus, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
-import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { SearchableSelect } from "@/components/SearchableSelect";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 
 const API = "/api/crm/legal-milestones";
 
@@ -29,12 +31,6 @@ const AGREEMENT_STEPS = [
   { key: "FinalExecution",   label: "Final Execution",          hint: "Mark the agreement Executed" },
 ] as const;
 const MANUAL_STEPS = new Set(["DirectorMeeting"]);
-
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load legal workflows (HTTP ${r.status})`);
-  return r.json();
-}
 
 const PAGE_SIZE = 20;
 interface LegalMilestoneListFilters {
@@ -436,28 +432,30 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
   return { isPhysicallyComplete, agreementDone, sections, progressChecks, journeyLabel, doneCount, totalCount };
 }
 
-// ─── Status colour map ────────────────────────────────────────────────────────
+// ─── Status tone ──────────────────────────────────────────────────────────────
+// Settled (registered, confirmed, issued, approved, completed) is solid; in hand (drafted, info sent, scheduled,
+// applied, pending) is hatched.
+const SETTLED = new Set(["Registered", "Executed", "Confirmed", "Completed", "Issued", "Approved", "Acknowledged", "Ready"]);
+const stageTone = (s: string): "done" | "waiting" | "stopped" => (SETTLED.has(s) ? "done" : statusTone(s));
 
-const statusColor: Record<string, string> = {
-  Registered: "text-green-700 bg-green-50 border-green-200",
-  Executed:   "text-blue-700 bg-blue-50 border-blue-200",
-  Drafted:    "text-orange-700 bg-orange-50 border-orange-200",
-  Confirmed:  "text-green-700 bg-green-50 border-green-200",
-  InfoSent:   "text-blue-700 bg-blue-50 border-blue-200",
-  Pending:    "text-orange-700 bg-orange-50 border-orange-200",
-  Completed:  "text-green-700 bg-green-50 border-green-200",
-  Scheduled:  "text-blue-700 bg-blue-50 border-blue-200",
-  Issued:     "text-green-700 bg-green-50 border-green-200",
-  Approved:   "text-green-700 bg-green-50 border-green-200",
-  Applied:    "text-sky-700 bg-sky-50 border-sky-200",
-  Draft:      "text-orange-700 bg-orange-50 border-orange-200",
-};
+// Today's date where the user is: toISOString gives the UTC date, a day behind before 05:30 IST.
+const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 // ─── Stage row component ──────────────────────────────────────────────────────
-// The one row type for EVERY stage in the journey — Agreement's own 8
-// sub-steps render through this exact same component as AFS/NOC/Possession/
-// Sale Deed/Registry/Mutation, so the whole page reads as one continuous,
-// consistently-styled timeline instead of two visually different trackers.
+// The one row type for EVERY stage in the journey (Agreement's own 8 sub-steps through Mutation), so the whole page
+// reads as one continuous timeline. Square ink marks: done solid, current outlined, locked faint, not applicable dashed.
+
+const Mark: React.FC<{ kind: "done" | "current" | "locked" | "na" }> = ({ kind }) => (
+  <div className={`shrink-0 z-10 w-[22px] h-[22px] flex items-center justify-center mt-0.5 ${
+    kind === "done" ? "bg-foreground text-card border border-foreground"
+    : kind === "current" ? "bg-card border-2 border-foreground"
+    : kind === "na" ? "bg-card border border-dashed border-foreground/30"
+    : "bg-card border border-foreground/20"}`}>
+    {kind === "done" ? <Check size={12} /> : kind === "locked" ? <Lock size={9} className="text-muted-foreground/50" /> : kind === "current" ? <i className="w-2 h-2 bg-foreground" /> : null}
+  </div>
+);
+const Rail: React.FC<{ show: boolean; solid?: boolean }> = ({ show, solid }) =>
+  show ? <div className={`absolute left-[10.5px] top-6 bottom-0 w-px ${solid ? "bg-foreground" : "bg-foreground/20"}`} /> : null;
 
 const StageRow: React.FC<{
   stage: Stage;
@@ -470,101 +468,93 @@ const StageRow: React.FC<{
   const hasRecord = !!stage.status;
   const isAuto = action.kind === "auto";
   const isManual = action.kind === "manual";
-  const actionLabel = isManual ? "Mark Done" : isAuto ? "Auto-synced" : isDone ? "Open" : hasRecord ? "Continue" : isLocked ? "View" : "Start →";
+  const actionLabel = isManual ? "Mark done" : isAuto ? null : isDone ? "Open" : hasRecord ? "Continue" : isLocked ? null : "Start";
 
   const handleClick = () => {
+    if (isLocked) return;                              // locked steps are read-only — no navigation
     if (action.kind === "manual") { action.onAction(); return; }
     if (action.kind === "navigate") {
       navigate(`${action.path}${action.path.includes("?") ? "&" : "?"}bookingId=${bookingId}`);
     }
   };
+  const refs = (
+    <>
+      {stage.no && <span className="font-heading text-[0.625rem] tabular-nums text-muted-foreground">{stage.no}</span>}
+      {stage.status && <SheetMark text={stage.status} tone={stageTone(stage.status)} />}
+    </>
+  );
+  const title = (muted?: boolean) => `font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em] ${muted ? "text-muted-foreground/60" : "text-foreground"}`;
 
-  // Not applicable to this specific booking (e.g. Bank NOC for a self-funded
-  // purchase) — render as a plainly dimmed, non-actionable row instead of a
-  // normal Start/Continue action, so staff never gets an inviting "Start →"
-  // button for a step that will never happen for this booking.
   if (stage.isApplicable === false) {
     return (
-      <div className="relative flex gap-4 pb-5 last:pb-0">
-        {!isLast && <div className="absolute left-[15px] top-8 bottom-0 w-0.5 bg-border" />}
-        <div className="shrink-0 z-10 mt-1">
-          <div className="w-8 h-8 rounded-full bg-muted/40 border-2 border-dashed border-border flex items-center justify-center">
-            <span className="text-muted-foreground/50 text-xs">—</span>
+      <div className="relative flex gap-3 pb-3 last:pb-0">
+        <Rail show={!isLast} />
+        <Mark kind="na" />
+        <div className="flex-1 py-0.5 opacity-50"><span className={`${title(true)} line-through`}>{stage.label}</span></div>
+      </div>
+    );
+  }
+
+  if (isDone) {
+    return (
+      <div className="relative flex gap-3 pb-3 last:pb-0">
+        <Rail show={!isLast} solid />
+        <Mark kind="done" />
+        <div className="flex-1 flex items-center justify-between gap-2 min-w-0 py-0.5">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            <span className={title()}>{stage.label}</span>
+            {refs}
           </div>
+          {action.kind === "navigate" && (
+            <button onClick={handleClick} className="shrink-0 text-[0.625rem] text-muted-foreground hover:text-foreground flex items-center gap-1 whitespace-nowrap">
+              <ExternalLink size={10} /> Open
+            </button>
+          )}
         </div>
-        <div className="flex-1 rounded-xl border border-dashed border-border bg-muted/10 px-4 py-3 opacity-70">
-          <span className="text-sm font-semibold text-muted-foreground line-through decoration-muted-foreground/40">{stage.label}</span>
-          <div className="text-[0.75rem] text-muted-foreground mt-0.5">Not applicable — {stage.notApplicableReason}</div>
+      </div>
+    );
+  }
+
+  // Locked: shows what it is waiting for (it was hidden on hover only).
+  if (isLocked) {
+    return (
+      <div className="relative flex gap-3 pb-3 last:pb-0">
+        <Rail show={!isLast} />
+        <Mark kind="locked" />
+        <div className="flex-1 py-0.5 min-w-0">
+          <span className={title(true)}>{stage.label}</span>
+          {stage.unlockedHint && <p className="text-[0.6875rem] text-muted-foreground/70 mt-0.5">{stage.unlockedHint}</p>}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="relative flex gap-4 pb-5 last:pb-0">
-      {!isLast && (
-        <div className={`absolute left-[15px] top-8 bottom-0 w-0.5 ${isDone ? "bg-green-300" : "bg-border"}`} />
-      )}
-
-      <div className="shrink-0 z-10 mt-1">
-        {isDone ? (
-          <div className="w-8 h-8 rounded-full bg-green-100 border-2 border-green-400 dark:bg-green-900/40 dark:border-green-600 flex items-center justify-center">
-            <CheckCircle2 size={16} className="text-green-600 dark:text-green-400" />
+    <div className="relative flex gap-3 pb-4 last:pb-0">
+      <Rail show={!isLast} />
+      <Mark kind="current" />
+      <div className="flex-1 px-3 py-2.5 flex items-center justify-between gap-3 min-w-0 bg-card" style={{ border: RULE_SOFT, borderLeft: "3px solid hsl(var(--foreground))" }}>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={title()}>{stage.label}</span>
+            {refs}
           </div>
-        ) : isLocked ? (
-          <div className="w-8 h-8 rounded-full bg-muted/60 border-2 border-border flex items-center justify-center">
-            <Lock size={13} className="text-muted-foreground/50" />
-          </div>
-        ) : (
-          <div className="w-8 h-8 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center">
-            <Circle size={12} className="text-primary fill-primary/30" />
-          </div>
-        )}
-      </div>
-
-      <div className={`flex-1 rounded-xl border transition-colors ${
-        isDone
-          ? "border-green-200 bg-green-500/[0.04] dark:border-green-900/60 dark:bg-green-950/20"
-          : isLocked
-          ? "border-border bg-muted/20 opacity-70"
-          : "border-primary/30 bg-primary/[0.03]"
-      }`}>
-        <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-sm font-semibold leading-tight ${isLocked ? "text-muted-foreground" : isDone ? "text-green-700 dark:text-green-300" : "text-foreground"}`}>
-                {stage.label}
-              </span>
-              {stage.no && <span className="text-[0.6875rem] font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">{stage.no}</span>}
-              {stage.status && (
-                <span className={`text-[0.6875rem] px-2 py-0.5 rounded-lg border font-semibold ${statusColor[stage.status] || ""}`}>
-                  {stage.status}
-                </span>
-              )}
-            </div>
-            <div className={`text-[0.75rem] mt-0.5 leading-snug ${isLocked ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
-              {isLocked
-                ? <span className="flex items-center gap-1"><Lock size={9} className="shrink-0" /> Waiting: {stage.unlockedHint}</span>
-                : stage.sublabel}
-            </div>
-          </div>
-          {isAuto ? (
-            <span className="shrink-0 text-[0.625rem] text-muted-foreground bg-muted/60 border border-border rounded-lg px-2.5 py-1.5 whitespace-nowrap">Auto-synced</span>
-          ) : (isManual && !canEdit) ? null : (
-            <button
-              onClick={handleClick}
-              className={`shrink-0 flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-                isDone
-                  ? "border-green-300 text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:border-green-800 dark:text-green-300"
-                  : isLocked
-                  ? "border-border text-muted-foreground hover:bg-muted"
-                  : "border-primary btn-module text-white "
-              }`}
-            >
-              {actionLabel} {!isManual && <ExternalLink size={11} />}
-            </button>
-          )}
+          <p className="text-xs text-muted-foreground mt-1">{stage.sublabel}</p>
         </div>
+        {isAuto ? (
+          <span className="shrink-0 flex items-center gap-2">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground" title="Ticks itself from the agreement's own actions">Automatic</span>
+            {!isDone && (
+              <button onClick={() => navigate(`/crm/agreements?bookingId=${bookingId}`)} className={`${KEY_LINE} h-8 px-3`}>
+                Open Agreement <ExternalLink size={10} />
+              </button>
+            )}
+          </span>
+        ) : (isManual && !canEdit) || actionLabel === null ? null : (
+          <button onClick={handleClick} className={`${KEY_INK} h-8 px-3 shrink-0`}>
+            {actionLabel} {!isManual && <ExternalLink size={10} />}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -589,30 +579,28 @@ const CrmLegalMilestones: React.FC = () => {
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
 
   const listFilters: LegalMilestoneListFilters = useMemo(
     () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
     [search, cpb]
   );
-  const { data: listResult, isLoading, isFetching, dataUpdatedAt, refetch, isError, error } = useQuery({
+  const { data: listResult, isLoading, isFetching, refetch, isError, error } = useQuery({
     queryKey: ["crm-legal-milestones", listFilters, page],
     queryFn: () => fetchLegalMilestonesList(listFilters, page),
     staleTime: 30_000,
   });
   const trackers = listResult?.rows ?? [];
   const total = listResult?.total ?? 0;
-  const { data: bookings = [] } = useQuery({
+  const { data: bookings = [], isLoading: loadingBookings } = useQuery({
     queryKey: ["crm-legal-milestones-eligible-bookings"],
     queryFn: fetchEligibleBookings,
     staleTime: 60_000,
     enabled: newDialog,
   });
 
-  // Auto-select from ?bookingId= URL param (deep-link from stage buttons on
-  // this page). Resolved via the dedicated /booking/:bookingId lookup
-  // rather than scanning `trackers` — that list is now paginated, so the
-  // deep-linked tracker could easily not be on the current page (same class
-  // of bug fixed on CrmHandover.tsx earlier this rollout).
+  // ?bookingId= opens that booking's journey; resolved through the dedicated lookup since the list is paged.
   const [deepLinkResolved, setDeepLinkResolved] = useState(false);
   useEffect(() => {
     const urlBookingId = sp.get("bookingId");
@@ -624,29 +612,26 @@ const CrmLegalMilestones: React.FC = () => {
     });
   }, [sp, deepLinkResolved]);
 
-  // A regular row click sets both the id and the full row object directly
-  // (selectRow below) so selection never depends on the object still being
-  // present in the current page/filter — only the deep-link path above
-  // needs the dedicated lookup.
-  const selected = selectedTracker && selectedTracker.Id === selectedId
-    ? selectedTracker
-    : (trackers as any[]).find((t: any) => t.Id === selectedId);
+  // The list's fresh copy wins over the one kept from the click / deep link: after Mark done the list refetches,
+  // and the open journey used to keep showing the old state until another row was clicked.
+  const selected = (trackers as any[]).find((t: any) => t.Id === selectedId)
+    ?? (selectedTracker && selectedTracker.Id === selectedId ? selectedTracker : null);
   const selectRow = (t: any) => { setSelectedId(t.Id); setSelectedTracker(t); setSp({ bookingId: String(t.BookingId) }, { replace: true }); };
+  const reloadSelected = async (bkId: number | string) => {
+    const t = await fetchTrackerByBooking(String(bkId));
+    if (t) { setSelectedId(t.Id); setSelectedTracker(t); setSp({ bookingId: String(t.BookingId) }, { replace: true }); }
+  };
 
-  // Open the first booking's journey by default (instead of an empty "select
-  // a booking" panel); the user can still pick any other row. Skipped while a
-  // ?bookingId= deep link is being resolved above.
-  useEffect(() => {
-    if (selectedId != null || sp.get("bookingId")) return;
-    const first = (trackers as any[])[0];
-    if (first) { setSelectedId(first.Id); setSelectedTracker(first); }
-  }, [trackers, selectedId, sp]);
-  // /eligible-bookings already applies the real POST gate (Approved, active,
-  // not frozen, has an Agreement, no tracker yet) — no client-side filtering needed.
+  const trackerModels = useMemo(
+    () => (trackers as any[]).map((t: any) => ({ t, m: buildWorkflowModel(t) })),
+    [trackers],
+  );
+
+  // /eligible-bookings already applies the real POST gate (Approved, active, not frozen, has an Agreement, no tracker).
   const startableBookings = bookings as any[];
 
   const handleStart = async () => {
-    if (!bookingId) { toast.error("Booking is required"); return; }
+    if (!bookingId) return void toast.error("Select a booking.");
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -654,13 +639,14 @@ const CrmLegalMilestones: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ BookingId: parseInt(bookingId) }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not start the legal workflow.");
       toast.success("Legal workflow started");
       setNewDialog(false);
+      ["crm-legal-milestones", "crm-legal-milestones-eligible-bookings"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+      // Open the journey just started (it stayed on whatever was open).
+      await reloadSelected(bookingId);
       setBookingId("");
-      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
-      qc.invalidateQueries({ queryKey: ["crm-legal-milestones-eligible-bookings"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -669,235 +655,169 @@ const CrmLegalMilestones: React.FC = () => {
   };
 
   const handleStepUpdate = async (step: string, status: string) => {
-    if (selectedId == null) return;
+    if (selectedId == null || !selected) return;
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/${step}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Status: status, Done: status === "Completed" ? new Date().toISOString().slice(0, 10) : undefined }),
+        body: JSON.stringify({ Status: status, Done: status === "Completed" ? todayLocal() : undefined }),
       });
-      if (!res.ok) throw new Error((await res.json()).error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not update the step.");
+      toast.success("Step marked done");
       qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
+      await reloadSelected(selected.BookingId);
     } catch (e: any) {
       toast.error(translateError(e.message));
     }
   };
 
   const model = selected ? buildWorkflowModel(selected, (step) => handleStepUpdate(step, "Completed")) : null;
+  const pct = model && model.totalCount ? Math.round((model.doneCount / model.totalCount) * 100) : 0;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "CRM", "Legal Journey Overview"]} />
-      <CrmShell
-        title="Legal Journey Overview"
-        subtitle="The complete property transaction lifecycle — from Agreement signing to Mutation — for every booking, dynamically laid out per its own project's sale process"
+      <Breadcrumbs items={["Dashboard", "CRM", "Legal Milestones"]} />
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Pre-sale"
+        title="Legal Milestones"
+        subtitle="Every booking's legal journey in one line, from agreement signing through both Sub-Registrar visits to mutation."
         action={
-          <div className="flex items-center gap-3">
-            <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-            {rights.canCreate && (
-            <button
-              onClick={() => setNewDialog(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg "
-            >
-              <Plus size={14} /> Start Workflow
-            </button>
-            )}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            {rights.canCreate && <button onClick={() => setNewDialog(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> Start workflow</button>}
           </div>
         }
       >
-        <div className="flex gap-4 h-[calc(100vh-220px)]">
+        <div className="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-220px)]">
           {/* ── Left panel: booking list ── */}
-          <div className="w-80 shrink-0 flex flex-col gap-2">
-          <div className="relative">
-            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-              placeholder="Search customer, booking... (Enter to search)"
-              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-          </div>
-          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-          <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5">
-            {isLoading ? (
-              <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
-            ) : isError ? (
-              <div className="p-4 text-center text-sm text-destructive">{(error as any)?.message || "Failed to load"}</div>
-            ) : trackers.length === 0 ? (
-              <div className="p-4 text-center text-muted-foreground text-sm">No legal workflows started</div>
-            ) : (trackers as any[]).map((t: any) => {
-              const m = buildWorkflowModel(t);
-              const { text, done } = m.journeyLabel;
-              return (
-                <button
-                  key={t.Id}
-                  onClick={() => selectRow(t)}
-                  className={`w-full text-left rounded-lg border overflow-hidden transition-colors ${
-                    selectedId === t.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"
-                  }`}
-                >
-                  <div className="flex">
-                    <div className={`w-[3px] shrink-0 self-stretch ${done ? "bg-green-500" : m.agreementDone ? "bg-blue-500" : "bg-sky-400"}`} />
-                    <div className="flex-1 min-w-0 p-3 space-y-1">
-                      <div className="flex items-center gap-1.5">
-                        <div className="text-sm font-semibold truncate">{t.ApplicantName}</div>
-                        {m.isPhysicallyComplete && (
-                          // Bare "Completed" here read as if THIS BOOKING'S journey
-                          // were done — sitting right next to a "Document Collection
-                          // pending" line one row below made that reading actively
-                          // contradictory. This flag is about the PROJECT (Ready-to-
-                          // Move / physically finished construction), not this
-                          // booking's own progress — labelled accordingly.
-                          <span className="shrink-0 text-[0.5625rem] px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="This booking's PROJECT is already physically complete (Ready-to-Move) — Handover doesn't have to wait on the Sale Deed. Does not mean this booking's own legal journey is finished.">Project Ready</span>
-                        )}
-                      </div>
-                      <div className="text-[0.6875rem] text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
-                      <div className={`text-[0.6875rem] font-medium flex items-center gap-1 ${done ? "text-green-600" : "text-muted-foreground"}`}>
-                        {done ? <CheckCircle2 size={10} /> : <Circle size={10} />}
-                        {text}
-                      </div>
+          <div className="w-full md:w-80 shrink-0 flex flex-col bg-card min-h-0" style={{ border: RULE }}>
+            <div className="p-3 space-y-2" style={{ borderBottom: RULE }}>
+              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+                placeholder="Search customer or booking…"
+                className="h-9 w-full border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+              <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
+            </div>
+            <div className="flex-1 overflow-y-auto thin-scroll max-h-[45vh] md:max-h-none">
+              {isLoading ? (
+                <p className="p-4 text-center text-muted-foreground text-sm">Loading…</p>
+              ) : isError ? (
+                <p className="p-4 text-center text-sm text-destructive">{(error as Error)?.message || "Could not load the legal workflows."}</p>
+              ) : trackers.length === 0 ? (
+                <p className="p-4 text-center text-muted-foreground text-sm">{search || cpb.projectId ? "No workflow matches." : "No legal workflow started yet."}</p>
+              ) : trackerModels.map(({ t, m }) => {
+                const on = selectedId === t.Id;
+                const p = m.totalCount ? Math.round((m.doneCount / m.totalCount) * 100) : 0;
+                return (
+                  <button key={t.Id} onClick={() => selectRow(t)}
+                    className={`w-full text-left px-3 py-2.5 transition-colors ${on ? "bg-foreground text-card" : "hover:bg-primary/5"}`}
+                    style={{ borderBottom: RULE_SOFT }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold truncate"><ApplicantNames name={t.ApplicantName} bookingId={t.BookingId} applicationId={t.ApplicationId} /></span>
+                      <span className={`font-heading text-[0.625rem] font-bold tabular-nums shrink-0 ${on ? "" : "text-muted-foreground"}`}>{m.doneCount}/{m.totalCount}</span>
                     </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+                    <div className={`mt-0.5 text-[0.6875rem] tabular-nums ${on ? "opacity-80" : "text-muted-foreground"}`}>
+                      {[t.BookingNo, t.UnitNo].filter(Boolean).join(" · ")}{m.isPhysicallyComplete ? " · project ready" : ""}
+                    </div>
+                    <div className="mt-1.5 h-1 w-full" style={{ background: on ? "hsl(var(--card) / 0.25)" : "hsl(var(--foreground) / 0.12)" }}>
+                      <div className={`h-full ${on ? "bg-card" : "bg-foreground"}`} style={{ width: `${p}%` }} />
+                    </div>
+                    <div className={`mt-1 text-[0.6875rem] font-semibold ${on ? "" : m.journeyLabel.done ? "text-foreground" : "text-muted-foreground"}`}>{m.journeyLabel.text}</div>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ borderTop: RULE_SOFT }}><CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} /></div>
           </div>
 
           {/* ── Right panel: journey detail ── */}
-          <div className="flex-1 overflow-y-auto thin-scroll">
+          <div className="flex-1 min-w-0 overflow-y-auto thin-scroll">
             {!selected || !model ? (
-              <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                Select a booking on the left to view its legal journey
+              <div className="h-full min-h-[200px] flex items-center justify-center text-muted-foreground text-sm bg-card" style={{ border: RULE_SOFT }}>
+                Pick a booking on the left to see its legal journey.
               </div>
             ) : (
               <div className="space-y-4 pb-6">
-                {/* Header */}
-                <div className="rounded-xl border border-border bg-card overflow-hidden">
-                  <div className="px-5 py-4 flex items-center justify-between gap-3 border-b border-border bg-muted/20">
+                <div className="bg-card" style={{ border: RULE }}>
+                  <div className="px-5 py-4 flex items-center justify-between gap-3 flex-wrap" style={{ borderBottom: RULE }}>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="font-heading font-bold text-[0.9375rem] truncate">{selected.ApplicantName}</h2>
-                        {model.isPhysicallyComplete && (
-                          <span className="shrink-0 text-[0.625rem] px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete — Handover doesn't have to wait on the Sale Deed. Agreement/AFS Registration is still required as normal.">
-                            Project Completed
-                          </span>
-                        )}
+                      <span className={`block ${LBL}`}>Legal journey</span>
+                      <h2 className="font-heading font-bold text-lg text-foreground truncate"><ApplicantNames name={selected.ApplicantName} bookingId={selected.BookingId} applicationId={selected.ApplicationId} /></h2>
+                      <div className="text-[0.6875rem] text-muted-foreground mt-0.5 tabular-nums">
+                        {[selected.BookingNo, selected.UnitNo].filter(Boolean).join(" · ")}
+                        {model.isPhysicallyComplete && <span title="The project is already complete (ready to move): Handover need not wait for the Sale Deed. Agreement and AFS registration still apply."> · project ready</span>}
                       </div>
-                      <div className="text-[0.6875rem] text-muted-foreground mt-0.5">{selected.BookingNo} · {selected.UnitNo}</div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                      <button
-                        onClick={() => navigate(`/crm/agreements?bookingId=${selected.BookingId}`)}
-                        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground hover:bg-muted font-semibold"
-                      >
-                        <ExternalLink size={11} /> View Agreement
-                      </button>
-                    </div>
+                    <button onClick={() => navigate(`/crm/agreements?bookingId=${selected.BookingId}`)} className={`${KEY_LINE} h-9 px-3`}>
+                      <ExternalLink size={12} /> Open agreement
+                    </button>
                   </div>
-                  {/* One continuous progress bar (doneCount/totalCount, every
-                      applicable stage across the WHOLE journey) plus a row of
-                      per-section dots underneath — replaces the old two
-                      different progress indicators (Phase-1-only step count +
-                      a separate Phase-2+ dot row) that made it easy to think
-                      the journey was further along, or less along, than it
-                      really was. */}
                   <div className="px-5 py-3 space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-[0.6875rem] text-muted-foreground font-medium">Overall journey progress</span>
-                      <span className="text-[0.6875rem] font-semibold text-foreground">{model.doneCount}/{model.totalCount} steps</span>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className={LBL}>Overall</span>
+                      <span className="font-heading text-sm font-bold tabular-nums">{model.doneCount} of {model.totalCount} steps · {pct}%</span>
                     </div>
-                    <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${model.journeyLabel.done ? "bg-green-500" : "bg-primary"}`}
-                        style={{ width: `${model.totalCount ? Math.round((model.doneCount / model.totalCount) * 100) : 0}%` }}
-                      />
+                    <div className="h-2 w-full" style={{ border: RULE_SOFT }}>
+                      <div className="h-full bg-foreground transition-all" style={{ width: `${pct}%` }} />
                     </div>
-                    <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                      {model.progressChecks.map((p) => (
+                    {/* One square per section; hover for its name. */}
+                    <div className="flex items-center gap-1 pt-0.5">
+                      {model.progressChecks.map((p, i) => (
                         <span key={p.label} title={p.label}
-                          className={`flex items-center gap-1 text-[0.625rem] px-2 py-0.5 rounded-full border font-medium ${
-                            p.done ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-300" : "bg-muted/40 border-border text-muted-foreground/60"
-                          }`}>
-                          {p.done ? <CheckCircle2 size={9} /> : <Circle size={9} />}
-                          {p.label}
+                          className={`inline-flex items-center justify-center w-5 h-5 font-heading text-[0.5625rem] font-bold tabular-nums ${p.done ? "bg-foreground text-card border border-foreground" : "bg-card text-muted-foreground border border-foreground/25"}`}>
+                          {p.done ? <Check size={10} /> : i + 1}
                         </span>
                       ))}
                     </div>
                   </div>
                 </div>
 
-                {/* The ENTIRE journey — Agreement's 8 sub-steps included — as
-                    one continuous list of sections, every section using the
-                    exact same StageRow component. No separate "Phase 1 card"
-                    with different visuals, and nothing hidden behind a locked
-                    placeholder: a section not yet reachable simply shows its
-                    stages as locked rows (with the real reason why), so
-                    staff can always see the full remaining journey at a
-                    glance instead of it appearing to vanish. */}
                 {model.sections.map((section) => (
-                  <div key={section.key} className="rounded-xl border border-border bg-card overflow-hidden">
-                    <div className="px-5 py-3.5 border-b border-border bg-muted/20 flex items-start gap-3">
-                      <div>
-                        <h3 className="text-sm font-bold">{section.title}</h3>
-                        <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-relaxed">
-                          {section.isApplicable ? section.description : section.notApplicableReason}
-                        </p>
-                      </div>
+                  <section key={section.key} className="bg-card" style={{ border: RULE }}>
+                    <div className="px-4 py-2.5 flex items-center justify-between gap-2" style={{ borderBottom: RULE }}>
+                      <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{section.title}</span>
+                      {section.isApplicable
+                        ? <span title={section.description} className="text-muted-foreground hover:text-foreground cursor-help"><Info size={12} /></span>
+                        : <span className="text-[0.6875rem] text-muted-foreground">{section.notApplicableReason}</span>}
                     </div>
                     {section.isApplicable && (
-                      <div className="p-5 space-y-0">
+                      <div className="px-4 py-3">
                         {section.stages.map((stage, idx) => (
-                          <StageRow
-                            key={stage.key}
-                            stage={stage}
-                            isLast={idx === section.stages.length - 1}
-                            bookingId={selected.BookingId}
-                            navigate={navigate}
-                            canEdit={rights.canEdit}
-                          />
+                          <StageRow key={stage.key} stage={stage} isLast={idx === section.stages.length - 1}
+                            bookingId={selected.BookingId} navigate={navigate} canEdit={rights.canEdit} />
                         ))}
                       </div>
                     )}
-                  </div>
+                  </section>
                 ))}
               </div>
             )}
           </div>
         </div>
+      </SheetShell>
 
-        <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
-          <DialogContent accent="crm" className="max-w-sm">
-            <DialogHeader><DialogTitle className="font-heading">Start Legal Workflow</DialogTitle></DialogHeader>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <SearchableNativeSelect
-                value={bookingId}
-                onChange={(e) => setBookingId(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
-              >
-                <option value="">Select booking</option>
-                {startableBookings.map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
-                ))}
-              </SearchableNativeSelect>
-              {startableBookings.length === 0 && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  No booking is eligible right now — a booking needs to be fully Approved, active, unfrozen, have an Agreement on file, and not already have a legal workflow tracker.
-                </p>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 pt-3 border-t border-border">
-              <button onClick={() => setNewDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button
-                onClick={handleStart}
-                disabled={saving || startableBookings.length === 0}
-                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40"
-              >
-                {saving ? "Starting..." : "Start"}
-              </button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </CrmShell>
+      <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
+        <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
+          <DialogHeader><DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em]">Start legal workflow</DialogTitle></DialogHeader>
+          <label className="block space-y-1">
+            <span className={`block ${LBL}`}>Booking *</span>
+            <SearchableSelect value={bookingId} onChange={setBookingId}
+              placeholder={loadingBookings ? "Loading bookings…" : startableBookings.length ? "Select booking" : "No booking is eligible"}
+              searchPlaceholder="Search booking or customer…"
+              options={startableBookings.map((b: any) => ({ value: String(b.Id), label: `${b.BookingNo} · ${b.ApplicantName}` }))} />
+            {!loadingBookings && startableBookings.length === 0 && (
+              <span className="block text-xs text-muted-foreground pt-1">
+                A booking needs to be approved, active, not frozen, have an agreement on file, and no legal workflow yet.
+              </span>
+            )}
+          </label>
+          <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
+            <button onClick={() => setNewDialog(false)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+            <button onClick={handleStart} disabled={saving || !bookingId} className={`${KEY_INK} h-9 px-4`}>{saving ? "Starting…" : "Start"}</button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

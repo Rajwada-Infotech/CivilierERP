@@ -15,8 +15,14 @@ function safeArray<T>(raw: unknown): T[] {
 
 // ── Header CRUD ───────────────────────────────────────────────────────────────
 
-export const getWorkOrders = async () => {
-  const res = await fetchWithAuth(BASE_URL);
+export const getWorkOrders = async (params?: { page?: number; limit?: number; search?: string; status?: string }) => {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.search?.trim()) qs.set("search", params.search.trim());
+  if (params?.status && params.status !== "all") qs.set("status", params.status);
+  const s = qs.toString();
+  const res = await fetchWithAuth(s ? `${BASE_URL}?${s}` : BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json().catch(() => []);
 };
@@ -339,8 +345,6 @@ export interface WOPOSummary {
 export interface SaveFullWOResult {
   message: string;
   activityCount: number;
-  /** WO-POs auto-created from material items on this save */
-  woPOs: WOPOSummary[];
 }
 
 export const saveFullWorkOrder = async (
@@ -364,19 +368,10 @@ export const saveFullWorkOrder = async (
   return res.json().catch(() => ({}));
 };
 
-// ── Confirm WO → auto-create WO-POs ──────────────────────────────────────────
+// ── Confirm WO ────────────────────────────────────────────────────────────────
 
 export interface ConfirmWOResult {
   message: string;
-  totalMaterialCost: number;
-  threshold: number;
-  thresholdMet: boolean;
-  woPOsCreated: number;
-  purchaseOrders: {
-    PurchaseOrderID: number;
-    PurchaseOrderNo: string;
-    SupplierName: string | null;
-  }[];
 }
 
 export interface WOPOPrefillItem {
@@ -402,18 +397,38 @@ export interface WOPOPrefill {
   totalMaterialCost: number;
 }
 
-export const getWOPOPrefill = async (id: number): Promise<WOPOPrefill> => {
-  const res = await fetchWithAuth(`${BASE_URL}/${id}/create-po-prefill`);
-  if (!res.ok) {
-    let err: Record<string, string> = {};
-    try {
-      err = await res.json();
-    } catch {
-      /* ignore */
-    }
-    throw new Error(err.error || `Failed to load WO prefill: ${res.status}`);
+/** Everything the Material Request form needs to be pre-filled from an approved Work Order. */
+export interface WorkOrderMRPrefill {
+  WOId: number;
+  WODocNo: string;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  Reason: string;
+  Remarks: string;
+  items: { ItemId: string; ItemName: string | null; UOMCode: string | null; Quantity: number }[];
+}
+
+/** Raised when the Work Order already has a live Material Request (HTTP 409). */
+export class MaterialRequestExistsError extends Error {
+  mrId: number;
+  docNo: string | null;
+  constructor(message: string, mrId: number, docNo: string | null) {
+    super(message);
+    this.name = "MaterialRequestExistsError";
+    this.mrId = mrId;
+    this.docNo = docNo;
   }
-  return res.json().catch(() => ({}));
+}
+
+/** The Work Order's materials (summed per item + unit) shaped for the Material Request form. Creates nothing. */
+export const getMaterialRequestPrefillFromWO = async (id: number): Promise<WorkOrderMRPrefill> => {
+  const res = await fetchWithAuth(`/api/material-requests/from-work-order/${id}/prefill`);
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 409 && body.mrId) {
+    throw new MaterialRequestExistsError(body.error || "A Material Request already exists", body.mrId, body.docNo ?? null);
+  }
+  if (!res.ok) throw new Error(body.error || `Failed to load the work order materials: ${res.status}`);
+  return body as WorkOrderMRPrefill;
 };
 
 export const confirmWorkOrder = async (

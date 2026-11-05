@@ -5,23 +5,24 @@ const fs = require("fs");
 const multer = require("multer");
 const express = require("express");
 const { getPool, sql } = require("../db");
+const { countedInvoiceSql } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const rateLimit = require("express-rate-limit");
 const {
   syncAdToPlatform,
   normalizeImportedLeads,
   providerLabel,
 } = require("../services/saAdPlatformService");
 const { getNextDocNumber } = require("../services/docNumber");
+const { welcomeLeads } = require("../services/saMessaging");
+const { CONNECTION_JOIN, CONNECTION_COLUMNS, applyConnection } = require("../services/integrationConnections");
 
 const router = express.Router();
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
-router.use(authMiddleware);
+const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 bumpCacheVersion("sa-ads").catch(() => {});
 
@@ -84,7 +85,7 @@ router.get(
           FROM dbo.SaMarketingInvoice i
           WHERE i.IsActive = 1
             AND i.AdId IS NOT NULL
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
           GROUP BY i.AdId
         )
         SELECT
@@ -92,6 +93,7 @@ router.get(
           a.AdCode,
           a.CampaignId,
           c.Name AS CampaignName,
+          c.PlatformId,
           a.Name,
           a.CreativeRef,
           a.AdType,
@@ -150,7 +152,7 @@ router.get(
 router.get(
   "/dropdown",
   requirePageRight("sa-ads", "view"),
-  cache("sa-ads-dropdown", 600),
+  cache("sa-ads-dropdown", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -182,7 +184,7 @@ router.get(
 router.get(
   "/campaigns",
   requirePageRight("sa-ads", "view"),
-  cache("sa-ads-campaigns", 600),
+  cache("sa-ads-campaigns", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -308,13 +310,15 @@ async function getAdWithPlatform(pool, adId) {
         p.AccessToken,
         p.ApiConfigId,
         p.AccountDetails,
-        p.PixelId
+        p.PixelId,
+        ${CONNECTION_COLUMNS}
       FROM dbo.SaAd a
       JOIN dbo.SaCampaign c ON c.Id = a.CampaignId
       LEFT JOIN dbo.SaSocialMediaPlatform p ON p.Id = c.PlatformId
+      ${CONNECTION_JOIN}
       WHERE a.Id = @AdId AND a.IsActive = 1
     `);
-  return result.recordset[0] || null;
+  return (await applyConnection(pool, result.recordset[0])) || null;
 }
 
 function parseUtmParameters(value) {
@@ -427,6 +431,7 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
     const normalized = await normalizeImportedLeads(ad, ad, incoming);
     const utm = parseUtmParameters(ad.UtmParameters);
     let inserted = 0;
+    const newLeadIds = [];
     let skipped = 0;
     let invalid = 0;
 
@@ -484,11 +489,14 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
                'Ad', @LeadFormName, @SourceCampaignName, @SourceAdName, @SourcePlacement,
                @LeadCaptureUrl, @UtmSource, @UtmMedium, @UtmCampaign, @UtmContent, @UtmTerm, @CapturedAt, @SourcePayload,
                CAST(SYSDATETIME() AS DATE), 'New', 1, @CreatedBy, SYSDATETIME());
-            SELECT 1 AS Inserted;
+            SELECT CAST(SCOPE_IDENTITY() AS INT) AS Inserted;
           END
           ELSE SELECT 0 AS Inserted;
         `);
-      if (result.recordset[0]?.Inserted) inserted += 1;
+      if (result.recordset[0]?.Inserted) {
+        inserted += 1;
+        newLeadIds.push(result.recordset[0].Inserted);
+      }
       else skipped += 1;
     }
 
@@ -513,6 +521,7 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
       `);
 
     res.json({ success: true, received: incoming.length, inserted, skipped, invalid });
+    welcomeLeads(pool, newLeadIds, createdBy);
   } catch (err) {
     console.error("[sa-ads] POST /import-leads error:", err.message);
     if (err.number === 2601 || err.number === 2627) {

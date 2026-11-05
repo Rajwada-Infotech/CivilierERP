@@ -39,14 +39,13 @@ const STAGE_CONFIRMED = "Confirmed";
 
 const WORKFLOW_STAGES = [STAGE_REVIEW, STAGE_MARKETING, STAGE_DIRECTOR, STAGE_CONFIRMED];
 
-// Which roles may act at each approval stage. super_admin is a parallel
-// approver on BOTH levels (per requirement); the LevelData roles in
-// ApprovalWorkflows are the broader gate, this is the tighter per-stage
-// gate the booking page itself uses to decide what to render.
-const STAGE_ROLES = {
-  [STAGE_MARKETING]: ["admin", "super_admin", "marketing_head"],
-  [STAGE_DIRECTOR]: ["admin", "super_admin", "director"],
-};
+// Who may act at each stage comes only from Approval Setup: the
+// "crm-bookings" workflow's Level 1 is Marketing Head, Level 2 is Director,
+// and a user may act at a stage when that level names their role or them.
+const STAGE_LEVEL = { MarketingHeadApproval: 1, DirectorApproval: 2 };
+// The booking flow has two approval stages, so Approval Setup must define
+// at least that many levels (a structural need of this flow, not a setting).
+const MIN_APPROVAL_LEVELS = Object.keys(STAGE_LEVEL).length;
 
 // Human labels for UI badges / banners / logs.
 const STAGE_LABELS = {
@@ -99,7 +98,7 @@ async function logStageAction(pool, bookingId, stage, action, remarks, actorUser
 }
 
 // Read the full stage state for the booking detail page.
-async function getStageState(pool, bookingId) {
+async function getStageState(pool, bookingId, viewer = null) {
   const row = await getBookingStageRow(pool, bookingId);
   if (!row) return null;
 
@@ -119,23 +118,33 @@ async function getStageState(pool, bookingId) {
     RejectedFromStage: row.RejectedFromStage,
     RejectedBy: row.RejectedBy,
     RejectedAt: row.RejectedAt,
+    // Where a send-back from here may go (default first) — SEND_BACK_TARGETS.
+    SendBackTo: SEND_BACK_TARGETS[row.WorkflowStage] || [],
     MarketingHeadApprovedAt: row.MarketingHeadApprovedAt,
     MarketingHeadApprovedBy: row.MarketingHeadApprovedBy,
     DirectorApprovedAt: row.DirectorApprovedAt,
     DirectorApprovedBy: row.DirectorApprovedBy,
     ConfirmedAt: row.ConfirmedAt,
     ConfirmedBy: row.ConfirmedBy,
+    // Whether the viewer may approve / reject at the current stage — decided
+    // here from Approval Setup so the booking page holds no role list.
+    CanActOnStage: viewer && STAGE_LEVEL[row.WorkflowStage]
+      ? await canApproveStage(viewer.role, row.WorkflowStage, viewer.userId)
+      : false,
     history: history.recordset,
   };
 }
 
-// Role gate used by the routes: the passed role may approve at the given
-// stage if it is the stage's own role set. super_admin is included on both
-// stages as the parallel approver.
-function canApproveStage(role, stage) {
-  const allowed = STAGE_ROLES[stage];
-  if (!allowed) return false;
-  return allowed.includes(String(role || "").toLowerCase());
+// May this user act at the given stage? Super Admin can act in parallel;
+// otherwise decided by the crm-bookings workflow in Approval Setup.
+async function canApproveStage(role, stage, userId = null) {
+  const { isSuperAdmin, getWorkflow, userMatchesLevel } = require("./approvalService");
+  if (isSuperAdmin && isSuperAdmin(role)) return true;
+  const level = STAGE_LEVEL[stage];
+  if (!level) return false;
+  const wf = await getWorkflow("crm-bookings").catch(() => null);
+  const def = wf?.LevelDefs?.[level - 1];
+  return !!def && userMatchesLevel(def, role, userId);
 }
 
 // Shared guard: a booking must be live (not Cancelled/Rejected) and
@@ -147,7 +156,7 @@ async function requireActiveStage(pool, bookingId, stage) {
     e.status = 404;
     throw e;
   }
-  if (row.Status === "Cancelled" || row.Status === "Rejected" || row.IsActive === 0) {
+  if (row.Status === "Cancelled" || row.Status === "Rejected" || row.IsActive === false || row.IsActive === 0) {
     const e = new Error(`This booking has been ${row.Status} — no further workflow actions are allowed`);
     e.status = 400;
     throw e;
@@ -160,10 +169,9 @@ async function requireActiveStage(pool, bookingId, stage) {
   return row;
 }
 
-// Staff "Submit for Approval" — Review -> MarketingHeadApproval. Two gates:
-// all 7 data-review checklist items (KYC, Project/Unit/Rate, Payment Plan,
-// Bank/Deposit, Broker, Source, Documents) must be Checked, and the Booking
-// Amount (Milestone #1) must be fully paid. ProjectUnitRate and
+// Staff "Submit for Approval" — Review -> MarketingHeadApproval. Every
+// data-review checklist item (CHECKLIST_ITEMS in crmApplicationChecklist.js)
+// must be Checked. ProjectUnitRate and
 // PaymentPlanAmounts being Checked already IS "Unit/Rate/Value confirmed"
 // and "Payment Plan confirmed" — the old separate
 // UnitReviewConfirmed/PlanReviewConfirmed columns asserted the exact same
@@ -184,7 +192,7 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   }
 
   const readiness = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT b.Status
+    SELECT b.Status, b.TotalValue
     FROM dbo.CrmBooking b
     WHERE b.Id = @bid
   `);
@@ -194,11 +202,36 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   if (chk.Status === "Approved") {
     return { ok: true, noop: true, stage: STAGE_CONFIRMED };
   }
-
+  // Same rule as checkBookingApprovalReadiness (crmBookings.js): never into approval at ₹0.
+  if (!(Number(chk.TotalValue) > 0)) {
+    throw Object.assign(new Error("Total value is ₹0 — set the rate (and the unit's saleable area) before sending for approval"), { status: 400 });
+  }
 
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Re-checked under the booking's lock: a double click (or two verifiers)
+    // must send it only once — the second finds it already sent — and an item
+    // flagged in the same moment must still stop it.
+    const locked = (await tx.request().input("bid", sql.Int, bookingId).query(`
+      SELECT WorkflowStage, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid`)).recordset[0];
+    if (!locked || !locked.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(locked.Status)) {
+      throw Object.assign(new Error("This booking is no longer active"), { status: 400 });
+    }
+    if (locked.WorkflowStage !== STAGE_REVIEW) {
+      throw Object.assign(new Error(`Booking has already been sent — it is at '${stageLabel(locked.WorkflowStage)}'`), { status: 409 });
+    }
+    // Only the items that apply (ensureChecklistRows above) — a row left from
+    // data since removed (e.g. parking taken off) is not on the checklist and
+    // must not stop the send.
+    const lockReq = tx.request().input("aid", sql.Int, row.ApplicationId);
+    const keyParams = checklistItems.map((it, i) => { lockReq.input(`k${i}`, sql.NVarChar(50), it.ItemKey); return `@k${i}`; });
+    const open = keyParams.length ? (await lockReq.query(`
+      SELECT COUNT(*) AS N FROM dbo.CrmApplicationVerificationChecklist WITH (UPDLOCK, HOLDLOCK)
+      WHERE ApplicationId = @aid AND Level = 1 AND CheckStatus <> 'Checked' AND ItemKey IN (${keyParams.join(", ")})`)).recordset[0].N : 0;
+    if (open > 0) {
+      throw Object.assign(new Error(`Complete the data review checklist first — ${open} item(s) still not checked`), { status: 400 });
+    }
     await tx.request().input("bid", sql.Int, bookingId)
       .query(`
         UPDATE dbo.CrmBooking SET
@@ -219,15 +252,36 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
     ok: true,
     stage: STAGE_MARKETING,
     label: stageLabel(STAGE_MARKETING),
-    remarque: null,
+    remark: null,
   };
 }
 
 async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, userId) {
+  if (stage === STAGE_CONFIRMED) {
+    const e = new Error("This booking is already confirmed — there is nothing left to approve");
+    e.status = 409;
+    throw e;
+  }
   const row = await requireActiveStage(pool, bookingId, stage);
-  if (!canApproveStage(userRole, stage)) {
+  if (!(await canApproveStage(userRole, stage, userId))) {
     const e = new Error(`You are not authorized to approve at the '${stageLabel(stage)}' stage`);
     e.status = 403;
+    throw e;
+  }
+
+  // Refuse BEFORE anything is recorded when Approval Setup has fewer levels
+  // than the booking flow needs. approvalTransition treats a missing
+  // workflow as one level and would flip Status to Approved on the first
+  // click (how production bookings 1/4/5 were approved on 22-25 Sep 2026,
+  // before the crm-bookings workflow existed).
+  const workflow = await require("./approvalService").getWorkflow("crm-bookings").catch(() => null);
+  const configuredLevels = workflow ? (workflow.Levels || workflow.LevelDefs?.length || 0) : 0;
+  if (configuredLevels < MIN_APPROVAL_LEVELS) {
+    const e = new Error(
+      `Booking approval needs ${MIN_APPROVAL_LEVELS} levels in Approval Setup (Marketing Head, then Director); `
+      + `it has ${configuredLevels}. Ask an admin to set it up before approving.`,
+    );
+    e.status = 409;
     throw e;
   }
 
@@ -237,9 +291,6 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
   // Approved — which is exactly our "Confirmed".
   const result = await approvalTransition("crm-bookings", bookingId, "Approved", userEmail, userRole, null, userId);
 
-  // Require at least 2 approval levels (Marketing Head + Director) before confirming.
-  // A misconfigured 1-level workflow must never bypass Director approval.
-  const MIN_APPROVAL_LEVELS = 2;
   const confirmedNow = result.level >= result.totalLevels && result.totalLevels >= MIN_APPROVAL_LEVELS;
   // nextStage is derived from the level approvalTransition ACTUALLY just
   // recorded (result.level), never from the `stage` parameter this request
@@ -280,6 +331,15 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Still live? A delete (or cancellation) can commit between this
+    // request's first read and the approval above — then the approval must
+    // not stand: the throw runs the compensation below (Status back,
+    // approval row removed).
+    const live = (await tx.request().input("bid", sql.Int, bookingId).query(`
+      SELECT IsActive, Status FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid`)).recordset[0];
+    if (!live || !live.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(live.Status)) {
+      throw Object.assign(new Error("This booking was deleted or cancelled while it was being approved — nothing was approved"), { status: 409 });
+    }
     await tx.request()
       .input("bid", sql.Int, bookingId)
       .input("stg", sql.NVarChar(40), nextStage)
@@ -308,6 +368,29 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
     await tx.commit();
   } catch (txErr) {
     try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    // approvalTransition already committed on its own transaction before this stage
+    // update opened. If this stage update transaction fails, compensate by walking
+    // booking Status back to 'Pending' (if it reached 'Approved') and removing the
+    // orphaned ApprovalAuditLog entry so the booking does not sit in a contradictory state.
+    try {
+      if (confirmedNow) {
+        await pool.request().input("bid", sql.Int, bookingId).query(
+          "UPDATE dbo.CrmBooking SET Status = 'Pending', UpdatedAt = SYSDATETIME() WHERE Id = @bid AND Status = 'Approved'"
+        );
+      }
+      await pool.request()
+        .input("bid", sql.Int, bookingId)
+        .query(`
+          DELETE FROM dbo.ApprovalAuditLog
+          WHERE Id IN (
+            SELECT TOP 1 Id FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'CrmBooking' AND RecordId = @bid AND ActionStatus = 'Approved'
+            ORDER BY ActionAt DESC, Id DESC
+          )
+        `);
+    } catch (compErr) {
+      console.error("[crm-booking-stage] approve compensation failed:", compErr.message);
+    }
     throw txErr;
   }
 
@@ -333,15 +416,15 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
     // When the approver tried to approve the MR before the Director approved the booking,
     // it threw and the MR stayed Pending with ReceivedPaymentId = NULL — Finance never
     // got a row to approve, so milestone AmountPaid was never updated. Now that the
-    // booking is Confirmed, sweep those MRs through approveMoneyReceipt so the
+    // booking is Confirmed, sweep those MRs through sendMoneyReceiptToFinance so the
     // ReceivedPayment row lands in Finance's queue automatically.
     try {
-      const { approveMoneyReceipt, createMoneyReceiptAfterDataReview } = require("./crmMoneyReceiptWorkflow");
+      const { sendMoneyReceiptToFinance, createMoneyReceiptAfterDataReview } = require("./crmMoneyReceiptWorkflow");
       const pendingMrs = await pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT Id FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status = 'Pending' AND ReceivedPaymentId IS NULL");
       for (const mr of pendingMrs.recordset) {
         try {
-          await approveMoneyReceipt(pool, mr.Id, userId, userEmail);
+          await sendMoneyReceiptToFinance(pool, mr.Id, userId, userEmail);
         } catch (mrErr) {
           console.error("[crmBookingStageService] auto-approve pending MR", mr.Id, "on confirm failed:", mrErr.message);
         }
@@ -380,7 +463,27 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
 // mandatory (the whole point is to tell the preparer what to fix). The
 // LevelData remains untouched (the stage never clears), so a re-approve
 // after correction works cleanly.
-async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, userId, remark) {
+// Where a send-back from each stage may go. One step back by default; the
+// Director may also send it straight to Data Review when the application
+// itself needs correcting. Either way every approval after that point is
+// cleared, so the booking runs the whole chain again from there.
+const SEND_BACK_TARGETS = {
+  [STAGE_MARKETING]: [STAGE_REVIEW],
+  [STAGE_DIRECTOR]: [STAGE_MARKETING, STAGE_REVIEW],
+};
+
+// The same targets as a SQL column (comma-separated, default first) for list queries.
+function sendBackTargetsSql(stageColumn) {
+  const whens = Object.entries(SEND_BACK_TARGETS).map(([from, to]) => `WHEN N'${from}' THEN N'${to.join(",")}'`).join(" ");
+  return `CASE ${stageColumn} ${whens} END`;
+}
+
+async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, userId, remark, { toStage = null } = {}) {
+  if (stage === STAGE_CONFIRMED) {
+    const e = new Error("This booking is already confirmed — it can't be sent back; cancel or amend it instead");
+    e.status = 409;
+    throw e;
+  }
   const row = await requireActiveStage(pool, bookingId, stage);
   if (!row) throw Object.assign(new Error("Booking not found"), { status: 404 });
   if (!remark || !String(remark).trim()) {
@@ -388,13 +491,17 @@ async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, u
     e.status = 400;
     throw e;
   }
-  if (!canApproveStage(userRole, stage)) {
+  if (!(await canApproveStage(userRole, stage, userId))) {
     const e = new Error(`You are not authorized to reject at the '${stageLabel(stage)}' stage`);
     e.status = 403;
     throw e;
   }
 
-  const prevStage = stage === STAGE_MARKETING ? STAGE_REVIEW : STAGE_MARKETING;
+  const targets = SEND_BACK_TARGETS[stage] || [];
+  if (toStage && !targets.includes(toStage)) {
+    throw Object.assign(new Error(`From '${stageLabel(stage)}' a booking can be sent back to: ${targets.map(stageLabel).join(" or ")}`), { status: 400 });
+  }
+  const prevStage = toStage || targets[0] || STAGE_REVIEW;
 
   // The stage bounce-back, its stage-log entry, and the approval-level reset
   // (clear stale Approved rows + record the BouncedBack action) are one
@@ -513,6 +620,8 @@ module.exports = {
   STAGE_CONFIRMED,
   WORKFLOW_STAGES,
   STAGE_LABELS,
+  SEND_BACK_TARGETS,
+  sendBackTargetsSql,
   stageLabel,
   getStageState,
   submitForApproval,

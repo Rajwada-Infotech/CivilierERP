@@ -1,7 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+// Any saved chain change can alter the step list new villas copy
+// (services/autoDprChains.js caches it), so a successful write clears it.
+router.use((req, res, next) => {
+  if (req.method !== "GET") res.on("finish", () => { if (res.statusCode < 300) require("../services/autoDprChains").clearTemplateCache(); });
+  next();
+});
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const authMiddleware = require("../middleware/auth");
@@ -29,6 +35,11 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 // already stored that way — 0 -> "G", same convention roomMaster.js and
 // RoomMaster.tsx's own floorLabel() already use.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// The plot label a floorless unit is placed by — same string as
+// services/unitLayout.js chainFloorLabel builds (plot names joined by '+').
+const PLOT_LABEL_SQL = `(SELECT N'Plot ' + STRING_AGG(p.PlotName, '+') WITHIN GROUP (ORDER BY p.PlotName)
+   FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)`;
 
 // ── GET /scope-options?level=tower|floor|flat|room&projectId=&towerId=&floor=&flatId= ──
 router.get("/scope-options", authMiddleware, async (req, res) => {
@@ -65,12 +76,21 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
         WHERE BlockId = @TowerId AND IsActive = 1 AND FloorNo IS NOT NULL
         ORDER BY FloorNo
       `);
-      return res.json(
-        r.recordset.map(({ FloorNo }) => {
+      // A villa in a plotted block has no floor: it is listed under the
+      // plot(s) it stands on — the same label its chains carry
+      // (services/unitLayout.js chainFloorLabel).
+      const villas = await pool.request().input("TowerId", sql.Int, towerId).query(`
+        SELECT DISTINCT ${PLOT_LABEL_SQL} AS Label
+        FROM dbo.UnitMaster u
+        WHERE u.BlockId = @TowerId AND u.IsActive = 1 AND u.FloorNo IS NULL`);
+      return res.json([
+        ...r.recordset.map(({ FloorNo }) => {
           const label = FloorNo === 0 ? "G" : String(FloorNo);
           return { id: label, label };
         }),
-      );
+        ...villas.recordset.filter((v) => v.Label).sort((a, b) => a.Label.localeCompare(b.Label, undefined, { numeric: true }))
+          .map((v) => ({ id: v.Label, label: v.Label })),
+      ]);
     }
 
     if (level === "flat") {
@@ -78,8 +98,15 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
       // "G" -> 0, otherwise the numeric floor — same convention floor
       // options above (and roomMaster.js/RoomMaster.tsx's own floorLabel())
       // already use.
-      const floorNo = floor === "G" ? 0 : parseInt(floor, 10);
-      if (!Number.isFinite(floorNo)) return res.status(400).json({ error: "Invalid floor" });
+      const floorNo = floor === "G" ? 0 : /^-?\d+$/.test(floor) ? parseInt(floor, 10) : NaN;
+      if (!Number.isFinite(floorNo)) {
+        // Not a floor number: a plot label — the floorless villa(s) on it.
+        const v = await pool.request().input("TowerId", sql.Int, towerId).input("Label", sql.NVarChar(200), floor).query(`
+          SELECT u.Id AS id, u.UnitName AS label FROM dbo.UnitMaster u
+          WHERE u.BlockId = @TowerId AND u.IsActive = 1 AND u.FloorNo IS NULL AND ${PLOT_LABEL_SQL} = @Label
+          ORDER BY u.UnitName`);
+        return res.json(v.recordset);
+      }
       const r = await pool.request().input("TowerId", sql.Int, towerId).input("FloorNo", sql.Int, floorNo).query(`
         SELECT Id AS id, UnitName AS label
         FROM dbo.UnitMaster
@@ -100,13 +127,17 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
       if (excludeId) request.input("ExcludeId", sql.Int, excludeId);
       const r = await request.query(`
         SELECT
-          rm.Id AS id, rm.RoomName AS label,
+          rm.Id AS id,
+          -- a villa room carries its own floor inside the villa
+          CONCAT(CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN UPPER(rm.Storey) = 'ROOF' THEN 'Roof terrace · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, rm.RoomName) AS label,
           dm.Alias AS linkedAlias
         FROM dbo.RoomMaster rm
         LEFT JOIN dbo.DependencyMaster dm
           ON dm.RoomId = rm.Id ${excludeId ? "AND dm.Id <> @ExcludeId" : ""}
-        WHERE rm.UnitId = @FlatId AND rm.Floor = @Floor AND rm.IsActive = 1
-        ORDER BY rm.RoomName
+        WHERE rm.UnitId = @FlatId AND rm.IsActive = 1
+          -- a villa's rooms carry no floor; its "floor" here is its plot label
+          AND (rm.Floor = @Floor OR (rm.Floor IS NULL AND EXISTS (SELECT 1 FROM dbo.UnitMaster u WHERE u.Id = rm.UnitId AND u.FloorNo IS NULL)))
+        ORDER BY CASE WHEN rm.Storey IS NULL THEN -2 WHEN rm.Storey = 'B' THEN -1 WHEN rm.Storey = 'G' THEN 0 ELSE ISNULL(TRY_CAST(rm.Storey AS INT), 999) END, rm.RoomName
       `);
       return res.json(r.recordset);
     }
@@ -122,7 +153,38 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
-    const r = await pool.request().query(`
+    // Optional narrowing (the mobile app, and Work Allocation's tree, which loads the light list and each room's
+    // chains only when that room is opened):
+    //   projectId — one project's chains      search — alias / location text
+    //   roomId — one room's chains            rungId — the chain one activity belongs to
+    //   page+limit — OFFSET/FETCH paging      withActivities=0 — skip the per-chain ladder
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const roomId = req.query.roomId ? parseInt(req.query.roomId, 10) : null;
+    const rungId = req.query.rungId ? parseInt(req.query.rungId, 10) : null;
+    const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : null;
+    const paged = req.query.page != null || req.query.limit != null;
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 30));
+    const offset = (Math.max(1, parseInt(req.query.page, 10) || 1) - 1) * limit;
+    const withActivities = req.query.withActivities !== "0";
+    const listReq = pool.request();
+    let extra = "";
+    // Retired chains (deleted, or replaced when a villa's type changed or its
+    // conversion was undone) are history, not work: every list shows live
+    // chains only unless a caller asks for the rest.
+    const includeInactive = req.query.includeInactive === "1";
+    const activeOnly = includeInactive ? "" : " AND dm.IsActive = 1";
+    if (Number.isFinite(projectId)) { listReq.input("projectId", sql.Int, projectId); extra += " AND dm.ProjectId = @projectId"; }
+    if (Number.isFinite(roomId)) { listReq.input("roomId", sql.Int, roomId); extra += " AND dm.RoomId = @roomId"; }
+    if (Number.isFinite(rungId)) {
+      listReq.input("rungId", sql.Int, rungId);
+      extra += " AND dm.Id = (SELECT dmr.DependencyMasterId FROM dbo.DependencyMasterActivity dmr WHERE dmr.Id = @rungId)";
+    }
+    if (search) {
+      listReq.input("search", sql.NVarChar(200), `%${search}%`);
+      extra += " AND (dm.Alias LIKE @search OR bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search)";
+    }
+    if (paged) { listReq.input("offset", sql.Int, offset); listReq.input("limit", sql.Int, limit); }
+    const r = await listReq.query(`
       SELECT
         dm.Id AS id,
         dm.Alias AS alias,
@@ -132,23 +194,25 @@ router.get("/", authMiddleware, async (req, res) => {
         dm.TowerId AS towerId, bm.BlockName AS towerName,
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
-        dm.RoomId AS roomId, rm.RoomName AS roomName,
+        dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
         dm.CreatedAt AS createdAt,
         (SELECT COUNT(*) FROM dbo.DependencyMasterActivity dma WHERE dma.DependencyMasterId = dm.Id) AS activityCount,
         -- Built server-side so the list row is ready to render as-is —
         -- the client shouldn't have to join 4 names together itself.
         CONCAT(
-          ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
-          ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+          ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
+          ' > ', ISNULL(um.UnitName, '—'), ' > ',
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN UPPER(rm.Storey) = 'ROOF' THEN 'Roof terrace · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
         ) AS scopePath
       FROM dbo.DependencyMaster dm
       LEFT JOIN dbo.enterprise   ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster  bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster   um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster   rm ON rm.Id = dm.RoomId
-      WHERE 1=1${projectPredicate(req.projectScope, "dm.ProjectId")}
-      ORDER BY dm.Id DESC
+      WHERE 1=1${projectPredicate(req.projectScope, "dm.ProjectId")}${activeOnly}${extra}
+      ORDER BY dm.Id DESC${paged ? " OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY" : ""}
     `);
+    if (!withActivities) return res.json(r.recordset.map((row) => ({ ...row, activities: [] })));
 
     // Every rung for every chain, in one query — callers that need the full
     // activity ladder per chain (e.g. Work Done's chain browser) used to
@@ -162,7 +226,10 @@ router.get("/", authMiddleware, async (req, res) => {
       FROM dbo.DependencyMasterActivity dma
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       JOIN dbo.DependencyMaster dmx ON dmx.Id = dma.DependencyMasterId
-      WHERE 1=1${projectPredicate(req.projectScope, "dmx.ProjectId")}
+      WHERE 1=1${projectPredicate(req.projectScope, "dmx.ProjectId")}${includeInactive ? "" : " AND dmx.IsActive = 1"}${
+        // A narrowed list only needs its own chains' rungs (ids come from the query above — integers).
+        (extra || paged) ? ` AND dma.DependencyMasterId IN (${r.recordset.map((x) => Number(x.id)).filter(Number.isFinite).join(",") || "NULL"})` : ""
+      }
       ORDER BY dma.DependencyMasterId, dma.SequenceNo ASC
     `);
     const activitiesByChain = new Map();
@@ -196,7 +263,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
         dm.TowerId AS towerId, bm.BlockName AS towerName,
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
-        dm.RoomId AS roomId, rm.RoomName AS roomName,
+        dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
         dm.CreatedAt AS createdAt, dm.UpdatedAt AS updatedAt
       FROM dbo.DependencyMaster dm
       LEFT JOIN dbo.enterprise   ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
@@ -245,6 +312,15 @@ function validatePayload(body) {
 }
 
 // ── POST / — create ──────────────────────────────────────────────────────
+// A room type's step list just changed: villas built before it existed get it now.
+function fillVillasForChain(pool, chainId, actor) {
+  pool.request().input("id", sql.Int, chainId)
+    .query("SELECT r.RoomCategoryId FROM dbo.DependencyMaster d JOIN dbo.RoomMaster r ON r.Id = d.RoomId WHERE d.Id = @id AND d.IsActive = 1")
+    .then((q) => { const c = q.recordset[0]?.RoomCategoryId; return c ? require("../services/autoDprChains").fillChainlessVillaRooms(pool, { categoryId: c, actor }) : null; })
+    .then((r) => { if (r?.chainsCreated) console.log(`[dependency-master] gave ${r.chainsCreated} villa room(s) this step list`); })
+    .catch((e) => console.warn("[dependency-master] villa fill failed (non-fatal):", e.message));
+}
+
 router.post("/", authMiddleware, requirePageRight("dependency-master", "create"), async (req, res) => {
   const err = validatePayload(req.body);
   if (err) return res.status(400).json({ error: err });
@@ -311,6 +387,7 @@ router.post("/", authMiddleware, requirePageRight("dependency-master", "create")
       `);
     }
 
+    if (activities.length) fillVillasForChain(pool, newId, actor);
     res.status(201).json({ success: true, id: newId, message: "Dependency record created" });
   } catch (err2) {
     console.error("[POST /dependency-master]", err2);
@@ -454,6 +531,7 @@ router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit")
     }
 
     await tx.commit();
+    fillVillasForChain(getPool(), id, actor);
     res.json({ success: true, message: "Dependency record updated" });
   } catch (err2) {
     if (tx) {

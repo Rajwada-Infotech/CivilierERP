@@ -5,11 +5,66 @@ router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
+const { MODULES, rankAllowed } = require("../services/moduleUsage");
+
+// ── Personalised Home ────────────────────────────────────────────────────────
+// POST /usage records that the caller just worked in a module; GET
+// /module-ranking orders their accessible modules by how much and how recently
+// they work in them, which the Home page uses to decide which tiles lead.
+// Not cached: the answer is per user.
+router.post("/usage", async (req, res) => {
+  const userId = parseInt(req.user?.userId ?? req.user?.id, 10);
+  const module = String(req.body?.module || "");
+  if (!Number.isFinite(userId)) return res.status(401).json({ error: "Not authenticated" });
+  if (!MODULES.includes(module)) return res.status(400).json({ error: "Unknown module" });
+  try {
+    const pool = getPool();
+    await pool.request()
+      .input("userId", sql.Int, userId)
+      .input("module", sql.NVarChar(40), module)
+      .query(`
+        MERGE dbo.UserModuleUsage AS t
+        USING (SELECT @userId AS UserId, @module AS Module) AS s
+          ON t.UserId = s.UserId AND t.Module = s.Module
+        WHEN MATCHED THEN UPDATE SET VisitCount = t.VisitCount + 1, LastVisitedAt = SYSUTCDATETIME()
+        WHEN NOT MATCHED THEN INSERT (UserId, Module, VisitCount, LastVisitedAt) VALUES (s.UserId, s.Module, 1, SYSUTCDATETIME());
+      `);
+    res.json({ success: true });
+  } catch (err) {
+    // Table not created yet (code deployed before `migrate.js up` ran migration 539): usage tracking is
+    // best-effort, so don't 500 every page view.
+    if (err.number === 208) return res.json({ success: true, skipped: true });
+    console.error("[homeActivity] POST /usage:", err.message);
+    res.status(500).json({ error: "Failed to record usage" });
+  }
+});
+
+router.get("/module-ranking", async (req, res) => {
+  const userId = parseInt(req.user?.userId ?? req.user?.id, 10);
+  if (!Number.isFinite(userId)) return res.status(401).json({ error: "Not authenticated" });
+  const allowedModules = req.query.modules
+    ? String(req.query.modules).split(",").map((m) => m.trim()).filter((m) => MODULES.includes(m))
+    : null;
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("userId", sql.Int, userId).query(`
+      SELECT Module AS module, VisitCount AS visitCount, LastVisitedAt AS lastVisitedAt
+      FROM dbo.UserModuleUsage WHERE UserId = @userId
+    `);
+    res.json(rankAllowed(r.recordset, allowedModules));
+  } catch (err) {
+    // Same as /usage: no table yet means no history, i.e. the default order.
+    if (err.number === 208) return res.json(rankAllowed([], allowedModules));
+    console.error("[homeActivity] GET /module-ranking:", err.message);
+    res.status(500).json({ error: "Failed to load module ranking" });
+  }
+});
 
 // ── Lightweight sales summary for Home dashboard ─────────────────────────────
 // Returns only SQL-aggregated scalars — no row transfer — so the home page
 // doesn't have to pull 500+ sale order rows just to count/sum them.
-router.get("/sales-summary", cache("home-sales-summary", 120), async (req, res) => {
+router.get("/sales-summary", cache("home-sales-summary", 120, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const now = new Date();
@@ -358,7 +413,7 @@ const SOURCES = {
         NULL AS DocNo,
         CONCAT('User added — ', u.name) AS Title,
         ISNULL((SELECT TOP 1 r.RName FROM dbo.Role r WHERE r.RId = u.RoleId), u.email) AS Subtitle,
-        NULL AS Actor,
+        /*USER_ACTOR*/NULL AS Actor,
         CAST(NULL AS DECIMAL(18,2)) AS Amount,
         CASE WHEN ISNULL(u.discontinue, 0) = 1 THEN 'Inactive' ELSE 'Active' END AS Status,
         CAST(COALESCE(u.created_datetime, '2000-01-01') AS DATETIME2) AS At,
@@ -368,7 +423,13 @@ const SOURCES = {
   },
 };
 
-router.get("/activity-feed", cache("home-activity-feed", 45), async (req, res) => {
+// Who added a user, when the column exists (migration 535); otherwise the feed shows no actor.
+const USER_ACTOR_SQL =
+  "(SELECT TOP 1 COALESCE(NULLIF(cu.name, ''), cu.email) FROM dbo.users cu WHERE cu.id = u.CreatedBy)";
+const sourceSql = (s, hasCreatedBy) =>
+  s.sql.replace("/*USER_ACTOR*/NULL", hasCreatedBy ? USER_ACTOR_SQL : "NULL");
+
+router.get("/activity-feed", cache("home-activity-feed", 45, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
 
@@ -380,9 +441,10 @@ router.get("/activity-feed", cache("home-activity-feed", 45), async (req, res) =
       .filter(Boolean);
     const allow = requested.length ? new Set(requested) : null;
 
+    const hasCreatedBy = await usersHaveCreatedBy(pool);
     const branches = Object.values(SOURCES)
       .filter((s) => !allow || allow.has(s.module))
-      .map((s) => `SELECT * FROM (${s.sql}) x`);
+      .map((s) => `SELECT * FROM (${sourceSql(s, hasCreatedBy)}) x`);
 
     if (!branches.length) return res.json({ items: [] });
 
@@ -417,7 +479,7 @@ router.get("/activity-feed", cache("home-activity-feed", 45), async (req, res) =
 const WEEK_PER_SOURCE = 3000;
 const IST_MINUTES = 330;
 
-router.get("/activity-week", cache("home-activity-week", 60), async (req, res) => {
+router.get("/activity-week", cache("home-activity-week", 60, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const requested = String(req.query.modules || "")
@@ -434,9 +496,10 @@ router.get("/activity-week", cache("home-activity-week", 60), async (req, res) =
       return d.toISOString().slice(0, 10);
     });
 
+    const hasCreatedBy = await usersHaveCreatedBy(pool);
     const branches = Object.values(SOURCES)
       .filter((s) => !allow || allow.has(s.module))
-      .map((s) => `SELECT * FROM (${s.sql}) x`);
+      .map((s) => `SELECT * FROM (${sourceSql(s, hasCreatedBy)}) x`);
     if (!branches.length) {
       return res.json({ days: days.map((date) => ({ date, count: 0, amount: 0 })) });
     }

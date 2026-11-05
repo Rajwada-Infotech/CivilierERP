@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { projectPredicate, projectParamGuard, assertAllocationAllowed } = require("../services/projectScope");
@@ -32,6 +32,7 @@ const SELECT_COLUMNS = `
   dl.RoomId                  AS roomId,
   rm.RoomName                AS roomName,
   rm.Floor                   AS floor,
+  rm.Storey                  AS storey,
   dl.Shift                 AS shift,
   dl.AttendanceStatus      AS attendanceStatus,
   dl.Remarks               AS remarks,
@@ -102,6 +103,25 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-daily-labour", "
   try {
     if (!(await assertAllocationAllowed(req, res, allocationId))) return;
     const pool = getPool();
+
+    // No DB-level uniqueness exists on (AllocationId, EntryDate, RoomId) —
+    // a double-click or retry on the same day's labour form silently
+    // inserted a second row, double-counting skilled/unskilled headcount
+    // for that allocation/date in every downstream report. RoomId is
+    // nullable, so matched NULL-safely rather than with a plain =.
+    const dupe = await pool.request()
+      .input("allocationId", sql.Int, allocationId)
+      .input("entryDate", sql.Date, entryDate)
+      .input("roomId", sql.Int, roomId != null && roomId !== "" ? roomId : null)
+      .query(`
+        SELECT TOP 1 EntryId FROM dbo.DailyLabourEntry
+        WHERE AllocationId = @allocationId AND EntryDate = @entryDate
+          AND ((RoomId IS NULL AND @roomId IS NULL) OR RoomId = @roomId)
+      `);
+    if (dupe.recordset.length) {
+      return res.status(409).json({ error: "An entry for this allocation, date and room already exists — edit it instead of creating a new one.", existingId: dupe.recordset[0].EntryId });
+    }
+
     const result = await pool.request()
       .input("allocationId", sql.Int, allocationId)
       .input("entryDate", sql.Date, entryDate)

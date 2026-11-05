@@ -1,17 +1,16 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
+const { countedInvoiceSql } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("../services/docNumber");
-const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
-router.use(authMiddleware);
+const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 bumpCacheVersion("sa-campaigns").catch(() => {});
 
@@ -38,7 +37,7 @@ router.get(
             FROM dbo.SaMarketingInvoice i
             WHERE i.AdId = a.Id
               AND i.IsActive = 1
-              AND i.PaymentStatus <> 'Cancelled'
+              AND ${countedInvoiceSql("i.")}
           ) inv
           GROUP BY a.CampaignId
         ),
@@ -100,7 +99,7 @@ router.get(
 router.get(
   "/platforms",
   requirePageRight("sa-campaigns", "view"),
-  cache("sa-campaigns-platforms", 600),
+  cache("sa-campaigns-platforms", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -122,7 +121,7 @@ router.get(
 router.get(
   "/dropdown",
   requirePageRight("sa-campaigns", "view"),
-  cache("sa-campaigns-dropdown", 600),
+  cache("sa-campaigns-dropdown", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();

@@ -13,7 +13,7 @@ const reqStr = (max, message) =>
   z.preprocess(
     (value) => (typeof value === "string" ? value.trim() : value),
     z
-      .string({ required_error: message, invalid_type_error: message })
+      .string({ error: message })
       .min(1, message)
       .max(max),
   );
@@ -30,7 +30,7 @@ const reqInt = (message) =>
       return cleaned === undefined ? cleaned : Number(cleaned);
     },
     z
-      .number({ required_error: message, invalid_type_error: message })
+      .number({ error: message })
       .int(message)
       .positive(message),
   );
@@ -47,7 +47,7 @@ const reqNonNegativeNumber = (message) =>
       return cleaned === undefined ? cleaned : Number(cleaned);
     },
     z
-      .number({ required_error: message, invalid_type_error: message })
+      .number({ error: message })
       .finite(message)
       .min(0, message),
   );
@@ -59,7 +59,7 @@ const reqDate = (message) =>
       const cleaned = emptyToUndefined(value);
       return cleaned === undefined ? cleaned : new Date(cleaned);
     },
-    z.date({ required_error: message, invalid_type_error: message }),
+    z.date({ error: message }),
   );
 
 const jsonPassthrough = z.any().optional();

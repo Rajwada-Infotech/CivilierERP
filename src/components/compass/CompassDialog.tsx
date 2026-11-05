@@ -1,81 +1,23 @@
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  Building2,
-  ClipboardList,
-  Clock,
-  Cpu,
-  Database,
-  FolderOpen,
-  HardHat,
-  Landmark,
-  Megaphone,
-  MessageSquare,
-  Package,
-  Settings,
-  ShieldCheck,
-  ShoppingCart,
-  Users,
-  Wallet,
-  Wrench,
-} from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Command as CommandPrimitive } from "cmdk";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import {
-  Command,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import { moduleLandings, type CompassEntry } from "./compassRegistry";
+import { moduleLandings } from "./compassRegistry";
 import { groupByModule, searchEntries } from "./compassSearch";
 import { useCompass } from "./useCompass";
+import { COMPASS_CSS } from "./compassStyles";
+import { CompassSearchHead } from "./CompassSearchHead";
+import { CompassResults } from "./CompassResults";
+import { CompassFooter } from "./CompassFooter";
 
-const MODULE_ICONS: Record<string, React.ElementType> = {
-  finance: Landmark,
-  material: Package,
-  engineering: HardHat,
-  crm: Building2,
-  sales: ShoppingCart,
-  "sales-automation": Megaphone,
-  followup: ClipboardList,
-  ticket: MessageSquare,
-  records: FolderOpen,
-  civilworkdpr: HardHat,
-  loan: Wallet,
-  "fixed-asset": Cpu,
-  maintenance: Wrench,
-  "hr-payroll": Users,
-  admin: Settings,
-  dba: Database,
-  super_admin: ShieldCheck,
-};
-
-function Row({ entry, value, onSelect, showModule }: {
-  entry: CompassEntry;
-  /** cmdk needs a unique value per row; a page can appear in Recent and Modules at once. */
-  value: string;
-  onSelect: (e: CompassEntry) => void;
-  showModule?: boolean;
-}) {
-  const Icon = MODULE_ICONS[entry.moduleId] ?? FolderOpen;
-  const sub = [showModule ? entry.module : null, entry.group].filter(Boolean).join(" · ");
-  return (
-    <CommandItem value={value} onSelect={() => onSelect(entry)} className="gap-3 py-2.5 cursor-pointer">
-      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate text-sm text-foreground">{entry.label}</span>
-        {sub && <span className="truncate text-[0.6875rem] text-muted-foreground">{sub}</span>}
-      </span>
-    </CommandItem>
-  );
-}
-
-const Kbd = ({ children }: { children: React.ReactNode }) => (
-  <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground">
-    {children}
-  </kbd>
-);
-
+// The Compass panel: the search head, the results, and the key line, on one sheet.
+//
+// Sizing: it starts 10% down the screen and is at most 80% of its height, so its bottom never leaves the screen;
+// the head and footer keep their size and only the result list between them scrolls (see compassStyles.ts for why
+// the panel itself can't be scrolled).
+//
+// Highlight and scroll: the first row is highlighted (the latest Recent page, or the best match) and the list sits at
+// the top whenever the panel opens or the query changes. Left to cmdk, the highlight could land further down and get
+// scrolled into view while the panel was still animating open, leaving the list scrolled to the middle.
 export function CompassDialog() {
   const { open, closeCompass, entries, recent, select, shortcut } = useCompass();
   const [query, setQuery] = useState("");
@@ -85,90 +27,50 @@ export function CompassDialog() {
     if (!open) setQuery("");
   }, [open]);
 
-  const hasQuery = query.trim().length > 0;
   const results = useMemo(() => searchEntries(entries, query), [entries, query]);
   const groups = useMemo(() => groupByModule(results), [results]);
   const landings = useMemo(() => moduleLandings(entries), [entries]);
+
+  const listRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState("");
+  const first = query.trim()
+    ? (groups[0]?.entries[0]?.route ?? "")
+    : recent[0]
+      ? `recent:${recent[0].route}`
+      : landings[0]
+        ? `module:${landings[0].moduleId}`
+        : "";
+  useLayoutEffect(() => {
+    if (!open) return;
+    setActive(first);
+    const toTop = () => { if (listRef.current) listRef.current.scrollTop = 0; };
+    toTop();
+    // Once more after the open animation, in case anything scrolled the list while it ran.
+    const raf = requestAnimationFrame(toTop);
+    const t = window.setTimeout(toTop, 250);
+    return () => { cancelAnimationFrame(raf); window.clearTimeout(t); };
+    // `first` changes with the query and with the lists; the reset follows it.
+  }, [open, first]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && closeCompass()}>
       <DialogContent
         hideCloseButton
-        className="top-[16%] translate-y-0 gap-0 overflow-hidden p-0 sm:p-0 sm:max-w-xl"
+        className="compass-sheet top-[10dvh] translate-y-0 flex flex-col gap-0 p-0 sm:p-0 sm:max-w-2xl max-h-[80dvh] overflow-clip"
       >
+        <style>{COMPASS_CSS}</style>
         <DialogTitle className="sr-only">Find a page</DialogTitle>
         <DialogDescription className="sr-only">
           Type to search every page you have access to, then press Enter to open it.
         </DialogDescription>
 
         {/* Our own ranking (label > alias > section > module); cmdk's built-in filter is off. */}
-        <Command shouldFilter={false} loop className="bg-transparent">
-          <CommandInput
-            autoFocus
-            value={query}
-            onValueChange={setQuery}
-            placeholder="Search pages…  (try “invoice”, “brs”, “finance po”)"
-          />
-          <CommandList className="max-h-[min(60vh,420px)] thin-scroll">
-            {hasQuery ? (
-              results.length === 0 ? (
-                <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-                  No pages match “{query.trim()}”.
-                </div>
-              ) : (
-                groups.map((g) => (
-                  <CommandGroup key={g.moduleId} heading={g.module}>
-                    {g.entries.map((e) => (
-                      <Row key={e.route} entry={e} value={e.route} onSelect={select} />
-                    ))}
-                  </CommandGroup>
-                ))
-              )
-            ) : (
-              <>
-                {recent.length > 0 && (
-                  <CommandGroup
-                    heading={
-                      <span className="flex items-center gap-1.5">
-                        <Clock className="h-3 w-3" /> Recent
-                      </span>
-                    }
-                  >
-                    {recent.map((e) => (
-                      <Row key={e.route} entry={e} value={`recent:${e.route}`} onSelect={select} showModule />
-                    ))}
-                  </CommandGroup>
-                )}
-                <CommandGroup heading="Jump to a module">
-                  {landings.map((e) => (
-                    <CommandItem
-                      key={e.moduleId}
-                      value={`module:${e.moduleId}`}
-                      onSelect={() => select(e)}
-                      className="gap-3 py-2.5 cursor-pointer"
-                    >
-                      {React.createElement(MODULE_ICONS[e.moduleId] ?? FolderOpen, {
-                        className: "h-4 w-4 shrink-0 text-muted-foreground",
-                      })}
-                      <span className="text-sm text-foreground">{e.module}</span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </>
-            )}
-          </CommandList>
-        </Command>
+        <CommandPrimitive shouldFilter={false} loop value={active} onValueChange={setActive} className="flex min-h-0 flex-1 flex-col" label="Find a page">
+          <CompassSearchHead query={query} onQuery={setQuery} />
+          <CompassResults listRef={listRef} query={query} groups={groups} recent={recent} landings={landings} onSelect={select} />
+        </CommandPrimitive>
 
-        <div className="flex items-center justify-between border-t border-border bg-muted/30 px-3 py-2 text-[0.6875rem] text-muted-foreground">
-          <span className="flex items-center gap-3">
-            <span className="flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> navigate</span>
-            <span className="flex items-center gap-1"><Kbd>↵</Kbd> open</span>
-            <span className="flex items-center gap-1"><Kbd>esc</Kbd> close</span>
-          </span>
-          <span className="hidden sm:flex items-center gap-1">
-            <Kbd>{shortcut.primary}</Kbd>
-          </span>
-        </div>
+        <CompassFooter shortcut={shortcut.primary} />
       </DialogContent>
     </Dialog>
   );

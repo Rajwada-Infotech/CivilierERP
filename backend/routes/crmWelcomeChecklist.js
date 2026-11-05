@@ -2,7 +2,10 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+// Project access: a restricted user gets 403 on checklists outside their projects.
+require("../services/projectScope").crmProjectGuards(router);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -12,7 +15,6 @@ const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // ─── Checklist template ──────────────────────────────────────────────────
 // ALWAYS_TEMPLATE applies to every booking — these facts exist for every
@@ -497,6 +499,8 @@ router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), asyn
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const conds = [`ci.RecheckStatus = '${CrmStatus.OPEN}'`];
+    // A user limited to some projects sees only their bookings' flags.
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     const req0 = pool.request();
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }

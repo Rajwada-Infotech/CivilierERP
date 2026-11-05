@@ -1,8 +1,12 @@
 const express = require("express");
+const { sumMoney } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmAfsQueryPayment")); }
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -13,7 +17,6 @@ const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
@@ -60,6 +63,7 @@ router.get("/", requirePageRight("crm-afs-query-payment", "view"), async (req, r
     // Company/Project/Block narrows the set server-side instead.
     if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (req.projectScope) where.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
     const result = await req0.query(`${AQP_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY aqp.CreatedAt DESC`);
     res.json(result.recordset);
@@ -243,16 +247,18 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    // The fee amount is optional at creation but mandatory here — the customer
-    // is being told what to pay at the Sub-Registrar, so there must be a
-    // figure on record before the paperwork goes out.
-    if (row.Status === CrmStatus.PENDING
-        && (row.StampDuty == null || Number(row.StampDuty) === 0)
-        && (row.RegistrationFee == null || Number(row.RegistrationFee) === 0)) {
-      return res.status(400).json({ error: "Enter the Stamp Duty or Registration Fee amount before sending the details to the customer." });
-    }
+    // The fee amount stays optional here too (business decision 2026-10-22 —
+    // staff genuinely may not know it yet, e.g. still waiting on the Sub-
+    // Registrar's own valuation). Forcing a number before this could proceed
+    // only pushed staff to type a placeholder to get past the block, which is
+    // worse than sending with none. The real, binding figure is what gets
+    // recorded at /:id/confirm (ConfirmedAmount) once the customer actually
+    // pays — that step still requires a real amount; nothing downstream reads
+    // StampDuty/RegistrationFee as anything but an optional estimate (see
+    // AfsQpStampDuty/AfsQpRegistrationFee in crmAgreements.js).
+    const hasAmount = (row.StampDuty != null && Number(row.StampDuty) > 0) || (row.RegistrationFee != null && Number(row.RegistrationFee) > 0);
 
-    const rawFiles = Array.isArray(req.body.files) ? req.body.files : [];
+    const rawFiles = Array.isArray(req.body?.files) ? req.body.files : [];
     if (!rawFiles.length) return res.status(400).json({ error: "At least one file is required" });
     let files;
     try {
@@ -293,7 +299,9 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
       await logCommunication(tx, {
         bookingId: row.BookingId, direction: "Outbound",
         subject: "AFS stamp duty / registration fee details sent to customer",
-        summary: "Required government payment amount and paperwork for AFS registration shared with the customer.",
+        summary: hasAmount
+          ? "Required government payment amount and paperwork for AFS registration shared with the customer."
+          : "Paperwork for AFS registration shared with the customer; the exact stamp duty / registration fee amount was not yet known and will follow.",
         createdBy: actor,
       });
 
@@ -321,7 +329,7 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId, Status FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
+      .query("SELECT BookingId, Status, StampDuty, RegistrationFee FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
     const row = cur.recordset[0];
     if (row.Status === "Confirmed") return res.status(400).json({ error: "Already confirmed" });
@@ -331,6 +339,16 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    // Confirming is staff attesting the customer paid the government, so it
+    // needs the receipt and the amount; an amount different from stamp duty +
+    // registration fee (e.g. a revised valuation) must be explained.
+    if (!b.proof) return res.status(400).json({ error: "Attach the payment proof (challan / receipt) the customer paid to the Sub-Registrar" });
+    const confirmed = b.ConfirmedAmount != null && b.ConfirmedAmount !== "" ? parseFloat(b.ConfirmedAmount) : NaN;
+    if (!(confirmed > 0)) return res.status(400).json({ error: "Enter the amount the customer paid" });
+    const expected = sumMoney([row.StampDuty, row.RegistrationFee]);
+    if (expected > 0 && Math.abs(confirmed - expected) > 0.5 && !String(b.Remarks || "").trim()) {
+      return res.status(400).json({ error: `The amount paid (₹${confirmed.toLocaleString("en-IN")}) differs from stamp duty + registration fee (₹${expected.toLocaleString("en-IN")}) — add a remark explaining why` });
+    }
     let proof = null;
     if (b.proof) {
       try {

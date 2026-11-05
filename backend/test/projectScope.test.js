@@ -85,6 +85,59 @@ describe("getProjectScope", () => {
     });
     expect(await getProjectScope({ userId: 4, role: "user" })).toBeNull();
   });
+
+  // A pool that answers by table: user rows, role rows (or "table missing").
+  const tablePool = ({ userRows = [], roleRows = [], roleTableMissing = false }) => ({
+    request: () => {
+      const inputs = {};
+      return {
+        input(k, _t, v) { inputs[k] = v; return this; },
+        query: async (text) => {
+          if (/UserProjectAccess/.test(text)) return { recordset: userRows };
+          if (/RoleProjectAccess/.test(text)) {
+            if (roleTableMissing) { const e = new Error("Invalid object name"); e.number = 208; throw e; }
+            return { recordset: inputs.rid === 7 ? roleRows : [] };
+          }
+          return { recordset: [] };
+        },
+      };
+    },
+  });
+
+  test("a user with no personal list follows their role's list", async () => {
+    getPool.mockReturnValue(tablePool({ roleRows: [{ ProjectId: 5 }, { ProjectId: 6 }] }));
+    expect(await getProjectScope({ userId: 10, role: "engineer", roleId: 7 })).toEqual([5, 6]);
+  });
+
+  test("a personal list overrides the role's, it is not added to it", async () => {
+    getPool.mockReturnValue(tablePool({ userRows: [{ ProjectId: 9 }], roleRows: [{ ProjectId: 5 }, { ProjectId: 6 }] }));
+    expect(await getProjectScope({ userId: 11, role: "engineer", roleId: 7 })).toEqual([9]);
+  });
+
+  test("neither a personal nor a role list means unrestricted", async () => {
+    getPool.mockReturnValue(tablePool({}));
+    expect(await getProjectScope({ userId: 12, role: "engineer", roleId: 7 })).toBeNull();
+  });
+
+  test("a role with a list does not restrict users of other roles", async () => {
+    getPool.mockReturnValue(tablePool({ roleRows: [{ ProjectId: 5 }] }));
+    expect(await getProjectScope({ userId: 13, role: "engineer", roleId: 8 })).toBeNull();
+  });
+
+  test("admin roles ignore a role list", async () => {
+    getPool.mockReturnValue(tablePool({ roleRows: [{ ProjectId: 5 }] }));
+    expect(await getProjectScope({ userId: 14, role: "admin", roleId: 7 })).toBeNull();
+  });
+
+  test("before migration 534 (no role table) it fails open for the role part", async () => {
+    getPool.mockReturnValue(tablePool({ roleTableMissing: true }));
+    expect(await getProjectScope({ userId: 15, role: "engineer", roleId: 7 })).toBeNull();
+  });
+
+  test("the missing role table does not disturb a user's own list", async () => {
+    getPool.mockReturnValue(tablePool({ userRows: [{ ProjectId: 3 }], roleTableMissing: true }));
+    expect(await getProjectScope({ userId: 16, role: "engineer", roleId: 7 })).toEqual([3]);
+  });
 });
 
 const mockRes = () => {

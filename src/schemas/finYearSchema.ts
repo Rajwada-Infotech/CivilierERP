@@ -49,3 +49,5 @@ export const finYearSchema = z
   });
 
 export type FinYearForm = z.infer<typeof finYearSchema>;
+/** What the form holds before validation fills in the defaults (react-hook-form's input type). */
+export type FinYearFormInput = z.input<typeof finYearSchema>;

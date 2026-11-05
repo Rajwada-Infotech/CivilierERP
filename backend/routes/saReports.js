@@ -1,15 +1,14 @@
 const express = require("express");
 const router = express.Router();
-const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+const { getPool, sql } = require("../db");
+const { countedInvoiceSql } = require("../constants/saStatuses");
+const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { isSaAdmin, isSaTeamLead, actorId, applyLeadScope } = require("../services/saAccess");
 
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 function dateRangeFilter(req, column) {
   // Validate date format before interpolating to prevent SQL injection
@@ -53,7 +52,7 @@ router.get("/campaign-performance", requirePageRight("sa-campaigns", "view"), as
           FROM dbo.SaMarketingInvoice i
           WHERE i.AdId = a.Id
             AND i.IsActive = 1
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
         ) inv
         GROUP BY a.CampaignId
       ),
@@ -106,7 +105,7 @@ router.get("/ad-performance", requirePageRight("sa-ads", "view"), async (req, re
         FROM dbo.SaMarketingInvoice
         WHERE IsActive = 1
           AND AdId IS NOT NULL
-          AND PaymentStatus <> 'Cancelled'
+          AND ${countedInvoiceSql()}
         GROUP BY AdId
       )
       SELECT a.Id, a.Name, a.Status, a.Budget,
@@ -182,7 +181,7 @@ router.get("/cost-per-lead", requirePageRight("sa-campaigns", "view"), async (re
           FROM dbo.SaMarketingInvoice i
           WHERE i.AdId = a.Id
             AND i.IsActive = 1
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
         ) inv
         GROUP BY a.CampaignId
       ),
@@ -211,6 +210,18 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
     const pool = getPool();
     const filter = dateRangeFilter(req, "l.CreatedAt");
     const whereClause = filter ? filter.replace("WHERE ", "AND ") : "";
+    // CallsMade/SiteVisits were joined with no date predicate at all, so
+    // they always showed each user's all-time totals regardless of the
+    // requested range while LeadsHandled was correctly windowed — a
+    // narrow-range report showed lifetime call/visit counts next to a
+    // correctly-scoped lead count. SaInquiryCall has no other timestamp
+    // than CallTime; SaSiteVisit has no "actually occurred" timestamp,
+    // only PreferredDate — same column the team-leader-performance report
+    // below already uses for this exact purpose.
+    const callFilter = dateRangeFilter(req, "c.CallTime");
+    const callClause = callFilter ? callFilter.replace("WHERE ", "AND ") : "";
+    const visitFilter = dateRangeFilter(req, "v.PreferredDate");
+    const visitClause = visitFilter ? visitFilter.replace("WHERE ", "AND ") : "";
 
     const r2 = pool.request();
     let userScope = "";
@@ -235,8 +246,8 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
         SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
       FROM dbo.Users u
       INNER JOIN dbo.SaLead l ON l.AssignedSalespersonId = u.id AND l.IsActive = 1 ${whereClause}
-      LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id
-      LEFT JOIN dbo.SaSiteVisit v ON v.ExecutiveId = u.id
+      LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id ${callClause}
+      LEFT JOIN dbo.SaSiteVisit v ON v.ExecutiveId = u.id ${visitClause}
       WHERE 1=1 ${userScope}
       GROUP BY u.id, u.name
       ORDER BY Bookings DESC
@@ -373,7 +384,7 @@ router.get("/marketing-roi", requirePageRight("sa-campaigns", "view"), async (re
           FROM dbo.SaMarketingInvoice i
           WHERE i.AdId = a.Id
             AND i.IsActive = 1
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
         ) inv
         GROUP BY a.CampaignId
       ),

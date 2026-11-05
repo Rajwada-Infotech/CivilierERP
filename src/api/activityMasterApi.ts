@@ -2,7 +2,7 @@
 
 const BASE = "/api/activity-master";
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface DbActivity {
   id: number;
@@ -11,27 +11,32 @@ export interface DbActivity {
   activity_type: number | null; // 0 = Group, 1 = Activity
   group_id: number | null; // INT in DB
   is_active: boolean;
-  created_by: string | null; // nvarchar(300) â€” stores user email
+  created_by: string | null; // nvarchar(300) — stores user email
   created_datetime: string | null;
-  approved_by: string | null; // nvarchar(300) â€” stores user email
+  approved_by: string | null; // nvarchar(300) — stores user email
   approved_at: string | null;
-  updated_by: string | null; // nvarchar(300) â€” stores user email
+  updated_by: string | null; // nvarchar(300) — stores user email
   updated_at: string | null;
-  belongsTo: string | null; // nvarchar(200) â€” stores group_id as string, NULL for Groups
-  hsn_code: string | null; // nvarchar(50) â€” linked HSN code, only for Activities
-  gl_head_id: number | null; // FK â†’ AccountHeadMaster.LHeadId, only for Activities
+  belongsTo: string | null; // nvarchar(200) — stores group_id as string, NULL for Groups
+  hsn_code: string | null; // nvarchar(50) — linked HSN code, only for Activities
+  gl_head_id: number | null; // FK → AccountHeadMaster.LHeadId, only for Activities
   gl_head_name: string | null;
+  days_of_completion: number | null; // whole days to finish, only for Activities
+  tag_id: number | null; // DPR tag (dbo.DprTagMaster), only for Activities
+  tag_name: string | null;
 }
 
 export interface ActivityPayload {
   activity_name: string | null;
   short_description: string | null;
   activity_type: number; // 0 = Group, 1 = Activity
-  group_id: number | null; // INT â€” NULL for Groups, group's id for Activities
+  group_id: number | null; // INT — NULL for Groups, group's id for Activities
   is_active: boolean;
-  belongsTo: string | null; // nvarchar(200) â€” NULL for Groups, String(group_id) for Activities
-  hsn_code: string | null; // nvarchar(50) â€” NULL for Groups, optional for Activities
+  belongsTo: string | null; // nvarchar(200) — NULL for Groups, String(group_id) for Activities
+  hsn_code: string | null; // nvarchar(50) — NULL for Groups, optional for Activities
   gl_head_id: number | null; // NULL for Groups, optional for Activities
+  days_of_completion: number | null; // NULL for Groups, optional for Activities
+  tag_name: string | null; // NULL for Groups; a new name is added to the DPR Tag Master on save
 }
 
 export interface ApiResponse {
@@ -39,7 +44,7 @@ export interface ApiResponse {
   id?: number;
 }
 
-// â”€â”€â”€ Payload Builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Payload Builder ──────────────────────────────────────────────────────────
 
 export const toPayload = (
   r: Record<string, unknown>,
@@ -61,12 +66,15 @@ export const toPayload = (
     belongsTo: isGroup ? null : groupId ? String(groupId) : null, // NULL for Group, "id" string for Activity
     hsn_code: isGroup ? null : (r.hsnCode as string) || null, // NULL for Group, optional for Activity
     // Custom-render select (see ActivityMaster.tsx) hands back the raw id
-    // as a string via onChange â€” parse it, don't cast, or "" is coerced to 0.
+    // as a string via onChange — parse it, don't cast, or "" is coerced to 0.
     gl_head_id: isGroup ? null : r.glHeadId ? Number(r.glHeadId) : null,
+    // Blank = not set; Groups never carry one.
+    days_of_completion: isGroup || r.daysOfCompletion === "" || r.daysOfCompletion == null ? null : Number(r.daysOfCompletion),
+    tag_name: isGroup ? null : ((r.tagName as string) || "").trim() || null,
   };
 };
 
-// â”€â”€â”€ API Functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── API Functions ────────────────────────────────────────────────────────────
 
 export const getActivities = async (): Promise<DbActivity[]> => {
   const res = await fetchWithAuth(BASE);

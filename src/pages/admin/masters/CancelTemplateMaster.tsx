@@ -100,7 +100,7 @@ const CancelTemplateMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading cancel templates...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load cancel templates.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load cancel templates.</div>;
 
   return (
     <>

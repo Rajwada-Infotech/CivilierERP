@@ -2,8 +2,8 @@
 
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { bumpCacheVersion } = require("../redis");
@@ -31,6 +31,7 @@ router.get("/search", authenticateToken, requirePageRight("short-close", "view")
       finYearId: req.query.finYearId || null,
       companyId: req.query.companyId || null,
       projectId: req.query.projectId || null,
+      scope: req.projectScope ?? null,
     });
     res.json(rows);
   } catch (err) {
@@ -56,6 +57,7 @@ router.post("/process", authenticateToken, requirePageRight("short-close", "edit
       ids,
       remarks: req.body.remarks || null,
       userEmail: user,
+      scope: req.projectScope ?? null,
     });
 
     await bumpCacheVersion(docType === "PO" ? "purchase-orders" : "material-requests");

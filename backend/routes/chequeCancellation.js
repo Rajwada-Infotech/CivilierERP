@@ -15,8 +15,8 @@
  */
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -570,7 +570,7 @@ router.get("/", requirePageRight("cheque-cancellation", "view"), async (req, res
       SELECT
         cc.CCId, cc.ChequeLotId, cc.ChequeLotNumber, cc.ChequeNo, cc.PaymentId,
         cc.BankId, cc.BankName, cc.AccountNumber, cc.Reason, cc.CancelledBy, cc.CancelledAt,
-        np.DocNo, np.PPaymentName, np.PAmount, np.PDate, np.PProject, np.PCompany,
+        np.DocNo, np.PPaymentName, np.PAmount, np.PDate, COALESCE((SELECT TOP 1 ent.name FROM dbo.enterprise ent WHERE ent.business_type = 'P' AND ent.id = TRY_CAST(np.PProject AS INT)), np.PProject) AS PProject, np.PCompany,
         ISNULL(ec.name, np.PCompany) AS PCompanyName
       FROM dbo.CancelledCheque cc
       LEFT JOIN dbo.NewPayment np ON np.PPaymentID = cc.PaymentId

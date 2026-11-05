@@ -27,7 +27,7 @@ function Field({ label, value }: { label: string; value: string }) {
 export function MaterialRequestDetailModal({ recordId, onClose }: { recordId: number | null; onClose: () => void }) {
   const insets = useSafeAreaInsets();
 
-  const { data: mr, isLoading } = useQuery<MaterialRequest>({
+  const { data: mr, isLoading, isError, error, refetch, isRefetching } = useQuery<MaterialRequest>({
     queryKey: ["mr-detail", recordId],
     queryFn: () => getMaterialRequestById(recordId!),
     enabled: recordId != null,
@@ -60,7 +60,26 @@ export function MaterialRequestDetailModal({ recordId, onClose }: { recordId: nu
           </Pressable>
         </View>
 
-        {isLoading || !mr ? (
+        {isError ? (
+          // A failed load used to leave the spinner running for ever (the old check was just "no data yet").
+          <View className="flex-1 items-center justify-center px-8">
+            <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.medium, textAlign: "center" }}>
+              Couldn't load this Material Request.
+            </Text>
+            {error instanceof Error && error.message ? (
+              <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 4, textAlign: "center" }}>{error.message}</Text>
+            ) : null}
+            <Pressable
+              onPress={() => refetch()}
+              disabled={isRefetching}
+              style={{ marginTop: 14, paddingHorizontal: 16, paddingVertical: 8, borderWidth: 1, borderColor: colors.foreground, opacity: isRefetching ? 0.5 : 1 }}
+            >
+              <Text style={{ color: colors.foreground, fontSize: 11, fontFamily: fonts.body.medium, letterSpacing: 1 }}>
+                {isRefetching ? "TRYING…" : "TRY AGAIN"}
+              </Text>
+            </Pressable>
+          </View>
+        ) : isLoading || !mr ? (
           <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
         ) : (
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>

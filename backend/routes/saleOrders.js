@@ -1,8 +1,8 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectAllowed } = require("../services/projectScope");
 
@@ -75,7 +75,8 @@ const HEADER_JOINS = `
 `;
 
 // ─── GET list of sale orders ───────────────────────────────────────────────
-router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60), async (req, res) => {
+// dropOnAnyWrite: a sale order's status also changes from the Approval Inbox, which doesn't bump "sale-orders".
+router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const {
@@ -83,14 +84,15 @@ router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60)
       toCompany,
       fromProject,
       toProject,
-      limit = 100,
-      page = 1,
     } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    // Bounded: a bad or huge ?limit used to reach SQL as NaN / any size.
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const offset = (page - 1) * limit;
 
     const request = pool
       .request()
-      .input("limit", sql.Int, parseInt(limit))
+      .input("limit", sql.Int, limit)
       .input("offset", sql.Int, offset);
 
     let where = "WHERE 1=1" + soVisibleSql(req.projectScope, "so");

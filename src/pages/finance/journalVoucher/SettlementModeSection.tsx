@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BookOpen, CalendarClock, CalendarDays, Hash, Info, Loader2, Wallet, X } from "lucide-react";
+import { chequeLotRange } from "../payment/chequeLotRange";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { BankRecord } from "@/api/bankMasterApi";
@@ -211,16 +212,22 @@ export function SettlementModeSection({
                     aria-label="Cheque lot"
                     value={value.chequeLotId ? String(value.chequeLotId) : ""}
                     onChange={(e) => set({ chequeLotId: e.target.value ? Number(e.target.value) : null, chequeNo: "" })}
-                    className={cn(fieldCls, "font-mono")}
+                    className={cn(fieldCls, "font-heading tabular-nums")}
                   >
                     <option value="">— Select lot —</option>
                     {lots.map((l) => (
                       <option key={l.CId} value={String(l.CId)}>
                         {l.ChequeLotNumber}
+                        {chequeLotRange(l) ? `  · Cheques ${chequeLotRange(l)}` : ""}
                         {l.RemainingCheques != null ? `  (${l.RemainingCheques} remaining)` : ""}
                       </option>
                     ))}
                   </select>
+                  {chequeLotRange(lots.find((l) => l.CId === value.chequeLotId)) && (
+                    <p className="text-[0.6875rem] text-muted-foreground">
+                      Cheques {chequeLotRange(lots.find((l) => l.CId === value.chequeLotId))}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -235,7 +242,7 @@ export function SettlementModeSection({
                       value={value.chequeNo}
                       onChange={(e) => set({ chequeNo: e.target.value })}
                       disabled={loadingNumbers}
-                      className={cn(fieldCls, "font-mono")}
+                      className={cn(fieldCls, "font-heading tabular-nums")}
                     >
                       <option value="">— Select cheque number —</option>
                       {available.map((n) => (
@@ -271,8 +278,8 @@ export function SettlementModeSection({
                   className={cn(
                     "flex items-start gap-2 px-3 py-2 rounded-lg border text-xs",
                     expiry.expired
-                      ? "bg-red-500/5 border-red-500/30 text-red-600 dark:text-red-400"
-                      : "bg-indigo-500/5 border-indigo-500/20 text-indigo-600 dark:text-indigo-400",
+                      ? "bg-destructive/10 border-destructive/40 text-destructive"
+                      : "bg-primary/10 border-foreground/40 text-foreground",
                   )}
                 >
                   {expiry.expired ? <AlertTriangle size={13} className="shrink-0 mt-0.5" /> : <CalendarClock size={13} className="shrink-0 mt-0.5" />}
@@ -284,7 +291,7 @@ export function SettlementModeSection({
                 </div>
               )}
               {postDated && !value.chequeDate && (
-                <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-violet-600 dark:text-violet-400">
+                <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-foreground/40 text-xs text-foreground">
                   <Info size={13} className="shrink-0 mt-0.5" />
                   <span>Post-dated cheques are generally valid for 3 months from the cheque date.</span>
                 </div>

@@ -8,6 +8,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmBookingAmendmentRequest")); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -18,10 +20,9 @@ const { emitNotification } = require("../services/notify");
 const extraChargesRouter = require("./crmExtraCharges");
 const parkingRouter = require("./crmParking");
 const coApplicantRouter = require("./crmCoApplicant");
-const { applyPagination } = require("../services/crmListPagination");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const LIST_SELECT = `
   SELECT r.*,
@@ -38,58 +39,92 @@ const LIST_SELECT = `
   LEFT JOIN dbo.Users revBy ON revBy.id = r.ReviewedBy
 `;
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmHandover / CrmServiceTickets:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Pending, Approved, Rejected } }
+// `counts` honours search + company/project/block but NOT status, so the
+// tabs always show what each status would contain. Without `page` the
+// legacy full-array response is returned so existing callers keep working.
+const AMD_STATUSES = ["Pending", "Approved", "Rejected"];
+const AMD_SORT = {
+  BookingNo: "b.BookingNo",
+  ApplicantName: "a.ApplicantName",
+  Status: "r.Status",
+  RequestedAt: "r.RequestedAt",
+  ReviewedAt: "r.ReviewedAt",
+};
+function buildAmdWhere(request, query, includeStatus, projectScope = null) {
+  const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
+  }
+  if (includeStatus && AMD_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(20), query.status);
+    conds.push("r.Status = @status");
+  }
+  if (query.from) {
+    request.input("from", sql.Date, query.from);
+    conds.push("CAST(r.RequestedAt AS DATE) >= @from");
+  }
+  if (query.to) {
+    request.input("to", sql.Date, query.to);
+    conds.push("CAST(r.RequestedAt AS DATE) <= @to");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 // GET / — every amendment request, optionally filtered by ?status=Pending.
 // Powers the approver-facing review list.
 router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
-    const conds = [];
-    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("r.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
-    }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${LIST_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY r.RequestedAt DESC`);
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildAmdWhere(r0, req.query, true, req.projectScope);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY r.RequestedAt DESC`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY r.RequestedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(20), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmBookingAmendmentRequest r
-          JOIN dbo.CrmBooking b ON b.Id = r.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@st2 IS NULL OR r.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
-        `),
-    ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(AMD_SORT, req.query.sortKey) ? AMD_SORT[req.query.sortKey] : AMD_SORT.RequestedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
+    const countReq = pool.request();
+    const countWhere = buildAmdWhere(countReq, req.query, false, req.projectScope);
+    const countRes = await countReq.query(
+      `SELECT r.Status, COUNT(*) AS C FROM dbo.CrmBookingAmendmentRequest r
+       JOIN dbo.CrmBooking b ON b.Id = r.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       ${countWhere} GROUP BY r.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = AMD_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildAmdWhere(pageReq, req.query, true, req.projectScope);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${SELECT_WITH_BLOCK} ${pageWhere} ORDER BY ${sortCol} ${dir}, r.Id DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    // statusCounts (no All) for the sheet page's tabs; counts kept for other callers.
+    const { All: _all, ...statusCounts } = counts;
+    res.json({ rows: rowsRes.recordset, total, counts, statusCounts, page, pageSize });
   } catch (e) {
     console.error("[crm-booking-amendments] GET / error:", e.message);
     res.status(500).json({ error: e.message });
@@ -146,6 +181,15 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Re-read under a lock: two approvals at once (a double click, two
+      // approvers) both passed the Pending check above and both applied the
+      // change — the extra charge / parking added twice.
+      const live = (await tx.request().input("id", sql.Int, id)
+        .query("SELECT Status FROM dbo.CrmBookingAmendmentRequest WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id")).recordset[0];
+      if (live?.Status !== CrmStatus.PENDING) {
+        await tx.rollback();
+        return res.status(409).json({ error: `This request is already ${live?.Status || "gone"}` });
+      }
       if (reqRow.ChangeType === "ExtraCharge") {
         if (reqRow.Action === "Add") applyResult = await extraChargesRouter.applyAddExtraCharge(tx, reqRow.BookingId, proposedChange, actor);
         else if (reqRow.Action === "Edit") applyResult = await extraChargesRouter.applyEditExtraCharge(tx, reqRow.TargetId, proposedChange, actor);
@@ -192,7 +236,7 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
     // Legal visibility — this booking's financial details just changed
     // after its Agreement documents were already under verification.
     const agreement = await pool.request().input("bid", sql.Int, reqRow.BookingId)
-      .query("SELECT Id, AgreementNo, LegalExecutiveId FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Id, AgreementNo, LegalExecutiveId FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
     if (agreement.recordset.length && agreement.recordset[0].LegalExecutiveId) {
       const ag = agreement.recordset[0];
       await emitNotification(pool, ag.LegalExecutiveId, "crm_booking_amendment_approved",
@@ -232,15 +276,17 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
     if (!row.recordset.length) return res.status(404).json({ error: "Amendment request not found" });
     if (row.recordset[0].Status !== CrmStatus.PENDING) return res.status(400).json({ error: `This request is already ${row.recordset[0].Status}` });
 
-    await pool.request()
+    const upd = await pool.request()
       .input("id", sql.Int, id)
       .input("rb", sql.Int, actorId(req))
       .input("notes", sql.NVarChar(500), notes)
       .query(`
         UPDATE dbo.CrmBookingAmendmentRequest SET
           Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
-        WHERE Id = @id
+        WHERE Id = @id AND Status = '${CrmStatus.PENDING}'
       `);
+    // Approved a moment ago by someone else: never mark an applied change Rejected.
+    if (!upd.rowsAffected[0]) return res.status(409).json({ error: "This request was just reviewed by someone else — refresh" });
     // Single write — reject applies nothing, so there's no compound-write
     // atomicity risk here the way approve above has.
 

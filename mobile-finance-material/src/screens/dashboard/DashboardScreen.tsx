@@ -7,6 +7,7 @@
 // LoginScreen.tsx's file header for the same reasoning: no functional loss,
 // heavy animation on every card entrance doesn't read as "polish" on a
 // touch device the way it does with a mouse.
+import { fmtIstClock, istHour } from "@/utils/istTime";
 import { useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl } from "react-native";
 import { useNavigation } from "@react-navigation/native";
@@ -47,7 +48,7 @@ export default function DashboardScreen() {
 
   const firstName = currentUser?.name?.split(" ")[0] ?? "there";
 
-  const hour = new Date().getHours();
+  const hour = istHour();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   // Only the two modules this app is for are fetched — nothing is loaded for
@@ -67,7 +68,7 @@ export default function DashboardScreen() {
   );
 
   const lastUpdated = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+    ? fmtIstClock(dataUpdatedAt)
     : null;
 
   const activityFeed: FeedItemData[] = useMemo(() => {

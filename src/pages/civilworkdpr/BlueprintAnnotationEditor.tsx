@@ -15,6 +15,7 @@ import {
 } from "@/api/dependencyActivityAssignmentApi";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
+import { fmtIstDateTime } from "@/lib/istTime";
 
 // ── Shape model ──────────────────────────────────────────────────────────
 // A plain discriminated union serialized straight to JSON — no need for
@@ -450,7 +451,7 @@ export default function BlueprintAnnotationEditor({
                 {annotation?.updatedBy && (
                   <p className="text-[0.6875rem] text-muted-foreground">
                     Last marked up by <span className="font-medium text-foreground">{annotation.updatedBy}</span>
-                    {annotation.updatedAt && ` on ${new Date(annotation.updatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`}
+                    {annotation.updatedAt && ` on ${fmtIstDateTime(annotation.updatedAt)}`}
                   </p>
                 )}
                 {referenceContext && referenceShapesDisplay.length > 0 && (

@@ -5,7 +5,8 @@ import { MoneyChange, Add, Edit2, ArrowUp2, ArrowDown2, Copy, TickCircle, CloseC
 import { Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell, HR_PAYROLL_ACCENT as ACCENT, HR_GRADIENT } from "@/components/hrpayroll/HrPayrollShell";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { FormulaBuilderModal } from "@/components/hrpayroll/FormulaBuilderModal";
 import { getEmployeeCompanyOptions } from "@/api/employeeMasterApi";
 import { getDeductionAdditions, type DeductionAdditionRow } from "@/api/deductionAdditionMasterApi";
@@ -374,404 +375,422 @@ const SalaryStructure: React.FC = () => {
 
   const calculationBaseOptions = [...RESERVED_KEYWORDS, ...availableHeadsForFormula.map((h) => h.code)];
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading salary structures...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load Salary Structure.</div>;
+  // ── Presentation helpers (display only) ────────────────────────────────
+  const TYPE_TONE: Record<string, { bar: string; chip: string; label: string }> = {
+    Earning: { bar: "#10b981", chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400", label: "Earning" },
+    Deduction: { bar: "#ef4444", chip: "bg-red-500/10 text-red-600 dark:text-red-400", label: "Deduction" },
+    "Employer Contribution": { bar: "#3b82f6", chip: "bg-blue-500/10 text-blue-600 dark:text-blue-400", label: "Employer" },
+    Informational: { bar: "#94a3b8", chip: "bg-slate-500/10 text-slate-600 dark:text-slate-300", label: "Info" },
+  };
+  const toneOf = (t?: string) => TYPE_TONE[t || ""] ?? TYPE_TONE.Informational;
+  const [libSearch, setLibSearch] = useState("");
+  const shownStructures = structures.filter((r) => {
+    const q = libSearch.trim().toLowerCase();
+    return !q || [r.Name, r.Code, r.CompanyName].some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const card = "rounded-2xl bg-card/80 backdrop-blur-lg border border-border shadow-sm";
+  const StepHead = ({ n, title, hint }: { n: number; title: string; hint: string }) => (
+    <div className="flex items-center gap-3 mb-4">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm" style={{ background: HR_GRADIENT }}>{n}</span>
+      <div>
+        <p className="text-sm font-heading font-semibold text-foreground leading-tight">{title}</p>
+        <p className="text-[0.6875rem] text-muted-foreground">{hint}</p>
+      </div>
+    </div>
+  );
+  const Flag = ({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[0.6875rem] font-medium transition-colors ${on ? "text-white border-transparent shadow-sm" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+      style={on ? { background: HR_GRADIENT } : undefined}
+    >
+      {on && <TickCircle size={11} />} {label}
+    </button>
+  );
+  const inr = (n: number) => "₹" + n.toLocaleString("en-IN");
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 xl:grid-cols-[22rem_minmax(0,1fr)] gap-5 p-1">
+        <div className="h-96 rounded-2xl bg-muted/50 animate-pulse" />
+        <div className="h-[32rem] rounded-2xl bg-muted/40 animate-pulse" />
+      </div>
+    );
+  }
+  if (error) return <div className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">Failed to load Salary Structure.</div>;
+
+  const canWrite = editingId === null ? rights.canCreate : rights.canEdit;
+  const t = previewResult?.totals;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Salary Structure"]} />
       <HrPayrollShell title="Salary Structure Master" subtitle="Formula-driven payroll templates built from Salary Heads" icon={MoneyChange}>
-        <div className="space-y-5">
-          {(rights.canCreate || rights.canEdit) && (
-            <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
-                <div>
-                  <h2 className="font-heading font-semibold text-foreground text-sm">
-                    {editingId !== null ? `Edit Salary Structure${header.isActive ? "" : " (Draft)"}` : "New Salary Structure"}
-                  </h2>
-                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                    {editingId !== null ? "Modify the template below and save." : "Define the header, add Salary Head lines, then validate and activate."}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors"
-                >
+        <div className="grid grid-cols-1 xl:grid-cols-[22rem_minmax(0,1fr)] gap-5 items-start">
+          {/* ═════════ Library ═════════ */}
+          <aside className={`${card} p-4 xl:sticky xl:top-20`}>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div>
+                <p className="text-sm font-heading font-semibold text-foreground">Structure library</p>
+                <p className="text-[0.6875rem] text-muted-foreground">{structures.length} template{structures.length !== 1 ? "s" : ""}</p>
+              </div>
+              {(rights.canCreate || rights.canEdit) && (
+                <button type="button" onClick={resetForm} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-heading font-semibold text-white shadow-sm" style={{ background: HR_GRADIENT }}>
                   <Add size={14} /> New
                 </button>
-              </div>
+              )}
+            </div>
+            <input value={libSearch} onChange={(e) => setLibSearch(e.target.value)} placeholder="Search name, code, company…" className={smallInput + " mb-3"} />
+            <div className="space-y-2 max-h-[34rem] overflow-y-auto pr-0.5">
+              {shownStructures.length === 0 ? (
+                <p className="py-8 text-center text-xs text-muted-foreground">{structures.length ? "No templates match." : "No templates yet — build one in the builder."}</p>
+              ) : shownStructures.map((row) => {
+                const sel = editingId === row.SalaryStructureId;
+                return (
+                  <div
+                    key={row.SalaryStructureId}
+                    className={`group rounded-xl border p-3 transition-all ${sel ? "shadow-md" : "border-border hover:border-border hover:shadow-sm bg-background/40"}`}
+                    style={sel ? { borderColor: `${ACCENT}66`, background: `${ACCENT}0d` } : undefined}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <button type="button" onClick={() => rights.canEdit && startEdit(row)} className="min-w-0 text-left" disabled={!rights.canEdit}>
+                        <p className="text-sm font-semibold text-foreground truncate">{row.Name}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground truncate">
+                          <span className="font-mono">{row.Code}</span> · v{row.Version} · {row.Lines.length} line{row.Lines.length !== 1 ? "s" : ""}
+                        </p>
+                        {row.CompanyName && <p className="text-[0.6875rem] text-muted-foreground truncate">{row.CompanyName}</p>}
+                      </button>
+                      <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${row.IsActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+                        {row.IsActive ? "Active" : "Draft"}
+                      </span>
+                    </div>
+                    <div className="mt-2.5 flex items-center gap-1 border-t border-border/60 pt-2">
+                      {rights.canEdit && (
+                        <button onClick={() => startEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"><Edit2 size={14} /></button>
+                      )}
+                      {rights.canEdit && !row.IsActive && (
+                        <button onClick={() => handleActivate(row.SalaryStructureId)} title="Activate" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.6875rem] font-medium text-emerald-600 hover:bg-emerald-500/10"><TickCircle size={13} /> Activate</button>
+                      )}
+                      {rights.canEdit && row.IsActive && (
+                        <button onClick={() => handleDeactivate(row.SalaryStructureId)} title="Deactivate" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.6875rem] font-medium text-amber-600 hover:bg-amber-500/10"><CloseCircle size={13} /> Deactivate</button>
+                      )}
+                      <span className="flex-1" />
+                      {rights.canCreate && (
+                        <button onClick={() => { setCopyTargetId(row.SalaryStructureId); setCopyCode(""); setCopyName(`${row.Name} Copy`); }} title="Copy Structure" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"><Copy size={14} /></button>
+                      )}
+                      {rights.canDelete && (
+                        deleteConfirmId === row.SalaryStructureId ? (
+                          <span className="flex items-center gap-1">
+                            <button onClick={() => handleDelete(row.SalaryStructureId)} className="px-2 py-1 rounded-md text-[0.6875rem] font-medium bg-destructive text-destructive-foreground">Confirm</button>
+                            <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded-md text-[0.6875rem] font-medium border border-border">Cancel</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => setDeleteConfirmId(row.SalaryStructureId)} title="Delete" className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 size={14} /></button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </aside>
 
-              <div className="p-5 space-y-5">
-                {/* Header fields */}
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {/* ═════════ Builder ═════════ */}
+          <div className="space-y-5 min-w-0">
+            {(rights.canCreate || rights.canEdit) && (
+              <div className={`${card} overflow-hidden`}>
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border" style={{ background: `${ACCENT}0a` }}>
                   <div>
-                    <label className={labelBase}>Company</label>
-                    <select value={header.companyId} onChange={(e) => setHeader((h) => ({ ...h, companyId: e.target.value }))} className={inputBase}>
-                      <option value="">Select...</option>
-                      {companyOptions.map((c) => (
-                        <option key={c.id} value={String(c.id)}>{c.label}</option>
-                      ))}
-                    </select>
+                    <p className="text-[0.625rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">{editingId !== null ? "Editing" : "New template"}</p>
+                    <h2 className="font-heading font-semibold text-foreground">
+                      {editingId !== null ? (header.name || "Salary structure") : "Build a salary structure"}
+                    </h2>
                   </div>
-                  <div>
-                    <label className={labelBase}>Structure Name<span className="text-destructive ml-0.5">*</span></label>
-                    <input type="text" value={header.name} onChange={(e) => setHeader((h) => ({ ...h, name: e.target.value }))} className={inputBase} />
-                  </div>
-                  <div>
-                    <label className={labelBase}>Structure Code<span className="text-destructive ml-0.5">*</span></label>
-                    <input type="text" value={header.code} onChange={(e) => setHeader((h) => ({ ...h, code: e.target.value.toUpperCase() }))} className={inputBase} />
-                  </div>
-                  <div className="md:col-span-3">
-                    <label className={labelBase}>Description</label>
-                    <textarea value={header.description} onChange={(e) => setHeader((h) => ({ ...h, description: e.target.value }))} rows={2} className={inputBase} />
-                  </div>
-                  <div>
-                    <label className={labelBase}>Effective From</label>
-                    <DateInput value={header.effectiveFrom} onChange={(e) => setHeader((h) => ({ ...h, effectiveFrom: e.target.value }))} className={inputBase} />
-                  </div>
-                  <div>
-                    <label className={labelBase}>Effective To</label>
-                    <DateInput value={header.effectiveTo} onChange={(e) => setHeader((h) => ({ ...h, effectiveTo: e.target.value }))} className={inputBase} />
-                  </div>
-                  <div>
-                    <label className={labelBase}>CTC Frequency</label>
-                    <select value={header.ctcFrequency} onChange={(e) => setHeader((h) => ({ ...h, ctcFrequency: e.target.value as CTCFrequency }))} className={inputBase}>
-                      <option value="Monthly">Monthly</option>
-                      <option value="Annual">Annual</option>
-                    </select>
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <label className={labelBase + " mb-0"}>Status</label>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${header.isActive ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" : "bg-muted text-muted-foreground border-border"}`}>
-                      {header.isActive ? "Active" : "Draft / Inactive"}
-                    </span>
-                  </div>
+                  <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold ${header.isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+                    {header.isActive ? "Active" : "Draft / Inactive"}
+                  </span>
                 </div>
 
-                {/* Component grid */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className={labelBase + " mb-0"}>Salary Components<span className="text-destructive ml-0.5">*</span></label>
-                    <button type="button" onClick={addLine} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors">
-                      <Add size={14} /> Add Row
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {lines.map((line, idx) => {
-                      const head = heads.find((h) => String(h.Id) === line.deductionAdditionId);
-                      return (
-                        <div key={idx} className="rounded-lg border border-border p-3 bg-muted/10">
-                          <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
-                            <div className="md:col-span-4">
-                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Salary Head</label>
-                              <select value={line.deductionAdditionId} onChange={(e) => updateLine(idx, { deductionAdditionId: e.target.value })} className={smallInput}>
-                                <option value="">Select...</option>
-                                {heads.map((h) => (
-                                  <option key={h.Id} value={String(h.Id)}>{h.Code} — {h.Name} ({h.Type})</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="md:col-span-2">
-                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Calc Type</label>
-                              <select value={line.calculationType} onChange={(e) => updateLine(idx, { calculationType: e.target.value as CalculationType })} className={smallInput}>
-                                {CALCULATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                              </select>
-                            </div>
-                            <div className="md:col-span-4">
-                              {line.calculationType === "Fixed" && (
-                                <>
-                                  <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Fixed Amount</label>
-                                  <input type="number" value={line.amount} onChange={(e) => updateLine(idx, { amount: e.target.value })} className={smallInput} placeholder="Amount" />
-                                </>
-                              )}
-                              {line.calculationType === "Percentage" && (
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Base</label>
-                                    <select value={line.calculationBase} onChange={(e) => updateLine(idx, { calculationBase: e.target.value })} className={smallInput}>
-                                      <option value="">Select...</option>
-                                      {calculationBaseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Percentage</label>
-                                    <input type="number" value={line.percentage} onChange={(e) => updateLine(idx, { percentage: e.target.value })} className={smallInput} placeholder="%" />
-                                  </div>
-                                </div>
-                              )}
-                              {line.calculationType === "Formula" && (
-                                <>
-                                  <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Formula</label>
-                                  <div className="flex gap-1.5">
-                                    <input type="text" value={line.formula} onChange={(e) => updateLine(idx, { formula: e.target.value })} className={smallInput + " font-mono"} placeholder="e.g. GROSS - BASIC - HRA" />
-                                    <button type="button" onClick={() => setFormulaBuilderIdx(idx)} className="px-2.5 py-1.5 rounded-lg text-xs border border-border hover:bg-muted transition-colors whitespace-nowrap">
-                                      Builder
-                                    </button>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                            <div className="md:col-span-2 flex items-center justify-end gap-1">
-                              <button type="button" onClick={() => moveLine(idx, -1)} disabled={idx === 0} className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed text-muted-foreground">
-                                <ArrowUp2 size={14} />
-                              </button>
-                              <button type="button" onClick={() => moveLine(idx, 1)} disabled={idx === lines.length - 1} className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed text-muted-foreground">
-                                <ArrowDown2 size={14} />
-                              </button>
-                              <button type="button" onClick={() => removeLine(idx)} disabled={lines.length === 1} className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed text-muted-foreground hover:text-destructive">
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mt-2">
-                            <div>
-                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Min Amount</label>
-                              <input type="number" value={line.minAmount} onChange={(e) => updateLine(idx, { minAmount: e.target.value })} className={smallInput} />
-                            </div>
-                            <div>
-                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Max Amount</label>
-                              <input type="number" value={line.maxAmount} onChange={(e) => updateLine(idx, { maxAmount: e.target.value })} className={smallInput} />
-                            </div>
-                            <div>
-                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Rounding</label>
-                              <select value={line.roundingRule} onChange={(e) => updateLine(idx, { roundingRule: e.target.value as RoundingRule })} className={smallInput}>
-                                {ROUNDING_RULES.map((r) => <option key={r} value={r}>{r}</option>)}
-                              </select>
-                            </div>
-                            <div className="col-span-2 md:col-span-3 flex flex-wrap items-center gap-x-3 gap-y-1 pt-4">
-                              <label className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer">
-                                <input type="checkbox" checked={line.includeInGross} onChange={(e) => updateLine(idx, { includeInGross: e.target.checked })} /> In Gross
-                              </label>
-                              <label className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer">
-                                <input type="checkbox" checked={line.includeInCTC} onChange={(e) => updateLine(idx, { includeInCTC: e.target.checked })} /> In CTC
-                              </label>
-                              <label className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer">
-                                <input type="checkbox" checked={line.includeInNet} onChange={(e) => updateLine(idx, { includeInNet: e.target.checked })} /> In Net
-                              </label>
-                              <label className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer">
-                                <input type="checkbox" checked={line.taxable} onChange={(e) => updateLine(idx, { taxable: e.target.checked })} /> Taxable
-                              </label>
-                              <label className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer">
-                                <input type="checkbox" checked={line.isActive} onChange={(e) => updateLine(idx, { isActive: e.target.checked })} /> Active
-                              </label>
-                              <label className="flex items-center gap-1.5 text-xs font-semibold text-foreground cursor-pointer">
-                                <input type="radio" checked={line.isBalancing} onChange={() => setBalancing(idx)} /> Balancing Component
-                              </label>
-                            </div>
-                          </div>
-                          {head && (
-                            <p className="text-[0.625rem] text-muted-foreground mt-1.5">
-                              {head.Code} · {head.Type}{head.LedgerName ? ` · ${head.LedgerName}` : ""}
-                            </p>
-                          )}
+                <div className="p-5 space-y-7">
+                  {/* ① Details */}
+                  <section>
+                    <StepHead n={1} title="Details" hint="Name the template and when it applies" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-4">
+                      <div className="min-w-0">
+                        <label className={labelBase}>Company</label>
+                        <SearchableNativeSelect value={header.companyId} onChange={(e) => setHeader((h) => ({ ...h, companyId: e.target.value }))} className={inputBase} searchPlaceholder="Search company…">
+                          <option value="">Select...</option>
+                          {companyOptions.map((c) => (
+                            <option key={c.id} value={String(c.id)}>{c.label}</option>
+                          ))}
+                        </SearchableNativeSelect>
+                      </div>
+                      <div>
+                        <label className={labelBase}>Structure Name<span className="text-destructive ml-0.5">*</span></label>
+                        <input type="text" value={header.name} onChange={(e) => setHeader((h) => ({ ...h, name: e.target.value }))} className={inputBase} placeholder="e.g. Staff — Standard" />
+                      </div>
+                      <div>
+                        <label className={labelBase}>Structure Code<span className="text-destructive ml-0.5">*</span></label>
+                        <input type="text" value={header.code} onChange={(e) => setHeader((h) => ({ ...h, code: e.target.value.toUpperCase() }))} className={inputBase + " font-mono"} placeholder="e.g. STF-STD" />
+                      </div>
+                      <div>
+                        <label className={labelBase}>Effective From</label>
+                        <DateInput value={header.effectiveFrom} onChange={(e) => setHeader((h) => ({ ...h, effectiveFrom: e.target.value }))} className={inputBase} />
+                      </div>
+                      <div>
+                        <label className={labelBase}>Effective To</label>
+                        <DateInput value={header.effectiveTo} onChange={(e) => setHeader((h) => ({ ...h, effectiveTo: e.target.value }))} className={inputBase} />
+                      </div>
+                      <div>
+                        <label className={labelBase}>CTC Frequency</label>
+                        <div className="flex rounded-lg border border-border bg-muted p-0.5">
+                          {(["Monthly", "Annual"] as CTCFrequency[]).map((f) => (
+                            <button key={f} type="button" onClick={() => setHeader((h) => ({ ...h, ctcFrequency: f }))}
+                              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${header.ctcFrequency === f ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                              {f}
+                            </button>
+                          ))}
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
+                      <div className="col-span-full">
+                        <label className={labelBase}>Description</label>
+                        <textarea value={header.description} onChange={(e) => setHeader((h) => ({ ...h, description: e.target.value }))} rows={2} className={inputBase + " resize-none"} placeholder="Optional — who this template is for" />
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* ② Components */}
+                  <section>
+                    <div className="flex items-start justify-between gap-3">
+                      <StepHead n={2} title="Salary components" hint="Each line is one salary head and how it's calculated, in order" />
+                      <button type="button" onClick={addLine} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors">
+                        <Add size={14} /> Add component
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {lines.map((line, idx) => {
+                        const head = heads.find((h) => String(h.Id) === line.deductionAdditionId);
+                        const tone = toneOf(head?.Type);
+                        return (
+                          <div key={idx} className={`relative rounded-xl border bg-background/50 p-3.5 pl-5 ${line.isActive ? "border-border" : "border-dashed border-border opacity-70"}`}>
+                            <span className="absolute left-0 top-3 bottom-3 w-1 rounded-full" style={{ background: tone.bar }} />
+                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-[0.6875rem] font-bold text-muted-foreground">{idx + 1}</span>
+                              {head ? (
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${tone.chip}`}>{tone.label}</span>
+                              ) : (
+                                <span className="text-[0.6875rem] text-muted-foreground">Pick a salary head</span>
+                              )}
+                              {line.isBalancing && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold text-white" style={{ background: HR_GRADIENT }}>★ Balancing</span>}
+                              <span className="flex-1" />
+                              <button type="button" onClick={() => moveLine(idx, -1)} disabled={idx === 0} title="Move up" className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 text-muted-foreground"><ArrowUp2 size={14} /></button>
+                              <button type="button" onClick={() => moveLine(idx, 1)} disabled={idx === lines.length - 1} title="Move down" className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 text-muted-foreground"><ArrowDown2 size={14} /></button>
+                              <button type="button" onClick={() => removeLine(idx)} disabled={lines.length === 1} title="Remove" className="p-1.5 rounded-lg hover:bg-destructive/10 disabled:opacity-30 text-muted-foreground hover:text-destructive"><Trash2 size={14} /></button>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_auto_minmax(0,1.2fr)] gap-3 items-end">
+                              <div className="min-w-0">
+                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Salary Head</label>
+                                <select value={line.deductionAdditionId} onChange={(e) => updateLine(idx, { deductionAdditionId: e.target.value })} className={smallInput}>
+                                  <option value="">Select...</option>
+                                  {heads.map((h) => (
+                                    <option key={h.Id} value={String(h.Id)}>{h.Code} — {h.Name} ({h.Type})</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Calculated as</label>
+                                <div className="flex rounded-lg border border-border bg-muted p-0.5">
+                                  {CALCULATION_TYPES.map((ct) => (
+                                    <button key={ct} type="button" onClick={() => updateLine(idx, { calculationType: ct })}
+                                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${line.calculationType === ct ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                                      {ct === "Percentage" ? "%" : ct}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="min-w-0">
+                                {line.calculationType === "Fixed" && (
+                                  <>
+                                    <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Fixed Amount (₹)</label>
+                                    <input type="number" value={line.amount} onChange={(e) => updateLine(idx, { amount: e.target.value })} className={smallInput} placeholder="Amount" />
+                                  </>
+                                )}
+                                {line.calculationType === "Percentage" && (
+                                  <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
+                                    <div className="min-w-0">
+                                      <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Of</label>
+                                      <select value={line.calculationBase} onChange={(e) => updateLine(idx, { calculationBase: e.target.value })} className={smallInput}>
+                                        <option value="">Select...</option>
+                                        {calculationBaseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Percent</label>
+                                      <input type="number" value={line.percentage} onChange={(e) => updateLine(idx, { percentage: e.target.value })} className={smallInput} placeholder="%" />
+                                    </div>
+                                  </div>
+                                )}
+                                {line.calculationType === "Formula" && (
+                                  <>
+                                    <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Formula</label>
+                                    <div className="flex gap-1.5">
+                                      <input type="text" value={line.formula} onChange={(e) => updateLine(idx, { formula: e.target.value })} className={smallInput + " font-mono"} placeholder="e.g. GROSS - BASIC - HRA" />
+                                      <button type="button" onClick={() => setFormulaBuilderIdx(idx)} className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white whitespace-nowrap shadow-sm" style={{ background: HR_GRADIENT }}>
+                                        ƒ Builder
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-3 gap-2 sm:max-w-md">
+                              <div>
+                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Min ₹</label>
+                                <input type="number" value={line.minAmount} onChange={(e) => updateLine(idx, { minAmount: e.target.value })} className={smallInput} />
+                              </div>
+                              <div>
+                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Max ₹</label>
+                                <input type="number" value={line.maxAmount} onChange={(e) => updateLine(idx, { maxAmount: e.target.value })} className={smallInput} />
+                              </div>
+                              <div>
+                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Rounding</label>
+                                <select value={line.roundingRule} onChange={(e) => updateLine(idx, { roundingRule: e.target.value as RoundingRule })} className={smallInput}>
+                                  {ROUNDING_RULES.map((r) => <option key={r} value={r}>{r}</option>)}
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                              <Flag on={line.includeInGross} label="In Gross" onClick={() => updateLine(idx, { includeInGross: !line.includeInGross })} />
+                              <Flag on={line.includeInCTC} label="In CTC" onClick={() => updateLine(idx, { includeInCTC: !line.includeInCTC })} />
+                              <Flag on={line.includeInNet} label="In Net" onClick={() => updateLine(idx, { includeInNet: !line.includeInNet })} />
+                              <Flag on={line.taxable} label="Taxable" onClick={() => updateLine(idx, { taxable: !line.taxable })} />
+                              <Flag on={line.isActive} label="Active" onClick={() => updateLine(idx, { isActive: !line.isActive })} />
+                              <Flag on={line.isBalancing} label="★ Balancing" onClick={() => setBalancing(idx)} />
+                            </div>
+                            {head && (
+                              <p className="text-[0.625rem] text-muted-foreground mt-2">
+                                {head.Code} · {head.Type}{head.LedgerName ? ` · ${head.LedgerName}` : ""}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  {validationErrors.length > 0 && (
+                    <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 space-y-1">
+                      <p className="text-xs font-heading font-semibold text-destructive">Validation issues</p>
+                      {validationErrors.map((e, i) => (
+                        <p key={i} className="text-xs text-destructive flex items-start gap-1.5">
+                          <CloseCircle size={13} className="mt-0.5 shrink-0" /> {e.message}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {validationErrors.length > 0 && (
-                  <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-1">
-                    <p className="text-xs font-heading font-semibold text-destructive">Validation issues</p>
-                    {validationErrors.map((e, i) => (
-                      <p key={i} className="text-xs text-destructive flex items-start gap-1.5">
-                        <CloseCircle size={13} className="mt-0.5 shrink-0" /> {e.message}
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl flex-wrap">
-                <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
-                  {canSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
-                </p>
-                <div className="flex items-center gap-2 flex-wrap sm:ml-auto">
+                {/* Pinned action bar */}
+                <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 px-5 py-3 border-t border-border bg-card/95 backdrop-blur">
+                  <span className={`text-[0.6875rem] font-medium ${canSave ? "text-emerald-600" : "text-muted-foreground"}`}>
+                    {canSave ? "● Ready to save" : "Name, code and at least one component are required"}
+                  </span>
+                  <span className="flex-1" />
                   <button type="button" onClick={handleValidate} disabled={validating || !canSave} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
-                    Validate Formula
+                    {validating ? "Validating…" : "Validate Formula"}
                   </button>
                   <button type="button" onClick={runPreview} disabled={previewLoading || !canSave} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
                     Preview
                   </button>
-                  <button
-                    onClick={() => handleSave(false)}
-                    disabled={!canSave || saving || (editingId === null ? !rights.canCreate : !rights.canEdit)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-                  >
+                  <button onClick={() => handleSave(false)} disabled={!canSave || saving || !canWrite} className="px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
                     Save
                   </button>
-                  <button
-                    onClick={() => handleSave(true)}
-                    disabled={!canSave || saving || (editingId === null ? !rights.canCreate : !rights.canEdit)}
-                    className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40"
-                  >
-                    {editingId !== null ? "Update & Calculate" : "Save & Calculate"}
+                  <button onClick={() => handleSave(true)} disabled={!canSave || saving || !canWrite} className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm disabled:opacity-40" style={{ background: HR_GRADIENT }}>
+                    {saving ? "Saving…" : editingId !== null ? "Update & Calculate" : "Save & Calculate"}
                   </button>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Preview calculator */}
-          <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-            <div className="px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
-              <h3 className="font-heading font-semibold text-foreground text-sm">Preview Calculator</h3>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">Enter a test CTC and calculate the salary breakup this template produces.</p>
-            </div>
-            <div className="p-5 space-y-4">
+            {/* ③ Check & preview */}
+            <div className={`${card} p-5`}>
+              <StepHead n={3} title="Preview the breakup" hint="Try a test CTC and see exactly what this template pays" />
               <div className="flex flex-wrap items-end gap-3">
                 <div>
-                  <label className={labelBase}>Test CTC</label>
-                  <input type="number" value={testCtc} onChange={(e) => setTestCtc(e.target.value)} className={inputBase} style={{ width: 180 }} />
+                  <label className={labelBase}>Test CTC (₹)</label>
+                  <input type="number" value={testCtc} onChange={(e) => setTestCtc(e.target.value)} className={inputBase + " w-44"} />
                 </div>
                 <div>
                   <label className={labelBase}>Frequency</label>
-                  <select value={testCtcFrequency} onChange={(e) => setTestCtcFrequency(e.target.value as CTCFrequency)} className={inputBase} style={{ width: 140 }}>
-                    <option value="Monthly">Monthly</option>
-                    <option value="Annual">Annual</option>
-                  </select>
+                  <div className="flex rounded-lg border border-border bg-muted p-0.5">
+                    {(["Monthly", "Annual"] as CTCFrequency[]).map((f) => (
+                      <button key={f} type="button" onClick={() => setTestCtcFrequency(f)}
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${testCtcFrequency === f ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                        {f}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <button type="button" onClick={runPreview} disabled={previewLoading} className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40">
+                <button type="button" onClick={runPreview} disabled={previewLoading} className="h-10 px-5 rounded-lg text-sm font-heading font-semibold text-white shadow-sm disabled:opacity-40" style={{ background: HR_GRADIENT }}>
                   {previewLoading ? "Calculating..." : "Calculate"}
                 </button>
               </div>
 
               {previewResult && !previewResult.valid && (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-1">
+                <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-1">
                   {previewResult.errors.map((e, i) => (
                     <p key={i} className="text-xs text-destructive">{e.message}</p>
                   ))}
                 </div>
               )}
 
-              {previewResult && previewResult.valid && previewResult.totals && (
-                <div className="rounded-lg border border-border overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-muted/30 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
-                        <th className="text-left px-3 py-2">Salary Head</th>
-                        <th className="text-left px-3 py-2">Type</th>
-                        <th className="text-left px-3 py-2">Calculation</th>
-                        <th className="text-right px-3 py-2">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {previewResult.lines.map((l) => (
-                        <tr key={l.DeductionAdditionId}>
-                          <td className="px-3 py-2 font-medium">{l.HeadName}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{l.HeadType}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{l.Calculation}</td>
-                          <td className="px-3 py-2 text-right font-mono">₹{l.Amount.toLocaleString("en-IN")}</td>
-                        </tr>
-                      ))}
-                      <tr className="bg-muted/20 font-semibold">
-                        <td className="px-3 py-2" colSpan={3}>Gross Salary</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{previewResult.totals.GrossSalary.toLocaleString("en-IN")}</td>
-                      </tr>
-                      <tr className="font-semibold">
-                        <td className="px-3 py-2" colSpan={3}>Total Employee Deduction</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{previewResult.totals.TotalEmployeeDeduction.toLocaleString("en-IN")}</td>
-                      </tr>
-                      <tr className="font-semibold">
-                        <td className="px-3 py-2" colSpan={3}>Net Salary</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{previewResult.totals.NetSalary.toLocaleString("en-IN")}</td>
-                      </tr>
-                      <tr className="font-semibold">
-                        <td className="px-3 py-2" colSpan={3}>Employer Contribution</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{previewResult.totals.TotalEmployerContribution.toLocaleString("en-IN")}</td>
-                      </tr>
-                      <tr className="bg-primary/10 font-bold">
-                        <td className="px-3 py-2" colSpan={3}>Total CTC</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{previewResult.totals.TotalCTC.toLocaleString("en-IN")}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+              {previewResult && previewResult.valid && t && (
+                <div className="mt-5 space-y-4">
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
+                    {([
+                      ["Gross", t.GrossSalary, "text-foreground"],
+                      ["Employee deduction", t.TotalEmployeeDeduction, "text-red-500"],
+                      ["Net salary", t.NetSalary, "text-emerald-600 dark:text-emerald-400"],
+                      ["Employer contribution", t.TotalEmployerContribution, "text-blue-600 dark:text-blue-400"],
+                    ] as const).map(([l, v, c]) => (
+                      <div key={l} className="rounded-xl border border-border bg-background/50 px-3.5 py-2.5">
+                        <p className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">{l}</p>
+                        <p className={`text-lg font-heading font-bold tabular-nums ${c}`}>{inr(v)}</p>
+                      </div>
+                    ))}
+                    <div className="rounded-xl px-3.5 py-2.5 text-white shadow-sm col-span-2 lg:col-span-1" style={{ background: HR_GRADIENT }}>
+                      <p className="text-[0.625rem] uppercase tracking-wider text-white/80">Total CTC</p>
+                      <p className="text-lg font-heading font-bold tabular-nums">{inr(t.TotalCTC)}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-border divide-y divide-border/60 overflow-hidden">
+                    {previewResult.lines.map((l) => {
+                      const tone = toneOf(l.HeadType);
+                      const pct = t.TotalCTC ? Math.min(100, (Math.abs(l.Amount) / t.TotalCTC) * 100) : 0;
+                      return (
+                        <div key={l.DeductionAdditionId} className="px-4 py-2.5">
+                          <div className="flex items-center gap-3">
+                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: tone.bar }} />
+                            <span className="min-w-0 flex-1">
+                              <span className="text-sm font-medium text-foreground">{l.HeadName}</span>
+                              <span className="ml-2 text-[0.6875rem] text-muted-foreground">{l.Calculation}</span>
+                            </span>
+                            <span className={`hidden sm:inline-flex px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${tone.chip}`}>{tone.label}</span>
+                            <span className="w-28 text-right text-sm font-semibold tabular-nums">{inr(l.Amount)}</span>
+                          </div>
+                          <div className="mt-1.5 ml-5 h-1 rounded-full bg-muted overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: tone.bar }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* Records list */}
-          <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60 rounded-t-xl">
-              <div>
-                <h3 className="font-heading font-semibold text-foreground text-sm">Salary Structure Records</h3>
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{structures.length} record{structures.length !== 1 ? "s" : ""}</p>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/10">
-                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Name</th>
-                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Code</th>
-                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Version</th>
-                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Company</th>
-                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Lines</th>
-                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
-                    <th className="text-right px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {structures.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">No records yet. Add one above.</td></tr>
-                  ) : (
-                    structures.map((row) => (
-                      <tr key={row.SalaryStructureId} className={`border-b border-border last:border-b-0 hover:bg-muted/20 transition-colors ${editingId === row.SalaryStructureId ? "bg-primary/5" : ""}`}>
-                        <td className="px-4 py-2.5 font-medium text-foreground">{row.Name}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs">{row.Code}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground">v{row.Version}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground">{row.CompanyName || "-"}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground">{row.Lines.length}</td>
-                        <td className="px-4 py-2.5">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${row.IsActive ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" : "bg-muted text-muted-foreground border-border"}`}>
-                            {row.IsActive ? "Active" : "Draft"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                            {rights.canEdit && (
-                              <button onClick={() => startEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
-                                <Edit2 size={14} />
-                              </button>
-                            )}
-                            {rights.canEdit && !row.IsActive && (
-                              <button onClick={() => handleActivate(row.SalaryStructureId)} title="Activate" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-emerald-600">
-                                <TickCircle size={14} />
-                              </button>
-                            )}
-                            {rights.canEdit && row.IsActive && (
-                              <button onClick={() => handleDeactivate(row.SalaryStructureId)} title="Deactivate" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-amber-600">
-                                <CloseCircle size={14} />
-                              </button>
-                            )}
-                            {rights.canCreate && (
-                              <button onClick={() => { setCopyTargetId(row.SalaryStructureId); setCopyCode(""); setCopyName(`${row.Name} Copy`); }} title="Copy Structure" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
-                                <Copy size={14} />
-                              </button>
-                            )}
-                            {rights.canDelete && (
-                              deleteConfirmId === row.SalaryStructureId ? (
-                                <div className="flex items-center gap-1">
-                                  <button onClick={() => handleDelete(row.SalaryStructureId)} className="px-2 py-1 rounded text-[0.6875rem] font-medium bg-destructive text-destructive-foreground">Confirm</button>
-                                  <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded text-[0.6875rem] font-medium border border-border">Cancel</button>
-                                </div>
-                              ) : (
-                                <button onClick={() => setDeleteConfirmId(row.SalaryStructureId)} title="Delete" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-destructive">
-                                  <Trash2 size={14} />
-                                </button>
-                              )
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
             </div>
           </div>
         </div>
@@ -804,7 +823,7 @@ const SalaryStructure: React.FC = () => {
             </div>
             <div className="flex items-center justify-end gap-2 mt-4">
               <button onClick={() => setCopyTargetId(null)} className="px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
-              <button onClick={handleCopy} disabled={!copyCode.trim()} className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40">Copy</button>
+              <button onClick={handleCopy} disabled={!copyCode.trim()} className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm disabled:opacity-40" style={{ background: HR_GRADIENT }}>Copy</button>
             </div>
           </div>
         </div></BodyPortal>

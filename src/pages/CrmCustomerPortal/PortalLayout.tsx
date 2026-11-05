@@ -4,13 +4,15 @@ import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Building2, FileText, CreditCard, HardHat, LifeBuoy, IdCard,
   LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers,
+  FileSignature,
 } from "lucide-react";
-import { fetchMe, fetchApplications, fetchTimeline } from "./portalApi";
+import { fetchMe, fetchApplications, fetchTimeline, fetchTransferDeeds, fetchCreditNotes, creditNotesSeenKey, readSeen } from "./portalApi";
 import {
   INK, VIOLET_DEEP, VIOLET, VIOLET_LIGHT, GOLD, GOLD_SOFT, PORCELAIN, SURFACE, SURFACE_ALT, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
   applyPortalAccent, getStoredPortalAccent, applyPortalMode, getStoredPortalMode, StatusPill,
 } from "./portalTheme";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const NAV_GROUPS: { label: string; items: { to: string; label: string; icon: any }[] }[] = [
   { label: "Overview", items: [
@@ -22,6 +24,7 @@ const NAV_GROUPS: { label: string; items: { to: string; label: string; icon: any
   ]},
   { label: "Finance", items: [
     { to: "/crm-client-portal/agreement", label: "Agreement", icon: FileText },
+    { to: "/crm-client-portal/transfer-deed", label: "Transfer Deed", icon: FileSignature },
     { to: "/crm-client-portal/payments", label: "Payments", icon: CreditCard },
   ]},
   { label: "Support", items: [
@@ -42,6 +45,8 @@ function initials(name: string | null | undefined) {
 }
 
 const SIDEBAR_BG = `linear-gradient(180deg, ${INK} 0%, ${VIOLET_DEEP} 55%, ${VIOLET} 100%)`;
+
+const ACCOUNT_WIDE_PATHS = ["/crm-client-portal/transfer-deed"];
 
 // ── Application Selector — shown when the customer has multiple applications ──
 function ApplicationSelector({
@@ -95,6 +100,9 @@ function ApplicationSelector({
                       <span className="text-xs font-semibold tracking-wide" style={{ ...mono, color: GOLD }}>
                         {app.ApplicationNo}
                       </span>
+                      {app.IsCoApplicant ? (
+                        <span className="text-[0.65rem] px-1.5 py-0.5 rounded-full border" style={{ color: TEXT_MUTED, borderColor: HAIRLINE }}>Co-applicant · view only</span>
+                      ) : null}
                       {app.BookingNo && (
                         <span className="text-xs" style={{ color: TEXT_MUTED }}>→ {app.BookingNo}</span>
                       )}
@@ -103,7 +111,7 @@ function ApplicationSelector({
                       {app.ProjectName || "Project"}{app.UnitNo ? ` · Unit ${app.UnitNo}` : ""}
                     </p>
                     <p className="text-xs mt-0.5" style={{ color: TEXT_MUTED }}>
-                      {app.ApplicantName}
+                      <ApplicantNames name={app.ApplicantName} coApplicants={app.CoApplicantNames ? String(app.CoApplicantNames).split("|") : []} />
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -145,7 +153,19 @@ const PortalLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [selectedApplicationId, setSelectedApplicationId] = useState<number | null>(null);
+  const [selectedApplicationId, setSelectedApplicationId] = useState<number | null>(() => {
+    const stored = sessionStorage.getItem("crm_portal_app_id");
+    return stored ? parseInt(stored, 10) : null;
+  });
+
+  const handleSelectApplication = (id: number | null) => {
+    if (id === null) {
+      sessionStorage.removeItem("crm_portal_app_id");
+    } else {
+      sessionStorage.setItem("crm_portal_app_id", String(id));
+    }
+    setSelectedApplicationId(id);
+  };
 
   const { data: me, error: meError } = useQuery({ queryKey: ["portal-me"], queryFn: fetchMe, retry: false, staleTime: 60_000 });
   const { data: applications, error: appsError } = useQuery({ queryKey: ["portal-applications"], queryFn: fetchApplications, retry: false, staleTime: 60_000 });
@@ -154,9 +174,14 @@ const PortalLayout: React.FC = () => {
   useEffect(() => {
     if (!applications) return;
     if (applications.length === 1 && !selectedApplicationId) {
-      setSelectedApplicationId(applications[0].ApplicationId);
+      handleSelectApplication(applications[0].ApplicationId);
     }
   }, [applications, selectedApplicationId]);
+
+  // Same cache as the Transfer Deed page, so an answer given there clears the badge at once.
+  const { data: deeds } = useQuery<any[]>({ queryKey: ["portal-transfer-deeds"], queryFn: fetchTransferDeeds, staleTime: 60_000 });
+  // Same cache as Payments' credit notes; new ones (not yet seen there) show on Payments.
+  const { data: creditNotes } = useQuery<any[]>({ queryKey: ["portal-gst-notes"], queryFn: fetchCreditNotes, staleTime: 60_000 });
 
   const { data: timeline, error: tlError } = useQuery({
     queryKey: ["portal-timeline", selectedApplicationId],
@@ -175,6 +200,7 @@ const PortalLayout: React.FC = () => {
     const isUnauthorized = [meError, appsError, tlError].some((e: any) => e?.message === "unauthorized");
     const needsPasswordChange = [meError, appsError, tlError].some((e: any) => e?.message === "password_change_required");
     if (isUnauthorized) {
+      sessionStorage.removeItem("crm_portal_app_id");
       localStorage.removeItem("crm_portal_token");
       navigate("/crm-client-portal/login");
     }
@@ -182,11 +208,12 @@ const PortalLayout: React.FC = () => {
   }, [meError, appsError, tlError, navigate]);
 
   const handleLogout = () => {
+    sessionStorage.removeItem("crm_portal_app_id");
     localStorage.removeItem("crm_portal_token");
     navigate("/crm-client-portal/login");
   };
 
-  const handleBackToSelector = () => setSelectedApplicationId(null);
+  const handleBackToSelector = () => handleSelectApplication(null);
 
   const hasMultipleApps = (applications?.length ?? 0) > 1;
 
@@ -197,13 +224,20 @@ const PortalLayout: React.FC = () => {
     if (timeline?.queryPayment?.Status === "InfoSent") b.agreement = (b.agreement || 0) + 1;
     const pendingMilestones = (timeline?.paymentMilestones || []).filter((m: any) => m.Status === "Pending").length;
     if (pendingMilestones) b.payments = pendingMilestones;
+    // Transfer deeds belong to the customer, not one application.
+    const deedTodo = (deeds || []).reduce((n: number, v: any) => n + Number(v.todo || 0), 0);
+    if (deedTodo) b.deeds = deedTodo;
+    const seen = readSeen(creditNotesSeenKey(me?.Id));
+    const newNotes = (creditNotes || []).filter((n: any) => Number(n.Id) > seen).length;
+    if (newNotes) b.payments = (b.payments || 0) + newNotes;
     return b;
-  }, [timeline]);
+  }, [timeline, deeds, creditNotes, me, location.pathname]);
   const totalAlerts = Object.values(badges).reduce((a, b) => a + b, 0);
 
   const badgeKeyFor = (to: string) => {
     if (to.endsWith("/agreement")) return "agreement";
     if (to.endsWith("/payments")) return "payments";
+    if (to.endsWith("/transfer-deed")) return "deeds";
     return null;
   };
 
@@ -239,7 +273,10 @@ const PortalLayout: React.FC = () => {
   const isLoading = !me || !applications;
 
   // Show application selector if customer has multiple apps and none selected yet
-  const showSelector = !isLoading && hasMultipleApps && !selectedApplicationId;
+  // Pages about the customer, not one booking (a transfer deed: a buyer may own
+  // nothing yet) open straight away, without choosing an application.
+  const accountWide = ACCOUNT_WIDE_PATHS.some((p) => location.pathname.startsWith(p));
+  const showSelector = !isLoading && hasMultipleApps && !selectedApplicationId && !accountWide;
 
   return (
     <div className="min-h-screen flex" style={{ background: PORCELAIN }}>
@@ -348,7 +385,7 @@ const PortalLayout: React.FC = () => {
             {hasMultipleApps && selectedApplicationId && (
               <div className="px-3 pt-3">
                 <button
-                  onClick={() => { setSelectedApplicationId(null); setMobileOpen(false); }}
+                  onClick={() => { handleSelectApplication(null); setMobileOpen(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium"
                   style={{ color: "rgba(233,225,250,0.75)", border: "1px solid rgba(255,255,255,0.12)" }}
                 >
@@ -403,9 +440,13 @@ const PortalLayout: React.FC = () => {
           ) : showSelector ? (
             <ApplicationSelector
               applications={applications!}
-              onSelect={setSelectedApplicationId}
+              onSelect={handleSelectApplication}
               me={me}
             />
+          ) : accountWide ? (
+            <Suspense fallback={<PortalSkeleton />}>
+              <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />
+            </Suspense>
           ) : !selectedApplicationId ? (
             <div className="min-h-[60vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>
               No active applications found.
@@ -414,6 +455,11 @@ const PortalLayout: React.FC = () => {
             <PortalSkeleton />
           ) : (
             <Suspense fallback={<PortalSkeleton />}>
+              {selectedApp?.IsCoApplicant ? (
+                <div className="mb-4 rounded-xl border px-4 py-3 text-sm" style={{ borderColor: HAIRLINE, color: TEXT_MUTED, background: "white" }}>
+                  You are a co-applicant on this booking — you can follow everything here; approvals, uploads and requests are made by the main applicant, {selectedApp.ApplicantName}.
+                </div>
+              ) : null}
               <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />
             </Suspense>
           )}

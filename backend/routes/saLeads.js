@@ -1,15 +1,16 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { convertLead } = require("../services/saHandoff");
 const { applyLeadScope, actorId, isSaAdmin } = require("../services/saAccess");
 const { getIo } = require("../socket");
-const crypto = require("crypto");
-const { normalizeSaLeadContactFields } = require("../validation/saLeadValidation");
+const { alertAssigned } = require("../services/saMessaging");
+const { createLead } = require("../services/saLeadCreate");
 
 // Insert notification row and emit to the user's personal socket room.
 async function emitNotification(pool, userId, type, title, body, refId) {
@@ -46,14 +47,7 @@ async function emitNotification(pool, userId, type, title, body, refId) {
   }
 }
 
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
-router.use(apiRateLimit);
-
-function genUid() {
-  return "LEAD-" + Date.now() + "-" + crypto.randomBytes(3).toString("hex").toUpperCase();
-}
 
 const { validateSourceChain } = require("../services/sourceChain");
 
@@ -114,8 +108,9 @@ router.get("/", requirePageRight("sa-leads", "view"), async (req, res) => {
   }
 });
 
-// GET /users — dropdown for assigning leads (SA roles only)
-router.get("/users", requirePageRight("sa-leads", "view"), async (req, res) => {
+// GET /users — dropdown for assigning leads (SA roles only). CRM Bookings' "Assigned To", Welcome Calls' "Called by"
+// and Handover's "Key handed by" read it too, so a CRM user without Sales Automation's right still gets the list.
+router.get("/users", requireAnyPageRight(["sa-leads", "crm-bookings", "crm-welcome-calls", "crm-handover", "crm-service-tickets"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const r = await pool.request().query(`
@@ -143,108 +138,19 @@ router.get("/users", requirePageRight("sa-leads", "view"), async (req, res) => {
 // caller at the existing lead instead of silently creating a twin record.
 router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
   try {
-    const pool = getPool();
-    const normalizedContact = normalizeSaLeadContactFields(req.body);
-    if (normalizedContact.errors.length) {
-      return res.status(400).json({ error: normalizedContact.errors.join("; ") });
-    }
-    const b = normalizedContact.value;
-    if (!b.Mobile) {
-      return res.status(400).json({ error: "Mobile is required" });
-    }
-    const uid = genUid();
-    const sourceError = await validateSourceChain(pool, b);
-    if (sourceError) return res.status(400).json({ error: sourceError });
-
-    if (b.Mobile) {
-      const dup = await pool.request().input("mob", sql.NVarChar(20), b.Mobile)
-        .query("SELECT TOP 1 Id, LeadUid, CustomerName, Status FROM dbo.SaLead WHERE Mobile = @mob AND IsActive = 1 ORDER BY CreatedAt DESC");
-      if (dup.recordset.length) {
-        return res.status(409).json({
-          error: `A lead with this mobile number already exists: ${dup.recordset[0].LeadUid} (${dup.recordset[0].CustomerName || "no name"}, ${dup.recordset[0].Status})`,
-          existingLeadId: dup.recordset[0].Id,
-        });
-      }
-    }
-
-    await pool.request()
-      .input("uid", sql.NVarChar(50), uid)
-      .input("cn", sql.NVarChar(200), b.CustomerName || null)
-      .input("mob", sql.NVarChar(20), b.Mobile || null)
-      .input("alt", sql.NVarChar(20), b.AltMobile || null)
-      .input("em", sql.NVarChar(200), b.Email || null)
-      .input("pid", sql.Int, b.PlatformId || null)
-      .input("cid", sql.Int, b.CampaignId || null)
-      .input("aid", sql.Int, b.AdId || null)
-      .input("dg", sql.Date, b.DateGenerated || null)
-      .input("rem", sql.NVarChar(sql.MAX), b.CustomerRemarks || null)
-      .input("st", sql.NVarChar(30), b.Status || "New")
-      .input("cl", sql.NVarChar(30), b.Classification || null)
-      .input("tl", sql.Int, b.AssignedTeamLeadId || null)
-      .input("sp", sql.Int, b.AssignedSalespersonId || null)
-      .input("srcType", sql.NVarChar(30), b.SourceType || null)
-      .input("cpid", sql.Int, b.ChannelPartnerId || null)
-      .input("bmin", sql.Decimal(18, 2), b.BudgetMin != null && b.BudgetMin !== "" ? parseFloat(b.BudgetMin) : null)
-      .input("bmax", sql.Decimal(18, 2), b.BudgetMax != null && b.BudgetMax !== "" ? parseFloat(b.BudgetMax) : null)
-      .input("ptype", sql.NVarChar(50), b.PropertyType || null)
-      .input("bhk", sql.NVarChar(30), b.BhkPreference || null)
-      .input("loc", sql.NVarChar(200), b.PreferredLocation || null)
-      .input("timeline", sql.NVarChar(30), b.PurchaseTimeline || null)
-      .input("externalLeadId", sql.NVarChar(200), b.ExternalLeadId || null)
-      .input("leadFormName", sql.NVarChar(200), b.LeadFormName || null)
-      .input("sourceCampaignName", sql.NVarChar(200), b.SourceCampaignName || null)
-      .input("sourceAdName", sql.NVarChar(200), b.SourceAdName || null)
-      .input("sourcePlacement", sql.NVarChar(200), b.SourcePlacement || null)
-      .input("leadCaptureUrl", sql.NVarChar(2000), b.LeadCaptureUrl || null)
-      .input("utmSource", sql.NVarChar(100), b.UtmSource || null)
-      .input("utmMedium", sql.NVarChar(100), b.UtmMedium || null)
-      .input("utmCampaign", sql.NVarChar(200), b.UtmCampaign || null)
-      .input("utmContent", sql.NVarChar(200), b.UtmContent || null)
-      .input("utmTerm", sql.NVarChar(200), b.UtmTerm || null)
-      .input("capturedAt", sql.DateTime2(3), b.CapturedAt || null)
-      .input("sourcePayload", sql.NVarChar(sql.MAX), b.SourcePayload ? JSON.stringify(b.SourcePayload) : null)
-      .input("cb", sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.SaLead
-          (LeadUid, CustomerName, Mobile, AltMobile, Email, PlatformId, CampaignId, AdId,
-           DateGenerated, CustomerRemarks, Status, Classification,
-           AssignedTeamLeadId, AssignedSalespersonId,
-           SourceType, ChannelPartnerId, BudgetMin, BudgetMax, PropertyType,
-           BhkPreference, PreferredLocation, PurchaseTimeline,
-           ExternalLeadId, LeadFormName, SourceCampaignName, SourceAdName,
-           SourcePlacement, LeadCaptureUrl, UtmSource, UtmMedium, UtmCampaign,
-           UtmContent, UtmTerm, CapturedAt, SourcePayload,
-           IsActive, CreatedBy, CreatedAt)
-        VALUES
-          (@uid, @cn, @mob, @alt, @em, @pid, @cid, @aid,
-           ISNULL(@dg, CAST(SYSDATETIME() AS DATE)), @rem, @st, @cl,
-           @tl, @sp, @srcType, @cpid, @bmin, @bmax, @ptype, @bhk, @loc, @timeline,
-           @externalLeadId, @leadFormName, @sourceCampaignName, @sourceAdName,
-           @sourcePlacement, @leadCaptureUrl, @utmSource, @utmMedium, @utmCampaign,
-           @utmContent, @utmTerm, @capturedAt, @sourcePayload,
-           1, @cb, SYSDATETIME())
-      `);
-    res.status(201).json({ success: true, LeadUid: uid });
+    const r = await createLead(getPool(), req.body, actorId(req));
+    if (r.error) return res.status(r.status).json({ error: r.error, ...(r.existingLeadId ? { existingLeadId: r.existingLeadId } : {}) });
+    res.status(201).json({ success: true, LeadUid: r.uid });
   } catch (e) {
     console.error("[sa-leads] POST error:", e.message);
-    if (e.number === 2601 || e.number === 2627) {
-      return res.status(409).json({ error: "A lead with this mobile number already exists." });
-    }
     res.status(500).json({ error: e.message });
   }
 });
 
-// Allowed forward transitions per status
-const STATUS_TRANSITIONS = {
-  New: ["New", "Assigned", "Contacted", "Lost"],
-  Assigned: ["Assigned", "Contacted", "Lost"],
-  Contacted: ["Contacted", "FollowUp", "VisitScheduled", "Lost"],
-  FollowUp: ["FollowUp", "VisitScheduled", "Lost"],
-  VisitScheduled: ["VisitScheduled", "Visited", "Lost"],
-  Visited: ["Visited", "FollowUp", "Booking", "Lost"],
-  Booking: ["Booking"],
-  Lost: ["Lost"],
-};
+// Allowed forward transitions per status — shared with saHandoff.js via
+// constants/saStatuses.js (kept there, not here, to avoid a circular
+// require: this file requires saHandoff.js below).
+const { STATUS_TRANSITIONS } = require("../constants/saStatuses");
 
 // PUT /:id — update lead (with audit trail + notifications)
 router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
@@ -296,6 +202,20 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
       AdId: b.AdId,
     });
     if (sourceError) return res.status(400).json({ error: sourceError });
+
+    // Same dedup POST / already does — this route never had it, so editing
+    // a lead's Mobile to match another active lead's number went through
+    // silently with no 409, unlike creating a lead with that same number.
+    if (b.Mobile && b.Mobile !== old.Mobile) {
+      const dup = await pool.request().input("mob", sql.NVarChar(20), b.Mobile).input("id", sql.Int, leadId)
+        .query("SELECT TOP 1 Id, LeadUid, CustomerName, Status FROM dbo.SaLead WHERE Mobile = @mob AND IsActive = 1 AND Id <> @id ORDER BY CreatedAt DESC");
+      if (dup.recordset.length) {
+        return res.status(409).json({
+          error: `A lead with this mobile number already exists: ${dup.recordset[0].LeadUid} (${dup.recordset[0].CustomerName || "no name"}, ${dup.recordset[0].Status})`,
+          existingLeadId: dup.recordset[0].Id,
+        });
+      }
+    }
 
     // Effective values actually being written — @x falls back to the
     // existing column via ISNULL below whenever the caller omits a field,
@@ -419,6 +339,7 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
         "Lead Assigned to Your Team",
         `Lead ${old.LeadUid} has been assigned to your team.`,
         leadId);
+      alertAssigned(pool, leadId, newTl);
     }
 
     // Notify new SP when AssignedSalespersonId changes
@@ -428,6 +349,7 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
         "Lead Assigned to You",
         `Lead ${old.LeadUid} has been assigned to you for follow-up.`,
         leadId);
+      alertAssigned(pool, leadId, newSp);
     }
 
     res.json({ success: true });
@@ -496,7 +418,7 @@ router.put("/:id/convert", requirePageRight("sa-leads", "edit"), async (req, res
     res.json({ success: true, message: "Lead converted — now available in the CRM Leads pool" });
   } catch (e) {
     console.error("[sa-leads] convert error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async (req, res) => {
@@ -514,7 +436,7 @@ router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async
     res.json({ success: true, message: "Lead converted — now available in the CRM Leads pool" });
   } catch (e) {
     console.error("[sa-leads] convert error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 

@@ -9,6 +9,7 @@
 // CrmApplication/CrmBooking's real constraints (Unit Master mandatory,
 // milestones required, etc.).
 const { sql } = require("../db");
+const { CrmStatus } = require("../constants/crmStatuses");
 const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
@@ -46,11 +47,26 @@ class CrmCreationError extends Error {
   }
 }
 
+// A commercial unit can't be applied for or booked until its GST rule exists
+// (services/crmGst.js assertCommercialGstReady); surfaced as a creation error.
+async function assertCommercialGst(pool, unitIds) {
+  const { assertCommercialGstReady, GstSetupError } = require("./crmGst");
+  try {
+    await assertCommercialGstReady(pool, unitIds);
+  } catch (e) {
+    if (e instanceof GstSetupError) throw new CrmCreationError(e.message, 400);
+    throw e;
+  }
+}
+
 async function assertConnectedPlotGroup(pool, plotIds) {
   if (plotIds.length < 2) return;
-  const pairs = await pool.request().query(`
+  const req = pool.request();
+  plotIds.forEach((id, i) => req.input(`cpid${i}`, sql.Int, id));
+  const inList = plotIds.map((_, i) => `@cpid${i}`).join(",");
+  const pairs = await req.query(`
     SELECT PlotId, AdjacentPlotId FROM dbo.PlotAdjacency
-    WHERE PlotId IN (${plotIds.join(",")}) AND AdjacentPlotId IN (${plotIds.join(",")})
+    WHERE PlotId IN (${inList}) AND AdjacentPlotId IN (${inList})
   `);
   const neighbours = new Map(plotIds.map((id) => [id, new Set()]));
   pairs.recordset.forEach(({ PlotId, AdjacentPlotId }) => {
@@ -73,17 +89,18 @@ async function assertConnectedPlotGroup(pool, plotIds) {
 async function validatePlotSelection(pool, plotIds, { projectId = null, applicationId = null, requireAdjacent = true } = {}) {
   if (!plotIds.length) return [];
   const requestedProjectId = projectId != null && projectId !== "" ? Number(projectId) : null;
-  const result = await pool.request()
-    .input("applicationId", sql.Int, applicationId)
-    .query(`
+  const pReq = pool.request().input("applicationId", sql.Int, applicationId);
+  plotIds.forEach((id, i) => pReq.input(`ppid${i}`, sql.Int, id));
+  const plotInList = plotIds.map((_, i) => `@ppid${i}`).join(",");
+  const result = await pReq.query(`
       SELECT p.Id, p.PlotName, p.ProjectId, p.BlockId
       FROM dbo.PlotMaster p
-      WHERE p.Id IN (${plotIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+      WHERE p.Id IN (${plotInList}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmBookingPlot bp
           JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
           WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-            AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+            AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
         )
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmApplicationPlot ap
@@ -309,7 +326,10 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   const rawAppPlotIds = Array.isArray(b.PreferredPlotIds) ? b.PreferredPlotIds.map(Number).filter(Number.isInteger) : [];
   const rawAppUnitIds = Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0 ? b.PreferredUnitIds : (hasValue(b.PreferredUnitId) ? [b.PreferredUnitId] : []);
   const preferredUnitId = rawAppUnitIds.length > 0 ? rawAppUnitIds[0] : null;
-  if (rawAppUnitIds.length > 0) await assertVillaBuyer(pool, rawAppUnitIds, customerId);
+  if (rawAppUnitIds.length > 0) {
+    await assertVillaBuyer(pool, rawAppUnitIds, customerId);
+    await assertCommercialGst(pool, rawAppUnitIds);
+  }
   let unitName = b.InterestedUnit || null;
   if (rawAppPlotIds.length > 0) {
     const plots = await validatePlotSelection(pool, rawAppPlotIds, { projectId: b.ProjectId });
@@ -317,8 +337,12 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   }
   if (preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "") {
     const unit = await pool.request().input("uid", sql.Int, parseInt(preferredUnitId))
-      .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+      .query(`SELECT UnitName,
+                CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = UnitKind AND k.IsLand = 1) THEN 1 ELSE 0 END AS IsLand
+              FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1`);
     if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
+    // Land is sold through the plot list (CrmApplicationPlot), never as a unit.
+    if (unit.recordset[0].IsLand) throw new CrmCreationError("This is land — choose it from the plot list, not as a unit.");
     unitName = unit.recordset[0].UnitName;
 
     // Reject the pick up front if the unit is already spoken for — before any
@@ -391,7 +415,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("campid", sql.Int, campaignId)
       .input("adid",   sql.Int, adId)
       .input("cpid",   sql.Int, channelPartnerId)
-      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
+      .input("rate", rateSqlType(), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
       .input("ppid", sql.Int,           effectivePaymentPlanId != null ? effectivePaymentPlanId : null)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
@@ -438,6 +462,10 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     throw e;
   }
   const applicationId = result.recordset[0].Id;
+  // The plot's owner applying for the villa on it brings the plot's co-owners along.
+  if (rawAppUnitIds.length > 0) {
+    await require("./villaLand").copyLandCoOwners(pool, applicationId, rawAppUnitIds, actorUserId);
+  }
   // Starts Draft, not Pending — the wizard's own PUT /:id/submit (see
   // crmApplications.js) is the real Draft->Pending gate (approvalTransition
   // only allows that transition from Draft/Rejected). Inserting straight as
@@ -493,7 +521,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   if (preferredUnitId) {
     try {
       await placeHoldIfNeeded(pool, {
-        entityType: "Unit", entityId: parseInt(preferredUnitId), applicationId, holdDays: 3,
+        entityType: "Unit", entityId: parseInt(preferredUnitId), applicationId,
         reason: "Application created — auto-hold", userId: actorUserId,
       });
     } catch (holdErr) {
@@ -575,6 +603,24 @@ async function rebuildLandSchedule(poolOrTx, bookingId, actorUserId = null) {
     WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL`);
   await generateMilestonesForBooking(poolOrTx, bookingId, Number(bk.TotalValue), null, bk.BookingDate, actorUserId, Number(bk.BookingAmount || 0));
   return { rebuilt: true };
+}
+
+/**
+ * The schedule a payment plan gives at a Grand Total: Milestone 1 is the plan's
+ * fixed Booking Amount, the other steps share what's left by their %. It is
+ * exactly what booking creation stores (generateMilestonesForBooking, then
+ * recalculateRemainingMilestones, which split with the same apportion) — the
+ * application form shows this so its preview and the real schedule agree.
+ * A plot sale's schedule is landSaleSchedule's instead.
+ */
+function planSchedule(grandTotal, bookingAmount, items) {
+  const { apportion, round2 } = require("./bookingUnits");
+  const list = (items && items.length ? items : DEFAULT_MILESTONES).slice().sort((x, y) => x.no - y.no);
+  const booking = Math.max(0, round2(Number(bookingAmount || 0)));
+  const rest = list.filter((m) => m.no !== 1);
+  const shares = apportion(Math.max(0, round2(Number(grandTotal || 0) - booking)), rest.map((m) => Number(m.pct)));
+  let i = 0;
+  return list.map((m) => ({ no: m.no, name: m.name, pct: m.no === 1 ? null : Number(m.pct), amount: m.no === 1 ? booking : shares[i++] }));
 }
 
 async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
@@ -659,17 +705,13 @@ async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, pay
       dueDate = runningDue;
     }
     const isFirst = m.no === 1;
-    // Nothing is due by default. Until a real Booking Amount is entered
-    // (bookingAmt > 0), every milestone — including #1 — is inserted at 0,
-    // not the plan's fixed percentage of TotalValue; staff would otherwise
-    // see a scary pre-filled "Due" figure the customer never agreed to.
-    // Once the Booking Amount is actually set (via the Payment tab's
-    // resync-schedule call), Milestone #1 takes that real amount and every
-    // other milestone gets redistributed across what's left, preserving the
-    // plan's relative weighting (recalculateRemainingMilestones falls back to
-    // the plan's own %s whenever a milestone's stored Percent is 0/unset).
-    const amt = bookingAmt > 0 ? (isFirst ? bookingAmt : Math.round(totalValue * m.pct) / 100) : 0;
-    const pct = bookingAmt > 0 ? (isFirst ? Math.round((bookingAmt / totalValue) * 10000) / 100 : m.pct) : 0;
+    // Milestone 1 is the plan's fixed Booking Amount. A zero Booking Amount
+    // means that step is already satisfied with no payment; later milestones
+    // still need real due amounts or the schedule would be all zero and block
+    // every subsequent payment forever.
+    const amt = isFirst ? bookingAmt : Math.round(totalValue * m.pct) / 100;
+    const pct = isFirst ? (totalValue > 0 ? Math.round((bookingAmt / totalValue) * 10000) / 100 : 0) : m.pct;
+    const zeroBookingStep = isFirst && bookingAmt === 0;
 
     const ins = await poolOrTx.request()
       .input("bid",  sql.Int,           bookingId)
@@ -681,15 +723,18 @@ async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, pay
       .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
       .input("dept", sql.NVarChar(100), m.dept || null)
       .input("cb",   sql.Int,           actorUserId)
+      .input("status", sql.NVarChar(30), zeroBookingStep ? CrmStatus.PAID : CrmStatus.PENDING)
+      .input("demandStatus", sql.NVarChar(30), zeroBookingStep ? CrmStatus.PAID : CrmStatus.PENDING)
+      .input("paidDate", sql.Date, null)
       .query(`
-        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, [Percent], DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, [Percent], DueDate, RequiredDocuments, ResponsibleDepartment, Status, DemandStatus, PaidDate, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@bid, @mno, @mname, @amt, @pct, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
+        VALUES (@bid, @mno, @mname, @amt, @pct, @due, @rdocs, @dept, @status, @demandStatus, @paidDate, @cb, SYSDATETIME())
       `);
     if (isFirst) milestone1Id = ins.recordset[0].Id;
   }
 
-  if (bookingAmt > 0 && milestone1Id && milestones.length > 1) {
+  if (milestone1Id && milestones.length > 1) {
     await recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilestoneId: milestone1Id });
   }
 }
@@ -788,7 +833,20 @@ async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPla
 // ApplicationId -> BookingId backfill every other Application-stage capture
 // (bank/KYC, documents, parking) already gets a few lines below.
 
-const { priceBooking, allocateConsideration } = require("./bookingUnits");
+const { priceBooking, allocateConsideration, rateSqlType, unitPrice } = require("./bookingUnits");
+
+// The one-booking-per-application check in createCrmBookingRecord first runs
+// unlocked, so two submits at once both pass it. Inside the booking's
+// transaction it is re-checked under the application's lock: the second
+// waits for the first and then finds its booking.
+async function assertNoBookingForApplicationLocked(tx, applicationId) {
+  const appLocked = (await tx.request().input("aid", sql.Int, applicationId).query(`
+    SELECT a.Id, (SELECT TOP 1 x.BookingNo FROM dbo.CrmBooking x WHERE x.ApplicationId = a.Id AND x.IsActive = 1) AS BookingNo
+    FROM dbo.CrmApplication a WITH (UPDLOCK, HOLDLOCK) WHERE a.Id = @aid`)).recordset[0];
+  if (appLocked?.BookingNo) {
+    throw new CrmCreationError(`This application already has a booking (${appLocked.BookingNo}) — an application can only have one`, 409);
+  }
+}
 
 async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
@@ -832,16 +890,20 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     await validatePlotSelection(pool, unitIds, { applicationId: parseInt(b.ApplicationId) });
   } else {
     await assertVillaBuyer(pool, unitIds, appRow.recordset[0].CustomerId);
+    await assertCommercialGst(pool, unitIds);
   }
 
-  // Fetch all selected units
-  const unitsRes = await pool.request().query(isPlotBooking ? `
+  // Fetch all selected units — parameterized IN list to avoid SQL injection
+  const uReq = pool.request();
+  unitIds.forEach((id, i) => uReq.input(`ubid${i}`, sql.Int, id));
+  const unitInList = unitIds.map((_, i) => `@ubid${i}`).join(",");
+  const unitsRes = await uReq.query(isPlotBooking ? `
     SELECT p.Id, p.PlotName AS UnitName, p.ProjectId, p.BlockId, CAST(NULL AS NVARCHAR(50)) AS UnitType,
            p.AreaSqFt, p.RatePerSqFt, proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
     FROM dbo.PlotMaster p
     LEFT JOIN dbo.enterprise proj ON proj.id = p.ProjectId AND proj.business_type = 'P'
     LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
-    WHERE p.Id IN (${unitIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+    WHERE p.Id IN (${unitInList}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
   ` : `
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.UnitKind, u.AreaSqFt,
            u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
@@ -850,7 +912,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     FROM dbo.UnitMaster u
     LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
     LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-    WHERE u.Id IN (${unitIds.join(",")}) AND u.IsActive = 1
+    WHERE u.Id IN (${unitInList}) AND u.IsActive = 1
   `);
   if (unitsRes.recordset.length !== unitIds.length) {
     throw new CrmCreationError("One or more selected units do not exist or are inactive");
@@ -871,16 +933,13 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     if (why) throw new CrmCreationError(why);
   }
 
-  // A customer can't actually get their Booking approved/paid against an
-  // unapproved Application, so the real "confirm within N days" clock only
-  // makes sense starting now — a fresh 3 days from Booking creation, not
-  // whatever was left on the original pick-time hold (which may have
-  // already burned most of its window sitting in the admin approval
-  // queue). This Booking still isn't a confirmed sale (Status stays
-  // 'Pending' until Approved AND Milestone #1 is Paid — see
-  // unitMatrix.js/parkingMatrix.js's Status derivation), so the deadline
-  // below is what the Matrix keeps counting down against in the meantime.
-  const confirmDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  // No auto-expiry — a Booking stays "to be confirmed" (Pending, not yet
+  // Approved + Milestone #1 Paid) indefinitely until staff acts on it or
+  // cancels it. Every "is this unit/parking taken" query already treats a
+  // NULL ConfirmDeadline as not-yet-expired, so leaving it unset here is
+  // all that's needed — no sentinel required, unlike CrmInventoryHold's
+  // NOT NULL HoldUntil column.
+  const confirmDeadline = null;
   const application = appRow.recordset[0];
   const bookingBridge = (b.BrokerId === undefined || b.BrokerId === null || b.BrokerId === "") && application.BrokerId == null && application.ChannelPartnerId != null
     ? await ensureBrokerForChannelPartner(pool, application.ChannelPartnerId, actorUserId)
@@ -965,6 +1024,12 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     }
     bookingAmount = Number(planRow.BookingAmount);
   }
+  if (!Number.isFinite(bookingAmount) || bookingAmount < 0) {
+    throw new CrmCreationError("Booking Amount must be a valid non-negative number");
+  }
+  if (bookingAmount > total) {
+    throw new CrmCreationError("Booking Amount cannot be more than the booking value");
+  }
 
   // getNextDocNumber uses its own internal sp_getapplock transaction and must
   // always run on pool (not on tx) — see crmPayments.js comment at line ~121.
@@ -990,6 +1055,17 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .query(`SELECT Id FROM dbo.${isPlotBooking ? "CrmBookingPlot" : "CrmBookingUnit"} WITH (UPDLOCK, ROWLOCK) WHERE ${isPlotBooking ? "PlotId" : "UnitId"} IN (${unitIds.join(",")}) AND Status = N'Active'`);
     if (taken.recordset.length) throw new CrmCreationError("One or more units are already booked", 409);
 
+    await assertNoBookingForApplicationLocked(tx, parseInt(b.ApplicationId));
+
+    // Re-check villa land ownership inside this same transaction, right
+    // before the insert — the first assertVillaBuyer check above ran on the
+    // plain pool, well before this lock, so a concurrent resale/transfer of
+    // the underlying plot could complete in between and leave this booking
+    // going through for a buyer who no longer owns the land.
+    if (!isPlotBooking) {
+      await assertVillaBuyer(tx, unitIds, appRow.recordset[0].CustomerId);
+    }
+
     const result = await tx.request()
       .input("no",    sql.NVarChar(30),  bookingNo)
       .input("appId", sql.Int,           parseInt(b.ApplicationId))
@@ -1008,7 +1084,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .input("builtUpArea",     sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
       .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
       .input("openTerraceArea", sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
-      .input("rate",  sql.Decimal(18,2), rate)
+      .input("rate",  rateSqlType(), rate)
       .input("tot",   sql.Decimal(18,2), total)
       .input("bamt",  sql.Decimal(18,2), bookingAmount)
       .input("ttype", sql.NVarChar(20),  tokenType)
@@ -1044,6 +1120,18 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
     bookingId = result.recordset[0].Id;
 
+    // A villa sold directly on plots nobody bought carries its land in its one
+    // villa price: that land part (Plot Master area x rate, at most the price)
+    // is recorded so GST and the ledger keep it out of construction (552).
+    if (!isPlotBooking) {
+      const land = await require("./villaLand").directSaleLandValue(tx, unitIds);
+      if (land > 0) {
+        await tx.request().input("bid", sql.Int, bookingId)
+          .input("land", sql.Decimal(18, 2), Math.min(land, Number(total) || 0))
+          .query("IF COL_LENGTH('dbo.CrmBooking', 'LandValue') IS NOT NULL EXEC sp_executesql N'UPDATE dbo.CrmBooking SET LandValue = @land WHERE Id = @bid', N'@land DECIMAL(18,2), @bid INT', @land = @land, @bid = @bid");
+      }
+    }
+
     // Insert unit lines (Migration 505 support for multi-plot sales)
     // Primary flag set on the first unit in the array.
     //
@@ -1064,7 +1152,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
         .input("bid", sql.Int, bookingId)
         .input("uid", sql.Int, line.unitId)
         .input("area", sql.Decimal(18,2), line.areaSqFt)
-        .input("rate", sql.Decimal(18,2), line.ratePerSqFt)
+        .input("rate", rateSqlType(), line.ratePerSqFt)
         .input("premium", sql.Decimal(18,2), line.premiumAmount)
         .input("alloc", sql.Decimal(18,2), line.allocatedValue)
         .input("cb", sql.Int, actorUserId)
@@ -1126,6 +1214,17 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     await tx.commit();
   } catch (e) {
     await tx.rollback().catch(() => {});
+    // Two bookings of the same free unit / plot at the same moment: the lock
+    // above can't hold rows that don't exist yet, so the second one is
+    // stopped by the database's one-active-line rule instead — say so plainly.
+    if ((e.number === 2601 || e.number === 2627) && /UX_CrmBooking(Unit_ActiveUnit|Plot_Active)/.test(e.message || "")) {
+      // A double click on Submit lands here too — the unit is taken by this
+      // same application's own booking, not by someone else.
+      const own = (await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId, 10))
+        .query("SELECT TOP 1 BookingNo FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1 ORDER BY Id DESC").catch(() => ({ recordset: [] }))).recordset[0];
+      if (own) throw new CrmCreationError(`This application already has its booking (${own.BookingNo})`, 409);
+      throw new CrmCreationError(`This ${isPlotBooking ? "plot" : "unit"} was just booked by someone else — refresh and choose another`, 409);
+    }
     throw e;
   }
   // ── END ATOMIC SECTION ──────────────────────────────────────────────────────
@@ -1215,15 +1314,261 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
   if (!bookingAmount) return null;
   const m1 = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+    .query("SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id");
   const firstMilestoneAmount = m1.recordset[0]?.AmountDue;
   if (firstMilestoneAmount == null) return null;
   if (Math.abs(Number(firstMilestoneAmount) - Number(bookingAmount)) < 1) return null;
   return `Booking token amount (₹${Number(bookingAmount).toLocaleString("en-IN")}) doesn't match the payment plan's first milestone (₹${Number(firstMilestoneAmount).toLocaleString("en-IN")}) — the milestone amount is what invoicing/payments will actually track.`;
 }
 
+// ── Moving a booking onto a different unit ─────────────────────────────────
+// One implementation, used by the booking's own Change Unit
+// (PUT /api/crm-bookings/:id/change-unit) and by an application corrected
+// before its booking is verified ("Submit Edits", crmApplications.js), so a
+// unit change from either side passes the same rules and re-prices the same way.
+const unitChangeError = (status, message) => Object.assign(new Error(message), { status });
+
+/**
+ * Whether an application may still change its unit / payment plan / rate with
+ * a booking already made from it: yes until that booking's data is verified
+ * and sent for approval. After that the approvers are looking at these
+ * figures; the booking is rejected back to Review to change them.
+ * Returns null when open, else the reason to show.
+ */
+async function applicationEditsClosedReason(pool, bookingId) {
+  const b = (await pool.request().input("id", sql.Int, bookingId).query(
+    "SELECT BookingNo, WorkflowStage, ReadyForApprovalAt, IsFrozen FROM dbo.CrmBooking WHERE Id = @id")).recordset[0];
+  if (!b) return null;
+  if (b.IsFrozen) return `Booking ${b.BookingNo} is frozen — an admin must unfreeze it before its unit, plan or rate change.`;
+  if ((b.WorkflowStage || require("./crmBookingStageService").STAGE_REVIEW) !== require("./crmBookingStageService").STAGE_REVIEW || b.ReadyForApprovalAt != null) {
+    return `Booking ${b.BookingNo} is verified and sent for approval — its unit, plan and rate are locked. Reject it back to Review to change them.`;
+  }
+  return null;
+}
+
+/**
+ * Re-point a booking at another unit, re-priced from the new unit's area at the
+ * booking's rate. Throws { status, message } when a rule refuses it.
+ *
+ * @param {object} o
+ *   newUnitId      the unit to move to
+ *   reason         recorded in the unit change log
+ *   actor          user id
+ *   paymentPlanId  the plan to use; omitted, the new unit's single tagged plan
+ *                  (if exactly one) when nothing is paid yet
+ *   checkOnly      run every check, change nothing
+ */
+async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = null, paymentPlanId, checkOnly = false }) {
+  const { requireActiveBooking, recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered } = require("./crmWorkflowGuards");
+  const { recalculateBookingGst, assertCommercialGstReady, GstSetupError } = require("./crmGst");
+  const id = bookingId;
+  newUnitId = parseInt(newUnitId, 10);
+
+  // Re-pointing a land sale at a built unit would leave its plot lines
+  // attached to a unit booking. Plots are changed by cancelling and
+  // re-booking, never by swapping the line type underneath.
+  if ((await pool.request().input("id", sql.Int, id).query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @id")).recordset.length) {
+    throw unitChangeError(400, "This is a plot sale — its plots can't be swapped for a unit. Cancel the booking and book the new plots instead.");
+  }
+  const activeErr = await requireActiveBooking(pool, id);
+  if (activeErr) throw unitChangeError(400, activeErr);
+
+  const booking = (await pool.request().input("id", sql.Int, id)
+    .query("SELECT UnitId, Status, WorkflowStage, RatePerSqFt, TotalValue, BookingAmount, ApplicationId FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1")).recordset[0];
+  if (!booking) throw unitChangeError(404, "Booking not found");
+  // Once the Agreement for Sale is signed (or the deed registered) the unit is
+  // named in a legal document — the ERP can't quietly swap it.
+  if (await isSaleDeedRegistered(pool, id)) {
+    throw unitChangeError(400, "The Sale Deed is registered — the unit can't be changed in the ERP. A Deed of Rectification at the Sub-Registrar is required.");
+  }
+  if (await isLegalWorkStarted(pool, id)) {
+    throw unitChangeError(400, "The Agreement for Sale is already signed and names this unit — cancel the agreement before changing the unit.");
+  }
+  // A new unit re-prices the booking — not while approvers are looking at the old price.
+  if (["MarketingHeadApproval", "DirectorApproval"].includes(booking.WorkflowStage)) {
+    throw unitChangeError(400, `This booking is in ${booking.WorkflowStage} — reject it back to Review before changing its unit, so the new price is approved.`);
+  }
+  const oldUnitId = booking.UnitId;
+  if (newUnitId === oldUnitId) throw unitChangeError(400, "New unit is the same as the current unit");
+
+  // Same lookup + availability checks as booking creation.
+  const unitRow = (await pool.request().input("uid", sql.Int, newUnitId).query(`
+    SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitKind, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind)) AS UnitType, u.AreaSqFt,
+           u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
+           proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
+    FROM dbo.UnitMaster u
+    LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
+    LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
+    WHERE u.Id = @uid AND u.IsActive = 1`)).recordset[0];
+  if (!unitRow) throw unitChangeError(400, "Selected unit does not exist or is inactive");
+
+  // The same rules a new booking must pass (crmEntityCreation.js).
+  const ctx = (await pool.request().input("id", sql.Int, id).query(`
+    SELECT b.ProjectId, a.CustomerId FROM dbo.CrmBooking b LEFT JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @id`)).recordset[0] || {};
+  if (ctx.ProjectId != null && unitRow.ProjectId !== ctx.ProjectId) {
+    throw unitChangeError(400, "A booking stays in its own project — pick a unit from the same project, or cancel and book afresh.");
+  }
+  {
+    const { bookingTypeViolation, loadLandKinds, loadCommercialKinds } = require("./projectType");
+    const why = await bookingTypeViolation(pool, [unitRow], {
+      isPlotBooking: false, landKinds: await loadLandKinds(pool), commercialKinds: await loadCommercialKinds(pool),
+    });
+    if (why) throw unitChangeError(400, why);
+  }
+  try {
+    await require("./villaLand").assertVillaBuyerOwnsLand(pool, [newUnitId], ctx.CustomerId);
+    await assertCommercialGstReady(pool, [newUnitId]);
+  } catch (e) {
+    if (e.status) throw e;
+    if (e instanceof GstSetupError) throw unitChangeError(400, e.message);
+    throw e;
+  }
+  // Priced from the new unit's saleable area — without one the booking would
+  // silently keep the old unit's price.
+  if (!(Number(unitRow.AreaSqFt) > 0)) {
+    throw unitChangeError(400, `${unitRow.UnitName} has no saleable area — set it in Unit Master first, so the booking can be re-priced.`);
+  }
+  const taken = await pool.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id)
+    .query(`SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())
+            UNION SELECT BookingId FROM dbo.CrmBookingUnit WHERE UnitId = @uid AND BookingId <> @id AND Status = N'Active'`);
+  if (taken.recordset.length) throw unitChangeError(409, "This unit is already booked");
+  if (checkOnly) return { unitNo: unitRow.UnitName };
+
+  await require("./crmHoldService").guardAndConvertHold(pool, "Unit", newUnitId, booking.ApplicationId);
+
+  const paid = await pool.request().input("bid", sql.Int, id).query(`
+    SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('${CrmStatus.PAID}', 'Waived'))`);
+  const canRegenerateSchedule = paid.recordset[0]?.Cnt === 0;
+  let newPlanId = null;
+  if (canRegenerateSchedule) {
+    try {
+      // Given a plan, it is checked against the new unit's plans; without one,
+      // only a unit with exactly one tagged plan resolves (no guessing).
+      newPlanId = await resolveApplicationPaymentPlan(pool, { preferredUnitId: unitRow.Id, paymentPlanId: paymentPlanId ?? null });
+    } catch {
+      newPlanId = null;
+    }
+  }
+  // Keep the booking's rate; fall back to the new unit's list rate.
+  const rate = booking.RatePerSqFt != null ? Number(booking.RatePerSqFt)
+    : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
+  const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;
+  const total = area && rate ? unitPrice(area, rate) : booking.TotalValue;
+
+  // Unit, price, GST, schedule, change log and audit are one event.
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    await tx.request()
+      .input("id", sql.Int, id).input("uid", sql.Int, newUnitId)
+      .input("pid", sql.Int, unitRow.ProjectId != null ? unitRow.ProjectId : null)
+      .input("pname", sql.NVarChar(200), unitRow.ProjectName || null)
+      .input("cid", sql.Int, unitRow.CompanyId != null ? unitRow.CompanyId : null)
+      .input("unit", sql.NVarChar(100), unitRow.UnitName)
+      .input("blk", sql.NVarChar(100), unitRow.BlockName || null)
+      .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
+      .input("area", sql.Decimal(18, 2), area)
+      .input("carpetArea", sql.Decimal(18, 2), unitRow.CarpetAreaSqFt != null ? Number(unitRow.CarpetAreaSqFt) : null)
+      .input("builtUpArea", sql.Decimal(18, 2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
+      .input("superBuiltUpArea", sql.Decimal(18, 2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
+      .input("openTerraceArea", sql.Decimal(18, 2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
+      .input("rate", rateSqlType(), rate)
+      .input("tot", sql.Decimal(18, 2), total)
+      .input("ppid", sql.Int, newPlanId)
+      .input("ub", sql.Int, actor)
+      .query(`
+        UPDATE dbo.CrmBooking SET
+          UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
+          CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
+          CarpetAreaSqFt = @carpetArea, BuiltUpAreaSqFt = @builtUpArea, SuperBuiltUpAreaSqFt = @superBuiltUpArea, OpenTerraceAreaSqFt = @openTerraceArea,
+          RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+          TotalValue = @tot,
+          PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
+          GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id`);
+
+    // The allocation line is what reserves a unit — it moves with the booking,
+    // or the old unit stays locked and the new one unprotected.
+    const moved = await tx.request()
+      .input("id", sql.Int, id).input("old", sql.Int, oldUnitId).input("uid", sql.Int, newUnitId)
+      .input("area", sql.Decimal(18, 2), area).input("rate", rateSqlType(), rate).input("tot", sql.Decimal(18, 2), total)
+      .input("ub", sql.Int, actor)
+      .query(`
+        UPDATE dbo.CrmBookingUnit SET UnitId = @uid, AreaSqFt = @area, RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+               AllocatedValue = @tot, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE BookingId = @id AND Status = N'Active' AND UnitId = @old`);
+    if (!moved.rowsAffected[0]) {
+      await tx.request().input("id", sql.Int, id).input("uid", sql.Int, newUnitId)
+        .input("area", sql.Decimal(18, 2), area).input("rate", rateSqlType(), rate).input("tot", sql.Decimal(18, 2), total).input("ub", sql.Int, actor)
+        .query(`INSERT INTO dbo.CrmBookingUnit (BookingId, UnitId, AreaSqFt, RatePerSqFt, AllocatedValue, Status, IsPrimary, CreatedBy, CreatedAt)
+                VALUES (@id, @uid, @area, @rate, @tot, N'Active', 1, @ub, SYSDATETIME())`);
+    }
+
+    // A new price can cross a GST band.
+    await recalculateBookingGst(tx, id);
+
+    if (newPlanId != null) {
+      // Only the %-based plan steps are rebuilt — parking / extra-charge steps
+      // belong to their own rows.
+      await tx.request().input("bid", sql.Int, id).query(`
+        DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL`);
+      await generateMilestonesForBooking(tx, id, total, newPlanId, null, actor, booking.BookingAmount);
+    } else {
+      // Same plan, new price: the unpaid steps follow it.
+      await recalculateRemainingMilestones(tx, id);
+    }
+
+    await tx.request()
+      .input("bid", sql.Int, id).input("oldUid", sql.Int, oldUnitId != null ? oldUnitId : null).input("newUid", sql.Int, newUnitId)
+      .input("reason", sql.NVarChar(sql.MAX), String(reason || "").trim()).input("cb", sql.Int, actor)
+      .query(`INSERT INTO dbo.CrmUnitChangeLog (BookingId, OldUnitId, NewUnitId, Reason, ChangedBy, ChangedAt)
+              VALUES (@bid, @oldUid, @newUid, @reason, @cb, SYSDATETIME())`);
+    await require("./crmAudit").logCrmAudit(tx, "Booking", id, actor, [{ field: "UnitId", oldVal: oldUnitId, newVal: newUnitId }]);
+    await tx.commit();
+  } catch (txErr) {
+    try { await tx.rollback(); } catch { /* already rolled back */ }
+    throw txErr;
+  }
+  return {
+    unitNo: unitRow.UnitName, paymentPlanUpdated: newPlanId != null,
+    parkingWarning: await parkingOutsideUnitBlock(pool, { bookingId: id, applicationId: booking.ApplicationId, unitId: newUnitId }),
+  };
+}
+
+
+/**
+ * Parking picked for an application (holds) or its booking (allotments) that
+ * sits in a different block from the unit — after the unit is changed, so the
+ * user is told to re-check the parking instead of finding it later. Returns a
+ * sentence to show, or null.
+ */
+async function parkingOutsideUnitBlock(pool, { applicationId = null, bookingId = null, unitId }) {
+  if (!unitId) return null;
+  const rows = (await pool.request().input("aid", sql.Int, applicationId).input("bid", sql.Int, bookingId).input("uid", sql.Int, unitId).query(`
+    SELECT DISTINCT s.SlotNo, sb.BlockName AS SlotBlock, ub.BlockName AS UnitBlock
+    FROM (
+      SELECT h.EntityId AS SlotId FROM dbo.CrmInventoryHold h
+      WHERE h.EntityType = 'Parking' AND h.Status = 'Active' AND @aid IS NOT NULL AND h.ApplicationId = @aid
+      UNION
+      SELECT pa.ParkingSlotId FROM dbo.CrmParkingAllotment pa
+      WHERE pa.IsActive = 1 AND pa.ParkingSlotId IS NOT NULL
+        AND ((@aid IS NOT NULL AND pa.ApplicationId = @aid) OR (@bid IS NOT NULL AND pa.BookingId = @bid))
+    ) x
+    JOIN dbo.ParkingSlot s ON s.Id = x.SlotId
+    JOIN dbo.UnitMaster u ON u.Id = @uid
+    LEFT JOIN dbo.BlockMaster sb ON sb.Id = s.BlockId
+    LEFT JOIN dbo.BlockMaster ub ON ub.Id = u.BlockId
+    WHERE s.BlockId IS NOT NULL AND u.BlockId IS NOT NULL AND s.BlockId <> u.BlockId`)).recordset;
+  if (!rows.length) return null;
+  const slots = rows.map((r) => `${r.SlotNo} (Block ${r.SlotBlock})`).join(", ");
+  return `Parking ${slots} is in another block than the new unit (Block ${rows[0].UnitBlock}) — check the parking and change it if needed.`;
+}
+
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
+  changeBookingUnit, applicationEditsClosedReason, parkingOutsideUnitBlock, assertNoBookingForApplicationLocked,
+  generateMilestonesForBooking, planSchedule, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

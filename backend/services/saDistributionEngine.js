@@ -16,6 +16,7 @@
  * (caller should leave the lead for manual distribution in that case).
  */
 const { sql } = require("../db");
+const { distributableStatus } = require("../constants/saStatuses");
 
 async function findApplicableRule(pool, level, campaignId, teamLeadUserId) {
   if (level === 1) {
@@ -130,4 +131,82 @@ async function resolveDistributionForLead(pool, lead, level) {
   return { ruleId: rule.Id, userId };
 }
 
-module.exports = { resolveDistributionForLead };
+
+/**
+ * Hands out the leads waiting at a level by the standing distribution rules — level 1 to team
+ * leads (New leads), level 2 to salespeople (Assigned, no salesperson yet). With leadIds, only
+ * those of them. Each lead is written in its own transaction and re-checked under a lock, so two
+ * runs at once can't hand the same lead out twice. Resolves { distributedCount, eligibleCount, assigned }.
+ */
+async function autoDistribute(pool, level, distributedBy, leadIds = null) {
+  const pendingResult = await pool.request().query(
+    level === 1
+      ? `SELECT Id, CampaignId, AssignedTeamLeadId FROM dbo.SaLead WHERE IsActive = 1 AND Status = 'New'`
+      : `SELECT Id, CampaignId, AssignedTeamLeadId FROM dbo.SaLead WHERE IsActive = 1 AND Status = 'Assigned' AND AssignedTeamLeadId IS NOT NULL AND AssignedSalespersonId IS NULL`
+  );
+  const only = leadIds ? new Set(leadIds.map(Number)) : null;
+  const pending = only ? pendingResult.recordset.filter((l) => only.has(l.Id)) : pendingResult.recordset;
+  let distributedCount = 0;
+  const assigned = [];
+  for (const lead of pending) {
+    const result = await resolveDistributionForLead(pool, lead, level);
+    if (!result) continue;
+
+    // Wrap the distribution log INSERT and lead UPDATE atomically so a crash
+    // between them can't leave an orphaned distribution row with a stale lead status.
+    //
+    // The pending list above was fetched once, up front, outside any
+    // transaction - two concurrent /run-now calls (double-click, or a
+    // scheduled job racing a manual trigger) could both see the same lead
+    // as pending before either writes it, producing the exact duplicate
+    // SaLeadDistribution row / fairness-skew bug already fixed for the
+    // manual /distribute route (see saLeadDistribution.js). Re-check the
+    // lead's eligibility under an UPDLOCK/HOLDLOCK inside this per-lead
+    // transaction, same pattern, so a second concurrent run sees the
+    // already-updated row and skips it.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const assignedCol = level === 1 ? "AssignedTeamLeadId" : "AssignedSalespersonId";
+      const cur = await tx.request().input("lid", sql.Int, lead.Id).input("st", sql.NVarChar(30), distributableStatus(level)).query(
+        `SELECT ${assignedCol} AS assignedTo FROM dbo.SaLead WITH (UPDLOCK, HOLDLOCK) WHERE Id = @lid AND IsActive = 1 AND Status = @st`,
+      );
+      if (!cur.recordset.length || cur.recordset[0].assignedTo != null) {
+        await tx.commit();
+        continue;
+      }
+
+      await tx.request()
+        .input("lid", sql.Int, lead.Id)
+        .input("fuid", sql.Int, distributedBy)
+        .input("tuid", sql.Int, result.userId)
+        .input("lvl", sql.Int, level)
+        .input("dby", sql.Int, distributedBy)
+        .query(`
+          INSERT INTO dbo.SaLeadDistribution (LeadId, FromUserId, ToUserId, Level, Method, DistributedAt, DistributedBy)
+          VALUES (@lid, @fuid, @tuid, @lvl, 'Auto', SYSDATETIME(), @dby)
+        `);
+
+      if (level === 1) {
+        await tx.request()
+          .input("lid", sql.Int, lead.Id)
+          .input("tuid", sql.Int, result.userId)
+          .query(`UPDATE dbo.SaLead SET AssignedTeamLeadId = @tuid, Status = 'Assigned', UpdatedAt = SYSDATETIME() WHERE Id = @lid`);
+      } else {
+        await tx.request()
+          .input("lid", sql.Int, lead.Id)
+          .input("tuid", sql.Int, result.userId)
+          .query(`UPDATE dbo.SaLead SET AssignedSalespersonId = @tuid, UpdatedAt = SYSDATETIME() WHERE Id = @lid`);
+      }
+      await tx.commit();
+      distributedCount++;
+      assigned.push({ leadId: lead.Id, userId: result.userId });
+    } catch (txErr) {
+      await tx.rollback();
+      console.error(`[sa-distribution-rules] run-now tx failed for lead ${lead.Id}:`, txErr.message);
+    }
+  }
+  return { distributedCount, eligibleCount: pending.length, assigned };
+}
+
+module.exports = { resolveDistributionForLead, autoDistribute };

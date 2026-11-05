@@ -41,12 +41,12 @@ function InvoicePdfDialog({ pdfUrl, title, subtitle, filename, onClose }: {
     <div data-overlay-portal className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
       style={{ pointerEvents: "auto" }}
       onClick={onClose} onPointerDown={(e) => e.stopPropagation()}>
-      <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden max-h-[90vh]"
+      <div className="bg-background border border-border shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <FileText size={16} className="text-primary shrink-0" />
+              <FileText size={16} className="text-foreground shrink-0" />
               <span className="font-medium text-sm truncate">{title}</span>
             </div>
             {subtitle && <p className="text-xs text-muted-foreground mt-0.5 ml-6">{subtitle}</p>}
@@ -54,11 +54,11 @@ function InvoicePdfDialog({ pdfUrl, title, subtitle, filename, onClose }: {
           <div className="flex items-center gap-2 shrink-0">
             {blobUrl && (
               <a href={blobUrl} download={filename}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1.5">
+                className="px-3 py-1.5 text-sm border border-border font-medium hover:bg-muted flex items-center gap-1.5">
                 <Download size={14} /> Download PDF
               </a>
             )}
-            <button onClick={onClose} className="p-1 rounded-md hover:bg-muted text-muted-foreground"><X size={16} /></button>
+            <button onClick={onClose} className="p-1 hover:bg-muted text-muted-foreground"><X size={16} /></button>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center min-h-[300px] bg-muted/20 overflow-hidden">
@@ -140,7 +140,7 @@ export function CrmInvoiceList({ invoices, emptyText = "No invoices generated ye
                   <td className="px-2.5 py-2 whitespace-nowrap text-xs">{inv.CreatedByName || "—"}</td>
                   <td className="px-2.5 py-2 whitespace-nowrap">
                     <button data-row-view onClick={() => setPreview(inv)}
-                      className="flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400 hover:underline">
+                      className="flex items-center gap-1 text-xs text-foreground hover:underline">
                       <Eye size={12} /> View
                     </button>
                   </td>

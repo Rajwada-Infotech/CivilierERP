@@ -2,6 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmPossessionNotice")); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -9,18 +11,22 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const PN_SELECT = `
   SELECT n.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
-    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
-     WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
-       AND m.AmountDue > ISNULL(m.AmountPaid, 0)) AS OutstandingMilestones,
-    ISNULL((SELECT SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)) FROM dbo.CrmPaymentMilestone m
-     WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
-       AND m.AmountDue > ISNULL(m.AmountPaid, 0)), 0) AS OutstandingBalance
+    CASE WHEN ${bookingFullyFundedSql("n.BookingId")} THEN 0 ELSE
+      (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
+       WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
+         AND m.AmountDue > ISNULL(m.AmountPaid, 0)) END AS OutstandingMilestones,
+    CASE WHEN ${bookingFullyFundedSql("n.BookingId")} THEN 0 ELSE
+      ISNULL((SELECT SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)) FROM dbo.CrmPaymentMilestone m
+       WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
+         AND m.AmountDue > ISNULL(m.AmountPaid, 0)), 0) END AS OutstandingBalance
   FROM dbo.CrmPossessionNotice n
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -32,6 +38,7 @@ const PN_SELECT = `
 router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT
         b.Id, b.BookingNo,
@@ -44,19 +51,17 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
         SELECT TOP 1 UnitNo FROM dbo.vw_CrmBookingDisplay WHERE BookingId = b.Id
       ) bv
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled', 'Rejected')
+        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+        ${scope}
         AND EXISTS (
           SELECT 1 FROM dbo.CrmPrePossession pp
-          WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'
+          WHERE pp.BookingId = b.Id
+            AND pp.DocumentationCheck = 1 AND pp.QualityInspectionCheck = 1 AND pp.UtilityReadinessCheck = 1
+            AND (${bookingFullyFundedSql("b.Id")})
         )
-        -- Block-level OC/CC (migration 447) checked first, falling back to
-        -- the project's blanket cert — same fallback as crmPrePossession.js.
+        -- OC/CC cleared for this booking (migration 577, vw_CrmBookingOcCc).
         AND (b.ProjectId IS NULL OR EXISTS (
-          SELECT 1 FROM dbo.CrmOccupancyCertificate oc
-          WHERE oc.Status = 'Received' AND (
-            (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
-            OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
-          )
+          SELECT 1 FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id AND v.Received = 1
         ))
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmPossessionNotice pn
@@ -95,8 +100,9 @@ const PN_JOINS = `
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
 `;
 
-function buildPnWhere(request, query, includeStatus) {
+function buildPnWhere(request, query, includeStatus, projectScope = null) {
   const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
   const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
   const companyId = intOf(query.companyId);
   const projectId = intOf(query.projectId);
@@ -122,7 +128,7 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
 
     if (req.query.page === undefined) {
       const r0 = pool.request();
-      const where = buildPnWhere(r0, req.query, false);
+      const where = buildPnWhere(r0, req.query, false, req.projectScope);
       const result = await r0.query(`${PN_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where} ORDER BY n.CreatedAt DESC`);
       return res.json(result.recordset);
     }
@@ -134,7 +140,7 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
     const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
 
     const countReq = pool.request();
-    const countWhere = buildPnWhere(countReq, req.query, false);
+    const countWhere = buildPnWhere(countReq, req.query, false, req.projectScope);
     const countRes = await countReq.query(
       `SELECT n.Status, COUNT(*) AS C FROM dbo.CrmPossessionNotice n ${PN_JOINS} ${countWhere} GROUP BY n.Status`
     );
@@ -143,7 +149,7 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
     const total = PN_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
 
     const pageReq = pool.request();
-    const pageWhere = buildPnWhere(pageReq, req.query, true);
+    const pageWhere = buildPnWhere(pageReq, req.query, true, req.projectScope);
     pageReq.input("offset", sql.Int, (page - 1) * pageSize);
     pageReq.input("pageSize", sql.Int, pageSize);
     const rowsRes = await pageReq.query(
@@ -170,6 +176,10 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

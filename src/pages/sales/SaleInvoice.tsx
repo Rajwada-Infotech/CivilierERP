@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
+import { fetchAllPages } from "@/lib/fetchAllPages";
 import { createPortal } from "react-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SalesShell } from "@/components/sales/SalesShell";
@@ -34,6 +35,7 @@ import { createReceivedPayment } from "@/api/receivedPaymentApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { DateInput } from "@/components/ui/date-input";
+import { ServerPager } from "@/components/ServerPager";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -283,8 +285,8 @@ function CollectPaymentModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
-      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto">
+    <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-md h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-widest mb-0.5">
@@ -422,14 +424,14 @@ function GenerateInvoiceTab() {
 
   const { data: soData, isLoading: soLoading } = useQuery({
     queryKey: ["sale-orders"],
-    queryFn: () => getSaleOrders({ limit: 500 }),
+    queryFn: async () => ({ data: await fetchAllPages((page, limit) => getSaleOrders({ page, limit }), { limit: 500 }) }),
     staleTime: 60_000,
   });
   const orders: SaleOrder[] = soData?.data ?? [];
 
   const { data: siData, isLoading: siLoading } = useQuery({
     queryKey: ["sale-invoices"],
-    queryFn: () => getSaleInvoices({ limit: 500 }),
+    queryFn: async () => ({ data: await fetchAllPages((page, limit) => getSaleInvoices({ page, limit }), { limit: 500 }) }),
     staleTime: 30_000,
   });
   const invoicedSoIds = useMemo(
@@ -595,12 +597,21 @@ function GenerateInvoiceTab() {
 
 function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
   const rights = usePageRights("sale-invoice");
+  // Server-paged: one page of invoices per request (newest first), however many exist.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["sale-invoices"],
-    queryFn: () => getSaleInvoices({ limit: 100 }),
+    queryKey: ["sale-invoices", "history", page, pageSize],
+    queryFn: () => getSaleInvoices({ page, limit: pageSize }),
     staleTime: 30_000,
+    placeholderData: keepPreviousData, // keep the current rows on screen while the next page loads
   });
   const invoices: SaleInvoiceDoc[] = data?.data ?? [];
+  const total = Number(data?.total ?? 0);
+  // A page past the end (rows removed since it was opened) comes back empty - go back to the first page.
+  React.useEffect(() => {
+    if (!isFetching && page > 1 && data && invoices.length === 0) setPage(1);
+  }, [isFetching, page, data, invoices.length]);
   const [viewingInvoice, setViewingInvoice] = useState<SaleInvoiceDoc | null>(
     null,
   );
@@ -739,9 +750,11 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
         </table>
       </div>
 
+      <ServerPager page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={setPageSize} />
+
       {/* ── View modal ────────────────────────────────────────────────────── */}
       {viewingInvoice && createPortal(
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+        <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
           <style>{`
             @media print {
               body * { visibility: hidden; }
@@ -762,7 +775,7 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
               .si-print-modal .sticky { position: static !important; }
             }
           `}</style>
-          <div className="si-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+          <div className="si-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto">
             <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
               <div>
                 <h2 className="font-heading font-bold text-base">

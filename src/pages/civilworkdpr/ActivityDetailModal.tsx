@@ -20,6 +20,7 @@ import {
   ZoomOut,
   Package,
   UserRound,
+  Link2,
   CalendarDays,
   RotateCcw,
   Users2,
@@ -37,14 +38,19 @@ import {
   MessageSquare,
   type LucideIcon,
 } from "lucide-react";
+import { dependencyAutoName } from "@/lib/dependencyAutoName";
+import { TagCombobox } from "@/components/civilworkdpr/TagCombobox";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   getActivityPhotos,
+  carryForwardPhotos,
   getActivityPhoto,
   uploadActivityPhoto,
   deleteActivityPhoto,
   getBlueprintAnnotation,
   getBlueprintAnnotationHistory,
   updateAssignmentDetail,
+  setActivityTag,
   getRungAssignment,
   saveRungAssignment,
   getAssignmentAttempts,
@@ -60,6 +66,7 @@ import {
   type AssignmentCheckpoint,
   type AssignmentStatus,
   type DailyLogEntry,
+  type ProgressLogEntry,
 } from "@/api/dependencyActivityAssignmentApi";
 import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 import {
@@ -69,13 +76,14 @@ import {
   type AttendanceStatus,
 } from "@/api/workerAttendanceApi";
 import { AddWorkerDialog, inputCls, STATUS_LABEL, STATUS_CLS, todayIso } from "@/pages/civilworkdpr/WorkerAttendance";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
 import { useAuth } from "@/contexts/AuthContext";
 import { DateInput } from "@/components/ui/date-input";
+import { fmtIstDateTime, fmtIstIso } from "@/lib/istTime";
 
 type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "daily-log" | "comments" | "history";
 
@@ -106,13 +114,7 @@ const CARRIED_FORWARD_NOTE = "Carried forward from previous After";
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return fmtIstDateTime(iso);
 }
 
 // Best-effort — geolocation is a nice-to-have on a photo, never a blocker
@@ -223,7 +225,7 @@ function PhotoLightbox({ rungId, photo, onClose }: { rungId: number; photo: Acti
           <img src={`data:${data.mimeType};base64,${data.dataBase64}`} alt={photo.fileName} className="max-w-full max-h-[75vh] rounded-xl shadow-2xl object-contain" />
         )}
         <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-white/70">
-          <span className="flex items-center gap-1.5 font-semibold" style={{ color: meta.color }}>
+          <span className="flex items-center gap-1.5 font-semibold text-white">
             <Icon size={12} /> {meta.label}
           </span>
           <span>{fmtDateTime(photo.capturedAt)}</span>
@@ -253,46 +255,27 @@ function PhotosTab({ rungId }: { rungId: number }) {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["activity-photos", rungId] });
 
-  // A new "After" shot marks one work cycle done — the field engineer
-  // shouldn't have to separately re-photograph "Before" for the next
-  // cycle when it's just whatever the site looked like a moment ago,
-  // i.e. the After that was just superseded. So the moment there's an
-  // After newer than the current Before, clone that After into Before
-  // automatically. Guarded by comparing timestamps (not just "any before
-  // exists") so this stays idempotent — safe to call on every load, not
-  // just right before a new capture.
-  const carryForwardBeforeIfNeeded = async () => {
+  // Day 1's After photos become day 2's Before. Done on the server (one INSERT…SELECT,
+  // idempotent) the moment the tab opens — and again right before a new photo is taken —
+  // so it never depends on someone having shot an After first or on the browser
+  // downloading and re-uploading each image.
+  const carryForward = async () => {
     try {
-      const current = await getActivityPhotos(rungId);
-      const lastAfter = current.after[0]; // ORDER BY CapturedAt DESC
-      if (!lastAfter) return;
-      const lastBefore = current.before[0];
-      const alreadyCarried = lastBefore && lastBefore.capturedAt >= lastAfter.capturedAt;
-      if (alreadyCarried) return;
-      const raw = await getActivityPhoto(rungId, lastAfter.id);
-      const blob = await (await fetch(`data:${raw.mimeType};base64,${raw.dataBase64}`)).blob();
-      const file = new File([blob], `before-carried-${Date.now()}.jpg`, { type: raw.mimeType });
-      await uploadActivityPhoto(rungId, "before", file, CARRIED_FORWARD_NOTE);
-      refresh();
+      const { carried } = await carryForwardPhotos(rungId);
+      if (carried > 0) refresh();
     } catch {
-      // Best-effort — a failed carry-forward should never block the new capture.
+      // Best-effort — a failed carry-forward should never block the Photos tab or a new capture.
     }
   };
-
-  // Reconciles on every load too, not just right before a new capture —
-  // otherwise a Before that should already reflect yesterday's After only
-  // ever shows up the next time someone happens to take a new After photo,
-  // which could be days later. Keyed on the latest After's own id so this
-  // re-checks whenever a new After actually lands, not on every re-render.
   useEffect(() => {
-    if (data?.after?.[0]) carryForwardBeforeIfNeeded();
+    void carryForward();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.after?.[0]?.id]);
+  }, [rungId]);
 
   const addPhoto = async (blob: Blob) => {
     setUploading(true);
     try {
-      await carryForwardBeforeIfNeeded();
+      await carryForward();
       const note = await getGeoTag();
       const file = new File([blob], `${activeTag}-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" });
       await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
@@ -333,31 +316,23 @@ function PhotosTab({ rungId }: { rungId: number }) {
   return (
     <div className="flex flex-col gap-4">
       {/* Tag picker — applies to whatever gets captured next. */}
-      <div className="flex items-center gap-1.5">
-        {TAG_ORDER.map((tag) => {
-          const meta = TAG_META[tag];
-          const Icon = meta.icon;
-          const active = activeTag === tag;
-          return (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => setActiveTag(tag)}
-              className="flex items-center gap-1 px-2 py-1 rounded-full text-[0.6875rem] font-medium border transition-colors"
-              style={
-                active
-                  ? { background: `${meta.color}1A`, borderColor: `${meta.color}60`, color: meta.color }
-                  : { borderColor: "var(--border)", color: "var(--muted-foreground)" }
-              }
-            >
-              <Icon size={11} /> {meta.label}
-            </button>
-          );
-        })}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">File the next photo under</span>
+        <div className="seg">
+          {TAG_ORDER.map((tag) => {
+            const meta = TAG_META[tag];
+            const active = activeTag === tag;
+            return (
+              <button key={tag} type="button" onClick={() => setActiveTag(tag)} aria-pressed={active} className={active ? "on" : undefined}>
+                {meta.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Camera panel */}
-      <div className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+      <div className="overflow-hidden" style={{ border: "1px dashed hsl(var(--foreground) / 0.5)" }}>
         {camera.isActive ? (
           <div className="relative bg-black">
             <video ref={camera.videoRef} playsInline muted className="w-full max-h-72 object-contain" />
@@ -381,11 +356,11 @@ function PhotosTab({ rungId }: { rungId: number }) {
             <button
               type="button"
               onClick={openCamera}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white transition-colors"
-              style={{ background: TAG_META[activeTag].color }}
+              className="inline-flex items-center gap-1.5 h-9 px-4 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground"
             >
               <CameraIcon size={13} /> Open camera
             </button>
+            <p className="text-[0.6875rem] text-muted-foreground">The photo will be filed under {TAG_META[activeTag].label.toLowerCase()}.</p>
           </div>
         )}
       </div>
@@ -396,18 +371,18 @@ function PhotosTab({ rungId }: { rungId: number }) {
           <Loader2 size={18} className="animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
           {TAG_ORDER.map((tag) => {
             const meta = TAG_META[tag];
-            const Icon = meta.icon;
             const photos = data?.[tag] ?? [];
             const carriedCount = photos.filter((p) => p.note === CARRIED_FORWARD_NOTE).length;
             return (
-              <div key={tag} className="pl-3 border-l-2" style={{ borderColor: `${meta.color}45` }}>
-                <p className="flex items-center gap-1 text-[0.625rem] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
-                  <Icon size={10} /> {meta.label} · {photos.length}
+              <div key={tag}>
+                <p className="flex items-baseline gap-2 font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2 mb-2.5" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                  {meta.label}
+                  <span className="font-semibold tabular-nums text-muted-foreground">{photos.length}</span>
                   {carriedCount > 0 && (
-                    <span className="normal-case font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
+                    <span className="normal-case tracking-normal font-body font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
                       (<RotateCcw size={9} /> {carriedCount} carried forward)
                     </span>
                   )}
@@ -633,7 +608,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
                   <button
                     onClick={() => handleRemoveWorker(row.workerId)}
                     title="Remove from activity"
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
+                    className="p-1.5 text-muted-foreground hover:text-destructive"
                   >
                     <UserX size={13} />
                   </button>
@@ -647,14 +622,14 @@ function AttendanceTab({ rungId }: { rungId: number }) {
       <div className="flex items-center justify-between gap-3">
         <button
           onClick={() => setAddWorkerOpen(true)}
-          className="flex items-center gap-1.5 text-sm text-cyan-600 hover:text-cyan-500 font-medium"
+          className="flex items-center gap-1.5 text-sm text-foreground hover:text-foreground font-medium"
         >
           <Plus size={14} /> Add Worker
         </button>
         <button
           onClick={handleSave}
           disabled={saving || attendanceRows.length === 0}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-40"
+          className="flex items-center gap-2 px-4 py-2 bg-foreground text-card text-sm font-medium disabled:opacity-40"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           Save Attendance
@@ -779,30 +754,37 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
                 onClick={() => toggleCheckpoint(i)}
                 disabled={saving === i}
                 className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors disabled:opacity-50 ${
+                  cp.needsRework ? "cp-rework-blink " : ""
+                }${
                   cp.isChecked
-                    ? "bg-emerald-500 border-emerald-500 text-white"
+                    ? "bg-foreground border-foreground text-card"
                     : gate.locked
-                      ? "bg-background border-amber-500/40 text-transparent"
-                      : "bg-background border-border text-transparent hover:border-cyan-500/50"
+                      ? "bg-background border-foreground text-transparent"
+                      : "bg-background border-border text-transparent hover:border-foreground"
                 }`}
                 title={cp.isChecked ? "Mark incomplete" : gate.locked ? "Not eligible yet" : "Mark complete"}
               >
                 {saving === i ? <Loader2 size={10} className="animate-spin text-muted-foreground" /> : <Check size={11} strokeWidth={3} />}
               </button>
               {i < checkpoints.length - 1 && (
-                <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-emerald-500/40" : "bg-border"}`} />
+                <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-foreground" : "bg-border"}`} />
               )}
             </div>
             <div className="flex-1 min-w-0 pb-3 pt-0.5">
               <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
                 {cp.fieldName}
+                {cp.needsRework && (
+                  <span className="cp-rework-blink inline-flex items-center gap-1 text-[0.625rem] font-semibold text-foreground bg-primary/10 border border-foreground px-1.5 py-0.5 rounded-full">
+                    <RotateCcw size={9} /> Redo — rated Poor
+                  </span>
+                )}
                 {cp.isDaily && (
-                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-foreground bg-primary/10 px-1.5 py-0.5 rounded-full">
                     <CalendarDays size={9} /> Daily
                   </span>
                 )}
                 {gate.locked && (
-                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-foreground bg-primary/10 px-1.5 py-0.5 rounded-full">
                     <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
                   </span>
                 )}
@@ -827,19 +809,85 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+// "Developer" or "Contractor" on its own says nothing — show whose labour / material it is.
+function SourceValue({ source, name }: { source: string | null; name?: string | null }) {
+  if (!source) return <>—</>;
+  const kind = source.charAt(0) + source.slice(1).toLowerCase();
+  return name ? (
+    <span className="flex flex-col">
+      <span className="text-foreground">{name}</span>
+      <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{kind}</span>
+    </span>
+  ) : (
+    <>{kind}</>
+  );
+}
+
 function OverviewTab({ row }: { row: ReportedAssignment }) {
   const queryClient = useQueryClient();
-  const [remarks, setRemarks] = useState(row.remarks ?? "");
-  const remarksMutation = useMutation({
-    mutationFn: (next: string) => updateAssignmentDetail(row.rungId, { remarks: next }),
+  const canTag = usePageRights("civilworkdpr-activity-reporting").canEdit;
+  // Tag: pick one from the DPR Tag Master or type a new one — a new tag is saved to the Master on Save.
+  const [tag, setTag] = useState(row.tagName ?? "");
+  useEffect(() => setTag(row.tagName ?? ""), [row.tagName, row.rungId]);
+  const tagMutation = useMutation({
+    mutationFn: (name: string) => setActivityTag(row.rungId, name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["dpr-tags"] });
+      toast.success(tag.trim() ? "Tag saved." : "Tag cleared.");
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to save the tag."),
+  });
+  // Each remark is a new entry, so a second (third…) one the same day is just another "Add".
+  const [remarks, setRemarks] = useState("");
+  const { data: progressLog = [] } = useQuery({
+    queryKey: ["activity-progress-log", row.rungId],
+    queryFn: () => getProgressLog(row.rungId),
+  });
+  const remarkHistory = progressLog.filter((e) => !!e.remarks).slice(0, 8);
+  const remarksMutation = useMutation({
+    mutationFn: (next: string) => updateAssignmentDetail(row.rungId, { remarks: next.trim(), append: true }),
+    onSuccess: () => {
+      setRemarks("");
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      queryClient.invalidateQueries({ queryKey: ["activity-progress-log", row.rungId] });
+      queryClient.invalidateQueries({ queryKey: ["activity-daily-log", row.rungId] });
+      toast.success("Remark added.");
     },
     onError: (err: any) => toast.error(err?.message || "Failed to save remarks."),
   });
 
   return (
     <div className="flex flex-col gap-5">
+      {/* Auto Name — flat, room and activity, derived from the dependency; read-only */}
+      <div>
+        <p className="flex items-center gap-1.5 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">
+          <Link2 size={11} /> Auto Name
+        </p>
+        <p className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground select-text">
+          {dependencyAutoName({ flatName: row.flatName, alias: row.alias, roomName: row.roomName, storey: row.storey, activityName: row.activityName }) || "—"}
+        </p>
+      </div>
+      {/* Tag */}
+      <div>
+        <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">Tag</p>
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <TagCombobox value={tag} onChange={setTag} disabled={!canTag} placeholder="Search or type a new tag…" />
+          </div>
+          {canTag && (
+            <button
+              type="button"
+              disabled={tagMutation.isPending || tag.trim() === (row.tagName ?? "")}
+              onClick={() => tagMutation.mutate(tag.trim())}
+              className="shrink-0 px-3 py-2.5 rounded-lg text-xs font-semibold bg-foreground text-card hover:opacity-90 disabled:opacity-40 transition-opacity"
+            >
+              {tagMutation.isPending ? "Saving…" : "Save tag"}
+            </button>
+          )}
+        </div>
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <Field label="Engineer">
           <span className="flex items-center gap-1.5">
@@ -859,8 +907,8 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
               <span
                 className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                   delay.tone === "on-time"
-                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
+                    ? "bg-primary/10 text-foreground"
+                    : "bg-primary/10 text-foreground"
                 }`}
               >
                 {delay.label}
@@ -869,9 +917,12 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
           })()}
         </Field>
         <Field label="End Date">{row.endDate ? new Date(row.endDate).toLocaleDateString("en-IN") : "—"}</Field>
-        <Field label="Days">{row.days ?? "—"}</Field>
-        <Field label="Labour Source">{row.labourSource ?? "—"}</Field>
-        <Field label="Material Source">{row.materialSource ?? "—"}</Field>
+        <Field label="Days">
+          {row.days ?? "—"}
+          <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} className="mt-1" />
+        </Field>
+        <Field label="Labour Source"><SourceValue source={row.labourSource} name={row.labourSourceName} /></Field>
+        <Field label="Material Source"><SourceValue source={row.materialSource} name={row.materialSourceName} /></Field>
       </div>
 
       {row.description && <Field label="Description">{row.description}</Field>}
@@ -900,17 +951,33 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
         <textarea
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
-          onBlur={() => {
-            if (remarks !== (row.remarks ?? "")) remarksMutation.mutate(remarks);
-          }}
           rows={3}
           placeholder="Add a note about this activity…"
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground resize-none"
         />
-        {remarksMutation.isPending && (
-          <p className="text-[0.625rem] text-muted-foreground mt-1 flex items-center gap-1">
-            <Loader2 size={9} className="animate-spin" /> Saving…
-          </p>
+        <div className="flex items-center justify-end gap-2 mt-1.5">
+          {remarksMutation.isPending && <Loader2 size={11} className="animate-spin text-muted-foreground" />}
+          <button
+            type="button"
+            onClick={() => remarksMutation.mutate(remarks)}
+            disabled={!remarks.trim() || remarksMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1 bg-foreground text-card text-[0.6875rem] font-heading font-semibold disabled:opacity-50 transition-colors"
+          >
+            <Save size={11} /> Add remark
+          </button>
+        </div>
+        {remarkHistory.length > 0 && (
+          <div className="mt-2 rounded-lg border border-border bg-background/60 divide-y divide-border/60 max-h-44 overflow-y-auto">
+            {remarkHistory.map((e) => (
+              <div key={e.id} className="px-3 py-1.5 text-[0.6875rem]">
+                <p className="text-foreground/90 whitespace-pre-wrap break-words">{e.remarks}</p>
+                <p className="text-muted-foreground/80 truncate">
+                  {e.loggedBy || "—"} ·{" "}
+                  {fmtIstDateTime(e.loggedAt, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </p>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -1026,11 +1093,11 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
         className={`relative h-3 rounded-full bg-muted touch-none select-none ${locked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
       >
         <div
-          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500"
+          className="absolute inset-y-0 left-0 bg-foreground"
           style={{ width: `${percent}%`, transition: dragging ? "none" : "width 150ms ease-out" }}
         />
         <div
-          className="absolute top-1/2 w-4 h-4 rounded-full bg-white border-2 border-cyan-500 shadow-md -translate-y-1/2 -translate-x-1/2"
+          className="absolute top-1/2 w-4 h-4 rounded-full bg-card border-2 border-foreground -translate-y-1/2 -translate-x-1/2"
           style={{ left: `${percent}%`, transition: dragging ? "none" : "left 150ms ease-out" }}
         />
       </div>
@@ -1048,7 +1115,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
             type="button"
             onClick={() => commit(percent)}
             disabled={mutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[0.6875rem] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-60 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1 bg-foreground text-card text-[0.6875rem] font-heading font-semibold disabled:opacity-60 transition-colors"
           >
             {mutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
             Save
@@ -1075,7 +1142,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
                           : "Updated"}
                     </span>
                     <span className="text-muted-foreground shrink-0">
-                      {new Date(entry.loggedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      {fmtIstDateTime(entry.loggedAt, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                     </span>
                   </div>
                   {entry.remarks && (
@@ -1098,6 +1165,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
 // this is the "keep the history of the reworked task" record, not
 // something acted on here.
 const REWORK_SOURCE_LABEL: Record<string, string> = { QC: "Quality Check", APPROVAL: "Approval" };
+const RESTORE_SOURCE = "RESTORE";
 
 function HistoryTab({ rungId }: { rungId: number }) {
   const { data: attempts = [], isLoading } = useQuery({
@@ -1120,7 +1188,7 @@ function HistoryTab({ rungId }: { rungId: number }) {
           <div className="flex flex-col items-center shrink-0">
             <div
               className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                a.isCurrent ? "bg-cyan-500 border-cyan-500 text-white" : "bg-background border-border text-transparent"
+                a.isCurrent ? "bg-foreground border-foreground text-card" : "bg-background border-border text-transparent"
               }`}
             >
               {a.isCurrent && <Check size={11} strokeWidth={3} />}
@@ -1131,7 +1199,7 @@ function HistoryTab({ rungId }: { rungId: number }) {
             <span className="text-sm flex items-center gap-1.5 flex-wrap text-foreground font-medium">
               Attempt {a.attemptNo}
               {a.isCurrent && (
-                <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-foreground bg-primary/10 px-1.5 py-0.5 rounded-full">
                   Current
                 </span>
               )}
@@ -1144,10 +1212,12 @@ function HistoryTab({ rungId }: { rungId: number }) {
               {a.startDate ? ` · Started ${new Date(a.startDate).toLocaleDateString("en-IN")}` : ""}
             </p>
             {a.reworkReason && (
-              <p className="text-xs mt-1.5 flex items-start gap-1.5 text-fuchsia-700 dark:text-fuchsia-400">
+              <p className="text-xs mt-1.5 flex items-start gap-1.5 text-foreground">
                 <RotateCcw size={11} className="shrink-0 mt-0.5" />
                 <span>
-                  Sent back for rework via {REWORK_SOURCE_LABEL[a.reworkSource || ""] || "unknown"}: {a.reworkReason}
+                  {a.reworkSource === RESTORE_SOURCE
+                    ? a.reworkReason
+                    : <>Sent back for rework via {REWORK_SOURCE_LABEL[a.reworkSource || ""] || "unknown"}: {a.reworkReason}</>}
                 </span>
               </p>
             )}
@@ -1162,13 +1232,49 @@ function HistoryTab({ rungId }: { rungId: number }) {
 // One permanent snapshot per day this activity was reported on (see the
 // PATCH /:rungId/status route's MERGE) — newest first. Photos for a day are
 // fetched lazily on expand since most days won't be opened.
+const dayKey = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : "");
+const fmtLongDate = (key: string) => {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+};
+const fmtClock = (iso: string) => fmtIstDateTime(iso, { hour: "2-digit", minute: "2-digit" });
+
+function DailyLogPhotoGroup({
+  label,
+  photos,
+  rungId,
+  onOpen,
+}: {
+  label: string;
+  photos: ActivityPhotoMeta[];
+  rungId: number;
+  onOpen: (p: ActivityPhotoMeta) => void;
+}) {
+  return (
+    <div>
+      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+        {label} · {photos.length}
+      </p>
+      {photos.length === 0 ? (
+        <p className="text-[0.6875rem] text-muted-foreground/70 italic">None</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {photos.map((p) => (
+            <PhotoThumb key={p.id} rungId={rungId} photo={p} onOpen={() => onOpen(p)} onDeleted={() => {}} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Photos for one day, Before and After side by side (carried-forward Befores are flagged by PhotoThumb).
 function DailyLogDayPhotos({ rungId, logDate }: { rungId: number; logDate: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ["activity-photos", rungId, logDate],
     queryFn: () => getActivityPhotos(rungId, logDate),
   });
   const [lightboxPhoto, setLightboxPhoto] = useState<ActivityPhotoMeta | null>(null);
-  const all = [...(data?.before ?? []), ...(data?.after ?? [])];
 
   if (isLoading) {
     return (
@@ -1177,29 +1283,45 @@ function DailyLogDayPhotos({ rungId, logDate }: { rungId: number; logDate: strin
       </div>
     );
   }
-  if (all.length === 0) {
+  if (!data || data.before.length + data.after.length === 0) {
     return <p className="text-[0.6875rem] text-muted-foreground/70 flex items-center gap-1 py-1"><ImageOff size={11} /> No photos logged this day</p>;
   }
   return (
     <>
-      <div className="flex flex-wrap gap-2 pt-1">
-        {all.map((p) => (
-          <PhotoThumb key={p.id} rungId={rungId} photo={p} onOpen={() => setLightboxPhoto(p)} onDeleted={() => {}} />
-        ))}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <DailyLogPhotoGroup label="Before" photos={data.before} rungId={rungId} onOpen={setLightboxPhoto} />
+        <DailyLogPhotoGroup label="After" photos={data.after} rungId={rungId} onOpen={setLightboxPhoto} />
       </div>
       {lightboxPhoto && <PhotoLightbox rungId={rungId} photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />}
     </>
   );
 }
 
+// The full history, newest day first: every remark in full, each progress move (from → to), and
+// the day's photos — nothing hidden behind a click for the recent days.
 function DailyLogTab({ rungId }: { rungId: number }) {
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ["activity-daily-log", rungId],
     queryFn: () => getDailyLog(rungId),
   });
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const { data: progressLog = [] } = useQuery({
+    queryKey: ["activity-progress-log", rungId],
+    queryFn: () => getProgressLog(rungId),
+  });
+  const RECENT_OPEN = 5;
+  const [openSet, setOpenSet] = useState<Set<string> | null>(null); // null = default (most recent days open)
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const queryClient = useQueryClient();
+
+  // Every update of a day (oldest first), keyed by the day it happened on.
+  const updatesByDay = useMemo(() => {
+    const m = new Map<string, ProgressLogEntry[]>();
+    [...progressLog].reverse().forEach((e) => {
+      const k = fmtIstIso(e.loggedAt).slice(0, 10); // the IST day it happened on, not the UTC one
+      m.set(k, [...(m.get(k) ?? []), e]);
+    });
+    return m;
+  }, [progressLog]);
 
   const handleDelete = async (entry: DailyLogEntry) => {
     if (!window.confirm("Delete this daily log entry?")) return;
@@ -1233,61 +1355,114 @@ function DailyLogTab({ rungId }: { rungId: number }) {
   }
 
   const todayStr = todayIso();
+  const keyOf = (e: DailyLogEntry) => dayKey(e.logDate);
+  const isOpenDay = (e: DailyLogEntry, idx: number) => (openSet ? openSet.has(keyOf(e)) : idx < RECENT_OPEN);
+  const toggle = (e: DailyLogEntry, idx: number) => {
+    const next = new Set(openSet ?? entries.filter((_x, i) => i < RECENT_OPEN).map(keyOf));
+    const k = keyOf(e);
+    if (isOpenDay(e, idx)) next.delete(k);
+    else next.add(k);
+    setOpenSet(next);
+  };
 
   return (
-    <div className="flex flex-col gap-2">
-      {entries.map((entry) => {
-        const isToday = entry.logDate === todayStr;
-        const isOpen = expanded === entry.logDate;
+    <div className="flex flex-col gap-2.5">
+      <div className="flex items-center justify-between">
+        <p className="text-[0.6875rem] text-muted-foreground">
+          {entries.length} day{entries.length === 1 ? "" : "s"} logged
+        </p>
+        <div className="flex items-center gap-3 text-[0.6875rem] font-medium">
+          <button type="button" className="text-foreground hover:underline" onClick={() => setOpenSet(new Set(entries.map(keyOf)))}>
+            Expand all
+          </button>
+          <button type="button" className="text-muted-foreground hover:text-foreground hover:underline" onClick={() => setOpenSet(new Set())}>
+            Collapse all
+          </button>
+        </div>
+      </div>
+
+      {entries.map((entry, idx) => {
+        const key = keyOf(entry);
+        const isToday = key === todayStr;
+        const open = isOpenDay(entry, idx);
+        const updates = updatesByDay.get(key) ?? [];
+        const before = entries[idx + 1]?.progressPercent ?? 0; // the previous logged day (list is newest first)
+        const after = entry.progressPercent;
+        const moved = after != null ? after - before : null;
         return (
           <div key={entry.id} className="rounded-xl border border-border bg-muted/10 overflow-hidden">
             <div className="flex items-center hover:bg-muted/30 transition-colors">
-            <button
-              type="button"
-              onClick={() => setExpanded(isOpen ? null : entry.logDate)}
-              className="flex-1 min-w-0 flex items-center gap-3 px-3.5 py-2.5 text-left"
-            >
-              <div className="flex flex-col items-start shrink-0 w-24">
-                <span className="text-sm font-heading font-semibold text-foreground">
-                  {new Date(entry.logDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                </span>
-                {isToday && (
-                  <span className="text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
-                    Today
-                  </span>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-foreground truncate">{entry.remarks || <span className="text-muted-foreground italic">No remarks</span>}</p>
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5 flex items-center gap-2">
-                  {entry.progressPercent != null && (
-                    <span className="flex items-center gap-1">
-                      <TrendingUp size={10} /> {entry.progressPercent}%
+              <button type="button" onClick={() => toggle(entry, idx)} className="flex-1 min-w-0 flex items-center gap-3 px-3.5 py-2.5 text-left">
+                <div className="flex flex-col items-start shrink-0">
+                  <span className="text-sm font-heading font-semibold text-foreground">{fmtLongDate(key)}</span>
+                  {isToday && (
+                    <span className="text-[0.625rem] font-medium text-foreground bg-primary/10 px-1.5 py-0.5 rounded-full mt-0.5">Today</span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 text-[0.6875rem] text-muted-foreground">
+                  {after != null && (
+                    <span className="flex items-center gap-1 font-medium text-foreground">
+                      <TrendingUp size={11} />
+                      {moved ? `${before}% → ${after}%` : `${after}%`}
+                      {moved ? (
+                        <span className={moved > 0 ? "text-foreground" : "text-foreground"}>({moved > 0 ? "+" : ""}{moved})</span>
+                      ) : (
+                        <span className="font-normal text-muted-foreground">no change</span>
+                      )}
                     </span>
                   )}
                   {entry.photoCount > 0 && (
-                    <span className="flex items-center gap-1">
-                      <CameraIcon size={10} /> {entry.photoCount}
-                    </span>
+                    <span className="flex items-center gap-1"><CameraIcon size={11} /> {entry.photoCount}</span>
                   )}
-                  {entry.updatedBy && <span>· {entry.updatedBy}</span>}
-                </p>
-              </div>
-              {isOpen ? <ChevronLeft size={14} className="rotate-90 text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
-            </button>
-            <button
-              type="button"
-              title="Delete entry"
-              onClick={() => handleDelete(entry)}
-              disabled={deletingId === entry.id}
-              className="shrink-0 mr-2 w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-            >
-              {deletingId === entry.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-            </button>
+                  {entry.updatedBy && <span className="truncate max-w-[140px]">{entry.updatedBy}</span>}
+                </div>
+                {open ? <ChevronLeft size={14} className="rotate-90 text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+              </button>
+              <button
+                type="button"
+                title="Delete entry"
+                onClick={() => handleDelete(entry)}
+                disabled={deletingId === entry.id}
+                className="shrink-0 mr-2 w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+              >
+                {deletingId === entry.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              </button>
             </div>
-            {isOpen && (
-              <div className="px-3.5 pb-3 border-t border-border">
-                <DailyLogDayPhotos rungId={rungId} logDate={entry.logDate} />
+
+            {open && (
+              <div className="px-3.5 pb-3.5 pt-2.5 border-t border-border flex flex-col gap-3.5">
+                <div>
+                  <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Updates</p>
+                  {updates.length > 0 ? (
+                    <div className="flex flex-col gap-2">
+                      {updates.map((u) => (
+                        <div key={u.id} className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2 text-[0.6875rem]">
+                            <span className="font-medium text-foreground flex items-center gap-1.5">
+                              {u.fromProgressPercent != null && u.toProgressPercent != null ? (
+                                <>
+                                  <TrendingUp size={10} /> {u.fromProgressPercent}% → {u.toProgressPercent}%
+                                </>
+                              ) : (
+                                "Remark"
+                              )}
+                            </span>
+                            <span className="text-muted-foreground shrink-0">
+                              {fmtClock(u.loggedAt)}
+                              {u.loggedBy ? ` · ${u.loggedBy}` : ""}
+                            </span>
+                          </div>
+                          {u.remarks && <p className="text-xs text-foreground whitespace-pre-wrap break-words mt-1">{u.remarks}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : entry.remarks ? (
+                    <p className="text-xs text-foreground whitespace-pre-wrap break-words">{entry.remarks}</p>
+                  ) : (
+                    <p className="text-[0.6875rem] text-muted-foreground/70 italic">No remarks or progress changes recorded</p>
+                  )}
+                </div>
+                <DailyLogDayPhotos rungId={rungId} logDate={key} />
               </div>
             )}
           </div>
@@ -1302,20 +1477,22 @@ function DailyLogTab({ rungId }: { rungId: number }) {
 // out of the plain status dropdown (that badge stays terminal once
 // Cancelled) and behind an explicit confirm step here, only reachable
 // after opening this modal and reviewing the activity's full detail. The
-// target status (APPROVED vs IN_PROGRESS) is decided server-side from
-// PreCancelStatus, but shown here up front so the confirm step isn't a
-// guess — see restoreCancelledActivity's own comment.
+// target (APPROVED, or a fresh attempt back at Allocated with the bar at 0)
+// is decided server-side from PreCancelStatus, but shown here up front so the
+// confirm step isn't a guess — see restoreCancelledActivity's own comment.
 function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const restoreTo: AssignmentStatus = row.preCancelStatus === "APPROVED" ? "APPROVED" : "IN_PROGRESS";
+  const restoreTo: AssignmentStatus = row.preCancelStatus === "APPROVED" ? "APPROVED" : "ALLOCATED";
 
   const restore = useMutation({
     mutationFn: () => restoreCancelledActivity(row.rungId),
     onSuccess: (res) => {
       toast.success(`Restored — back to ${ASSIGNMENT_STATUS_META[res.status].label}.`);
-      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
-      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      [
+        "civilworkdpr-activity-reporting", "civilworkdpr-work-done-saved-flow", "dependency-activity-assignment",
+        "civilworkdpr-work-done-dependency-detail", "activity-attempts", "activity-progress-log", "qc-queue",
+      ].forEach((k) => queryClient.invalidateQueries({ queryKey: [k] }));
       setConfirmOpen(false);
       onClose();
     },
@@ -1327,7 +1504,7 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
       <button
         type="button"
         onClick={() => setConfirmOpen(true)}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-heading font-bold uppercase tracking-wide border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-[#ffe2021a] transition-colors"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-heading font-bold uppercase tracking-wide border border-foreground text-foreground hover:bg-primary/10 transition-colors"
         title="Restore this Cancelled activity"
       >
         <ShieldQuestion size={12} /> Restore
@@ -1337,12 +1514,13 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
         createPortal(
           <div className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-4" onClick={() => setConfirmOpen(false)}>
             <div
-              className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl p-5 space-y-4"
+              className="sheet-frame w-full max-w-sm bg-card p-5 space-y-4"
+              style={{ margin: 0, border: "1.5px solid hsl(var(--foreground))" }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-[#ffe2021a] flex items-center justify-center shrink-0">
-                  <ShieldQuestion size={16} className="text-amber-600 dark:text-amber-400" />
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                  <ShieldQuestion size={16} className="text-foreground" />
                 </div>
                 <div>
                   <p className="text-sm font-heading font-semibold text-foreground">Restore this activity?</p>
@@ -1352,7 +1530,8 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
               <p className="text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
                 It will move from <span className="font-semibold">Cancelled</span> back to{" "}
                 <span className="font-semibold">{ASSIGNMENT_STATUS_META[restoreTo].label}</span>
-                {restoreTo === "IN_PROGRESS" && " — it hadn't been approved yet, so it goes through Reporting/QC/Approval again from there"}.
+                {restoreTo === "ALLOCATED" &&
+                  " with Work Done reset to 0% — it hadn't been approved yet, so it starts over: reported up to Completed again, then Quality Check and Approval. The cancelled attempt stays in its history"}.
               </p>
               <div className="flex justify-end gap-2">
                 <button
@@ -1366,7 +1545,7 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
                   type="button"
                   disabled={restore.isPending}
                   onClick={() => restore.mutate()}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-foreground text-card disabled:opacity-50 transition-colors"
                 >
                   {restore.isPending && <Loader2 size={14} className="animate-spin" />}
                   Restore
@@ -1427,27 +1606,37 @@ export default function ActivityDetailModal({
     [hasBlueprint, row.attemptNo],
   );
 
+  // Lock the page behind while the popup is open, so the wheel scrolls only the popup.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   return createPortal(
-    <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl max-h-[92vh] rounded-2xl overflow-hidden">
-        <CivilWorkDprShell
-          fillHeight
-          title={row.activityName}
-          subtitle={row.scopePath}
-          icon={ActivityIcon}
-          action={
-            <div className="flex items-center gap-2.5">
-              <QcBadge qcStatus={row.qcStatus} />
-              <AttemptBadge attemptNo={row.attemptNo} />
-              {canRestore && <RestoreCancelledButton row={row} onClose={onClose} />}
-              <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
-              <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
-                <X size={18} />
-              </button>
-            </div>
-          }
-        >
-          <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+    <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4 overscroll-contain">
+      <div
+        className="sheet-frame w-full max-w-3xl max-h-[92dvh] overflow-hidden flex flex-col bg-card"
+        style={{ margin: 0, border: "1.5px solid hsl(var(--foreground))", boxShadow: "6px 6px 0 hsl(var(--foreground) / 0.12)" }}
+      >
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 px-4 py-3.5 shrink-0" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <div className="min-w-0">
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Activity</p>
+            <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{row.activityName}</h3>
+            {row.scopePath && <p className="text-xs text-muted-foreground mt-0.5 break-words">{row.scopePath}</p>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <QcBadge qcStatus={row.qcStatus} />
+            <AttemptBadge attemptNo={row.attemptNo} />
+            {canRestore && <RestoreCancelledButton row={row} onClose={onClose} />}
+            <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
+            <button onClick={onClose} aria-label="Close" className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="overflow-hidden flex flex-col flex-1 min-h-0">
             {/* Six tabs' worth of icon+label never fit a phone's width — this
                 used to just overflow the flex row silently (no scrollbar, no
                 affordance), clipping "Daily Log"/"History" off-screen with
@@ -1463,14 +1652,14 @@ export default function ActivityDetailModal({
                     key={t.id}
                     type="button"
                     onClick={() => setTab(t.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors shrink-0 whitespace-nowrap ${
-                      active ? "border-cyan-500 text-cyan-600 dark:text-cyan-400" : "border-transparent text-muted-foreground hover:text-foreground"
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors shrink-0 whitespace-nowrap focus:outline-none focus-visible:bg-primary/10 ${
+                      active ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Icon size={13} />
                     {t.label}
                     {t.id === "photos" && photoCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[0.5625rem] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400">
+                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 font-heading text-[0.5625rem] font-bold tabular-nums bg-foreground text-card">
                         {photoCount}
                       </span>
                     )}
@@ -1492,7 +1681,7 @@ export default function ActivityDetailModal({
 
             <ProgressDragBar row={row} />
           </div>
-        </CivilWorkDprShell>
+        </div>
       </div>
     </div>,
     document.body,

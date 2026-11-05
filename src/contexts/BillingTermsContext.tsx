@@ -45,7 +45,8 @@ interface BillingTermsContextType {
 
 // ─── DB → BillingTerm mapper ───────────────────────────────────────────────────
 
-function mapDbRow(row: any): BillingTerm {
+// Exported so the Billing Terms master builds terms exactly as the invoice billing reads them.
+export function mapDbRow(row: any): BillingTerm {
   return {
     _id: String(row.BillingTermID),
     name: row.Name ?? "",

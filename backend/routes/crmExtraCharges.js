@@ -2,18 +2,21 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmExtraCharge", { withApplication: true })); }
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
-const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, requireNotMidApproval, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
-const { recalculateBookingGst, resolveExtraWorkHsn, getHsnRate, isLandSale } = require("../services/crmGst");
+const { recalculateBookingGst, resolveExtraWorkHsn, getHsnRate, isLandSale, gstOn } = require("../services/crmGst");
+const { round2 } = require("../services/bookingUnits");
 
+router.use(apiRateLimit);
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // Same re-derive-from-source pattern as crmParking.js's rollup — delegates
 // ParkingTotal/ExtraChargesTotal/GrandTotal AND the fixed HSN-driven GST
@@ -42,6 +45,16 @@ async function applyAddExtraCharge(pool, bookingId, b, actorUserId) {
 
   const activeErr = await requireActiveBooking(pool, bookingId);
   if (activeErr) throw chargeError(activeErr);
+  // Same amendment-queue timing gap as the edit/release helpers below — the
+  // route handler only checks this when the amendment is queued, not when
+  // it's later approved.
+  const midApproval = await requireNotMidApproval(pool, bookingId);
+  if (midApproval) throw chargeError(midApproval);
+  const checklistLock = await assertWelcomeChecklistUnlocked(pool, bookingId);
+  if (checklistLock) throw chargeError(checklistLock);
+  if (await isSaleDeedRegistered(pool, bookingId)) {
+    throw chargeError("This booking's Sale Deed is already registered — extra charges can no longer be added in the ERP. A Deed of Rectification is required for any correction.");
+  }
 
   const booking = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
@@ -59,8 +72,8 @@ async function applyAddExtraCharge(pool, bookingId, b, actorUserId) {
   }
   const landSale = await isLandSale(pool, { bookingId });
   const gstRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool, { landSale })).hsnCode);
-  const gstAmount = Math.round((amount * gstRate) / 100 * 100) / 100;
-  const totalAmount = amount + gstAmount;
+  const gstAmount = gstOn(amount, gstRate);
+  const totalAmount = round2(amount + gstAmount);
 
   const result = await pool.request()
     .input("bid",  sql.Int, bookingId)
@@ -102,6 +115,20 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
   if (BookingId != null) {
     const activeErr = await requireActiveBooking(pool, BookingId);
     if (activeErr) throw chargeError(activeErr);
+    // The route handler only checks these at the moment an amendment is
+    // QUEUED (when legal work has already started) — the amendment-approval
+    // path (crmBookingAmendments.js) calls this function directly with no
+    // re-check, so a request approved after the deed registered, or while
+    // the booking is mid-approval, would silently change figures that are
+    // either already baked into a registered legal deed or sitting inside
+    // an in-flight approval. Re-checked here so every caller gets it.
+    const midApproval = await requireNotMidApproval(pool, BookingId);
+    if (midApproval) throw chargeError(midApproval);
+    const checklistLock = await assertWelcomeChecklistUnlocked(pool, BookingId);
+    if (checklistLock) throw chargeError(checklistLock);
+    if (await isSaleDeedRegistered(pool, BookingId)) {
+      throw chargeError("This booking's Sale Deed is already registered — extra charges can no longer be changed in the ERP. A Deed of Rectification is required for any correction.");
+    }
   } else if (ApplicationId != null) {
     const app = await pool.request().input("aid", sql.Int, ApplicationId)
       .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
@@ -140,8 +167,8 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
   }
   const landSale = await isLandSale(pool, { bookingId: BookingId, applicationId: BookingId == null ? ApplicationId : null });
   const gstRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool, { landSale })).hsnCode);
-  const gstAmount = Math.round((amount * gstRate) / 100 * 100) / 100;
-  const totalAmount = amount + gstAmount;
+  const gstAmount = gstOn(amount, gstRate);
+  const totalAmount = round2(amount + gstAmount);
 
   await pool.request()
     .input("id",   sql.Int, id)
@@ -206,8 +233,8 @@ async function applyAddExtraChargeToApplication(pool, applicationId, b, actorUse
   }
   const landSale = await isLandSale(pool, { applicationId });
   const gstRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool, { landSale })).hsnCode);
-  const gstAmount = Math.round((amount * gstRate) / 100 * 100) / 100;
-  const totalAmount = amount + gstAmount;
+  const gstAmount = gstOn(amount, gstRate);
+  const totalAmount = round2(amount + gstAmount);
 
   const result = await pool.request()
     .input("aid",  sql.Int, applicationId)
@@ -264,6 +291,17 @@ async function applyReleaseExtraCharge(pool, id) {
 
   const activeErr = await requireActiveBooking(pool, BookingId);
   if (activeErr) throw chargeError(activeErr);
+  // Same amendment-queue timing gap as applyEditExtraCharge above — re-check
+  // here so an approval reached after the deed registered, or mid-approval,
+  // can't silently release a charge the route-level check only caught at
+  // queue time.
+  const midApproval = await requireNotMidApproval(pool, BookingId);
+  if (midApproval) throw chargeError(midApproval);
+  const checklistLock = await assertWelcomeChecklistUnlocked(pool, BookingId);
+  if (checklistLock) throw chargeError(checklistLock);
+  if (await isSaleDeedRegistered(pool, BookingId)) {
+    throw chargeError("This booking's Sale Deed is already registered — extra charges can no longer be changed in the ERP. A Deed of Rectification is required for any correction.");
+  }
 
   const milestone = await pool.request().input("ecid", sql.Int, id)
     .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ExtraChargeId = @ecid ORDER BY Id DESC");
@@ -324,6 +362,7 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
     if (applicationId === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await applyAddExtraChargeToApplication(tx, applicationId, req.body, actorId(req));
     await tx.commit();
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId }, ["ParkingExtraCharges"], "extra charge added");
     res.status(201).json({ success: true, ...result });
   } catch (e) {
     try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
@@ -333,6 +372,19 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
 });
 
 // GET /:bookingId — list extra charges for a booking
+// GET /:bookingId/gst-rate — the rate an extra charge on this booking is taxed
+// at (crmGst.extraWorkRateForBooking), for the add form's preview.
+router.get("/:bookingId/gst-rate", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
+    res.json({ rate: await require("../services/crmGst").extraWorkRateForBooking(getPool(), bookingId) });
+  } catch (e) {
+    console.error("[crm-extra-charges] GET gst-rate error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -366,6 +418,8 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    const midApproval = await requireNotMidApproval(pool, bookingId);
+    if (midApproval) return res.status(400).json({ error: midApproval });
 
     if (await isSaleDeedRegistered(pool, bookingId))
       return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Extra charges in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
@@ -431,6 +485,8 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "ed
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    const midApproval = await requireNotMidApproval(pool, bookingId);
+    if (midApproval) return res.status(400).json({ error: midApproval });
 
     if (await isSaleDeedRegistered(pool, bookingId))
       return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Extra charges in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
@@ -451,6 +507,7 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "ed
       await tx.begin();
       const result = await applyEditExtraCharge(tx, id, b, actorId(req));
       await tx.commit();
+      await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { table: "CrmExtraCharge", id }, ["ParkingExtraCharges"], "extra charge edited");
       res.json({ success: true, ...result });
     } catch (txErr) {
       try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
@@ -489,6 +546,8 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], 
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    const midApproval = await requireNotMidApproval(pool, bookingId);
+    if (midApproval) return res.status(400).json({ error: midApproval });
 
     if (await isSaleDeedRegistered(pool, bookingId))
       return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Extra charges in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
@@ -510,6 +569,7 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], 
       await tx.begin();
       const result = await applyReleaseExtraCharge(tx, id);
       await tx.commit();
+      await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { table: "CrmExtraCharge", id }, ["ParkingExtraCharges"], "extra charge removed");
       res.json({ success: true, ...result });
     } catch (txErr) {
       try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }

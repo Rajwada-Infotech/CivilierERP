@@ -177,18 +177,22 @@ async function getBookingCommercial(pool, bookingId) {
   return r.recordset.every((x) => x.IsCommercial === true || x.IsCommercial === 1);
 }
 
-/** Same answer for a single unit (quotes / forms before a booking exists). */
-async function getUnitCommercial(pool, unitId) {
+/** Same answer for a set of units — a quote before a booking exists. */
+async function getUnitsCommercial(pool, unitIds) {
   const hasCol = await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c");
   if (hasCol.recordset?.[0]?.c == null) return null; // pre-526: usage unknown -> usage-agnostic GST rules
-  if (unitId == null) return null;
-  const r = await pool.request().input("uid", sql.Int, unitId).query(`
+  const ids = (unitIds || []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return null;
+  const r = await pool.request().query(`
     SELECT ISNULL(k.IsCommercial, 0) AS IsCommercial
     FROM dbo.UnitMaster u LEFT JOIN dbo.CrmConstructedAssetKind k ON k.Code = u.UnitKind
-    WHERE u.Id = @uid`);
+    WHERE u.Id IN (${ids.join(",")})`);
   if (!r.recordset.length) return null;
-  return r.recordset[0].IsCommercial === true || r.recordset[0].IsCommercial === 1;
+  return r.recordset.every((x) => x.IsCommercial === true || x.IsCommercial === 1);
 }
+
+/** Same answer for a single unit (quotes / forms before a booking exists). */
+const getUnitCommercial = (pool, unitId) => getUnitsCommercial(pool, unitId == null ? [] : [unitId]);
 
 async function loadLandKinds(pool) {
   const r = await pool.request().query(
@@ -336,6 +340,21 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
   const hasLand = lines.some((l) => isLandLine(l));
   const isPureLand = hasLand && constructionValue === 0;
 
+  // A villa sold directly carries its land inside the villa price
+  // (CrmBooking.LandValue, migration 552) rather than on a plot line. Its share
+  // of the booking applies to whatever amount is asked about — the whole
+  // booking for GST, one invoice for the ledger.
+  if (!hasLand) {
+    const own = (await pool.request().input("bid", sql.Int, bookingId).query(
+      "IF COL_LENGTH('dbo.CrmBooking', 'LandValue') IS NOT NULL EXEC sp_executesql N'SELECT LandValue, TotalValue FROM dbo.CrmBooking WHERE Id = @bid', N'@bid INT', @bid = @bid",
+    )).recordset?.[0];
+    const land = Number(own?.LandValue || 0), bookingTotal = Number(own?.TotalValue || 0);
+    if (land > 0 && bookingTotal > 0) {
+      const landValue = round2(Number(totalValue || 0) * Math.min(land / bookingTotal, 1));
+      return { landValue, constructionValue: round2(Number(totalValue || 0) - landValue), isPureLand: false, hasLand: true };
+    }
+  }
+
   // AllocatedValue can lag a booking edit (it is written when lines are priced).
   // For a pure-land booking the split is unambiguous regardless of that, so trust
   // the booking's own TotalValue rather than a possibly stale allocation.
@@ -405,6 +424,7 @@ module.exports = {
   loadCommercialKinds,
   getBookingCommercial,
   getUnitCommercial,
+  getUnitsCommercial,
   UNIT_KIND,
   INCOME_ACCOUNT,
   getEffectiveType,

@@ -59,4 +59,12 @@ const ResaleStatus = Object.freeze({
   CANCELLED: 'Cancelled',
 });
 
-module.exports = { CrmStatus, LineStatus, ResaleStatus };
+// A booking in one of these statuses no longer counts: it holds no inventory,
+// owes no dues, gets no deed or possession, and is not a sale in any report.
+// Expired (never confirmed) and Transferred (resold to a new owner) are as
+// dead as Cancelled and Rejected — every "live booking" filter uses this one
+// list, so a new terminal status is added here once instead of in 60 queries.
+const DEAD_BOOKING_STATUSES = Object.freeze(["Cancelled", "Rejected", "Expired", "Transferred"]);
+const DEAD_BOOKING_SQL = `(${DEAD_BOOKING_STATUSES.map((s) => `N'${s}'`).join(", ")})`;
+
+module.exports = { CrmStatus, LineStatus, ResaleStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL };

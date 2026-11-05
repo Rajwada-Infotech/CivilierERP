@@ -1,28 +1,11 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
-import {
-  Lock,
-  Unlock,
-  RefreshCw,
-  Loader2,
-  AlertTriangle,
-  CheckCircle2,
-  Building,
-  CalendarDays,
-  TrendingUp,
-  TrendingDown,
-  ArrowRightLeft,
-  ShieldCheck,
-  History,
-  ChevronDown,
-  ChevronRight,
-  Info,
-} from "lucide-react";
+import { Lock, RefreshCw, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,6 +28,13 @@ interface HistoryEntry {
 }
 
 const fmt = (n: number) => formatINR(Math.abs(n));
+const fmtDay = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const SEL = "w-full h-9 border border-foreground/40 bg-card px-2.5 text-xs text-foreground focus:outline-none focus:border-foreground";
+const KEY = "h-9 px-4 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] flex items-center gap-1.5 transition-colors disabled:opacity-40";
+const RULE = "1px solid hsl(var(--foreground))";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
 
 // Allowed roles for carry-forward
 const ALLOWED_ROLES = new Set(["super_admin", "admin", "dba", "accounts_head"]);
@@ -171,16 +161,15 @@ export default function YearEndClose() {
     return (
       <>
         <Breadcrumbs items={["Dashboard", "Finance", "Year-End Close"]} />
-        <FinanceShell title="Year-End Closing" subtitle="Financial Year Carry Forward" icon={Lock}>
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <ShieldCheck size={48} className="text-muted-foreground/30 mb-4" />
-            <h3 className="text-sm font-semibold text-foreground mb-1">Access Restricted</h3>
-            <p className="text-xs text-muted-foreground max-w-sm">
-              Year-End Closing is restricted to <strong>Admin</strong> and <strong>Accounts Head</strong> roles only.
+        <SheetShell eyebrow="CivilierERP · Finance" title="Year-end closing" subtitle="Close a financial year and carry its result forward.">
+          <div className="bg-card py-16 px-4 text-center" style={{ border: RULE }}>
+            <p className={HEAD}>Access restricted</p>
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto mt-2">
+              Year-end closing is open to <strong>Admin</strong> and <strong>Accounts Head</strong> roles only.
               Contact your system administrator for access.
             </p>
           </div>
-        </FinanceShell>
+        </SheetShell>
       </>
     );
   }
@@ -188,43 +177,39 @@ export default function YearEndClose() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Year-End Close"]} />
-      <FinanceShell
-        title="Year-End Closing"
-        subtitle="Close Financial Year · Transfer P&L to Retained Earnings · Lock Period"
-        icon={Lock}
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Year-end closing"
+        subtitle="Transfer the year's profit or loss to Retained Earnings and lock the financial year against further posting."
       >
         {/* ── Selector Bar ── */}
-        <div className="mb-5 rounded-xl border border-border bg-muted/20 p-4">
+        <div className="bg-card px-4 py-4" style={{ border: RULE }}>
           <div className="flex flex-wrap items-end gap-4">
             {/* Company */}
             <div className="flex-1 min-w-[180px]">
-              <label className="flex items-center gap-1.5 text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1.5">
-                <Building size={10} /> Company
-              </label>
+              <label className={`${LBL} block mb-1`}>Company</label>
               <select
-                className="w-full h-8 rounded-md border border-border bg-background px-2.5 text-xs focus:ring-1 focus:ring-primary/40 transition-all"
+                className={SEL}
                 value={companyId ?? ""}
                 onChange={(e) => { setCompanyId(e.target.value ? Number(e.target.value) : null); setPreview(null); setResult(null); }}
               >
-                <option value="">— Select Company —</option>
+                <option value="">Select company</option>
                 {companies.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
             </div>
 
             {/* Financial Year */}
             <div className="flex-1 min-w-[180px]">
-              <label className="flex items-center gap-1.5 text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1.5">
-                <CalendarDays size={10} /> Financial Year
-              </label>
+              <label className={`${LBL} block mb-1`}>Financial year</label>
               <select
-                className="w-full h-8 rounded-md border border-border bg-background px-2.5 text-xs focus:ring-1 focus:ring-primary/40 transition-all"
+                className={SEL}
                 value={fyId ?? ""}
                 onChange={(e) => { setFyId(e.target.value ? Number(e.target.value) : null); setPreview(null); setResult(null); }}
               >
-                <option value="">— Select FY —</option>
+                <option value="">Select financial year</option>
                 {finYears.map((f) => (
                   <option key={f.id} value={f.id}>
-                    {f.label} {f.locked ? " 🔒 (Closed)" : ""}
+                    {f.label}{f.locked ? " (closed)" : ""}
                   </option>
                 ))}
               </select>
@@ -234,173 +219,138 @@ export default function YearEndClose() {
             <button
               onClick={() => { loadPreview(); loadHistory(); }}
               disabled={!companyId || !fyId}
-              className="h-8 px-3 rounded-md border border-border bg-background text-xs font-medium flex items-center gap-1.5 hover:bg-muted transition-all disabled:opacity-40"
+              className={`${KEY} border border-foreground text-foreground hover:bg-primary/10`}
             >
-              <RefreshCw size={12} /> Load Preview
+              <RefreshCw size={12} /> Load preview
             </button>
+
+            {selectedFy && (
+              <div className="h-9 flex items-center">
+                <SheetMark text={selectedFy.locked ? "Closed and locked" : "Open"} tone={selectedFy.locked ? "done" : "waiting"} />
+              </div>
+            )}
           </div>
         </div>
 
         {/* ── Status Messages ── */}
         {previewError === "already_closed" && (
-          <div className="mb-5 flex items-center gap-2 px-4 py-3 rounded-lg border bg-amber-500/5 border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs">
-            <Lock size={14} />
-            <span><strong>This Financial Year is already closed and locked.</strong> No further carry-forward is possible.</span>
+          <div className="flex items-center gap-2 px-4 py-3 border border-foreground text-foreground text-xs">
+            <Lock size={14} className="shrink-0" />
+            <span><strong>This financial year is already closed and locked.</strong> No further carry-forward is possible.</span>
           </div>
         )}
 
         {previewError && previewError !== "already_closed" && (
-          <div className="mb-5 flex items-center gap-2 px-4 py-3 rounded-lg border bg-red-500/5 border-red-500/20 text-red-700 dark:text-red-400 text-xs">
-            <AlertTriangle size={14} />
-            <span>{previewError}</span>
-          </div>
+          <div className="px-4 py-3 border border-destructive text-destructive text-xs">{previewError}</div>
         )}
 
         {result && (
-          <div className="mb-5 flex items-center gap-2 px-4 py-3 rounded-lg border bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-xs font-medium">
-            <CheckCircle2 size={14} />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border border-foreground text-foreground text-xs">
+            <SheetMark text="Year closed" tone="done" />
             <span>
-              Year-End Closing completed successfully! Net {result.netProfit >= 0 ? "Profit" : "Loss"}: {fmt(result.netProfit)} transferred to Retained Earnings.
-              Voucher: <code className="bg-background/60 px-1.5 py-0.5 rounded text-[0.625rem]">{result.voucherNo}</code>. Financial Year locked.
+              Net {result.netProfit >= 0 ? "profit" : "loss"} of <strong className="font-heading tabular-nums">{fmt(result.netProfit)}</strong> transferred to Retained Earnings by voucher{" "}
+              <strong className="font-heading tabular-nums">{result.voucherNo}</strong>. The financial year is locked.
             </span>
           </div>
         )}
 
         {resultError && (
-          <div className="mb-5 flex items-center gap-2 px-4 py-3 rounded-lg border bg-red-500/5 border-red-500/20 text-red-700 dark:text-red-400 text-xs">
-            <AlertTriangle size={14} />
-            <span>Carry-forward failed: {resultError === "already_processed" ? "This FY has already been processed." : resultError}</span>
+          <div className="px-4 py-3 border border-destructive text-destructive text-xs">
+            Carry-forward failed: {resultError === "already_processed" ? "This financial year has already been processed." : resultError}
           </div>
         )}
 
         {/* ── Preview Panel ── */}
         {previewLoading && (
           <div className="flex items-center justify-center py-16">
-            <Loader2 size={22} className="animate-spin text-primary/60" />
-            <span className="ml-2 text-xs text-muted-foreground">Calculating P&L summary…</span>
+            <Loader2 size={18} className="animate-spin text-muted-foreground" />
+            <span className="ml-2 text-xs text-muted-foreground">Calculating the year's result…</span>
           </div>
         )}
 
         {preview && (
-          <div className="space-y-5">
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="rounded-xl border border-primary/15 bg-gradient-to-br from-primary/8 to-primary/3 p-4">
-                <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-primary/60 mb-1">Total Revenue</p>
-                <p className="text-lg font-bold tabular-nums text-primary tracking-tight">{fmt(preview.totalIncome)}</p>
-              </div>
-              <div className="rounded-xl border border-orange-500/20 bg-gradient-to-br from-orange-500/8 to-orange-500/3 p-4">
-                <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-orange-600/60 dark:text-orange-400/60 mb-1">Total Expenses</p>
-                <p className="text-lg font-bold tabular-nums text-orange-700 dark:text-orange-400 tracking-tight">{fmt(preview.totalExpenses)}</p>
-              </div>
-              <div className={`rounded-xl border p-4 ${
-                preview.isProfit
-                  ? "border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-emerald-500/3"
-                  : "border-red-500/20 bg-gradient-to-br from-red-500/10 to-red-500/3"
-              }`}>
-                <p className={`text-[0.5625rem] font-heading uppercase tracking-widest mb-1 ${
-                  preview.isProfit ? "text-emerald-600/60 dark:text-emerald-400/60" : "text-red-600/60 dark:text-red-400/60"
-                }`}>
-                  Net {preview.isProfit ? "Profit" : "Loss"}
-                </p>
-                <div className="flex items-center gap-2">
-                  {preview.isProfit ? <TrendingUp size={16} className="text-emerald-500" /> : <TrendingDown size={16} className="text-red-500" />}
-                  <p className={`text-lg font-bold tabular-nums tracking-tight ${
-                    preview.isProfit ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"
-                  }`}>
-                    {fmt(preview.netProfit)}
-                  </p>
-                </div>
+          <>
+            {/* Figures */}
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+                {[
+                  { label: "Total revenue", value: fmt(preview.totalIncome), note: `FY ${preview.fy.name}`, red: false },
+                  { label: "Total expenses", value: fmt(preview.totalExpenses), note: `${fmtDay(preview.fy.startDate)} to ${fmtDay(preview.fy.endDate)}`, red: false },
+                  { label: preview.isProfit ? "Net profit" : "Net loss", value: preview.isProfit ? fmt(preview.netProfit) : `(${fmt(preview.netProfit)})`, note: "carried to Retained Earnings", red: !preview.isProfit },
+                ].map((x) => (
+                  <div key={x.label}>
+                    <p className="label" style={x.red ? { color: "var(--red)" } : undefined}>{x.label}</p>
+                    <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color: x.red ? "var(--red)" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.value}</p>
+                    <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                  </div>
+                ))}
               </div>
             </div>
 
             {/* Closing Journal Preview */}
-            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-              <div className="px-5 py-3 border-b border-border bg-muted/20">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ArrowRightLeft size={13} className="text-primary/60" />
-                    <h3 className="text-xs font-semibold text-foreground">Closing Journal Entry Preview</h3>
-                  </div>
-                  <span className="text-[0.5625rem] text-muted-foreground/60 tabular-nums">
-                    Voucher Date: {new Date(preview.fy.endDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                  </span>
-                </div>
+            <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+              <div className="px-4 py-3 flex flex-wrap items-baseline justify-between gap-2" style={{ borderBottom: RULE }}>
+                <h3 className={HEAD}>Closing journal entry</h3>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">Voucher date {fmtDay(preview.fy.endDate)}</span>
               </div>
-              <div className="px-5 py-3">
-                <table className="w-full text-xs">
+              <div className="px-4 py-3 overflow-x-auto">
+                <table className="w-full text-xs min-w-[420px]">
                   <thead>
-                    <tr className="border-b border-border/50">
-                      <th className="pb-2 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Particulars</th>
-                      <th className="pb-2 text-right text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground w-28">Debit ₹</th>
-                      <th className="pb-2 text-right text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground w-28">Credit ₹</th>
+                    <tr>
+                      <th className="pb-2 text-left">Particulars</th>
+                      <th className="pb-2 text-right w-32">Debit ₹</th>
+                      <th className="pb-2 text-right w-32">Credit ₹</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.isProfit ? (
-                      <>
-                        <tr className="border-b border-border/25">
-                          <td className="py-2 text-foreground">Income Summary A/c</td>
-                          <td className="py-2 text-right tabular-nums font-medium text-foreground">{fmt(preview.netProfit)}</td>
-                          <td className="py-2 text-right tabular-nums text-muted-foreground">—</td>
-                        </tr>
-                        <tr className="border-b border-border/25">
-                          <td className="py-2 pl-6 text-foreground italic">To Retained Earnings</td>
-                          <td className="py-2 text-right tabular-nums text-muted-foreground">—</td>
-                          <td className="py-2 text-right tabular-nums font-medium text-foreground">{fmt(preview.netProfit)}</td>
-                        </tr>
-                      </>
-                    ) : (
-                      <>
-                        <tr className="border-b border-border/25">
-                          <td className="py-2 text-foreground">Retained Earnings A/c</td>
-                          <td className="py-2 text-right tabular-nums font-medium text-red-600 dark:text-red-400">{fmt(Math.abs(preview.netProfit))}</td>
-                          <td className="py-2 text-right tabular-nums text-muted-foreground">—</td>
-                        </tr>
-                        <tr className="border-b border-border/25">
-                          <td className="py-2 pl-6 text-foreground italic">To Income Summary A/c</td>
-                          <td className="py-2 text-right tabular-nums text-muted-foreground">—</td>
-                          <td className="py-2 text-right tabular-nums font-medium text-red-600 dark:text-red-400">{fmt(Math.abs(preview.netProfit))}</td>
-                        </tr>
-                      </>
-                    )}
+                    <tr>
+                      <td className="py-2.5 text-foreground font-medium">{preview.isProfit ? "Income Summary A/c" : "Retained Earnings A/c"}</td>
+                      <td className="py-2.5 text-right font-heading tabular-nums font-semibold text-foreground">{fmt(preview.netProfit)}</td>
+                      <td className="py-2.5 text-right text-muted-foreground/50">—</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2.5 pl-6 text-foreground">{preview.isProfit ? "To Retained Earnings" : "To Income Summary A/c"}</td>
+                      <td className="py-2.5 text-right text-muted-foreground/50">—</td>
+                      <td className="py-2.5 text-right font-heading tabular-nums font-semibold text-foreground">{fmt(preview.netProfit)}</td>
+                    </tr>
                   </tbody>
                 </table>
-                <p className="mt-2 text-[0.5625rem] text-muted-foreground/60 italic">
-                  (Being transfer of Net {preview.isProfit ? "Profit" : "Loss"} for FY {preview.fy.name} to Retained Earnings under Reserves & Surplus)
+                <p className="mt-3 text-[0.6875rem] text-muted-foreground">
+                  (Being transfer of net {preview.isProfit ? "profit" : "loss"} for FY {preview.fy.name} to Retained Earnings under Reserves &amp; Surplus)
                 </p>
               </div>
             </div>
 
             {/* Heads Summary (collapsible) */}
             {preview.headsSummary.length > 0 && (
-              <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+              <div className="bg-card overflow-hidden" style={{ border: RULE }}>
                 <button
                   onClick={() => setExpandedHeads((v) => !v)}
-                  className="w-full px-5 py-3 flex items-center justify-between hover:bg-muted/20 transition-colors"
+                  aria-expanded={expandedHeads}
+                  className="w-full px-4 py-3 flex items-center justify-between text-foreground"
                 >
-                  <div className="flex items-center gap-2">
-                    <Info size={13} className="text-muted-foreground/60" />
-                    <span className="text-xs font-semibold text-foreground">Revenue & Expense Heads ({preview.headsSummary.length})</span>
-                  </div>
+                  <span className="flex items-baseline gap-2.5">
+                    <span className={HEAD}>Revenue and expense heads</span>
+                    <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{preview.headsSummary.length}</span>
+                  </span>
                   {expandedHeads ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </button>
                 {expandedHeads && (
-                  <div className="px-5 pb-3 max-h-64 overflow-y-auto">
+                  <div className="px-4 pb-3 max-h-72 overflow-y-auto" style={{ borderTop: RULE }}>
                     <table className="w-full text-[0.6875rem]">
                       <thead>
-                        <tr className="border-b border-border/40">
-                          <th className="pb-1.5 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Group</th>
-                          <th className="pb-1.5 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Head</th>
-                          <th className="pb-1.5 text-right text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground w-24">Amount ₹</th>
+                        <tr>
+                          <th className="py-2 text-left">Group</th>
+                          <th className="py-2 text-left">Head</th>
+                          <th className="py-2 text-right w-32">Amount ₹</th>
                         </tr>
                       </thead>
                       <tbody>
                         {preview.headsSummary.map((h, i) => (
-                          <tr key={i} className="border-b border-border/15 hover:bg-muted/10">
-                            <td className="py-1.5 text-muted-foreground">{h.groupName}</td>
-                            <td className="py-1.5 text-foreground">{h.headName}</td>
-                            <td className="py-1.5 text-right tabular-nums">{fmt(h.amount)}</td>
+                          <tr key={i}>
+                            <td className="py-2 text-muted-foreground">{h.groupName}</td>
+                            <td className="py-2 text-foreground">{h.headName}</td>
+                            <td className="py-2 text-right font-heading tabular-nums text-foreground">{fmt(h.amount)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -410,109 +360,85 @@ export default function YearEndClose() {
               </div>
             )}
 
-            {/* Execute Button */}
+            {/* Execute: the one irreversible act on the page, so the one place red is used for a control */}
             {!selectedFy?.locked && !result && (
               <div className="flex justify-end">
                 {!showConfirm ? (
-                  <button
-                    onClick={() => setShowConfirm(true)}
-                    className="h-10 px-6 rounded-lg bg-gradient-to-r from-red-600 to-red-700 text-white text-xs font-semibold shadow-md hover:shadow-lg hover:from-red-700 hover:to-red-800 transition-all flex items-center gap-2"
-                  >
-                    <Lock size={14} />
-                    Execute Year-End Carry Forward
+                  <button onClick={() => setShowConfirm(true)} className={`${KEY} border border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground`}>
+                    <Lock size={13} />
+                    Close and lock the year
                   </button>
                 ) : (
-                  <div className="flex items-center gap-3 p-4 rounded-xl border-2 border-red-500/30 bg-red-500/5">
-                    <AlertTriangle size={20} className="text-red-600 dark:text-red-400 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-red-700 dark:text-red-400">Confirm Year-End Closing</p>
-                      <p className="text-[0.625rem] text-red-600/70 dark:text-red-400/70 mt-0.5">
-                        This will post a closing journal entry and <strong>permanently lock</strong> FY {preview.fy.name}. No further transactions can be posted to this period. This action cannot be undone.
+                  <div className="w-full flex flex-wrap items-center gap-4 p-4 border-2 border-destructive bg-card">
+                    <div className="flex-1 min-w-[240px]">
+                      <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-destructive">Confirm year-end closing</p>
+                      <p className="text-xs text-foreground mt-1.5 leading-relaxed">
+                        This posts the closing journal entry and <strong>permanently locks</strong> FY {preview.fy.name}. Nothing more can be posted to this period, and it cannot be undone.
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => setShowConfirm(false)}
-                        className="h-8 px-4 rounded-md border border-border bg-background text-xs font-medium hover:bg-muted transition-all"
-                      >
+                      <button onClick={() => setShowConfirm(false)} className={`${KEY} border border-foreground text-foreground hover:bg-primary/10`}>
                         Cancel
                       </button>
-                      <button
-                        onClick={doCarryForward}
-                        disabled={executing}
-                        className="h-8 px-5 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-all flex items-center gap-1.5 disabled:opacity-50"
-                      >
+                      <button onClick={doCarryForward} disabled={executing} className={`${KEY} bg-destructive text-destructive-foreground border border-destructive hover:opacity-90`}>
                         {executing ? <Loader2 size={13} className="animate-spin" /> : <Lock size={13} />}
-                        {executing ? "Processing…" : "Confirm & Lock"}
+                        {executing ? "Processing…" : "Confirm and lock"}
                       </button>
                     </div>
                   </div>
                 )}
               </div>
             )}
-          </div>
+          </>
         )}
 
         {/* ── No data message ── */}
         {!previewLoading && !preview && !previewError && companyId && fyId && (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Unlock size={32} className="text-muted-foreground/30 mb-3" />
-            <p className="text-xs text-muted-foreground">Click "Load Preview" to see the year-end closing summary.</p>
+          <div className="bg-card py-14 px-4 text-center text-xs text-muted-foreground" style={{ border: "1px dashed hsl(var(--border))" }}>
+            Press "Load preview" to see the year-end closing summary.
           </div>
         )}
 
         {!companyId || !fyId ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <CalendarDays size={32} className="text-muted-foreground/30 mb-3" />
-            <p className="text-xs text-muted-foreground">Select a Company and Financial Year to begin.</p>
+          <div className="bg-card py-14 px-4 text-center text-xs text-muted-foreground" style={{ border: "1px dashed hsl(var(--border))" }}>
+            Select a company and a financial year to begin.
           </div>
         ) : null}
 
         {/* ── History Section ── */}
         {companyId && history.length > 0 && (
-          <div className="mt-8">
-            <div className="flex items-center gap-2 mb-3">
-              <History size={14} className="text-muted-foreground/60" />
-              <h3 className="text-xs font-semibold text-foreground">Carry-Forward History</h3>
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+            <div className="px-4 py-3 flex items-baseline gap-2.5" style={{ borderBottom: RULE }}>
+              <h3 className={HEAD}>Years closed so far</h3>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{history.length}</span>
             </div>
-            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-              <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[480px]">
                 <thead>
-                  <tr className="border-b border-border/50 bg-muted/20">
-                    <th className="py-2.5 px-4 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Voucher No.</th>
-                    <th className="py-2.5 px-4 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Date</th>
-                    <th className="py-2.5 px-4 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Details</th>
+                  <tr>
+                    <th className="py-2.5 px-4 text-left">Voucher / head</th>
+                    <th className="py-2.5 px-4 text-right w-36">Date / debit ₹</th>
+                    <th className="py-2.5 px-4 text-right w-36">Lines / credit ₹</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.map((h) => (
                     <React.Fragment key={h.voucherNo}>
-                      <tr
-                        className="border-b border-border/25 hover:bg-muted/15 transition-colors cursor-pointer"
-                        onClick={() => setExpandedHistory((v) => v === h.voucherNo ? null : h.voucherNo)}
-                      >
-                        <td className="py-2 px-4 font-medium text-foreground">
+                      <tr className="cursor-pointer" onClick={() => setExpandedHistory((v) => v === h.voucherNo ? null : h.voucherNo)}>
+                        <td className="py-2.5 px-4 text-foreground">
                           <div className="flex items-center gap-1.5">
                             {expandedHistory === h.voucherNo ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                            <code className="text-[0.625rem]">{h.voucherNo}</code>
+                            <span className="font-heading text-[0.6875rem] font-semibold tabular-nums">{h.voucherNo}</span>
                           </div>
                         </td>
-                        <td className="py-2 px-4 tabular-nums text-muted-foreground">
-                          {new Date(h.voucherDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                        </td>
-                        <td className="py-2 px-4 text-muted-foreground">
-                          {h.details.length} entries
-                        </td>
+                        <td className="py-2.5 px-4 text-right tabular-nums text-muted-foreground">{fmtDay(h.voucherDate)}</td>
+                        <td className="py-2.5 px-4 text-right tabular-nums text-muted-foreground">{h.details.length} lines</td>
                       </tr>
                       {expandedHistory === h.voucherNo && h.details.map((d, i) => (
-                        <tr key={`${h.voucherNo}-${i}`} className="bg-muted/5 border-b border-border/10">
-                          <td className="py-1.5 pl-12 text-[0.625rem] text-foreground/80">{d.headName}</td>
-                          <td className="py-1.5 px-4 text-right tabular-nums text-[0.625rem]">
-                            {d.debit > 0 ? fmt(d.debit) : "—"}
-                          </td>
-                          <td className="py-1.5 px-4 text-right tabular-nums text-[0.625rem]">
-                            {d.credit > 0 ? fmt(d.credit) : "—"}
-                          </td>
+                        <tr key={`${h.voucherNo}-${i}`}>
+                          <td className="py-2 pl-10 pr-4 text-[0.6875rem] text-foreground">{d.headName}</td>
+                          <td className="py-2 px-4 text-right font-heading tabular-nums text-[0.6875rem] text-foreground">{d.debit > 0 ? fmt(d.debit) : "—"}</td>
+                          <td className="py-2 px-4 text-right font-heading tabular-nums text-[0.6875rem] text-foreground">{d.credit > 0 ? fmt(d.credit) : "—"}</td>
                         </tr>
                       ))}
                     </React.Fragment>
@@ -524,13 +450,13 @@ export default function YearEndClose() {
         )}
 
         {historyLoading && (
-          <div className="mt-6 flex items-center justify-center py-6">
-            <Loader2 size={16} className="animate-spin text-muted-foreground/40" />
-            <span className="ml-2 text-[0.625rem] text-muted-foreground">Loading history…</span>
+          <div className="flex items-center justify-center py-6">
+            <Loader2 size={14} className="animate-spin text-muted-foreground" />
+            <span className="ml-2 text-[0.6875rem] text-muted-foreground">Loading history…</span>
           </div>
         )}
 
-      </FinanceShell>
+      </SheetShell>
     </>
   );
 }

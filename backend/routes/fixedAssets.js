@@ -1,14 +1,16 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests" } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
+const { runDepreciationForPeriod, previewDepreciationForPeriod, backfillDepreciationForAsset, AUTO_USER } = require("../services/fixedAssetAutoDepreciation");
 const { buildReversalPlan, executeReversal } = require("../services/fixedAssetReversal");
 const {
   buildPostingPlan: buildDepreciationPlan,
@@ -24,7 +26,7 @@ async function loadAssetForDepreciation(pool, id) {
   const r = await pool.request().input("AssetId", sql.Int, id).query(`
     SELECT AssetId, AssetCode, FAItemCode, AssetName, CompanyId, ProjectId,
            PurchaseCost, PurchaseDate, ActivationDate, FinYear,
-           DepreciationType, DepreciationRate, AssetStatus, Status
+           DepreciationType, DepreciationRate, AssetStatus, Status, TransferredAt
     FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId
   `);
   return r.recordset[0] || null;
@@ -73,7 +75,17 @@ async function generateAssetCode(pool, category) {
 }
 
 // ── GET / — list ──────────────────────────────────────────────────────────────
-router.get("/", async (req, res) => {
+// Depreciation posted against each asset (reversed entries left out); book value is cost less this.
+const POSTED_DEPRECIATION_JOIN = `LEFT JOIN (SELECT e.AssetId, SUM(e.DepreciationAmount) AS Depreciated FROM dbo.FixedAssetDepreciationEntry e
+                 WHERE ISNULL(e.Status, '') <> 'Reversed' GROUP BY e.AssetId) dep ON dep.AssetId = fa.AssetId`;
+
+// The asset list and a single asset also feed the other Fixed Asset pages' pickers, so any of the module's pages will do.
+const FA_READ_PAGES = [
+  "fixed-asset-record", "fixed-asset-tagging", "fixed-asset-assignment", "asset-transfer",
+  "fixed-asset-quality-check", "fixed-asset-maintenance", "fixed-asset-depreciation-generate", "fixed-asset-dashboard",
+];
+
+router.get("/", requireAnyPageRight(FA_READ_PAGES, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
@@ -92,6 +104,8 @@ router.get("/", async (req, res) => {
     if (req.query.finYear)    { request.input("FinYear",    sql.NVarChar(20),  String(req.query.finYear));         where.push("fa.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
     if (req.query.fromDate)   { request.input("FromDate",   sql.Date,          req.query.fromDate);                where.push("fa.PurchaseDate >= @FromDate"); }
     if (req.query.toDate)     { request.input("ToDate",     sql.Date,          req.query.toDate);                  where.push("fa.PurchaseDate <= @ToDate"); }
+    // Only the user's projects, as the dashboard counts them.
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "fa.ProjectId", "").trim());
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
@@ -109,12 +123,14 @@ router.get("/", async (req, res) => {
         fa.CompanyId, co.name AS CompanyName,
         fa.ProjectId, pr.name AS ProjectName,
         fa.SupplierId, sup.LHeadName AS SupplierName,
-        fa.GodownID, gd.GodownName, fa.SourceTagId, fa.FAItemCode
+        fa.GodownID, gd.GodownName, fa.SourceTagId, fa.FAItemCode,
+        ISNULL(dep.Depreciated, 0) AS Depreciated
       FROM dbo.FixedAssetRecord fa
       LEFT JOIN dbo.enterprise co  ON co.id = fa.CompanyId
       LEFT JOIN dbo.enterprise pr  ON pr.id = fa.ProjectId
       LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = fa.SupplierId
       LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
+      ${POSTED_DEPRECIATION_JOIN}
       ${whereClause}
       ORDER BY fa.CreatedAt DESC
     `);
@@ -177,8 +193,110 @@ router.get("/depreciation-summary", requirePageRight("fixed-asset-record", "view
   }
 });
 
+// ── GET /depreciation-history — every posted monthly depreciation, entry by entry ─
+// Powers the "Monthly Depreciation History" report: calculation (posting) date,
+// period, FA Item Code, depreciation amount, accumulated depreciation and remaining
+// book value. Accumulated / book value are a LIVE running total of the non-reversed
+// entries (so reversing an earlier month corrects every later row). Filters:
+// companyId, projectId, finYear, fromDate / toDate (period month), assetId,
+// includeReversed=1. Source = "Auto" for scheduler postings, "Manual" otherwise.
+router.get("/depreciation-history", requirePageRight("fixed-asset-record", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    const where = ["fa.AssetCode IS NOT NULL"];
+    if (!req.query.includeReversed) where.push("x.Status <> 'Reversed'");
+    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
+    if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
+    if (req.query.assetId)   { request.input("AssetId", sql.Int, parseInt(req.query.assetId, 10)); where.push("fa.AssetId = @AssetId"); }
+    if (req.query.finYear)   { request.input("FinYear", sql.NVarChar(20), String(req.query.finYear)); where.push("x.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
+    if (req.query.fromDate)  { request.input("FromDate", sql.Date, req.query.fromDate); where.push("DATEFROMPARTS(x.PeriodYear, x.PeriodMonth, 1) >= @FromDate"); }
+    if (req.query.toDate)    { request.input("ToDate", sql.Date, req.query.toDate); where.push("DATEFROMPARTS(x.PeriodYear, x.PeriodMonth, 1) <= @ToDate"); }
+    request.input("AutoUser", sql.NVarChar(200), AUTO_USER);
+
+    const result = await request.query(`
+      WITH x AS (
+        SELECT e.*,
+               SUM(CASE WHEN e.Status <> 'Reversed' THEN e.DepreciationAmount ELSE 0 END)
+                 OVER (PARTITION BY e.AssetId ORDER BY e.PeriodYear, e.PeriodMonth, e.EntryId ROWS UNBOUNDED PRECEDING) AS LiveAccum
+        FROM dbo.FixedAssetDepreciationEntry e
+      )
+      SELECT
+        x.EntryId, x.PostedAt AS CalculationDate,
+        DATEFROMPARTS(x.PeriodYear, x.PeriodMonth, 1) AS PeriodStart,
+        x.PeriodYear, x.PeriodMonth, x.FinYear,
+        fa.AssetId, fa.FAItemCode, fa.AssetCode, fa.AssetName, fa.AssetStatus,
+        co.name AS CompanyName, pr.name AS ProjectName,
+        x.Method, x.RatePct, fa.PurchaseCost,
+        x.OpeningBookValue, x.DepreciationAmount,
+        x.LiveAccum AS AccumulatedDepreciation,
+        fa.PurchaseCost - x.LiveAccum AS RemainingBookValue,
+        x.VoucherNo, x.Status, x.PostedBy,
+        CASE WHEN x.PostedBy = @AutoUser THEN 'Auto' ELSE 'Manual' END AS Source
+      FROM x
+      JOIN dbo.FixedAssetRecord fa ON fa.AssetId = x.AssetId
+      LEFT JOIN dbo.enterprise co ON co.id = fa.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = fa.ProjectId
+      WHERE ${where.join(" AND ")}
+      ORDER BY x.PeriodYear DESC, x.PeriodMonth DESC, fa.FAItemCode, x.EntryId DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[fixedAssets] GET /depreciation-history:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /depreciation/runs — recent automatic / manual monthly runs ───────────
+router.get("/depreciation/runs", requirePageRight("fixed-asset-record", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT TOP 36 RunId, PeriodYear, PeriodMonth, TriggerType, Status, StartedAt, FinishedAt, RunBy,
+             Eligible, Posted, AlreadyPosted, Skipped, Failed, NotConfigured, TotalAmount, Details
+      FROM dbo.FixedAssetDepreciationRun
+      ORDER BY StartedAt DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[fixedAssets] GET /depreciation/runs:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /depreciation/run { year, month, dryRun? } — run (or preview) a month now ─
+// The scheduler does this by itself on the 1st; this is the manual / catch-up button
+// and is safe to repeat: months already posted are counted, never posted again.
+router.post("/depreciation/run", requirePageRight("fixed-asset-record", "edit"), async (req, res) => {
+  const email = requireUser(req, res);
+  if (!email) return;
+  const year = DEP_YEAR(req.body.year);
+  const month = DEP_MONTHS(req.body.month);
+  if (!year || !month) return res.status(400).json({ error: "Valid year and month (1-12) are required" });
+  try {
+    const pool = getPool();
+    if (req.body.dryRun) return res.json({ ok: true, dryRun: true, ...(await previewDepreciationForPeriod(pool, { year, month })) });
+    const result = await runDepreciationForPeriod(pool, { year, month, trigger: "Manual", runBy: email });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[fixedAssets] POST /depreciation/run:", err.message);
+    res.status(err.code === "CONFIG_MISSING" ? 409 : 500).json({ error: err.message });
+  }
+});
+
 // ── GET /:id — single ─────────────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+// ── GET /dashboard — the Fixed Asset dashboard: figures from every page of the module, kept to the user's projects ─
+router.get("/dashboard", requirePageRight("fixed-asset-dashboard", "view"), async (req, res) => {
+  try {
+    const { buildFixedAssetDashboard } = require("../services/fixedAssetDashboard");
+    res.json(await buildFixedAssetDashboard(getPool(), req.projectScope ?? null));
+  } catch (err) {
+    console.error("[fixedAssets] GET /dashboard:", err.message);
+    res.status(500).json({ error: "Could not load the fixed asset figures." });
+  }
+});
+
+router.get("/:id", requireAnyPageRight(FA_READ_PAGES, "view"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -190,12 +308,14 @@ router.get("/:id", async (req, res) => {
         pr.name AS ProjectName,
         sup.LHeadName AS SupplierName,
         sup.LHeadCode AS SupplierCode,
-        gd.GodownName
+        gd.GodownName,
+        ISNULL(dep.Depreciated, 0) AS Depreciated
       FROM dbo.FixedAssetRecord fa
       LEFT JOIN dbo.enterprise co  ON co.id = fa.CompanyId
       LEFT JOIN dbo.enterprise pr  ON pr.id = fa.ProjectId
       LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = fa.SupplierId
       LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
+      ${POSTED_DEPRECIATION_JOIN}
       WHERE fa.AssetId = @AssetId
     `);
     const row = result.recordset[0];
@@ -203,6 +323,7 @@ router.get("/:id", async (req, res) => {
     // never a Fixed Asset — treat it as not-found here exactly like the
     // list above hides it, so it can't be viewed/edited by guessing an id.
     if (!row || !row.AssetCode) return res.status(404).json({ error: "Not found" });
+    if (!assertProjectAllowed(req, res, row.ProjectId)) return;
     res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -224,10 +345,11 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       remarks, sourceTagId, pictureBase64, repairType,
     } = req.body;
 
-    if (!assetCategory)
-      return res.status(400).json({ error: "assetCategory is required" });
-
     const sourceTagIdVal = sourceTagId ? parseInt(sourceTagId, 10) : null;
+    // With an FA Item Code the category normally comes from FA Inventory (below), so the
+    // body may omit it; a record created without a code must still name one.
+    if (!assetCategory && !sourceTagIdVal)
+      return res.status(400).json({ error: "assetCategory is required" });
     if (!sourceTagIdVal && !assetName)
       return res.status(400).json({ error: "assetName is required when no FA Item Code is selected" });
 
@@ -243,12 +365,15 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       // unassigned resource, re-check under UPDLOCK, insert" pattern used
       // by Asset Transfer's eligibility check.
       let sourceItemName = null, sourceCompanyId = null, sourceProjectId = null, sourceGodownId = null, sourceCode = null;
+      let effectiveCategory = assetCategory;
+      let depSetupId = depreciationSetupId, depType = depreciationType, depRate = depreciationRate;
       if (sourceTagIdVal) {
         const tagRes = await tx.request().input("TagId", sql.Int, sourceTagIdVal).query(`
           SELECT t.TagId, t.FAItemCode, t.CompanyId, t.ProjectId, t.GodownId,
-                 im.M_Name AS ItemName
+                 im.M_Name AS ItemName, batch.AssetCategory AS BatchCategory
           FROM dbo.FixedAssetTagging t WITH (UPDLOCK, HOLDLOCK)
           LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
+          LEFT JOIN dbo.FixedAssetRecord batch ON batch.AssetId = t.AssetId
           WHERE t.TagId = @TagId AND t.FAItemCode IS NOT NULL AND t.Status = 'Tagged'
             AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId AND fa.Status <> 'Deleted')
         `);
@@ -259,13 +384,34 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         sourceProjectId  = tag.ProjectId;
         sourceGodownId   = tag.GodownId;
         sourceCode       = tag.FAItemCode;
+
+        // The Asset Category was captured when the stock entered FA Inventory — use it, so the
+        // right depreciation rate applies without anyone re-selecting it (and nobody can pick a
+        // different one). Only when that category has an active Depreciation Setup; stock
+        // received through a GRN may carry an item-group name instead, which stays selectable.
+        if (tag.BatchCategory && String(tag.BatchCategory).trim()) {
+          const setupRes = await tx.request().input("Cat", sql.NVarChar(100), String(tag.BatchCategory).trim()).query(`
+            SELECT TOP 1 SetupId, AssetCategory, DepreciationType, DepreciationRate FROM dbo.DepreciationSetup
+            WHERE Status = 'Active' AND LOWER(LTRIM(RTRIM(AssetCategory))) = LOWER(LTRIM(RTRIM(@Cat)))
+            ORDER BY EffectiveFrom DESC, SetupId DESC
+          `);
+          const setup = setupRes.recordset[0];
+          if (setup) {
+            effectiveCategory = setup.AssetCategory.trim();
+            // The rate follows the category, so take it from the setup, not from whatever the client sent.
+            depSetupId = setup.SetupId;
+            depType = setup.DepreciationType;
+            depRate = setup.DepreciationRate;
+          }
+        }
       }
+      if (!effectiveCategory) { await tx.rollback(); return res.status(400).json({ error: "assetCategory is required" }); }
 
       const docTypeId = await resolveDocTypeId(pool, sql, "FA");
       const docNo     = await lockNextDocNumber(pool, sql, {
         docTypeId, finYear, tableName: "FixedAssetRecord", issuedBy: email,
       });
-      const assetCode = await generateAssetCode(pool, assetCategory);
+      const assetCode = await generateAssetCode(pool, effectiveCategory);
 
       const insert = await tx.request()
         .input("DocNo",               sql.NVarChar(100), docNo)
@@ -274,7 +420,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         .input("ProjectId",           sql.Int,           sourceTagIdVal ? sourceProjectId : (projectId ? parseInt(projectId, 10) : null))
         .input("FinYear",             sql.NVarChar(20),  finYear || null)
         .input("AssetName",           sql.NVarChar(200), sourceTagIdVal ? sourceItemName : assetName)
-        .input("AssetCategory",       sql.NVarChar(100), assetCategory)
+        .input("AssetCategory",       sql.NVarChar(100), effectiveCategory)
         .input("AssetCode",           sql.NVarChar(50),  assetCode)
         .input("Brand",               sql.NVarChar(100), brand || null)
         .input("Model",               sql.NVarChar(100), model || null)
@@ -289,9 +435,9 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         .input("Department",          sql.NVarChar(100), department || null)
         .input("Custodian",           sql.NVarChar(200), custodianName)
         .input("CustodianUserId",     sql.Int,           custodianUserIdVal)
-        .input("DepreciationSetupId", sql.Int,           depreciationSetupId ? parseInt(depreciationSetupId, 10) : null)
-        .input("DepreciationType",    sql.NVarChar(50),  depreciationType || null)
-        .input("DepreciationRate",    sql.Decimal(5,2),  depreciationRate != null && depreciationRate !== "" ? parseFloat(depreciationRate) : null)
+        .input("DepreciationSetupId", sql.Int,           depSetupId ? parseInt(depSetupId, 10) : null)
+        .input("DepreciationType",    sql.NVarChar(50),  depType || null)
+        .input("DepreciationRate",    sql.Decimal(5,2),  depRate != null && depRate !== "" ? parseFloat(depRate) : null)
         .input("UsefulLife",          sql.Int,           usefulLife  ? parseInt(usefulLife, 10)  : null)
         .input("Remarks",             sql.NVarChar(sql.MAX), remarks || null)
         .input("PictureBase64",       sql.NVarChar(sql.MAX), pictureBase64 || null)
@@ -325,7 +471,10 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       await backPatchRecordId(pool, sql, docNo, "FixedAssetRecord", newId);
       await bumpCacheVersion("fixed-assets");
       await bumpCacheVersion("fixed-asset-tagging");
-      res.json({ assetId: newId, docNo, assetCode });
+      // Tagged under a Fixed Asset Depreciation Tag: post its depreciation from the Purchase / Activation Date up to the
+      // last closed month right away, instead of waiting for the monthly run. Never blocks the save.
+      const depreciationBackfill = sourceTagIdVal ? await backfillDepreciationForAsset(pool, newId, { runBy: email }) : null;
+      res.json({ assetId: newId, docNo, assetCode, depreciationBackfill });
     } catch (e) { await tx.rollback(); throw e; }
   } catch (err) {
     console.error("[fixedAssets] POST /:", err.message);
@@ -345,10 +494,15 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
     // A batch row (no AssetCode) is FA Inventory bookkeeping, not a Fixed
     // Asset — it must never be editable through this endpoint.
     const guard = await pool.request().input("AssetId", sql.Int, id).query(
-      `SELECT AssetCode FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`,
+      `SELECT AssetCode, AssetStatus FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`,
     );
     if (!guard.recordset.length) return res.status(404).json({ error: "Not found" });
     if (!guard.recordset[0].AssetCode) return res.status(404).json({ error: "Not found" });
+    // Transferred to another company through an Inter-Company Transfer: this
+    // record is history only — the asset lives on under a new FA Code there.
+    if (guard.recordset[0].AssetStatus === "Transferred") {
+      return res.status(409).json({ error: "This asset was transferred to another company — its record is read-only history." });
+    }
 
     const {
       docDate, companyId, projectId, finYear,
@@ -469,12 +623,16 @@ router.delete("/:id", requirePageRight("fixed-asset-record", "delete"), async (r
     await tx.begin();
     try {
       const assetRes = await tx.request().input("AssetId", sql.Int, id).query(`
-        SELECT AssetId, Status, AssetCode
+        SELECT AssetId, Status, AssetCode, AssetStatus
         FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK)
         WHERE AssetId = @AssetId
       `);
       const asset = assetRes.recordset[0];
       if (!asset) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+      if (asset.AssetStatus === "Transferred") {
+        await tx.rollback();
+        return res.status(409).json({ error: "This asset was transferred to another company — its record is kept as history. Delete the Inter-Company Transfer to undo the move." });
+      }
       // A batch row (no AssetCode) is FA Inventory bookkeeping, not a Fixed
       // Asset — this endpoint only deletes real records; use the "Delete &
       // Reverse GRN" reversal flow (or Inventory Import's own reverse) for

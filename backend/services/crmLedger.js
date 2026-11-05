@@ -138,7 +138,8 @@ async function getCumulativeGstSplit(pool, bookingId, amount, side) {
       ? `SELECT ISNULL(SUM(inv.Amount), 0) AS Gross,
                 ISNULL((SELECT SUM(g.DebitAmount) FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND g.LHeadId = @adv AND ISNULL(g.IsReversed, 0) = 0), 0) AS Base
          FROM dbo.CrmInvoice inv
-         WHERE inv.BookingId = @bid AND EXISTS (SELECT 1 FROM dbo.GeneralLedgerEntry g WHERE g.SourceType = 'CrmInvoice' AND g.SourceId = inv.Id)`
+         WHERE inv.BookingId = @bid AND ISNULL(inv.Status, '') <> 'Void'
+           AND EXISTS (SELECT 1 FROM dbo.GeneralLedgerEntry g WHERE g.SourceType = 'CrmInvoice' AND g.SourceId = inv.Id AND ISNULL(g.IsReversed, 0) = 0)`
       : `SELECT ISNULL(SUM(g.DebitAmount), 0) AS Gross,
                 ISNULL(SUM(CASE WHEN g.LHeadId = @gst THEN g.CreditAmount ELSE 0 END), 0) AS Gst
          FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND ISNULL(g.IsReversed, 0) = 0`)).recordset[0] || {};
@@ -482,14 +483,19 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
     .input("ProjectId", sql.Int, row.ProjectId ?? null)
     .input("Notes", sql.NVarChar(500), `CRM on-account deposit ${row.ReceiptNo}`)
     .input("CreatedBy", sql.NVarChar(150), userEmail)
+    // Once per deposit: a GL posting that was reversed and posted again
+    // (e.g. a repair) re-ran this and put the deposit on the tracker twice.
     .query(`
-      INSERT INTO dbo.OnAccountLedger
-        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
-      VALUES
-        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
-      UPDATE dbo.AccountHeadMaster
-        SET OnAccountBalance = OnAccountBalance + @Amount
-        WHERE LHeadId = @PartyId;
+      IF NOT EXISTS (SELECT 1 FROM dbo.OnAccountLedger WHERE RefType = 'CrmOnAccountPayment' AND RefId = @RefId AND TxnType = 'CREDIT')
+      BEGIN
+        INSERT INTO dbo.OnAccountLedger
+          (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+        VALUES
+          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+        UPDATE dbo.AccountHeadMaster
+          SET OnAccountBalance = OnAccountBalance + @Amount
+          WHERE LHeadId = @PartyId;
+      END
     `);
 
   return { posted: true };
@@ -516,6 +522,57 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
  * customer's deposit is earmarked vs free" figure several screens read,
  * independent of which GL head the underlying cash actually sits on.
  */
+/**
+ * Keeps a CRM deposit's on-account tracker (OnAccountLedger + the party's
+ * OnAccountBalance) equal to what is really left of it: Amount - AppliedAmount,
+ * or nothing once it bounced. Applying to a milestone writes its own line
+ * (postCrmOnAccountApplied), but refunds, cancellation roll-overs, re-booking
+ * transfers, buy-backs and credit-note withdrawals used the deposit up with no
+ * line - Finance's On Account screen kept showing that money as available.
+ * Writes one adjusting line for the difference; a no-op when already equal or
+ * when the deposit was never put on the tracker. Safe to run again (it is also
+ * the backfill).
+ */
+// onlyDown (the default): only ever take the figure down. A Finance-side
+// adjustment against an invoice isn't linked to the deposit, so raising the
+// figure back up is left to the one path that really frees money (a bounce
+// un-applying other deposits).
+async function syncCrmOnAccountLedger(executor, onAccountId, userEmail, note = null, { onlyDown = true } = {}) {
+  const oa = (await executor.request().input("id", sql.Int, onAccountId).query(`
+    SELECT oa.Id, oa.ReceiptNo, oa.Amount, ISNULL(oa.AppliedAmount, 0) AS AppliedAmount, oa.Status,
+           b.CompanyId, b.ProjectId,
+           (SELECT TOP 1 l.PartyId FROM dbo.OnAccountLedger l
+             WHERE l.RefType = 'CrmOnAccountPayment' AND l.RefId = oa.Id AND l.TxnType = 'CREDIT') AS PartyId,
+           ISNULL((SELECT SUM(CASE WHEN l.TxnType = 'CREDIT' THEN l.Amount ELSE -l.Amount END) FROM dbo.OnAccountLedger l
+             WHERE l.RefId = oa.Id AND l.RefType IN ('CrmOnAccountPayment', 'CrmPaymentReceipt', 'CrmOnAccountAdjust')), 0) AS Tracked
+    FROM dbo.CrmOnAccountPayment oa
+    LEFT JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
+    WHERE oa.Id = @id`)).recordset[0];
+  if (!oa || oa.PartyId == null) return { synced: false, reason: "not on the tracker" };
+  const left = oa.Status === "Bounced" ? 0 : Math.max(0, Number(oa.Amount) - Number(oa.AppliedAmount));
+  const diff = Math.round((left - Number(oa.Tracked)) * 100) / 100;
+  if (Math.abs(diff) < 0.01 || (onlyDown && diff > 0)) return { synced: true, diff: 0 };
+  await executor.request()
+    .input("PartyId", sql.Int, oa.PartyId)
+    .input("TxnType", sql.NVarChar(10), diff > 0 ? "CREDIT" : "DEBIT")
+    .input("Amount", sql.Decimal(18, 2), Math.abs(diff))
+    .input("Diff", sql.Decimal(18, 2), diff)
+    .input("RefDocNo", sql.NVarChar(100), oa.ReceiptNo)
+    .input("RefId", sql.Int, oa.Id)
+    .input("CompanyId", sql.Int, oa.CompanyId ?? null)
+    .input("ProjectId", sql.Int, oa.ProjectId ?? null)
+    .input("Notes", sql.NVarChar(500), (note || `On-account ${oa.ReceiptNo} brought to what is left of it`).slice(0, 500))
+    .input("CreatedBy", sql.NVarChar(150), userEmail || "system")
+    .query(`
+      INSERT INTO dbo.OnAccountLedger
+        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+      VALUES
+        (@PartyId,'Customer',CAST(SYSDATETIME() AS DATE),@TxnType,@Amount,'CrmOnAccountAdjust',@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+      UPDATE dbo.AccountHeadMaster SET OnAccountBalance = ISNULL(OnAccountBalance, 0) + @Diff WHERE LHeadId = @PartyId;
+    `);
+  return { synced: true, diff };
+}
+
 async function postCrmOnAccountApplied(pool, onAccountId, appliedAmount, userEmail, txnDate) {
   const r = await pool.request().input("id", sql.Int, onAccountId).query(`
     SELECT oa.ReceiptNo, b.CompanyId, b.ProjectId, a.CustomerId, a.ApplicantName
@@ -554,6 +611,43 @@ async function postCrmOnAccountApplied(pool, onAccountId, appliedAmount, userEma
         SET OnAccountBalance = OnAccountBalance - @Amount
         WHERE LHeadId = @PartyId;
     `);
+  return { posted: true };
+}
+
+/**
+ * A brokerage approved: what is owed to the broker.
+ *   Dr Brokerage on Sales (gross)  /  Cr broker's ledger (gross)
+ * The payout voucher (Finance -> Payments, PAmount = gross, TDSAmount = TDS)
+ * then posts Dr broker / Cr Bank (net) + Cr TDS Payable, clearing it.
+ * Idempotent per brokerage record (one per tranche).
+ */
+async function postCrmBrokerageAccrualToGL(pool, brokerageId, userEmail) {
+  if (await hasPosting(pool, "CrmBrokerage", brokerageId))
+    return { posted: true, reason: "already posted (idempotent)" };
+  const row = (await pool.request().input("id", sql.Int, brokerageId).query(`
+    SELECT br.Id, br.ComputedAmount, br.BrokerId, br.TrancheLabel, b.BookingNo, b.CompanyId, b.ProjectId
+    FROM dbo.CrmBrokerageMaster br JOIN dbo.CrmBooking b ON b.Id = br.BookingId
+    WHERE br.Id = @id`)).recordset[0];
+  if (!row) return { posted: false, reason: `Brokerage ${brokerageId} not found` };
+  if (!row.BrokerId) return { posted: false, reason: `Brokerage ${brokerageId} has no broker ledger head` };
+  const gross = Math.round(Number(row.ComputedAmount || 0) * 100) / 100;
+  if (gross <= 0) return { none: true, reason: "No brokerage amount — nothing to post" };
+  const expenseHeadId = await getGLHeadIdByCode(pool, "CRM-BROKERAGE-EXP", "Brokerage on Sales");
+  const voucherNo = `BRK-${brokerageId}`;
+  const what = `${row.BookingNo}${row.TrancheLabel ? ` (${row.TrancheLabel} tranche)` : ""}`;
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate: new Date(),
+    sourceType: "CrmBrokerage",
+    sourceId: brokerageId,
+    companyId: row.CompanyId ?? null,
+    projectId: row.ProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: expenseHeadId, debit: gross, narration: `${voucherNo} — brokerage on ${what}` },
+      { lHeadId: row.BrokerId, credit: gross, narration: `${voucherNo} — brokerage owed on ${what}` },
+    ],
+  });
   return { posted: true };
 }
 
@@ -671,11 +765,12 @@ async function postCrmRefundPaid(pool, refundId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, refundId).query(`
-    SELECT Id, RefundNo, DeductionAmount, NetAmount, BookingId, CompanyId, ProjectId, CustomerId, PaidAt
+    SELECT Id, RefundNo, Status, DeductionAmount, NetAmount, BookingId, CompanyId, ProjectId, CustomerId, PaidAt
     FROM dbo.CrmRefund WHERE Id = @id
   `);
   const row = r.recordset[0];
   if (!row) return { posted: false, reason: `CrmRefund ${refundId} not found` };
+  if (row.Status !== "Paid") return { skipped: true, reason: `Refund ${refundId} is ${row.Status}, not Paid` };
   if (!row.CustomerId) return { posted: false, reason: `Refund ${refundId}: no linked CrmCustomer` };
 
   const deduction = Number(row.DeductionAmount) || 0;
@@ -683,6 +778,49 @@ async function postCrmRefundPaid(pool, refundId, userEmail) {
   const docNo = row.RefundNo || `CRFD-${refundId}`;
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
   const legs = [];
+
+  // Where did this booking's money actually sit? Receipts now post to the
+  // pooled Advance from Customer head (postCrmReceiptToGL / postCrmOnAccountToGL);
+  // older ones went to the customer's own head. The NewPayment payout debits
+  // the customer head for NetAmount — when the money sat on Advance, clear
+  // Advance here and hand the customer head back exactly what the payout
+  // took, so neither head is left carrying a balance:
+  //   Dr Advance ............ base of (net + deduction)
+  //   Dr GST Output ......... GST on the refunded (net) part — credit note
+  //   Cr Customer ........... net (offsets the payout voucher's debit)
+  //   Cr Forfeiture income .. base of the deduction (its GST stays payable)
+  if (row.BookingId) {
+    const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+    const onAdvance = (await pool.request().input("bid", sql.Int, row.BookingId).input("h", sql.Int, advanceHeadId).query(`
+      SELECT COUNT(*) AS n FROM dbo.GeneralLedgerEntry g
+      WHERE g.LHeadId = @h AND g.CreditAmount > 0 AND ISNULL(g.IsReversed, 0) = 0 AND (
+        (g.SourceType = 'CrmOnAccountPayment' AND g.SourceId IN (SELECT Id FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid OR HeldFromBookingId = @bid))
+        OR (g.SourceType = 'CrmPaymentReceipt' AND g.SourceId IN (
+          SELECT r.Id FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid)))`)).recordset[0].n > 0;
+    if (onAdvance) {
+      const gstNet = netAmount > 0 ? (await getGstSplit(pool, row.BookingId, netAmount)).gstAmount : 0;
+      const gstDed = deduction > 0 ? (await getGstSplit(pool, row.BookingId, deduction)).gstAmount : 0;
+      const round2 = (n) => Math.round(n * 100) / 100;
+      const advanceDebit = round2(netAmount - gstNet + deduction - gstDed);
+      if (advanceDebit > 0) legs.push({ lHeadId: advanceHeadId, debit: advanceDebit, narration: `${docNo} — advance cleared on refund / forfeiture` });
+      if (gstNet > 0) legs.push({ lHeadId: await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT), debit: gstNet, narration: `${docNo} — GST output liability reversed (credit note on refund; verify Sec.34 time limit)` });
+      if (netAmount > 0) legs.push({ lHeadId: customerHeadId, credit: netAmount, narration: `${docNo} — offsets the refund payout's debit to the customer` });
+      if (deduction > 0) legs.push({ lHeadId: await getGLHeadId(pool, CRM_FORFEITURE_ACCOUNT), credit: round2(deduction - gstDed), narration: `${docNo} — booking cancellation forfeiture income (excl. GST)` });
+      if (!legs.length) return { none: true, reason: `Refund ${refundId} has nothing to post` };
+      await postVoucher(pool, {
+        voucherNo: `${docNo}-ADJ`,
+        voucherDate: row.PaidAt || new Date(),
+        sourceType: "CrmRefund",
+        sourceId: refundId,
+        companyId: row.CompanyId ?? null,
+        projectId: row.ProjectId ?? null,
+        createdBy: userEmail,
+        legs,
+      });
+      return { posted: true };
+    }
+  }
+  // Legacy: the money sat on the customer's own head — unchanged treatment.
 
   // GST reversal on the portion actually credited BACK to the customer —
   // the "issue a credit note, reduce output liability" mechanism under
@@ -748,29 +886,55 @@ async function postCrmRefundPaid(pool, refundId, userEmail) {
  * applyOnAccountToMilestone sweep then DEBITs it back down onto milestones.
  */
 async function postCrmHeldCreditReallocateLedgerOnly(pool, { customerId, newOnAccountId, amount, companyId, projectId, receiptNo, userEmail, executor }) {
-  const exec = executor || pool;
-  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, customerId, userEmail);
-  await exec.request()
-    .input("PartyId", sql.Int, customerHeadId)
-    .input("PartyType", sql.NVarChar(20), "Customer") // readable label, same as Finance's own rows (onAccount.js PARTY_LABEL)
-    .input("TxnDate", sql.Date, new Date())
-    .input("TxnType", sql.NVarChar(10), "CREDIT")
-    .input("Amount", sql.Decimal(18, 2), amount)
-    .input("RefType", sql.NVarChar(30), "CrmOnAccountPayment")
-    .input("RefDocNo", sql.NVarChar(100), receiptNo || null)
-    .input("RefId", sql.Int, newOnAccountId)
-    .input("CompanyId", sql.Int, companyId ?? null)
-    .input("ProjectId", sql.Int, projectId ?? null)
-    .input("Notes", sql.NVarChar(500), `Re-booking credit from cancelled booking (${receiptNo || "held"})`)
-    .input("CreatedBy", sql.NVarChar(150), userEmail)
-    .query(`
-      INSERT INTO dbo.OnAccountLedger
-        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
-      VALUES
-        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
-      UPDATE dbo.AccountHeadMaster SET OnAccountBalance = OnAccountBalance + @Amount WHERE LHeadId = @PartyId;
-    `);
-  return { posted: true };
+  let tx = executor || null;
+  const ownsTx = !tx;
+  if (!tx) {
+    tx = pool.transaction();
+    await tx.begin();
+  }
+  try {
+    const customerHeadId = await ensureCrmCustomerLedgerHead(pool, customerId, userEmail);
+    const lockResource = `crm-rebooking-onaccount:${newOnAccountId}`;
+    const existing = await tx.request()
+      .input("resource", sql.NVarChar(255), lockResource)
+      .input("RefId", sql.Int, newOnAccountId)
+      .query(`
+        DECLARE @lockResult INT;
+        EXEC @lockResult = sys.sp_getapplock @Resource = @resource, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+        IF @lockResult < 0 THROW 51000, 'Could not lock re-booking on-account ledger entry', 1;
+        SELECT TOP 1 OAId FROM dbo.OnAccountLedger WITH (UPDLOCK, HOLDLOCK)
+        WHERE RefType = 'CrmOnAccountPayment' AND RefId = @RefId AND TxnType = 'CREDIT';
+      `);
+    if (existing.recordset.length) {
+      if (ownsTx) await tx.commit();
+      return { posted: true, reason: "already posted (idempotent)" };
+    }
+    await tx.request()
+      .input("PartyId", sql.Int, customerHeadId)
+      .input("PartyType", sql.NVarChar(20), "Customer")
+      .input("TxnDate", sql.Date, new Date())
+      .input("TxnType", sql.NVarChar(10), "CREDIT")
+      .input("Amount", sql.Decimal(18, 2), amount)
+      .input("RefType", sql.NVarChar(30), "CrmOnAccountPayment")
+      .input("RefDocNo", sql.NVarChar(100), receiptNo || null)
+      .input("RefId", sql.Int, newOnAccountId)
+      .input("CompanyId", sql.Int, companyId ?? null)
+      .input("ProjectId", sql.Int, projectId ?? null)
+      .input("Notes", sql.NVarChar(500), `Re-booking credit from cancelled booking (${receiptNo || "held"})`)
+      .input("CreatedBy", sql.NVarChar(150), userEmail)
+      .query(`
+        INSERT INTO dbo.OnAccountLedger
+          (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+        VALUES
+          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+        UPDATE dbo.AccountHeadMaster SET OnAccountBalance = OnAccountBalance + @Amount WHERE LHeadId = @PartyId;
+      `);
+    if (ownsTx) await tx.commit();
+    return { posted: true };
+  } catch (err) {
+    if (ownsTx) { try { await tx.rollback(); } catch {} }
+    throw err;
+  }
 }
 
 /**
@@ -784,9 +948,6 @@ async function postCrmHeldCreditReallocateLedgerOnly(pool, { customerId, newOnAc
  * Same-company transfers do NOT call this (no cross-company reclass needed).
  */
 async function postCrmHeldCreditCrossCompanyMirror(pool, rebookingTransferId, userEmail) {
-  if (await hasPosting(pool, "CrmRebookingTransfer", rebookingTransferId))
-    return { posted: true, reason: "already posted (idempotent)" };
-
   const r = await pool.request().input("id", sql.Int, rebookingTransferId).query(`
     SELECT rt.Id, rt.Amount, rt.FromCompanyId, rt.ToCompanyId, rt.ToBookingId,
            fb.ProjectId AS FromProjectId, tb.ProjectId AS ToProjectId,
@@ -809,34 +970,37 @@ async function postCrmHeldCreditCrossCompanyMirror(pool, rebookingTransferId, us
   const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
   const docNo = `REBK-${rebookingTransferId}`;
 
-  // Company A — liability leaves A's CRM books
-  await postVoucher(pool, {
-    voucherNo: `${docNo}-A`,
-    voucherDate: new Date(),
-    sourceType: "CrmRebookingTransfer",
-    sourceId: rebookingTransferId,
-    companyId: row.FromCompanyId ?? null,
-    projectId: row.FromProjectId ?? null,
-    createdBy: userEmail,
-    legs: [
-      { lHeadId: customerHeadId, debit: amount, narration: `${docNo} — held credit transferred out for re-booking` },
-      { lHeadId: collectionsHeadId, credit: amount, narration: `${docNo} — held credit transferred out` },
-    ],
-  });
-  // Company B — liability arrives in B's CRM books
-  await postVoucher(pool, {
-    voucherNo: `${docNo}-B`,
-    voucherDate: new Date(),
-    sourceType: "CrmRebookingTransfer",
-    sourceId: rebookingTransferId,
-    companyId: row.ToCompanyId ?? null,
-    projectId: row.ToProjectId ?? null,
-    createdBy: userEmail,
-    legs: [
-      { lHeadId: collectionsHeadId, debit: amount, narration: `${docNo} — held credit received for re-booking` },
-      { lHeadId: customerHeadId, credit: amount, narration: `${docNo} — held credit received` },
-    ],
-  });
+  const hasCompanyPosting = async (companyId) => {
+    const posted = await pool.request().input("id", sql.Int, rebookingTransferId)
+      .input("companyId", sql.Int, companyId).query(`
+        SELECT TOP 1 1 AS found FROM dbo.GeneralLedgerEntry
+        WHERE SourceType = 'CrmRebookingTransfer' AND SourceId = @id
+          AND CompanyId = @companyId AND IsReversed = 0
+      `);
+    return posted.recordset.length > 0;
+  };
+  if (!(await hasCompanyPosting(row.FromCompanyId))) {
+    await postVoucher(pool, {
+      voucherNo: `${docNo}-A`, voucherDate: new Date(), sourceType: "CrmRebookingTransfer",
+      sourceId: rebookingTransferId, companyId: row.FromCompanyId ?? null,
+      projectId: row.FromProjectId ?? null, createdBy: userEmail,
+      legs: [
+        { lHeadId: customerHeadId, debit: amount, narration: `${docNo} — held credit transferred out for re-booking` },
+        { lHeadId: collectionsHeadId, credit: amount, narration: `${docNo} — held credit transferred out` },
+      ],
+    });
+  }
+  if (!(await hasCompanyPosting(row.ToCompanyId))) {
+    await postVoucher(pool, {
+      voucherNo: `${docNo}-B`, voucherDate: new Date(), sourceType: "CrmRebookingTransfer",
+      sourceId: rebookingTransferId, companyId: row.ToCompanyId ?? null,
+      projectId: row.ToProjectId ?? null, createdBy: userEmail,
+      legs: [
+        { lHeadId: collectionsHeadId, debit: amount, narration: `${docNo} — held credit received for re-booking` },
+        { lHeadId: customerHeadId, credit: amount, narration: `${docNo} — held credit received` },
+      ],
+    });
+  }
   return { posted: true };
 }
 
@@ -956,7 +1120,7 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, invoiceId).query(`
-    SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate,
+    SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Status,
            b.Id AS BookingId, b.CompanyId, b.ProjectId
     FROM dbo.CrmInvoice inv
     JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
@@ -964,7 +1128,9 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
   `);
   const row = r.recordset[0];
   if (!row) return { posted: false, reason: `CrmInvoice ${invoiceId} not found` };
-  if (row.InvoiceType !== "Milestone" && row.InvoiceType !== "Booking")
+  if (row.Status === "Void") return { posted: false, reason: `${row.InvoiceNo} is void — not posted` };
+  // "Final" = a Non-Invoice customer's one invoice for the grand total.
+  if (row.InvoiceType !== "Milestone" && row.InvoiceType !== "Booking" && row.InvoiceType !== "Final")
     return { none: true, reason: `Invoice type "${row.InvoiceType}" is not a flat/parking sale invoice — no income to recognise` };
 
   const invoiceAmount = Number(row.Amount) || 0;
@@ -1065,7 +1231,7 @@ async function postCrmResaleFeeToGL(pool, resaleId, userEmail) {
   if (await hasPosting(pool, "CrmUnitResale", resaleId))
     return { posted: true, reason: "already posted (idempotent)" };
   const r = (await pool.request().input("id", sql.Int, resaleId).query(`
-    SELECT r.Id, r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, r.FromCustomerId, r.ResaleDate,
+    SELECT r.Id, r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, COALESCE(r.ToCustomerId, r.FromCustomerId) AS FeeCustomerId, r.ResaleDate,
            COALESCE(p.ProjectId, u.ProjectId) AS ProjectId, proj.company_id AS CompanyId,
            COALESCE(p.PlotName, u.UnitName) AS Item
     FROM dbo.CrmUnitResale r
@@ -1077,9 +1243,9 @@ async function postCrmResaleFeeToGL(pool, resaleId, userEmail) {
   const fee = Math.round(Number(r.DeveloperFeeAmount || 0) * 100) / 100;
   const gst = Math.round(Number(r.DeveloperFeeGstAmount || 0) * 100) / 100;
   if (fee <= 0) return { none: true, reason: "No developer fee on this resale — nothing to post" };
-  if (r.FromCustomerId == null) return { posted: false, reason: "Resale has no original buyer to charge the fee to" };
+  if (r.FeeCustomerId == null) return { posted: false, reason: "Resale has no buyer to charge the fee to" };
 
-  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FromCustomerId, userEmail);
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FeeCustomerId, userEmail);
   const feeHeadId = await getGLHeadIdByCode(pool, CRM_RESALE_FEE_CODE, CRM_RESALE_FEE_ACCOUNT);
   const voucherNo = `RSL-${resaleId}`;
   const legs = [
@@ -1103,8 +1269,89 @@ async function postCrmResaleFeeToGL(pool, resaleId, userEmail) {
   return { posted: true };
 }
 
+/**
+ * A resale by endorsement: the property's money paid so far moves with it.
+ *   Dr  seller's customer ledger   paid
+ *       Cr  buyer's customer ledger    paid
+ * No income, no GST — the developer received this money once already; only
+ * whose advance it is changes. Idempotent per resale.
+ */
+async function postCrmResaleTransferToGL(pool, resaleId, userEmail) {
+  if (await hasPosting(pool, "CrmUnitResaleTransfer", resaleId))
+    return { posted: true, reason: "already posted (idempotent)" };
+  const r = (await pool.request().input("id", sql.Int, resaleId).query(`
+    SELECT r.Id, r.PaidAtTransfer, r.FromCustomerId, r.ToCustomerId, r.CompletedAt,
+           b.ProjectId, b.CompanyId, COALESCE(b.UnitNo, b.BookingNo) AS Item
+    FROM dbo.CrmUnitResale r LEFT JOIN dbo.CrmBooking b ON b.Id = r.FromBookingId WHERE r.Id = @id`)).recordset[0];
+  if (!r) return { posted: false, reason: `Resale ${resaleId} not found` };
+  const paid = Math.round(Number(r.PaidAtTransfer || 0) * 100) / 100;
+  if (paid <= 0) return { none: true, reason: "Nothing paid yet — no advance to move" };
+  const sellerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FromCustomerId, userEmail);
+  const buyerHeadId = await ensureCrmCustomerLedgerHead(pool, r.ToCustomerId, userEmail);
+  const voucherNo = `RSL-T-${resaleId}`;
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate: r.CompletedAt || new Date(),
+    sourceType: "CrmUnitResaleTransfer",
+    sourceId: resaleId,
+    companyId: r.CompanyId ?? null,
+    projectId: r.ProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: sellerHeadId, debit: paid, narration: `${voucherNo} — ${r.Item} resold: advance passes to the new buyer` },
+      { lHeadId: buyerHeadId, credit: paid, narration: `${voucherNo} — ${r.Item} taken over by resale: advance from the previous buyer` },
+    ],
+  });
+  return { posted: true };
+}
+
+/**
+ * A buy-back, once Finance has paid it. The payout voucher itself posted
+ *   Dr seller's ledger  price  /  Cr Bank (net of TDS) + TDS Payable
+ * against the seller's advance (what they had paid, a credit on their ledger),
+ * so their ledger is left at the difference. That difference is the buy-back's
+ * own cost (a premium) or gain (a discount):
+ *   premium:  Dr Property Buy-back Cost  /  Cr seller's ledger
+ *   discount: Dr seller's ledger          /  Cr Property Buy-back Cost
+ * Earlier invoices are left as they are. Idempotent per buy-back.
+ */
+async function postCrmBuyBackDifferenceToGL(pool, resaleId, userEmail) {
+  if (await hasPosting(pool, "CrmUnitResaleBuyBack", resaleId))
+    return { posted: true, reason: "already posted (idempotent)" };
+  const r = (await pool.request().input("id", sql.Int, resaleId).query(`
+    SELECT r.Id, r.AgreedValue, r.PaidAtTransfer, r.FromCustomerId, r.CompletedAt,
+           b.ProjectId, b.CompanyId, COALESCE(b.UnitNo, b.BookingNo) AS Item
+    FROM dbo.CrmUnitResale r LEFT JOIN dbo.CrmBooking b ON b.Id = r.FromBookingId WHERE r.Id = @id`)).recordset[0];
+  if (!r) return { posted: false, reason: `Buy-back ${resaleId} not found` };
+  const diff = Math.round((Number(r.AgreedValue || 0) - Number(r.PaidAtTransfer || 0)) * 100) / 100;
+  if (Math.abs(diff) < 0.01) return { none: true, reason: "Bought back at exactly what was paid — no difference to post" };
+  const costHeadId = await getGLHeadIdByCode(pool, "CRM-BUYBACK-COST", "Property Buy-back Cost");
+  const sellerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FromCustomerId, userEmail);
+  const voucherNo = `BYB-${resaleId}`;
+  const amt = Math.abs(diff);
+  const legs = diff > 0
+    ? [{ lHeadId: costHeadId, debit: amt, narration: `${voucherNo} — ${r.Item} bought back above what was paid` },
+       { lHeadId: sellerHeadId, credit: amt, narration: `${voucherNo} — buy-back premium` }]
+    : [{ lHeadId: sellerHeadId, debit: amt, narration: `${voucherNo} — ${r.Item} bought back below what was paid` },
+       { lHeadId: costHeadId, credit: amt, narration: `${voucherNo} — buy-back discount` }];
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate: r.CompletedAt || new Date(),
+    sourceType: "CrmUnitResaleBuyBack",
+    sourceId: resaleId,
+    companyId: r.CompanyId ?? null,
+    projectId: r.ProjectId ?? null,
+    createdBy: userEmail,
+    legs,
+  });
+  return { posted: true };
+}
+
 module.exports = {
+  postCrmBuyBackDifferenceToGL,
+  postCrmResaleTransferToGL,
   postCrmResaleFeeToGL,
+  postCrmBrokerageAccrualToGL,
   CRM_COLLECTIONS_ACCOUNT,
   CRM_GST_OUTPUT_ACCOUNT,
   CRM_SALE_INCOME_ACCOUNT,
@@ -1116,6 +1363,7 @@ module.exports = {
   postCrmReceiptToGL,
   postCrmOnAccountToGL,
   postCrmOnAccountApplied,
+  syncCrmOnAccountLedger,
   postCrmBrokerPaymentToGL,
   postCrmCancellationRefundToGL,
   postCrmRefundPaid,

@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download } from "lucide-react";
+import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download, Receipt } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices } from "./portalApi";
+import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices, fetchCreditNotes, creditNotesSeenKey, writeSeen, fetchReceipts, downloadReceiptPdf } from "./portalApi";
 import {
   PageHeader, Card, CardHeader, StatusPill, GOLD, HAIRLINE, TEXT, TEXT_FAINT, TEXT_MUTED, SURFACE_ALT, serif,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
@@ -55,10 +55,25 @@ function InvoicePdfDialog({ invoice, applicationId, onClose }: { invoice: any; a
 }
 
 const PortalPayments: React.FC = () => {
-  const { timeline, applicationId } = useOutletContext<Ctx>();
+  const { timeline, applicationId, me } = useOutletContext<Ctx>();
   const milestones = timeline.paymentMilestones || [];
   const { data: invoices = [] } = useQuery({ queryKey: ["portal-invoices", applicationId], queryFn: () => fetchInvoices(applicationId), staleTime: 30_000 });
+  const { data: receipts = [] } = useQuery({ queryKey: ["portal-receipts", applicationId], queryFn: () => fetchReceipts(applicationId), staleTime: 30_000 });
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
+  const [downloadingReceiptId, setDownloadingReceiptId] = useState<number | null>(null);
+
+  const handleDownloadReceipt = async (receiptId: number) => {
+    try {
+      setDownloadingReceiptId(receiptId);
+      const blob = await downloadReceiptPdf(receiptId, applicationId);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } catch (err) {
+      console.error("Failed to download receipt:", err);
+    } finally {
+      setDownloadingReceiptId(null);
+    }
+  };
 
   if (!milestones.length) {
     return (
@@ -154,11 +169,72 @@ const PortalPayments: React.FC = () => {
         </Card>
       )}
 
+      {receipts.length > 0 && (
+        <Card className="overflow-hidden">
+          <CardHeader icon={Receipt} title="Payment Receipts" />
+          {receipts.map((rcpt: any) => (
+            <div key={rcpt.Id} className="flex items-center justify-between gap-3 px-5 py-3.5 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold" style={{ color: TEXT }}>{rcpt.ReceiptNo}</p>
+                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
+                  {fmtDate(rcpt.ReceivedDate || rcpt.CreatedAt)}{rcpt.PaymentMode ? ` · ${rcpt.PaymentMode}` : ""}{rcpt.TransactionRef ? ` · Ref: ${rcpt.TransactionRef}` : rcpt.ChequeNo ? ` · Chq: ${rcpt.ChequeNo}` : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <p className="text-sm font-bold" style={{ color: TEXT }}>{fmtMoney(rcpt.Amount)}</p>
+                <button
+                  type="button"
+                  disabled={downloadingReceiptId === rcpt.Id}
+                  onClick={() => handleDownloadReceipt(rcpt.Id)}
+                  className="flex items-center gap-1 text-xs font-medium hover:underline disabled:opacity-50"
+                  style={{ color: GOLD }}
+                >
+                  <Download size={13} /> {downloadingReceiptId === rcpt.Id ? "Opening…" : "Download"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      <RefundDocuments customerId={me?.Id} />
+
       {previewInvoice && (
         <InvoicePdfDialog invoice={previewInvoice} applicationId={applicationId} onClose={() => setPreviewInvoice(null)} />
       )}
     </div>
   );
 };
+
+/** Refund vouchers / credit notes for money given back to this customer (all their bookings). */
+function RefundDocuments({ customerId }: { customerId: any }) {
+  const { data: notes = [] } = useQuery<any[]>({ queryKey: ["portal-gst-notes"], queryFn: fetchCreditNotes });
+  // Seen here: the "new credit note" badge on Payments clears.
+  useEffect(() => {
+    if (notes.length && customerId != null) writeSeen(creditNotesSeenKey(customerId), Math.max(...notes.map((n: any) => Number(n.Id))));
+  }, [notes, customerId]);
+  if (!notes.length) return null;
+  const open = async (id: number) => {
+    const r = await fetch(`${API}/gst-notes/${id}/pdf`, { headers: authHeaders() });
+    if (r.ok) window.open(URL.createObjectURL(await r.blob()), "_blank");
+  };
+  const label = (n: any) => (n.Status === "TimeBarred" ? "GST paid certificate" : n.DocType === "CreditNote" ? "Credit note" : "Credit note (refund voucher)");
+  return (
+    <Card>
+      <CardHeader icon={FileText} title="Credit notes" />
+      <p className="px-5 pt-3 text-xs" style={{ color: TEXT_MUTED }}>Your credit notes for money we gave back — keep them for your records and tax filings.</p>
+      {notes.map((n) => (
+        <div key={n.Id} className="flex items-center gap-3 px-5 py-3 border-t" style={{ borderColor: HAIRLINE }}>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium" style={{ color: TEXT }}>{label(n)} {n.DocNo ? <span style={{ color: TEXT_MUTED }}>· {n.DocNo}</span> : null}</div>
+            <div className="text-xs" style={{ color: TEXT_FAINT }}>{n.Property} · {fmtDate(n.DocDate)} · refund {n.RefundNo}</div>
+          </div>
+          <div className="text-sm tabular-nums" style={{ color: TEXT }}>{fmtMoney(n.TotalAmount)}</div>
+          <button onClick={() => open(n.Id)} className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border" style={{ borderColor: HAIRLINE, color: TEXT }}><Download size={13} />PDF</button>
+        </div>
+      ))}
+    </Card>
+  );
+}
 
 export default PortalPayments;

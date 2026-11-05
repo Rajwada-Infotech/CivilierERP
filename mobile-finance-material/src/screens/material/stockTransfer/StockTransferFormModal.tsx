@@ -13,6 +13,7 @@
 // rows the same way Material Issues' getStockForRow does, since it's a
 // straightforward correctness improvement with the same data already in
 // hand.
+import { istToday } from "@/utils/istTime";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -33,7 +34,7 @@ function blankCartItem(): CartItem {
   return { key: uid(), itemId: "", itemName: "", uom: "", quantity: "", availableStock: 0 };
 }
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() { return istToday(); }
 
 type FormState = {
   companyId: string; projectId: string;

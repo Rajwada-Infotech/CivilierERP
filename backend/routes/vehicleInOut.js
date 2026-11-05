@@ -1,4 +1,4 @@
-/**
+﻿/**
  * backend/routes/vehicleInOut.js
  *
  * REST endpoints for the Vehicle In/Out module.
@@ -30,7 +30,7 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const multer = require("multer");
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
@@ -69,7 +69,7 @@ function parseIstDateTime(value) {
 const router = express.Router();
 
 // ── Rate-limit ────────────────────────────────────────────────────────────────
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // ── Permission guard ─────────────────────────────────────────────────────────
 // Approve/Reject are exempt — transition() (approvalService.js) is the real
@@ -157,6 +157,7 @@ function attachmentRowToDto(a) {
 }
 
 /** Link a set of previously-uploaded (unlinked) attachment ids to a VehicleInOutID. */
+// `pool` may be a transaction: create / edit run their writes in one.
 async function linkAttachments(pool, vehicleInOutId, attachmentIds) {
   if (!attachmentIds.length) return;
   for (const attachId of attachmentIds) {
@@ -246,6 +247,11 @@ class ValidationError extends Error {
  * so callers can validate before touching the header row.
  */
 const VALID_QUALITIES = new Set(["Excellent", "Good", "Bad"]);
+const VALID_WEIGHT_UNITS = new Set(["kg", "tonne"]);
+// Weight per line arrives with migration 584; saving and reading keep working on a server that hasn't run it.
+const { makeColumnProbe } = require("../services/columnProbe");
+const hasItemWeight = makeColumnProbe("dbo.VehicleInOutItems", "Weight");
+const weightCols = async (pool) => ((await hasItemWeight(pool)) ? ", Weight, WeightUnit" : ", CAST(NULL AS DECIMAL(18,3)) AS Weight, CAST(NULL AS NVARCHAR(10)) AS WeightUnit");
 
 async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutId) {
   const submitted = (Array.isArray(items) ? items : [])
@@ -262,10 +268,18 @@ async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutI
       // not sourced from the PO item, since the same ordered item can
       // arrive under different brands lot to lot.
       brand: typeof it.brand === "string" && it.brand.trim() ? it.brand.trim().slice(0, 100) : null,
+      // Optional weight of what arrived on this line, in kg or tonnes.
+      weight: Number(it.weight) > 0 ? Math.round(Number(it.weight) * 1000) / 1000 : null,
+      weightUnit: Number(it.weight) > 0 ? (VALID_WEIGHT_UNITS.has(it.weightUnit) ? it.weightUnit : "kg") : null,
     }))
     .filter((it) => it.poItemId && it.receivedQty > 0);
 
-  if (!poId || submitted.length === 0) return [];
+  // No poId means this is a gate-only record without a PO link (not currently
+  // used but kept for safety). Empty submitted with a poId means the user
+  // submitted the form without entering any received quantities — reject it.
+  if (!poId) return [];
+  if (submitted.length === 0)
+    throw new ValidationError("At least one item with a received quantity greater than zero is required.");
 
   const remaining = await getPOItemsWithRemaining(pool, poId, excludeVehicleInOutId);
   const byId = new Map(remaining.map((r) => [r.poItemId, r]));
@@ -298,6 +312,7 @@ async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
     DELETE FROM dbo.VehicleInOutItems WHERE VehicleInOutID = @ID
   `);
 
+  const withWeight = await hasItemWeight(pool);
   for (const line of validatedItems) {
     await pool
       .request()
@@ -309,11 +324,13 @@ async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
       .input("ReceivedQty", sql.Decimal(18, 3), line.receivedQty)
       .input("PhotoBase64", sql.NVarChar(sql.MAX), line.photoBase64 || null)
       .input("Quality", sql.NVarChar(20), line.quality || null)
-      .input("Brand", sql.NVarChar(100), line.brand || null).query(`
+      .input("Brand", sql.NVarChar(100), line.brand || null)
+      .input("Weight", sql.Decimal(18, 3), line.weight)
+      .input("WeightUnit", sql.NVarChar(10), line.weightUnit).query(`
         INSERT INTO dbo.VehicleInOutItems
-          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand)
+          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand${withWeight ? ", Weight, WeightUnit" : ""})
         VALUES
-          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64, @Quality, @Brand)
+          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64, @Quality, @Brand${withWeight ? ", @Weight, @WeightUnit" : ""})
       `);
   }
 }
@@ -355,14 +372,37 @@ router.get("/", async (req, res) => {
     const offset = (page - 1) * limit;
 
     const finYear = req.query.finYear || null;
-    const search = req.query.search || null;
+    const search = String(req.query.search || "").trim();
+
+    // A bare number means a document number: "85" is VEH-2026-00085, not every record with an 8 and a 5 somewhere in
+    // it (VEH-2026-00850, vehicle WB 85 1234). Only when no document has that number does it look in vehicle and
+    // challan numbers. Anything else searches the text columns as before.
+    const DOC_TAIL = "TRY_CAST(RIGHT(v.DocNo, PATINDEX('%[^0-9]%', REVERSE(v.DocNo) + 'x') - 1) AS BIGINT)";
+    const isDocNumber = /^\d{1,18}$/.test(search);
+    let searchSql = "";
+    if (isDocNumber) {
+      const hit = await pool
+        .request()
+        .input("FinYear", sql.NVarChar(20), finYear)
+        .input("DocTail", sql.BigInt, search)
+        .query(`
+          SELECT TOP 1 1 AS Hit FROM dbo.VehicleInOut v
+          WHERE ${DOC_TAIL} = @DocTail AND (@FinYear IS NULL OR v.FinYear = @FinYear)${projectPredicate(req.projectScope, "v.ProjectID")}
+        `);
+      searchSql = hit.recordset.length
+        ? `AND ${DOC_TAIL} = @DocTail`
+        : "AND (v.VehicleNo LIKE @Search OR v.ChallanNo LIKE @Search)";
+    } else if (search) {
+      searchSql = "AND (v.DocNo LIKE @Search OR v.VehicleNo LIKE @Search OR v.ChallanNo LIKE @Search OR v.SupplierName LIKE @Search OR v.PONumber LIKE @Search)";
+    }
 
     const request = pool
       .request()
       .input("Offset", sql.Int, offset)
       .input("Limit", sql.Int, limit)
       .input("FinYear", sql.NVarChar(20), finYear)
-      .input("Search", sql.NVarChar(255), search ? `%${search}%` : null);
+      .input("Search", sql.NVarChar(255), `%${search}%`)
+      .input("DocTail", sql.BigInt, isDocNumber ? search : null);
 
     const result = await request.query(`
       SELECT
@@ -393,13 +433,7 @@ router.get("/", async (req, res) => {
       LEFT JOIN dbo.enterprise ep ON ep.id = v.ProjectID
       WHERE 1=1
         AND (@FinYear IS NULL OR v.FinYear = @FinYear)
-        AND (
-          @Search IS NULL OR
-          v.DocNo      LIKE @Search OR
-          v.VehicleNo  LIKE @Search OR
-          v.ChallanNo  LIKE @Search OR
-          v.SupplierName LIKE @Search
-        )${projectPredicate(req.projectScope, "v.ProjectID")}
+        ${searchSql}${projectPredicate(req.projectScope, "v.ProjectID")}
       ORDER BY v.VehicleInOutID DESC
       OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 
@@ -407,17 +441,29 @@ router.get("/", async (req, res) => {
       FROM dbo.VehicleInOut v
       WHERE 1=1
         AND (@FinYear IS NULL OR v.FinYear = @FinYear)
-        AND (
-          @Search IS NULL OR
-          v.DocNo      LIKE @Search OR
-          v.VehicleNo  LIKE @Search OR
-          v.ChallanNo  LIKE @Search OR
-          v.SupplierName LIKE @Search
-        )${projectPredicate(req.projectScope, "v.ProjectID")};
+        ${searchSql}${projectPredicate(req.projectScope, "v.ProjectID")};
     `);
 
     const rows = result.recordsets[0];
     const total = result.recordsets[1][0]?.Total ?? 0;
+
+    // Each entry's lines for the register — item, quantity, quality grade and weight (photos stay on GET /:id).
+    if (rows.length) {
+      const ir = pool.request();
+      rows.forEach((r, i) => ir.input(`v${i}`, sql.Int, r.VehicleInOutID));
+      const items = (await ir.query(`
+        SELECT VehicleInOutID, VehicleInOutItemID, ItemName, UomName, ReceivedQty, Quality, Brand${await weightCols(pool)}
+        FROM dbo.VehicleInOutItems
+        WHERE VehicleInOutID IN (${rows.map((_, i) => `@v${i}`).join(", ")})
+        ORDER BY VehicleInOutItemID
+      `)).recordset;
+      const byRecord = new Map();
+      for (const it of items) {
+        if (!byRecord.has(it.VehicleInOutID)) byRecord.set(it.VehicleInOutID, []);
+        byRecord.get(it.VehicleInOutID).push(it);
+      }
+      rows.forEach((r) => { r.Items = byRecord.get(r.VehicleInOutID) || []; });
+    }
 
     res.json({
       data: rows,
@@ -570,7 +616,7 @@ router.get("/:id", async (req, res) => {
         FROM dbo.VehicleInOut v
         LEFT JOIN dbo.enterprise ec ON ec.id = v.CompanyID
         LEFT JOIN dbo.enterprise ep ON ep.id = v.ProjectID
-        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(v.CreatedBy)
+        LEFT JOIN dbo.users cu ON cu.email = v.CreatedBy
         WHERE v.VehicleInOutID = @ID
       `);
 
@@ -580,7 +626,7 @@ router.get("/:id", async (req, res) => {
     const record = result.recordset[0];
     record.Attachments = await getAttachmentsFor(pool, id);
     const itemsResult = await pool.request().input("ItemsID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand${await weightCols(pool)}
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ItemsID
     `);
@@ -703,7 +749,7 @@ router.get("/:id/items", async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("ID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, Brand
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, Brand, Quality${await weightCols(pool)}
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ID
     `);
@@ -773,6 +819,16 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     // ── 0b. Validate received quantities against what's left on the PO ──────
     // before touching the header row, so a rejected submission never
     // creates an orphaned Vehicle In/Out record.
+    // Before the per-line quantity check, gate the whole submission if the PO
+    // already has zero remaining across every line — meaning all ordered goods
+    // have been received and no new VIO entry would record anything meaningful.
+    const poItemsCheck = await getPOItemsWithRemaining(pool, parseInt(poId, 10), null);
+    const totalRemaining = poItemsCheck.reduce((s, r) => s + r.remainingQty, 0);
+    if (poItemsCheck.length > 0 && totalRemaining <= 0) {
+      return res.status(400).json({
+        error: 'This Purchase Order has been fully received — all ordered quantities have been delivered. No further Vehicle In/Out entries are permitted.',
+      });
+    }
     const validatedItems = await validateVehicleInOutItems(pool, poId, items, null);
 
     // ── 1. Resolve doc type ──────────────────────────────────────────────────
@@ -789,7 +845,14 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     });
 
     // ── 3. Insert record ─────────────────────────────────────────────────────
-    const insert = await pool
+    // Header, attachments and item lines are one unit: the header used to be saved on its own, so a failure
+    // while saving the lines (an oversized photo, a PO line changed underneath) left an entry with no items
+    // behind — and the user, seeing the error, saved again and got another one.
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    let insert;
+    try {
+    insert = await tx
       .request()
       .input("DocNo", sql.NVarChar(50), finalDocNo)
       .input("DocTypeId", sql.Int, docTypeId)
@@ -832,14 +895,20 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
 
     recordId = insert.recordset[0].VehicleInOutID;
 
-    // ── 4. Back-patch DocNumberSequence with the real PK ────────────────────
-    await backPatchRecordId(pool, sql, finalDocNo, "VehicleInOut", recordId);
-
     // ── 5. Link any attachments uploaded while filling out the form ─────────
-    await linkAttachments(pool, recordId, parseIdList(attachmentIds));
+    await linkAttachments(tx, recordId, parseIdList(attachmentIds));
 
     // ── 6. Persist the validated received-quantity lines ────────────────────
-    await saveVehicleInOutItems(pool, recordId, validatedItems);
+    await saveVehicleInOutItems(tx, recordId, validatedItems);
+
+    await tx.commit();
+    } catch (writeErr) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw writeErr;
+    }
+
+    // ── 4. Back-patch DocNumberSequence with the real PK ────────────────────
+    await backPatchRecordId(pool, sql, finalDocNo, "VehicleInOut", recordId);
 
     await bumpCacheVersion(CACHE_KEY);
 
@@ -913,7 +982,12 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     // own remaining allowance while re-editing it.
     const validatedItems = await validateVehicleInOutItems(pool, poId, items, id);
 
-    await pool
+    // Header, attachments and item lines are saved together or not at all (the lines are replaced: a failure
+    // between the delete and the insert used to leave the entry with no items).
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+    await tx
       .request()
       .input("ID", sql.Int, id)
       .input("DocDate", sql.Date, docDate || new Date())
@@ -951,11 +1025,17 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       `);
 
     // Link any newly-uploaded attachments added during this edit.
-    await linkAttachments(pool, id, parseIdList(attachmentIds));
+    await linkAttachments(tx, id, parseIdList(attachmentIds));
 
     // Persist the validated received-quantity lines (replaces this
     // record's previous item rows).
-    await saveVehicleInOutItems(pool, id, validatedItems);
+    await saveVehicleInOutItems(tx, id, validatedItems);
+
+    await tx.commit();
+    } catch (writeErr) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw writeErr;
+    }
 
     await bumpCacheVersion(CACHE_KEY);
 

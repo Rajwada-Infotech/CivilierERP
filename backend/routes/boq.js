@@ -1,8 +1,8 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectParamGuard, assertProjectRawAllowed } = require("../services/projectScope");
 
@@ -11,7 +11,7 @@ router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.BOQ WHERE BoqID 
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -115,6 +115,8 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
     await transaction
       .request()
       .input("BoqID", sqlRef.Int, boqID)
+      .input("ActivityId", sqlRef.NVarChar(100), it.activityId || null)
+      .input("ActivityName", sqlRef.NVarChar(255), it.activityName ? String(it.activityName).substring(0, 255) : null)
       .input("ItemId", sqlRef.NVarChar(100), it.itemId || null)
       .input("ItemName", sqlRef.NVarChar(255), itemName)
       .input("ItemCode", sqlRef.NVarChar(50), it.itemCode || null)
@@ -127,10 +129,10 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
       .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqItems
-          (BoqID, ItemId, ItemName, ItemCode, Description,
+          (BoqID, ActivityId, ActivityName, ItemId, ItemName, ItemCode, Description,
            Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
         VALUES
-          (@BoqID, @ItemId, @ItemName, @ItemCode, @Description,
+          (@BoqID, @ActivityId, @ActivityName, @ItemId, @ItemName, @ItemCode, @Description,
            @Quantity, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
       `);
   }
@@ -172,6 +174,9 @@ const syncBoqActivities = async (
       .input("ActivityId", sqlRef.NVarChar(100), ac.activityId || null)
       .input("ActivityName", sqlRef.NVarChar(255), activityName)
       .input("ActivityCode", sqlRef.NVarChar(50), ac.activityCode || null)
+      .input("GroupId", sqlRef.NVarChar(100), ac.groupId || null)
+      .input("GroupName", sqlRef.NVarChar(255), ac.groupName ? String(ac.groupName).substring(0, 255) : null)
+      .input("Area", sqlRef.Decimal(18, 4), ac.area === "" || ac.area == null ? null : parseFloat(ac.area) || 0)
       .input("Description", sqlRef.NVarChar(sqlRef.MAX), ac.description || null)
       .input("Quantity", sqlRef.Decimal(18, 4), qty)
       .input("UomId", sqlRef.Int, uomId)
@@ -181,10 +186,10 @@ const syncBoqActivities = async (
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
       .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqActivities
-          (BoqID, ActivityId, ActivityName, ActivityCode, Description,
+          (BoqID, ActivityId, ActivityName, ActivityCode, GroupId, GroupName, Area, Description,
            Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
         VALUES
-          (@BoqID, @ActivityId, @ActivityName, @ActivityCode, @Description,
+          (@BoqID, @ActivityId, @ActivityName, @ActivityCode, @GroupId, @GroupName, @Area, @Description,
            @Quantity, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
       `);
   }
@@ -193,10 +198,9 @@ const syncBoqActivities = async (
 // ── GET /  (List with Pagination) ────────────────────────────────────────────
 router.get("/", cache("boq", 300), async (req, res) => {
   try {
+    // companyId is an optional narrowing — without it the list spans every company (still within the
+    // caller's project scope).
     const companyId = parseInt(req.query.companyId, 10) || null;
-    if (!companyId) {
-      return res.status(400).json({ error: "companyId is required" });
-    }
 
     const pool = getPool();
     const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -204,8 +208,8 @@ router.get("/", cache("boq", 300), async (req, res) => {
     const offset = (page - 1) * limit;
     const search = (req.query.search || "").toString().trim();
     const status = (req.query.status || "").toString().trim();
-    // Always scope to the requested company — no cross-company list allowed
-    const where = ["b.CompanyId = @companyId"];
+    const where = [];
+    if (companyId) where.push("b.CompanyId = @companyId");
     if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
 
     if (search) {
@@ -222,9 +226,9 @@ router.get("/", cache("boq", 300), async (req, res) => {
       where.push("b.Status = @status");
     }
 
-    const whereSql = `WHERE ${where.join(" AND ")}`;
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const bindFilters = (request) => {
-      request.input("companyId", sql.Int, companyId);
+      if (companyId) request.input("companyId", sql.Int, companyId);
       if (search) request.input("search", sql.NVarChar(100), `%${search}%`);
       if (status && status !== "All") {
         request.input("status", sql.NVarChar(50), status);
@@ -232,8 +236,13 @@ router.get("/", cache("boq", 300), async (req, res) => {
       return request;
     };
 
+    // Totals over everything the filters match, not just this page: the page's figures used to add up
+    // only the rows on screen. Rejected BOQs stay out of the value.
     const countResult = await bindFilters(pool.request()).query(`
-      SELECT COUNT(*) AS total
+      SELECT COUNT(*) AS total,
+             ISNULL(SUM(CASE WHEN ISNULL(b.Status, 'Draft') <> 'Rejected' THEN b.TotalAmount ELSE 0 END), 0) AS totalValue,
+             SUM(CASE WHEN b.Status = 'Pending' THEN 1 ELSE 0 END) AS pending,
+             SUM(CASE WHEN b.Status = 'Approved' THEN 1 ELSE 0 END) AS approved
       FROM dbo.BOQ b
       LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
@@ -273,12 +282,18 @@ router.get("/", cache("boq", 300), async (req, res) => {
         FETCH NEXT @limit ROWS ONLY
       `);
 
+    const sums = countResult.recordset[0];
     res.json({
       data: result.recordset,
       page,
       limit,
       total,
       totalPages: Math.ceil(total / limit),
+      summary: {
+        totalValue: Number(sums.totalValue) || 0,
+        pending: Number(sums.pending) || 0,
+        approved: Number(sums.approved) || 0,
+      },
     });
   } catch (err) {
     console.error("GET BOQ error:", err);
@@ -503,8 +518,10 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
 
     const currentStatus = await getRecordStatus("boq", id);
     const allowPostApproval = await resolveAllowPostApproval(req, "boq");
-    await guardEdit("boq", id, { allowPostApproval });
+    // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
+    await guardEditAnyStage("boq", id, { allowPostApproval });
     const wasApproved = currentStatus === "Approved";
+    const wasPending = currentStatus === "Pending";
 
     const pool = getPool();
     const beforeSnapshot = wasApproved
@@ -517,7 +534,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     // only fires for Draft/Rejected). Mirrors journalVoucher.js's
     // wasApproved handling. BOQ doesn't post to GL directly, so no
     // reversal needed.
-    const effectiveStatus = wasApproved ? "Pending" : Status || "Draft";
+    const effectiveStatus = wasApproved || wasPending ? "Pending" : Status || "Draft";
     const uomMap = await buildUomMap(pool);
     transaction = pool.transaction();
     await transaction.begin();
@@ -558,6 +575,16 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
 
     await transaction.commit();
     await bumpCacheVersion("boq");
+
+    // Edited while Pending: it stays Pending, but earlier sign-offs were given to the old figures, so the
+    // approval starts again from level 1 (same as Journal Voucher and Fund Transfer).
+    if (wasPending) {
+      try {
+        await restartApprovalCycle("boq", id, userEmail, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+      } catch (cycleErr) {
+        console.error("[boq] could not restart approval cycle after pending edit:", cycleErr.message);
+      }
+    }
 
     // Re-submit to Pending if record was reverted to Draft (e.g. after edit).
     // For a genuinely Rejected record, transition()'s Pending branch writes a

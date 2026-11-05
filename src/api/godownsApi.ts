@@ -33,12 +33,6 @@ export const getGodowns = async (): Promise<GodownsResponse> => {
   return res.json().catch(() => ({}));
 };
 
-export const getGodown = async (id: number): Promise<Godown> => {
-  const res = await fetchWithAuth(`${BASE}/${id}`);
-  if (!res.ok) throw new Error(`Failed to fetch godown: ${res.status}`);
-  return res.json().catch(() => ({}));
-};
-
 export interface CreateGodownPayload {
   GodownCode?: string;
   GodownName: string;

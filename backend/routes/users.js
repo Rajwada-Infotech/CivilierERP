@@ -1,16 +1,17 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql, queryWithRetry } = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { redisGet, redisSet, redisDel, invalidateUserSession } = require("../redis");
 const { blacklistToken } = require("../middleware/blacklist");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
+const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
+const { usersHaveStatusReason } = require("../services/usersStatusReason");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 
 // Privileged roles that can always list users (Password Reset, User Management)
@@ -146,6 +147,32 @@ router.post("/login", async (req, res) => {
     // FIXED: Normalize role
     const normalizedRole = normalizeRole(user.roleName);
 
+    // Each login page is for its own people. Checked after the password, so a page can't be used to learn who has an account.
+    // `portal` comes from the web login pages; apps already installed on phones don't send it and are left as they were.
+    const portal = req.body.portal;
+    if (portal === "staff" || portal === "supplier") {
+      const isSupplier = normalizedRole === "supplier" || String(user.roleName || "").trim().toLowerCase() === "supplier";
+      if (portal === "staff" && isSupplier) {
+        return res.status(403).json({ error: "Supplier accounts sign in on the Supplier Portal." });
+      }
+      if (portal === "staff" && normalizedRole === "customer") {
+        return res.status(403).json({ error: "Customer accounts sign in on the Customer Portal." });
+      }
+      if (portal === "supplier" && !isSupplier) {
+        return res.status(403).json({ error: "This page is for supplier accounts. Please use the main login." });
+      }
+    }
+
+    // Maintenance mode: only a super admin may sign in.
+    {
+      const { getMaintenanceState } = require("../services/maintenanceMode");
+      const { maintenanceBody, isSuperAdmin } = require("../middleware/maintenanceGate");
+      const maintenance = await getMaintenanceState();
+      if (maintenance.active && maintenance.enforced && !isSuperAdmin(normalizedRole)) {
+        return res.status(503).json(maintenanceBody(maintenance));
+      }
+    }
+
     const token = jwt.sign(
       {
         userId: user.id,
@@ -195,7 +222,6 @@ router.post("/login", async (req, res) => {
 // AUTH REQUIRED BELOW THIS LINE
 // ======================
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 async function incrementLoginAttempts(attemptsKey, lockKey) {
   try {
@@ -258,12 +284,15 @@ router.get(
   async (req, res) => {
     try {
       const pool = getPool();
+      const withReason = await usersHaveStatusReason(pool);
       const result = await pool.request().query(`
         SELECT u.id, u.name, u.email, u.RoleId,
                r.RName AS roleName,
-               u.created_datetime, u.discontinue,
+               u.created_datetime, u.discontinue,${withReason ? " u.StatusReason, u.StatusChangedAt, u.StatusChangedBy," : ""}
                ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
-               u.avatar_url,
+               -- lists get the small thumbnail when there is one (migration 575)
+               COALESCE(u.avatar_thumb, u.avatar_url) AS avatar_url,
+               CAST(CASE WHEN u.avatar_url IS NOT NULL AND u.avatar_thumb IS NULL THEN 1 ELSE 0 END AS BIT) AS avatar_needs_thumb,
                u.DepartmentId, d.DepartmentName
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
@@ -302,6 +331,7 @@ router.post(
     try {
       const hashed = await bcrypt.hash(password, SALT_ROUNDS);
       const pool = getPool();
+      const withCreatedBy = await usersHaveCreatedBy(pool);
       await pool
         .request()
         .input("name", sql.NVarChar, name)
@@ -309,11 +339,12 @@ router.post(
         .input("RoleId", sql.Int, assignedRoleId)
         .input("can_accept_tickets", sql.Bit, can_accept_tickets ? 1 : 0)
         .input("DepartmentId", sql.Int, DepartmentId ? Number(DepartmentId) : null)
+        .input("createdBy", sql.Int, req.user?.userId ?? null)
         .input("password", sql.NVarChar, hashed).query(`
-          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets, DepartmentId)
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets, DepartmentId${withCreatedBy ? ", CreatedBy" : ""})
           VALUES (
             @name, @email, @password, @RoleId,
-            GETDATE(), 0, @can_accept_tickets, @DepartmentId
+            GETDATE(), 0, @can_accept_tickets, @DepartmentId${withCreatedBy ? ", @createdBy" : ""}
           )
         `);
       res.json({ message: "User created" });
@@ -342,10 +373,34 @@ router.put(
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
-    const { name, email, RoleId, roleId, discontinue, can_accept_tickets, DepartmentId } =
+    const { name, email, RoleId, roleId, discontinue, can_accept_tickets, DepartmentId, reason } =
       req.body;
     try {
       const pool = getPool();
+
+      // Making a user active or inactive is locked behind a written reason (kept in the activity log). An edit that does
+      // not mention the status leaves it as it is - it used to switch the account back on.
+      const current = await pool.request().input("id", sql.Int, id)
+        .query("SELECT ISNULL(discontinue, 0) AS discontinue FROM dbo.users WHERE id = @id");
+      if (!current.recordset.length) return res.status(404).json({ error: "User not found" });
+      const wasInactive = !!current.recordset[0].discontinue;
+      const nowInactive = discontinue === undefined ? wasInactive : !!discontinue;
+      const statusChanges = nowInactive !== wasInactive;
+      const statusReason = String(reason ?? "").trim();
+      if (statusChanges && statusReason.length < 5) {
+        return res.status(400).json({ error: "Give a reason (at least 5 characters) for making this user active or inactive." });
+      }
+      // A user switched back on cannot be switched off again for 90 days, whoever asks. On an active user the last status
+      // change is the day they were activated; an account that was never switched off has no date and is not held.
+      if (statusChanges && nowInactive && (await usersHaveStatusReason(pool))) {
+        const held = await pool.request().input("id", sql.Int, id).query(`
+          SELECT CONVERT(VARCHAR(10), DATEADD(DAY, 90, StatusChangedAt), 23) AS Until
+          FROM dbo.users WHERE id = @id AND StatusChangedAt IS NOT NULL AND DATEADD(DAY, 90, StatusChangedAt) > SYSDATETIME()`);
+        if (held.recordset.length) {
+          return res.status(409).json({ error: `This user was activated less than 90 days ago and cannot be made inactive until ${held.recordset[0].Until}.` });
+        }
+      }
+      if (statusChanges) res.locals.activityMessage = `${nowInactive ? "Made inactive" : "Made active"}: ${statusReason}`.slice(0, 120);
 
       // If only `discontinue` was sent (toggle active/inactive), skip updating
       // name/email/RoleId so we don't accidentally NULL them out.
@@ -382,7 +437,7 @@ router.put(
                 : 0,
           )
           .input("DepartmentId", sql.Int, DepartmentId ? Number(DepartmentId) : null)
-          .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
+          .input("discontinue", sql.Bit, nowInactive ? 1 : 0).query(`
           UPDATE dbo.users
           SET name=@name,
               email=@email,
@@ -392,6 +447,15 @@ router.put(
               DepartmentId=@DepartmentId
           WHERE id=@id
         `);
+      }
+
+      // Remember why, by whom and when the status last changed (the Users list shows it under the status).
+      if (statusChanges && (await usersHaveStatusReason(pool))) {
+        await pool.request()
+          .input("id", sql.Int, id)
+          .input("reason", sql.NVarChar(120), statusReason.slice(0, 120))
+          .input("by", sql.NVarChar(200), String(req.user?.name || req.user?.email || "").slice(0, 200) || null)
+          .query("UPDATE dbo.users SET StatusReason = @reason, StatusChangedAt = SYSDATETIME(), StatusChangedBy = @by WHERE id = @id");
       }
 
       // Discontinuing a user must stop their existing tokens immediately,

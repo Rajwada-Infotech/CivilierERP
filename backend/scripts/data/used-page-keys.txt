@@ -115,8 +115,6 @@ followup-department-master
 followup-extra-charge-master
 followup-parking-master
 followup-parking-slot-master
-followup-pending-tasks
-followup-reminders
 followup-tag-master
 followup-task-transfer
 followup-tasks

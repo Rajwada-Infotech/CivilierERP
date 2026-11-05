@@ -9,8 +9,8 @@ const { postSaCommissionToGL } = require("../services/saLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { assertNoChannelPartnerBrokerageConflict } = require("../services/saCommissionGuards");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const COMMISSION_SELECT = `
   SELECT

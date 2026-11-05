@@ -500,7 +500,7 @@ const SalesDashboard = () => {
                 color: "#d946ef",
               },
               {
-                label: "Payments",
+                label: "Received Payments",
                 icon: CreditCard,
                 path: "/sales/payment",
                 color: "#10b981",

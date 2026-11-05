@@ -82,8 +82,9 @@ export interface PaginatedReceivedPayments {
 export async function getReceivedPayments(
   page = 1,
   limit = 20,
+  opts: { salePayment?: boolean } = {},
 ): Promise<PaginatedReceivedPayments> {
-  const res = await fetchWithAuth(`${BASE}?page=${page}&limit=${limit}`);
+  const res = await fetchWithAuth(`${BASE}?page=${page}&limit=${limit}${opts.salePayment ? "&salePayment=1" : ""}`);
   if (!res.ok) throw new Error("Failed to fetch received payments");
   return res.json().catch(() => ({}));
 }
@@ -201,3 +202,10 @@ export async function getReceivedPaymentPosting(id: number): Promise<ReceivedPay
 
 // Alias used by ReceivedPayment.tsx
 export const addReceivedPayment = createReceivedPayment;
+/** Doc numbers of sale orders that already have an active (not Rejected) sale payment. */
+export async function getPaidSaleOrderDocNos(): Promise<string[]> {
+  const res = await fetchWithAuth(`${BASE}/sale-order-paid`);
+  if (!res.ok) throw new Error("Failed to fetch paid sale orders");
+  const j = await res.json().catch(() => ({}));
+  return Array.isArray(j?.docNos) ? j.docNos : [];
+}

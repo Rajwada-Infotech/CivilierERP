@@ -1,8 +1,10 @@
 const { sql } = require("../db");
+const { round2, sumMoney } = require("./bookingUnits");
 const { getNextDocNumber } = require("./docNumber");
 const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
 const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
+const { onAccountWithAvailableSql } = require("./crmPaymentFunding");
 
 // Server-side backstop for "a cancelled booking must be released from every
 // workflow action, not just hidden from dropdowns" — a stale client-side
@@ -12,13 +14,52 @@ const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 // Possession Notice, Brokerage, Handover, Welcome Call, Bank Details,
 // Service Tickets, Payments) calls this first and 400s with the message
 // below if it fails. Returns null when the booking is fine to act on.
+// While a booking sits with its approvers, its price must not move under them —
+// the same lock PUT /crm/bookings/:id applies to rate / value. Parking and extra
+// charges change the total too, so they wait until it's back in Review (or
+// approved: adding parking to a confirmed sale is normal and allowed).
+// Frees a dead booking's inventory: its unit / plot allocation lines (and the
+// application's plot lines) leave 'Active'. Those tables carry active-only
+// unique indexes and booking creation checks them — a line left Active locks
+// the unit / plot against every future buyer even though the booking itself
+// is Cancelled / Expired. Every path that ends a booking must call this.
+async function releaseBookingInventoryLines(executor, bookingId, lineStatus = "Cancelled") {
+  await executor.request().input("bid", sql.Int, bookingId).input("st", sql.NVarChar(30), lineStatus).query(`
+    UPDATE dbo.CrmBookingUnit SET Status = @st WHERE BookingId = @bid AND Status = N'Active';
+    UPDATE dbo.CrmBookingPlot SET Status = @st WHERE BookingId = @bid AND Status = N'Active';
+    UPDATE ap SET Status = @st
+    FROM dbo.CrmApplicationPlot ap JOIN dbo.CrmBooking b ON b.ApplicationId = ap.ApplicationId
+    WHERE b.Id = @bid AND ap.Status = N'Active';
+    -- The application's unit line too: one Active line per unit is enforced
+    -- (UX_CrmApplicationUnit_ActiveUnit), so leaving it Active kept a
+    -- cancelled flat or villa from ever being applied for again.
+    UPDATE au SET Status = @st
+    FROM dbo.CrmApplicationUnit au JOIN dbo.CrmBooking b ON b.ApplicationId = au.ApplicationId
+    WHERE b.Id = @bid AND au.Status = N'Active';
+  `);
+}
+
+async function requireNotMidApproval(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT WorkflowStage FROM dbo.CrmBooking WHERE Id = @bid");
+  const stage = r.recordset[0]?.WorkflowStage;
+  if (stage === "MarketingHeadApproval" || stage === "DirectorApproval") {
+    return `This booking is in ${stage} — reject it back to Review before changing its parking or extra charges, so the new total is approved.`;
+  }
+  return null;
+}
+
 async function requireActiveBooking(pool, bookingId) {
   const row = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Status, IsActive, IsFrozen, FreezeReason, FreezeExpiresAt FROM dbo.CrmBooking WHERE Id = @bid");
   if (!row.recordset.length) return "Booking not found";
   const b = row.recordset[0];
   if (!b.IsActive) return "This booking is no longer active";
-  if (["Cancelled", "Rejected"].includes(b.Status)) {
+  if (b.Status === "Transferred") {
+    return "This booking was transferred to a new owner by a resale — no further workflow actions are allowed on it";
+  }
+  // Every dead status (Cancelled, Rejected, Expired, Transferred) — one list, constants/crmStatuses.js.
+  if (require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(b.Status)) {
     return `This booking has been ${b.Status} — no further workflow actions are allowed on it`;
   }
   if (b.IsFrozen) {
@@ -178,7 +219,9 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   // is best-effort and can silently fail (missing bank, DB hiccup), so this
   // is checked independently rather than trusted from booking creation alone.
   const milestone1 = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+    SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+    ORDER BY Id
   `);
   // Real ledger settlement (Status='Paid') only happens via the automatic
   // full-booking sweep (autoApplyOnAccountIfFullyFunded in crmPayments.js) —
@@ -190,9 +233,11 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   // full-booking auto-sweep to physically mark it Paid.
   if (!milestone1.recordset.length || (milestone1.recordset[0].Status !== "Paid" && !(await isMilestoneOneCoveredByOnAccount(pool, bookingId)))) {
     const totalsRow = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT ISNULL(SUM(Amount), 0) AS TotalReceived FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+      SELECT ISNULL(SUM(oa.AvailableAmount), 0) AS TotalReceived FROM ${onAccountWithAvailableSql("oa")}
+      WHERE oa.BookingId = @bid
     `);
-    const totalReceived = Number(totalsRow.recordset[0]?.TotalReceived) || 0;
+    const totalReceived = (Number(milestone1.recordset[0]?.AmountPaid) || 0)
+      + (Number(totalsRow.recordset[0]?.TotalReceived) || 0);
     const m1Due = Number(milestone1.recordset[0]?.AmountDue) || 0;
     if (m1Due > 0 && totalReceived < m1Due) {
       const shortfall = Math.round((m1Due - totalReceived) * 100) / 100;
@@ -221,7 +266,7 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
  */
 async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
   const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid AND Status <> 'Cancelled'");
   if (existing.recordset.length) return null;
 
   const prereq = await validateAgreementPreparationPrerequisites(pool, bookingId);
@@ -365,7 +410,7 @@ async function maybeAutoCreateLegalMilestone(pool, bookingId, actorUserId) {
   if (existing.recordset.length) return null;
 
   const agr = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid AND Status <> 'Cancelled'");
   if (!agr.recordset.length) {
     const deed = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
@@ -450,9 +495,20 @@ async function getProjectSaleGate(pool, bookingId) {
  * fresh on every call, but Handover completion is the only path that can
  * actually flip this from no-op to creating the deed.
  */
+// Every sale deed starts with its one mandatory document requested — the
+// DeedDraft, as the manual create (POST /crm/sales-deed) already seeds — the same way an agreement starts with its Sale Agreement
+// request. Without it senior approval refused ("No mandatory documents
+// requested yet") with nothing telling staff to add one.
+async function requestStandingSaleDeedDocument(executor, deedId, actorUserId) {
+  await executor.request().input("did", sql.Int, deedId).input("cb", sql.Int, actorUserId || null).query(`
+    IF NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @did AND IsMandatory = 1)
+      INSERT INTO dbo.CrmSalesDeedDocument (SalesDeedId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+      VALUES (@did, N'DeedDraft', N'Sale Deed Draft (Physical Legal Document)', 1, N'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())`);
+}
+
 async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+    .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Cancelled'");
   if (existing.recordset.length) return null;
 
   // Sale Deed is prepared after possession handover in the under-construction
@@ -495,6 +551,7 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
         VALUES (@no, @bid, @agid, 'Draft', @note, @cb, SYSDATETIME())
       `);
     deedId = result.recordset[0].Id;
+    await requestStandingSaleDeedDocument(pool, deedId, actorUserId);
   } catch (e) {
     // Same race guard as every sibling maybeAutoCreate* in this file
     // (maybeAutoCreateAgreement, maybeAutoCreateLegalMilestone) — this one
@@ -558,6 +615,13 @@ function agreementDateError(message, status) {
 // THEM to respond — never while waiting on the other side. Writes
 // CrmAgreementDateHistory exactly as before (unchanged shape/consumers).
 async function proposeAgreementDate(pool, agreementId, proposedBy, proposedDate, actorUserId) {
+  // Same guard crmTransferDeed.js's proposeDate already enforces for its
+  // sibling date-negotiation flow — this one never had it, so a backdated
+  // date could sail through to CrmAgreementDateHistory with only a human
+  // super_admin sign-off at finalizeAgreementDate left to catch it.
+  if (proposedDate && String(proposedDate).slice(0, 10) < new Date().toISOString().slice(0, 10)) {
+    throw agreementDateError("The agreement date can't be in the past", 400);
+  }
   // UPDLOCK+HOLDLOCK: this turn-taking check is reachable from at least
   // four independent entry points on the same agreement (staff propose/
   // accept, staff proxy-propose/proxy-accept, and the customer portal's own
@@ -632,6 +696,12 @@ async function acceptAgreementDate(pool, agreementId, acceptedBy) {
   // engine's own "Pending" transition expects a submitting user/role.
   await pool.request().input("id", sql.Int, agreementId)
     .query("UPDATE dbo.CrmAgreement SET ProposedDateStatus = 'Matched', DateApprovalStatus = 'Pending' WHERE Id = @id");
+  // The date approval shares the agreement's approval log (same table) and
+  // was set Pending without a "sent for approval" marker — so the agreement's
+  // own earlier approvals counted toward the date approval's levels. A fresh
+  // cycle marker makes it start at level 1, like every other submission.
+  await require("./approvalService").restartApprovalCycle("crm-agreement-date", agreementId, null, null,
+    `Agreement date accepted by the ${acceptedBy === "Company" ? "company" : "customer"} — sent for date approval`);
 
   await pool.request()
     .input("agid", sql.Int, agreementId)
@@ -930,7 +1000,7 @@ async function recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilest
     const schedule = rows.filter((r) => r.ExtraChargeId == null && r.ParkingAllotmentId == null);
     const only = schedule.length === 1 ? schedule[0] : null;
     if (only && !["Paid", "Waived"].includes(only.Status) && !(Number(only.AmountPaid || 0) > 0)) {
-      const fixedOthers = rows.filter((r) => r.Id !== only.Id).reduce((s, r) => s + Number(r.AmountDue), 0);
+      const fixedOthers = sumMoney(rows.filter((r) => r.Id !== only.Id), (r) => r.AmountDue);
       const amt = Math.max(0, Math.round((grandTotal - fixedOthers) * 100) / 100);
       await poolOrTx.request().input("id", sql.Int, only.Id).input("amt", sql.Decimal(18, 2), amt)
         .input("pct", sql.Decimal(5, 2), Math.round((amt / grandTotal) * 10000) / 100)
@@ -939,8 +1009,8 @@ async function recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilest
     return;
   }
 
-  const settledTotal = settled.reduce((s, r) => s + Number(r.AmountDue), 0);
-  const remainingTarget = Math.max(0, grandTotal - settledTotal);
+  const settledTotal = sumMoney(settled, (r) => r.AmountDue);
+  const remainingTarget = Math.max(0, round2(grandTotal - settledTotal));
   // Weight priority per milestone: its own stored Percent (preserves any
   // prior redistribution or manual override) > the Payment Plan Template's
   // percentage for that milestone number > an even share as the last resort.
@@ -954,20 +1024,14 @@ async function recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilest
   const evenShare = knownSum > 0 ? knownSum / open.length : 100 / open.length;
   const resolvedWeights = weights.map((w) => w != null ? w : evenShare);
   const openPercentSum = resolvedWeights.reduce((s, w) => s + w, 0);
-  const weight = (r, idx) => (openPercentSum > 0 ? resolvedWeights[idx] / openPercentSum : 1 / open.length);
+  // Shared split (bookingUnits.apportion): each open step's share by weight,
+  // the last absorbing the rounding so the schedule sums exactly to Grand
+  // Total — the same split the application form previews (planSchedule).
+  const amounts = require("./bookingUnits").apportion(remainingTarget, openPercentSum > 0 ? resolvedWeights : open.map(() => 1));
 
-  let allocated = 0;
   for (let i = 0; i < open.length; i++) {
     const r = open[i];
-    const isLast = i === open.length - 1;
-    // The last open milestone absorbs whatever's left after rounding the
-    // others, so the schedule always sums exactly to GrandTotal instead of
-    // drifting a paisa or two off from independently-rounded shares.
-    const amount = isLast
-      ? Math.round((remainingTarget - allocated) * 100) / 100
-      : Math.round(remainingTarget * weight(r, i) * 100) / 100;
-    allocated += amount;
-    const finalAmount = Math.max(0, amount);
+    const finalAmount = Math.max(0, amounts[i]);
     const percent = remainingTarget > 0 ? Math.round((finalAmount / remainingTarget) * 10000) / 100 : 0;
 
     await poolOrTx.request()
@@ -1071,7 +1135,6 @@ async function tierBrokeragePercent(pool, dealValue) {
 //                      Executed (created now so it's visible/tracked, but
 //                      not payable until then).
 function buildBrokerageTranches(plan, totalAmount, agreementExecuted) {
-  const round2 = (n) => Math.round(n * 100) / 100;
   if (plan === "TwoPart") {
     const first = round2(totalAmount / 2);
     const second = round2(totalAmount - first);
@@ -1113,7 +1176,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   // leaving parking/extras out entirely — see booking 41, where the old
   // per-milestone schedule's real total was TotalValue + ParkingTotal,
   // confirmed against CrmPaymentMilestone.AmountDue sums.)
-  const dealValue = Number(bk.TotalValue || 0) + Number(bk.ParkingTotal || 0) + Number(bk.ExtraChargesTotal || 0);
+  const dealValue = sumMoney([bk.TotalValue, bk.ParkingTotal, bk.ExtraChargesTotal]);
   const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : await tierBrokeragePercent(pool, dealValue);
   const totalBrokerageAmount = Math.round(dealValue * totalPercent) / 100;
   if (totalBrokerageAmount <= 0) return null;
@@ -1125,7 +1188,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   // that's fast-tracked and already has an Executed/Registered agreement by
   // the time Milestone #1 clears shouldn't sit needlessly locked.
   const agr = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
   const agreementExecuted = ["Executed", "Registered"].includes(agr.recordset[0]?.Status);
 
   const tranches = buildBrokerageTranches(plan, totalBrokerageAmount, agreementExecuted);
@@ -1213,9 +1276,12 @@ async function maybeUnlockBrokerageOnAgreementExecuted(pool, bookingId) {
  */
 async function checkLoanProcessingCleared(pool, bookingId) {
   const result = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT b.FinancingType, l.SanctionStatus
+    SELECT b.FinancingType,
+           -- the booking's live loan, newest first (a closed one — e.g. a
+           -- previous owner's, after a resale — never counts)
+           (SELECT TOP 1 l.SanctionStatus FROM dbo.CrmLoanDetail l
+             WHERE l.BookingId = b.Id AND ISNULL(l.SanctionStatus, N'') <> N'Closed' ORDER BY l.Id DESC) AS SanctionStatus
     FROM dbo.CrmBooking b
-    LEFT JOIN dbo.CrmLoanDetail l ON l.BookingId = b.Id
     WHERE b.Id = @bid
   `);
   const row = result.recordset[0];
@@ -1265,7 +1331,7 @@ async function resolveNocType(pool, bookingId) {
     SELECT
       CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
         SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
       ) THEN 1 ELSE 0 END AS IsLoanFinanced
     FROM dbo.CrmBooking b WHERE b.Id = @bid
   `);
@@ -1298,56 +1364,43 @@ async function resolveNocType(pool, bookingId) {
  * Returns { received, source: 'block'|'project'|null, receivedDate, certType, certRow }.
  */
 async function resolveOcCcGate(pool, bookingId, certType = null) {
-  const typeFilter = certType ? "AND oc.CertType = @ct" : "";
-  const req = () => {
-    const r = pool.request().input("bid", sql.Int, bookingId);
-    if (certType) r.input("ct", sql.NVarChar(20), certType);
-    return r;
-  };
-
-  // Booking -> Block, via the same UnitMaster join used everywhere else in
-  // this codebase to resolve a booking's real block.
-  const blockRow = await req().query(`
-    SELECT um.BlockId, b.ProjectId
-    FROM dbo.CrmBooking b
-    LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-    WHERE b.Id = @bid
-  `);
-  const { BlockId, ProjectId } = blockRow.recordset[0] || {};
-  if (ProjectId == null) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
-
-  if (BlockId != null) {
-    const blockCert = await req().input("bid2", sql.Int, BlockId).query(`
-      SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
-      WHERE oc.BlockId = @bid2 AND oc.Status = 'Received' ${typeFilter}
-      ORDER BY oc.ReceivedDate ASC
-    `);
-    if (blockCert.recordset.length) {
-      const row = blockCert.recordset[0];
-      return { received: true, source: "block", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
-    }
-  }
-
-  const projectCert = await req().input("pid", sql.Int, ProjectId).query(`
-    SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
-    WHERE oc.ProjectId = @pid AND oc.BlockId IS NULL AND oc.Status = 'Received' ${typeFilter}
-    ORDER BY oc.ReceivedDate ASC
-  `);
-  if (projectCert.recordset.length) {
-    const row = projectCert.recordset[0];
-    return { received: true, source: "project", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
-  }
-
-  return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+  // One rule, kept in the database (migration 577, vw_CrmBookingOcCc): the
+  // booking's own block(s) - the unit's block and any plot's block - must be
+  // covered by their own Received certificate or by a project-wide one that
+  // was received while the block existed; a booking with no block follows the
+  // project, which is complete when every active block is. certType is no
+  // longer used by any caller (any of OC / CC / OC+CC counts).
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Received, ReceivedDate, Source FROM dbo.vw_CrmBookingOcCc WHERE BookingId = @bid");
+  const row = r.recordset[0];
+  if (!row || row.Received !== 1) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+  return { received: true, source: row.Source, receivedDate: row.ReceivedDate, certType: null, certRow: null };
 }
 
-module.exports = {
+// A locked Welcome Call checklist asserts specific facts were verified with
+// the customer — including, via its conditional items, that parking/extra
+// charges/co-applicant details are confirmed. Mutating any of those after
+// the checklist is Submitted/locked would leave it silently claiming
+// "verified" for a fact nobody re-checked. Shared by crmCoApplicant.js,
+// crmParking.js, and crmExtraCharges.js so every module with a dedicated
+// checklist item gets the same re-validation, not just the first one fixed.
+async function assertWelcomeChecklistUnlocked(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT IsLocked FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
+  if (r.recordset[0]?.IsLocked) {
+    return "The welcome call verification checklist for this booking is already submitted and locked. Reopen it on the Welcome Calls page before making this change.";
+  }
+  return null;
+}
+
+module.exports = { requireNotMidApproval, releaseBookingInventoryLines,
+  assertWelcomeChecklistUnlocked,
   resolveNocType,
   resolveOcCcGate,
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateLegalMilestone,
-  maybeAutoCreateSalesDeed,
+  maybeAutoCreateSalesDeed, requestStandingSaleDeedDocument,
   getProjectSaleGate,
   maybeAutoCreateBrokerage,
   maybeUnlockBrokerageOnAgreementExecuted,

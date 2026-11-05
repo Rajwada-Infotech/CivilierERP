@@ -1,48 +1,59 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getRoomsForUnit } from "@/api/roomMasterApi";
-import { floorLabel, floorDisplay } from "@/lib/floorLabel";
-import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
+import { floorLabel, floorDisplay, roomDisplay, VILLA_FLOOR } from "@/lib/floorLabel";
+import { getDependencyMasters, getDependencyMaster, listDependencyMasters, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
+import { AutoNameFinder } from "@/components/civilworkdpr/AutoNameFinder";
+import { PriorityBadge } from "@/components/civilworkdpr/PriorityBadge";
 import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { ScopeLocationTree } from "@/components/civilworkdpr/ScopeLocationTree";
+import { BulkAssignModal } from "@/pages/masters/DependencyMaster/components/BulkAssignModal";
 import {
-  Hammer,
   Layers,
   Building2,
   LayoutGrid,
   DoorOpen,
-  MapPin,
-  GitBranch,
   Loader2,
-  Tag,
   X,
   UserRound,
   CalendarDays,
-  ListChecks,
+  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-// ── Field styling — same cyan-accent convention as the rest of the Civil
-// Work DPR module (see WorkerAttendance.tsx's inputCls). ────────────────────
+// ── Field styling: squared, ink-ruled, with small capital labels, as on the
+// rest of the drawing-sheet pages. ───────────────────────────────────────────
 const inputCls =
-  "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
-const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1.5";
+  "w-full px-3 py-2.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed";
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const labelCls = `${LBL} block mb-1.5`;
 
 // Leaner variant for the Location row's Project/Tower/Floor/Unit/Room
-// selects — same look as WorkerAttendance.tsx's filterInputCls, so a chain
-// of five fields doesn't feel oversized next to the compact chips they
-// collapse into once picked.
+// selects, so a chain of five fields doesn't feel oversized next to the
+// compact chips they collapse into once picked.
 const leanInputCls =
-  "w-full px-2.5 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
-const leanLabelCls = "text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5";
+  "w-full h-9 px-2.5 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed";
+const leanLabelCls = `${LBL} block mb-1.5`;
+
+const RULE = "1px solid hsl(var(--foreground))";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+
+// How an assignment's status is marked: settled work solid, cancelled work red, everything still open hatched.
+const statusTone = (status: string): "done" | "waiting" | "stopped" =>
+  status === "COMPLETED" || status === "APPROVED" ? "done" : status === "CANCELLED" ? "stopped" : "waiting";
 
 // unit-master already carries Project/Block/Floor for every unit — reusing
 // that one flat list (same source CrmApplication.tsx's own Project -> Block
@@ -58,28 +69,27 @@ const UNIT_API = "/api/unit-master";
 // equally "in progress" even after it was done; a chip reads as settled and
 // gives the row's space back to whichever level is actually next.
 function LocationChip({
-  icon: Icon,
   label,
   value,
   onClear,
 }: {
-  icon: LucideIcon;
+  icon?: LucideIcon;
   label: string;
   value: string;
   onClear: () => void;
 }) {
   return (
-    <div className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1.5 rounded-lg border border-cyan-500/25 bg-cyan-500/10 text-xs">
-      <Icon size={11} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
-      <span className="text-muted-foreground">{label}:</span>
-      <span className="font-medium text-foreground">{value}</span>
+    <div className="inline-flex items-center gap-2 h-9 pl-2.5 pr-1 border border-foreground bg-card text-xs">
+      <span className={LBL}>{label}</span>
+      <span className="font-semibold text-foreground">{value}</span>
       <button
         type="button"
         onClick={onClear}
         title={`Change ${label.toLowerCase()}`}
-        className="ml-0.5 w-4 h-4 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-cyan-500/20 transition-colors"
+        aria-label={`Change ${label.toLowerCase()}`}
+        className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
       >
-        <X size={10} />
+        <X size={11} />
       </button>
     </div>
   );
@@ -128,6 +138,15 @@ function DependencyChainCards({
   onAssign: (rung: LadderActivity, chain: DependencyMasterListRow) => void;
 }) {
   const roomId = chains[0]?.roomId ?? null;
+  // The tree is drawn from the chain list without activities; this room's chains, with their activities, are
+  // fetched when the room is opened (and, with Expand all, only once it scrolls into view).
+  const { data: roomChains } = useQuery({
+    queryKey: ["civilworkdpr-work-done-room-chains", roomId],
+    queryFn: () => listDependencyMasters({ roomId: roomId as number }),
+    enabled: roomId != null,
+    staleTime: 60 * 1000,
+  });
+  const fullById = useMemo(() => new Map((roomChains ?? []).map((c) => [c.id, c])), [roomChains]);
   const { data: assignments = [] } = useQuery({
     queryKey: ["civilworkdpr-work-done-saved-flow", "room", roomId],
     queryFn: () => getReportedAssignments({ roomId }),
@@ -141,21 +160,14 @@ function DependencyChainCards({
 
   return (
     <div className="space-y-2.5">
-      {chains.map((chain) => {
+      {chains.map((light) => {
+        const chain = fullById.get(light.id) ?? light;
         const rungs = chain.activities ?? [];
         return (
-          <div key={chain.id} className="rounded-lg border border-border/60 px-3.5 py-3 space-y-2.5">
-            <div>
+          <div key={chain.id} className="px-3.5 py-3 space-y-2.5" style={{ border: "1px solid hsl(var(--border))" }}>
+            <div className="flex items-baseline gap-2.5 flex-wrap">
               <span className="text-sm font-semibold text-foreground">{chain.alias}</span>
-              <span
-                className={`ml-2 text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                  chain.workType === "INTERNAL"
-                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                    : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                }`}
-              >
-                {chain.workType}
-              </span>
+              <span className={LBL}>{chain.workType}</span>
             </div>
             {/* Mobile: one full-width block per rung, name on its own line
                 above the badges — the old single-line rounded-full pill
@@ -181,21 +193,16 @@ function DependencyChainCards({
                       key={rung.rungId ?? rung.activityId}
                       type="button"
                       onClick={() => onAssign(rung, chain)}
-                      className={`w-full sm:w-auto flex flex-wrap items-center gap-1.5 rounded-xl sm:rounded-full border px-2.5 sm:pl-2 sm:pr-2.5 py-1.5 sm:py-1 text-xs text-left transition-colors ${
-                        done
-                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                          : "border-border bg-muted/40 text-foreground hover:bg-muted"
+                      className={`w-full sm:w-auto flex flex-wrap items-center gap-2 border px-2.5 py-1.5 text-xs text-left text-foreground transition-colors hover:bg-primary/10 ${
+                        done ? "border-foreground" : "border-foreground/40 hover:border-foreground"
                       }`}
                       title="Assign engineer & material"
                     >
                       <span className="font-medium flex-1 min-w-0 basis-full sm:basis-auto">
                         {rung.sequenceNo}. {rung.activityName}
                       </span>
-                      <span
-                        className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 ${meta.className}`}
-                      >
-                        {meta.label}
-                      </span>
+                      <SheetMark text={meta.label} tone={statusTone(assignment?.status ?? "PENDING")} />
+                      <PriorityBadge priority={assignment?.priority} />
                       <QcBadge qcStatus={assignment?.qcStatus} />
                       <AttemptBadge attemptNo={assignment?.attemptNo} />
                     </button>
@@ -212,6 +219,10 @@ function DependencyChainCards({
 
 export default function WorkDone() {
   const rights = usePageRights("civilworkdpr-work-done");
+  // Bulk assign writes Work Allocation data, so it needs the same edit right as saving one allocation.
+  const reportingRights = usePageRights("civilworkdpr-activity-reporting");
+  const canBulkAssign = rights.canEdit || reportingRights.canEdit;
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [form, setForm] = useState<WorkDoneLocationForm>(EMPTY_FORM);
   const [activeAssignment, setActiveAssignment] = useState<{ rung: LadderActivity; chain: DependencyMasterListRow } | null>(null);
 
@@ -228,11 +239,57 @@ export default function WorkDone() {
   // GET /:id per chain via useQueries, which at production scale (1000+
   // chains) blew through the route's rate limit and left this page unable
   // to load at all.
+  // Just the chains (where each one is), not their activities: enough to draw the tree, count and bulk assign.
+  // A room's activities load when it is opened (DependencyChainCards); the Auto Name finder, which searches every
+  // activity, loads the full list only once someone types in it.
   const { data: allChains = [] } = useQuery({
-    queryKey: ["civilworkdpr-work-done-all-chains"],
-    queryFn: getDependencyMasters,
+    queryKey: ["civilworkdpr-work-done-all-chains", "light"],
+    queryFn: () => listDependencyMasters({ withActivities: false }),
     enabled: rights.canView,
   });
+  const [finderActive, setFinderActive] = useState(false);
+  const { data: finderChains = [], isFetching: loadingFinderChains } = useQuery({
+    queryKey: ["civilworkdpr-work-done-all-chains", "full"],
+    queryFn: getDependencyMasters,
+    enabled: rights.canView && finderActive,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Opened from a report row (?rung=&chain=): go straight to that activity's allocation form, once.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { rungId: linkedRung, chainId: linkedChain } = readChainLink(searchParams);
+  useEffect(() => {
+    if ((!linkedRung && !linkedChain) || !rights.canView) return;
+    let cancelled = false;
+    // Only the chain that activity belongs to is fetched, not every chain in the system.
+    (linkedRung ? listDependencyMasters({ rungId: linkedRung }) : Promise.resolve([] as DependencyMasterListRow[]))
+      .then((found) => {
+        if (cancelled) return;
+        const chain = found.find((c) => (linkedChain ? c.id === linkedChain : true));
+        const rung = chain?.activities?.find((a) => a.rungId === linkedRung);
+        if (chain && rung) setActiveAssignment({ rung, chain });
+        else toast.error("That activity is not in Work Allocation (its chain may have been retired, or is outside your projects).");
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : "Could not open that activity.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("rung");
+            next.delete("chain");
+            return next;
+          },
+          { replace: true },
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedRung, linkedChain, rights.canView]);
   const { data: projects = [], isLoading: loadingProjects } = useQuery({
     queryKey: ["civilworkdpr-work-done-projects"],
     queryFn: fetchProjects,
@@ -251,7 +308,7 @@ export default function WorkDone() {
   // reused here rather than duplicated against a second API shape.
   const unitsForProject = useMemo(() => {
     if (!form.ProjectId) return [];
-    return (units as any[]).filter((u: any) => String(u.ProjectId) === form.ProjectId);
+    return (units as any[]).filter((u: any) => String(u.ProjectId) === form.ProjectId && !u.IsLand);
   }, [units, form.ProjectId]);
 
   const towersForProject = useMemo(() => {
@@ -270,23 +327,26 @@ export default function WorkDone() {
   const floorsForTower = useMemo(() => {
     const set = new Set<string>();
     unitsForTower.forEach((u: any) => {
-      if (u.FloorNo != null) set.add(String(u.FloorNo));
+      if (u.IsVilla) set.add(VILLA_FLOOR);
+      else if (u.FloorNo != null) set.add(String(u.FloorNo));
     });
-    return Array.from(set).sort((a, b) => Number(a) - Number(b));
+    // Villas (no tower floor) come after the numbered floors.
+    return Array.from(set).sort((a, b) => (a === VILLA_FLOOR ? 1 : b === VILLA_FLOOR ? -1 : Number(a) - Number(b)));
   }, [unitsForTower]);
 
   const unitsForFloor = useMemo(() => {
     if (!form.FloorNo) return [];
-    return unitsForTower.filter((u: any) => String(u.FloorNo) === form.FloorNo);
+    return unitsForTower.filter((u: any) => (form.FloorNo === VILLA_FLOOR ? !!u.IsVilla : !u.IsVilla && String(u.FloorNo) === form.FloorNo));
   }, [unitsForTower, form.FloorNo]);
 
   // Dependency link — appears once a Room is selected. Both sides are now
   // real dbo.RoomMaster rows (Flat Master), so matching narrows all the way
   // down to the exact Room, not just Project/Tower/Floor/Unit.
   const [linkedDependencyId, setLinkedDependencyId] = useState<string>("");
+  // The picked room's chains only: the server narrows it, instead of every chain being downloaded and filtered here.
   const { data: allDependencies = [], isLoading: loadingDependencies } = useQuery({
-    queryKey: ["civilworkdpr-work-done-dependencies"],
-    queryFn: getDependencyMasters,
+    queryKey: ["civilworkdpr-work-done-room-chains", Number(form.RoomId)],
+    queryFn: () => listDependencyMasters({ roomId: Number(form.RoomId) }),
     staleTime: 60 * 1000,
     enabled: !!form.RoomId,
   });
@@ -298,7 +358,8 @@ export default function WorkDone() {
         String(d.towerId) === form.BlockId &&
         // Dependency Master stores the floor as a label ("G", "1", "2", …);
         // the form holds UnitMaster.FloorNo ("0" for Ground) — compare labels.
-        String(d.floor) === floorLabel(form.FloorNo) &&
+        // A villa's chains carry "Plot N" — the unit + room already pin it.
+        (form.FloorNo === VILLA_FLOOR || String(d.floor) === floorLabel(form.FloorNo)) &&
         String(d.flatId) === form.UnitId &&
         String(d.roomId) === form.RoomId,
     );
@@ -388,26 +449,38 @@ export default function WorkDone() {
           { label: "Work Allocation" },
         ]}
       />
-      <CivilWorkDprShell
-        title="Work Allocation"
-        subtitle="Tag a work-done entry to the exact Project / Tower / Floor / Unit"
-        icon={Hammer}
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Work allocation"
+        subtitle="Pick a room, then give each activity in its chain an engineer, dates and material."
+        action={
+          canBulkAssign && allChains.length > 0 ? (
+            <button onClick={() => setBulkOpen(true)} className={`${KEY} shrink-0 px-3 py-2 border border-foreground text-foreground hover:bg-primary/10`}>
+              <Users className="h-3.5 w-3.5" />
+              Bulk assign
+            </button>
+          ) : undefined
+        }
       >
         {!rights.canView ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          <div className="bg-card p-8 text-center text-sm text-muted-foreground" style={{ border: "1px dashed hsl(var(--border))" }}>
             You don't have access to this page.
           </div>
         ) : (
           <>
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-              <MapPin size={14} className="text-cyan-600 dark:text-cyan-400" />
-              <span className="text-sm font-heading font-semibold text-foreground">
-                Location
-              </span>
+          <AutoNameFinder
+            chains={finderChains as DependencyMasterListRow[]}
+            loading={loadingFinderChains}
+            onActive={() => setFinderActive(true)}
+            onPick={(rung, chain) => setActiveAssignment({ rung, chain })}
+          />
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+              <span className={HEAD}>Location</span>
+              <span className="text-[0.6875rem] text-muted-foreground">Project, tower, floor, unit, then room</span>
             </div>
 
-            <div className="p-3.5 sm:p-5">
+            <div className="px-4 py-4">
               {/* Each level collapses into a chip once picked (see
                   LocationChip) and only the next level's dropdown is ever
                   rendered — nothing downstream shows until its parent is
@@ -416,7 +489,7 @@ export default function WorkDone() {
               <div className="flex flex-wrap items-end gap-2.5">
                 {/* 1. Project */}
                 {loadingMasters ? (
-                  <div className="w-56 h-[30px] rounded-lg border border-border bg-muted/30 animate-pulse" />
+                  <div className="w-56 h-9 border border-border bg-muted/40 animate-pulse" />
                 ) : form.ProjectId && selectedProject ? (
                   <LocationChip
                     icon={Building2}
@@ -426,8 +499,7 @@ export default function WorkDone() {
                   />
                 ) : (
                   <div className="w-full sm:w-56">
-                    <label className={leanLabelCls}>
-                      <Building2 size={11} /> Project
+                    <label className={leanLabelCls}>Project
                     </label>
                     <select value={form.ProjectId} onChange={(e) => handleProjectChange(e.target.value)} className={leanInputCls}>
                       <option value="">Select project…</option>
@@ -451,8 +523,7 @@ export default function WorkDone() {
                     />
                   ) : (
                     <div className="w-full sm:w-48">
-                      <label className={leanLabelCls}>
-                        <Layers size={11} /> Tower
+                      <label className={leanLabelCls}>Tower
                       </label>
                       <select value={form.BlockId} onChange={(e) => handleTowerChange(e.target.value)} className={leanInputCls}>
                         <option value="">Select tower…</option>
@@ -471,8 +542,7 @@ export default function WorkDone() {
                     <LocationChip icon={LayoutGrid} label="Floor" value={floorDisplay(form.FloorNo)} onClear={() => handleFloorChange("")} />
                   ) : (
                     <div className="w-full sm:w-36">
-                      <label className={leanLabelCls}>
-                        <LayoutGrid size={11} /> Floor
+                      <label className={leanLabelCls}>Floor
                       </label>
                       <select value={form.FloorNo} onChange={(e) => handleFloorChange(e.target.value)} className={leanInputCls}>
                         <option value="">Select floor…</option>
@@ -491,8 +561,7 @@ export default function WorkDone() {
                     <LocationChip icon={DoorOpen} label="Unit" value={selectedUnit.UnitName} onClear={() => handleUnitChange("")} />
                   ) : (
                     <div className="w-full sm:w-48">
-                      <label className={leanLabelCls}>
-                        <DoorOpen size={11} /> Unit
+                      <label className={leanLabelCls}>Unit
                       </label>
                       <select value={form.UnitId} onChange={(e) => handleUnitChange(e.target.value)} className={leanInputCls}>
                         <option value="">Select unit…</option>
@@ -512,13 +581,12 @@ export default function WorkDone() {
                     <LocationChip
                       icon={DoorOpen}
                       label="Room"
-                      value={roomInstances.find((r) => String(r.Id) === form.RoomId)?.RoomName || form.RoomId}
+                      value={(() => { const r = roomInstances.find((x) => String(x.Id) === form.RoomId); return r ? roomDisplay(r.RoomName, r.Storey) : form.RoomId; })()}
                       onClear={() => handleRoomChange("")}
                     />
                   ) : (
                     <div className="w-full sm:w-48">
-                      <label className={leanLabelCls}>
-                        <DoorOpen size={11} /> Room
+                      <label className={leanLabelCls}>Room
                       </label>
                       <select
                         value={form.RoomId}
@@ -535,7 +603,7 @@ export default function WorkDone() {
                         </option>
                         {roomInstances.map((r) => (
                           <option key={r.Id} value={String(r.Id)}>
-                            {r.RoomName}
+                            {roomDisplay(r.RoomName, r.Storey)}
                           </option>
                         ))}
                       </select>
@@ -553,10 +621,10 @@ export default function WorkDone() {
               they're narrowing in on one specific room via the dropdowns,
               and this whole-portfolio browser is just noise underneath it. */}
           {allChains.length > 0 && !form.ProjectId && (
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-                <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
-                <span className="text-sm font-heading font-semibold text-foreground">Dependency Chains</span>
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+                <span className={HEAD}>Dependency chains</span>
+                <span className="text-[0.6875rem] text-muted-foreground">Every chain, by the room it belongs to. Open a room and press an activity to assign it.</span>
               </div>
               <div className="p-2 sm:p-4">
                 <ScopeLocationTree
@@ -580,21 +648,18 @@ export default function WorkDone() {
             rather than an exact Room match, since Work Allocation's Room is
             synthetic and Dependency Master's isn't. */}
         {rights.canView && form.RoomId && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-              <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
-              <span className="text-sm font-heading font-semibold text-foreground">
-                Link Dependency
-              </span>
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-4 py-3" style={{ borderBottom: RULE }}>
+              <span className={HEAD}>Link dependency</span>
             </div>
 
-            <div className="p-3.5 sm:p-5 space-y-4">
+            <div className="px-4 py-4 space-y-5">
               {loadingDependencies ? (
-                <div className="w-full h-10 rounded-lg border border-border bg-muted/30 animate-pulse" />
+                <div className="w-full h-10 border border-border bg-muted/40 animate-pulse" />
               ) : matchingDependencies.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center text-sm text-muted-foreground">
+                <div className="px-4 py-5 text-center text-sm text-muted-foreground" style={{ border: "1px dashed hsl(var(--border))" }}>
                   No dependency chains are configured for this unit yet.{" "}
-                  <a href="/masters/dependency/new" className="text-cyan-600 dark:text-cyan-400 hover:underline font-medium">
+                  <a href="/masters/dependency/new" className="text-foreground underline underline-offset-2 font-medium">
                     Set one up in Dependency Master
                   </a>
                   .
@@ -602,9 +667,7 @@ export default function WorkDone() {
               ) : (
                 <>
                   <div>
-                    <label className={labelCls}>
-                      <Tag size={11} /> Dependency Chain
-                    </label>
+                    <label className={labelCls}>Dependency chain</label>
                     <select
                       value={linkedDependencyId}
                       onChange={(e) => setLinkedDependencyId(e.target.value)}
@@ -613,25 +676,17 @@ export default function WorkDone() {
                       <option value="">Select a dependency chain…</option>
                       {matchingDependencies.map((d) => (
                         <option key={d.id} value={String(d.id)}>
-                          {d.alias} — {d.roomName || "Room"} — {d.workType} ({d.activityCount} step{d.activityCount === 1 ? "" : "s"})
+                          {d.alias} — {roomDisplay(d.roomName, d.storey)} — {d.workType} ({d.activityCount} step{d.activityCount === 1 ? "" : "s"})
                         </option>
                       ))}
                     </select>
                   </div>
 
                   {linkedDependency && (
-                    <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-4 py-3.5 space-y-2.5">
-                      <div className="flex items-center justify-between gap-2">
+                    <div className="px-4 py-3.5 space-y-2.5" style={{ border: RULE }}>
+                      <div className="flex items-baseline justify-between gap-2 flex-wrap">
                         <span className="text-sm font-semibold text-foreground">{linkedDependency.alias}</span>
-                        <span
-                          className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
-                            linkedDependency.workType === "INTERNAL"
-                              ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                              : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                          }`}
-                        >
-                          {linkedDependency.workType}
-                        </span>
+                        <span className={LBL}>{linkedDependency.workType}</span>
                       </div>
                       <p className="text-xs text-muted-foreground">{linkedDependency.scopePath}</p>
                       {loadingDependencyDetail ? (
@@ -657,10 +712,8 @@ export default function WorkDone() {
                       the chip row and chain card above. */}
                   {linkedDependency && !loadingDependencyDetail && (linkedDependencyDetail?.activities?.length ?? 0) > 0 && (
                     <div>
-                      <label className={labelCls}>
-                        <ListChecks size={11} /> Saved Flow
-                      </label>
-                      <div className="rounded-lg border border-border overflow-hidden">
+                      <label className={labelCls}>Saved flow</label>
+                      <div className="overflow-hidden" style={{ border: RULE }}>
                         {/* Mobile: one stacked card per rung — the 5-column
                             table below is the same cramped-on-a-phone shape
                             Reporting's own activity table had before its own
@@ -675,8 +728,9 @@ export default function WorkDone() {
                                     {rung.sequenceNo}. {rung.activityName}
                                   </span>
                                   {assignment && (
-                                    <div className="shrink-0">
-                                      <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
+                                    <div className="shrink-0 flex flex-col items-end gap-0.5">
+                                      <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} resumed={!!assignment.resumedAt} />
+                                      <TimelineHint status={assignment.status} startDate={assignment.startDate} days={assignment.days} endDate={assignment.endDate} />
                                     </div>
                                   )}
                                 </div>
@@ -723,7 +777,7 @@ export default function WorkDone() {
                         <div className="hidden sm:block overflow-x-auto">
                           <table className="w-full text-sm">
                             <thead>
-                              <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                              <tr className="text-left">
                                 <th className="px-3.5 py-2.5">Activity</th>
                                 <th className="px-3 py-2.5">Engineer</th>
                                 <th className="px-3 py-2.5">Start Date</th>
@@ -737,7 +791,7 @@ export default function WorkDone() {
                                 return (
                                   <tr
                                     key={`${rung.rungId ?? rung.activityId}-${rung.sequenceNo}`}
-                                    className="border-b border-border last:border-0 hover:bg-muted/20"
+                                    
                                   >
                                     <td className="px-3.5 py-3">
                                       <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
@@ -781,7 +835,8 @@ export default function WorkDone() {
                                           )}
                                         </td>
                                         <td className="px-3.5 py-3">
-                                          <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
+                                          <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} resumed={!!assignment.resumedAt} />
+                                          <TimelineHint status={assignment.status} startDate={assignment.startDate} days={assignment.days} endDate={assignment.endDate} className="mt-1" />
                                         </td>
                                       </>
                                     ) : (
@@ -803,7 +858,8 @@ export default function WorkDone() {
             </div>
           </div>
         )}
-      </CivilWorkDprShell>
+      </SheetShell>
+      <BulkAssignModal open={bulkOpen} onClose={() => setBulkOpen(false)} rows={allChains} />
       {activeAssignment && (
         <RungAssignmentModal
           rung={activeAssignment.rung}

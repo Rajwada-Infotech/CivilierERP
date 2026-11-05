@@ -1,5 +1,5 @@
-// FA Inventory — generate N FA Item Codes and tag that many units of a
-// Fixed-Asset item at a godown. Mirrors POST /api/fixed-asset-tagging.
+// FA Inventory — Tag Items: generate N FA Item Codes for that many units of a Fixed-Asset item at a godown. Mirrors
+// POST /api/fixed-asset-tagging. Opened from a received-stock row it starts on that stock (prefill).
 // Editing only touches date + remarks (the route allows nothing else).
 import { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
@@ -11,6 +11,7 @@ import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { FormScaffold, FormSection, NumberField, RemarksField, PickerField, DateField } from "@/components/form";
 import { getCompanies, getProjects, getGodowns } from "@/api/mastersApi";
+import { projectBelongsToCompany } from "@/utils/projectBelongsTo";
 import {
   getEligibleAssetItems, createFixedAssetTagging, getFixedAssetTagging, updateFixedAssetTagging,
 } from "@/api/fixedAssetApi";
@@ -21,13 +22,14 @@ export default function TaggingFormScreen() {
   const nav = useNavigation();
   const qc = useQueryClient();
   const editingId = route.params?.id ?? null;
+  const prefill = route.params?.prefill;
 
   const [docDate, setDocDate] = useState(new Date().toISOString().slice(0, 10));
-  const [companyId, setCompanyId] = useState("");
-  const [projectId, setProjectId] = useState("");
-  const [godownId, setGodownId] = useState("");
+  const [companyId, setCompanyId] = useState(prefill?.companyId ?? "");
+  const [projectId, setProjectId] = useState(prefill?.projectId ?? "");
+  const [godownId, setGodownId] = useState(prefill?.godownId ?? "");
   const [itemId, setItemId] = useState("");
-  const [count, setCount] = useState("1");
+  const [count, setCount] = useState(prefill?.numberOfItems || "1");
   const [remarks, setRemarks] = useState("");
   const [hydrated, setHydrated] = useState(!editingId);
 
@@ -56,7 +58,7 @@ export default function TaggingFormScreen() {
 
   const companyOpts = useMemo(() => (companiesQ.data ?? []).map((c) => ({ key: String(c.id), label: c.label })), [companiesQ.data]);
   const projectOpts = useMemo(
-    () => (projectsQ.data ?? []).filter((p) => !companyId || String(p.company_id) === companyId).map((p) => ({ key: String(p.id), label: p.label })),
+    () => (projectsQ.data ?? []).filter((p) => projectBelongsToCompany(p, companyId)).map((p) => ({ key: String(p.id), label: p.label })),
     [projectsQ.data, companyId],
   );
   const godownOpts = useMemo(() => (godownsQ.data ?? []).map((g) => ({ key: String(g.GodownID), label: g.GodownName, sublabel: g.GodownCode })), [godownsQ.data]);
@@ -67,6 +69,13 @@ export default function TaggingFormScreen() {
     })),
     [itemsQ.data],
   );
+  // A stock row opens the form on its item: pick it once the godown's items load (ids differ only in case).
+  useEffect(() => {
+    if (!prefill?.itemId || itemId || !itemsQ.data?.length) return;
+    const match = itemsQ.data.find((i) => i.ItemId.toLowerCase() === prefill.itemId.toLowerCase());
+    if (match) setItemId(match.ItemId);
+  }, [itemsQ.data, prefill, itemId]);
+
   const selectedItem = (itemsQ.data ?? []).find((i) => i.ItemId === itemId);
 
   const save = useMutation({
@@ -80,6 +89,8 @@ export default function TaggingFormScreen() {
     onSuccess: (r) => {
       toast.success(editingId ? "Tagging entry updated" : `${r.codes.length} FA Item Code(s) generated`);
       qc.invalidateQueries({ queryKey: ["fa-tagging"] });
+      qc.invalidateQueries({ queryKey: ["fa-pending-batches"] });
+      qc.invalidateQueries({ queryKey: ["fa-dashboard"] });
       qc.invalidateQueries({ queryKey: ["fa-assets"] });
       qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
       nav.goBack();

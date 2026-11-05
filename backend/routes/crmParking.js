@@ -1,23 +1,27 @@
 const express = require("express");
+const { round2, sumMoney, unitPrice } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmParkingAllotment", { withApplication: true })); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+const allowRoles = require("../middleware/role");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
-const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus, requireNotMidApproval, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
-const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
+const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn, gstOn } = require("../services/crmGst");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Recomputes CrmBooking.ParkingTotal/ExtraChargesTotal/GrandTotal AND the
 // fixed HSN-driven GST (which re-prices every active parking allotment to
@@ -119,7 +123,8 @@ const ALLOTMENT_SELECT = `
          -- holds in On Account until an explicit sweep" rule, AmountPaid
          -- alone would under-report real cash received against the booking.
          ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0)
-           + ISNULL((SELECT SUM(Amount - ISNULL(AppliedAmount,0)) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS BookingTotalPaid
+           + ISNULL((SELECT SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount,0)
+               THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS BookingTotalPaid
   FROM dbo.CrmParkingAllotment pa
   LEFT JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
   LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
@@ -142,6 +147,13 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
 
   const activeErr = await requireActiveBooking(pool, bookingId);
   if (activeErr) throw parkingError(activeErr);
+  const midApprovalAdd = await requireNotMidApproval(pool, bookingId);
+  if (midApprovalAdd) throw parkingError(midApprovalAdd);
+  const checklistLockAdd = await assertWelcomeChecklistUnlocked(pool, bookingId);
+  if (checklistLockAdd) throw parkingError(checklistLockAdd);
+  if (await isSaleDeedRegistered(pool, bookingId)) {
+    throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
+  }
 
   const booking = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id, BookingNo, ApplicationId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
@@ -186,9 +198,9 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   if (!slot.recordset.length) throw parkingError("Selected parking slot is not active");
   const slotNo = slot.recordset[0].SlotNo;
 
-  const lineAmount = Charge * qty;
-  const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
-  const totalAmount = lineAmount + gstAmount;
+  const lineAmount = round2(Charge * qty);
+  const gstAmount = gstOn(lineAmount, GstRate);
+  const totalAmount = round2(lineAmount + gstAmount);
 
   // ── BEGIN ATOMIC SECTION ────────────────────────────────────────────────
   // assertSlotAvailable, guardAndConvertHold, and the INSERT all run inside
@@ -252,11 +264,16 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   // see crmWorkflowGuards.js.
   await rollupBookingTotals(pool, bookingId);
   await syncParkingPaymentStatus(pool, bookingId);
+  // The roll-up reprices the allotment to the booking's own Unit+Parking GST
+  // (0 when exempt / land) — report that figure, not the pre-roll-up one.
+  const repriced = await pool.request().input("id", sql.Int, allotmentId)
+    .query("SELECT TotalAmount FROM dbo.CrmParkingAllotment WHERE Id = @id");
+  const finalAmount = Number(repriced.recordset[0]?.TotalAmount ?? totalAmount);
   await logCrmAudit(pool, "Booking", bookingId, actorUserId, [
-    { field: "ParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${totalAmount}` },
+    { field: "ParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${finalAmount}` },
   ]);
 
-  return { id: allotmentId, TotalAmount: totalAmount };
+  return { id: allotmentId, TotalAmount: finalAmount };
 }
 
 async function applyEditParking(pool, id, b) {
@@ -271,6 +288,13 @@ async function applyEditParking(pool, id, b) {
   if (BookingId != null) {
     const activeErr = await requireActiveBooking(pool, BookingId);
     if (activeErr) throw parkingError(activeErr);
+    const midApprovalEdit = await requireNotMidApproval(pool, BookingId);
+    if (midApprovalEdit) throw parkingError(midApprovalEdit);
+    const checklistLockEdit = await assertWelcomeChecklistUnlocked(pool, BookingId);
+    if (checklistLockEdit) throw parkingError(checklistLockEdit);
+    if (await isSaleDeedRegistered(pool, BookingId)) {
+      throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
+    }
   }
 
   const milestone = BookingId != null
@@ -292,9 +316,9 @@ async function applyEditParking(pool, id, b) {
     newRateSnapshot = override;
   }
 
-  const lineAmount = effectiveRate * qty;
-  const gstAmount = Math.round((lineAmount * Number(GstRateSnapshot)) / 100 * 100) / 100;
-  const totalAmount = lineAmount + gstAmount;
+  const lineAmount = round2(effectiveRate * qty);
+  const gstAmount = gstOn(lineAmount, GstRateSnapshot);
+  const totalAmount = round2(lineAmount + gstAmount);
 
   await pool.request()
     .input("id",   sql.Int, id)
@@ -322,6 +346,10 @@ async function applyEditParking(pool, id, b) {
   if (BookingId != null) {
     await rollupBookingTotals(pool, BookingId);
     await syncParkingPaymentStatus(pool, BookingId);
+    // Repriced by the roll-up to the booking's own GST — report that.
+    const repriced = await pool.request().input("id", sql.Int, id)
+      .query("SELECT TotalAmount FROM dbo.CrmParkingAllotment WHERE Id = @id");
+    return { TotalAmount: Number(repriced.recordset[0]?.TotalAmount ?? totalAmount), RateSnapshot: effectiveRate };
   }
   return { TotalAmount: totalAmount, RateSnapshot: effectiveRate };
 }
@@ -366,6 +394,13 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null, 
 
   const activeErr = await requireActiveBooking(pool, BookingId);
   if (activeErr) throw parkingError(activeErr);
+  const midApprovalRelease = await requireNotMidApproval(pool, BookingId);
+  if (midApprovalRelease) throw parkingError(midApprovalRelease);
+  const checklistLockRelease = await assertWelcomeChecklistUnlocked(pool, BookingId);
+  if (checklistLockRelease) throw parkingError(checklistLockRelease);
+  if (await isSaleDeedRegistered(pool, BookingId)) {
+    throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
+  }
 
   // Legacy shape: a dedicated milestone still exists for this sale — keep
   // using its own Status, same as before. New-shape sales (no linked
@@ -420,10 +455,13 @@ async function releaseAllParkingForBooking(pool, bookingId) {
   for (const row of rows.recordset) {
     await pool.request().input("id", sql.Int, row.Id)
       .query("UPDATE dbo.CrmParkingAllotment SET IsActive = 0 WHERE Id = @id");
-    const milestone = await pool.request().input("paid", sql.Int, row.Id)
+    // Every open milestone of the slot, not just the first one returned
+    // (a Paid one stays as the payment record).
+    const milestones = await pool.request().input("paid", sql.Int, row.Id)
       .query("SELECT Id, Status FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid");
-    if (milestone.recordset.length && milestone.recordset[0].Status !== CrmStatus.PAID) {
-      await pool.request().input("mid", sql.Int, milestone.recordset[0].Id)
+    for (const ms of milestones.recordset) {
+      if (ms.Status === CrmStatus.PAID) continue;
+      await pool.request().input("mid", sql.Int, ms.Id)
         .query("DELETE FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
     }
   }
@@ -487,6 +525,7 @@ router.get("/", requirePageRight("crm-parking-booking", "view"), async (req, res
     // clause can't reference a SELECT-list alias at the same query level).
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("(a.CompanyId = @companyId OR b.CompanyId = @companyId)"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("COALESCE(p.ProjectId, s.ProjectId) = @projectId"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "COALESCE(p.ProjectId, s.ProjectId)", "").trim());
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("COALESCE(p.BlockId, s.BlockId) = @blockId"); }
     const result = await req0.query(`${ALLOTMENT_SELECT} WHERE ${conds.join(" AND ")} ORDER BY pa.CreatedAt DESC`);
     res.json(result.recordset);
@@ -515,6 +554,9 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
     const projectId = parseInt(req.query.projectId);
     const blockId = req.query.blockId ? parseInt(req.query.blockId) : null;
     if (!projectId) return res.status(400).json({ error: "projectId is required" });
+    if (!require("../services/projectScope").projectAllowed(req.projectScope, projectId)) {
+      return res.status(403).json({ error: "You don't have access to this project" });
+    }
 
     const rates = await pool.request()
       .input("pid", sql.Int, projectId).input("bid", sql.Int, blockId)
@@ -677,10 +719,12 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
         WHERE a.Id = @aid AND a.IsActive = 1
       `);
       const appR = appRow.recordset[0];
-      const unitTotal = appR && appR.RatePerSqFt && appR.AreaSqFt ? Math.round(Number(appR.AreaSqFt) * Number(appR.RatePerSqFt)) : 0;
-      const allotmentBase = allotments.reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
-      const holdBase = holdLineAmounts.reduce((s, x) => s + x.lineAmount, 0);
-      const combinedBase = unitTotal + allotmentBase + holdBase;
+      // The unit's price as everywhere else (unitPrice, to the paisa) — it was rounded to the rupee here, so
+      // near the GST band's threshold this check could pick another band than the booking itself.
+      const unitTotal = appR ? unitPrice(appR.AreaSqFt, appR.RatePerSqFt) : 0;
+      const allotmentBase = sumMoney(allotments, (a) => (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1));
+      const holdBase = sumMoney(holdLineAmounts, (x) => x.lineAmount);
+      const combinedBase = round2(unitTotal + allotmentBase + holdBase);
       // Through the shared resolver so dbo.CrmGstRule governs here too. This
       // used to compare against UNIT_PARKING_THRESHOLD directly, which meant
       // moving the threshold in the master repriced the booking but not this
@@ -692,7 +736,7 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
     }
 
     const holds = holdLineAmounts.map(({ h, lineAmount }) => {
-      const gstAmount = Math.round((lineAmount * unitParkingRate) / 100 * 100) / 100;
+      const gstAmount = gstOn(lineAmount, unitParkingRate);
       return {
         Id: h.Id, Kind: "Hold", ParkingSlotId: h.ParkingSlotId, SlotNo: h.SlotNo,
         CurrentParkingType: h.ParkingType, Quantity: 1,
@@ -712,7 +756,8 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
 // Registered BEFORE POST /:bookingId deliberately — Express matches routes
 // in registration order, and "/:bookingId" is a single-segment param that
 // would otherwise greedily match the literal path "/standalone" too.
-router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
+// The Parking Matrix sells a slot from here too (its "Sell now"), under its own edit right.
+router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications", "crm-parking-matrix"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
@@ -724,6 +769,9 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
       .query("SELECT Id, ProjectId, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
+    if (!require("../services/projectScope").projectAllowed(req.projectScope, application.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project" });
+    }
     const plotApp = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
       .query("SELECT TOP 1 1 AS x FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid AND Status = N'Active'");
     if (plotApp.recordset.length) return res.status(400).json({ error: PLOT_SALE_NO_PARKING });
@@ -762,9 +810,9 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const parkingSlotId = b.ParkingSlotId !== undefined && b.ParkingSlotId !== null && b.ParkingSlotId !== "" ? parseInt(b.ParkingSlotId) : null;
     assertSlotSelected(ParkingType, parkingSlotId);
 
-    const lineAmount = Charge * qty;
-    const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
-    const totalAmount = lineAmount + gstAmount;
+    const lineAmount = round2(Charge * qty);
+    const gstAmount = gstOn(lineAmount, GstRate);
+    const totalAmount = round2(lineAmount + gstAmount);
 
     const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
       .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
@@ -780,7 +828,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
 
       const hold = await placeHoldIfNeeded(pool, {
         entityType: "Parking", entityId: parkingSlotId, applicationId: parseInt(b.ApplicationId),
-        holdDays: 3, reason: "Application — parking slot selected", userId: actorId(req),
+        reason: "Application — parking slot selected", userId: actorId(req),
       });
 
       // placeHold's own INSERT is shared with Unit holds (no rate concept
@@ -797,6 +845,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
         { field: "ParkingHold", oldVal: null, newVal: `${ParkingType} ${slotNo} held until ${hold.holdUntil}` },
       ]);
 
+      await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId: parseInt(b.ApplicationId) }, ["ParkingExtraCharges"], `parking ${ParkingType} ${slotNo} added`);
       return res.status(201).json({
         success: true, hold: true, id: hold.id, holdUntil: hold.holdUntil,
         SlotNo: slotNo, TotalAmount: totalAmount,
@@ -875,6 +924,7 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
       }
     }
     await releaseHold(pool, holdId, actorId(req));
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId: row.recordset[0].ApplicationId }, ["ParkingExtraCharges"], "parking removed");
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-parking] DELETE /hold error:", e.message);
@@ -892,6 +942,8 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    const midApproval = await requireNotMidApproval(pool, bookingId);
+    if (midApproval) return res.status(400).json({ error: midApproval });
 
     if (await isSaleDeedRegistered(pool, bookingId))
       return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
@@ -931,6 +983,8 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "
     if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
+      const midApproval = await requireNotMidApproval(pool, bookingId);
+      if (midApproval) return res.status(400).json({ error: midApproval });
     }
 
     if (bookingId != null && await isSaleDeedRegistered(pool, bookingId))
@@ -978,9 +1032,12 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
     if (row.recordset[0].BookingId != null) {
       return res.status(400).json({ error: "This parking sale is linked to a booking — record payment through the booking's payment schedule instead" });
     }
+    if (row.recordset[0].PaymentStatus === CrmStatus.PAID) {
+      return res.status(409).json({ error: "This parking sale is already marked paid" });
+    }
 
     const receiptNo = await getNextDocNumber(pool, "PARK", "PARK");
-    await pool.request()
+    const upd = await pool.request()
       .input("id", sql.Int, id)
       .input("no", sql.NVarChar(30), receiptNo)
       .input("mode", sql.NVarChar(50), b.PaymentMode || null)
@@ -989,8 +1046,10 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
         UPDATE dbo.CrmParkingAllotment SET
           PaymentStatus = '${CrmStatus.PAID}', ReceiptNo = @no, PaymentMode = @mode,
           PaymentReceivedDate = ISNULL(@dt, CAST(SYSDATETIME() AS DATE))
-        WHERE Id = @id
+        WHERE Id = @id AND ISNULL(PaymentStatus, '') <> '${CrmStatus.PAID}'
       `);
+    // A second click racing the first: keep the first receipt.
+    if (!upd.rowsAffected[0]) return res.status(409).json({ error: "This parking sale is already marked paid" });
 
     const actorEmail = req.user?.name || req.user?.email || "system";
     try {
@@ -1018,7 +1077,7 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
 // Reason is required only when routing through the amendment queue (agreement
 // Executed/Registered). For direct releases (normal booking workflow) it is
 // optional — recorded in the audit trail when supplied, silent when not.
-router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
+router.delete("/:id", allowRoles("super_admin"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -1033,6 +1092,8 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
     if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
+      const midApproval = await requireNotMidApproval(pool, bookingId);
+      if (midApproval) return res.status(400).json({ error: midApproval });
     }
 
     if (bookingId != null && await isSaleDeedRegistered(pool, bookingId))

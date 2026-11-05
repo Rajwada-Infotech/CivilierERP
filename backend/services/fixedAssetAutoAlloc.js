@@ -46,6 +46,9 @@ async function deriveFinYear(pool, docDate) {
 // stays Pending for manual tagging via FA Inventory instead.
 async function autoTagBatch(pool, {
   assetId, itemId, itemName, qty, companyId, projectId, godownId, docDate, sourceDocNo, userEmail,
+  // What the tag remark calls the receipt — "GRN" for goods received, "ICT" for
+  // an Inter-Company Transfer received (see interCompanyFixedAssets.js).
+  receiptLabel = "GRN",
 }) {
   if (!projectId || !godownId) return { tagged: 0 };
 
@@ -83,7 +86,11 @@ async function autoTagBatch(pool, {
         .input("GodownId",  sql.Int,           godownId)
         .input("TaggedQty", sql.Decimal(18,3), 1)
         .input("FAItemCode",sql.NVarChar(200), code)
-        .input("Remarks",   sql.NVarChar(sql.MAX), `Auto-tagged on receipt — GRN ${sourceDocNo}`)
+        .input("Remarks",   sql.NVarChar(sql.MAX),
+          // Imported stock never had a GRN — don't present the import number as one.
+          receiptLabel === "IMPORT"
+            ? `Auto-tagged on receipt — Imported Stock / Without GRN (${sourceDocNo})`
+            : `Auto-tagged on receipt — ${receiptLabel} ${sourceDocNo}`)
         .input("CreatedBy", sql.NVarChar(200), userEmail || null)
         .query(`
           INSERT INTO dbo.FixedAssetTagging
@@ -112,7 +119,7 @@ async function autoTagBatch(pool, {
 
     await tx.commit();
     await backPatchRecordId(pool, sql, tagDocNo, "FixedAssetTagging", firstTagId);
-    return { tagged: codes.length };
+    return { tagged: codes.length, codes };
   } catch (e) {
     await tx.rollback();
     throw e;
@@ -251,13 +258,14 @@ async function listUntaggedBatches(pool) {
            fa.PurchaseInvoiceRef AS SourceDocNo, fa.DocDate,
            fa.CompanyId, co.name AS CompanyName, fa.ProjectId, pr.name AS ProjectName,
            fa.GodownID AS GodownId, gd.GodownName,
-           CASE WHEN tpl.Id IS NULL THEN 'NO_TEMPLATE' ELSE 'READY' END AS Reason
+           -- EXISTS, not a join: a project with two active templates listed its batches twice.
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.IDTemplateMaster tpl WHERE tpl.ProjectId = fa.ProjectId AND tpl.IsActive = 1)
+                THEN 'READY' ELSE 'NO_TEMPLATE' END AS Reason
     FROM dbo.FixedAssetRecord fa
     LEFT JOIN dbo.enterprise co ON co.id = fa.CompanyId
     LEFT JOIN dbo.enterprise pr ON pr.id = fa.ProjectId
     LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
-    LEFT JOIN dbo.IDTemplateMaster tpl ON tpl.ProjectId = fa.ProjectId AND tpl.IsActive = 1
-    WHERE fa.AssetCode IS NULL AND fa.SourceType IN ('GRN', 'IMPORT')
+    WHERE fa.AssetCode IS NULL AND fa.SourceType IN ('GRN', 'IMPORT', 'ICT')
       AND fa.AssetStatus = 'Pending' AND fa.Status <> 'Deleted'
       AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetTagging t WHERE t.AssetId = fa.AssetId AND t.Status = 'Tagged')
     ORDER BY fa.DocDate DESC, fa.AssetId DESC
@@ -276,6 +284,7 @@ async function autoTagPendingBatchesForProject(pool, projectId, userEmail) {
         assetId: b.AssetId, itemId: b.SourceItemId, itemName: b.AssetName, qty: Number(b.Quantity),
         companyId: b.CompanyId, projectId: b.ProjectId, godownId: b.GodownId,
         docDate: b.DocDate, sourceDocNo: b.SourceDocNo, userEmail,
+        receiptLabel: b.SourceType === "ICT" ? "ICT" : b.SourceType === "IMPORT" ? "IMPORT" : "GRN",
       });
       tagged += res.tagged;
     } catch (err) {

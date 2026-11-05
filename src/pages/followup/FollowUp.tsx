@@ -1,3 +1,5 @@
+import { KEY, KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
+import { SheetStats, PRIORITY_TONES } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,9 +22,9 @@ import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 const API = "/api/task-master";
 const PRIORITIES = ["Very Important", "Important", "Normal"] as const;
 
-// Same teal identity as FollowupShell — kept in sync deliberately.
-const ACCENT = "#0d9488";
-const ACCENT_SOFT = "#2dd4bf";
+// Ink on paper, like FollowupShell
+const ACCENT = "hsl(var(--foreground))";
+const ACCENT_SOFT = "hsl(var(--foreground))";
 
 interface Task {
   Id: number;
@@ -118,9 +120,9 @@ const BUCKET_LABELS = {
 } as const;
 
 const PRIORITY_COLORS: Record<(typeof PRIORITIES)[number], string> = {
-  "Very Important": "#ef4444",
-  Important: "#22c55e",
-  Normal: "#3b82f6",
+  "Very Important": "hsl(var(--destructive))",
+  Important: "hsl(var(--foreground))",
+  Normal: "hsl(var(--primary))",
 };
 
 function useGlass() {
@@ -128,18 +130,12 @@ function useGlass() {
   const isDark = !isLightTheme(theme);
   const glassCard = isDark
     ? {
-        background: "rgba(6, 20, 19, 0.45)",
-        border: "1px solid rgba(13,148,136,0.18)",
-        backdropFilter: "blur(20px) saturate(160%)",
-        WebkitBackdropFilter: "blur(20px) saturate(160%)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--foreground) / 0.18)",
       }
     : {
-        background: "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(13,148,136,0.20)",
-        backdropFilter: "blur(20px) saturate(180%)",
-        WebkitBackdropFilter: "blur(20px) saturate(180%)",
-        boxShadow: "0 8px 32px rgba(13,148,136,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--foreground) / 0.20)",
       };
   return { isDark, glassCard };
 }
@@ -185,7 +181,7 @@ const TaskRow: React.FC<{
       <td className="pl-3 pr-2 py-2.5 align-top relative">
         <div
           className="absolute left-0 top-0 bottom-0 w-0.5"
-          style={{ background: overdue ? "#ef4444" : `linear-gradient(to bottom, transparent 10%, ${ACCENT} 30%, ${ACCENT} 70%, transparent 90%)` }}
+          style={{ background: overdue ? "hsl(var(--destructive))" : "transparent" }}
         />
         <div className="flex items-start gap-1.5" style={{ paddingLeft: depth * 18 }}>
           {hasChildren ? (
@@ -204,7 +200,7 @@ const TaskRow: React.FC<{
             <span className="w-[13px] shrink-0" />
           )}
           <div className="min-w-0">
-            <span className="flex items-center gap-1 font-mono text-[0.625rem] text-muted-foreground uppercase tracking-widest">
+            <span className="flex items-center gap-1 tabular-nums text-[0.625rem] text-muted-foreground uppercase tracking-widest">
               {task.TaskNo || "—"}
               {hasChildren && <span className="text-muted-foreground/70 normal-case tracking-normal">({childCount})</span>}
             </span>
@@ -218,7 +214,7 @@ const TaskRow: React.FC<{
                   <span
                     key={tag.Id}
                     className="inline-flex items-center rounded-full font-medium truncate max-w-[100px] text-[0.5625rem] px-1.5 py-0.5"
-                    style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: ACCENT }}
+                    style={{ background: "hsl(var(--foreground) / 0.12)", border: "1px solid hsl(var(--foreground) / 0.3)", color: ACCENT }}
                     title={tag.Name}
                   >
                     {tag.Name}
@@ -229,12 +225,12 @@ const TaskRow: React.FC<{
           </div>
         </div>
       </td>
-      <td className={`px-2 py-2.5 align-top text-xs font-medium whitespace-nowrap ${overdue ? "text-red-500" : "text-muted-foreground"}`}>
+      <td className={`px-2 py-2.5 align-top text-xs font-medium whitespace-nowrap ${overdue ? "text-destructive" : "text-muted-foreground"}`}>
         {dueLabel(task.DueDate) || "—"}
       </td>
       <td className="px-2 py-2.5 align-top text-xs whitespace-nowrap">
         {task.NextFollowUpAt ? (
-          <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium px-1.5 py-0.5 rounded-md bg-[#ffe2021a] text-amber-600 border border-amber-500/25">
+          <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground border border-muted-foreground/25">
             {formatDate(task.NextFollowUpAt)}
           </span>
         ) : (
@@ -254,16 +250,16 @@ const TaskRow: React.FC<{
                 title={p}
                 className="inline-flex items-center gap-1 font-semibold rounded-md border text-[0.5625rem] px-1.5 py-0.5 transition-colors"
                 style={{
-                  borderColor: checked ? color : "rgba(148,163,184,0.3)",
+                  borderColor: checked ? color : "hsl(var(--muted-foreground) / 0.3)",
                   color: checked ? color : undefined,
-                  background: checked ? `${color}1A` : "transparent",
+                  background: checked ? `color-mix(in srgb, ${color} 10%, transparent)` : "transparent",
                 }}
               >
                 <span
                   className="rounded-[3px] border w-2.5 h-2.5 flex items-center justify-center shrink-0"
                   style={{ borderColor: color, background: checked ? color : "transparent" }}
                 >
-                  {checked && <Check size={7} color="#fff" strokeWidth={3} />}
+                  {checked && <Check size={7} color="hsl(var(--card))" strokeWidth={3} />}
                 </span>
                 {p}
               </button>
@@ -273,7 +269,7 @@ const TaskRow: React.FC<{
       </td>
       <td className="px-2 py-2.5 align-top text-xs text-muted-foreground whitespace-nowrap">
         {task.Status}
-        {task.CaseNumber && <div className="font-mono text-[0.625rem] mt-0.5">{task.CaseNumber}</div>}
+        {task.CaseNumber && <div className="tabular-nums text-[0.625rem] mt-0.5">{task.CaseNumber}</div>}
       </td>
       <td className="px-2 py-2.5 align-top w-[150px]" onClick={(e) => e.stopPropagation()}>
         <ProgressBar
@@ -287,53 +283,13 @@ const TaskRow: React.FC<{
         <button
           type="button"
           onClick={() => onCreateSubtask(task)}
-          className="inline-flex items-center gap-1 text-[0.6875rem] font-medium px-2 py-1 rounded-md border transition-colors hover:bg-muted/60"
-          style={{ borderColor: "rgba(13,148,136,0.35)", color: ACCENT }}
+          className={`${KEY_LINE} h-8 px-3`}
           title="Create a subtask under this follow-up"
         >
           <ListPlus size={12} /> Subtask
         </button>
       </td>
     </motion.tr>
-  );
-};
-
-const StatCard: React.FC<{
-  label: string;
-  count: number;
-  icon: React.ElementType;
-  color: string;
-  delay: number;
-  active: boolean;
-  onClick: () => void;
-}> = ({ label, count, icon: Icon, color, delay, active, onClick }) => {
-  const { glassCard } = useGlass();
-  return (
-    <motion.button
-      type="button"
-      onClick={onClick}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay, ease: "easeOut" }}
-      whileHover={{ y: -2 }}
-      className="flex-1 min-w-[160px] rounded-xl p-4 flex items-center gap-3 text-left transition-shadow"
-      style={{
-        ...glassCard,
-        outline: active ? `2px solid ${color}` : "none",
-        outlineOffset: -1,
-      }}
-    >
-      <div
-        className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-        style={{ background: `${color}1A`, border: `1px solid ${color}40`, boxShadow: `0 0 12px ${color}26` }}
-      >
-        <Icon size={17} style={{ color }} />
-      </div>
-      <div>
-        <p className="text-2xl font-bold text-foreground leading-none">{count}</p>
-        <p className="text-xs text-muted-foreground mt-1">{label}</p>
-      </div>
-    </motion.button>
   );
 };
 
@@ -629,10 +585,10 @@ const FollowUp: React.FC = () => {
               key={p}
               type="button"
               onClick={() => setPriorityFilter(active ? null : p)}
-              className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+              className={`${KEY} h-8 px-3 border ${
                 active ? "" : "border-border text-muted-foreground hover:bg-muted"
               }`}
-              style={active ? { background: `${color}29`, borderColor: `${color}73`, color } : undefined}
+              style={active ? { background: `color-mix(in srgb, ${color} 16%, transparent)`, borderColor: `color-mix(in srgb, ${color} 45%, transparent)`, color } : undefined}
             >
               {p}
             </button>
@@ -640,69 +596,23 @@ const FollowUp: React.FC = () => {
         })}
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <StatCard
-          label="Due Today"
-          count={buckets.dueToday.length}
-          icon={Clock3}
-          color="#3b82f6"
-          delay={0.05}
-          active={bucketFilter === "dueToday"}
-          onClick={() => setBucketFilter((f) => (f === "dueToday" ? null : "dueToday"))}
-        />
-        <StatCard
-          label="Overdue"
-          count={buckets.overdue.length}
-          icon={Flame}
-          color="#ef4444"
-          delay={0.1}
-          active={bucketFilter === "overdue"}
-          onClick={() => setBucketFilter((f) => (f === "overdue" ? null : "overdue"))}
-        />
-        <StatCard
-          label="Upcoming"
-          count={buckets.upcoming.length}
-          icon={CalendarDays}
-          color="#10b981"
-          delay={0.15}
-          active={bucketFilter === "upcoming"}
-          onClick={() => setBucketFilter((f) => (f === "upcoming" ? null : "upcoming"))}
-        />
-        <StatCard
-          label="On Hold"
-          count={buckets.onHold.length}
-          icon={Pause}
-          color="#f59e0b"
-          delay={0.2}
-          active={bucketFilter === "onHold"}
-          onClick={() => setBucketFilter((f) => (f === "onHold" ? null : "onHold"))}
-        />
-        <StatCard
-          label="Close"
-          count={closedCount}
-          icon={CheckCircle2}
-          color="#64748b"
-          delay={0.25}
-          active={false}
-          onClick={() => navigate("/followup/close-tasks")}
-        />
-        <StatCard
-          label="Cancelled"
-          count={cancelledCount}
-          icon={XCircle}
-          color="#ef4444"
-          delay={0.3}
-          active={false}
-          onClick={() => navigate("/followup/cancelled-tasks")}
-        />
-      </div>
+      <SheetStats
+        items={[
+          { label: "Due Today", value: buckets.dueToday.length, active: bucketFilter === "dueToday", onClick: () => setBucketFilter((f) => (f === "dueToday" ? null : "dueToday")) },
+          { label: "Overdue", value: buckets.overdue.length, red: buckets.overdue.length > 0, active: bucketFilter === "overdue", onClick: () => setBucketFilter((f) => (f === "overdue" ? null : "overdue")) },
+          { label: "Upcoming", value: buckets.upcoming.length, active: bucketFilter === "upcoming", onClick: () => setBucketFilter((f) => (f === "upcoming" ? null : "upcoming")) },
+          { label: "On Hold", value: buckets.onHold.length, active: bucketFilter === "onHold", onClick: () => setBucketFilter((f) => (f === "onHold" ? null : "onHold")) },
+          { label: "Close", value: closedCount, onClick: () => navigate("/followup/close-tasks") },
+          { label: "Cancelled", value: cancelledCount, onClick: () => navigate("/followup/cancelled-tasks") },
+        ]}
+      />
 
       {bucketFilter && (
         <div className="flex items-center gap-2 text-xs">
           <span className="text-muted-foreground">Showing</span>
           <span
             className="inline-flex items-center gap-1.5 font-semibold px-2 py-1 rounded-lg"
-            style={{ background: "rgba(13,148,136,0.14)", color: ACCENT }}
+            style={{ background: "hsl(var(--foreground) / 0.14)", color: ACCENT }}
           >
             {BUCKET_LABELS[bucketFilter]}
             <button
@@ -721,7 +631,7 @@ const FollowUp: React.FC = () => {
         <div className="flex items-center justify-center py-16">
           <div
             className="w-5 h-5 rounded-full border-2 animate-spin"
-            style={{ borderColor: "rgba(13,148,136,0.2)", borderTopColor: ACCENT }}
+            style={{ borderColor: "hsl(var(--foreground) / 0.2)", borderTopColor: ACCENT }}
           />
         </div>
       ) : totalActive === 0 ? (
@@ -733,7 +643,7 @@ const FollowUp: React.FC = () => {
         >
           <div
             className="w-11 h-11 rounded-xl flex items-center justify-center mb-1"
-            style={{ background: "rgba(13,148,136,0.14)", border: "1px solid rgba(13,148,136,0.3)" }}
+            style={{ background: "hsl(var(--foreground) / 0.14)", border: "1px solid hsl(var(--foreground) / 0.3)" }}
           >
             <ClipboardList size={18} style={{ color: ACCENT_SOFT }} />
           </div>
@@ -833,7 +743,7 @@ const FollowUp: React.FC = () => {
             <button
               type="button"
               onClick={() => setSubtaskParent(null)}
-              className="px-3 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:bg-muted transition-colors"
+              className={`${KEY_LINE} h-9 px-4`}
             >
               Cancel
             </button>
@@ -841,8 +751,7 @@ const FollowUp: React.FC = () => {
               type="button"
               onClick={handleCreateSubtask}
               disabled={savingSubtask}
-              className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-colors"
-              style={{ background: "rgba(13,148,136,0.14)", border: "1px solid rgba(13,148,136,0.35)", color: ACCENT }}
+              className={`${KEY_INK} h-9 px-4`}
             >
               {savingSubtask ? "Creating…" : "Create Subtask"}
             </button>
@@ -930,13 +839,13 @@ const TaskGroup: React.FC<{
           {title}
         </p>
         <span className="text-[0.625rem] text-muted-foreground">{tasks.length}</span>
-        <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(13,148,136,0.25), transparent)" }} />
+        <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, hsl(var(--foreground) / 0.25), transparent)" }} />
       </div>
       <div className="rounded-xl overflow-hidden" style={glassCard}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px]">
             <thead>
-              <tr className="border-b" style={{ borderColor: "rgba(13,148,136,0.15)" }}>
+              <tr className="border-b" style={{ borderColor: "hsl(var(--foreground) / 0.15)" }}>
                 <th className={`${TABLE_HEAD_CLS} pl-3`}>Task</th>
                 <th className={TABLE_HEAD_CLS}>Due</th>
                 <th className={TABLE_HEAD_CLS}>Next Follow-up</th>

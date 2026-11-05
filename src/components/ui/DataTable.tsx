@@ -26,6 +26,30 @@ import {
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 
+// ─── Responsive columns ────────────────────────────────────────────────────────
+// A column can hide itself below a breakpoint through its meta className ("hidden lg:table-cell"). The table's
+// minimum width must leave such a column out while it's hidden; otherwise a narrow screen gets a table as wide as
+// every column put together, with the few shown ones stretched across it and the rest blank.
+const BREAKPOINTS: Record<string, number> = { sm: 640, md: 768, lg: 1024, xl: 1280, "2xl": 1536 };
+
+/** Whether a column with this meta className is showing at a viewport of `width` px. */
+export function columnShownAt(className: string | undefined, width: number): boolean {
+  const cls = (className ?? "").split(/\s+/);
+  if (!cls.includes("hidden")) return true;
+  const at = cls.map((c) => /^(sm|md|lg|xl|2xl):(table-cell|block|flex|inline|inline-block|grid)$/.exec(c)?.[1]).find(Boolean);
+  return at ? width >= BREAKPOINTS[at] : false;
+}
+
+function useViewportWidth() {
+  const [width, setWidth] = useState(() => (typeof window === "undefined" ? 1280 : window.innerWidth));
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
+}
+
 // ─── Re-export ColumnDef so pages only import from here ──────────────────────
 export type { ColumnDef };
 export type { ExportColumn };
@@ -78,6 +102,18 @@ interface DataTableProps<TData extends RowData> {
    *   ],
    * }}
    */
+  /**
+   * Server-side pagination: `data` is already the current page from the API. The footer's Rows
+   * selector and page buttons then drive the server (page is 1-based) and "of N" shows the
+   * server's total. Leave unset for the normal client-side paging of a full list.
+   */
+  serverPagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    onPageChange: (page: number) => void;
+    onPageSizeChange: (pageSize: number) => void;
+  };
   exportConfig?: {
     title: string;
     filename?: string;
@@ -103,9 +139,11 @@ export function DataTable<TData extends RowData>({
   loading = false,
   skeletonRows = 5,
   exportConfig,
+  serverPagination,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
+  const viewportWidth = useViewportWidth();
   // Horizontal-scroll edge fades: shown only while there's more table to
   // scroll to on that side.
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -153,6 +191,11 @@ export function DataTable<TData extends RowData>({
     return next;
   }, [columns]);
 
+  const sp = serverPagination;
+  const effectivePagination: PaginationState = sp
+    ? { pageIndex: Math.max(0, sp.page - 1), pageSize: sp.pageSize }
+    : pagination;
+
   const table = useReactTable({
     data,
     columns: orderedColumns,
@@ -160,12 +203,18 @@ export function DataTable<TData extends RowData>({
       sorting,
       globalFilter,
       columnFilters,
-      pagination,
+      pagination: effectivePagination,
     },
+    ...(sp ? { manualPagination: true, rowCount: sp.total } : {}),
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
     onColumnFiltersChange: setColumnFilters,
-    onPaginationChange: setPagination,
+    onPaginationChange: (updater) => {
+      if (!sp) return setPagination(updater);
+      const next = typeof updater === "function" ? updater(effectivePagination) : updater;
+      if (next.pageSize !== sp.pageSize) sp.onPageSizeChange(next.pageSize);
+      else if (next.pageIndex !== effectivePagination.pageIndex) sp.onPageChange(next.pageIndex + 1);
+    },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -186,12 +235,13 @@ export function DataTable<TData extends RowData>({
   // Reset to page 0 only when the search/filter actually changes — not on
   // every `data` reference change (see autoResetPageIndex comment above).
   useEffect(() => {
+    if (sp) return;
     setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFilter, columnFilters]);
 
   const { rows } = table.getRowModel();
-  const totalFiltered = table.getFilteredRowModel().rows.length;
+  const totalFiltered = sp ? sp.total : table.getFilteredRowModel().rows.length;
 
   // Clamp — but never reset to 0 — if the current page fell out of range
   // (e.g. a row was deleted and page 3 no longer exists). A same-length
@@ -199,6 +249,7 @@ export function DataTable<TData extends RowData>({
   // reproduce the scroll-reset bug the two changes above just fixed.
   const pageCount = table.getPageCount();
   useEffect(() => {
+    if (sp) return;
     if (pageCount > 0 && pagination.pageIndex > pageCount - 1) {
       setPagination((p) => ({ ...p, pageIndex: pageCount - 1 }));
     }
@@ -213,7 +264,7 @@ export function DataTable<TData extends RowData>({
           search) still need this row rendered so exportConfig's ExportMenu
           isn't silently dropped. */}
       {(searchable || exportConfig) && (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
+        <div className="dt-toolbar flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
           <p className="text-[0.6875rem] font-body text-muted-foreground">
             {loading
               ? "Loading..."
@@ -267,7 +318,10 @@ export function DataTable<TData extends RowData>({
           // width exceed the container so the wrapper's overflow-x-auto can
           // actually kick in; min-width:100% keeps narrow tables filling
           // the container exactly as before.
-          const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 150), 0);
+          // Only the columns showing at this width count (see columnShownAt).
+          const totalSize = allCols
+            .filter((c) => columnShownAt((c.columnDef.meta as { className?: string } | undefined)?.className, viewportWidth))
+            .reduce((s, c) => s + (c.columnDef.size ?? 150), 0);
           // Column sizes are authored in px but applied in rem (size / 16) so
           // they scale together with the rem-based text (e.g. the laptop
           // 110% root size) instead of the text outgrowing its column and
@@ -453,17 +507,19 @@ export function DataTable<TData extends RowData>({
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-muted-foreground">Rows</span>
             <select
-              value={pagination.pageSize}
+              value={effectivePagination.pageSize}
               onChange={(e) =>
-                setPagination((p) => ({
-                  ...p,
-                  pageSize: Number(e.target.value),
-                  pageIndex: 0,
-                }))
+                sp
+                  ? sp.onPageSizeChange(Number(e.target.value))
+                  : setPagination((p) => ({
+                      ...p,
+                      pageSize: Number(e.target.value),
+                      pageIndex: 0,
+                    }))
               }
               className="text-xs font-body rounded-md bg-muted border border-border px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
             >
-              {pageSizeOptions.map((s) => (
+              {(sp && !pageSizeOptions.includes(sp.pageSize) ? [...pageSizeOptions, sp.pageSize].sort((a, b) => a - b) : pageSizeOptions).map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>

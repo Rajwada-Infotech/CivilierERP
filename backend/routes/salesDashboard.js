@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 // No extra permission gate here — /api routes are already protected
@@ -17,7 +17,7 @@ const { cache } = require("../middleware/cache");
  *   - Recent sale orders           : last 8 rows
  *   - Recent sale invoices         : last 8 rows
  */
-router.get("/", cache("sales-dashboard", 60), async (req, res) => {
+router.get("/", cache("sales-dashboard", 60, { dropOnAnyWrite: true }), async (req, res) => {
   // companyId is optional — omitting it (the dashboard's own default, no
   // company picker on the page anymore) aggregates across every company
   // instead of requiring one to be chosen before anything loads.

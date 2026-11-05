@@ -1,4 +1,5 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { makeAvatarThumb } from "@/lib/avatarThumb";
 
 const BASE = "/api/user-profile";
 
@@ -59,10 +60,12 @@ export const getUserActivity = async (id: number, limit = 50) => {
 };
 
 export const uploadAvatar = async (id: number, dataUri: string) => {
+  // A small thumbnail goes up with it, for lists (migration 575).
+  const thumb = await makeAvatarThumb(dataUri);
   const res = await fetchWithAuth(`${BASE}/${id}/upload-avatar`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ avatar: dataUri }),
+    body: JSON.stringify({ avatar: dataUri, thumb }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

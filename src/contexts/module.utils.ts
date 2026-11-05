@@ -1,3 +1,5 @@
+import { LEGAL_PAGE_KEYS } from "@/pages/legal/legalMasters";
+
 // Non-component exports for ModuleContext, split out so ModuleContext.tsx
 // only exports the provider/hook — mixing component and non-component
 // exports in one file breaks Vite's Fast Refresh (forces a full page reload
@@ -18,6 +20,7 @@ export type Module =
   | "loan"
   | "maintenance"
   | "hr-payroll"
+  | "legal"
   | "admin"
   | null;
 
@@ -32,13 +35,62 @@ export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   sales: "/sales",
   records: "/records",
   civilworkdpr: "/civilworkdpr",
-  "sales-automation": "/sales-automation/social-media",
+  "sales-automation": "/sales-automation",
   crm: "/crm/dashboard",
   loan: "/loan",
   maintenance: "/maintenance",
   "hr-payroll": "/hr-payroll",
+  legal: "/legal",
   admin: "/admin/dashboard",
 };
+
+// ── Admin pages and the page right each one is shown under ──────────────────────────────────────────────────
+// Admin pages are open to admin-tier roles (super_admin / admin / dba) always. Any other role gets exactly the Admin
+// pages that are ticked for it in Menu Rights - the same key the page is listed under there. Pages with no key
+// here (APK Manager, ticket panels, the profile pages, Super Admin / DBA screens) stay admin-tier only.
+export const ADMIN_PATH_PAGE_KEYS: Record<string, string> = {
+  "/admin": "admin-dashboard",
+  "/admin/dashboard": "admin-dashboard",
+  "/users": "users",
+  "/admin/activity-browser": "activity-browser",
+  "/admin/masters/business-unit": "business-unit-master",
+  "/admin/masters/company": "company-master",
+  "/admin/masters/project": "project-master",
+  "/admin/masters/role-master": "role-master",
+  "/admin/masters/menu-types": "menu-types",
+  "/admin/masters/contractor-categories": "contractor-categories",
+  "/admin/masters/godowns": "godowns",
+  "/admin/masters/integration-channels": "integration-channels",
+  "/admin/page-definitions": "page-definitions",
+  "/admin/widget-catalog": "widget-catalog",
+  "/admin/approval/inbox": "approval-inbox",
+  "/admin/approval/setup": "approval-setup",
+  "/admin/approval/post-rights": "post-approval-rights",
+  "/admin/security/password-reset": "password-reset",
+  "/admin/rights/menu": "menu-rights",
+  "/admin/rights/widgets": "widget-rights",
+  "/admin/rights/fin-year": "fin-year-rights",
+  "/admin/rights/project-access": "project-access",
+  "/admin/communicator/sms-setup": "sms-setup",
+  "/admin/communicator/email-setup": "email-setup",
+  "/admin/communicator/whatsapp-setup": "whatsapp-setup",
+  "/admin/api-integration": "api-integration",
+  "/admin/metrics": "metrics-dashboard",
+  "/admin/signature": "signature",
+  "/admin/control-panel": "admin-control-panel",
+};
+
+export const ADMIN_PAGE_KEYS: string[] = [...new Set(Object.values(ADMIN_PATH_PAGE_KEYS))];
+
+/** Whether the person has the right for at least one Admin page (so the Admin module is theirs to open). */
+export const hasAnyAdminPageRight = (canAccessPage: (pageKey: string) => boolean): boolean =>
+  ADMIN_PAGE_KEYS.some((pk) => canAccessPage(pk));
+
+/** Where to send a non-admin-tier person who opens the Admin module: the first page they hold the right for. */
+export function firstAccessibleAdminPath(canAccessPage: (pageKey: string) => boolean): string | null {
+  const first = Object.entries(ADMIN_PATH_PAGE_KEYS).find(([path, key]) => path !== "/admin" && canAccessPage(key));
+  return first ? first[0] : null;
+}
 
 // Map each module to a representative page key that signals access. A user
 // with ANY view right in a module's page definitions can see/reach that
@@ -53,11 +105,16 @@ export const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
   engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
   ticket:      ["ticket-dashboard", "tickets"],
   sales:       ["sale-order", "sale-invoice", "sales-payment"],
-  civilworkdpr: ["civilworkdpr-dashboard"],
+  // Every page of the module, so a user granted only e.g. Quality Check still sees (and can reach) it.
+  civilworkdpr: ["civilworkdpr-dashboard", "civilworkdpr-dependency", "civilworkdpr-work-done", "civilworkdpr-activity-reporting", "civilworkdpr-quality-check", "civilworkdpr-work-transfer", "civilworkdpr-worker-attendance", "civilworkdpr-daily-labour", "civilworkdpr-amendment", "civilworkdpr-query", "civilworkdpr-room-master"],
   "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
   maintenance: ["maintenance-dashboard"],
+  admin:       ADMIN_PAGE_KEYS,
   loan:        ["loan-dashboard", "loan-sanction"],
   "hr-payroll": ["hr-payroll-dashboard"],
+  // Every page of the module, so a user granted only one master still sees (and can reach) it.
+  legal:       ["legal-dashboard", ...LEGAL_PAGE_KEYS, "legal-land-reports", "legal-registration-search",
+                "legal-deed-registrations", "legal-approvals", "legal-pending-queue"],
   records:     ["records"],
   crm:         ["crm-dashboard", "crm-bookings", "crm-applications", "crm-agreements", "crm-sales-deed"],
 };

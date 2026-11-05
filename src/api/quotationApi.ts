@@ -20,6 +20,9 @@ export interface QuotationSupplier {
   SupplierName: string;
   Status: "Pending" | "Submitted";
   InvitedAt: string;
+  PaymentTermId?: number | null;
+  PaymentTermName?: string | null;
+  PaymentTermDays?: number | null;
 }
 
 export interface Quotation {
@@ -111,6 +114,7 @@ export interface QTPOPrefill {
   Remarks: string;
   SupplierId: number;
   SupplierName: string | null;
+  PaymentTermId?: number | null;
   SourceMRId?: number | null;
   SourceMRDocNo?: string | null;
   items: QTPOPrefillItem[];
@@ -193,6 +197,13 @@ export const removeQuotationSupplier = (id: number | string, supplierId: number 
   fetchWithAuth(`${BASE}/${id}/suppliers/${supplierId}`, { method: "DELETE" }).then((r) =>
     handleResponse(r),
   );
+
+export const setSupplierPaymentTerm = (id: number | string, supplierId: number | string, PaymentTermId: number | null) =>
+  fetchWithAuth(`${BASE}/${id}/suppliers/${supplierId}/payment-term`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ PaymentTermId }),
+  }).then((r) => handleResponse(r));
 
 export const getL1ChartData = (id: number | string) =>
   fetchWithAuth(`${BASE}/${id}/l1-chart`).then((r) => handleResponse<L1ChartData>(r));

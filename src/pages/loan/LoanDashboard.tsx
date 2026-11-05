@@ -1,46 +1,33 @@
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { GlassShell, GlassCard, GlassSection } from "@/components/dashboard/GlassShell";
-import { MoneyRecive, DocumentText } from "iconsax-react";
-import {
-  CalendarClock,
-  CheckCircle2,
-  TrendingUp,
-  ChevronRight,
-  Inbox,
-  PieChart as PieChartIcon,
-} from "lucide-react";
-import { useState, type ElementType, type ReactNode } from "react";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
 import { getLoanSanctions, type LoanType } from "@/api/loanSanctionApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getCompanyOptions, type CompanyOption } from "@/api/bankMasterApi";
 import { CompanyFilterCombo } from "@/components/CompanyFilterCombo";
-import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
-
-const ACCENT = "#22c55e";
+import { SHEET_CSS, Detail, Skel, SheetMark } from "@/components/sheet/Sheet";
 
 const fmt = (n: number) =>
   "₹" + new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
+const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n);
+const short = (v: number) =>
+  v >= 1e7 ? `${(v / 1e7).toFixed(1)}Cr` : v >= 1e5 ? `${(v / 1e5).toFixed(1)}L` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}k` : String(v);
+const share = (part: number, whole: number) => (whole > 0 ? Math.min(100, Math.max(0, (part / whole) * 100)) : 0);
 
-const LOAN_TYPE_COLORS: Record<LoanType, string> = {
-  "Inter-Company": "#3b82f6",
-  "Bank Loan": "#0ea5e9",
-  "Customer Loan": "#f59e0b",
-};
+type Fill = "solid" | "mid" | "hatch";
+
+// How each loan type is drawn in ink: bank borrowing solid, inter-company a
+// lighter tone, money lent to customers hatched.
+const LOAN_TYPES: { type: LoanType; fill: Fill }[] = [
+  { type: "Bank Loan", fill: "solid" },
+  { type: "Inter-Company", fill: "mid" },
+  { type: "Customer Loan", fill: "hatch" },
+];
+
+const fillStyle = (fill: Fill): React.CSSProperties =>
+  fill === "solid" ? { background: "var(--blue)" } : fill === "mid" ? { backgroundColor: "var(--sheet)", backgroundImage: "linear-gradient(var(--blue-mid), var(--blue-mid))" } : {};
 
 interface UpcomingEmi {
   EMIId: number;
@@ -52,163 +39,60 @@ interface UpcomingEmi {
   BorrowerName: string;
 }
 
-function EmptyState({ icon: Icon, message, accent }: { icon: typeof Inbox; message: string; accent: string }) {
-  return (
-    <div className="rounded-xl border border-dashed border-border py-10 flex flex-col items-center gap-2.5">
-      <div
-        className="w-10 h-10 rounded-xl flex items-center justify-center"
-        style={{ background: `${accent}14`, border: `1px solid ${accent}28` }}
-      >
-        <Icon size={17} style={{ color: accent }} />
-      </div>
-      <p className="text-sm text-muted-foreground">{message}</p>
-    </div>
-  );
-}
-
-// ── Chart cards ──────────────────────────────────────────────────────────
-// Same card chrome + recharts setup FinanceDashboard/CrmDashboard use, kept
-// local to this file since none of the other module dashboards share theirs
-// either — each just re-styles Pie/Line for its own data shape.
-function ChartCardShell({
-  title,
-  icon: Icon,
-  accentColor,
-  isDark,
-  children,
-}: {
-  title: string;
-  icon: ElementType;
-  accentColor: string;
-  isDark: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{
-        background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
-        border: isDark ? "1px solid rgba(34,197,94,0.15)" : "1px solid rgba(34,197,94,0.18)",
-        backdropFilter: "blur(16px) saturate(150%)",
-        WebkitBackdropFilter: "blur(16px) saturate(150%)",
-      }}
-    >
-      <div
-        className="flex items-center gap-2 px-4 py-3 border-b"
-        style={{ borderColor: isDark ? "rgba(34,197,94,0.15)" : "rgba(34,197,94,0.12)" }}
-      >
-        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${accentColor}26` }}>
-          <Icon size={11} style={{ color: accentColor }} />
-        </div>
-        <span className="text-xs font-heading font-semibold" style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}>
-          {title}
-        </span>
-      </div>
-      <div className="p-4">{children}</div>
-    </div>
-  );
-}
-
-interface DonutPoint {
-  name: string;
-  value: number;
-  color: string;
-}
-
-function LoanTypeDonut({ data, isDark }: { data: DonutPoint[]; isDark: boolean }) {
-  const { theme } = useTheme();
-  const total = data.reduce((s, d) => s + d.value, 0);
-  return (
-    <ChartCardShell title="Sanctioned by Loan Type" icon={PieChartIcon} accentColor="#8b5cf6" isDark={isDark}>
-      {total === 0 ? (
-        <div className="text-center text-muted-foreground py-10 text-sm">No data yet</div>
-      ) : (
-        <div className="flex flex-col sm:flex-row items-center gap-4">
-          <ResponsiveContainer width="100%" height={180}>
-            <PieChart>
-              <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2} strokeWidth={0}>
-                {data.map((d, i) => (
-                  <Cell key={i} fill={bwChartColor(theme, i, d.color)} />
-                ))}
-              </Pie>
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0];
-                  return (
-                    <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
-                      <p className="text-xs font-heading font-semibold text-foreground">{d.name}</p>
-                      <p className="text-xs text-muted-foreground">{fmt(d.value as number)}</p>
-                    </div>
-                  );
-                }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="space-y-2 w-full sm:w-auto shrink-0">
-            {data.map((d, i) => (
-              <div key={d.name} className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: bwChartColor(theme, i, d.color) }} />
-                <span className="text-xs text-foreground whitespace-nowrap">{d.name}</span>
-                <span className="text-xs text-muted-foreground ml-auto sm:ml-3">{fmt(d.value)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </ChartCardShell>
-  );
-}
-
 interface MonthlyPoint {
   month: string;
-  Sanctioned: number;
+  year: string;
+  sanctioned: number;
+  count: number;
 }
 
-function SanctionTrendCard({ data, isDark }: { data: MonthlyPoint[]; isDark: boolean }) {
-  const { theme } = useTheme();
-  const hasData = data.some((d) => d.Sanctioned > 0);
+// ── C: six months — the amount sanctioned in each ────────────────────────
+const SixMonthPlot: React.FC<{ rows: MonthlyPoint[] }> = ({ rows }) => {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 760, H = 230, pad = 8, top = 24, base = 188;
+  const n = Math.max(1, rows.length);
+  const slot = (W - pad * 2) / n;
+  const max = Math.max(1, ...rows.map((r) => r.sanctioned));
+  const cx = (i: number) => pad + slot * i + slot / 2;
+  const w = Math.min(46, slot * 0.42);
+  const active = hover != null ? rows[hover] : null;
   return (
-    <ChartCardShell title="Sanctioned Amount — Last 6 Months" icon={TrendingUp} accentColor="#22c55e" isDark={isDark}>
-      {!hasData ? (
-        <div className="text-center text-muted-foreground py-10 text-sm">No loans sanctioned in this period</div>
-      ) : (
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-            <CartesianGrid
-              strokeDasharray="3 3"
-              stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"}
-              vertical={false}
-            />
-            <XAxis
-              dataKey="month"
-              tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
-              axisLine={false}
-              tickLine={false}
-              width={40}
-              tickFormatter={(v) => (v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
-            />
-            <Tooltip
-              formatter={(value: number) => [fmt(value), "Sanctioned"]}
-              contentStyle={{
-                background: isDark ? "rgba(15,17,26,0.95)" : "rgba(255,255,255,0.95)",
-                border: "1px solid #22c55e30",
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-            />
-            <Line type="monotone" dataKey="Sanctioned" stroke={theme === "bw" ? "#008000" : "#22c55e"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-          </LineChart>
-        </ResponsiveContainer>
-      )}
-    </ChartCardShell>
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "baseline", minHeight: 22, marginBottom: 6 }}>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 10, height: 10, background: "var(--blue)", display: "inline-block" }} /> Sanctioned</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-2)" }}>
+          {active ? `${active.month} ${active.year} · ${fmt(active.sanctioned)} · ${fmtNum(active.count)} loan${active.count === 1 ? "" : "s"}` : "Hover a month for its figures"}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Amount sanctioned each month, last six months" onMouseLeave={() => setHover(null)}>
+        <line x1={pad} x2={W - pad} y1={top} y2={top} stroke="var(--rule)" strokeDasharray="2 5" />
+        <text x={pad + 2} y={top - 6} fontFamily="DM Sans, sans-serif" fontSize="10" fill="var(--graphite)">{short(max)}</text>
+        {rows.map((r, i) => {
+          const h = (r.sanctioned / max) * (base - top);
+          const on = hover == null || hover === i;
+          return (
+            <g key={`${r.month}-${r.year}`} onMouseEnter={() => setHover(i)}>
+              <rect x={pad + slot * i} y={0} width={slot} height={H} fill={hover === i ? "var(--blue-wash)" : "transparent"} />
+              {r.sanctioned > 0 ? (
+                <>
+                  <rect x={cx(i) - w / 2} y={base - h} width={w} height={h} fill="var(--blue)" fillOpacity={on ? 0.92 : 0.4} />
+                  <text x={cx(i)} y={base - h - 6} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="10" fill={on ? "var(--ink)" : "var(--faint)"}>{short(r.sanctioned)}</text>
+                </>
+              ) : (
+                <text x={cx(i)} y={base - 6} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="10" fill="var(--faint)">—</text>
+              )}
+              <text x={cx(i)} y={base + 17} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="10" letterSpacing="1" fill={hover === i ? "var(--ink)" : "var(--graphite)"}>{r.month.toUpperCase()}</text>
+              {(i === 0 || r.month === "Jan") && (
+                <text x={cx(i)} y={base + 30} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="8" letterSpacing="1" fill="var(--faint)">{r.year}</text>
+              )}
+            </g>
+          );
+        })}
+        <line x1={pad} x2={W - pad} y1={base} y2={base} stroke="var(--ink)" strokeWidth="1.5" />
+      </svg>
+    </div>
   );
-}
+};
 
 export default function LoanDashboard() {
   const navigate = useNavigate();
@@ -223,7 +107,7 @@ export default function LoanDashboard() {
     staleTime: 5 * 60_000,
   });
 
-  const { data: loans = [], isLoading } = useQuery({
+  const { data: loans = [], isLoading, isError, isFetching, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["loan-sanctions", companyId],
     queryFn: () => getLoanSanctions(companyId),
     staleTime: 30_000,
@@ -252,163 +136,221 @@ export default function LoanDashboard() {
     const paid = Number(l.TotalPaidAmount || 0);
     return s + Math.max(0, scheduled - paid);
   }, 0);
+  const emiDue = upcomingEmis.reduce((s, e) => s + Number(e.EMIAmount || 0), 0);
 
   const recentLoans = [...loans]
     .sort((a, b) => new Date(b.CreatedAt ?? 0).getTime() - new Date(a.CreatedAt ?? 0).getTime())
     .slice(0, 5);
 
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
-
-  const loanTypeDonutData: DonutPoint[] = (Object.keys(LOAN_TYPE_COLORS) as LoanType[])
-    .map((t) => ({
-      name: t,
-      value: loans.filter((l) => l.LoanType === t).reduce((s, l) => s + Number(l.Amount || 0), 0),
-      color: LOAN_TYPE_COLORS[t],
-    }))
-    .filter((d) => d.value > 0);
+  const byType = LOAN_TYPES.map((t) => {
+    const of = loans.filter((l) => l.LoanType === t.type);
+    return { ...t, count: of.length, amount: of.reduce((s, l) => s + Number(l.Amount || 0), 0) };
+  });
+  const segments = byType.filter((t) => t.amount > 0);
 
   // Last 6 calendar months, oldest first — sums Amount for loans sanctioned
   // (CreatedAt) within each month, from whatever's already loaded above.
-  const monthlyTrendData: MonthlyPoint[] = Array.from({ length: 6 }, (_, i) => {
+  const monthly: MonthlyPoint[] = Array.from({ length: 6 }, (_, i) => {
     const d = new Date();
     d.setDate(1);
     d.setMonth(d.getMonth() - (5 - i));
     return d;
   }).map((monthStart) => {
     const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
-    const sum = loans
-      .filter((l) => {
-        if (!l.CreatedAt) return false;
-        const c = new Date(l.CreatedAt);
-        return c >= monthStart && c < monthEnd;
-      })
-      .reduce((s, l) => s + Number(l.Amount || 0), 0);
-    return { month: monthStart.toLocaleDateString("en-IN", { month: "short", year: "2-digit" }), Sanctioned: sum };
+    const inMonth = loans.filter((l) => {
+      if (!l.CreatedAt) return false;
+      const c = new Date(l.CreatedAt);
+      return c >= monthStart && c < monthEnd;
+    });
+    return {
+      month: monthStart.toLocaleDateString("en-IN", { month: "short" }),
+      year: String(monthStart.getFullYear()),
+      sanctioned: inMonth.reduce((s, l) => s + Number(l.Amount || 0), 0),
+      count: inMonth.length,
+    };
   });
+  const hasMonthly = monthly.some((m) => m.sanctioned > 0);
+  const repaidPct = share(totalSanctioned - outstanding, totalSanctioned);
+  const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
 
   return (
-    <GlassShell
-      title="Loan"
-      subtitle="Inter-company, bank and customer loan overview"
-      icon={MoneyRecive as any}
-      accentColor={ACCENT}
-    >
+    <div>
+      <style>{SHEET_CSS}</style>
       <Breadcrumbs items={["Dashboard", "Loan"]} />
-      <div className="mb-2">
-        <CompanyFilterCombo companies={companies} value={companyId} onChange={setCompanyId} />
-      </div>
-      {/* Stat tiles */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <GlassCard
-          label="Total Sanctioned"
-          value={isLoading ? "—" : fmt(totalSanctioned)}
-          sub={`${loans.length} loan${loans.length === 1 ? "" : "s"}`}
-          icon={MoneyRecive as any}
-          accentColor={ACCENT}
-        />
-        <GlassCard
-          label="Outstanding"
-          value={isLoading ? "—" : fmt(outstanding)}
-          sub="Across active loans"
-          icon={TrendingUp}
-          accentColor="#f59e0b"
-        />
-        <GlassCard
-          label="Active Loans"
-          value={isLoading ? "—" : activeLoans.length}
-          sub={`${closedLoans.length} closed`}
-          icon={DocumentText as any}
-          accentColor="#3b82f6"
-        />
-        <GlassCard
-          label="EMIs Due Soon"
-          value={upcomingEmis.length}
-          sub="Within 7 days"
-          icon={CalendarClock}
-          accentColor={upcomingEmis.length ? "#ef4444" : "#10b981"}
-        />
-      </div>
 
-      {/* Breakdown charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <LoanTypeDonut data={loanTypeDonutData} isDark={isDark} />
-        <SanctionTrendCard data={monthlyTrendData} isDark={isDark} />
-      </div>
-
-      {/* Recent loans */}
-      <GlassSection title="Recent Loans" icon={DocumentText as any} accentColor={ACCENT}>
-        {recentLoans.length === 0 ? (
-          <EmptyState icon={Inbox} message="No loans sanctioned yet." accent={ACCENT} />
-        ) : (
-          <div className="space-y-2">
-            {recentLoans.map((l) => {
-              const typeColor = LOAN_TYPE_COLORS[l.LoanType];
-              const borrower = l.BorrowerCompanyName || l.BorrowerCustomerName || "—";
-              const total = l.TotalEMIs ?? 0;
-              const paid = l.PaidEMIs ?? 0;
-              const pct = total ? Math.round((paid / total) * 100) : 0;
-              const closed = l.Status === "Closed";
-              return (
-                <button
-                  key={l.LoanId}
-                  onClick={() => navigate(`/loan/sanction?view=${l.LoanId}`)}
-                  className="group w-full flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3.5 text-left hover:border-transparent hover:shadow-md transition-all"
-                >
-                  <div
-                    className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                    style={{ background: `${typeColor}16`, border: `1px solid ${typeColor}30` }}
-                  >
-                    <MoneyRecive size={15} style={{ color: typeColor } as any} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-foreground font-mono">{l.LoanNo}</p>
-                      <span
-                        className="px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium shrink-0"
-                        style={{ background: `${typeColor}16`, color: typeColor }}
-                      >
-                        {l.LoanType}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {l.LenderCompanyName} <span className="opacity-50">→</span> {borrower}
-                    </p>
-                  </div>
-
-                  {total > 0 && (
-                    <div className="hidden sm:flex flex-col items-center gap-1 w-24 shrink-0">
-                      <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${pct}%`, background: "#22c55e" }}
-                        />
-                      </div>
-                      <span className="text-[0.625rem] text-muted-foreground">
-                        {paid}/{total} EMIs
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="text-right shrink-0 w-28">
-                    <p className="text-sm font-mono font-semibold text-foreground">{fmt(Number(l.Amount))}</p>
-                    <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-emerald-600 dark:text-emerald-400">
-                      {closed && <CheckCircle2 size={10} />}
-                      {l.Status}
-                    </span>
-                  </div>
-
-                  <ChevronRight
-                    size={15}
-                    className="text-muted-foreground/40 group-hover:text-muted-foreground group-hover:translate-x-0.5 transition-all shrink-0"
-                  />
-                </button>
-              );
-            })}
+      <div className="crm-sheet sheet-in">
+        {/* Title block */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
+          <div style={{ flex: "1 1 320px", padding: "22px 22px 20px", minWidth: 0 }}>
+            <p className="label">CivilierERP · Loan</p>
+            <h1 className="title" style={{ fontSize: "clamp(28px, 3.4vw, 44px)", margin: "8px 0 0", lineHeight: 1.05 }}>Loan overview</h1>
+            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--ink-2)", maxWidth: "60ch" }}>
+              What has been sanctioned across inter-company, bank and customer loans, what is still owed, and the instalments falling due.
+            </p>
           </div>
-        )}
-      </GlassSection>
-    </GlassShell>
+          <div className="mono titleblock" style={{ flex: "1 1 280px", maxWidth: 380, minWidth: 240, display: "grid", gridTemplateColumns: "1fr 1fr", borderLeft: "1px solid var(--ink)", fontSize: 13 }}>
+            <div style={{ gridColumn: "1 / -1", padding: "10px 14px", borderBottom: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 5 }}>Company</span>
+              <CompanyFilterCombo companies={companies} value={companyId} onChange={setCompanyId} />
+            </div>
+            <div style={{ padding: "10px 14px", borderRight: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Read at</span>
+              {readAt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} · {readAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            <div style={{ padding: "10px 14px", display: "flex", alignItems: "flex-end" }}>
+              <button onClick={() => refetch()} disabled={isFetching} className="label link" style={{ color: "var(--blue)" }}>
+                {isFetching ? "Reading…" : "Re-read"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {isError && <div className="cell" style={{ color: "var(--red)", fontSize: 13 }}>Could not load the loans. Use Re-read to try again.</div>}
+
+        {/* A + B */}
+        <div className="grid2">
+          <Detail tag="A" title="Sanctioned, by loan type" note={`${fmtNum(loans.length)} loan${loans.length === 1 ? "" : "s"}`}>
+            {isLoading ? (<><Skel h={54} w="60%" /><Skel h={28} /><Skel w="70%" /></>) : loans.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>
+                No loans are sanctioned yet. Sanction one from Loan Sanction.
+              </p>
+            ) : (
+              <>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 36px", alignItems: "flex-end" }}>
+                  <button onClick={() => navigate("/loan/sanction")}>
+                    <span className="label link" style={{ display: "inline-block", marginBottom: 8 }}>Sanctioned</span>
+                    <span className="figure" style={{ display: "block", fontSize: "clamp(28px, 3.6vw, 48px)" }}>{fmt(totalSanctioned)}</span>
+                  </button>
+                  <div>
+                    <span className="label" style={{ display: "block", marginBottom: 8 }}>Still owed</span>
+                    <span className="figure" style={{ display: "block", fontSize: "clamp(28px, 3.6vw, 48px)", color: "var(--ink-2)" }}>{fmt(outstanding)}</span>
+                  </div>
+                </div>
+
+                {/* every rupee sanctioned, measured out by loan type */}
+                <div style={{ marginTop: 22 }}>
+                  <div className="hatch" style={{ display: "flex", height: 30, border: "1.5px solid var(--ink)", backgroundColor: "var(--sheet)" }} role="img"
+                    aria-label={segments.map((s) => `${s.type} ${fmt(s.amount)}`).join(", ")}>
+                    {segments.map((s, i) => (
+                      <div
+                        key={s.type}
+                        className={s.fill === "hatch" ? "" : "grow"}
+                        title={`${s.type}: ${fmt(s.amount)}`}
+                        style={{ width: `${share(s.amount, totalSanctioned)}%`, borderLeft: i ? "1.5px solid var(--ink)" : 0, ...fillStyle(s.fill) }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* the same, as a schedule */}
+                <div style={{ marginTop: 16 }}>
+                  {byType.map((s) => (
+                    <div key={s.type} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--rule-soft)", opacity: s.count ? 1 : 0.5 }}>
+                      <i className={s.fill === "hatch" ? "hatch" : ""} style={{ width: 10, height: 10, flexShrink: 0, border: "1px solid var(--ink)", ...fillStyle(s.fill) }} />
+                      <span className="label" style={{ color: "var(--ink)", flex: 1, minWidth: 0 }}>{s.type}</span>
+                      <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}>{fmtNum(s.count)} loan{s.count === 1 ? "" : "s"}</span>
+                      <span className="figure" style={{ fontSize: 15, minWidth: 110, textAlign: "right" }}>{fmt(s.amount)}</span>
+                      <span style={{ fontSize: 11.5, color: "var(--graphite)", width: 38, textAlign: "right" }}>{Math.round(share(s.amount, totalSanctioned))}%</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </Detail>
+
+          <Detail tag="B" title="Standing">
+            {isLoading ? (<><Skel h={40} /><Skel h={40} /><Skel h={40} /></>) : (
+              <div>
+                <div style={{ paddingBottom: 14 }}>
+                  <span style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span className="label" style={{ color: "var(--ink)" }}>Repaid</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 4 }}>of everything sanctioned</span>
+                    </span>
+                    <span className="figure" style={{ fontSize: 34, whiteSpace: "nowrap" }}>
+                      {Math.round(repaidPct)}<span style={{ fontSize: "0.5em", fontWeight: 500, marginLeft: 3 }}>%</span>
+                    </span>
+                  </span>
+                  <span className="hatch" style={{ display: "block", height: 9, marginTop: 10, border: "1px solid var(--ink)" }}>
+                    <span className="grow" style={{ display: "block", height: "100%", width: `${repaidPct}%`, background: "var(--blue)" }} />
+                  </span>
+                  <span style={{ display: "block", marginTop: 6, fontSize: 11.5, color: "var(--graphite)" }}>
+                    {fmt(Math.max(0, totalSanctioned - outstanding))} repaid · {fmt(outstanding)} owed
+                  </span>
+                </div>
+                {[
+                  { label: "Active loans", value: fmtNum(activeLoans.length), sub: `${fmtNum(closedLoans.length)} closed`, red: false },
+                  {
+                    label: "EMIs due soon",
+                    value: fmtNum(upcomingEmis.length),
+                    sub: upcomingEmis.length ? `${fmt(emiDue)} falls due within seven days` : "nothing falls due within seven days",
+                    red: upcomingEmis.length > 0,
+                  },
+                ].map((s) => (
+                  <button key={s.label} onClick={() => navigate("/loan/sanction")} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "13px 0", borderTop: "1px solid var(--rule-soft)", width: "100%" }}>
+                    <span style={{ minWidth: 0, textAlign: "left" }}>
+                      <span className="label link" style={{ color: s.red ? "var(--red)" : "var(--ink)" }}>{s.label}</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 4 }}>{s.sub}</span>
+                    </span>
+                    <span className="figure" style={{ fontSize: 28, whiteSpace: "nowrap", color: s.red ? "var(--red)" : undefined }}>{s.value}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </Detail>
+        </div>
+
+        {/* C */}
+        <Detail tag="C" title="Six months of sanctions" note="Amount sanctioned each month">
+          {isLoading ? <Skel h={220} /> : !hasMonthly ? (
+            <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No loans were sanctioned in the last six months.</p>
+          ) : <SixMonthPlot rows={monthly} />}
+        </Detail>
+
+        {/* D */}
+        <Detail tag="D" title="Latest loans" note={`${fmtNum(loans.length)} in all`}>
+          {isLoading ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : recentLoans.length === 0 ? (
+            <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No loans are sanctioned yet.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ minWidth: 680 }}>
+                <thead><tr><th>Loan</th><th>Lender → borrower</th><th>EMIs paid</th><th className="num">Amount</th><th>Status</th></tr></thead>
+                <tbody>
+                  {recentLoans.map((l) => {
+                    const borrower = l.BorrowerCompanyName || l.BorrowerCustomerName || "—";
+                    const total = l.TotalEMIs ?? 0;
+                    const paid = l.PaidEMIs ?? 0;
+                    const closed = l.Status === "Closed";
+                    return (
+                      <tr key={l.LoanId} className="go" onClick={() => navigate(`/loan/sanction?view=${l.LoanId}`)}>
+                        <td>
+                          <span className="mono" style={{ display: "block", fontWeight: 600 }}>{l.LoanNo}</span>
+                          <span className="label" style={{ display: "block", marginTop: 3 }}>{l.LoanType}</span>
+                        </td>
+                        <td style={{ color: "var(--ink-2)", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {l.LenderCompanyName} <span style={{ color: "var(--faint)" }}>→</span> {borrower}
+                        </td>
+                        <td style={{ width: 130 }}>
+                          {total > 0 ? (
+                            <>
+                              <span className="hatch" style={{ display: "block", height: 7, border: "1px solid var(--ink)" }}>
+                                <span style={{ display: "block", height: "100%", width: `${share(paid, total)}%`, background: "var(--blue)" }} />
+                              </span>
+                              <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 4 }}>{paid} of {total}</span>
+                            </>
+                          ) : <span style={{ color: "var(--faint)" }}>No schedule</span>}
+                        </td>
+                        <td className="num"><span className="figure" style={{ fontSize: 14 }}>{fmt(Number(l.Amount))}</span></td>
+                        <td><SheetMark text={l.Status} tone={closed ? "done" : "waiting"} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Detail>
+      </div>
+    </div>
   );
 }

@@ -1,8 +1,10 @@
+import { deactivateHeldUntil, fmtHeldUntil } from "@/lib/userStatusHold";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getUsers, addUser, updateUser, deleteUser } from "@/api/userApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { UserStatusDialog } from "@/components/UserStatusDialog";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { Badge } from "@/components/ui/badge";
@@ -129,11 +131,14 @@ export default function AdminControlPanel() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Switching a user on or off asks for a reason first (the server refuses the change without one).
+  const [statusTarget, setStatusTarget] = useState<any | null>(null);
   const toggleStatusMutation = useMutation({
-    mutationFn: (user: any) =>
-      updateUser(user.id, { discontinue: !user.discontinue }),
+    mutationFn: ({ user, reason }: { user: any; reason: string }) =>
+      updateUser(user.id, { discontinue: !user.discontinue, reason }),
     onSuccess: () => {
       toast.success("Status updated");
+      setStatusTarget(null);
       qc.invalidateQueries({ queryKey: ["admin-users"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -309,7 +314,9 @@ export default function AdminControlPanel() {
                             variant="ghost"
                             size="icon"
                             className={`h-6 w-6 ${!user.discontinue ? "text-orange-500" : "text-green-500"}`}
-                            onClick={() => toggleStatusMutation.mutate(user)}
+                            onClick={() => setStatusTarget(user)}
+                            disabled={!!deactivateHeldUntil(user)}
+                            title={deactivateHeldUntil(user) ? `Activated less than 90 days ago. Can be made inactive from ${fmtHeldUntil(deactivateHeldUntil(user)!)}.` : undefined}
                           >
                             {!user.discontinue ? (
                               <Lock size={12} />
@@ -569,6 +576,16 @@ export default function AdminControlPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {statusTarget && (
+        <UserStatusDialog
+          userName={statusTarget.name}
+          makeActive={!!statusTarget.discontinue}
+          busy={toggleStatusMutation.isPending}
+          onClose={() => setStatusTarget(null)}
+          onConfirm={(reason) => toggleStatusMutation.mutate({ user: statusTarget, reason })}
+        />
+      )}
     </div>
   );
 }

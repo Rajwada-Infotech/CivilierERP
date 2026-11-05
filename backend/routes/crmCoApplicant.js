@@ -1,16 +1,47 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
+const { linkCoApplicantToCustomer, resolveCoApplicantCustomer } = require("../services/crmCoApplicantCustomer");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmCoApplicant", { withApplication: true })); }
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { isLegalWorkStarted, requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { isLegalWorkStarted, requireApprovedBooking, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
+
+// GET /names — the co-applicants (Applicant 2, 3 …) of every booking and
+// application, in applicant order, so every CRM screen can show a booking as
+// "Mr. Roy & Mrs. Roy" (src/components/crm/ApplicantNames.tsx). A booking's
+// list includes its application's co-applicants. Project-scoped.
+router.get("/names", requirePageRight("crm-applications", "view"), async (req, res) => {
+  try {
+    const { projectPredicate } = require("../services/projectScope");
+    const r = await getPool().request().query(`
+      SELECT a.Id AS ApplicationId, b.Id AS BookingId, c.Name, c.CreatedAt, c.Id
+      FROM dbo.CrmCoApplicant c
+      JOIN dbo.CrmApplication a ON a.Id = c.ApplicationId OR a.Id = (SELECT bx.ApplicationId FROM dbo.CrmBooking bx WHERE bx.Id = c.BookingId)
+      LEFT JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id AND b.IsActive = 1
+      WHERE c.IsActive = 1 AND LTRIM(RTRIM(ISNULL(c.Name, ''))) <> ''${projectPredicate(req.projectScope, "a.ProjectId")}
+      ORDER BY c.CreatedAt, c.Id`);
+    const byApplication = {}, byBooking = {};
+    const add = (map, key, name) => { if (key == null) return; const l = (map[key] ||= []); if (!l.includes(name)) l.push(name); };
+    for (const row of r.recordset) {
+      const name = String(row.Name).trim();
+      add(byApplication, row.ApplicationId, name);
+      add(byBooking, row.BookingId, name);
+    }
+    res.json({ byApplication, byBooking });
+  } catch (e) {
+    console.error("[crm-co-applicant] GET /names error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // GET /booking/:bookingId — co-applicants for a booking
 router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
@@ -19,11 +50,19 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
     const bookingId = parseId(req.params.bookingId);
     if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT * FROM dbo.CrmCoApplicant WHERE BookingId = @bid AND IsActive = 1 ORDER BY CreatedAt");
+      .query(`SELECT c.Id, c.BookingId, c.ApplicationId, c.Name, c.Relation, c.Mobile, c.Email,
+                     CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+                     CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+                     c.DateOfBirth, c.Gender, c.Occupation, c.AnnualIncome,
+                     c.Address, c.City, c.[State], c.Pincode, c.Notes,
+                     c.SourceType, c.CustomerId, c.IsActive, c.CreatedBy, c.CreatedAt, c.UpdatedBy, c.UpdatedAt,
+                     cu.CustomerNo, ROW_NUMBER() OVER (ORDER BY c.CreatedAt, c.Id) + 1 AS ApplicantNo
+              FROM dbo.CrmCoApplicant c LEFT JOIN dbo.CrmCustomer cu ON cu.Id = c.CustomerId
+              WHERE c.BookingId = @bid AND c.IsActive = 1 ORDER BY c.CreatedAt, c.Id`);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-co-applicant] GET error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -35,19 +74,18 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
 // checked. Block the edit here instead, same as the checklist's own
 // assertUnlocked gate — staff reopen the checklist first, which is an
 // explicit, logged action, rather than this silently going stale.
-async function assertWelcomeChecklistUnlocked(pool, bookingId) {
-  const r = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT IsLocked FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
-  if (r.recordset[0]?.IsLocked) {
-    return "The welcome call verification checklist for this booking is already submitted and locked. Reopen it on the Welcome Calls page before adding or removing a co-applicant.";
-  }
-  return null;
-}
-
 // The actual insert, shared by the direct (pre-legal-work) path below and
 // the amendment-approval replay path in crmBookingAmendments.js — never
 // duplicated logic between the two.
 async function applyAddCoApplicant(pool, bookingId, b, actorUserId) {
+  if (bookingId) {
+    const activeErr = await requireApprovedBooking(pool, bookingId);
+    if (activeErr) throw Object.assign(new Error(activeErr), { status: 400 });
+    const lockErr = await assertWelcomeChecklistUnlocked(pool, bookingId);
+    if (lockErr) throw Object.assign(new Error(lockErr), { status: 400 });
+  }
+  // Same person never twice; the main applicant is never also a co-applicant.
+  const pickedCustomerId = await resolveCoApplicantCustomer(pool, { bookingId }, b);
   const result = await pool.request()
     .input("bid",  sql.Int, bookingId)
     .input("name", sql.NVarChar(200), b.Name.trim())
@@ -63,6 +101,10 @@ async function applyAddCoApplicant(pool, bookingId, b, actorUserId) {
       OUTPUT INSERTED.Id
       VALUES (@bid, @name, @rel, @mob, @em, @pan, @aadh, @note, @cb, SYSDATETIME())
     `);
+  // Applicant 2, 3 … are customers too (services/crmCoApplicantCustomer.js).
+  if (pickedCustomerId) await pool.request().input("id", sql.Int, result.recordset[0].Id).input("c", sql.Int, pickedCustomerId)
+    .query("UPDATE dbo.CrmCoApplicant SET CustomerId = @c WHERE Id = @id");
+  await linkCoApplicantToCustomer(pool, result.recordset[0].Id, actorUserId);
   return { id: result.recordset[0].Id };
 }
 
@@ -99,12 +141,22 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
     res.status(201).json({ success: true, ...result });
   } catch (e) {
     console.error("[crm-co-applicant] POST error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
 // Shared with the amendment-approval replay path — see applyAddCoApplicant.
 async function applyEditCoApplicant(pool, id, b, actorUserId) {
+  const where = (await pool.request().input("id", sql.Int, id).query("SELECT ApplicationId, BookingId FROM dbo.CrmCoApplicant WHERE Id = @id")).recordset[0] || {};
+  if (where.BookingId) {
+    const activeErr = await requireApprovedBooking(pool, where.BookingId);
+    if (activeErr) throw Object.assign(new Error(activeErr), { status: 400 });
+    const lockErr = await assertWelcomeChecklistUnlocked(pool, where.BookingId);
+    if (lockErr) throw Object.assign(new Error(lockErr), { status: 400 });
+  }
+  const pickedCustomerId = await resolveCoApplicantCustomer(pool, { applicationId: where.ApplicationId, bookingId: where.BookingId, exceptId: id }, b);
+  await pool.request().input("id", sql.Int, id).input("c", sql.Int, pickedCustomerId)
+    .query("IF COL_LENGTH('dbo.CrmCoApplicant', 'CustomerId') IS NOT NULL EXEC sp_executesql N'UPDATE dbo.CrmCoApplicant SET CustomerId = @c WHERE Id = @id', N'@c INT, @id INT', @c = @c, @id = @id");
   await pool.request()
     .input("id",     sql.Int, id)
     .input("name",   sql.NVarChar(200), b.Name.trim())
@@ -132,6 +184,7 @@ async function applyEditCoApplicant(pool, id, b, actorUserId) {
         UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
       WHERE Id = @id
     `);
+  await linkCoApplicantToCustomer(pool, id, actorUserId);
   return { success: true };
 }
 
@@ -182,15 +235,24 @@ router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"]
     }
 
     const result = await applyEditCoApplicant(pool, id, b, actorId(req));
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { table: "CrmCoApplicant", id }, ["ApplicantKyc"], "co-applicant edited");
     res.json(result);
   } catch (e) {
     console.error("[crm-co-applicant] PUT error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
 // Shared with the amendment-approval replay path — see applyAddCoApplicant.
 async function applyRemoveCoApplicant(pool, id) {
+  const row = (await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id")).recordset[0];
+  const bookingId = row?.BookingId;
+  if (bookingId) {
+    const activeErr = await requireApprovedBooking(pool, bookingId);
+    if (activeErr) throw Object.assign(new Error(activeErr), { status: 400 });
+    const lockErr = await assertWelcomeChecklistUnlocked(pool, bookingId);
+    if (lockErr) throw Object.assign(new Error(lockErr), { status: 400 });
+  }
   await pool.request().input("id", sql.Int, id)
     .query("UPDATE dbo.CrmCoApplicant SET IsActive = 0 WHERE Id = @id");
   return { success: true };
@@ -225,10 +287,11 @@ router.delete("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-application
       }
     }
     const result = await applyRemoveCoApplicant(pool, id);
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { table: "CrmCoApplicant", id }, ["ApplicantKyc"], "co-applicant removed");
     res.json(result);
   } catch (e) {
     console.error("[crm-co-applicant] DELETE error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -247,18 +310,24 @@ router.get("/application/:applicationId", requirePageRight("crm-applications", "
     if (isNaN(applicationId)) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, applicationId)
       .query(`
-        SELECT Id, Name, Relation, Mobile, Email, PanNo, AadhaarNo,
-               DateOfBirth, Gender, Occupation, AnnualIncome,
-               Address, City, [State], Pincode, Notes,
-               SourceType, BookingId, ApplicationId, CreatedAt, UpdatedAt
-        FROM dbo.CrmCoApplicant
-        WHERE ApplicationId = @aid AND IsActive = 1
-        ORDER BY CreatedAt
+        SELECT c.Id, c.Name, c.Relation, c.Mobile, c.Email,
+               CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+               CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+               c.DateOfBirth, c.Gender, c.Occupation, c.AnnualIncome,
+               c.Address, c.City, c.[State], c.Pincode, c.Notes,
+               c.SourceType, c.BookingId, c.ApplicationId, c.CreatedAt, c.UpdatedAt,
+               c.CustomerId, cu.CustomerNo,
+               -- the main applicant is Applicant 1; co-applicants are 2, 3 … in the order added
+               ROW_NUMBER() OVER (ORDER BY c.CreatedAt, c.Id) + 1 AS ApplicantNo
+        FROM dbo.CrmCoApplicant c
+        LEFT JOIN dbo.CrmCustomer cu ON cu.Id = c.CustomerId
+        WHERE c.ApplicationId = @aid AND c.IsActive = 1
+        ORDER BY c.CreatedAt, c.Id
       `);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-co-applicant] GET /application error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -276,6 +345,7 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
 
     const b = req.body;
     if (!b.Name?.trim()) return res.status(400).json({ error: "Co-applicant Name is required" });
+    const pickedCustomerId = await resolveCoApplicantCustomer(pool, { applicationId }, b);
 
     const result = await pool.request()
       .input("aid",    sql.Int,          applicationId)
@@ -307,10 +377,14 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
            @dob, @gender, @occ, @inc,
            @addr, @city, @state, @pin, @note, @src, @cb, SYSDATETIME())
       `);
+    if (pickedCustomerId) await pool.request().input("id", sql.Int, result.recordset[0].Id).input("c", sql.Int, pickedCustomerId)
+      .query("UPDATE dbo.CrmCoApplicant SET CustomerId = @c WHERE Id = @id");
+    await linkCoApplicantToCustomer(pool, result.recordset[0].Id, actorId(req));
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId }, ["ApplicantKyc"], "co-applicant added");
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
     console.error("[crm-co-applicant] POST /application error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 

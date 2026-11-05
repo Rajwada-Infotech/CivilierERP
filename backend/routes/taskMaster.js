@@ -3,8 +3,8 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { lockNextDocNumber, currentFinYear } = require("../utils/docNumberLock");
 const { computeProgressMap } = require("../utils/taskProgress");
@@ -1063,10 +1063,11 @@ router.post("/:id/attachments", upload.array("files", 10), async (req, res) => {
       .query("SELECT Id FROM dbo.TaskMaster WHERE Id = @Id AND IsDeleted = 0");
     if (!task.recordset.length) return res.status(404).json({ error: "Task not found" });
 
-    await saveAttachments(pool, taskId, null, req.files, uploadedBy);
+    const files = Array.isArray(req.files) ? req.files : [];
+    await saveAttachments(pool, taskId, null, files, uploadedBy);
 
     await bumpTaskCaches();
-    res.json({ message: `${req.files.length} file(s) attached` });
+    res.json({ message: `${files.length} file(s) attached` });
   } catch (err) {
     console.error("[task-master] POST attachments error:", err.message);
     res.status(500).json({ error: err.message });

@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Camera, CalendarDays, Check, Loader2, Trash2 } from "lucide-react";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Camera, CalendarDays, Check, Loader2, Lock, Trash2 } from "lucide-react";
 import {
   deleteCheckpointUpdate,
   fetchCheckpointUpdatePhoto,
@@ -21,6 +19,13 @@ const fromYmd = (s: string) => {
   return new Date(y, m - 1, d);
 };
 const fmt = (s: string) => fromYmd(s).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
+/** "15:42" -> "03:42 pm" */
+const fmtTime = (hhmm: string) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm;
+  return `${pad(h % 12 || 12)}:${pad(m)} ${h < 12 ? "am" : "pm"}`;
+};
 
 function UpdatePhoto({ update }: { update: CheckpointUpdate }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -54,12 +59,11 @@ function UpdatePhoto({ update }: { update: CheckpointUpdate }) {
 
 /**
  * Daily-update control for a checkpoint flagged "daily" in Work Checkpoint Master:
- * a calendar dropdown (days with an update are marked) plus a live-camera button
- * that logs the photo against the chosen date. Everything saves immediately.
+ * a live-camera button that logs the photo for TODAY (the date is locked) together with
+ * the time it was logged. Everything saves immediately.
  */
 export function CheckpointDailyUpdates({
   checkpointId,
-  startDate,
 }: {
   /** Row id of the saved checkpoint; undefined until the assignment has been saved. */
   checkpointId?: number;
@@ -67,8 +71,8 @@ export function CheckpointDailyUpdates({
 }) {
   const qc = useQueryClient();
   const today = useMemo(() => toYmd(new Date()), []);
-  const [date, setDate] = useState(today);
-  const [calOpen, setCalOpen] = useState(false);
+  // Locked to today: a daily update is a same-day record (the server enforces it too).
+  const date = today;
   const [camOpen, setCamOpen] = useState(false);
   const [note, setNote] = useState("");
 
@@ -80,7 +84,6 @@ export function CheckpointDailyUpdates({
   });
   const byDate = useMemo(() => new Map(updates.map((u) => [u.date, u])), [updates]);
   const current = byDate.get(date);
-  const logged = useMemo(() => updates.map((u) => fromYmd(u.date)), [updates]);
 
   const save = useMutation({
     mutationFn: (photo: Blob) => saveCheckpointUpdate(checkpointId as number, { date, photo, note: note.trim() || undefined }),
@@ -108,37 +111,16 @@ export function CheckpointDailyUpdates({
   return (
     <div className="mt-1.5 rounded-lg border border-dashed border-cyan-500/30 bg-cyan-500/5 p-2.5 space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
-        <Popover open={calOpen} onOpenChange={setCalOpen}>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:border-cyan-500/50"
-              aria-label="Choose update date"
-            >
-              <CalendarDays size={12} className="text-cyan-600 dark:text-cyan-400" />
-              {date === today ? "Today · " : ""}
-              {fmt(date)}
-              {current && <Check size={11} className="text-emerald-500" />}
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-auto p-0 z-[1001]">
-            <Calendar
-              mode="single"
-              selected={fromYmd(date)}
-              onSelect={(d) => {
-                if (d) {
-                  setDate(toYmd(d));
-                  setCalOpen(false);
-                }
-              }}
-              disabled={(d) => toYmd(d) > today || (!!startDate && toYmd(d) < startDate.slice(0, 10))}
-              modifiers={{ logged }}
-              modifiersClassNames={{ logged: "[&_button]:bg-emerald-500/20 [&_button]:font-semibold [&_button]:text-emerald-700 dark:[&_button]:text-emerald-300" }}
-              defaultMonth={fromYmd(date)}
-            />
-            <p className="px-3 pb-2 text-[0.625rem] text-muted-foreground">Green days already have an update.</p>
-          </PopoverContent>
-        </Popover>
+        <div
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground"
+          aria-label="Choose update date"
+          title="Daily updates can only be logged for today"
+        >
+          <CalendarDays size={12} className="text-cyan-600 dark:text-cyan-400" />
+          Today · {fmt(date)}
+          <Lock size={10} className="text-muted-foreground" />
+          {current && <Check size={11} className="text-emerald-500" />}
+        </div>
 
         <button
           type="button"
@@ -168,6 +150,7 @@ export function CheckpointDailyUpdates({
           <div className="flex-1 min-w-0 text-[0.6875rem] text-muted-foreground">
             <p className="text-foreground font-medium">{fmt(current.date)}</p>
             {current.note && <p className="truncate">{current.note}</p>}
+            {current.loggedTime && <p>Logged at {fmtTime(current.loggedTime)}</p>}
             {current.createdBy && <p className="truncate">by {current.createdBy}</p>}
           </div>
           <button

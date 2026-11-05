@@ -5,10 +5,10 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { actorId, isSaAdmin } = require("../services/saAccess");
+const { actorId, isSaAdmin, applyLeadScope } = require("../services/saAccess");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const LEAD_TASK_SELECT = `
   SELECT
@@ -59,6 +59,15 @@ router.get("/lead/:leadId", requirePageRight("sa-lead-tasks", "view"), async (re
     const pool = getPool();
     const lid = parseId(req.params.leadId);
     if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
+
+    const req0 = pool.request().input("lid", sql.Int, lid);
+    const scope = applyLeadScope(req0, req, "l");
+    const check = await req0.query(
+      `SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`
+    );
+    if (!check.recordset.length)
+      return res.status(403).json({ error: "Access denied or lead not found" });
+
     const result = await pool.request()
       .input("lid", sql.Int, lid)
       .query(`${LEAD_TASK_SELECT} WHERE t.LeadId = @lid ORDER BY t.DueDate ASC`);
@@ -73,7 +82,17 @@ router.get("/lead/:leadId", requirePageRight("sa-lead-tasks", "view"), async (re
 router.post("/lead/:leadId", requirePageRight("sa-lead-tasks", "create"), async (req, res) => {
   try {
     const pool  = getPool();
-    const lid   = parseInt(req.params.leadId);
+    const lid   = parseId(req.params.leadId);
+    if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
+
+    const req0 = pool.request().input("lid", sql.Int, lid);
+    const scope = applyLeadScope(req0, req, "l");
+    const check = await req0.query(
+      `SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`
+    );
+    if (!check.recordset.length)
+      return res.status(403).json({ error: "Access denied or lead not found" });
+
     const b     = req.body;
     const actor = actorId(req);
 
@@ -104,7 +123,17 @@ router.put("/:id", requirePageRight("sa-lead-tasks", "edit"), async (req, res) =
     const pool  = getPool();
     const b     = req.body;
     const actor = actorId(req);
+    const isAdmin = isSaAdmin(req);
     const tid   = parseInt(req.params.id);
+
+    // GET / scopes non-admins to their own tasks (t.AssignedTo = actor) —
+    // this never checked that, letting anyone with the edit page right
+    // act on any other user's task by id alone.
+    if (!isAdmin) {
+      const owned = await pool.request().input("id", sql.Int, tid).input("actorId", sql.Int, actor)
+        .query("SELECT 1 AS ok FROM dbo.SaLeadTask WHERE Id = @id AND AssignedTo = @actorId");
+      if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
+    }
 
     await pool.request()
       .input("id",    sql.Int,           tid)
@@ -112,6 +141,9 @@ router.put("/:id", requirePageRight("sa-lead-tasks", "edit"), async (req, res) =
       .input("desc",  sql.NVarChar(sql.MAX), b.Description || null)
       .input("asgn",  sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : null)
       .input("due",   sql.DateTime2(3),  b.DueDate || null)
+      // A status-only update (Mark done / Reopen) sends no DueDate — keep it.
+      // Only a body that carries DueDate (even empty, to clear it) changes it.
+      .input("dueSet", sql.Bit,          Object.prototype.hasOwnProperty.call(b, "DueDate") ? 1 : 0)
       .input("pri",   sql.NVarChar(10),  b.Priority || null)
       .input("st",    sql.NVarChar(20),  b.Status || null)
       .input("ub",    sql.Int,           actor)
@@ -120,10 +152,10 @@ router.put("/:id", requirePageRight("sa-lead-tasks", "edit"), async (req, res) =
           Title       = ISNULL(@title, Title),
           Description = ISNULL(@desc, Description),
           AssignedTo  = ISNULL(@asgn, AssignedTo),
-          DueDate     = @due,
+          DueDate     = CASE WHEN @dueSet = 1 THEN @due ELSE DueDate END,
           Priority    = ISNULL(@pri, Priority),
           Status      = ISNULL(@st, Status),
-          CompletedAt = CASE WHEN @st = 'Done' THEN SYSDATETIME() ELSE CompletedAt END,
+          CompletedAt = CASE WHEN @st = 'Done' THEN SYSDATETIME() WHEN @st IS NOT NULL THEN NULL ELSE CompletedAt END,
           UpdatedBy   = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -138,8 +170,18 @@ router.put("/:id", requirePageRight("sa-lead-tasks", "edit"), async (req, res) =
 router.delete("/:id", requirePageRight("sa-lead-tasks", "delete"), async (req, res) => {
   try {
     const pool = getPool();
+    const tid = parseInt(req.params.id);
+    const actor = actorId(req);
+    const isAdmin = isSaAdmin(req);
+
+    if (!isAdmin) {
+      const owned = await pool.request().input("id", sql.Int, tid).input("actorId", sql.Int, actor)
+        .query("SELECT 1 AS ok FROM dbo.SaLeadTask WHERE Id = @id AND AssignedTo = @actorId");
+      if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
+    }
+
     await pool.request()
-      .input("id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, tid)
       .query("DELETE FROM dbo.SaLeadTask WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {

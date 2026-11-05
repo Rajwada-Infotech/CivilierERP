@@ -1,8 +1,8 @@
 const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express")
 const router = express.Router()
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db")
 const { cache } = require("../middleware/cache")
 const { bumpCacheVersion } = require("../redis")
@@ -22,7 +22,7 @@ const requireUserEmail = (req, res) => {
 };
 
 // GET all cards
-// created_by/updated_by now store email strings directly â€” no JOIN needed
+// created_by/updated_by now store email strings directly — no JOIN needed
 // Optional ?bankId= filter (and implicit active-only) is used by the Payment
 // form's card selector, mirroring the /cheque-lots?bankId= pattern.
 router.get("/", cache("card-master", 300), async (req, res) => {
@@ -82,7 +82,7 @@ router.post("/", requirePageRight("card-master", "create"), validateBody(cardMas
       .input("reminder_days",    sql.Int,       reminder_days || null)
       .input("status",           sql.Bit,       status ? 1 : 0)
       .input("created_at",       sql.DateTime2, new Date())
-      .input("created_by",       sql.NVarChar(100), userEmail)  // âœ… real email
+      .input("created_by",       sql.NVarChar(100), userEmail)  // ✅ real email
       .query(`
         INSERT INTO dbo.card_master (
           company_name, bank_id, bank_name, account_number, ifsc_code,
@@ -135,7 +135,7 @@ router.put("/:id", requirePageRight("card-master", "edit"), validateBody(cardMas
       .input("reminder_days",    sql.Int,            reminder_days || null)
       .input("status",           sql.Bit,            status ? 1 : 0)
       .input("updated_at",       sql.DateTime2,      new Date())
-      .input("updated_by",       sql.NVarChar(100),  userEmail)  // âœ… real email
+      .input("updated_by",       sql.NVarChar(100),  userEmail)  // ✅ real email
       .query(`
         UPDATE dbo.card_master SET
           company_name=@company_name, bank_id=@bank_id, bank_name=@bank_name,

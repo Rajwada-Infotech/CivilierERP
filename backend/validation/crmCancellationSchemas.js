@@ -9,7 +9,7 @@ const emptyToUndef = (schema) => z.preprocess((v) => (v === "" || v === null ? u
 
 const crmCancellationCreateSchema = z.object({
   BookingId: z.coerce.number().int().positive(),
-  Reason: emptyToUndef(z.string().trim()),
+  Reason: z.string({ error: (iss) => (iss.input === undefined ? "Give the reason for the cancellation" : undefined) }).trim().min(1, "Give the reason for the cancellation"),
   DeductionPercent: emptyToUndef(z.coerce.number().min(0).max(100)),
 });
 

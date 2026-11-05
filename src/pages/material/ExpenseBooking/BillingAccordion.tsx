@@ -60,7 +60,7 @@ function MasterTermPicker({
       <DialogContent className="w-[calc(100vw-2rem)] max-w-xl max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
-            <BookOpen size={16} className="text-emerald-500" />
+            <BookOpen size={16} className="text-foreground" />
             Select Billing Term
           </DialogTitle>
           <DialogDescription>
@@ -86,16 +86,16 @@ function MasterTermPicker({
                 onSelect(term);
                 onClose();
               }}
-              className="w-full text-left rounded-xl border border-border bg-background hover:border-emerald-500/40 hover:bg-emerald-500/[0.03] transition-all px-4 py-3 group"
+              className="w-full text-left rounded-xl border border-border bg-background hover:border-foreground hover:bg-primary/10 transition-all px-4 py-3 group"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-heading font-semibold text-foreground group-hover:text-emerald-500 transition-colors">
+                    <p className="text-sm font-heading font-semibold text-foreground group-hover:text-foreground transition-colors">
                       {term.name}
                     </p>
                     {term.calculationType && (
-                      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[0.625rem] font-heading bg-muted text-muted-foreground border-border">
+                      <span className="inline-flex items-center rounded-none border px-2 py-0.5 text-[0.625rem] font-heading bg-muted text-muted-foreground border-border">
                         {term.calculationType}
                       </span>
                     )}
@@ -108,7 +108,7 @@ function MasterTermPicker({
                 </div>
                 <ChevronDown
                   size={14}
-                  className="text-muted-foreground group-hover:text-emerald-500 rotate-[-90deg] shrink-0 mt-1 transition-colors"
+                  className="text-muted-foreground group-hover:text-foreground rotate-[-90deg] shrink-0 mt-1 transition-colors"
                 />
               </div>
             </button>
@@ -159,11 +159,11 @@ function SingleTermRow({
     : Math.max(0, runningBase - discountAmount);
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden">
+    <div className="border border-foreground overflow-hidden bg-card">
       {/* Row header */}
-      <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-muted/30">
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-border">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/10 text-[0.625rem] font-heading font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+          <span className="flex items-center justify-center w-5 h-5 rounded-full border border-foreground text-[0.625rem] font-heading font-semibold text-foreground shrink-0">
             {index + 1}
           </span>
           <div className="min-w-0">
@@ -171,9 +171,9 @@ function SingleTermRow({
               {term.masterTermName ?? `Term ${index + 1}`}
               {term.masterTermName && (
                 <span
-                  className={`inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${
+                  className={`inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-none border ${
                     isAddition
-                      ? "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20"
+                      ? "bg-primary/10 text-foreground border-foreground/40"
                       : "bg-destructive/10 text-destructive border-destructive/20"
                   }`}
                 >
@@ -197,7 +197,7 @@ function SingleTermRow({
           <button
             type="button"
             onClick={onPickMaster}
-            className="flex items-center gap-1 text-[0.6875rem] text-emerald-600 dark:text-emerald-400 hover:underline"
+            className="flex items-center gap-1 text-[0.6875rem] text-foreground hover:underline"
           >
             <BookOpen size={11} />
             {term.masterTermName ? "Change" : "From Master"}
@@ -210,8 +210,8 @@ function SingleTermRow({
           >
             {term.applicable ? (
               <>
-                <ToggleRight size={15} className="text-emerald-500" />
-                <span className="text-emerald-600 dark:text-emerald-400 hidden sm:inline">On</span>
+                <ToggleRight size={15} className="text-foreground" />
+                <span className="text-foreground hidden sm:inline">On</span>
               </>
             ) : (
               <>
@@ -246,7 +246,7 @@ function SingleTermRow({
       {expanded && (
         <div className="border-t border-border bg-card p-3 space-y-3">
           {!term.applicable ? (
-            <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-4 flex flex-col items-center gap-1.5 text-center">
+            <div className="rounded-lg border border-dashed border-foreground/40 px-4 py-4 flex flex-col items-center gap-1.5 text-center">
               <Tag size={15} className="text-muted-foreground/40" />
               <p className="text-[0.6875rem] text-muted-foreground">
                 Toggle on to configure this discount term
@@ -264,8 +264,8 @@ function SingleTermRow({
                       className={
                         "rounded-lg border px-3 py-1.5 text-xs font-heading font-semibold transition-all " +
                         (term.type === t
-                          ? "border-emerald-500/40 bg-emerald-500/[0.07] text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20"
-                          : "border-border bg-background text-muted-foreground hover:border-emerald-500/30")
+                          ? "border-foreground/40 bg-primary/10 text-foreground ring-1 ring-foreground/30"
+                          : "border-border bg-background text-muted-foreground hover:border-foreground")
                       }
                     >
                       {t === "percentage"
@@ -451,18 +451,18 @@ export function BillingAccordion({
         }}
       />
 
-      <div className="rounded-xl border border-border overflow-hidden">
+      <div className="border border-foreground overflow-hidden bg-card">
         {/* ── Section Header ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 bg-muted/40">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/10 shrink-0">
-              <Receipt size={14} className="text-emerald-500" />
+            <div className="flex items-center justify-center w-[22px] h-[22px] rounded-full shrink-0 text-foreground" style={{ border: "1.5px solid hsl(var(--foreground))" }}>
+              <Receipt size={14} className="text-foreground" />
             </div>
             <div className="min-w-0">
               <p className="text-sm font-heading font-semibold text-foreground flex items-center gap-1.5">
                 Billing Terms
                 {isMulti && terms.length > 1 && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.625rem] font-heading px-1.5 py-0.5 border border-emerald-500/20">
+                  <span className="inline-flex items-center gap-0.5 rounded-none bg-primary/10 text-foreground text-[0.625rem] font-heading px-1.5 py-0.5 border border-foreground/40">
                     <Layers size={9} />
                     {terms.length}
                   </span>
@@ -470,7 +470,7 @@ export function BillingAccordion({
               </p>
               <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate">
                 {activeCount > 0 && hasBase ? (
-                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                  <span className="text-foreground font-medium">
                     {activeCount} term{activeCount > 1 ? "s" : ""} applied · Net
                     ₹{fmt(bd.netAmount)}
                   </span>
@@ -533,7 +533,7 @@ export function BillingAccordion({
                     <button
                       type="button"
                       onClick={addTerm}
-                      className="w-full rounded-xl border border-dashed border-border hover:border-emerald-500/40 hover:bg-emerald-500/[0.03] transition-all px-4 py-3 flex items-center justify-center gap-2 text-xs text-muted-foreground hover:text-emerald-500"
+                      className="w-full rounded-xl border border-dashed border-border hover:border-foreground hover:bg-primary/10 transition-all px-4 py-3 flex items-center justify-center gap-2 text-xs text-muted-foreground hover:text-foreground"
                     >
                       <Plus size={13} />
                       Add another billing term
@@ -543,7 +543,7 @@ export function BillingAccordion({
                   /* Legacy single-term UI */
                   <div className="space-y-4">
                     {!discount.applicable ? (
-                      <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-5 flex flex-col items-center gap-2 text-center">
+                      <div className="rounded-lg border border-dashed border-foreground/40 px-4 py-5 flex flex-col items-center gap-2 text-center">
                         <Tag size={18} className="text-muted-foreground/40" />
                         <p className="text-xs text-muted-foreground">
                           Toggle discount on or pick a term from master
@@ -563,8 +563,8 @@ export function BillingAccordion({
                                 className={
                                   "rounded-lg border px-3 py-2 text-xs font-heading font-semibold transition-all " +
                                   (discount.type === t
-                                    ? "border-emerald-500/40 bg-emerald-500/[0.07] text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20"
-                                    : "border-border bg-background text-muted-foreground hover:border-emerald-500/30")
+                                    ? "border-foreground/40 bg-primary/10 text-foreground ring-1 ring-foreground/30"
+                                    : "border-border bg-background text-muted-foreground hover:border-foreground")
                                 }
                               >
                                 {t === "percentage"
@@ -620,7 +620,7 @@ export function BillingAccordion({
                 </p>
 
                 {!hasBase ? (
-                  <div className="flex flex-col items-center justify-center gap-2 text-center py-8 rounded-lg border border-dashed border-border bg-muted/20">
+                  <div className="flex flex-col items-center justify-center gap-2 text-center py-8 rounded-lg border border-dashed border-foreground/40">
                     <AlertCircle
                       size={16}
                       className="text-muted-foreground/40"
@@ -683,9 +683,9 @@ export function BillingAccordion({
                     const hasPreTerms = preTerms.length > 0;
 
                     return (
-                      <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50 text-xs">
+                      <div className="border border-foreground overflow-hidden divide-y divide-border/60 text-xs bg-card">
                         {/* Basic Amount */}
-                        <div className="flex justify-between items-center px-3 py-2 bg-muted/20">
+                        <div className="flex justify-between items-center px-3 py-2">
                           <span className="text-muted-foreground">
                             Basic Amount
                           </span>
@@ -716,7 +716,7 @@ export function BillingAccordion({
                               <span
                                 className={
                                   isAdd
-                                    ? "text-green-500 tabular-nums"
+                                    ? "text-foreground tabular-nums"
                                     : "text-destructive tabular-nums"
                                 }
                               >
@@ -729,7 +729,7 @@ export function BillingAccordion({
 
                         {/* Taxable Amount (shown when pre-GST terms exist) */}
                         {hasPreTerms && (
-                          <div className="flex justify-between items-center px-3 py-1.5 bg-muted/30">
+                          <div className="flex justify-between items-center px-3 py-1.5 border-t border-foreground">
                             <span className="text-muted-foreground font-medium">
                               Taxable Amount
                               <span className="ml-1 text-[0.625rem] opacity-60">
@@ -773,7 +773,7 @@ export function BillingAccordion({
                         </div>
 
                         {/* Gross Amount */}
-                        <div className="flex justify-between items-center px-3 py-2 bg-muted/30">
+                        <div className="flex justify-between items-center px-3 py-2 border-t border-foreground">
                           <span className="text-muted-foreground">
                             Gross Amount
                             <span className="ml-1 text-[0.625rem] opacity-60">
@@ -806,7 +806,7 @@ export function BillingAccordion({
                               <span
                                 className={
                                   isAdd
-                                    ? "text-green-500 tabular-nums"
+                                    ? "text-foreground tabular-nums"
                                     : "text-destructive tabular-nums"
                                 }
                               >
@@ -818,14 +818,14 @@ export function BillingAccordion({
                         })}
 
                         {/* Net Payable */}
-                        <div className="flex justify-between items-center px-3 py-2.5 bg-emerald-500/[0.06]">
+                        <div className="flex justify-between items-center px-3 py-2.5 border-t-2 border-foreground">
                           <span className="font-heading font-semibold text-foreground">
                             Net Payable
                             <span className="ml-1 text-[0.625rem] font-normal opacity-60">
                               Final amount due
                             </span>
                           </span>
-                          <span className="font-heading font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                          <span className="font-heading font-bold text-foreground tabular-nums">
                             ₹{fmt(Math.round(netPayable * 100) / 100)}
                           </span>
                         </div>

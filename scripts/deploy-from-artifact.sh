@@ -8,7 +8,7 @@ set -euo pipefail
 #
 # How to use this, end to end:
 #
-#   1. In GitHub: open the repo -> Actions tab -> "CI" workflow on the left
+#   1. In GitHub: open the repo -> Actions tab -> "Build & Test" workflow on the left
 #      -> "Run workflow" button -> pick the branch (usually main) -> Run.
 #   2. Wait for the run to finish (green check). Open it, scroll down to
 #      "Artifacts", and download the .zip there.

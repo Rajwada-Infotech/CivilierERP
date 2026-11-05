@@ -90,38 +90,40 @@ function fmtNum(n: number | null): string {
 
 function DiffCell({ before, after }: { before: number | null; after: number | null }) {
   if (before == null && after != null) {
-    return <td className="px-2.5 py-1.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmtNum(after)}</td>;
+    return <td className="px-2.5 py-1.5 text-right tabular-nums font-semibold text-foreground">{fmtNum(after)}</td>;
   }
   if (after == null && before != null) {
-    return <td className="px-2.5 py-1.5 text-right tabular-nums text-red-600 dark:text-red-400 line-through">{fmtNum(before)}</td>;
+    return <td className="px-2.5 py-1.5 text-right tabular-nums text-destructive line-through">{fmtNum(before)}</td>;
   }
   if (before === after) {
-    return <td className="px-2.5 py-1.5 text-right tabular-nums">{fmtNum(after)}</td>;
+    return <td className="px-2.5 py-1.5 text-right tabular-nums text-muted-foreground">{fmtNum(after)}</td>;
   }
   return (
     <td className="px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap">
-      <span className="text-red-600 dark:text-red-400 line-through">{fmtNum(before)}</span>
-      {" → "}
-      <span className="text-emerald-600 dark:text-emerald-400 font-medium">{fmtNum(after)}</span>
+      <span className="text-destructive line-through">{fmtNum(before)}</span>
+      <span className="text-muted-foreground"> → </span>
+      <span className="font-semibold text-foreground">{fmtNum(after)}</span>
     </td>
   );
 }
 
+const TH = "px-2.5 py-2 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+
 function ItemsDiffTable({ entries }: { entries: ItemDiffEntry[] }) {
   return (
-    <div className="rounded-lg border border-border overflow-x-auto">
+    <div className="overflow-x-auto" style={{ border: "1px solid hsl(var(--border))" }}>
       <table className="w-full text-[0.6875rem] min-w-[420px]">
-        <thead className="bg-muted/40">
-          <tr>
-            <th className="text-left px-2.5 py-1.5 font-medium text-muted-foreground">Item</th>
-            <th className="text-right px-2.5 py-1.5 font-medium text-muted-foreground">Quantity</th>
-            <th className="text-right px-2.5 py-1.5 font-medium text-muted-foreground">Rate</th>
-            <th className="text-right px-2.5 py-1.5 font-medium text-muted-foreground">Amount</th>
+        <thead>
+          <tr style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+            <th className={`text-left ${TH}`}>Item</th>
+            <th className={`text-right ${TH}`}>Quantity</th>
+            <th className={`text-right ${TH}`}>Rate</th>
+            <th className={`text-right ${TH}`}>Amount</th>
           </tr>
         </thead>
         <tbody>
           {entries.map((e) => (
-            <tr key={e.key} className="border-t border-border/60">
+            <tr key={e.key} style={{ borderTop: "1px solid hsl(var(--border) / 0.6)" }}>
               <td className="px-2.5 py-1.5">
                 <div className="font-medium">{e.name}</div>
                 {e.unit && <div className="text-[0.625rem] text-muted-foreground">{e.unit}</div>}
@@ -210,9 +212,7 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
       header: "Amendment No",
       size: 130,
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400">
-          {String(getValue() || "—")}
-        </span>
+        <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{String(getValue() || "—")}</span>
       ),
     },
     {
@@ -222,10 +222,8 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
       size: 220,
       cell: ({ row }) => (
         <div className="min-w-0">
-          <p className="truncate">{row.original.RefDocLabel}</p>
-          <p className="font-mono text-[0.6875rem] text-muted-foreground truncate">
-            {row.original.RefDocNo || "—"}
-          </p>
+          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground truncate">{row.original.RefDocLabel}</p>
+          <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground truncate mt-1">{row.original.RefDocNo || "—"}</p>
         </div>
       ),
     },
@@ -256,8 +254,8 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
       size: 170,
       cell: ({ row }) => (
         <div className="min-w-0">
-          <p className="truncate text-xs">{row.original.CreatedBy || "—"}</p>
-          <p className="text-[0.6875rem] text-muted-foreground truncate">
+          <p className="truncate text-xs font-medium text-foreground">{row.original.CreatedBy || "—"}</p>
+          <p className="text-[0.6875rem] text-muted-foreground truncate tabular-nums mt-0.5">
             {fmtDateTime(row.original.CreatedAt)}
           </p>
         </div>
@@ -273,10 +271,10 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
           <button
             type="button"
             onClick={() => openDetail(row.original.Id)}
-            className="p-1.5 rounded-lg text-violet-500 hover:bg-violet-500/10 transition-colors"
+            className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
             title="View field changes"
           >
-            <FileDiff size={15} />
+            <FileDiff size={13} />
           </button>
         </div>
       ),
@@ -286,10 +284,30 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
   return (
     <Shell
       title={title}
-      subtitle="Audit trail of edits made to already-approved documents."
+      subtitle="Every change made to a document after it was approved: what it was, what it is now, who changed it and when."
       icon={History}
     >
       <Breadcrumbs items={[{ label: title }]} />
+
+      {!loading && rows.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-y-4">
+          {(() => {
+            const month = new Date().toISOString().slice(0, 7);
+            return [
+              { label: "Amendments", value: rows.length, note: "recorded in all" },
+              { label: "This month", value: rows.filter((r) => String(r.CreatedAt || "").slice(0, 7) === month).length, note: "since the 1st" },
+              { label: "Documents changed", value: new Set(rows.map((r) => `${r.RefDocLabel}|${r.RefDocNo}`)).size, note: "distinct documents" },
+              { label: "People", value: new Set(rows.map((r) => r.CreatedBy).filter(Boolean)).size, note: "made a change" },
+            ];
+          })().map((x, i) => (
+            <div key={x.label} className={i ? "sm:pl-5 sm:border-l sm:border-border" : ""}>
+              <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{x.label}</p>
+              <p className="font-heading text-2xl sm:text-[1.75rem] font-semibold tabular-nums tracking-tight text-foreground leading-none mt-2">{x.value.toLocaleString("en-IN")}</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-1.5">{x.note}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       <DataTable
         data={rows}
@@ -303,47 +321,42 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
       <Dialog open={!!detail || detailLoading} onOpenChange={(open) => !open && setDetail(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto" hideCloseButton>
           <DialogHeader>
-            <div className="flex items-center justify-between gap-2">
-              <DialogTitle className="font-mono text-sm">
-                {detail?.AmendmentNo || "Loading..."}
-              </DialogTitle>
-              <button
-                onClick={() => setDetail(null)}
-                className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
-              >
+            <div className="flex items-end justify-between gap-3 pb-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <div className="min-w-0">
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Amendment{detail ? ` · ${detail.RefDocLabel}` : ""}
+                </p>
+                <DialogTitle className="font-heading text-lg font-bold tabular-nums tracking-tight mt-1">{detail?.AmendmentNo || "Loading…"}</DialogTitle>
+              </div>
+              <button onClick={() => setDetail(null)} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors" aria-label="Close">
                 <X size={16} />
               </button>
             </div>
           </DialogHeader>
 
           {detail && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div>
-                  <p className="text-muted-foreground">Document</p>
-                  <p className="font-medium">{detail.RefDocLabel} — {detail.RefDocNo || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Changed By</p>
-                  <p className="font-medium">{detail.CreatedBy || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Changed At</p>
-                  <p className="font-medium">{fmtDateTime(detail.CreatedAt)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Project</p>
-                  <p className="font-medium">{detail.ProjectName || "—"}</p>
-                </div>
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-3">
+                {[
+                  { l: "Document", v: detail.RefDocNo || "—" },
+                  { l: "Project", v: detail.ProjectName || "—" },
+                  { l: "Changed by", v: detail.CreatedBy || "—" },
+                  { l: "Changed at", v: fmtDateTime(detail.CreatedAt) },
+                ].map((x) => (
+                  <div key={x.l} className="min-w-0">
+                    <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{x.l}</p>
+                    <p className="text-[0.8125rem] font-medium text-foreground mt-1 break-words">{x.v}</p>
+                  </div>
+                ))}
               </div>
 
-              <div className="rounded-lg border border-border overflow-x-auto">
+              <div className="overflow-x-auto" style={{ border: "1px solid hsl(var(--foreground))" }}>
                 <table className="w-full text-xs min-w-[420px]">
-                  <thead className="bg-muted/40">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Field</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Before</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">After</th>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                      <th className={`text-left ${TH}`} style={{ paddingLeft: 12 }}>Field</th>
+                      <th className={`text-left ${TH}`}>Was</th>
+                      <th className={`text-left ${TH}`}>Now</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -352,7 +365,7 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
                       const newItems = tryParseItems(c.NewValue);
                       if (oldItems || newItems) {
                         return (
-                          <tr key={c.Id} className="border-t border-border">
+                          <tr key={c.Id} style={{ borderTop: "1px solid hsl(var(--border) / 0.6)" }}>
                             <td className="px-3 py-2 font-medium align-top whitespace-nowrap">
                               {c.FieldLabel || c.FieldName}
                             </td>
@@ -363,12 +376,12 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
                         );
                       }
                       return (
-                        <tr key={c.Id} className="border-t border-border">
+                        <tr key={c.Id} style={{ borderTop: "1px solid hsl(var(--border) / 0.6)" }}>
                           <td className="px-3 py-2 font-medium">{c.FieldLabel || c.FieldName}</td>
-                          <td className="px-3 py-2 text-red-600 dark:text-red-400 break-all tabular-nums">
+                          <td className="px-3 py-2 text-destructive line-through decoration-destructive/60 break-all tabular-nums">
                             {fmtCellValue(c.OldValue)}
                           </td>
-                          <td className="px-3 py-2 text-emerald-600 dark:text-emerald-400 break-all tabular-nums">
+                          <td className="px-3 py-2 font-semibold text-foreground break-all tabular-nums">
                             {fmtCellValue(c.NewValue)}
                           </td>
                         </tr>

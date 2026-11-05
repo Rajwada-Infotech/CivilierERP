@@ -306,7 +306,7 @@ export function ErrorPage({ error }: ErrorPageProps) {
           {/* Dev-only error detail — same pattern as original */}
           {isDev && (
             <div className="mt-3 border border-border/50 rounded bg-muted/40 p-3">
-              <p className="font-mono text-[0.6875rem] text-muted-foreground break-all">
+              <p className="font-mono text-[0.6875rem] text-muted-foreground break-all !whitespace-normal">
                 {errorMessage}
               </p>
             </div>

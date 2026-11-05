@@ -10,6 +10,7 @@ import { buildFinanceNavItems } from "@/components/layout/sidebars/FinanceSideba
 import { fixedAssetNavItems } from "@/components/layout/sidebars/FixedAssetSidebar";
 import { followupNavItems } from "@/components/layout/sidebars/FollowupSidebar";
 import { hrPayrollNavItems } from "@/components/layout/sidebars/HrPayrollSidebar";
+import { legalNavItems } from "@/components/layout/sidebars/LegalSidebar";
 import { loanNavItems } from "@/components/layout/sidebars/LoanSidebar";
 import { maintenanceNavItems } from "@/components/layout/sidebars/MaintenanceSidebar";
 import { materialNavItems } from "@/components/layout/sidebars/MaterialSidebar";
@@ -28,6 +29,7 @@ import {
   fixedAssetSetupItems,
   followupSetupItems,
   hrPayrollSetupItems,
+  legalSetupItems,
   maintenanceSetupItems,
   materialSetupItems,
   salesAutomationSetupItems,
@@ -100,6 +102,7 @@ export const COMPASS_KEYWORDS: Record<string, string[]> = {
   "/masters/contractors": ["contractor master"],
   "/masters/account-group": ["ac group", "chart of accounts"],
   "/masters/general-ledger": ["ledger", "gl", "coa"],
+  "/admin/script-console": ["script", "scripts", "run script", "docker exec", "node", "console"],
 };
 
 // ─── Sources ──────────────────────────────────────────────────────────────────
@@ -107,7 +110,7 @@ export const COMPASS_KEYWORDS: Record<string, string[]> = {
 interface ModuleSource {
   id: string;
   label: string;
-  nav: (ctx: { isAdminTier: boolean }) => NavItem[];
+  nav: (ctx: { isAdminTier: boolean; isSuperAdmin: boolean }) => NavItem[];
   setup?: SetupItem[];
 }
 
@@ -129,7 +132,9 @@ const SOURCES: ModuleSource[] = [
   { id: "fixed-asset", label: "Fixed Asset", nav: () => fixedAssetNavItems, setup: fixedAssetSetupItems },
   { id: "maintenance", label: "Maintenance", nav: () => maintenanceNavItems, setup: maintenanceSetupItems },
   { id: "hr-payroll", label: "HR and Payroll", nav: () => hrPayrollNavItems, setup: hrPayrollSetupItems },
-  { id: "admin", label: "Admin", nav: () => buildAdminNavItems(0), setup: adminSetupItems },
+  { id: "legal", label: "Legal", nav: () => legalNavItems, setup: legalSetupItems },
+  // The Admin menu lists the Script Console for a super admin only, so the builder is told who is asking.
+  { id: "admin", label: "Admin", nav: ({ isSuperAdmin }) => buildAdminNavItems(0, isSuperAdmin), setup: adminSetupItems },
   { id: "dba", label: "DBA", nav: () => dbaNavItems },
   { id: "super_admin", label: "Super Admin", nav: () => superAdminNavItems },
 ];
@@ -145,7 +150,7 @@ const ADMIN_INBOX_ROUTE = "/admin/approval/inbox";
 const isNavigable = (route: string | undefined): route is string =>
   !!route && route.startsWith("/") && !/[:*]/.test(route);
 
-function collect(src: ModuleSource, isAdminTier: boolean): CompassEntry[] {
+function collect(src: ModuleSource, isAdminTier: boolean, isSuperAdmin: boolean): CompassEntry[] {
   const out: CompassEntry[] = [];
   const push = (
     route: string | undefined,
@@ -163,7 +168,7 @@ function collect(src: ModuleSource, isAdminTier: boolean): CompassEntry[] {
     });
   };
 
-  for (const item of src.nav({ isAdminTier })) {
+  for (const item of src.nav({ isAdminTier, isSuperAdmin })) {
     push(item.path, item.label, { pageKey: item.pageKey, isDashboard: item.isDashboard });
     for (const c of item.children ?? []) {
       push(c.path, c.label, { group: item.label, pageKey: c.pageKey, state: c.state });
@@ -200,7 +205,7 @@ export function buildCompassEntries(access: CompassAccess): CompassEntry[] {
     if (src.id === "super_admin" && role !== "super_admin") continue;
     if (src.id === "dba" && !isAdminTier) continue;
 
-    const raw = collect(src, isAdminTier);
+    const raw = collect(src, isAdminTier, role === "super_admin");
     let allowed: CompassEntry[];
 
     if (src.id === "admin" && !isAdminTier) {

@@ -1,10 +1,15 @@
-const allowRoles = require("../middleware/role");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+// A block (by id) and any project given must be inside the user's projects.
+require("../services/projectScope").setupScopeGuard(router, { idPaths: [["/", "block"]] });
+// Block Master's own rights (admins always pass). Writes used to be admin-only while the page offered them to anyone
+// holding these rights, so everyone else got "Forbidden".
+const PAGE = "followup-block-master";
 const { getPool, sql } = require("../db");
 const { getBlockLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
@@ -61,10 +66,14 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         b.UpdatedAt,
         COALESCE(unitLock.LockBookingNo, parkLock.LockBookingNo) AS LockBookingNo,
         COALESCE(unitLock.LockHoldId, parkLock.LockHoldId) AS LockHoldId,
-        planTags.PlanIds AS PaymentPlanIds, planTags.PlanNames AS PaymentPlanNames
+        planTags.PlanIds AS PaymentPlanIds, planTags.PlanNames AS PaymentPlanNames,
+        COALESCE(bt.Name, pt.Name) AS TypeName,
+        CASE WHEN b.ProjectTypeId IS NOT NULL THEN 1 ELSE 0 END AS HasOwnType
       FROM dbo.BlockMaster b
       LEFT JOIN dbo.enterprise e
         ON e.id = b.ProjectId AND e.business_type = 'P'
+      LEFT JOIN dbo.ProjectTypeMaster bt ON bt.Id = b.ProjectTypeId
+      LEFT JOIN dbo.ProjectTypeMaster pt ON pt.Id = e.project_type_id
       OUTER APPLY (
         SELECT STRING_AGG(CAST(bpp.PlanId AS VARCHAR(20)), ',') AS PlanIds,
                STRING_AGG(pp.PlanName, ', ') AS PlanNames
@@ -76,7 +85,7 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         SELECT TOP 1 bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
         FROM dbo.UnitMaster u
         LEFT JOIN dbo.CrmBooking bk
-          ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
+          ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
         LEFT JOIN dbo.CrmInventoryHold h
           ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
         WHERE u.BlockId = b.Id AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)
@@ -90,6 +99,7 @@ router.get("/", cache("block-master", 300), async (req, res) => {
           ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
         WHERE s.BlockId = b.Id AND (pa.Id IS NOT NULL OR h.Id IS NOT NULL)
       ) parkLock
+      ${req.projectScope ? `WHERE ${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()}` : ""}
       ORDER BY e.name, b.BlockName
     `);
     res.json(result.recordset);
@@ -102,7 +112,7 @@ router.get("/", cache("block-master", 300), async (req, res) => {
 // GET projects for dropdown (enterprise where business_type = P)
 router.get(
   "/projects",
-  cache("block-master-projects", 600),
+  cache("block-master-projects", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -110,7 +120,7 @@ router.get(
       SELECT id AS Id, name AS Name
       FROM dbo.enterprise
       WHERE business_type = 'P'
-        AND ISNULL(discontinue, 0) = 0
+        AND ISNULL(discontinue, 0) = 0${require("../services/projectScope").projectPredicate(req.projectScope, "id")}
       ORDER BY name
     `);
       res.json(result.recordset);
@@ -139,7 +149,7 @@ router.get("/applicable-payment-plans", async (req, res) => {
 });
 
 // POST — add block
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   const { ProjectId, BlockName, IsActive, PaymentPlanIds } = req.body;
   const createdBy = req.user?.userId || null;
   try {
@@ -226,7 +236,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update block
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockName, IsActive, PaymentPlanIds } = req.body;
   const updatedBy = req.user?.userId || null;
@@ -315,7 +325,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 //      still physically blocks a hard DELETE. This check catches that and
 //      reports it clearly instead of letting a raw SQL FK-violation surface.
 // Only once BOTH come back clear does the row actually get removed.
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
@@ -450,13 +460,14 @@ router.get("/:id/floors", async (req, res) => {
 // PUT /api/block-master/:id/unit-type-specs — full replace for this block
 // Receives an array of {UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt,
 // SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt}.
-router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id/unit-type-specs", requirePageRight(PAGE, "edit"), async (req, res) => {
   const blockId = parseInt(req.params.id, 10);
   if (!Number.isFinite(blockId)) return res.status(400).json({ error: "Invalid block id" });
   const specs = req.body;
   if (!Array.isArray(specs)) return res.status(400).json({ error: "Expected an array" });
   try {
     const pool = getPool();
+    const skippedUnits = [];
     // Full replace — delete existing then re-insert, same pattern as payment plan tag sync.
     await pool.request().input("blockId", sql.Int, blockId)
       .query("DELETE FROM dbo.BlockUnitTypeSpec WHERE BlockId = @blockId");
@@ -493,6 +504,14 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
       // same unit type. The spec is the single source of truth — individual
       // unit rows must always reflect whatever the block-level spec says.
       // AreaSqFt is the legacy single-field kept in sync with SBU.
+      //
+      // Excludes any unit getUnitLockReason would refuse to edit (booked,
+      // held, or a live Application pointing at it) — unitMaster.js's own
+      // PUT /:id already blocks changing a locked unit's area/rate one at a
+      // time for exactly this reason ("letting staff silently change a sold
+      // unit's area/rate underneath a live booking is exactly the kind of
+      // drift that caused the A1-1001 mess"); this cascade was bypassing
+      // that same rule in bulk.
       await pool.request()
         .input("blockId",  sql.Int, blockId)
         .input("unitType", sql.NVarChar(50),   s.UnitType.trim())
@@ -502,7 +521,7 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
         .input("openTerr", sql.Decimal(18, 2), openTerr)
         .input("rate",     sql.Decimal(18, 2), rate)
         .query(`
-          UPDATE dbo.UnitMaster SET
+          UPDATE u SET
             CarpetAreaSqFt       = @carpet,
             BuiltUpAreaSqFt      = @builtUp,
             SuperBuiltUpAreaSqFt = @sbu,
@@ -510,13 +529,35 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
             OpenTerraceAreaSqFt  = @openTerr,
             RatePerSqFt          = @rate,
             UpdatedAt            = SYSDATETIME()
-          WHERE BlockId = @blockId AND UnitType = @unitType AND IsActive = 1
+          FROM dbo.UnitMaster u
+          WHERE u.BlockId = @blockId AND u.UnitType = @unitType AND u.IsActive = 1
+            AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred'))
+            AND NOT EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME())
+            AND NOT EXISTS (SELECT 1 FROM dbo.CrmApplication app WHERE app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Converted'))
         `);
+      const skippedCount = await pool.request()
+        .input("blockId",  sql.Int, blockId)
+        .input("unitType", sql.NVarChar(50), s.UnitType.trim())
+        .query(`SELECT COUNT(*) AS n FROM dbo.UnitMaster u
+          WHERE u.BlockId = @blockId AND u.UnitType = @unitType AND u.IsActive = 1
+            AND (
+              EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred'))
+              OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME())
+              OR EXISTS (SELECT 1 FROM dbo.CrmApplication app WHERE app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Converted'))
+            )`);
+      if (skippedCount.recordset[0].n > 0) {
+        skippedUnits.push({ unitType: s.UnitType.trim(), count: skippedCount.recordset[0].n });
+      }
     }
     await bumpCacheVersion("block-master");
     await bumpFlatMasterCaches();
     await bumpCacheVersion("unit-master");
-    res.json({ message: "Unit type specs saved" });
+    res.json({
+      message: skippedUnits.length
+        ? `Unit type specs saved — ${skippedUnits.map((s) => `${s.count} ${s.unitType} unit(s)`).join(", ")} kept their original area/rate (booked, held, or applied for)`
+        : "Unit type specs saved",
+      skippedUnits,
+    });
   } catch (err) {
     console.error("[block-master] PUT unit-type-specs error:", err.message);
     res.status(500).json({ error: err.message });

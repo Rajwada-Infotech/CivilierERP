@@ -201,11 +201,11 @@ export const getProjects = async (): Promise<ProjectOption[]> => {
   return normalizeArray<any>(raw).map((p) => ({ id: String(p.id), name: p.label ?? "", companyId: p.company_id != null ? String(p.company_id) : null }));
 };
 
-export interface GodownOption { id: number; name: string; projectId: number | null }
+export interface GodownOption { id: number; name: string; projectId: number | null; isMain: boolean }
 
 export const getGodowns = async (): Promise<GodownOption[]> => {
   const raw = await fetchWithAuth("/api/godowns").then((r) => r.json().catch(() => ({})));
-  return normalizeArray<any>(raw).map((g) => ({ id: g.GodownID, name: g.GodownName, projectId: g.ProjectID ?? null }));
+  return normalizeArray<any>(raw).map((g) => ({ id: g.GodownID, name: g.GodownName, projectId: g.ProjectID ?? null, isMain: !!g.IsMain }));
 };
 
 export const fetchFinYearOptions = async (): Promise<{ id: number; label: string }[]> => {

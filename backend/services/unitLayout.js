@@ -295,6 +295,24 @@ function floorLabelOf(floorNo) {
   return floorNo === 0 ? "G" : floorNo != null ? String(floorNo) : null;
 }
 
+// The Floor a work chain (dbo.DependencyMaster.Floor) records for a unit.
+// A unit with a floor uses it. A unit with none follows its block's effective
+// project type: a type without floors (plotted) places the villa by the
+// plot(s) it was built on; a type with floors means the floor is missing, which
+// is reported rather than written as the text "null".
+async function chainFloorLabel(db, unit, { asLabel = true } = {}) {
+  if (unit.FloorNo != null) return asLabel ? floorLabelOf(unit.FloorNo) : String(unit.FloorNo);
+  const { getEffectiveType } = require("./projectType");
+  const type = await getEffectiveType(db, { blockId: unit.BlockId });
+  if (type.HasFloors) throw new Error(`${unit.UnitName} has no floor — set its floor in Auto Project Setup first`);
+  const r = await db.request().input("u", sql.Int, unit.UnitId ?? unit.Id).query(`
+    SELECT N'Plot ' + STRING_AGG(PlotName, '+') WITHIN GROUP (ORDER BY PlotName) AS Plots
+    FROM dbo.PlotMaster WHERE ConvertedUnitId = @u AND IsActive = 1`);
+  const plots = r.recordset[0]?.Plots;
+  if (!plots) throw new Error(`${unit.UnitName} is in a ${type.Name} block but isn't built on a plot — convert it from its plot first`);
+  return plots;
+}
+
 // Brings one unit's RoomMaster rows in line with its layout's composition.
 // Matching is by RoomCategoryId COUNT, not by name — so a Bathroom going
 // from 1 to 2 turns "Bathroom" into "Bathroom 1" + a new "Bathroom 2"
@@ -309,8 +327,18 @@ function floorLabelOf(floorNo) {
 // syncs of the same unit (e.g. a composition save propagating while an
 // admin runs the bulk generate) serialize instead of both inserting.
 // `cache` (a Map) lets a batch caller share layout/composition lookups.
-async function syncUnitRooms(db, unitId, { removeUnused = false, createdBy = null, cache = null } = {}) {
+async function syncUnitRooms(db, unitId, { removeUnused = false, createdBy = null, cache = null, villaTool = false } = {}) {
   const result = { created: 0, reactivated: 0, deactivated: 0, renamed: 0, keptWithWork: [], layout: null, skipped: null };
+
+  // A villa built on a plot owns its rooms floor by floor (its villa type's
+  // plan). Generic room tools — Flat Master generate / bulk generate, layout
+  // overrides, Unit Master edits — leave it exactly as it is; only the villa
+  // tools (convert, change type, add missing rooms) pass villaTool.
+  if (!villaTool) {
+    const isVilla = (await db.request().input("u", sql.Int, unitId)
+      .query("SELECT TOP 1 1 AS v FROM dbo.PlotMaster WHERE ConvertedUnitId = @u AND IsActive = 1")).recordset.length > 0;
+    if (isVilla) { result.skipped = "villa"; return result; }
+  }
 
   const unitRes = await db.request().input("id", sql.Int, unitId).query(`
     SELECT Id, ProjectId, BlockId, FloorNo, UnitType, LayoutTypeId
@@ -495,6 +523,28 @@ async function syncUnitRooms(db, unitId, { removeUnused = false, createdBy = nul
     result.created += inserts.length;
   }
 
+  // A villa built on a plot keeps its DPR in step with its rooms: rooms this
+  // sync added get their work chains at once (services/autoDprChains.js).
+  // Flats are left to the chainless-rooms script, as before.
+  // A villa's rooms also carry the floor they sit on, from its villa type's
+  // floor-by-floor plan (services/villaComposition.js).
+  if (result.created > 0 || result.reactivated > 0) {
+    const villa = await db.request().input("u", sql.Int, unitId)
+      .query("SELECT TOP 1 1 AS v FROM dbo.PlotMaster WHERE ConvertedUnitId = @u AND IsActive = 1");
+    if (villa.recordset.length) {
+      result.storeysSet = await require("./villaComposition").applyStoreys(db, unitId);
+    }
+  }
+  if (result.created > 0) {
+    const villa = await db.request().input("u", sql.Int, unitId)
+      .query("SELECT TOP 1 1 AS v FROM dbo.PlotMaster WHERE ConvertedUnitId = @u AND IsActive = 1");
+    if (villa.recordset.length) {
+      const dpr = await require("./autoDprChains").createChainsForUnit(db, unitId, createdBy != null ? String(createdBy) : null);
+      result.dprChainsCreated = dpr.created;
+      if (dpr.skipped.length) result.dprRoomsWithoutTemplate = dpr.skipped;
+    }
+  }
+
   return result;
 }
 
@@ -512,7 +562,7 @@ async function inferRoomCategoryId(db, roomName) {
 // unit can't roll back (or block) the rest. Returns totals + per-unit
 // failures.
 async function syncRoomsForUnits(pool, unitIds, opts = {}) {
-  const totals = { units: 0, unitsChanged: 0, created: 0, reactivated: 0, renamed: 0, deactivated: 0, skippedNoLayout: 0, failed: [] };
+  const totals = { units: 0, unitsChanged: 0, created: 0, reactivated: 0, renamed: 0, deactivated: 0, skippedNoLayout: 0, skippedVillas: 0, failed: [] };
   const cache = new Map(); // layout + composition, shared across the batch
   for (const unitId of unitIds) {
     totals.units++;
@@ -521,7 +571,8 @@ async function syncRoomsForUnits(pool, unitIds, opts = {}) {
     try {
       const r = await syncUnitRooms(tx, unitId, { ...opts, cache });
       await tx.commit();
-      if (r.skipped) totals.skippedNoLayout++;
+      if (r.skipped === "villa") totals.skippedVillas++;
+      else if (r.skipped) totals.skippedNoLayout++;
       totals.created += r.created;
       totals.reactivated += r.reactivated;
       totals.renamed += r.renamed;
@@ -858,4 +909,5 @@ module.exports = {
   ROOM_NAME_MAX,
   ROOM_HAS_WORK,
   floorLabelOf,
+  chainFloorLabel,
 };

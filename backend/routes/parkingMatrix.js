@@ -4,19 +4,20 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET /projects — mirrors unitMatrix.js
-router.get("/projects", requirePageRight("crm-parking-matrix", "view"), cache("parking-matrix-projects", 600), async (req, res) => {
+router.get("/projects", requirePageRight("crm-parking-matrix", "view"), cache("parking-matrix-projects", 600, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT id AS Id, name AS Name
       FROM dbo.enterprise
-      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0
+      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0${projectPredicate(req.projectScope, "id")}
       ORDER BY name
     `);
     res.json(result.recordset);
@@ -34,9 +35,11 @@ router.get("/blocks", requirePageRight("crm-parking-matrix", "view"), async (req
     const request = pool.request();
     let query = "SELECT Id, BlockName AS Name FROM dbo.BlockMaster WHERE IsActive = 1";
     if (Number.isFinite(projectId)) {
+      if (!assertProjectAllowed(req, res, projectId)) return;
       request.input("pid", sql.Int, projectId);
       query += " AND ProjectId = @pid";
     }
+    query += projectPredicate(req.projectScope, "ProjectId");
     query += " ORDER BY BlockName";
     const result = await request.query(query);
     res.json(result.recordset);
@@ -57,6 +60,8 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
     const pool = getPool();
     const projectId = parseInt(req.query.projectId, 10);
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+    // A user limited to some projects sees only their matrices (any project id used to be served).
+    if (!assertProjectAllowed(req, res, projectId)) return;
     const blockId = parseInt(req.query.blockId, 10);
 
     const request = pool.request().input("pid", sql.Int, projectId);
@@ -72,7 +77,8 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
         pa.Id AS AllotmentId, pa.BookingId, pa.CreatedAt AS AllotmentDate, b.BookingNo, b.Status AS BookingStatus, b.ConfirmDeadline,
         pa.TotalAmount, pa.PaymentStatus AS AllotmentPaymentStatus, pa.Quantity,
         CASE WHEN pa.BookingId IS NOT NULL AND EXISTS (
-          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = pa.BookingId AND m.MilestoneNo = 1 AND m.Status = 'Paid'
+          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = pa.BookingId AND m.MilestoneNo = 1
+            AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL AND m.Status = 'Paid'
         ) THEN 1 ELSE 0 END AS Milestone1Paid,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,
@@ -82,7 +88,7 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
       FROM dbo.ParkingSlot s
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = s.BlockId
       LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
-      LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME())
+      LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmApplication a ON a.Id = ISNULL(pa.ApplicationId, b.ApplicationId)
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
       LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()

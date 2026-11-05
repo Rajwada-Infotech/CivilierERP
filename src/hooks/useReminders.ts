@@ -234,6 +234,13 @@ const REMINDER_PAGE_KEYS: Record<string, string[]> = {
   grn: ["grn-master", "grns"],
   tds: ["tds-master"],
   work_order: ["work-order", "engineering-work-order"],
+  // Every other source too: a reminder only shows to someone who may open the page it links to. (The server
+  // already limits each list to the user's own projects.)
+  expense_emi: ["expense-booking"],
+  loan_emi: ["loan-sanction"],
+  material_request: ["material-request"],
+  pdc: ["reports"],
+  followup: ["followup-dashboard"],
 };
 
 function hasReminderAccess(
@@ -269,10 +276,10 @@ export async function fetchAllReminders(
       : Promise.resolve(null);
 
   const [poRes, grnRes, tdsRes, woRes] = await Promise.allSettled([
-    maybeFetch("/api/purchase-orders", "purchase_order"),
-    maybeFetch("/api/grns", "grn"),
+    maybeFetch("/api/purchase-orders?limit=500", "purchase_order"),
+    maybeFetch("/api/grns?limit=500", "grn"),
     maybeFetch("/api/tds-master", "tds"),
-    maybeFetch("/api/work-orders", "work_order"),
+    maybeFetch("/api/work-orders?limit=100", "work_order"),
   ]);
 
   const toList = async (res: PromiseSettledResult<Response | null>) => {
@@ -296,6 +303,7 @@ export async function fetchAllReminders(
 
   const invoicedSources = new Set<string>();
   try {
+    if (!hasReminderAccess(role, pagePermissions, "purchase_order") && !hasReminderAccess(role, pagePermissions, "grn")) throw new Error("not needed");
     const ebRes = await fetchWithAuth("/api/expense-booking?limit=200");
     if (ebRes.ok) {
       const ebRaw = await ebRes.json();
@@ -368,6 +376,8 @@ export async function fetchAllReminders(
     toList(tdsRes),
     toList(woRes),
   ]);
+  const ifAllowed = (type: keyof typeof REMINDER_PAGE_KEYS, fetcher: () => Promise<ReminderItem[]>) =>
+    hasReminderAccess(role, pagePermissions, type) ? fetcher().catch(() => [] as ReminderItem[]) : Promise.resolve([] as ReminderItem[]);
   const [, emiItems, mrItems, pdcItems, followupItems, loanEmiItems] = await Promise.all([
     Promise.resolve().then(() => {
       process(poList, "purchase_order", "PurchaseOrderID", "PO", "/material/purchase-order");
@@ -375,11 +385,11 @@ export async function fetchAllReminders(
       process(tdsList, "tds", "Id", "TDS", "/masters/tds");
       process(woList, "work_order", "Id", "WO", "/material/work-order");
     }),
-    fetchEmiReminders().catch(() => [] as ReminderItem[]),
-    fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
-    fetchPdcReminders().catch(() => [] as ReminderItem[]),
-    fetchFollowUpReminders().catch(() => [] as ReminderItem[]),
-    fetchLoanEmiReminders().catch(() => [] as ReminderItem[]),
+    ifAllowed("expense_emi", fetchEmiReminders),
+    ifAllowed("material_request", fetchMaterialRequestReminders),
+    ifAllowed("pdc", fetchPdcReminders),
+    ifAllowed("followup", fetchFollowUpReminders),
+    ifAllowed("loan_emi", fetchLoanEmiReminders),
   ]);
 
   items.push(...emiItems);
@@ -416,6 +426,24 @@ function fetchRemindersShared(
     if (shared?.promise === promise) shared = null;
   });
   return promise;
+}
+
+/** Runs `fn` when the browser is idle (or after 2.5 s at the latest). Returns a cancel function. */
+export function runWhenIdle(fn: () => void): () => void {
+  if (typeof window === "undefined") {
+    fn();
+    return () => {};
+  }
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  if (typeof w.requestIdleCallback === "function") {
+    const id = w.requestIdleCallback(fn, { timeout: 2500 });
+    return () => w.cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(fn, 1500);
+  return () => window.clearTimeout(id);
 }
 
 export function useReminders(options: { pollingInterval?: number } = {}) {
@@ -483,11 +511,17 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
     if (!role) return;
     let cancelled = false;
 
-    refresh();
+    // The reminders badge is a nicety, but it downloads whole lists (POs, GRNs, work orders, expense bookings,
+    // material requests, PDCs…). Started at page load those requests competed with the page's own data and
+    // the browser's connection limit, so the first screen waited for them. Start once the page has settled.
+    const cancelInitial = runWhenIdle(() => {
+      if (!cancelled) void refresh();
+    });
 
     if (pollingInterval <= 0) {
       return () => {
         cancelled = true;
+        cancelInitial();
         if (backoffTimer.current) clearTimeout(backoffTimer.current);
       };
     }

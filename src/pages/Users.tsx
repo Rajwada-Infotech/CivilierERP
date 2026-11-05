@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   Edit,
   Trash2,
@@ -19,6 +19,11 @@ import { getRolesList } from "@/api/roleApi";
 import { getDepartmentOptions } from "@/api/departmentMasterApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { makeAvatarThumb } from "@/lib/avatarThumb";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { UserStatusDialog } from "@/components/UserStatusDialog";
+import { fmtIstDateTime } from "@/lib/istTime";
+import { deactivateHeldUntil, fmtHeldUntil } from "@/lib/userStatusHold";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface User {
@@ -30,9 +35,17 @@ interface User {
   RoleId: number;
   created_datetime: string;
   discontinue: boolean;
+  /** why, by whom and when the status was last switched (migration 621) */
+  StatusReason?: string | null;
+  StatusChangedAt?: string | null;
+  StatusChangedBy?: string | null;
   can_accept_tickets?: boolean;
   DepartmentId?: number | null;
   DepartmentName?: string | null;
+  /** the list's small thumbnail when there is one, else the full picture (migration 575) */
+  avatar_url?: string | null;
+  /** a picture uploaded before thumbnails existed — made once on this page */
+  avatar_needs_thumb?: boolean;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
@@ -75,7 +88,7 @@ const addUserApi = async (user: {
   return res.json().catch(() => ({}));
 };
 
-const updateUserApi = async (id: number, data: Partial<User>) => {
+const updateUserApi = async (id: number, data: Partial<User> & { reason?: string }) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders(),
@@ -128,17 +141,43 @@ const getInitials = (name: string) =>
     .join("")
     .toUpperCase();
 
-const avatarColors = [
-  "bg-violet-500",
-  "bg-blue-500",
-  "bg-emerald-500",
-  "bg-amber-500",
-  "bg-rose-500",
-  "bg-cyan-500",
-  "bg-fuchsia-500",
-  "bg-indigo-500",
-];
-const getAvatarColor = (id: number) => avatarColors[id % avatarColors.length];
+// The user's profile picture, or their initials when they have none (or it
+// fails to load). Same square frame either way.
+function UserAvatar({ name, url, size, muted, userId, needsThumb }: { name: string; url?: string | null; size: string; muted?: boolean; userId?: number; needsThumb?: boolean }) {
+  const [broken, setBroken] = useState(false);
+  // A picture uploaded before thumbnails existed: make its thumbnail once and
+  // save it, so next time the list loads only a few KB. Best-effort.
+  useEffect(() => {
+    if (!needsThumb || !url || !userId) return;
+    let done = false;
+    makeAvatarThumb(url).then((thumb) => {
+      if (!thumb || done) return;
+      fetchWithAuth(`/api/user-profile/${userId}/avatar-thumb`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ thumb }),
+      }).catch(() => {});
+    });
+    return () => { done = true; };
+  }, [needsThumb, url, userId]);
+  const frame = `${size} flex items-center justify-center font-heading font-bold flex-shrink-0 border overflow-hidden ${muted ? "border-foreground/40 text-muted-foreground" : "border-foreground text-foreground"}`;
+  if (url && !broken) {
+    return (
+      <div className={frame}>
+        <img src={url} alt={name} className={`w-full h-full object-cover ${muted ? "opacity-60 grayscale" : ""}`} onError={() => setBroken(true)} />
+      </div>
+    );
+  }
+  return <div className={frame}>{getInitials(name)}</div>;
+}
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+const INPUT = "w-full h-10 px-3 bg-card border border-foreground/40 focus:border-foreground outline-none text-sm text-foreground placeholder:text-muted-foreground/60";
+const TAG = "inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 whitespace-nowrap";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -148,7 +187,7 @@ function buildUserColumns(
   setDeleteConfirmId: (id: number | null) => void,
   setEditUserId: (id: number) => void,
   setViewUserId: (id: number) => void,
-  updateMutation: { mutate: (args: { id: number; data: any }) => void },
+  onStatus: (user: User) => void,
   ticketAccessMutation: {
     mutate: (args: { id: number; canAccept: boolean }) => void;
     isPending?: boolean;
@@ -162,11 +201,9 @@ function buildUserColumns(
       size: 240,
       cell: ({ row }) => (
         <div className="flex items-center gap-3">
-          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${getAvatarColor(row.original.id)}`}>
-            {getInitials(row.original.name)}
-          </div>
+          <UserAvatar name={row.original.name} url={row.original.avatar_url} size="w-8 h-8 text-[0.625rem]" muted={!!row.original.discontinue} userId={row.original.id} needsThumb={row.original.avatar_needs_thumb} />
           <div className="min-w-0">
-            <p className="font-medium text-foreground truncate">{row.original.name}</p>
+            <p className={`font-semibold truncate ${row.original.discontinue ? "text-muted-foreground" : "text-foreground"}`}>{row.original.name}</p>
             <p className="text-xs text-muted-foreground truncate">{row.original.email}</p>
           </div>
         </div>
@@ -177,8 +214,7 @@ function buildUserColumns(
       header: "Role",
       size: 140,
       cell: ({ row }) => (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted text-xs font-medium text-foreground">
-          <ShieldCheck size={12} className="text-primary" />
+        <span className={`${TAG} text-foreground border border-foreground/40`}>
           {row.original.roleName ?? roles.find((r) => r.RId === row.original.RoleId)?.RName ?? "—"}
         </span>
       ),
@@ -187,6 +223,7 @@ function buildUserColumns(
       accessorKey: "DepartmentName",
       header: "Department",
       size: 140,
+      meta: { className: "hidden xl:table-cell" },
       cell: ({ row }) => (
         <span className="text-sm text-foreground">
           {row.original.DepartmentName ?? "—"}
@@ -197,6 +234,7 @@ function buildUserColumns(
       accessorKey: "can_accept_tickets",
       header: "Ticket Access",
       size: 140,
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => {
         const user = row.original;
         const canAccept =
@@ -213,10 +251,10 @@ function buildUserColumns(
                 canAccept: !user.can_accept_tickets,
               })
             }
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition ${
+            className={`${TAG} border transition-colors ${
               canAccept
-                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                : "bg-muted text-muted-foreground hover:bg-muted/80"
+                ? "bg-foreground text-card border-foreground"
+                : "border-dashed border-foreground/50 text-muted-foreground hover:text-foreground hover:border-foreground"
             } ${lockedByRole ? "opacity-70 cursor-not-allowed" : ""}`}
             title={
               lockedByRole
@@ -224,11 +262,6 @@ function buildUserColumns(
                 : "Toggle ticket acceptance"
             }
           >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                canAccept ? "bg-blue-500" : "bg-muted-foreground"
-              }`}
-            />
             {canAccept ? "Can accept" : "No accept"}
           </button>
         );
@@ -237,14 +270,22 @@ function buildUserColumns(
     {
       accessorKey: "discontinue",
       header: "Status",
-      size: 110,
-      cell: ({ getValue }) => {
+      size: 190,
+      cell: ({ row, getValue }) => {
         const inactive = getValue() as boolean;
+        const u = row.original;
+        const heldUntil = deactivateHeldUntil(u);
         return (
-          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${!inactive ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${!inactive ? "bg-emerald-500" : "bg-rose-500"}`} />
-            {!inactive ? "Active" : "Inactive"}
-          </span>
+          <div className="leading-tight">
+            {!inactive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
+            {heldUntil && <p className="mt-1 text-[0.6875rem] font-medium text-foreground whitespace-nowrap">Held to {fmtHeldUntil(heldUntil)}</p>}
+            {u.StatusReason && (
+              <p className="mt-1 max-w-[220px] whitespace-normal text-[0.6875rem] text-muted-foreground" title={u.StatusReason}>
+                {u.StatusReason}
+                <span className="block text-[0.625rem] opacity-80">{[u.StatusChangedBy, u.StatusChangedAt ? fmtIstDateTime(u.StatusChangedAt) : ""].filter(Boolean).join(" · ")}</span>
+              </p>
+            )}
+          </div>
         );
       },
     },
@@ -255,23 +296,26 @@ function buildUserColumns(
       enableSorting: false,
       cell: ({ row }) => {
         const user = row.original;
+        const heldUntil = deactivateHeldUntil(user);
         return (
           <div className="flex items-center justify-end gap-2.5">
-            <button data-row-view onClick={() => setViewUserId(user.id)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition" title="View"><Eye size={15} /></button>
-            <button onClick={() => setEditUserId(user.id)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition" title="Edit"><Edit size={15} /></button>
+            <button data-row-view onClick={() => setViewUserId(user.id)} className={ACT} title="View" aria-label="View"><Eye size={13} /></button>
+            <button onClick={() => setEditUserId(user.id)} className={ACT} title="Edit" aria-label="Edit"><Edit size={13} /></button>
             <button
-              onClick={() => updateMutation.mutate({ id: user.id, data: { discontinue: !user.discontinue } })}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${!user.discontinue ? "bg-rose-100 text-rose-600 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-400" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400"}`}
+              onClick={() => onStatus(user)}
+              disabled={!!heldUntil}
+              title={heldUntil ? `Activated less than 90 days ago. Can be made inactive from ${fmtHeldUntil(heldUntil)}.` : undefined}
+              className={`${KEY} h-7 w-[5.75rem] shrink-0 border ${!user.discontinue ? "border-foreground/40 text-muted-foreground hover:text-destructive hover:border-destructive" : "border-foreground text-foreground hover:bg-primary/10"}`}
             >
-              {!user.discontinue ? "Deactivate" : "Activate"}
+              {heldUntil ? "Held" : !user.discontinue ? "Deactivate" : "Activate"}
             </button>
             {deleteConfirmId === user.id ? (
               <div className="flex items-center gap-1 ml-1">
-                <button onClick={() => deleteMutation.mutate(user.id)} className="text-xs px-2.5 py-1 bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition font-medium">Confirm</button>
-                <button onClick={() => setDeleteConfirmId(null)} className="text-xs px-2 py-1 text-muted-foreground hover:text-foreground transition">Cancel</button>
+                <button onClick={() => deleteMutation.mutate(user.id)} className={`${KEY} h-7 px-2.5 bg-destructive text-destructive-foreground border border-destructive`}>Confirm</button>
+                <button onClick={() => setDeleteConfirmId(null)} className={`${KEY} h-7 px-2 text-muted-foreground hover:text-foreground`}>Cancel</button>
               </div>
             ) : (
-              <button onClick={() => setDeleteConfirmId(user.id)} className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition" title="Delete"><Trash2 size={15} /></button>
+              <button onClick={() => setDeleteConfirmId(user.id)} className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors" title="Delete" aria-label="Delete"><Trash2 size={13} /></button>
             )}
           </div>
         );
@@ -298,6 +342,9 @@ const Users = () => {
     queryFn: getDepartmentOptions,
   });
 
+  // Making a user active / inactive asks for a reason first: the change waits here until the dialog is confirmed.
+  const [statusChange, setStatusChange] = useState<{ id: number; name: string; makeActive: boolean; data: Partial<User> } | null>(null);
+
   const addMutation = useMutation({
     mutationFn: addUserApi,
     onSuccess: () => {
@@ -310,11 +357,12 @@ const Users = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<User> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<User> & { reason?: string } }) =>
       updateUserApi(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       toast.success("User updated successfully.");
+      setStatusChange(null);
       resetForm();
       setDrawerOpen(false);
     },
@@ -357,7 +405,7 @@ const Users = () => {
   const [showPass, setShowPass] = useState(false);
 
   const columns = useMemo(
-    () => buildUserColumns(roles, deleteConfirmId, setDeleteConfirmId, setEditUserId, setViewUserId, updateMutation, ticketAccessMutation, deleteMutation),
+    () => buildUserColumns(roles, deleteConfirmId, setDeleteConfirmId, setEditUserId, setViewUserId, (u) => setStatusChange({ id: u.id, name: u.name, makeActive: !!u.discontinue, data: { discontinue: !u.discontinue } }), ticketAccessMutation, deleteMutation),
     [roles, deleteConfirmId, deleteMutation.isPending, ticketAccessMutation.isPending],
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -405,17 +453,21 @@ const Users = () => {
     }
 
     if (editUserId !== null) {
-      updateMutation.mutate({
-        id: editUserId,
-        data: {
-          name: form.name.trim(),
-          email: form.email.trim(),
-          RoleId: form.RoleId,
-          DepartmentId: form.DepartmentId || null,
-          discontinue: !form.isActive,
-          can_accept_tickets: form.canAcceptTickets,
-        },
-      });
+      const data = {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        RoleId: form.RoleId,
+        DepartmentId: form.DepartmentId || null,
+        discontinue: !form.isActive,
+        can_accept_tickets: form.canAcceptTickets,
+      };
+      // Switching the account on or off in this form also asks for a reason.
+      const was = allUsers.find((u) => u.id === editUserId);
+      if (was && !!was.discontinue !== !form.isActive) {
+        setStatusChange({ id: editUserId, name: form.name.trim(), makeActive: form.isActive, data });
+      } else {
+        updateMutation.mutate({ id: editUserId, data });
+      }
     } else {
       addMutation.mutate({
         name: form.name.trim(),
@@ -474,100 +526,68 @@ const Users = () => {
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
 
-      <AdminShell
-        title="User Master"
-        subtitle="Manage system users and access roles"
-        icon={UsersIcon}
+      <SheetShell
+        eyebrow="CivilierERP · Admin"
+        title="Users"
+        subtitle="Everyone who can sign in: their role, department and whether they take tickets. Supplier portal logins are listed separately."
         action={
-          <button
-            onClick={openAddDrawer}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
-          >
-            <UserPlus size={15} />
-            Add User
+          <button onClick={openAddDrawer} className={`${KEY_INK} h-9 px-4 shrink-0`}>
+            <UserPlus size={13} />
+            New user
           </button>
         }
       >
-      {/* ── Stats strip ── */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          {
-            label: "Total Users",
-            value: allUsers.length,
-            icon: UsersIcon,
-            color: "text-primary",
-          },
-          {
-            label: "Active",
-            value: activeCount,
-            icon: ShieldCheck,
-            color: "text-emerald-500",
-          },
-          {
-            label: "Inactive",
-            value: inactiveCount,
-            icon: Circle,
-            color: "text-rose-400",
-          },
-        ].map(({ label, value, icon: Icon, color }) => (
-          <div
-            key={label}
-            className="glass rounded-xl px-5 py-4 flex items-center gap-4"
-          >
-            <div className={`p-2.5 rounded-lg bg-muted ${color}`}>
-              <Icon size={18} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold font-heading text-foreground leading-none">
-                {value}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
-            </div>
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Users", value: allUsers.length, note: `${normalUsers.length} staff · ${supplierUsers.length} supplier portal` },
+              { label: "Active", value: activeCount, note: "can sign in" },
+              { label: "Inactive", value: inactiveCount, note: "sign-in blocked" },
+            ].map((s) => (
+              <div key={s.label}>
+                <p className="label">{s.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : s.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{s.note}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
 
-      {/* ── Normal users table ── */}
-      <div className="flex items-center gap-2 mt-2">
-        <UsersIcon size={15} className="text-primary" />
-        <h3 className="font-heading font-semibold text-sm text-foreground">
-          System Users
-        </h3>
-        <span className="text-xs text-muted-foreground">({normalUsers.length})</span>
-      </div>
-      <div className="glass rounded-xl overflow-hidden">
-        <DataTable
-          data={normalUsers}
-          columns={columns}
-          loading={isLoading}
-          searchPlaceholder="Search users…"
-          emptyMessage="No users added yet."
-          defaultPageSize={25}
-        />
-      </div>
+        <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+          <div className="px-4 py-3" style={{ borderBottom: RULE }}>
+            <p className="flex items-baseline gap-2.5">
+              <span className={HEAD}>System users</span>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{normalUsers.length}</span>
+            </p>
+          </div>
+          <DataTable
+            data={normalUsers}
+            columns={columns}
+            loading={isLoading}
+            searchPlaceholder="Search users…"
+            emptyMessage="No users added yet."
+            defaultPageSize={25}
+          />
+        </div>
 
-      {/* ── Supplier Master portal users table ── */}
-      <div className="flex items-center gap-2 mt-4">
-        <ShieldCheck size={15} className="text-primary" />
-        <h3 className="font-heading font-semibold text-sm text-foreground">
-          Supplier Portal Users
-        </h3>
-        <span className="text-xs text-muted-foreground">
-          ({supplierUsers.length}) — auto-created from Supplier Master
-        </span>
-      </div>
-      <div className="glass rounded-xl overflow-hidden">
-        <DataTable
-          data={supplierUsers}
-          columns={columns}
-          loading={isLoading}
-          searchPlaceholder="Search suppliers…"
-          emptyMessage="No supplier portal logins yet."
-          defaultPageSize={25}
-        />
-      </div>
-
-      </AdminShell>
+        <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+          <div className="px-4 py-3" style={{ borderBottom: RULE }}>
+            <p className="flex flex-wrap items-baseline gap-2.5">
+              <span className={HEAD}>Supplier portal users</span>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{supplierUsers.length}</span>
+              <span className="text-xs text-muted-foreground">created automatically from Supplier Master</span>
+            </p>
+          </div>
+          <DataTable
+            data={supplierUsers}
+            columns={columns}
+            loading={isLoading}
+            searchPlaceholder="Search suppliers…"
+            emptyMessage="No supplier portal logins yet."
+            defaultPageSize={25}
+          />
+        </div>
+      </SheetShell>
 
       {/* ── Add / Edit Drawer ── */}
       {drawerOpen && (
@@ -576,22 +596,21 @@ const Users = () => {
           onClick={closeDrawer}
         >
           <div
-            className="relative w-full max-w-md h-full bg-card border-l border-border shadow-2xl flex flex-col overflow-y-auto"
+            className="sheet-frame relative w-full max-w-md h-full bg-card flex flex-col overflow-y-auto" style={{ margin: 0, borderLeft: RULE }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Drawer header */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-border flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                  <UserPlus size={18} />
-                </div>
-                <h2 className="font-heading font-semibold text-foreground">
-                  {editUserId !== null ? "Edit User" : "New User"}
+            <div className="flex items-center justify-between px-6 py-5 flex-shrink-0" style={{ borderBottom: RULE }}>
+              <div>
+                <p className={LBL}>User</p>
+                <h2 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1">
+                  {editUserId !== null ? "Edit user" : "New user"}
                 </h2>
               </div>
               <button
                 onClick={closeDrawer}
-                className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
+                className={ACT}
+                aria-label="Close"
               >
                 <X size={18} />
               </button>
@@ -603,7 +622,7 @@ const Users = () => {
               className="flex flex-col flex-1 px-6 py-6 gap-5"
             >
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                <label className={`${LBL} mb-1.5 block`}>
                   Full Name *
                 </label>
                 <input
@@ -612,12 +631,12 @@ const Users = () => {
                   value={form.name}
                   onChange={handleChange}
                   required
-                  className="w-full h-10 px-3 bg-input/70 border border-border rounded-lg focus:ring-1 focus:ring-primary focus:border-primary outline-none text-sm"
+                  className={INPUT}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                <label className={`${LBL} mb-1.5 block`}>
                   Email Address *
                 </label>
                 <input
@@ -627,12 +646,12 @@ const Users = () => {
                   value={form.email}
                   onChange={handleChange}
                   required
-                  className="w-full h-10 px-3 bg-input/70 border border-border rounded-lg focus:ring-1 focus:ring-primary focus:border-primary outline-none text-sm"
+                  className={INPUT}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                <label className={`${LBL} mb-1.5 block`}>
                   Role
                 </label>
                 <div className="relative">
@@ -645,7 +664,7 @@ const Users = () => {
                         RoleId: Number(e.target.value),
                       }))
                     }
-                    className="w-full h-10 px-3 pr-9 bg-input/70 border border-border rounded-lg focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none text-sm text-foreground"
+                    className={`${INPUT} pr-9 appearance-none`}
                   >
                     <option value={0}>Select a role…</option>
                     {roles.map((r) => (
@@ -662,7 +681,7 @@ const Users = () => {
               </div>
 
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                <label className={`${LBL} mb-1.5 block`}>
                   Department
                 </label>
                 <div className="relative">
@@ -675,7 +694,7 @@ const Users = () => {
                         DepartmentId: Number(e.target.value),
                       }))
                     }
-                    className="w-full h-10 px-3 pr-9 bg-input/70 border border-border rounded-lg focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none text-sm text-foreground"
+                    className={`${INPUT} pr-9 appearance-none`}
                   >
                     <option value={0}>Select a department…</option>
                     {departments.map((d) => (
@@ -693,7 +712,7 @@ const Users = () => {
 
               {editUserId === null && (
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                  <label className={`${LBL} mb-1.5 block`}>
                     Password *
                   </label>
                   <div className="relative">
@@ -704,7 +723,7 @@ const Users = () => {
                       value={form.password}
                       onChange={handleChange}
                       required
-                      className="w-full h-10 px-3 pr-10 bg-input/70 border border-border rounded-lg focus:ring-1 focus:ring-primary focus:border-primary outline-none text-sm"
+                      className={`${INPUT} pr-10`}
                     />
                     <button
                       type="button"
@@ -717,7 +736,7 @@ const Users = () => {
                 </div>
               )}
 
-              <div className="flex items-center gap-2.5 p-3.5 rounded-lg bg-muted/50 border border-border">
+              <div className="flex items-center gap-2.5 p-3.5 border border-foreground/30">
                 <input
                   type="checkbox"
                   name="isActive"
@@ -725,7 +744,7 @@ const Users = () => {
                   aria-label="Active User"
                   checked={form.isActive}
                   onChange={handleChange}
-                  className="h-4 w-4 accent-primary"
+                  className="h-4 w-4 accent-foreground"
                 />
                 <label
                   htmlFor="isActive"
@@ -734,17 +753,17 @@ const Users = () => {
                   Active User
                 </label>
                 <span
-                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  className={`${TAG} ${
                     form.isActive
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                      : "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"
+                      ? "bg-foreground text-card"
+                      : "text-muted-foreground border border-dashed border-foreground/50"
                   }`}
                 >
                   {form.isActive ? "Active" : "Inactive"}
                 </span>
               </div>
 
-              <div className="flex items-center gap-2.5 p-3.5 rounded-lg bg-muted/50 border border-border">
+              <div className="flex items-center gap-2.5 p-3.5 border border-foreground/30">
                 <input
                   type="checkbox"
                   name="canAcceptTickets"
@@ -752,7 +771,7 @@ const Users = () => {
                   aria-label="Can Accept Tickets"
                   checked={form.canAcceptTickets}
                   onChange={handleChange}
-                  className="h-4 w-4 accent-primary"
+                  className="h-4 w-4 accent-foreground"
                 />
                 <label
                   htmlFor="canAcceptTickets"
@@ -761,10 +780,10 @@ const Users = () => {
                   Can accept tickets
                 </label>
                 <span
-                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  className={`${TAG} ${
                     form.canAcceptTickets
-                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                      : "bg-muted text-muted-foreground"
+                      ? "bg-foreground text-card"
+                      : "text-muted-foreground border border-dashed border-foreground/50"
                   }`}
                 >
                   {form.canAcceptTickets ? "Enabled" : "Off"}
@@ -772,29 +791,41 @@ const Users = () => {
               </div>
 
               {/* Drawer footer */}
-              <div className="flex gap-3 mt-auto pt-4 border-t border-border">
+              <div className="flex gap-2 mt-auto pt-4" style={{ borderTop: RULE }}>
                 <button
                   type="button"
                   onClick={closeDrawer}
-                  className="flex-1 h-10 border border-border hover:bg-muted rounded-lg text-sm font-medium transition"
+                  className={`${KEY_LINE} flex-1 h-10`}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={addMutation.isPending || updateMutation.isPending}
-                  className="btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto flex-1 flex items-center justify-center rounded-lg disabled:opacity-50 transition-all"
+                  className={`${KEY_INK} flex-1 h-10`}
                 >
                   {addMutation.isPending || updateMutation.isPending
                     ? "Saving…"
                     : editUserId !== null
-                      ? "Update User"
-                      : "Add User"}
+                      ? "Update user"
+                      : "Add user"}
                 </button>
               </div>
             </form>
           </div>
         </div></BodyPortal>
+      )}
+
+      {statusChange && (
+        <BodyPortal>
+          <UserStatusDialog
+            userName={statusChange.name}
+            makeActive={statusChange.makeActive}
+            busy={updateMutation.isPending}
+            onClose={() => setStatusChange(null)}
+            onConfirm={(reason) => updateMutation.mutate({ id: statusChange.id, data: { ...statusChange.data, reason } })}
+          />
+        </BodyPortal>
       )}
 
       {/* ── View User Modal ── */}
@@ -804,53 +835,43 @@ const Users = () => {
           onClick={() => setViewUserId(null)}
         >
           <div
-            className="glass p-6 rounded-2xl w-full max-w-sm mx-4"
+            className="sheet-frame bg-card p-6 w-full max-w-sm mx-4"
+            style={{ margin: 0, border: RULE, boxShadow: "8px 8px 0 hsl(var(--foreground) / 0.12)" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Avatar header */}
-            <div className="flex flex-col items-center mb-6 text-center">
-              <div
-                className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-bold mb-3 ${getAvatarColor(viewedUser.id)}`}
-              >
-                {getInitials(viewedUser.name)}
+            <div className="flex items-center gap-4 pb-4 mb-4" style={{ borderBottom: RULE }}>
+              <UserAvatar name={viewedUser.name} url={viewedUser.avatar_url} size="w-14 h-14 text-lg" />
+              <div className="min-w-0">
+                <h2 className="font-heading text-lg font-bold tracking-tight text-foreground truncate">
+                  {viewedUser.name}
+                </h2>
+                <p className="text-sm text-muted-foreground truncate">
+                  {viewedUser.email}
+                </p>
+                <div className="mt-1.5">
+                  {!viewedUser.discontinue ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
+                </div>
               </div>
-              <h2 className="text-lg font-semibold text-foreground">
-                {viewedUser.name}
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                {viewedUser.email}
-              </p>
-              <span
-                className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full ${
-                  !viewedUser.discontinue
-                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                    : "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"
-                }`}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${!viewedUser.discontinue ? "bg-emerald-500" : "bg-rose-500"}`}
-                />
-                {!viewedUser.discontinue ? "Active" : "Inactive"}
-              </span>
             </div>
 
-            <div className="space-y-3 text-sm border-t border-border pt-4">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Role</span>
+            <div className="text-sm divide-y divide-foreground/15">
+              <div className="flex justify-between py-2">
+                <span className={LBL}>Role</span>
                 <span className="font-medium text-foreground">
                   {viewedUser.roleName ??
                     roles.find((r) => r.RId === viewedUser.RoleId)?.RName ??
                     "—"}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Department</span>
+              <div className="flex justify-between py-2">
+                <span className={LBL}>Department</span>
                 <span className="font-medium text-foreground">
                   {viewedUser.DepartmentName ?? "—"}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Created</span>
+              <div className="flex justify-between py-2">
+                <span className={LBL}>Created</span>
                 <span className="font-medium text-foreground">
                   {new Date(viewedUser.created_datetime).toLocaleDateString(
                     "en-IN",
@@ -858,8 +879,8 @@ const Users = () => {
                   )}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Ticket Accept</span>
+              <div className="flex justify-between py-2">
+                <span className={LBL}>Ticket Accept</span>
                 <span className="font-medium text-foreground">
                   {viewedUser.can_accept_tickets ||
                   ["admin", "super_admin", "dba"].includes(viewedUser.role)
@@ -867,9 +888,9 @@ const Users = () => {
                     : "Not allowed"}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">User ID</span>
-                <span className="font-mono text-xs text-muted-foreground">
+              <div className="flex justify-between py-2">
+                <span className={LBL}>User ID</span>
+                <span className="font-heading text-xs tabular-nums text-muted-foreground">
                   #{viewedUser.id}
                 </span>
               </div>
@@ -877,7 +898,7 @@ const Users = () => {
 
             <button
               onClick={() => setViewUserId(null)}
-              className="btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto mt-6 w-full flex items-center justify-center rounded-lg transition-all"
+              className={`${KEY_LINE} h-9 mt-5 w-full`}
             >
               Close
             </button>

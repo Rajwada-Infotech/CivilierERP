@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const sql = require("mssql");
 
 const { cache } = require("../middleware/cache");
@@ -10,6 +10,7 @@ const { bumpCacheVersion } = require("../redis");
 const { getPool } = require("../db");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { hasPosting, reversePostingBySource } = require("../services/generalLedger");
+const { BRS_SOURCES, isApprovedStatus, findUnapproved, unapprovedResponse, NOT_CLEARABLE_REASON } = require("../utils/brsClearGuard");
 
 // Maps a BRS-level sourceType to the GeneralLedgerEntry.SourceType(s) that
 // carry its actual money-movement leg(s), in authority order — the first
@@ -50,15 +51,8 @@ router.use(checkPermissionForMethod("Finance", "BRS"));
 
 // Every SourceType the unified BRS view (GET /) can produce — the /clear,
 // /unclear, /bounce actions below all validate against this same list.
-const RECONCILABLE_SOURCE_TYPES = [
-  "PAYMENT",
-  "RECEIVED",
-  "CRM_RECEIVED",
-  "FUND_TRANSFER_OUT",
-  "FUND_TRANSFER_IN",
-  "LOAN_DISBURSED",
-  "LOAN_RECEIVED",
-];
+// One list, from utils/brsClearGuard.js.
+const RECONCILABLE_SOURCE_TYPES = Object.keys(BRS_SOURCES);
 
 // Bust cache on startup so the unmatched-payments filter fix above takes
 // effect immediately instead of waiting out the 60s TTL on stale entries.
@@ -98,7 +92,7 @@ const findAHMCol = (meta, names, fallback = null) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /brs/filters  —  companies + banks for dropdown filters
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/filters", cache("brs-filters", 300), async (req, res) => {
+router.get("/filters", cache("brs-filters", 300, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
 
@@ -429,11 +423,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ft.TransferDate          AS PayDate,
           'Fund Transfer'          AS Mode,
           ft.DocNo                 AS DocNo,
-          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          CAST(CASE WHEN ft.Mode LIKE '%Cheque%' THEN NULL ELSE ft.DigitalRefNumber END AS NVARCHAR(100)) AS TxnId,
           ft.Status                AS PayStatus,
           CAST(0 AS BIT)           AS IsChequeCancelled,
           ft.CreatedAt             AS CreatedAt,
-          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(CASE WHEN ft.Mode LIKE '%Cheque%' THEN ft.ChequeNo END AS NVARCHAR(50)) AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
           CAST(NULL AS NVARCHAR(200)) AS ProjectName,
           COALESCE(brc4.IsMatched, 0)  AS IsMatched,
@@ -473,11 +467,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ft2.TransferDate         AS PayDate,
           'Fund Transfer'          AS Mode,
           ft2.DocNo                AS DocNo,
-          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          CAST(CASE WHEN ft2.Mode LIKE '%Cheque%' THEN NULL ELSE ft2.DigitalRefNumber END AS NVARCHAR(100)) AS TxnId,
           ft2.Status                AS PayStatus,
           CAST(0 AS BIT)           AS IsChequeCancelled,
           ft2.CreatedAt            AS CreatedAt,
-          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(CASE WHEN ft2.Mode LIKE '%Cheque%' THEN ft2.ChequeNo END AS NVARCHAR(50)) AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
           CAST(NULL AS NVARCHAR(200)) AS ProjectName,
           COALESCE(brc5.IsMatched, 0)  AS IsMatched,
@@ -526,11 +520,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ls.LoanDate              AS PayDate,
           'Loan Disbursement'      AS Mode,
           ls.LoanNo                AS DocNo,
-          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          CAST(CASE WHEN ls.PaymentMode LIKE '%Cheque%' THEN NULL ELSE ls.DigitalRefNumber END AS NVARCHAR(100)) AS TxnId,
           'Approved'                AS PayStatus,
           CAST(0 AS BIT)           AS IsChequeCancelled,
           ls.LoanDate              AS CreatedAt,
-          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(CASE WHEN ls.PaymentMode LIKE '%Cheque%' THEN ls.ChequeNo END AS NVARCHAR(50)) AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
           CAST(NULL AS NVARCHAR(200)) AS ProjectName,
           COALESCE(brc6.IsMatched, 0)  AS IsMatched,
@@ -573,11 +567,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ls2.LoanDate             AS PayDate,
           'Loan Receipt'           AS Mode,
           ls2.LoanNo               AS DocNo,
-          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          CAST(CASE WHEN ls2.PaymentMode LIKE '%Cheque%' THEN NULL ELSE ls2.DigitalRefNumber END AS NVARCHAR(100)) AS TxnId,
           'Approved'                AS PayStatus,
           CAST(0 AS BIT)           AS IsChequeCancelled,
           ls2.LoanDate             AS CreatedAt,
-          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(CASE WHEN ls2.PaymentMode LIKE '%Cheque%' THEN ls2.ChequeNo END AS NVARCHAR(50)) AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
           CAST(NULL AS NVARCHAR(200)) AS ProjectName,
           COALESCE(brc7.IsMatched, 0)  AS IsMatched,
@@ -677,7 +671,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
     const dataResult = await dataReq.query(dataSql);
 
     res.json({
-      data: dataResult.recordset,
+      // Clearable: the backend's decision (utils/brsClearGuard.js) — web and
+      // mobile only reflect it.
+      data: dataResult.recordset.map((r) => isApprovedStatus(r.PayStatus)
+        ? { ...r, Clearable: true }
+        : { ...r, Clearable: false, ClearBlockReason: NOT_CLEARABLE_REASON }),
       total,
       page,
       limit,
@@ -716,11 +714,22 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
   try {
     const pool = getPool();
 
+    // Only an Approved document may be cleared — re-read and locked inside the
+    // same transaction as the write, so it cannot change mid-clear.
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+    const blocked = await findUnapproved(tx, [{ SourceType: sourceType, SourceID: parseInt(sourceId) }]);
+    if (blocked.length) {
+      await tx.rollback();
+      return res.status(400).json(unapprovedResponse(blocked));
+    }
+
     // Upsert into BankReconciliation — BankClearingDate/ClearedBy/ClearedAt
     // describe the CURRENT clear state and get overwritten on every
     // clear/unclear cycle (unclear nulls them back out below), same
     // convention BounceDate/BounceReason already use.
-    await pool
+    await tx
       .request()
       .input("SourceType", sql.NVarChar(20), sourceType)
       .input("SourceID", sql.Int, parseInt(sourceId))
@@ -740,6 +749,11 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
           VALUES
             (@SourceType, @SourceID, 1, @BankClearingDate, @ClearedBy, GETDATE(), GETDATE(), GETDATE())
       `);
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* already ended */ }
+      throw txErr;
+    }
 
     await bumpCacheVersion("brs");
     // The payment/received-payment list's DisplayStatus (Cheque Issued ->
@@ -815,7 +829,16 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
 
   try {
     const pool = getPool();
-    await pool
+    // Same rule as clear: only an Approved document can be bounced.
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+    const blocked = await findUnapproved(tx, [{ SourceType: sourceType, SourceID: parseInt(sourceId) }]);
+    if (blocked.length) {
+      await tx.rollback();
+      return res.status(400).json(unapprovedResponse(blocked));
+    }
+    await tx
       .request()
       .input("SourceType",    sql.NVarChar(20),  sourceType)
       .input("SourceID",      sql.Int,            parseInt(sourceId))
@@ -841,6 +864,11 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
           VALUES
             (@SourceType, @SourceID, 0, 1, @BounceDate, @BounceReason, @BounceRemarks, GETDATE())
       `);
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* already ended */ }
+      throw txErr;
+    }
 
     // A bounced instrument never actually moved money — reverse its GL
     // posting now, before the response, so a caller sees the true outcome
@@ -850,9 +878,34 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
       console.warn(`BRS bounce: ${sourceType} ${sourceId} — GL not reversed (${glReversal.reason})`);
     }
 
+    // A CRM customer's payment: the booking stops counting it (milestones
+    // reopen, the money goes back on account). This is a separate transaction
+    // from the BRS flag and GL reversal, so surface failures for an explicit retry.
+    let crm = null;
+    if (sourceType === "RECEIVED") {
+      try {
+        crm = await require("../services/crmBouncedPayment").unwindBouncedCrmPayment(pool, parseInt(sourceId), bounceReason, req.user?.userId ?? null);
+        if (crm?.crm) for (const k of ["crm-payments", "crm-bookings", "crm-money-receipts", "crm-on-account"]) await bumpCacheVersion(k);
+      } catch (crmErr) {
+        console.error("BRS bounce: CRM unwind failed for receipt", sourceId, crmErr.message);
+        crm = { crm: true, error: crmErr.message };
+      }
+      for (const k of ["crm-payments", "crm-bookings", "crm-money-receipts", "crm-on-account"]) await bumpCacheVersion(k);
+    }
+
     await bumpCacheVersion("brs");
     await bumpCacheVersion(sourceType === "PAYMENT" ? "new-payment" : "received-payment");
-    res.json({ message: "Marked as bounced", glReversed: glReversal.reversed });
+    if (crm?.error) {
+      return res.status(503).json({
+        error: "Payment marked bounced, but the CRM unwind failed. Retry the bounce action to finish reconciling the booking.",
+        retryable: true,
+        bounced: true,
+        glReversed: glReversal.reversed || !!crm?.glReversed,
+        crm: { error: crm.error },
+      });
+    }
+    res.json({ message: "Marked as bounced", glReversed: glReversal.reversed || !!crm?.glReversed,
+      ...(crm?.crm ? { crm: { bookingId: crm.bookingId, reversed: crm.reversed, invoicesToReview: crm.invoices || [], error: crm.error } } : {}) });
 
     // Fire-and-forget — bounced cheques must not count as paid, update after responding
     if (sourceType === "PAYMENT") {
@@ -876,10 +929,23 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
 router.put("/:id/match", async (req, res) => {
   try {
     const pool = getPool();
-    await pool
-      .request()
-      .input("id", sql.Int, req.params.id)
-      .query("UPDATE BankReconciliation SET IsMatched = 1 WHERE BRSID = @id");
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      const row = (await tx.request().input("id", sql.Int, req.params.id)
+        .query("SELECT SourceType, SourceID FROM BankReconciliation WITH (UPDLOCK, HOLDLOCK) WHERE BRSID = @id")).recordset[0];
+      const blocked = row ? await findUnapproved(tx, [row]) : [];
+      if (blocked.length) {
+        await tx.rollback();
+        return res.status(400).json(unapprovedResponse(blocked));
+      }
+      await tx.request().input("id", sql.Int, req.params.id)
+        .query("UPDATE BankReconciliation SET IsMatched = 1 WHERE BRSID = @id");
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* already ended */ }
+      throw txErr;
+    }
     await bumpCacheVersion("brs");
     res.json({ message: "Marked as matched" });
   } catch (err) {

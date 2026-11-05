@@ -2,8 +2,8 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -1047,12 +1047,15 @@ router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) =
   const {
     loanDocNo, purpose, remarks, lenderBankAccountId, borrowerBankAccountId,
     loanDate, amount, hasInterest, interestType, interestRate, tenureMonths, dueDate,
+    lenderCompanyId, borrowerCompanyId,
+    paymentMode, chequeLotId, chequeLotNumber, chequeNo, chequeDate, isPostDated,
+    digitalRefNumber, demandDraftNo, demandDraftDate,
   } = req.body;
   const updatedBy = req.user?.email || req.user?.name || "system";
 
   // Financial-core edit only kicks in if the caller actually sent one of
   // these — the administrative-only edit path (Loan Doc No/Purpose/
-  // Remarks/bank tags) must keep working even after repayment has started.
+  // Remarks/bank tags) must keep working on a closed loan.
   const touchesFinancials =
     loanDate !== undefined || amount !== undefined || hasInterest !== undefined ||
     interestType !== undefined || interestRate !== undefined || tenureMonths !== undefined ||
@@ -1065,7 +1068,7 @@ router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) =
 
     const loanRes = await new sql.Request(tx)
       .input("LoanId", sql.Int, loanId)
-      .query("SELECT LoanId, LoanNo, Amount, BorrowerLHeadId, Status FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+      .query("SELECT LoanId, LoanNo, LoanType, Amount, LoanDate, LenderCompanyId, BorrowerCompanyId, LenderLHeadId, BorrowerLHeadId, Status FROM dbo.LoanSanction WHERE LoanId = @LoanId");
     const loan = loanRes.recordset[0];
     if (!loan) throw Object.assign(new Error("Loan not found"), { status: 404 });
 
@@ -1073,15 +1076,14 @@ router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) =
       if (loan.Status === "Closed") {
         throw Object.assign(new Error("This loan is closed and its terms can no longer be edited."), { status: 409 });
       }
+      // Installments already paid are kept exactly as they are; only the
+      // unpaid ones are rebuilt, for the principal still outstanding.
       const paidRes = await new sql.Request(tx)
         .input("LoanId", sql.Int, loanId)
-        .query("SELECT COUNT(*) AS cnt FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId AND IsPaid = 1");
-      if (paidRes.recordset[0].cnt > 0) {
-        throw Object.assign(
-          new Error("This loan already has repayments recorded — amount/interest/tenure/dates can no longer be edited. Only Loan Doc No, Purpose, Remarks, and bank A/C tags can still be changed."),
-          { status: 409 },
-        );
-      }
+        .query("SELECT InstallmentNo, DueDate, PrincipalComponent FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId AND IsPaid = 1 ORDER BY InstallmentNo");
+      const paidRows = paidRes.recordset;
+      const paidCount = paidRows.length;
+      const paidPrincipal = paidRows.reduce((sum, r) => sum + Number(r.PrincipalComponent || 0), 0);
 
       const useInterest = hasInterest !== false && hasInterest !== "false";
       const iType = INTEREST_TYPES.includes(interestType) ? interestType : "CI";
@@ -1093,16 +1095,25 @@ router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) =
       if (tenureMonths != null && tenureMonths !== "" && parseInt(tenureMonths, 10) <= 0) {
         throw Object.assign(new Error("Tenure must be at least 1 month"), { status: 400 });
       }
+      if (paidCount > 0 && newAmt <= paidPrincipal) {
+        throw Object.assign(new Error(`Amount must be more than the principal already repaid (${paidPrincipal.toFixed(2)}).`), { status: 400 });
+      }
       const newLoanDate = loanDate || loan.LoanDate;
       const effectiveRate = useInterest && interestRate != null && interestRate !== "" ? parseFloat(interestRate) : null;
       const newTenure = tenureMonths != null && tenureMonths !== "" ? parseInt(tenureMonths, 10) : null;
 
-      // Regenerate the schedule from scratch — safe because we already
-      // confirmed nothing is paid yet.
       await new sql.Request(tx)
         .input("LoanId", sql.Int, loanId)
-        .query("DELETE FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId");
-      const schedule = buildEmiSchedule(newAmt, effectiveRate || 0, newTenure, newLoanDate, iType, dueDate || null);
+        .query("DELETE FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId AND ISNULL(IsPaid, 0) = 0");
+      let schedule;
+      if (paidCount === 0) {
+        schedule = buildEmiSchedule(newAmt, effectiveRate || 0, newTenure, newLoanDate, iType, dueDate || null);
+      } else {
+        // Remaining principal over the remaining tenure, counted on from the last paid due date.
+        const remainingTenure = newTenure != null ? Math.max(1, newTenure - paidCount) : 1;
+        schedule = buildEmiSchedule(newAmt - paidPrincipal, effectiveRate || 0, remainingTenure, paidRows[paidCount - 1].DueDate, iType, dueDate || null)
+          .map((r) => ({ ...r, installmentNo: r.installmentNo + paidCount }));
+      }
       await insertEmiSchedule(tx, loanId, schedule);
 
       // Adjust the original sanction CREDIT and the borrower's On A/C
@@ -1158,6 +1169,91 @@ router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) =
               InterestType = @InterestType, InterestRate = @InterestRate, TenureMonths = @TenureMonths
           WHERE LoanId = @LoanId
         `);
+    }
+
+    // Lender / borrower company change. Moves the borrower's On A/C credit to the new party, so it is refused once
+    // money has moved (a repayment, or any use of that On A/C balance).
+    const newLender = lenderCompanyId != null && lenderCompanyId !== "" ? parseInt(lenderCompanyId, 10) : null;
+    const newBorrower = borrowerCompanyId != null && borrowerCompanyId !== "" ? parseInt(borrowerCompanyId, 10) : null;
+    const lenderChanged = newLender != null && loan.LenderCompanyId != null && newLender !== loan.LenderCompanyId;
+    const borrowerChanged = newBorrower != null && loan.BorrowerCompanyId != null && newBorrower !== loan.BorrowerCompanyId;
+    if (lenderChanged || borrowerChanged) {
+      if (loan.Status === "Closed") {
+        throw Object.assign(new Error("This loan is closed and its parties can no longer be changed."), { status: 409 });
+      }
+      const used = await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .query(`SELECT
+                  (SELECT COUNT(*) FROM dbo.LoanPayment WHERE LoanId = @LoanId) AS pays,
+                  (SELECT COUNT(*) FROM dbo.OnAccountLedger WHERE RefType = 'Loan' AND RefId = @LoanId AND TxnType = 'DEBIT') AS debits`);
+      if (used.recordset[0].pays > 0 || used.recordset[0].debits > 0) {
+        throw Object.assign(new Error("Repayments or On A/C adjustments are already recorded against this loan, so its lender/borrower company can no longer be changed."), { status: 409 });
+      }
+      const finalLender = lenderChanged ? newLender : loan.LenderCompanyId;
+      const finalBorrower = borrowerChanged ? newBorrower : loan.BorrowerCompanyId;
+      if (loan.LoanType === "Inter-Company" && finalLender === finalBorrower) {
+        throw Object.assign(new Error("Lender and borrower must be different companies."), { status: 400 });
+      }
+      const co = async (id) => {
+        const r = await new sql.Request(tx).input("id", sql.Int, id)
+          .query("SELECT id, name FROM dbo.enterprise WHERE business_type = 'C' AND id = @id");
+        if (!r.recordset[0]) throw Object.assign(new Error("Company not found"), { status: 400 });
+        return r.recordset[0];
+      };
+      let lenderHead = loan.LenderLHeadId;
+      let borrowerHead = loan.BorrowerLHeadId;
+      if (lenderChanged) {
+        const c = await co(newLender);
+        lenderHead = await ensureLoanLedgerHead(pool, "C", c.id, c.name, updatedBy);
+      }
+      if (borrowerChanged) {
+        const c = await co(newBorrower);
+        borrowerHead = await ensureLoanLedgerHead(pool, "C", c.id, c.name, updatedBy);
+        const credit = await new sql.Request(tx).input("RefId", sql.Int, loanId)
+          .query("SELECT SUM(Amount) AS amt FROM dbo.OnAccountLedger WHERE RefType = 'Loan' AND RefId = @RefId AND TxnType = 'CREDIT'");
+        const amt = Number(credit.recordset[0].amt || 0);
+        await new sql.Request(tx)
+          .input("RefId", sql.Int, loanId)
+          .input("PartyId", sql.Int, borrowerHead)
+          .input("CompanyId", sql.Int, c.id)
+          .query("UPDATE dbo.OnAccountLedger SET PartyId = @PartyId, CompanyId = @CompanyId WHERE RefType = 'Loan' AND RefId = @RefId");
+        if (loan.BorrowerLHeadId && loan.BorrowerLHeadId !== borrowerHead) {
+          await new sql.Request(tx).input("P", sql.Int, loan.BorrowerLHeadId).input("A", sql.Decimal(18, 2), amt)
+            .query("UPDATE dbo.AccountHeadMaster SET OnAccountBalance = ISNULL(OnAccountBalance, 0) - @A WHERE LHeadId = @P");
+          await new sql.Request(tx).input("P", sql.Int, borrowerHead).input("A", sql.Decimal(18, 2), amt)
+            .query("UPDATE dbo.AccountHeadMaster SET OnAccountBalance = ISNULL(OnAccountBalance, 0) + @A WHERE LHeadId = @P");
+        }
+      }
+      await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .input("LenderCompanyId", sql.Int, finalLender)
+        .input("BorrowerCompanyId", sql.Int, finalBorrower)
+        .input("LenderLHeadId", sql.Int, lenderHead)
+        .input("BorrowerLHeadId", sql.Int, borrowerHead)
+        .query(`UPDATE dbo.LoanSanction SET LenderCompanyId = @LenderCompanyId, BorrowerCompanyId = @BorrowerCompanyId,
+                  LenderLHeadId = @LenderLHeadId, BorrowerLHeadId = @BorrowerLHeadId WHERE LoanId = @LoanId`);
+      // Posted ledger entries name the old parties: reverse them; the Posting tab re-posts for the new ones.
+      await new sql.Request(tx)
+        .input("SrcId", sql.Int, loanId)
+        .query("UPDATE dbo.GeneralLedgerEntry SET IsReversed = 1 WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0");
+    }
+
+    // How the loan is disbursed (mode, cheque, reference) - tags on the loan itself.
+    if (paymentMode !== undefined) {
+      await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .input("PaymentMode", sql.NVarChar(30), paymentMode || null)
+        .input("ChequeLotId", sql.Int, chequeLotId ? parseInt(chequeLotId, 10) : null)
+        .input("ChequeLotNumber", sql.NVarChar(50), chequeLotNumber || null)
+        .input("ChequeNo", sql.NVarChar(20), chequeNo || null)
+        .input("ChequeDate", sql.Date, chequeDate || null)
+        .input("IsPostDated", sql.Bit, isPostDated ? 1 : 0)
+        .input("DigitalRefNumber", sql.NVarChar(100), digitalRefNumber || null)
+        .input("DemandDraftNo", sql.NVarChar(30), demandDraftNo || null)
+        .input("DemandDraftDate", sql.Date, demandDraftDate || null)
+        .query(`UPDATE dbo.LoanSanction SET PaymentMode = @PaymentMode, ChequeLotId = @ChequeLotId, ChequeLotNumber = @ChequeLotNumber,
+                  ChequeNo = @ChequeNo, ChequeDate = @ChequeDate, IsPostDated = @IsPostDated, DigitalRefNumber = @DigitalRefNumber,
+                  DemandDraftNo = @DemandDraftNo, DemandDraftDate = @DemandDraftDate WHERE LoanId = @LoanId`);
     }
 
     await new sql.Request(tx)
@@ -1327,40 +1423,79 @@ router.get("/:id/posting", requirePageRight("loan-sanction", "view"), async (req
 // logic the route runs, rather than reimplementing it — see
 // scripts/repostLoanToGL.js. Throws Object.assign(new Error(...), {status})
 // on any guard failure, same convention as createLoanSanctionInternal.
+// Inserts one voucher's GL legs on an ALREADY-OPEN transaction — unlike
+// generalLedger.js's postVoucher (which always opens its own transaction via
+// pool.transaction() and so can't be nested inside the row lock below), this
+// lets postLoanToGLInternal keep the LoanSanction row locked (UPDLOCK/HOLDLOCK)
+// for the whole check-then-insert so two concurrent posts can't both pass the
+// "already posted" check before either one's INSERTs land (see call site).
+async function insertVoucherLegsInTx(tx, { voucherNo, voucherDate, legs, sourceType, sourceId, companyId, createdBy }) {
+  for (const leg of legs) {
+    const debit = Math.round((leg.debit || 0) * 100) / 100;
+    const credit = Math.round((leg.credit || 0) * 100) / 100;
+    if (debit === 0 && credit === 0) continue;
+    await tx.request()
+      .input("VoucherNo", sql.NVarChar(50), voucherNo)
+      .input("VoucherDate", sql.Date, voucherDate)
+      .input("LHeadId", sql.Int, leg.lHeadId)
+      .input("DebitAmount", sql.Decimal(18, 2), debit)
+      .input("CreditAmount", sql.Decimal(18, 2), credit)
+      .input("Narration", sql.NVarChar(255), leg.narration || null)
+      .input("SourceType", sql.NVarChar(30), sourceType)
+      .input("SourceId", sql.Int, sourceId)
+      .input("CompanyId", sql.Int, companyId)
+      .input("CreatedBy", sql.NVarChar(150), createdBy)
+      .query(`
+        INSERT INTO dbo.GeneralLedgerEntry
+          (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration, SourceType, SourceId, CompanyId, CreatedBy)
+        VALUES
+          (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration, @SourceType, @SourceId, @CompanyId, @CreatedBy)
+      `);
+  }
+}
+
 async function postLoanToGLInternal(pool, loanId, userEmail) {
-  const { postVoucher } = require("../services/generalLedger");
+  // TOCTOU fix: the "already posted" SELECT used to run with no lock, so two
+  // concurrent post-to-gl/disburse calls for the same loan could both pass it
+  // before either one's INSERTs committed, double-posting the loan (and, for
+  // Bank/Customer Loan, double-crediting cash). WITH (UPDLOCK, HOLDLOCK) here
+  // blocks a second concurrent caller until the first transaction commits or
+  // rolls back, same pattern as the EMI-pay row lock below (see "pay" route).
+  const tx = pool.transaction();
+  await tx.begin();
+  let loan;
+  try {
+    const loanRes = await tx.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT LoanId, LoanNo, LoanType, LoanDate, Amount, LenderCompanyId, BorrowerCompanyId,
+             LenderLHeadId, BorrowerLHeadId, LenderBankAccountId, BorrowerBankAccountId
+      FROM dbo.LoanSanction WITH (UPDLOCK, HOLDLOCK) WHERE LoanId = @LoanId
+    `);
+    if (!loanRes.recordset.length) throw Object.assign(new Error("Loan not found"), { status: 404 });
+    loan = loanRes.recordset[0];
+    if (!loan.LenderLHeadId || !loan.BorrowerLHeadId) {
+      throw Object.assign(new Error("This loan is missing its lender/borrower GL accounts — cannot post."), { status: 422 });
+    }
 
-  const loanRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
-    SELECT LoanId, LoanNo, LoanType, LoanDate, Amount, LenderCompanyId, BorrowerCompanyId,
-           LenderLHeadId, BorrowerLHeadId, LenderBankAccountId, BorrowerBankAccountId
-    FROM dbo.LoanSanction WHERE LoanId = @LoanId
-  `);
-  if (!loanRes.recordset.length) throw Object.assign(new Error("Loan not found"), { status: 404 });
-  const loan = loanRes.recordset[0];
-  if (!loan.LenderLHeadId || !loan.BorrowerLHeadId) {
-    throw Object.assign(new Error("This loan is missing its lender/borrower GL accounts — cannot post."), { status: 422 });
-  }
+    const alreadyPosted = await tx.request().input("SrcId", sql.Int, loanId).query(`
+      SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
+    `);
+    if (alreadyPosted.recordset.length) {
+      throw Object.assign(new Error("This loan has already been posted to GL."), { status: 409 });
+    }
 
-  const alreadyPosted = await pool.request().input("SrcId", sql.Int, loanId).query(`
-    SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
-  `);
-  if (alreadyPosted.recordset.length) {
-    throw Object.assign(new Error("This loan has already been posted to GL."), { status: 409 });
-  }
+    // A Fund Transfer-originated Inter-Company loan already posted its own
+    // combined bank-movement + lender/borrower legs at approval time (see
+    // postFundTransferApproval in generalLedger.js) — posting again here
+    // would double-count both loan heads' balances.
+    const ftLinked = await tx.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT TOP 1 FTId FROM dbo.FundTransfer WHERE LinkedLoanId = @LoanId
+    `);
+    if (ftLinked.recordset.length) {
+      throw Object.assign(new Error("This loan was created by a Fund Transfer, which already posted it to GL."), { status: 409 });
+    }
 
-  // A Fund Transfer-originated Inter-Company loan already posted its own
-  // combined bank-movement + lender/borrower legs at approval time (see
-  // postFundTransferApproval in generalLedger.js) — posting again here
-  // would double-count both loan heads' balances.
-  const ftLinked = await pool.request().input("LoanId", sql.Int, loanId).query(`
-    SELECT TOP 1 FTId FROM dbo.FundTransfer WHERE LinkedLoanId = @LoanId
-  `);
-  if (ftLinked.recordset.length) {
-    throw Object.assign(new Error("This loan was created by a Fund Transfer, which already posted it to GL."), { status: 409 });
-  }
-
-  const amt = Number(loan.Amount);
-  if (!amt || amt <= 0) throw Object.assign(new Error("Loan has no amount to post."), { status: 400 });
+    const amt = Number(loan.Amount);
+    if (!amt || amt <= 0) throw Object.assign(new Error("Loan has no amount to post."), { status: 400 });
 
   // Inter-Company involves TWO of our own companies — each needs its own
   // book entry (Lender's books show the receivable, Borrower's books show
@@ -1371,67 +1506,73 @@ async function postLoanToGLInternal(pool, loanId, userEmail) {
   // Loan/Customer Loan only ever involve ONE of our own companies (the
   // other side is an external bank or customer), so those still get one
   // voucher.
-  if (loan.LoanType === "Inter-Company") {
-    if (!loan.LenderBankAccountId || !loan.BorrowerBankAccountId) {
-      throw Object.assign(new Error("This Inter-Company loan is missing a Lender or Borrower Bank A/C — cannot post."), { status: 422 });
+    if (loan.LoanType === "Inter-Company") {
+      if (!loan.LenderBankAccountId || !loan.BorrowerBankAccountId) {
+        throw Object.assign(new Error("This Inter-Company loan is missing a Lender or Borrower Bank A/C — cannot post."), { status: 422 });
+      }
+      await insertVoucherLegsInTx(tx, {
+        voucherNo: loan.LoanNo,
+        voucherDate: loan.LoanDate,
+        sourceType: "LoanPosting",
+        sourceId: loanId,
+        companyId: loan.LenderCompanyId,
+        createdBy: userEmail,
+        legs: [
+          { lHeadId: loan.BorrowerLHeadId, debit: amt, narration: `${loan.LoanNo} — inter-company loan receivable (funds sent)` },
+          { lHeadId: loan.LenderBankAccountId, credit: amt, narration: `${loan.LoanNo} — loan disbursed` },
+        ],
+      });
+      await insertVoucherLegsInTx(tx, {
+        voucherNo: loan.LoanNo,
+        voucherDate: loan.LoanDate,
+        sourceType: "LoanPosting",
+        sourceId: loanId,
+        companyId: loan.BorrowerCompanyId,
+        createdBy: userEmail,
+        legs: [
+          { lHeadId: loan.BorrowerBankAccountId, debit: amt, narration: `${loan.LoanNo} — loan received` },
+          { lHeadId: loan.LenderLHeadId, credit: amt, narration: `${loan.LoanNo} — inter-company loan payable (funds received)` },
+        ],
+      });
+    } else {
+      // Dr the borrower's Loan ledger (they now owe this — a receivable from
+      // the sanctioning side), Cr the lender's Loan ledger (funds went out).
+      const lines = [
+        { LHeadId: loan.BorrowerLHeadId, DebitAmount: amt, CreditAmount: 0, Narration: `Loan Posting: ${loan.LoanNo} — Borrower` },
+        { LHeadId: loan.LenderLHeadId, DebitAmount: 0, CreditAmount: amt, Narration: `Loan Posting: ${loan.LoanNo} — Lender` },
+      ];
+      await insertVoucherLegsInTx(tx, {
+        voucherNo: loan.LoanNo,
+        // The loan's own date, not the date it happened to get posted —
+        // matches the Inter-Company branch above, which already got this
+        // right.
+        voucherDate: loan.LoanDate,
+        sourceType: "LoanPosting",
+        sourceId: loanId,
+        companyId: loan.LenderCompanyId || loan.BorrowerCompanyId || null,
+        createdBy: userEmail,
+        legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+      });
     }
-    await postVoucher(pool, {
-      voucherNo: loan.LoanNo,
-      voucherDate: loan.LoanDate,
-      sourceType: "LoanPosting",
-      sourceId: loanId,
-      companyId: loan.LenderCompanyId,
-      createdBy: userEmail,
-      legs: [
-        { lHeadId: loan.BorrowerLHeadId, debit: amt, narration: `${loan.LoanNo} — inter-company loan receivable (funds sent)` },
-        { lHeadId: loan.LenderBankAccountId, credit: amt, narration: `${loan.LoanNo} — loan disbursed` },
-      ],
-    });
-    await postVoucher(pool, {
-      voucherNo: loan.LoanNo,
-      voucherDate: loan.LoanDate,
-      sourceType: "LoanPosting",
-      sourceId: loanId,
-      companyId: loan.BorrowerCompanyId,
-      createdBy: userEmail,
-      legs: [
-        { lHeadId: loan.BorrowerBankAccountId, debit: amt, narration: `${loan.LoanNo} — loan received` },
-        { lHeadId: loan.LenderLHeadId, credit: amt, narration: `${loan.LoanNo} — inter-company loan payable (funds received)` },
-      ],
-    });
-  } else {
-    // Dr the borrower's Loan ledger (they now owe this — a receivable from
-    // the sanctioning side), Cr the lender's Loan ledger (funds went out).
-    const lines = [
-      { LHeadId: loan.BorrowerLHeadId, DebitAmount: amt, CreditAmount: 0, Narration: `Loan Posting: ${loan.LoanNo} — Borrower` },
-      { LHeadId: loan.LenderLHeadId, DebitAmount: 0, CreditAmount: amt, Narration: `Loan Posting: ${loan.LoanNo} — Lender` },
-    ];
-    await postVoucher(pool, {
-      voucherNo: loan.LoanNo,
-      // The loan's own date, not the date it happened to get posted —
-      // matches the Inter-Company branch above, which already got this
-      // right.
-      voucherDate: loan.LoanDate,
-      sourceType: "LoanPosting",
-      sourceId: loanId,
-      companyId: loan.LenderCompanyId || loan.BorrowerCompanyId || null,
-      createdBy: userEmail,
-      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
-    });
-  }
 
-  // BUG 9 FIX: stamp DisbursedAt when the GL posting confirms money moved.
-  // Null until then; setting it here (and in the Inter-Company auto-post
-  // path in POST / above) gives the loan a distinct disbursement moment
-  // separate from its sanction date, enabling the "Given vs Received"
-  // lifecycle distinction on the frontend. Uses the loan's own LoanDate,
-  // not SYSDATETIME() — "Post to GL" can happen well after the real
-  // disbursement (a legacy loan reposted today shouldn't show today as
-  // its disbursement date).
-  await pool.request()
-    .input("LoanId", sql.Int, loanId)
-    .input("LoanDate", sql.Date, loan.LoanDate)
-    .query("UPDATE dbo.LoanSanction SET DisbursedAt = @LoanDate WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
+    // BUG 9 FIX: stamp DisbursedAt when the GL posting confirms money moved.
+    // Null until then; setting it here (and in the Inter-Company auto-post
+    // path in POST / above) gives the loan a distinct disbursement moment
+    // separate from its sanction date, enabling the "Given vs Received"
+    // lifecycle distinction on the frontend. Uses the loan's own LoanDate,
+    // not SYSDATETIME() — "Post to GL" can happen well after the real
+    // disbursement (a legacy loan reposted today shouldn't show today as
+    // its disbursement date).
+    await tx.request()
+      .input("LoanId", sql.Int, loanId)
+      .input("LoanDate", sql.Date, loan.LoanDate)
+      .query("UPDATE dbo.LoanSanction SET DisbursedAt = @LoanDate WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
+
+    await tx.commit();
+  } catch (err) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    throw err;
+  }
 
   await bumpCacheVersion("loan-sanction");
   return { voucherNo: loan.LoanNo };

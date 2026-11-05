@@ -2,13 +2,54 @@ const GOOGLE_ADS_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v24";
 const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v20.0";
 const { normalizeSaLeadContactFields } = require("../validation/saLeadValidation");
 
+// adapter: this file can actually talk to that family's API (test, push, metrics, leads).
 const PROVIDER_CONFIG = {
   facebook: { label: "Meta Ads", family: "meta" },
   instagram: { label: "Meta Ads", family: "meta" },
-  meta: { label: "Meta Ads", family: "meta" },
-  google: { label: "Google Ads", family: "google" },
+  meta: {
+    // instantLeads: lead-form submissions can be delivered to us the moment they happen (metaLeadWebhook.js).
+    label: "Meta Ads", family: "meta", adapter: true, instantLeads: true,
+    settings: [
+      { key: "appId", label: "Meta app ID (for Connect with Facebook and instant leads)", secret: false },
+      { key: "appSecret", label: "Meta app secret", secret: true },
+    ],
+  },
+  // settings: extra values a connection of this provider needs (kept in IntegrationChannels.SettingsJson);
+  // secret ones are never sent back to the browser. autoRenew: the access token is renewed from the
+  // refresh token (Google's last about an hour).
+  google: {
+    label: "Google Ads", family: "google", adapter: true, autoRenew: true,
+    settings: [
+      { key: "clientId", label: "OAuth client ID", secret: false },
+      { key: "clientSecret", label: "OAuth client secret", secret: true },
+      { key: "loginCustomerId", label: "Manager account ID (only if you sign in through a manager account)", secret: false },
+    ],
+  },
   linkedin: { label: "LinkedIn Ads", family: "linkedin" },
 };
+
+/** The providers a connection in Admin → Integrations can be: [{ id, label, settings, autoRenew }]. */
+const CONNECTION_PROVIDERS = Object.entries(PROVIDER_CONFIG)
+  .filter(([, c]) => c.adapter)
+  .map(([id, c]) => ({ id, label: c.label, settings: c.settings || [], autoRenew: !!c.autoRenew, instantLeads: !!c.instantLeads }));
+
+/** Exchanges a Google OAuth refresh token for a fresh access token: { accessToken, expiresAt }. */
+async function renewGoogleAccessToken({ clientId, clientSecret, refreshToken }) {
+  let body;
+  try {
+    body = await requestJson("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" }),
+    });
+  } catch (err) {
+    // Google's token endpoint answers { error, error_description } — e.g. invalid_client, invalid_grant.
+    const reason = String(err.body?.error_description || err.body?.error || err.message).replace(/\.+$/, "");
+    throw new Error(`Google refused to renew the token: ${reason}. Check the client ID, client secret and refresh token.`);
+  }
+  if (!body.access_token) throw new Error("Google did not return an access token — check the client ID, secret and refresh token");
+  return { accessToken: body.access_token, expiresAt: new Date(Date.now() + (Number(body.expires_in) || 3600) * 1000) };
+}
 
 function normalizeProvider(platformType) {
   return String(platformType || "").trim().toLowerCase();
@@ -138,13 +179,15 @@ async function requestJson(url, options = {}) {
 
 function googleHeaders(platform) {
   const settings = parseAccountDetails(platform);
+  // Google retired developer tokens on 9 Sep 2026 — API access now comes from the Google Cloud
+  // project that owns the OAuth client. The header is ignored today and will be rejected in a
+  // future API version, so it is only sent while an old connection still has one saved.
   const developerToken = platform.DeveloperToken || settings.developerToken || process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-  if (!developerToken) throw new Error("Google Ads developer token is required in AccountDetails.developerToken or GOOGLE_ADS_DEVELOPER_TOKEN");
   const headers = {
     Authorization: `Bearer ${platform.AccessToken}`,
-    "developer-token": developerToken,
     "Content-Type": "application/json",
   };
+  if (developerToken) headers["developer-token"] = developerToken;
   const loginCustomerId = platform.LoginCustomerId || settings.loginCustomerId || process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
   if (loginCustomerId) headers["login-customer-id"] = cleanCustomerId(loginCustomerId);
   return headers;
@@ -173,7 +216,7 @@ async function testPlatformConnection(platformType, accessToken, adAccountId, pl
 
     if (family === "meta") {
       const accountId = normalizeMetaAccountId(adAccountId);
-      const result = await requestJson(metaUrl(accountId || "me", {
+      const result = await requestJson(metaUrl(encodeURIComponent(accountId || "me"), {
         access_token: accessToken,
         fields: accountId ? "id,name,account_status" : "id,name",
       }));
@@ -240,7 +283,7 @@ async function pushGoogleAd(ad, platform) {
     partialFailure: true,
   };
 
-  const result = await requestJson(`https://googleads.googleapis.com/${GOOGLE_ADS_VERSION}/customers/${customerId}/adGroupAds:mutate`, {
+  const result = await requestJson(`https://googleads.googleapis.com/${GOOGLE_ADS_VERSION}/customers/${encodeURIComponent(customerId)}/adGroupAds:mutate`, {
     method: "POST",
     headers: googleHeaders(platform),
     body: JSON.stringify(body),
@@ -280,7 +323,7 @@ async function pushMetaAd(ad, platform) {
       },
     },
   };
-  const creative = await requestJson(metaUrl(`${accountId}/adcreatives`), {
+  const creative = await requestJson(metaUrl(`${encodeURIComponent(accountId)}/adcreatives`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(creativeBody),
@@ -293,7 +336,7 @@ async function pushMetaAd(ad, platform) {
     creative: { creative_id: creative.id },
     status: statusToMeta(ad.Status),
   };
-  const result = await requestJson(metaUrl(`${accountId}/ads`), {
+  const result = await requestJson(metaUrl(`${encodeURIComponent(accountId)}/ads`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(adBody),
@@ -366,7 +409,7 @@ async function fetchGoogleMetrics(ad, platform, dateRange = "LAST_30_DAYS") {
     WHERE ${where}
       AND segments.date DURING ${dateRange}
   `;
-  const result = await requestJson(`https://googleads.googleapis.com/${GOOGLE_ADS_VERSION}/customers/${customerId}/googleAds:searchStream`, {
+  const result = await requestJson(`https://googleads.googleapis.com/${GOOGLE_ADS_VERSION}/customers/${encodeURIComponent(customerId)}/googleAds:searchStream`, {
     method: "POST",
     headers: googleHeaders(platform),
     body: JSON.stringify({ query }),
@@ -393,7 +436,7 @@ function aggregateGoogleRows(rows, rawResponse) {
 async function fetchMetaMetrics(ad, platform, datePreset = "last_30d") {
   const adId = ad.ExternalAdId;
   if (!adId) throw new Error("Meta metrics require ExternalAdId.");
-  const result = await requestJson(metaUrl(`${adId}/insights`, {
+  const result = await requestJson(metaUrl(`${encodeURIComponent(adId)}/insights`, {
     access_token: platform.AccessToken,
     date_preset: datePreset,
     fields: "impressions,clicks,spend,reach,frequency,ctr,cpc,cpm,actions,cost_per_action_type",
@@ -437,7 +480,7 @@ async function fetchLeadsFromPlatform(ad, platform) {
   const formId = settings.leadFormId || ad.LeadFormId || ad.ExternalLeadFormId || null;
   const objectId = formId || ad.ExternalAdId;
   if (!objectId) throw new Error("Meta lead pull requires AccountDetails.leadFormId or ad ExternalAdId.");
-  const result = await requestJson(metaUrl(`${objectId}/leads`, {
+  const result = await requestJson(metaUrl(`${encodeURIComponent(objectId)}/leads`, {
     access_token: platform.AccessToken,
     fields: "id,created_time,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,field_data",
     limit: 100,
@@ -492,6 +535,13 @@ async function normalizeImportedLeads(ad, platform, importedLeads = []) {
 }
 
 module.exports = {
+  CONNECTION_PROVIDERS,
+  META_GRAPH_VERSION,
+  metaUrl,
+  requestJson,
+  normalizeMetaLead,
+  providerFamily,
+  renewGoogleAccessToken,
   providerLabel,
   testPlatformConnection,
   syncAdToPlatform,

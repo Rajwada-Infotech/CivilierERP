@@ -1,0 +1,200 @@
+// By User, right side: one person's figures and their activity, day by day.
+import React, { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, Loader2, Download } from "lucide-react";
+import type { SessionEvent, UserActivitySummary, UserActivityType } from "@/api/userActivityApi";
+import { describeActivity } from "./describeActivity";
+import { ChangeDetails } from "./ChangeDetails";
+import { KindCount, KindTag, LBL, KEY_LINE, RULE, RoleTag, chip } from "./activityShared";
+import { ago } from "./PeopleList";
+
+const IST = "Asia/Kolkata";
+export const timeIst = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: IST });
+export const dayLabelIst = (key: string) =>
+  new Date(`${key}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric", timeZone: IST });
+
+export const TYPES: { key: UserActivityType; label: string }[] = [
+  { key: "changes", label: "Changes" },
+  { key: "all", label: "Everything" },
+  { key: "reads", label: "Pages opened" },
+  { key: "logins", label: "Sign-ins" },
+];
+
+/** What a day's activities were, most meaningful first, each kind once with its count (sign-ins and sign-outs together). */
+const KIND_ORDER = ["create", "update", "delete", "export", "settings_change", "read", "login"];
+function dayKinds(items: SessionEvent[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const e of items) {
+    const kind = describeActivity(e).kind;
+    const k = kind === "logout" ? "login" : kind;
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return KIND_ORDER.filter((k) => counts.has(k)).map((k) => [k, counts.get(k) as number]);
+}
+
+function EventRow({ e }: { e: SessionEvent }) {
+  const d = describeActivity(e);
+  return (
+    <div className="flex items-start gap-3 py-2.5 border-b border-foreground/10 last:border-0">
+      <span className="w-16 shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground">{timeIst(e.timestamp)}</span>
+      <span className="w-[4.5rem] shrink-0">
+        <KindTag kind={d.kind} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm text-foreground">
+          {d.verb}
+          {d.subject ? <span className="font-semibold"> {d.subject}</span> : null}
+          {d.where ? <span className="text-muted-foreground"> · from {d.where}</span> : null}
+        </p>
+        <ChangeDetails d={d} />
+        {(e.event !== "action" || e.ipAddress) && (
+          <p className="text-[0.6875rem] text-muted-foreground truncate">
+            {e.ipAddress && e.ipAddress !== "unknown" ? e.ipAddress : ""}
+            {e.event === "login" && e.deviceInfo && e.deviceInfo !== "unknown" ? ` · ${e.deviceInfo}` : ""}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export const PersonActivity: React.FC<{
+  current?: UserActivitySummary;
+  type: UserActivityType;
+  setType: (t: UserActivityType) => void;
+  total: number;
+  days: { key: string; items: SessionEvent[] }[];
+  loading: boolean;
+  hasMore: boolean;
+  loadingMore: boolean;
+  loadMore: () => void;
+  /** Download the whole selected period for this person, day by day (not only the days loaded here). */
+  onExport: () => void;
+  exporting: boolean;
+}> = ({ current, type, setType, total, days, loading, hasMore, loadingMore, loadMore, onExport, exporting }) => {
+  // Every day is open, showing its activities; a day can be closed to just its header (its total and what was done).
+  const [closed, setClosed] = useState<Set<string>>(new Set());
+  useEffect(() => setClosed(new Set()), [current?.userId, type]);
+  const isOpen = (key: string) => !closed.has(key);
+  const toggle = (key: string) =>
+    setClosed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allClosed = days.length > 0 && days.every((g) => closed.has(g.key));
+  // Clicking a kind in a day's header shows only that kind of activity for that day; clicking it again shows all.
+  const [only, setOnly] = useState<Record<string, string>>({});
+  useEffect(() => setOnly({}), [current?.userId, type]);
+  const pick = (day: string, kind: string) => {
+    setOnly((prev) => {
+      const next = { ...prev };
+      if (next[day] === kind) delete next[day];
+      else next[day] = kind;
+      return next;
+    });
+    setClosed((prev) => {
+      if (!prev.has(day)) return prev;
+      const next = new Set(prev);
+      next.delete(day);
+      return next;
+    });
+  };
+  const kindOf = (e: SessionEvent) => {
+    const k = describeActivity(e).kind;
+    return k === "logout" ? "login" : k;
+  };
+
+  return (
+  <div className="bg-card min-w-0" style={{ border: RULE }}>
+    {!current ? (
+      <p className="p-10 text-center text-sm text-muted-foreground">Pick a person to see what they did.</p>
+    ) : (
+      <>
+        <div className="p-4 space-y-3" style={{ borderBottom: RULE }}>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-heading text-lg font-bold tracking-tight text-foreground">{current.userName}</h3>
+            {current.userRole && <RoleTag role={current.userRole} />}
+            <span className="text-xs text-muted-foreground">{current.userEmail}</span>
+            <span className={`${LBL} ml-auto`}>Last seen {ago(current.lastSeen)}</span>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-5" style={{ borderTop: "1px solid hsl(var(--foreground) / 0.2)", borderBottom: "1px solid hsl(var(--foreground) / 0.2)" }}>
+            {[
+              { label: "Sessions", value: current.sessions },
+              { label: "Created", value: current.creates },
+              { label: "Updated", value: current.updates, note: "approvals included" },
+              { label: "Deleted", value: current.deletes, red: current.deletes > 0 },
+              { label: "Pages opened", value: current.reads },
+            ].map((s, i) => (
+              <div key={s.label} className="px-3 py-2.5" style={i ? { borderLeft: "1px solid hsl(var(--foreground) / 0.12)" } : undefined}>
+                <p className={LBL} title={s.note}>{s.label}</p>
+                <p className={`font-heading text-lg font-bold tabular-nums mt-0.5 ${s.red ? "text-destructive" : "text-foreground"}`}>{s.value.toLocaleString("en-IN")}</p>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {TYPES.map((t) => (
+              <button key={t.key} onClick={() => setType(t.key)} aria-pressed={type === t.key} className={chip(type === t.key)}>
+                {t.label}
+              </button>
+            ))}
+            <span className={`${LBL} ml-auto`}>
+              {total.toLocaleString("en-IN")} event{total === 1 ? "" : "s"}
+            </span>
+            {days.length > 0 && (
+              <button type="button" onClick={() => setClosed(allClosed ? new Set() : new Set(days.map((g) => g.key)))} className={`${KEY_LINE} h-7 px-2.5`}>
+                {allClosed ? "Expand all" : "Collapse all"}
+              </button>
+            )}
+            <button type="button" onClick={onExport} disabled={exporting || total === 0} className={`${KEY_LINE} h-7 px-2.5`} title="Download every day of the selected period as an Excel file">
+              {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+              {exporting ? "Exporting…" : "Export"}
+            </button>
+          </div>
+        </div>
+
+        <div className="px-4 pb-4 lg:max-h-[calc(100vh-24rem)] overflow-y-auto">
+          {loading ? (
+            <p className="py-10 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
+              <Loader2 size={14} className="animate-spin" /> Loading…
+            </p>
+          ) : days.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Nothing of this kind in the selected period.</p>
+          ) : (
+            days.map((g) => (
+              <section key={g.key}>
+                <h4 className="sticky top-0 z-[1] bg-card m-0 py-2 flex flex-wrap items-center gap-x-2 gap-y-1" style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground))" }}>
+                  <button
+                    type="button"
+                    onClick={() => toggle(g.key)}
+                    aria-expanded={isOpen(g.key)}
+                    className="flex items-center gap-2 text-left hover:text-primary"
+                  >
+                    {isOpen(g.key) ? <ChevronDown size={13} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={13} className="shrink-0 text-muted-foreground" />}
+                    <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{dayLabelIst(g.key)}</span>
+                    <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{g.items.length}</span>
+                  </button>
+                  {dayKinds(g.items).map(([kind, n]) => (
+                    <KindCount key={kind} kind={kind} count={n} pressed={only[g.key] === kind} onClick={() => pick(g.key, kind)} />
+                  ))}
+                </h4>
+                {isOpen(g.key) &&
+                  g.items
+                    .filter((e) => !only[g.key] || kindOf(e) === only[g.key])
+                    .map((e) => (
+                      <EventRow key={e.id || `${e.timestamp}-${e.resource}`} e={e} />
+                    ))}
+              </section>
+            ))
+          )}
+          {hasMore && (
+            <button onClick={loadMore} disabled={loadingMore} className={`${KEY_LINE} mt-3 w-full h-9`}>
+              {loadingMore ? "Loading…" : "Load older"}
+            </button>
+          )}
+        </div>
+      </>
+    )}
+  </div>
+  );
+};

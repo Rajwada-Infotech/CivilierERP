@@ -2,6 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const multer = require("multer");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmBookingDocument", { withApplication: true })); }
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -10,8 +12,8 @@ const { actorId } = require("../services/saAccess");
 const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Standard checklist shown even before any row exists, so staff see what's
 // expected to be collected — not just what's already been uploaded.
@@ -239,6 +241,7 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
         try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
         throw txErr;
       }
+      await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId }, ["Documents"], "document uploaded");
       res.status(201).json({ success: true, ids: inserted, count: inserted.length });
     } catch (e) {
       console.error("[crm-booking-documents] application upload error:", e.message);
@@ -317,6 +320,7 @@ router.delete("/:id", requireAnyPageRight(["crm-applications", "crm-welcome-call
     }
 
     await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmBookingDocument WHERE Id = @id");
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { bookingId: docRow.recordset[0].BookingId }, ["Documents"], "document deleted");
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-booking-documents] DELETE error:", e.message);

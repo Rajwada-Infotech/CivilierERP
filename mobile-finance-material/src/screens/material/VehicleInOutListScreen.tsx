@@ -4,6 +4,7 @@
 // create/edit/delete are all supported (this page has no separate document
 // lifecycle beyond Draft/approval, unlike Payment) — CSV import/export and
 // Print stay web-only.
+import { fmtWallClock } from "@/utils/istTime";
 import { useMemo, useState } from "react";
 import { View, Text, Pressable, ActivityIndicator, TextInput, Alert } from "react-native";
 import { ProjectGroupedList } from "@/components/ProjectGroupedList";
@@ -30,10 +31,9 @@ function fmtDate(d: string | null | undefined) {
   return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-IN");
 }
 
+// Entry / exit times are stored as the IST digits that were typed; show those digits, not the phone's zone.
 function fmtDateTime(d: string | null | undefined) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? d : dt.toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" });
+  return fmtWallClock(d, { dateStyle: "short", timeStyle: "short" });
 }
 
 function VehicleCard({

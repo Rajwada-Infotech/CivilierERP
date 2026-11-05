@@ -4,6 +4,7 @@
 // document sources, EMI, and billing terms. Not ported: file attachments
 // (the web Invoice form has none either — no backend column for it, unlike
 // Contract).
+import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, Alert, Modal, Switch } from "react-native";
@@ -44,7 +45,7 @@ const SOURCE_TABS: Array<{ kind: SourceKind; label: string; icon: React.Componen
 ];
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return istToday();
 }
 
 function fieldLabel(text: string) {

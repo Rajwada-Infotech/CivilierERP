@@ -44,6 +44,20 @@ function depreciationStart(asset) {
   return { y: d.getFullYear(), m: d.getMonth() + 1 };
 }
 
+/**
+ * First month in which depreciation must NOT be posted because the asset left
+ * this company through an Inter-Company Transfer (see
+ * services/interCompanyFixedAssets.js). The engine is monthly, so the transfer
+ * month itself and everything after it stop; months before it are untouched and
+ * stay as posted history. Returns {y, m} or null for an asset never transferred.
+ */
+function depreciationStopMonth(asset) {
+  if (!asset.TransferredAt) return null;
+  const d = new Date(asset.TransferredAt);
+  if (Number.isNaN(d.getTime())) return null;
+  return { y: d.getFullYear(), m: d.getMonth() + 1 };
+}
+
 /** Validate the asset carries everything depreciation posting needs. */
 function validateAssetForDepreciation(asset) {
   const cost = Number(asset.PurchaseCost) || 0;
@@ -110,6 +124,19 @@ const alreadyPosted = postedEntry;
  * — never `accumulatedDepreciation`.
  */
 async function computeMonth(pool, asset, year, month) {
+  // A transferred asset is a historical record only: nothing new is charged
+  // from the transfer month on (a month already posted is still shown as is).
+  const stop = depreciationStopMonth(asset);
+  if (stop && year * 12 + month >= stop.y * 12 + stop.m) {
+    const already = await postedEntry(pool, asset.AssetId, year, month);
+    if (!already) {
+      throw cfgErr(
+        `Depreciation stopped: this asset was transferred to another company on ${new Date(asset.TransferredAt).toLocaleDateString("en-IN")}. ` +
+        `No depreciation is posted for ${month}/${year} onward — it is depreciated under its new FA Code in the receiving company.`,
+      );
+    }
+  }
+
   const bad = validateAssetForDepreciation(asset);
   if (bad) throw bad;
 

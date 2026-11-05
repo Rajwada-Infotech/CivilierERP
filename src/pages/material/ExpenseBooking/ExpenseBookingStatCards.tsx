@@ -1,5 +1,3 @@
-import { Receipt, CheckCircle2, Clock, CreditCard } from "lucide-react";
-import { StatCard } from "./PickerPrimitives";
 import { fmt } from "./helpers";
 
 interface ExpenseBookingStatCardsProps {
@@ -9,42 +7,23 @@ interface ExpenseBookingStatCardsProps {
   emiCount: number;
 }
 
-export function ExpenseBookingStatCards({
-  totalNet,
-  approvedCount,
-  pendingCount,
-  emiCount,
-}: ExpenseBookingStatCardsProps) {
+// Four figures on a ruled row (the sheet frame supplies .statrow, .label and .figure).
+export function ExpenseBookingStatCards({ totalNet, approvedCount, pendingCount, emiCount }: ExpenseBookingStatCardsProps) {
+  const items = [
+    { label: "Total booked", value: `₹${fmt(totalNet)}`, note: "net, on this page of the list" },
+    { label: "Approved", value: approvedCount.toLocaleString("en-IN"), note: "in all" },
+    { label: "Pending", value: pendingCount.toLocaleString("en-IN"), note: "awaiting approval, in all" },
+    { label: "On EMI", value: emiCount.toLocaleString("en-IN"), note: "on this page of the list" },
+  ];
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <StatCard
-        label="Total Booked"
-        value={`₹${fmt(totalNet)}`}
-        icon={Receipt}
-        color="text-indigo-500 bg-indigo-500/10"
-        accentColor="border-l-indigo-500"
-      />
-      <StatCard
-        label="Approved"
-        value={approvedCount}
-        icon={CheckCircle2}
-        color="text-indigo-500 bg-indigo-500/10"
-        accentColor="border-l-indigo-500"
-      />
-      <StatCard
-        label="Pending"
-        value={pendingCount}
-        icon={Clock}
-        color="text-amber-500 bg-[#ffe2021a]"
-        accentColor="border-l-amber-500"
-      />
-      <StatCard
-        label="EMI Active"
-        value={emiCount}
-        icon={CreditCard}
-        color="text-violet-500 bg-violet-500/10"
-        accentColor="border-l-violet-500"
-      />
+    <div className="statrow four">
+      {items.map((x) => (
+        <div key={x.label}>
+          <p className="label">{x.label}</p>
+          <p className="figure" style={{ fontSize: "clamp(20px, 2.2vw, 30px)", marginTop: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.value}</p>
+          <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+        </div>
+      ))}
     </div>
   );
 }

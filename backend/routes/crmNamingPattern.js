@@ -5,13 +5,13 @@
 
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageAction } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const { SCOPE, validateTemplate, renderName } = require("../services/namingPattern");
 
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // Managed inside Auto Project Setup — same page rights, no separate screen.
 const PAGE = "crm-auto-project-setup";
@@ -81,7 +81,8 @@ router.post("/preview", requirePageRight(PAGE, "view"), (req, res) => {
   res.json({ example: example({ Scope: v.scope, Template: v.template, GroundLabel: v.groundLabel, SkipLetters: v.skip, NumberStart: v.start }) });
 });
 
-router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
+// Saving a naming in Auto Project Setup makes its pattern here — an edit there, so create or edit will do.
+router.post("/", requireAnyPageAction(PAGE, ["create", "edit"]), async (req, res) => {
   const v = parse(req.body || {});
   if (v.error) return res.status(400).json({ error: v.error });
   try {

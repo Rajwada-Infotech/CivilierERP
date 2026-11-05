@@ -10,6 +10,7 @@ import {
   getServiceTickets, markTicketInProgress, resolveServiceTicket, closeServiceTicket, reopenServiceTicket,
   type ServiceTicketRow, type TicketStatus,
 } from "@/api/serviceTicketApi";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const TICKET_VIOLET = "#a78bfa";
 const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "\u2014");
@@ -163,7 +164,7 @@ export default function MaintenanceServiceRequests() {
                     </div>
                     <p className="text-sm font-heading font-semibold text-foreground truncate">{t.Subject}</p>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 mt-1">
-                      {t.ApplicantName && <p className="text-xs text-muted-foreground">Customer: <span className="text-foreground">{t.ApplicantName}</span></p>}
+                      {t.ApplicantName && <p className="text-xs text-muted-foreground">Customer: <span className="text-foreground"><ApplicantNames name={t.ApplicantName} bookingId={t.BookingId} /></span></p>}
                       {t.UnitNo && <p className="text-xs text-muted-foreground">Unit: <span className="text-foreground">{t.UnitNo}</span></p>}
                       {t.ProjectName && <p className="text-xs text-muted-foreground">Project: <span className="text-foreground">{t.ProjectName}</span></p>}
                       {t.AssigneeName && <p className="text-xs text-muted-foreground">Assigned: <span className="text-foreground">{t.AssigneeName}</span></p>}

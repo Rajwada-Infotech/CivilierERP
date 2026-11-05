@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { usePageRights } from "@/hooks/usePageRights";
+import { useRef, useState } from "react";
+import { useInSheet } from "@/components/sheet/useInSheet";
+import { useCanApprove } from "@/hooks/useCanApprove";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -10,27 +11,9 @@ import {
 } from "./ui/dialog";
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
+import { activityHeaders } from "@/lib/fetchWithAuth";
+import { refreshAfterWrite } from "@/lib/queryClient";
 import { CheckCircle2, SendHorizonal, XCircle, Loader2, ClipboardCheck } from "lucide-react";
-
-// ─── Role check ───────────────────────────────────────────────────────────────
-// Reads role from JWT stored in localStorage under "token".
-function getUserRole(): string | null {
-  try {
-    const token = sessionStorage.getItem("token");
-    if (!token) return null;
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.role ?? null;
-  } catch {
-    return null;
-  }
-}
-
-const APPROVER_ROLES = ["admin", "super_admin", "dba"];
-
-function isApprover(allowedRoles: string[]): boolean {
-  const role = getUserRole();
-  return role !== null && allowedRoles.includes(role);
-}
 
 // ─── fetchWithAuth helper (inline — avoids import path assumptions) ───────────
 async function authFetch(url: string, method: string, body?: object) {
@@ -39,6 +22,7 @@ async function authFetch(url: string, method: string, body?: object) {
     method,
     headers: {
       "Content-Type": "application/json",
+      ...activityHeaders(),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -54,6 +38,8 @@ async function authFetch(url: string, method: string, body?: object) {
       throw new Error("Server is busy — please try again in a moment.");
     throw new Error(data.error || `HTTP ${res.status}`);
   }
+  // Approve / reject / submit changes statuses shown in lists elsewhere: read them again (lib/queryClient.ts).
+  refreshAfterWrite();
   return data;
 }
 
@@ -67,12 +53,14 @@ interface ApprovalActionsProps {
   /** When true, only the Submit button is shown. Approve/Reject are reserved
    *  for the Admin Approval Inbox and will not render on this component. */
   submitOnly?: boolean;
-  /** Override which roles may see Approve/Reject (only relevant when this
-   *  component renders inside the Approval Inbox, i.e. submitOnly=false).
-   *  Defaults to the system-wide APPROVER_ROLES. The backend re-checks
-   *  independently via approvalService.js's MODULE_APPROVER_ROLE_OVERRIDES —
-   *  this only controls whether the buttons render. */
-  approverRoles?: string[];
+  /** The approval module this record belongs to (e.g. "purchase-orders",
+   *  "crm-agreements"). Approve / Reject show only when Approval Setup lets
+   *  the signed-in user act on this record now — asked from the server
+   *  (/api/approval-workflows/can-act), never decided from role lists here. */
+  module?: string;
+  /** Already known by the caller (the Approval Inbox computes it per row) —
+   *  skips the server check. */
+  canAct?: boolean;
   /** Inserted between recordId and the action verb — e.g. "date" turns the
    *  call into `${endpoint}/${recordId}/date/${action}`. Used when a record
    *  has more than one independent approval gate (e.g. CRM Agreement's
@@ -89,13 +77,6 @@ interface ApprovalActionsProps {
    *  it has no such gate. Only ever affects rendering here; the backend is
    *  still the real authority on whether /approve succeeds. */
   reviewInstead?: { label: string; onClick: () => void };
-  /** Mark modules the backend keeps deliberately role-locked (Journal
-   *  Voucher, Fund Transfer, Inter-Company Transfer, CRM Agreement Date /
-   *  Sales Deed Director — see MODULE_APPROVER_ROLE_OVERRIDES in
-   *  approvalService.js). When true, the "approval-inbox" page-right
-   *  fallback below is skipped and only approverRoles can unlock the
-   *  buttons, mirroring the backend gate exactly. */
-  restricted?: boolean;
   /** Extra source statuses (beyond Rejected/Issued/Partially Received) that
    *  should show the Submit button. Every module using this component
    *  auto-submits a Draft record the moment it's created, so a lingering
@@ -105,19 +86,30 @@ interface ApprovalActionsProps {
    *  showSubmit logic didn't know about, leaving that row with no action at
    *  all. Additive and opt-in so every other caller is unaffected. */
   extraSubmitStatuses?: string[];
-  /** For a `restricted` module only: true when this specific record's
-   *  caller already determined (via the Approval Inbox list's own
-   *  isVisibleToViewer/_canAct computation, approvalInbox.js) that the
-   *  current viewer is named by userId on the record's current Approval
-   *  Setup level — e.g. Journal Voucher is hardcoded to super_admin by
-   *  approverRoles, but an admin can still name someone else (Prashant) as
-   *  an approver for it in Approval Setup. Without this, a restricted
-   *  module's buttons stayed locked to the hardcoded role list even for a
-   *  person Approval Setup explicitly named, even though the inbox row
-   *  already showed them the record as theirs to act on and
-   *  approvalService.js's transition() now honours the same match. Ignored
-   *  when `restricted` is false. */
-  workflowVisible?: boolean;
+  /** Draw in the drawing-sheet style even where it can't be detected: inside a dialog, which renders outside the
+   *  page's sheet. */
+  sheet?: boolean;
+  /** Where a rejection may send the record back to (default first) — shown
+   *  as a choice when there is more than one; the chosen one goes as `toStage`. */
+  sendBackChoices?: SendBackChoice[];
+}
+
+export type SendBackChoice = { value: string; label: string; note?: string };
+
+/** Pick where a send-back goes — the inbox's Reject and the booking's Send Back share it. */
+export function SendBackChoices({ choices, value, onChange }: { choices: SendBackChoice[]; value: string | null; onChange: (v: string) => void }) {
+  if (choices.length < 2) return null;
+  const current = value ?? choices[0].value;
+  return (
+    <div className="space-y-1.5 text-sm" role="radiogroup" aria-label="Send back to">
+      {choices.map((o) => (
+        <label key={o.value} className="flex items-start gap-2 cursor-pointer">
+          <input type="radio" name="send-back-to" className="mt-1" checked={current === o.value} onChange={() => onChange(o.value)} />
+          <span><span className="font-medium">{o.label}</span>{o.note && <span className="text-muted-foreground text-xs"> — {o.note}</span>}</span>
+        </label>
+      ))}
+    </div>
+  );
 }
 
 export function ApprovalActions({
@@ -127,27 +119,27 @@ export function ApprovalActions({
   onSuccess,
   className,
   submitOnly = false,
-  approverRoles = APPROVER_ROLES,
+  module,
+  canAct,
   actionPathSuffix,
   reviewInstead,
-  restricted = false,
   extraSubmitStatuses = [],
-  workflowVisible = false,
+  sheet: sheetProp = false,
+  sendBackChoices,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
+  const [rejectTo, setRejectTo] = useState<string | null>(null);
+  // Drawn in ink, squared, on a drawing-sheet page (the Approval Inbox); unchanged elsewhere.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sheet = useInSheet(rootRef) || sheetProp;
+  const SK = "rounded-none h-8 px-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] gap-1.5 [&_svg]:size-3.5";
 
-  // Fallback: holding "edit" on the "approval-inbox" page via Menu Rights
-  // also unlocks the buttons — mirrors the backend's transition() gate in
-  // approvalService.js. Not consulted for `restricted` modules, which stay
-  // locked to approverRoles unless workflowVisible names this person
-  // specifically (see that prop's doc comment).
-  const { canEdit: hasApprovalInboxEdit } = usePageRights("approval-inbox");
-  const approver =
-    isApprover(approverRoles) ||
-    (!restricted && hasApprovalInboxEdit) ||
-    (restricted && workflowVisible);
+  // Approval Setup decides who may act; ask the server unless the caller
+  // already knows. No module and no answer -> no Approve / Reject.
+  const serverCanAct = useCanApprove(module, recordId, !submitOnly && canAct === undefined);
+  const approver = canAct ?? serverCanAct;
 
   // ── Action handler ──────────────────────────────────────────────────────────
   async function handleAction(action: "submit" | "approve" | "reject") {
@@ -162,12 +154,29 @@ export function ApprovalActions({
       // matter what was entered. Sending both is harmless — every route
       // destructures only the one key it actually reads.
       const body =
-        action === "reject" ? { note: rejectNote, Remarks: rejectNote } : undefined;
+        action === "reject"
+          ? { note: rejectNote, Remarks: rejectNote, ...(sendBackChoices?.length ? { toStage: rejectTo ?? sendBackChoices[0].value } : {}) }
+          : undefined;
       const path = actionPathSuffix
         ? `${endpoint}/${recordId}/${actionPathSuffix}/${action}`
         : `${endpoint}/${recordId}/${action}`;
       const data = await authFetch(path, "PUT", body);
-      if (
+      if (action === "approve" && data?.partialFailure) {
+        toast.warning(data.message || "Approval completed with a follow-up issue", data.crmLedgerRetryId ? {
+          action: {
+            label: "Retry CRM ledger",
+            onClick: async () => {
+              try {
+                const result = await authFetch(`/api/crm/refunds/rebooking-transfer/${data.crmLedgerRetryId}/retry-ledger`, "PUT");
+                if (result.partialFailure) toast.warning(result.message || "CRM ledger follow-up is still incomplete");
+                else toast.success(result.message || "CRM ledger entries updated");
+              } catch (err: unknown) {
+                toast.error(err instanceof Error ? err.message : "CRM ledger retry failed");
+              }
+            },
+          },
+        } : undefined);
+      } else if (
         action === "approve" &&
         data?.newStatus &&
         data.newStatus !== "Approved"
@@ -205,6 +214,7 @@ export function ApprovalActions({
       if (action === "reject") {
         setRejectOpen(false);
         setRejectNote("");
+        setRejectTo(null);
       }
       onSuccess?.(action, data);
     } catch (err: unknown) {
@@ -245,14 +255,14 @@ export function ApprovalActions({
   if (!showSubmit && !showApproveReject) return null;
 
   return (
-    <div className={`flex items-center gap-2 ${className ?? ""}`}>
+    <div ref={rootRef} className={`flex items-center gap-2 ${className ?? ""}`}>
       {/* Submit button — visible to all users on Draft/Issued */}
       {showSubmit && (
         <button
           disabled={loading !== null}
           onClick={() => handleAction("submit")}
           title="Submit for Approval"
-          className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold tracking-wide transition-all disabled:opacity-50 bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm shadow-violet-500/30 hover:from-violet-500 hover:to-indigo-500 hover:shadow-md hover:shadow-violet-500/40 hover:-translate-y-px active:translate-y-0 active:shadow-sm"
+          className={sheet ? `${SK} inline-flex items-center border border-foreground text-foreground hover:bg-primary/10 disabled:opacity-50` : "relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold tracking-wide transition-all disabled:opacity-50 bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm shadow-violet-500/30 hover:from-violet-500 hover:to-indigo-500 hover:shadow-md hover:shadow-violet-500/40 hover:-translate-y-px active:translate-y-0 active:shadow-sm"}
         >
           {loading === "submit" ? (
             <Loader2 className="w-3 h-3 animate-spin" />
@@ -269,7 +279,7 @@ export function ApprovalActions({
           {reviewInstead ? (
             <Button
               size="sm"
-              className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-cyan-600 hover:bg-cyan-700 text-white [&_svg]:size-3.5"
+              className={sheet ? `${SK} border border-foreground bg-card text-foreground hover:bg-primary/10` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-cyan-600 hover:bg-cyan-700 text-white [&_svg]:size-3.5"}
               onClick={reviewInstead.onClick}
             >
               <ClipboardCheck className="w-3.5 h-3.5" />
@@ -278,7 +288,7 @@ export function ApprovalActions({
           ) : (
             <Button
               size="sm"
-              className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"
+              className={sheet ? `${SK} bg-foreground text-card border border-foreground hover:bg-foreground/85` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"}
               disabled={loading !== null}
               onClick={() => handleAction("approve")}
             >
@@ -293,7 +303,7 @@ export function ApprovalActions({
 
           <Button
             size="sm"
-            className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-red-600 hover:bg-red-700 text-white border-0 [&_svg]:size-3.5"
+            className={sheet ? `${SK} bg-destructive text-white border border-destructive hover:bg-destructive/85` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-red-600 hover:bg-red-700 text-white border-0 [&_svg]:size-3.5"}
             disabled={loading !== null}
             onClick={() => setRejectOpen(true)}
           >
@@ -309,10 +319,11 @@ export function ApprovalActions({
 
       {/* Rejection note dialog */}
       <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className={sheet ? "sheet-frame sm:max-w-md" : "sm:max-w-md"} style={sheet ? { margin: 0 } : undefined}>
           <DialogHeader>
-            <DialogTitle>Reject Record</DialogTitle>
+            <DialogTitle className={sheet ? "font-heading text-lg font-bold tracking-tight pb-3 border-b border-foreground" : undefined}>{sheet ? "Reject record" : "Reject Record"}</DialogTitle>
           </DialogHeader>
+          {sendBackChoices && <SendBackChoices choices={sendBackChoices} value={rejectTo} onChange={setRejectTo} />}
           <Textarea
             placeholder="Reason for rejection (optional but recommended)"
             value={rejectNote}

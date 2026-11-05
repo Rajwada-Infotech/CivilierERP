@@ -25,27 +25,6 @@ export interface StockTransfer {
   CreatedAt: string;
 }
 
-export interface StockTransfersResponse {
-  data: StockTransfer[];
-  total: number;
-}
-
-export const getStockTransfers = async (params?: {
-  fromGodown?: number;
-  toGodown?: number;
-  page?: number;
-  limit?: number;
-}): Promise<StockTransfersResponse> => {
-  const qs = new URLSearchParams();
-  if (params?.fromGodown) qs.set("fromGodown", String(params.fromGodown));
-  if (params?.toGodown) qs.set("toGodown", String(params.toGodown));
-  if (params?.page) qs.set("page", String(params.page));
-  if (params?.limit) qs.set("limit", String(params.limit));
-  const res = await fetchWithAuth(`${BASE}?${qs}`);
-  if (!res.ok) throw new Error(`Failed to fetch transfers: ${res.status}`);
-  return res.json().catch(() => ({}));
-};
-
 export const getStockTransferById = async (
   id: number,
 ): Promise<StockTransfer> => {
@@ -75,4 +54,22 @@ export const createStockTransfer = async (
     throw new Error(err.error || `Transfer failed: ${res.status}`);
   }
   return res.json().catch(() => ({}));
+};
+
+// Transfer History tab: stock transfers and inter-company transfers together, newest first, one page at a time
+// (GET /api/stock-transfers/history). `ictTotal` is across all pages.
+export type TransferHistoryRow =
+  | { kind: "plain"; data: StockTransfer }
+  | { kind: "ict"; data: import("./interCompanyTransferApi").InterCompanyTransferSummary };
+
+export const getTransferHistory = async (params: { page: number; limit: number }): Promise<{
+  data: TransferHistoryRow[];
+  total: number;
+  plainTotal: number;
+  ictTotal: number;
+}> => {
+  const qs = new URLSearchParams({ page: String(params.page), limit: String(params.limit) });
+  const res = await fetchWithAuth(`${BASE}/history?${qs}`);
+  if (!res.ok) throw new Error(`Failed to fetch transfer history: ${res.status}`);
+  return res.json();
 };

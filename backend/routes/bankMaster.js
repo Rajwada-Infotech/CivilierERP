@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
@@ -13,6 +13,7 @@ const {
   bankMasterUpdateSchema,
 } = require("../utils/bankMasterSchemas");
 const { actorId } = require("../services/saAccess");
+const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 // Project tagging (optional, not-mandatory) — a bank tagged to one or more
 // Projects becomes the ONLY bank offered for that Project's work; a bank
 // with no tag at all stays in the shared fallback pool every untagged
@@ -149,7 +150,7 @@ router.get("/", cache("bank-master", 300), async (req, res) => {
                  STRING_AGG(proj.name, ', ') AS ProjectNames
           FROM dbo.CrmProjectBank pb
           JOIN dbo.enterprise proj ON proj.id = pb.ProjectId AND proj.business_type = 'P'
-          WHERE pb.BankLHeadId = ahm.LHeadId AND pb.IsActive = 1
+          WHERE pb.BankLHeadId = ahm.LHeadId AND pb.IsActive = 1 ${projectPredicate(req.projectScope, "pb.ProjectId")}
         ) tags
         WHERE LHeadType = @type
         ORDER BY LHeadId DESC
@@ -166,6 +167,11 @@ router.get("/", cache("bank-master", 300), async (req, res) => {
 
 // ====================== CREATE BANK ======================
 router.post("/", requirePageRight("bank-master", "create"), validateBody(bankMasterCreateSchema), async (req, res) => {
+  if (Array.isArray(req.body.ProjectIds)) {
+    for (const rawProjectId of req.body.ProjectIds) {
+      if (!assertProjectAllowed(req, res, parseInt(rawProjectId, 10))) return;
+    }
+  }
   const {
     BName,
     BBranch,
@@ -347,6 +353,11 @@ router.post("/", requirePageRight("bank-master", "create"), validateBody(bankMas
 router.put("/:id", requirePageRight("bank-master", "edit"), validateBody(bankMasterUpdateSchema), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
+  if (Array.isArray(req.body.ProjectIds)) {
+    for (const rawProjectId of req.body.ProjectIds) {
+      if (!assertProjectAllowed(req, res, parseInt(rawProjectId, 10))) return;
+    }
+  }
   const {
     BName,
     BBranch,

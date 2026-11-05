@@ -3,7 +3,7 @@ import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongs
 import { useNavigate } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -19,13 +19,7 @@ import {
   ChevronRight,
   ChevronDown,
   Search,
-  TrendingUp,
-  TrendingDown,
-  Scale,
-  IndianRupee,
   CalendarDays,
-  Folder,
-  FolderOpen,
   Building,
   Briefcase,
   FolderKanban,
@@ -33,7 +27,6 @@ import {
   CalendarRange,
   CalendarCheck,
   Loader2,
-  Receipt,
   X,
   Target,
 } from "lucide-react";
@@ -171,13 +164,6 @@ function toDateStr(s: string) {
   return s ? s.slice(0, 10) : "";
 }
 
-const TYPE_DOT: Record<string, string> = {
-  S: "bg-blue-400",
-  C: "bg-orange-400",
-  B: "bg-emerald-400",
-  A: "bg-purple-400",
-  GL: "bg-primary/70",
-};
 const TYPE_LABEL: Record<string, string> = {
   S: "Supplier",
   C: "Contractor",
@@ -322,29 +308,29 @@ function TBRow({
     node.opening.credit > 0 ||
     node.transactions.debit > 0 ||
     node.transactions.credit > 0;
-  const dot = node.type ? TYPE_DOT[node.type] : null;
   const isDrillable = !node.isGroup;
 
   return (
     <>
     <tr
       onClick={isDrillable ? () => onDrill(node) : undefined}
-      className={`border-b border-border/40 transition-colors ${
-        node.isGroup
-          ? node.level === 0
-            ? "bg-muted/35 hover:bg-muted/50"
-            : "bg-muted/15 hover:bg-muted/28"
+      className={isDrillable ? "cursor-pointer" : undefined}
+      // A top-level group opens with an ink rule; the account whose entries are open carries a rule on its left.
+      style={
+        node.isGroup && node.level === 0
+          ? { boxShadow: "inset 0 1px 0 hsl(var(--foreground))" }
           : isDrillOpen
-            ? "bg-primary/8 hover:bg-primary/10"
-            : "hover:bg-primary/5 cursor-pointer"
-      }`}
+            ? { boxShadow: "inset 3px 0 0 hsl(var(--primary))" }
+            : undefined
+      }
     >
       <td className="py-2.5 pr-3" style={{ paddingLeft: `${indent + 14}px` }}>
         <div className="flex items-center gap-2">
           {node.isGroup && hasKids ? (
             <button
               onClick={() => onToggle(node.id)}
-              className="flex items-center justify-center w-4 h-4 rounded text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              aria-label={isOpen ? "Collapse" : "Expand"}
+              className="flex items-center justify-center w-4 h-4 text-foreground shrink-0"
             >
               {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             </button>
@@ -352,88 +338,56 @@ function TBRow({
             <span className="w-4 shrink-0" />
           )}
 
-          {node.isGroup ? (
-            <span className="shrink-0 text-amber-400/80">
-              {isOpen && hasKids ? (
-                <FolderOpen size={13} />
-              ) : (
-                <Folder size={13} />
-              )}
-            </span>
-          ) : dot ? (
-            <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
-          ) : (
-            <span className="w-2 shrink-0" />
-          )}
-
           <span
-            className={`text-sm leading-tight ${
+            className={
               node.isGroup
                 ? node.level === 0
-                  ? "font-heading font-bold text-foreground tracking-wide uppercase text-[0.6875rem]"
-                  : "font-heading font-semibold text-foreground/90 text-xs uppercase tracking-wide"
-                : "text-foreground/80 text-xs"
-            }`}
+                  ? "font-heading font-bold text-foreground tracking-[0.1em] uppercase text-[0.6875rem]"
+                  : "font-heading font-semibold text-foreground text-[0.6875rem] uppercase tracking-[0.06em]"
+                : "text-foreground text-[0.8125rem] leading-tight"
+            }
           >
             {node.name}
           </span>
 
-          {node.code && (
-            <span className="text-[0.625rem] font-mono text-muted-foreground/50">
-              {node.code}
-            </span>
-          )}
+          {node.code && <span className="font-heading text-[0.625rem] tabular-nums text-muted-foreground">{node.code}</span>}
           {!node.isGroup && node.type && (
-            <span className="text-[0.5625rem] font-heading uppercase tracking-wider text-muted-foreground/40">
-              {TYPE_LABEL[node.type] ?? node.type}
-            </span>
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground/70">{TYPE_LABEL[node.type] ?? node.type}</span>
           )}
-          {!node.isGroup && !hasAnyValue && (
-            <span className="text-[0.625rem] text-muted-foreground/35 italic ml-0.5">
-              no transactions
-            </span>
-          )}
+          {!node.isGroup && !hasAnyValue && <span className="text-[0.625rem] text-muted-foreground/60 italic ml-0.5">no transactions</span>}
         </div>
       </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-xs text-foreground border-l border-border/30">
-        {fmt(node.opening.debit)}
-      </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-xs text-foreground border-r border-border/30">
-        {fmt(node.opening.credit)}
-      </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-xs text-foreground">
-        {fmt(node.transactions.debit)}
-      </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-xs text-foreground border-r border-border/30">
-        {fmt(node.transactions.credit)}
-      </td>
-      <td
-        className={`px-3 py-2.5 text-right tabular-nums text-xs font-medium ${node.closing.debit > 0 ? "text-rose-400" : "text-muted-foreground/35"}`}
-      >
-        {fmt(node.closing.debit)}
-      </td>
-      <td
-        className={`px-3 py-2.5 text-right tabular-nums text-xs font-medium ${node.closing.credit > 0 ? "text-emerald-400" : "text-muted-foreground/35"}`}
-      >
-        {fmt(node.closing.credit)}
-      </td>
+      {[
+        { v: node.opening.debit, cls: "border-l border-border/60" },
+        { v: node.opening.credit, cls: "border-r border-border/60" },
+        { v: node.transactions.debit, cls: "" },
+        { v: node.transactions.credit, cls: "border-r border-border/60" },
+        { v: node.closing.debit, cls: "", strong: true },
+        { v: node.closing.credit, cls: "", strong: true },
+      ].map((c, i) => (
+        <td
+          key={i}
+          className={`px-3 py-2.5 text-right font-heading tabular-nums text-xs ${c.cls} ${
+            c.v > 0 ? (c.strong || node.isGroup ? "font-semibold text-foreground" : "text-foreground") : "text-muted-foreground/40"
+          }`}
+        >
+          {fmt(c.v)}
+        </td>
+      ))}
     </tr>
 
     {/* ── Inline drill-down panel ───────────────────────────────────── */}
     {isDrillOpen && (
       <tr>
         <td colSpan={7} className="p-0">
-          <div className="mx-4 my-2 rounded-xl border border-primary/20 bg-primary/5 overflow-hidden">
+          <div className="mx-4 my-2 overflow-hidden bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
             {/* Header bar */}
-            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-primary/15 bg-primary/8">
-              <Receipt size={13} className="text-primary shrink-0" />
-              <span className="text-xs font-heading font-semibold text-primary">{node.name}</span>
-              <span className="text-[0.625rem] text-muted-foreground/60 ml-1">
-                {node.type ? (TYPE_LABEL[node.type] ?? node.type) : ""} · transactions in period
-              </span>
+            <div className="flex items-baseline gap-3 px-4 py-2.5" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Entries in the period</span>
+              <span className="text-[0.8125rem] font-semibold text-foreground">{node.name}</span>
               <button
                 onClick={(e) => { e.stopPropagation(); onDrill(node); }}
-                className="ml-auto w-5 h-5 flex items-center justify-center rounded hover:bg-primary/15 text-muted-foreground hover:text-foreground transition-colors"
+                className="ml-auto w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X size={11} />
               </button>
@@ -450,8 +404,8 @@ function TBRow({
             ) : (
               <div className="overflow-x-auto max-h-72">
                 <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-card/95 backdrop-blur-sm z-10">
-                    <tr className="border-b border-border text-left text-muted-foreground uppercase text-[0.625rem] tracking-wide">
+                  <thead className="sticky top-0 bg-card z-10">
+                    <tr className="text-left">
                       <th className="px-3 py-2">Voucher No.</th>
                       <th className="px-3 py-2">Date</th>
                       <th className="px-3 py-2">Source / Entry</th>
@@ -468,14 +422,15 @@ function TBRow({
                     {drillData.transactions.map((t, ti) => {
                       const st = (t.sourceType ?? "").toLowerCase();
                       const isPending = (t as any).status !== "posted" && !(t as any).entryId;
-                      const badge = st === "newpayment"      ? { label: "Payment",    cls: "bg-blue-500/10 text-blue-500" }
-                                  : st === "receivedpayment" ? { label: "Received",   cls: "bg-emerald-500/10 text-emerald-600" }
-                                  : st === "expensebooking"  ? { label: "Expense Bkg",cls: "bg-[#ffe2021a] text-amber-600" }
-                                  : st === "invoiceposting"  ? { label: "Invoice",    cls: "bg-[#ffe2021a] text-amber-600" }
-                                  : st === "grn" || st === "grnposting" ? { label: "GRN", cls: "bg-violet-500/10 text-violet-500" }
-                                  : st === "journalvoucher"  ? { label: "JV",         cls: "bg-rose-500/10 text-rose-500" }
-                                  : st === "onaccountledger" ? { label: "On Account", cls: "bg-cyan-500/10 text-cyan-600" }
-                                  : { label: t.sourceType ?? "Entry", cls: "bg-muted text-muted-foreground" };
+                      const sourceLabel =
+                        st === "newpayment" ? "Payment"
+                        : st === "receivedpayment" ? "Received"
+                        : st === "expensebooking" ? "Expense booking"
+                        : st === "invoiceposting" ? "Invoice"
+                        : st === "grn" || st === "grnposting" ? "GRN"
+                        : st === "journalvoucher" ? "JV"
+                        : st === "onaccountledger" ? "On account"
+                        : t.sourceType ?? "Entry";
 
                       const ref = (t as any).sourceRef as { id: number; docNo: string; type: string } | null;
                       const displayDoc = t.docNo || t.voucherNo || (ref?.docNo) || "—";
@@ -488,23 +443,15 @@ function TBRow({
                         <Fragment key={t.entryId ?? `direct-${ti}`}>
                         <tr
                           onClick={(e) => { e.stopPropagation(); if (isClickable) onOpenSource(t); }}
-                          className={`border-b ${t.items && t.items.length > 0 ? "border-border/0" : "border-border/30"} ${isPending ? "opacity-70 bg-muted/20" : ""} ${isClickable ? "cursor-pointer hover:bg-primary/8" : ""}`}
+                          className={`${isPending ? "opacity-70" : ""} ${isClickable ? "cursor-pointer" : ""}`}
                         >
-                          <td className="px-3 py-1.5 font-mono text-[0.6875rem]">{t.voucherNo || "—"}</td>
+                          <td className="px-3 py-1.5 font-heading tabular-nums text-[0.6875rem]">{t.voucherNo || "—"}</td>
                           <td className="px-3 py-1.5 whitespace-nowrap">{t.date ? fmtDate(t.date) : "—"}</td>
                           <td className="px-3 py-1.5">
-                            <span className="inline-flex items-center gap-1.5 flex-wrap">
-                              <span className={`text-[0.5625rem] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded font-medium ${badge.cls}`}>
-                                {badge.label}
-                              </span>
-                              {isPending && (
-                                <span className="text-[0.5625rem] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded font-medium bg-yellow-500/10 text-yellow-600">
-                                  Pending
-                                </span>
-                              )}
-                              <span className={`font-mono text-[0.6875rem] ${isClickable ? "text-primary underline" : "text-foreground/70"}`}>
-                                {displayDoc}
-                              </span>
+                            <span className="inline-flex items-center gap-2 flex-wrap">
+                              <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{sourceLabel}</span>
+                              {isPending && <SheetMark text="Pending" tone="waiting" />}
+                              <span className={`font-heading text-[0.6875rem] font-semibold tabular-nums ${isClickable ? "text-foreground underline underline-offset-2" : "text-foreground/80"}`}>{displayDoc}</span>
                             </span>
                           </td>
                           <td className="px-3 py-1.5 text-[0.6875rem]">{t.invoiceNo || "—"}</td>
@@ -532,8 +479,8 @@ function TBRow({
                               ? `${t.costCenter.code ?? ""}${t.costCenter.code ? " - " : ""}${t.costCenter.name ?? ""}`
                               : "—"}
                           </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums text-rose-400">{t.debit ? fmt(t.debit) : "—"}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">{t.credit ? fmt(t.credit) : "—"}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-foreground">{t.debit ? fmt(t.debit) : "—"}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-foreground">{t.credit ? fmt(t.credit) : "—"}</td>
                           <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[160px] text-[0.6875rem]">{t.narration || "—"}</td>
                         </tr>
                         {/* Item-level breakdown — this leg's bucketed total
@@ -544,14 +491,14 @@ function TBRow({
                         {t.items && t.items.length > 0 && (
                           <tr className="border-b border-border/30">
                             <td colSpan={10} className="px-3 pb-2 pt-0">
-                              <div className="ml-4 rounded-lg border border-border/40 bg-muted/10 overflow-hidden">
+                              <div className="ml-4 overflow-hidden" style={{ border: "1px dashed hsl(var(--border))" }}>
                                 {t.items.map((it, ii) => (
                                   <div
                                     key={ii}
                                     className={`flex items-center justify-between px-3 py-1.5 text-[0.6875rem] ${ii > 0 ? "border-t border-border/30" : ""}`}
                                   >
                                     <span className="text-foreground/80">{it.itemName}</span>
-                                    <span className="font-mono tabular-nums text-muted-foreground">₹{fmt(it.amount)}</span>
+                                    <span className="font-heading tabular-nums tabular-nums text-muted-foreground">₹{fmt(it.amount)}</span>
                                   </div>
                                 ))}
                               </div>
@@ -604,37 +551,23 @@ function CostCentrePanel({
 
   return (
     <div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-border border-b border-border">
-        <div className="px-5 py-4">
-          <p className="text-sm font-bold font-heading leading-none">
-            {data.costCenter.code} - {data.costCenter.name}
-          </p>
-          <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
-            Cost Centre
-          </p>
-        </div>
-        <div className="px-5 py-4">
-          <p className="text-sm font-bold font-heading leading-none text-rose-400">
-            {fmt(data.totals.debit)}
-          </p>
-          <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
-            Total Debit
-          </p>
-        </div>
-        <div className="px-5 py-4">
-          <p className="text-sm font-bold font-heading leading-none text-emerald-400">
-            {fmt(data.totals.credit)}
-          </p>
-          <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
-            Total Credit
-          </p>
-        </div>
+      <div className="statrow" style={{ padding: "16px 16px 18px", borderBottom: "1px solid hsl(var(--foreground))" }}>
+        {[
+          { label: "Cost centre", value: `${data.costCenter.code} - ${data.costCenter.name}` },
+          { label: "Total debit", value: fmt(data.totals.debit) },
+          { label: "Total credit", value: fmt(data.totals.credit) },
+        ].map((x) => (
+          <div key={x.label}>
+            <p className="label">{x.label}</p>
+            <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.value}</p>
+          </div>
+        ))}
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[760px]">
           <thead>
-            <tr className="border-b border-border bg-muted/30 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
+            <tr className="text-left">
               <th className="px-4 py-2">Voucher No.</th>
               <th className="px-3 py-2">Date</th>
               <th className="px-3 py-2">Account</th>
@@ -646,28 +579,28 @@ function CostCentrePanel({
           </thead>
           <tbody className="divide-y divide-border/40">
             {data.transactions.map((t) => (
-              <tr key={t.entryId} className="hover:bg-muted/10">
-                <td className="px-4 py-2 font-mono text-xs">{t.voucherNo || "—"}</td>
+              <tr key={t.entryId}>
+                <td className="px-4 py-2 font-heading tabular-nums text-xs">{t.voucherNo || "—"}</td>
                 <td className="px-3 py-2 text-xs whitespace-nowrap">
                   {t.date ? fmtDate(t.date) : "—"}
                 </td>
                 <td className="px-3 py-2 text-xs">{t.account.name || "—"}</td>
                 <td className="px-3 py-2 text-xs">
                   {t.poNo ? (
-                    <span className="font-mono text-primary">{t.poNo}</span>
+                    <span className="font-heading font-semibold tabular-nums text-foreground">{t.poNo}</span>
                   ) : (
                     "—"
                   )}
                   {t.docNo && t.docNo !== t.poNo && (
-                    <span className="block text-[0.625rem] text-muted-foreground font-mono">
+                    <span className="block text-[0.625rem] text-muted-foreground font-heading tabular-nums">
                       {t.docNo}
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-xs text-rose-400">
+                <td className="px-3 py-2 text-right tabular-nums text-xs text-foreground">
                   {t.debit ? fmt(t.debit) : "—"}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-xs text-emerald-400">
+                <td className="px-3 py-2 text-right tabular-nums text-xs text-foreground">
                   {t.credit ? fmt(t.credit) : "—"}
                 </td>
                 <td className="px-3 py-2 text-xs text-muted-foreground truncate max-w-[200px]">
@@ -703,7 +636,7 @@ function FilterSelect({
 }) {
   return (
     <div className="flex flex-col gap-0.5 w-full sm:min-w-[140px] sm:w-auto">
-      <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1 mb-0.5">
         <Icon size={9} /> {label}
       </span>
       <div className="relative">
@@ -717,7 +650,7 @@ function FilterSelect({
             );
           }}
           disabled={isLoading}
-          className="h-8 w-full pl-2.5 pr-7 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none disabled:opacity-50 cursor-pointer"
+          className="h-9 w-full pl-2.5 pr-7 text-xs bg-card border border-foreground/40 text-foreground focus:outline-none focus:border-foreground appearance-none disabled:opacity-50 cursor-pointer"
         >
           <option value="">{isLoading ? "Loading…" : placeholder}</option>
           {options.map((o) => (
@@ -749,16 +682,11 @@ function ModeTab({
   label: string;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.6875rem] font-heading font-semibold tracking-wide transition-all border ${
-        active
-          ? "btn-module text-white border-primary shadow-sm"
-          : "bg-background text-muted-foreground border-border hover:text-foreground hover:bg-muted"
-      }`}
-    >
-      <Icon size={11} />
-      {label}
+    <button onClick={onClick} aria-pressed={active} className={active ? "on" : undefined}>
+      <span className="inline-flex items-center gap-1.5">
+        <Icon size={11} />
+        {label}
+      </span>
     </button>
   );
 }
@@ -777,12 +705,11 @@ function DateField({
   highlight?: boolean;
 }) {
   return (
-    <div className={`flex items-center h-8 rounded-lg border text-xs overflow-hidden ${
-      highlight ? "border-primary/50 ring-1 ring-primary/20" : "border-border"
-    } bg-background`}>
-      <span className={`flex items-center gap-1 px-2 h-full border-r text-[0.5625rem] font-heading uppercase tracking-wider whitespace-nowrap select-none ${
-        highlight ? "border-primary/30 text-primary/70 bg-primary/5" : "border-border text-muted-foreground/60 bg-muted/40"
-      }`}>
+    <div className="flex items-center h-9 text-xs overflow-hidden bg-card" style={{ border: `1px solid hsl(var(--foreground) / ${highlight ? 1 : 0.4})` }}>
+      <span
+        className="flex items-center gap-1 px-2 h-full font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap select-none text-muted-foreground"
+        style={{ borderRight: "1px solid hsl(var(--border))" }}
+      >
         <CalendarDays size={10} />
         {label}
       </span>
@@ -1189,38 +1116,10 @@ export default function TrialBalance() {
 
   const statCards = summary
     ? [
-        {
-          label: "Transaction Debit",
-          value: formatINR(summary.totalDebit),
-          Icon: TrendingUp,
-          color: "text-rose-400",
-          bg: "bg-rose-400/10",
-          border: "border-l-rose-400",
-        },
-        {
-          label: "Transaction Credit",
-          value: formatINR(summary.totalCredit),
-          Icon: TrendingDown,
-          color: "text-emerald-400",
-          bg: "bg-emerald-400/10",
-          border: "border-l-emerald-400",
-        },
-        {
-          label: "Net Balance",
-          value: formatINR(Math.abs(summary.totalDebit - summary.totalCredit)),
-          Icon: Scale,
-          color: balanced ? "text-emerald-400" : "text-amber-400",
-          bg: balanced ? "bg-emerald-400/10" : "bg-amber-400/10",
-          border: balanced ? "border-l-emerald-400" : "border-l-amber-400",
-        },
-        {
-          label: "Opening Balance",
-          value: formatINR(summary.openingDebit + summary.openingCredit),
-          Icon: IndianRupee,
-          color: "text-primary",
-          bg: "bg-primary/10",
-          border: "border-l-primary",
-        },
+        { label: "Opening Balance", value: formatINR(summary.openingDebit + summary.openingCredit) },
+        { label: "Transaction Debit", value: formatINR(summary.totalDebit) },
+        { label: "Transaction Credit", value: formatINR(summary.totalCredit) },
+        { label: "Net Balance", value: formatINR(Math.abs(summary.totalDebit - summary.totalCredit)) },
       ]
     : [];
 
@@ -1243,35 +1142,23 @@ export default function TrialBalance() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Trial Balance"]} />
-      <FinanceShell
-        title="Trial Balance"
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Trial balance"
         subtitle={
-          asOf
-            ? `${visible.length} entries · Refreshed ${fmtDate(asOf)}`
-            : "Account-wise opening, transaction and closing balances"
+          [periodLabel(), selCompany?.label || selEnterprise?.label, selProject?.label].filter(Boolean).join(" · ") ||
+          "Opening, movement and closing balance of every account."
         }
-        icon={Scale}
         action={
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <button
-              onClick={expandAll}
-              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/20 text-muted-foreground hover:text-foreground hover:bg-indigo-500/10 transition-colors"
-            >
-              <ChevronDown size={13} />
-              <span className="hidden sm:inline">Expand All</span>
-            </button>
-            <button
-              onClick={() => setExpanded(new Set())}
-              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/20 text-muted-foreground hover:text-foreground hover:bg-indigo-500/10 transition-colors"
-            >
-              <ChevronRight size={13} />
-              <span className="hidden sm:inline">Collapse</span>
-            </button>
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <div className="seg">
+              <button onClick={expandAll}>Expand all</button>
+              <button onClick={() => setExpanded(new Set())}>Collapse</button>
+            </div>
             <button
               onClick={fetchData}
               disabled={loading}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
-              style={{ color: "#818cf8" }}
+              className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
               <span className="hidden sm:inline">Refresh</span>
@@ -1280,9 +1167,9 @@ export default function TrialBalance() {
         }
       >
         {/* ── Main card ───────────────────────────────────────────────────── */}
-        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
+        <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
           {/* ── Filter bar ─────────────────────────────────────────────────── */}
-          <div className="flex flex-col gap-3 px-4 py-3.5 border-b border-border bg-muted/20">
+          <div className="flex flex-col gap-3 px-4 py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
 
             {/* Row 1 — Enterprise / Company / Project / Cost Centre */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
@@ -1323,13 +1210,13 @@ export default function TrialBalance() {
             {/* Row 2 — Period mode tabs + picker */}
             <div className="flex flex-col gap-2">
               {/* Mode tabs row */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/50 shrink-0 mr-0.5">
-                  Period:
-                </span>
-                <ModeTab active={filterMode === "fy"}    onClick={() => switchMode("fy")}    icon={Calendar}      label="FY" />
-                <ModeTab active={filterMode === "range"} onClick={() => switchMode("range")} icon={CalendarRange} label="Range" />
-                <ModeTab active={filterMode === "ason"}  onClick={() => switchMode("ason")}  icon={CalendarCheck} label="As On" />
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground shrink-0">Period</span>
+                <div className="seg">
+                  <ModeTab active={filterMode === "fy"}    onClick={() => switchMode("fy")}    icon={Calendar}      label="Financial year" />
+                  <ModeTab active={filterMode === "range"} onClick={() => switchMode("range")} icon={CalendarRange} label="Date range" />
+                  <ModeTab active={filterMode === "ason"}  onClick={() => switchMode("ason")}  icon={CalendarCheck} label="As on" />
+                </div>
               </div>
 
               {/* Period input row */}
@@ -1341,7 +1228,7 @@ export default function TrialBalance() {
                         value={selectedFYId ?? ""}
                         onChange={(e) => handleFYChange(e.target.value ? Number(e.target.value) : null)}
                         disabled={finYearsLoading}
-                        className="h-8 pl-2.5 pr-7 rounded-lg text-xs bg-background border border-primary/40 ring-1 ring-primary/20 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 appearance-none cursor-pointer disabled:opacity-50 min-w-[148px]"
+                        className="h-9 pl-2.5 pr-7 text-xs bg-card border border-foreground text-foreground font-semibold focus:outline-none appearance-none cursor-pointer disabled:opacity-50 min-w-[148px]"
                       >
                         <option value="">{finYearsLoading ? "Loading…" : "Select FY"}</option>
                         {finYears.map((fy) => (
@@ -1351,7 +1238,7 @@ export default function TrialBalance() {
                       <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     </div>
                     {selectedFY && (
-                      <span className="text-[0.625rem] text-muted-foreground/60">
+                      <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
                         {fmtDate(toDateStr(selectedFY.FStartDate))} – {fmtDate(toDateStr(selectedFY.FEndDate))}
                       </span>
                     )}
@@ -1374,12 +1261,12 @@ export default function TrialBalance() {
 
             {/* Row 3 — Show all accounts + Export */}
             <div className="flex items-center gap-2">
-              <label className="h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-xs bg-background border border-border text-muted-foreground hover:text-foreground cursor-pointer select-none whitespace-nowrap flex-1 sm:flex-none">
+              <label className="h-9 flex items-center gap-2 px-3 text-xs bg-card border border-foreground/40 text-foreground cursor-pointer select-none whitespace-nowrap flex-1 sm:flex-none">
                 <input
                   type="checkbox"
                   checked={!hideEmpty}
                   onChange={(e) => setHideEmpty(!e.target.checked)}
-                  className="accent-primary"
+                  className="accent-foreground"
                 />
                 Show all accounts
               </label>
@@ -1400,29 +1287,29 @@ export default function TrialBalance() {
             {/* Viewing chips */}
             {(selEnterprise || selCompany || selProject || selCostCenter || periodLabel()) && (
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[0.625rem] text-muted-foreground">Viewing:</span>
+                <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Viewing</span>
                 {selEnterprise && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-1 border border-foreground/40 text-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em]">
                     <Building size={9} /> {selEnterprise.label}
                   </span>
                 )}
                 {selCompany && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-1 border border-foreground/40 text-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em]">
                     <Briefcase size={9} /> {selCompany.label}
                   </span>
                 )}
                 {selProject && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-1 border border-foreground/40 text-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em]">
                     <FolderKanban size={9} /> {selProject.label}
                   </span>
                 )}
                 {selCostCenter && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-1 border border-foreground/40 text-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em]">
                     <Target size={9} /> {selCostCenter.label}
                   </span>
                 )}
                 {periodLabel() && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-1 border border-foreground/40 text-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em]">
                     <CalendarDays size={9} /> {periodLabel()}
                   </span>
                 )}
@@ -1443,27 +1330,22 @@ export default function TrialBalance() {
           <>
           {/* Stats */}
           {summary && !loading && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border border-b border-border">
-              {statCards.map(({ label, value, Icon, color, bg, border }) => (
-                <div
-                  key={label}
-                  className={`flex items-center gap-3 px-5 py-4 border-l-2 ${border}`}
-                >
-                  <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
-                    <Icon size={14} />
-                  </div>
-                  <div>
-                    <p
-                      className={`text-sm font-bold font-heading leading-none ${color}`}
-                    >
+            <div className="statrow four" style={{ padding: "16px 16px 18px", borderBottom: "1px solid hsl(var(--foreground))" }}>
+              {statCards.map(({ label, value }) => {
+                // The debit and credit movement must agree; if they do not, that difference is the one red figure.
+                const isNet = label === "Net Balance";
+                return (
+                  <div key={label}>
+                    <p className="label" style={isNet && !balanced ? { color: "var(--red)" } : undefined}>
+                      {isNet ? (balanced ? "Difference" : "Out of balance by") : label}
+                    </p>
+                    <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color: isNet && !balanced ? "var(--red)" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {value}
                     </p>
-                    <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
-                      {label}
-                    </p>
+                    {isNet && <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{balanced ? "debit equals credit" : "debit and credit do not agree"}</p>}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -1487,16 +1369,11 @@ export default function TrialBalance() {
                 const indent = node.level * 12;
                 const hasKids = node.children.length > 0;
                 const isOpen = expanded.has(node.id);
-                const dot = node.type ? TYPE_DOT[node.type] : null;
-                return (
+                              return (
                   <div
                     key={`${node.isGroup ? "g" : "e"}-${node.id}`}
-                    style={{ paddingLeft: `${indent + 12}px` }}
-                    className={`pr-3 py-2.5 transition-colors ${
-                      node.isGroup
-                        ? node.level === 0 ? "bg-muted/35" : "bg-muted/15"
-                        : "cursor-pointer hover:bg-primary/5"
-                    }`}
+                    style={{ paddingLeft: `${indent + 12}px`, ...(node.isGroup && node.level === 0 ? { borderTop: "1px solid hsl(var(--foreground))" } : {}) }}
+                    className={`pr-3 py-2.5 ${node.isGroup ? "" : "cursor-pointer"}`}
                     onClick={!node.isGroup ? () => openDrillDown(node) : undefined}
                   >
                     {/* Name row */}
@@ -1504,18 +1381,11 @@ export default function TrialBalance() {
                       {node.isGroup && hasKids ? (
                         <button
                           onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
-                          className="w-4 h-4 flex items-center justify-center rounded text-muted-foreground shrink-0"
+                          className="w-4 h-4 flex items-center justify-center text-foreground shrink-0"
                         >
                           {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                         </button>
                       ) : <span className="w-4 shrink-0" />}
-                      {node.isGroup ? (
-                        <span className="text-amber-400/80 shrink-0">
-                          {isOpen && hasKids ? <FolderOpen size={12} /> : <Folder size={12} />}
-                        </span>
-                      ) : dot ? (
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
-                      ) : <span className="w-2 shrink-0" />}
                       <span className={`text-xs leading-tight flex-1 ${
                         node.isGroup
                           ? node.level === 0
@@ -1526,27 +1396,27 @@ export default function TrialBalance() {
                         {node.name}
                       </span>
                       {node.code && (
-                        <span className="text-[0.625rem] font-mono text-muted-foreground/40 shrink-0">{node.code}</span>
+                        <span className="text-[0.625rem] font-heading tabular-nums text-muted-foreground/40 shrink-0">{node.code}</span>
                       )}
                     </div>
                     {/* Values grid: 3 cols × 2 rows (Dr/Cr per section) */}
                     <div className="grid grid-cols-3 gap-x-2 pl-5 text-[0.625rem] tabular-nums">
-                      <span className="text-muted-foreground/50 font-heading uppercase tracking-wide">Opening</span>
-                      <span className="text-muted-foreground/50 font-heading uppercase tracking-wide">Txn</span>
-                      <span className="text-muted-foreground/50 font-heading uppercase tracking-wide">Closing</span>
+                      <span className="text-muted-foreground font-heading font-semibold uppercase tracking-[0.1em] text-[0.5625rem]">Opening</span>
+                      <span className="text-muted-foreground font-heading font-semibold uppercase tracking-[0.1em] text-[0.5625rem]">Txn</span>
+                      <span className="text-muted-foreground font-heading font-semibold uppercase tracking-[0.1em] text-[0.5625rem]">Closing</span>
                       <div>
-                        {node.opening.debit > 0 && <div className="text-rose-400">{fmt(node.opening.debit)}</div>}
-                        {node.opening.credit > 0 && <div className="text-emerald-400">{fmt(node.opening.credit)}</div>}
+                        {node.opening.debit > 0 && <div className="text-foreground">{fmt(node.opening.debit)} <span className="text-muted-foreground font-normal">Dr</span></div>}
+                        {node.opening.credit > 0 && <div className="text-foreground">{fmt(node.opening.credit)} <span className="text-muted-foreground font-normal">Cr</span></div>}
                         {node.opening.debit === 0 && node.opening.credit === 0 && <span className="text-muted-foreground/30">—</span>}
                       </div>
                       <div>
-                        {node.transactions.debit > 0 && <div className="text-rose-400">{fmt(node.transactions.debit)}</div>}
-                        {node.transactions.credit > 0 && <div className="text-emerald-400">{fmt(node.transactions.credit)}</div>}
+                        {node.transactions.debit > 0 && <div className="text-foreground">{fmt(node.transactions.debit)} <span className="text-muted-foreground font-normal">Dr</span></div>}
+                        {node.transactions.credit > 0 && <div className="text-foreground">{fmt(node.transactions.credit)} <span className="text-muted-foreground font-normal">Cr</span></div>}
                         {node.transactions.debit === 0 && node.transactions.credit === 0 && <span className="text-muted-foreground/30">—</span>}
                       </div>
                       <div>
-                        {node.closing.debit > 0 && <div className="text-rose-400 font-medium">{fmt(node.closing.debit)}</div>}
-                        {node.closing.credit > 0 && <div className="text-emerald-400 font-medium">{fmt(node.closing.credit)}</div>}
+                        {node.closing.debit > 0 && <div className="text-foreground font-medium">{fmt(node.closing.debit)} <span className="text-muted-foreground font-normal">Dr</span></div>}
+                        {node.closing.credit > 0 && <div className="text-foreground font-medium">{fmt(node.closing.credit)} <span className="text-muted-foreground font-normal">Cr</span></div>}
                         {node.closing.debit === 0 && node.closing.credit === 0 && <span className="text-muted-foreground/30">—</span>}
                       </div>
                     </div>
@@ -1556,30 +1426,28 @@ export default function TrialBalance() {
             )}
             {/* Grand total */}
             {summary && !loading && visible.length > 0 && (
-              <div className="px-3 py-3 bg-muted/40 border-t-2 border-border">
-                <p className="text-xs font-heading font-bold text-foreground uppercase tracking-wider mb-2">Grand Total</p>
+              <div className="px-3 py-3" style={{ borderTop: "2px solid hsl(var(--foreground))" }}>
+                <p className="font-heading text-[0.6875rem] font-bold text-foreground uppercase tracking-[0.12em] mb-2">Grand total</p>
                 <div className="grid grid-cols-3 gap-x-2 text-[0.625rem] tabular-nums">
-                  <span className="text-muted-foreground/50 font-heading uppercase">Opening</span>
-                  <span className="text-muted-foreground/50 font-heading uppercase">Txn</span>
-                  <span className="text-muted-foreground/50 font-heading uppercase">Closing</span>
+                  <span className="text-muted-foreground font-heading font-semibold uppercase tracking-[0.1em] text-[0.5625rem]">Opening</span>
+                  <span className="text-muted-foreground font-heading font-semibold uppercase tracking-[0.1em] text-[0.5625rem]">Txn</span>
+                  <span className="text-muted-foreground font-heading font-semibold uppercase tracking-[0.1em] text-[0.5625rem]">Closing</span>
                   <div>
-                    <div className="text-rose-400 font-bold">{formatINR(summary.openingDebit)}</div>
-                    <div className="text-emerald-400 font-bold">{formatINR(summary.openingCredit)}</div>
+                    <div className="text-foreground font-bold">{formatINR(summary.openingDebit)} <span className="text-muted-foreground font-normal">Dr</span></div>
+                    <div className="text-foreground font-bold">{formatINR(summary.openingCredit)} <span className="text-muted-foreground font-normal">Cr</span></div>
                   </div>
                   <div>
-                    <div className="text-rose-400 font-bold">{formatINR(summary.totalDebit)}</div>
-                    <div className="text-emerald-400 font-bold">{formatINR(summary.totalCredit)}</div>
+                    <div className="text-foreground font-bold">{formatINR(summary.totalDebit)} <span className="text-muted-foreground font-normal">Dr</span></div>
+                    <div className="text-foreground font-bold">{formatINR(summary.totalCredit)} <span className="text-muted-foreground font-normal">Cr</span></div>
                   </div>
                   <div>
-                    <div className="text-rose-400 font-bold">{formatINR(summary.openingDebit + summary.totalDebit)}</div>
-                    <div className="text-emerald-400 font-bold">{formatINR(summary.openingCredit + summary.totalCredit)}</div>
+                    <div className="text-foreground font-bold">{formatINR(summary.openingDebit + summary.totalDebit)} <span className="text-muted-foreground font-normal">Dr</span></div>
+                    <div className="text-foreground font-bold">{formatINR(summary.openingCredit + summary.totalCredit)} <span className="text-muted-foreground font-normal">Cr</span></div>
                   </div>
                 </div>
-                {balanced && (
-                  <p className="mt-2 text-center text-[0.6875rem] font-heading text-emerald-500 font-semibold">
-                    ✓ Books are balanced — Debit = Credit
-                  </p>
-                )}
+                <div className="mt-3">
+                  <SheetMark text={balanced ? "Books balance" : "Books do not balance"} tone={balanced ? "done" : "stopped"} />
+                </div>
               </div>
             )}
           </div>
@@ -1588,12 +1456,10 @@ export default function TrialBalance() {
           <div className="overflow-x-auto hidden md:block">
             <table className="w-full text-sm min-w-[820px]">
               <thead>
-                <tr className="border-b border-border bg-muted/30">
+                <tr>
                   <th className="px-4 py-2 text-left w-[38%]">
                     <div className="flex items-center gap-2">
-                      <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
-                        Account / Description
-                      </span>
+                      <span className="whitespace-nowrap">Account</span>
                       <div className="relative">
                         <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                         <input
@@ -1601,7 +1467,7 @@ export default function TrialBalance() {
                           placeholder="Search…"
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
-                          className="h-6 pl-6 pr-5 rounded-md text-[0.6875rem] bg-background border border-border text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 w-36"
+                          className="h-7 pl-6 pr-5 text-[0.6875rem] font-body normal-case tracking-normal bg-card border border-foreground/40 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground w-40"
                         />
                         {search && (
                           <button onClick={() => setSearch("")} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -1613,36 +1479,36 @@ export default function TrialBalance() {
                   </th>
                   <th
                     colSpan={2}
-                    className="px-3 py-2 text-center text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground border-l border-border/40"
+                    className="px-3 py-2 text-center border-l border-border/60"
                   >
                     Opening Balance
                   </th>
                   <th
                     colSpan={2}
-                    className="px-3 py-2 text-center text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground border-l border-border/40"
+                    className="px-3 py-2 text-center border-l border-border/60"
                   >
                     Transactions
                   </th>
                   <th
                     colSpan={2}
-                    className="px-3 py-2 text-center text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground border-l border-border/40"
+                    className="px-3 py-2 text-center border-l border-border/60"
                   >
                     Closing Balance
                   </th>
                 </tr>
-                <tr className="border-b border-border bg-muted/10">
+                <tr>
                   <th className="px-4 py-1.5" />
                   {[
-                    "Debit",
-                    "Credit",
-                    "Debit",
-                    "Credit",
-                    "Debit",
-                    "Credit",
+                    "Dr",
+                    "Cr",
+                    "Dr",
+                    "Cr",
+                    "Dr",
+                    "Cr",
                   ].map((h, i) => (
                     <th
                       key={i}
-                      className={`px-3 py-1.5 text-right text-[0.625rem] font-heading font-medium tracking-wider ${h === "Debit" ? "text-rose-400" : "text-emerald-400"} ${i === 0 ? "border-l border-border/30" : ""} ${i === 1 || i === 3 ? "border-r border-border/30" : ""}`}
+                      className={`px-3 py-1.5 text-right ${i === 0 ? "border-l border-border/60" : ""} ${i === 1 || i === 3 ? "border-r border-border/60" : ""}`}
                     >
                       {h}
                     </th>
@@ -1650,7 +1516,7 @@ export default function TrialBalance() {
                 </tr>
               </thead>
 
-              <tbody className="divide-y divide-border/30">
+              <tbody>
                 {loading ? (
                   Array.from({ length: 10 }).map((_, i) => (
                     <tr key={i} className="border-b border-border/30">
@@ -1698,39 +1564,29 @@ export default function TrialBalance() {
 
               {summary && !loading && visible.length > 0 && (
                 <tfoot>
-                  <tr className="border-t-2 border-border bg-muted/40">
-                    <td className="px-4 py-3 text-xs font-heading font-bold text-foreground uppercase tracking-wider">
-                      Grand Total
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-xs font-bold text-rose-400 border-l border-border/30">
-                      {formatINR(summary.openingDebit)}
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-xs font-bold text-emerald-400 border-r border-border/30">
-                      {formatINR(summary.openingCredit)}
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-xs font-bold text-rose-400">
-                      {formatINR(summary.totalDebit)}
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-xs font-bold text-emerald-400 border-r border-border/30">
-                      {formatINR(summary.totalCredit)}
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-xs font-bold text-rose-400">
-                      {formatINR(summary.openingDebit + summary.totalDebit)}
-                    </td>
-                    <td className="px-3 py-3 text-right tabular-nums text-xs font-bold text-emerald-400">
-                      {formatINR(summary.openingCredit + summary.totalCredit)}
+                  {/* Closed off the way a statement is: a heavy rule above the totals, a double rule beneath */}
+                  <tr style={{ boxShadow: "inset 0 2px 0 hsl(var(--foreground)), inset 0 -1px 0 hsl(var(--foreground))" }}>
+                    <td className="px-4 py-3 font-heading text-[0.6875rem] font-bold text-foreground uppercase tracking-[0.12em]">Grand total</td>
+                    {[
+                      { v: summary.openingDebit, cls: "border-l border-border/60" },
+                      { v: summary.openingCredit, cls: "border-r border-border/60" },
+                      { v: summary.totalDebit, cls: "" },
+                      { v: summary.totalCredit, cls: "border-r border-border/60" },
+                      { v: summary.openingDebit + summary.totalDebit, cls: "" },
+                      { v: summary.openingCredit + summary.totalCredit, cls: "" },
+                    ].map((c, i) => (
+                      <td key={i} className={`px-3 py-3 text-right font-heading tabular-nums text-xs font-bold text-foreground ${c.cls}`}>{formatINR(c.v)}</td>
+                    ))}
+                  </tr>
+                  <tr style={{ boxShadow: "inset 0 1px 0 hsl(var(--foreground))" }}>
+                    <td colSpan={7} className="px-4 py-2.5">
+                      {balanced ? (
+                        <SheetMark text="Books balance: debit equals credit" tone="done" />
+                      ) : (
+                        <SheetMark text="Books do not balance: debit and credit differ" tone="stopped" />
+                      )}
                     </td>
                   </tr>
-                  {balanced && (
-                    <tr className="bg-emerald-500/5">
-                      <td
-                        colSpan={7}
-                        className="px-4 py-2 text-center text-[0.6875rem] font-heading text-emerald-500 font-semibold tracking-wide"
-                      >
-                        ✓ Books are balanced — Debit = Credit
-                      </td>
-                    </tr>
-                  )}
                 </tfoot>
               )}
             </table>
@@ -1738,7 +1594,7 @@ export default function TrialBalance() {
           </>
           )}
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {/* ── Level 3: GL entry detail dialog ──────────────────────────────────
           Shows exactly what this leg posted — voucher, date, debit/credit,
@@ -1746,31 +1602,22 @@ export default function TrialBalance() {
           already on screen. Deliberately does not navigate to the source
           document's own editable form. */}
       <Dialog open={!!glEntryDetail} onOpenChange={(o) => { if (!o) setGlEntryDetail(null); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
           <DialogHeader>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 border border-primary/20">
-                <IndianRupee size={15} className="text-primary" />
-              </div>
-              <div>
-                <DialogTitle className="font-heading text-base">
-                  {glEntryDetail?.voucherNo || glEntryDetail?.docNo || "GL Entry"}
-                </DialogTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {drillNode?.name ?? ""}
-                </p>
-              </div>
+            <div className="pb-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Ledger entry · {drillNode?.name ?? ""}</p>
+              <DialogTitle className="font-heading text-lg font-bold tabular-nums tracking-tight mt-1">
+                {glEntryDetail?.voucherNo || glEntryDetail?.docNo || "GL entry"}
+              </DialogTitle>
             </div>
           </DialogHeader>
 
           {glEntryDetail && (
             <div className="space-y-4">
-              {/* Amount highlight */}
-              <div className="rounded-xl bg-primary/5 border border-primary/15 px-4 py-3 flex items-center justify-between">
-                <span className="text-xs text-muted-foreground font-heading uppercase tracking-wide">
-                  {glEntryDetail.debit > 0 ? "Debit" : "Credit"}
-                </span>
-                <span className="text-xl font-bold text-primary font-heading">
+              {/* Amount */}
+              <div className="px-4 py-3 flex items-end justify-between" style={{ border: "1.5px solid hsl(var(--foreground))" }}>
+                <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{glEntryDetail.debit > 0 ? "Debit" : "Credit"}</span>
+                <span className="font-heading text-2xl font-semibold tabular-nums tracking-tight text-foreground leading-none">
                   {formatINR(glEntryDetail.debit > 0 ? glEntryDetail.debit : glEntryDetail.credit)}
                 </span>
               </div>
@@ -1798,7 +1645,7 @@ export default function TrialBalance() {
                   },
                 ].map(({ label, value }) => (
                   <div key={label}>
-                    <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">{label}</p>
+                    <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground mb-1">{label}</p>
                     <p className="text-foreground font-medium truncate">{value || "—"}</p>
                   </div>
                 ))}
@@ -1806,20 +1653,20 @@ export default function TrialBalance() {
 
               {/* Narration */}
               {glEntryDetail.narration && (
-                <div className="rounded-lg bg-muted/30 border border-border px-3 py-2">
-                  <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Narration</p>
+                <div className="px-3 py-2" style={{ border: "1px solid hsl(var(--border))" }}>
+                  <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground mb-1">Narration</p>
                   <p className="text-xs text-foreground">{glEntryDetail.narration}</p>
                 </div>
               )}
 
               {/* Item breakdown, when this leg has one (GRN-sourced) */}
               {glEntryDetail.items && glEntryDetail.items.length > 0 && (
-                <div className="rounded-lg bg-muted/30 border border-border overflow-hidden">
-                  <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 px-3 pt-2 pb-1">Items</p>
+                <div className="overflow-hidden" style={{ border: "1px solid hsl(var(--border))" }}>
+                  <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground px-3 pt-2 pb-1">Items</p>
                   {glEntryDetail.items.map((it, i) => (
                     <div key={i} className={`flex items-center justify-between px-3 py-1.5 text-xs ${i > 0 ? "border-t border-border/30" : ""}`}>
                       <span className="text-foreground/80">{it.itemName}</span>
-                      <span className="font-mono tabular-nums text-muted-foreground">{formatINR(it.amount)}</span>
+                      <span className="font-heading tabular-nums tabular-nums text-muted-foreground">{formatINR(it.amount)}</span>
                     </div>
                   ))}
                 </div>

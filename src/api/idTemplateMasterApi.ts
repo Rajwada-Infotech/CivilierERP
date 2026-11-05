@@ -38,7 +38,8 @@ export const getIDTemplateByProject = async (projectId: number): Promise<IDTempl
   return res.json();
 };
 
-export const createIDTemplate = async (data: IDTemplatePayload): Promise<{ id: number }> => {
+// autoTagged: stock that was waiting for this project's alias and was tagged on save.
+export const createIDTemplate = async (data: IDTemplatePayload): Promise<{ id: number; autoTagged?: number }> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -48,13 +49,14 @@ export const createIDTemplate = async (data: IDTemplatePayload): Promise<{ id: n
   return res.json();
 };
 
-export const updateIDTemplate = async (id: number, data: IDTemplatePayload): Promise<void> => {
+export const updateIDTemplate = async (id: number, data: IDTemplatePayload): Promise<{ autoTagged?: number }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) await handleError(res, "Failed to update ID template");
+  return res.json();
 };
 
 export const deleteIDTemplate = async (id: number): Promise<void> => {

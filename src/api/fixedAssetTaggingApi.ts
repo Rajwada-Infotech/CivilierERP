@@ -19,7 +19,16 @@ export interface TaggingListItem {
   TaggedQty: number;
   FAItemCode: string | null;
   Remarks: string | null;
-  Status: "Tagged" | "Cancelled";
+  /** "Transferred" = retired by an Inter-Company Transfer (Not Available). */
+  Status: "Tagged" | "Cancelled" | "Transferred";
+  /** Sending side: when the code was retired and the new code it became. */
+  TransferredAt?: string | null;
+  TransferredToCode?: string | null;
+  /** Receiving side: the old code this fresh one replaced. */
+  TransferredFromCode?: string | null;
+  SourceICTId?: number | null;
+  /** Where the tagged stock came from: GRN, IMPORT (added without a GRN) or ICT. */
+  StockSource?: string | null;
   CreatedBy: string | null;
   CreatedAt: string;
   CompanyId: number | null;
@@ -54,6 +63,8 @@ export interface UnassignedFAItemCode {
   ProjectName: string | null;
   GodownId: number | null;
   GodownName: string | null;
+  /** Asset Category captured at FA Inventory import — the Depreciation Tag reuses it. */
+  AssetCategory?: string | null;
 }
 
 export interface TaggingPayload {
@@ -83,7 +94,10 @@ export interface PendingBatch {
   CompanyName: string | null;
   ProjectId: number | null;
   ProjectName: string | null;
+  GodownId: number | null;
   GodownName: string | null;
+  /** The Item Master item received, for tagging this batch from its row. */
+  SourceItemId: string | null;
   Reason: "NO_TEMPLATE" | "READY";
 }
 

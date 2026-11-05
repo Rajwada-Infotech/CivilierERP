@@ -1,8 +1,9 @@
 const express = require("express");
+const { ebCoversGrnSql } = require("../services/expenseGrnLink");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectParamGuard, ebResolvedProjectSql: ebResolvedProject, assertProjectRawAllowed: assertBodyProjectAllowed } = require("../services/projectScope");
@@ -695,7 +696,8 @@ async function handleChainStatus(req, res) {
           eb.ENetAmount,
           eb.EAmount
         FROM dbo.ExpenseBooking eb
-        WHERE eb.ESourceType = @ESourceType AND eb.ESourceId = @ESourceId
+        -- A GRN also shows the invoices it was merged into (ELinkedGrnIds), not only the one booked on it.
+        WHERE ${String(sourceType) === "GRN" ? ebCoversGrnSql("eb", "@ESourceId") : "eb.ESourceType = @ESourceType AND eb.ESourceId = @ESourceId"}
         ORDER BY eb.Eid DESC
       `);
 
@@ -1951,8 +1953,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
         .input("DupGRNId", sql.Int, grnId).query(`
           SELECT COUNT(*) AS cnt
           FROM dbo.ExpenseBooking
-          WHERE ESourceType = 'GRN'
-            AND ESourceId = @DupGRNId
+          WHERE ${ebCoversGrnSql("", "@DupGRNId")}
             AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(dupCheck.recordset[0]?.cnt) > 0) {
@@ -2442,8 +2443,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         .input("DupGRNId", sql.Int, grnId).query(`
           SELECT COUNT(*) AS cnt
           FROM dbo.ExpenseBooking
-          WHERE ESourceType = 'GRN'
-            AND ESourceId = @DupGRNId
+          WHERE ${ebCoversGrnSql("", "@DupGRNId")}
             AND ISNULL(EStatus, '') <> 'Deleted'
         `);
       if (Number(dupCheck.recordset[0]?.cnt) > 0) {

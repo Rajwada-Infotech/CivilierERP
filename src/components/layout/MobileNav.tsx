@@ -1,82 +1,46 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  BarChart3,
-  CheckCircle2,
-  X,
-  Receipt,
-  HardHat,
-  FileText,
-  Puzzle,
-  Users,
-  ChevronRight,
+  type SetupItem,
+  financeSetupItems,
+  salesSetupItems,
+  maintenanceSetupItems,
+  hrPayrollSetupItems,
+  materialSetupItems,
+  fixedAssetSetupItems,
+  followupSetupItems,
+  engineeringSetupItems,
+  civilWorkDprSetupItems,
+  salesAutomationSetupItems,
+  crmSetupItems,
+  legalSetupItems,
+  adminSetupItems,
+} from "./setupMenus";
+import { Grip } from "lucide-react";
 
-  Landmark,
-  TrendingUp,
-  ClipboardList,
-  Grip,
-  Home,
-  Settings,
-  Layers,
-  Map,
-  Hash,
-  ReceiptIndianRupee,
-  CreditCard,
-  BookOpen,
-  Tag,
-  FileType2,
-  LayoutGrid,
-  Ruler,
-  Activity,
-  DoorOpen,
-  Target,
-  Calendar,
-  Package,
-  RotateCcw,
-  Wallet,
-  Car,
-  PlusCircle,
-  Truck,
-  Megaphone,
-  SlidersHorizontal,
-  UsersRound,
-  ShieldCheck,
-  CalendarClock,
-  Wand2,
-  GitBranch,
-  XCircle,
-  Percent,
-  Wrench,
-  Handshake,
-} from "lucide-react";
 import {
-  Bank,
-  Receipt21,
-  Category2,
-  ClipboardText,
-  Message2,
-  Archive,
-  Building3,
-  Chart21,
-  VideoPlay,
-  Shield,
-  ShieldTick,
-  Crown,
-  Data,
-  Profile,
-  Logout,
-  MoneyRecive,
-  Cpu,
-  ShoppingCart,
-} from "iconsax-react";
-
+  IconChartBar as TbChartBar,
+  IconChevronDown as TbChevronDown,
+  IconChevronRight as TbChevronRight,
+  IconCrown as TbCrown,
+  IconDatabase as TbDatabase,
+  IconHome as TbHome,
+  IconLayoutGrid as TbLayoutGrid,
+  IconLogout as TbLogout,
+  IconMenu2 as TbMenu2,
+  IconSearch as TbSearch,
+  IconSettings as TbSettings,
+  IconShieldCheck as TbShieldCheck,
+  IconUser as TbUser,
+  IconX as TbX,
+} from "@tabler/icons-react";
 import { useModule } from "@/contexts/ModuleContext";
-import { MODULE_DASHBOARD_ROUTES } from "@/contexts/module.utils";
+import { MODULE_DASHBOARD_ROUTES, firstAccessibleAdminPath, hasAnyAdminPageRight, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
+import { ALL_MODULES, hexToHsl } from "./moduleDefs";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useReminders } from "@/hooks/useReminders";
-import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 
 // ── Desktop sidebar definitions — single source of truth, mirrored here ──────
@@ -95,7 +59,10 @@ import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
+import { GENIE_CSS } from "@/components/navbar/navPanelStyles";
+import { useGeniePanel } from "@/components/navbar/useGeniePanel";
 import { loanNavItems } from "./sidebars/LoanSidebar";
+import { legalNavItems } from "./sidebars/LegalSidebar";
 import type {
   NavItem as DesktopNavItem,
   SubItem as DesktopSubItem,
@@ -119,540 +86,46 @@ interface NavItem {
   pageKey?: string;
 }
 
-interface SetupItem {
-  icon: React.ElementType<any>;
-  label: string;
-  path: string;
-  color: string;
-  pageKey?: string;
-}
 
 // ── Module colour system ──────────────────────────────────────────────────────
-const MODULE_META: Record<
-  string,
-  {
-    h: number;
-    s: number;
-    l: number;
-    icon: React.ElementType;
-    label: string;
-    route: string;
-  }
-> = {
+type ModuleMeta = {
+  h: number;
+  s: number;
+  l: number;
+  icon: React.ElementType;
+  label: string;
+  route: string;
+};
+const MODULE_META: Record<string, ModuleMeta> = {
   __none__: { h: 242, s: 65, l: 58, icon: Grip, label: "Menu", route: "/home" },
-  finance: {
-    h: 217,
-    s: 91,
-    l: 60,
-    icon: Bank,
-    label: "Finance",
-    route: MODULE_DASHBOARD_ROUTES.finance,
-  },
-  material: {
-    h: 160,
-    s: 60,
-    l: 45,
-    icon: Receipt21,
-    label: "Material",
-    route: MODULE_DASHBOARD_ROUTES.material,
-  },
-  "fixed-asset": {
-    h: 45,
-    s: 93,
-    l: 47,
-    icon: Cpu,
-    label: "Fixed Asset",
-    route: MODULE_DASHBOARD_ROUTES["fixed-asset"],
-  },
-  loan: {
-    h: 142,
-    s: 71,
-    l: 45,
-    icon: MoneyRecive,
-    label: "Loan",
-    route: MODULE_DASHBOARD_ROUTES.loan,
-  },
-  followup: {
-    h: 174,
-    s: 72,
-    l: 40,
-    icon: Category2,
-    label: "Follow Up",
-    route: MODULE_DASHBOARD_ROUTES.followup,
-  },
-  engineering: {
-    h: 38,
-    s: 92,
-    l: 50,
-    icon: ClipboardText,
-    label: "Engineering",
-    route: MODULE_DASHBOARD_ROUTES.engineering,
-  },
-  civilworkdpr: {
-    h: 192,
-    s: 91,
-    l: 36,
-    icon: Chart21,
-    label: "Civil Work DPR",
-    route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
-  },
-  ticket: {
-    h: 330,
-    s: 80,
-    l: 60,
-    icon: Message2,
-    label: "Ticket",
-    route: MODULE_DASHBOARD_ROUTES.ticket,
-  },
-  sales: {
-    h: 271,
-    s: 91,
-    l: 65,
-    icon: ShoppingCart,
-    label: "Sales",
-    route: MODULE_DASHBOARD_ROUTES.sales,
-  },
-  maintenance: {
-    h: 84,
-    s: 81,
-    l: 35,
-    icon: Wrench,
-    label: "Maintenance",
-    route: MODULE_DASHBOARD_ROUTES.maintenance,
-  },
-  records: {
-    h: 347,
-    s: 77,
-    l: 50,
-    icon: Archive,
-    label: "Records",
-    route: MODULE_DASHBOARD_ROUTES.records,
-  },
-  "sales-automation": {
-    h: 330,
-    s: 70,
-    l: 55,
-    icon: VideoPlay,
-    label: "Sales Automation",
-    route: MODULE_DASHBOARD_ROUTES["sales-automation"],
-  },
-  crm: {
-    h: 199,
-    s: 89,
-    l: 48,
-    icon: Building3,
-    label: "CRM",
-    route: MODULE_DASHBOARD_ROUTES.crm,
-  },
-  admin: {
-    h: 217,
-    s: 91,
-    l: 60,
-    icon: Shield,
-    label: "Admin",
-    route: "/admin/dashboard",
-  },
+  ...Object.fromEntries(
+    ALL_MODULES.map((m): [string, ModuleMeta] => [
+      m.id,
+      { ...hexToHsl(m.color), icon: m.icon, label: m.label, route: MODULE_DASHBOARD_ROUTES[m.id] },
+    ]),
+  ),
 };
 
-// ── Setup item lists (mirrors TopNavbar) ─────────────────────────────────────
-const financeSetupItems: SetupItem[] = [
-  {
-    icon: Layers,
-    label: "AC Group",
-    path: "/masters/account-group",
-    color: "text-indigo-400",
-    pageKey: "account-head",
-  },
-  {
-    icon: Receipt,
-    label: "General Ledger",
-    path: "/masters/general-ledger",
-    color: "text-orange-400",
-    pageKey: "general-ledger",
-  },
-  {
-    icon: Truck,
-    label: "Vendors",
-    path: "/masters/suppliers",
-    color: "text-blue-400",
-    pageKey: "supplier-master",
-  },
-  {
-    icon: HardHat,
-    label: "Contractors",
-    path: "/masters/contractors",
-    color: "text-amber-500",
-    pageKey: "contractor-master",
-  },
-  {
-    icon: Landmark,
-    label: "Banks",
-    path: "/masters/banks",
-    color: "text-emerald-500",
-    pageKey: "bank-master",
-  },
-  {
-    icon: Handshake,
-    label: "Partners",
-    path: "/masters/partners",
-    color: "text-orange-500",
-    pageKey: "partner-master",
-  },
-  {
-    icon: Calendar,
-    label: "Fin Year",
-    path: "/masters/financial-year",
-    color: "text-purple-400",
-    pageKey: "financial-year-master",
-  },
-  {
-    icon: BookOpen,
-    label: "Cheque",
-    path: "/masters/cheque",
-    color: "text-cyan-500",
-    pageKey: "cheque-master",
-  },
-  {
-    icon: CreditCard,
-    label: "Card",
-    path: "/masters/card",
-    color: "text-rose-500",
-    pageKey: "card-master",
-  },
-  {
-    icon: FileText,
-    label: "TDS",
-    path: "/masters/tds",
-    color: "text-green-500",
-    pageKey: "tds-master",
-  },
-  {
-    icon: Target,
-    label: "Cost Center",
-    path: "/masters/cost-center",
-    color: "text-pink-500",
-    pageKey: "cost-center",
-  },
-  {
-    icon: TrendingUp,
-    label: "Profit Center",
-    path: "/masters/profit-center",
-    color: "text-teal-500",
-    pageKey: "profit-center",
-  },
-  {
-    icon: RotateCcw,
-    label: "Return Reason",
-    path: "/masters/return-reason",
-    color: "text-red-400",
-    pageKey: "return-reason-master",
-  },
-  {
-    icon: Wallet,
-    label: "Payment Reason",
-    path: "/masters/payment-reason",
-    color: "text-lime-500",
-    pageKey: "payment-reason-master",
-  },
-  {
-    icon: Users,
-    label: "Customer Master",
-    path: "/masters/customers",
-    color: "text-violet-500",
-    pageKey: "customer-master",
-  },
-];
-
-const materialSetupItems: SetupItem[] = [
-  {
-    icon: Package,
-    label: "Items",
-    path: "/masters/items",
-    color: "text-teal-500",
-  },
-  {
-    icon: Layers,
-    label: "Items Group",
-    path: "/masters/item-groups",
-    color: "text-indigo-400",
-  },
-  {
-    icon: Hash,
-    label: "Unit of Measurement",
-    path: "/masters/unit-measurement",
-    color: "text-orange-400",
-  },
-  {
-    icon: ReceiptIndianRupee,
-    label: "HSN",
-    path: "/masters/hsn",
-    color: "text-pink-400",
-  },
-  {
-    icon: BillingIcon,
-    label: "Billing",
-    path: "/masters/billing-terms",
-    color: "text-lime-500",
-  },
-  {
-    icon: FileText,
-    label: "T&C",
-    path: "/material/t-c-master",
-    color: "text-purple-500",
-  },
-  {
-    icon: CalendarClock,
-    label: "Payment Terms",
-    path: "/masters/payment-terms",
-    color: "text-sky-500",
-    pageKey: "payment-terms",
-  },
-  {
-    icon: ClipboardList,
-    label: "Inventory",
-    path: "/material/inventory-master",
-    color: "text-teal-400",
-  },
-];
-
-const fixedAssetSetupItems: SetupItem[] = [
-  {
-    icon: Percent,
-    label: "Depreciation Setup",
-    path: "/fixed-asset/depreciation-setup",
-    color: "text-yellow-500",
-    pageKey: "depreciation-setup",
-  },
-  {
-    icon: Hash,
-    label: "ID Template Master",
-    path: "/fixed-asset/id-template-master",
-    color: "text-yellow-500",
-    pageKey: "id-template-master",
-  },
-];
-
-const maintenanceSetupItems: SetupItem[] = [
-  {
-    icon: Receipt,
-    label: "Charge Head",
-    path: "/masters/charge-head",
-    color: "text-slate-500",
-    pageKey: "charge-head-master",
-  },
-];
-
-const followupSetupItems: SetupItem[] = [
-  // "Task Master" moved into the Follow-Up module sidebar (followupNavItems)
-  // — kept out of the Setup sheet so it isn't listed twice on mobile.
-  {
-    icon: Users,
-    label: "Department Master",
-    path: "/followup/setup/department-master",
-    color: "text-cyan-500",
-    pageKey: "followup-department-master",
-  },
-  {
-    icon: Tag,
-    label: "Tag Master",
-    path: "/followup/setup/tag-master",
-    color: "text-pink-500",
-    pageKey: "followup-tag-master",
-  },
-  {
-    icon: XCircle,
-    label: "Cancel Template",
-    path: "/followup/setup/cancel-template",
-    color: "text-red-500",
-    pageKey: "followup-cancel-template-master",
-  },
-];
-
-const engineeringSetupItems: SetupItem[] = [
-  {
-    icon: Activity,
-    label: "Engineering Activity Master",
-    path: "/masters/engineering-activity",
-    color: "text-orange-400",
-    pageKey: "engineering-activity-master",
-  },
-];
-
-const salesAutomationSetupItems: SetupItem[] = [
-  {
-    icon: Megaphone,
-    label: "Social Media",
-    path: "/sales-automation/social-media",
-    color: "text-pink-500",
-    pageKey: "sa-social-media",
-  },
-  {
-    icon: SlidersHorizontal,
-    label: "Distribution Rules",
-    path: "/sales-automation/distribution-rules",
-    color: "text-amber-500",
-    pageKey: "sa-distribution-rules",
-  },
-  {
-    icon: UsersRound,
-    label: "Teams",
-    path: "/sales-automation/teams",
-    color: "text-purple-500",
-    pageKey: "sa-teams",
-  },
-  {
-    icon: ShieldCheck,
-    label: "Role Master",
-    path: "/sales-automation/role-master",
-    color: "text-orange-500",
-    pageKey: "sa-role-master",
-  },
-];
-
-// Unit/Block/Room/Parking/Extra-Charge masters are shared with the
-// Follow-Up module (same underlying data and pageKey gating), but they're
-// now ALSO registered under /crm/setup/* in App.tsx so these links stay
-// inside the crm module — a /followup/... URL would flip the whole app
-// into Follow-Up chrome the moment it's clicked (ModuleContext derives
-// activeModule purely from the path prefix). pageKey still points at the
-// real (shared, followup-*) permission the route actually checks, so
-// visibility for non-privileged users matches the real access gate. Kept
-// in sync with TopNavbar.tsx's own copy.
-const crmSetupItems: SetupItem[] = [
-  {
-    icon: Wand2,
-    label: "Auto Project Setup",
-    path: "/crm/setup/auto-project-setup",
-    color: "text-fuchsia-500",
-    pageKey: "crm-auto-project-setup",
-  },
-  {
-    icon: Ruler,
-    label: "Unit Master",
-    path: "/crm/setup/unit-master",
-    color: "text-orange-500",
-    pageKey: "followup-unit-master",
-  },
-  {
-    icon: Map,
-    label: "Plot Master",
-    path: "/crm/setup/plot-master",
-    color: "text-emerald-500",
-    pageKey: "crm-auto-project-setup",
-  },
-  {
-    icon: Layers,
-    label: "Block Master",
-    path: "/crm/setup/block-master",
-    color: "text-cyan-500",
-    pageKey: "followup-block-master",
-  },
-  {
-    icon: HardHat,
-    label: "Broker Master",
-    path: "/masters/brokers",
-    color: "text-amber-500",
-    pageKey: "broker-master",
-  },
-  {
-    icon: ClipboardList,
-    label: "Payment Plan Master",
-    path: "/crm/payment-plans",
-    color: "text-emerald-500",
-    pageKey: "crm-payment-plans",
-  },
-  {
-    icon: Car,
-    label: "Parking Rate Master",
-    path: "/crm/setup/parking-master",
-    color: "text-blue-500",
-    pageKey: "followup-parking-master",
-  },
-  {
-    icon: Hash,
-    label: "Parking Slot Master",
-    path: "/crm/setup/parking-slot-master",
-    color: "text-sky-500",
-    pageKey: "followup-parking-slot-master",
-  },
-  {
-    icon: PlusCircle,
-    label: "Extra Charge Master",
-    path: "/crm/setup/extra-charge-master",
-    color: "text-pink-500",
-    pageKey: "followup-extra-charge-master",
-  },
-  {
-    icon: Activity,
-    label: "Pending Tasks",
-    path: "/crm/setup/pending-tasks",
-    color: "text-purple-500",
-    pageKey: "followup-pending-tasks",
-  },
-  {
-    icon: Calendar,
-    label: "Reminders",
-    path: "/crm/setup/reminders",
-    color: "text-indigo-500",
-    pageKey: "followup-reminders",
-  },
-];
-
-const adminSetupItems: SetupItem[] = [
-  {
-    icon: LayoutGrid,
-    label: "Menu Types",
-    path: "/admin/masters/menu-types",
-    color: "text-emerald-500",
-  },
-  {
-    icon: Tag,
-    label: "Entry Type",
-    path: "/masters/named-entry-type",
-    color: "text-purple-400",
-  },
-  {
-    icon: FileType2,
-    label: "Type of Doc",
-    path: "/masters/type-of-doc",
-    color: "text-sky-500",
-  },
-  {
-    icon: Users,
-    label: "Role Master",
-    path: "/admin/masters/role-master",
-    color: "text-blue-400",
-  },
-];
-
-const civilWorkDprSetupItems: SetupItem[] = [
-  {
-    icon: ClipboardList,
-    label: "Activity Master",
-    path: "/masters/activity",
-    color: "text-cyan-500",
-    pageKey: "activity-master",
-  },
-  {
-    icon: DoorOpen,
-    label: "Flat Master",
-    path: "/civilworkdpr/room-master",
-    color: "text-cyan-500",
-    pageKey: "civilworkdpr-room-master",
-  },
-  {
-    icon: GitBranch,
-    label: "Dependency Master",
-    path: "/masters/dependency",
-    color: "text-cyan-500",
-    pageKey: "dependency-master",
-  },
-];
-
 export const MobileNav: React.FC = () => {
-  const [open, setOpen] = useState(false);
+  // Which full-height sheet is open from the bottom bar: the module menu, or "Me" (profile, theme, sign out).
+  const [sheet, setSheet] = useState<null | "menu" | "me">(null);
+  const open = sheet !== null;
+  const setOpen = (v: boolean) => { if (!v) setSheet(null); };
+  // A sheet swells up out of its bar tab like a bubble and pops back into it when closed (the closing is played by close()).
+  const { closing, close } = useGeniePanel(open, setOpen);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // Put the bubble's origin on the tab it came from. offsetLeft / offsetTop are the sheet's layout box, not its animated one.
+    const el = sheetRef.current;
+    const tab = sheet ? document.querySelector<HTMLElement>(`.mn-bar [data-tab="${sheet}"]`) : null;
+    if (!el || !tab) return;
+    const r = tab.getBoundingClientRect();
+    el.style.setProperty("--genie-ox", `${r.left + r.width / 2 - el.offsetLeft}px`);
+    el.style.setProperty("--genie-oy", `${r.top + r.height / 2 - el.offsetTop}px`);
+  }, [sheet]);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"nav" | "setup" | "theme">("nav");
+  const [showSetup, setShowSetup] = useState(false);
+  const [query, setQuery] = useState("");
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -678,8 +151,9 @@ export const MobileNav: React.FC = () => {
 
   // Close on route change
   useEffect(() => {
-    setOpen(false);
+    setSheet(null);
     setExpandedGroup(null);
+    setQuery("");
   }, [location.pathname]);
 
   // Lock body scroll when open
@@ -715,6 +189,12 @@ export const MobileNav: React.FC = () => {
       };
     if (activeModule === "finance")
       return { items: financeSetupItems, label: "Finance", available: true };
+    if (activeModule === "sales")
+      return { items: salesSetupItems, label: "Sales", available: true };
+    if (activeModule === "hr-payroll")
+      return { items: hrPayrollSetupItems, label: "HR and Payroll", available: true };
+    if (activeModule === "legal")
+      return { items: legalSetupItems, label: "Legal", available: true };
     if (activeModule === "sales-automation")
       return {
         items: salesAutomationSetupItems,
@@ -809,6 +289,8 @@ export const MobileNav: React.FC = () => {
         return adaptItems(crmNavItems as DesktopNavItem[]);
       case "loan":
         return adaptItems(loanNavItems as DesktopNavItem[]);
+      case "legal":
+        return adaptItems(legalNavItems as DesktopNavItem[]);
       default:
         return [];
     }
@@ -856,651 +338,584 @@ export const MobileNav: React.FC = () => {
   const activeModKey = isAdminPage ? "admin" : (activeModule ?? "__none__");
   const activeMod = MODULE_META[activeModKey] ?? MODULE_META.__none__;
 
+  // Exactly who the desktop module strip shows each module to.
+  const isAdminTier = isAdminTierRole(currentUser?.role ?? "");
   const moduleModules = Object.entries(MODULE_META).filter(([id]) => {
     if (id === "__none__") return false;
-    if (id === "admin") return isAdmin;
-    if (currentUser?.role?.toLowerCase() === "engineer") {
-      return ["followup", "engineering", "ticket", "records"].includes(id);
-    }
-    return true;
+    if (id === "admin") return isAdminTier || hasAnyAdminPageRight((pk) => canAccessPage(pk as any));
+    return sharedUserHasModuleAccess(id, isAdminTier, (pk) => canAccessPage(pk as any));
   });
 
   const themeCheck: Record<Theme, string> = {
     dark: "#818cf8",
     light: "#7c3aed",
-    midnight: "#2dd4bf",
-    root: "#f59e0b",
     glass: "#fb7185",
     bw: "#111111",
+    sage: "#6b8f71",
   };
 
-  const tabs: Array<{ id: "nav" | "setup" | "theme"; label: string }> = [
-    { id: "nav", label: "Navigation" },
-    {
-      id: "setup",
-      label: setupConfig.available ? `Setup · ${setupConfig.label}` : "Setup",
-    },
-    { id: "theme", label: "Appearance" },
+  const modColor = (alpha?: number) =>
+    alpha == null
+      ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
+      : `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / ${alpha})`;
+  const ActiveModIcon = activeMod.icon;
+
+  const visibleSetupItems = setupConfig.items.filter((it) => !it.pageKey || canAccessPage(it.pageKey));
+
+  // Open the group that holds the current page, so the menu opens where you are. The module's Setup pages are
+  // listed open every time — they are few, and hiding them behind a tap made them easy to miss.
+  useEffect(() => {
+    if (sheet !== "menu") return;
+    const g = navItems.find((it) => it.children?.some((c) => c.path === location.pathname));
+    setExpandedGroup(g ? g.label : null);
+    setShowSetup(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet]);
+
+  // Find-a-page: every page of this module and its Setup, by name.
+  const searchResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const out: { label: string; path: string; where: string; icon?: React.ElementType }[] = [];
+    navItems.forEach((it) => {
+      if (it.path && it.label.toLowerCase().includes(q)) out.push({ label: it.label, path: it.path, where: activeMod.label, icon: it.icon });
+      it.children?.forEach((c) => {
+        if (c.label.toLowerCase().includes(q) || it.label.toLowerCase().includes(q))
+          out.push({ label: c.label, path: c.path, where: it.label, icon: it.icon });
+      });
+    });
+    visibleSetupItems.forEach((it) => {
+      if (it.label.toLowerCase().includes(q)) out.push({ label: it.label, path: it.path, where: "Setup", icon: it.icon });
+    });
+    return out.slice(0, 40);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, navItems.length, activeModKey, visibleSetupItems.length]);
+
+  const profilePath = isSuperAdmin
+    ? "/superadmin/profile"
+    : isDba
+      ? "/dba/profile"
+      : currentUser?.role === "admin"
+        ? "/admin/profile"
+        : "/user/profile";
+
+  const roleLabel = isSuperAdmin ? "Super Admin" : isDba ? "DBA" : isAdmin ? "Admin" : (currentUser?.role || "User");
+
+  const switchModule = (id: string, meta: ModuleMeta) => {
+    if (id === "admin") {
+      navigate(
+        isAdminTier
+          ? "/admin/dashboard"
+          : firstAccessibleAdminPath((pk) => canAccessPage(pk as any)) ?? "/admin/approval/inbox",
+      );
+    } else {
+      setActiveModule(id as any);
+      navigate(meta.route);
+    }
+    setSheet(null);
+  };
+
+  // Square avatar on the sheet: the photo, or initials in ink on paper.
+  const Avatar = ({ size }: { size: number }) => (
+    <span className="mn-avatar" style={{ width: size, height: size, fontSize: size * 0.36 }}>
+      {currentUser?.avatarUrl ? (
+        <img src={currentUser.avatarUrl} alt={currentUser.name} />
+      ) : (
+        currentUser?.initials || "?"
+      )}
+    </span>
+  );
+
+  // ── Bottom bar items ──────────────────────────────────────────────────────
+  const barItems: { id: string; label: string; icon: React.ElementType; active: boolean; onClick: () => void }[] = [
+    { id: "home", label: "Home", icon: TbHome, active: !sheet && location.pathname === "/home", onClick: () => go("/home") },
+    { id: "menu", label: "Menu", icon: TbMenu2, active: sheet === "menu", onClick: () => (sheet === "menu" ? close() : setSheet("menu")) },
+    { id: "reports", label: "Reports", icon: TbChartBar, active: !sheet && location.pathname.startsWith("/reports"), onClick: () => go("/reports") },
+    { id: "me", label: "Me", icon: TbUser, active: sheet === "me", onClick: () => (sheet === "me" ? close() : setSheet("me")) },
   ];
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  let rowNo = 0;
 
   return (
     <>
       {logoutOverlay}
+      <style>{MOBILE_NAV_CSS + GENIE_CSS}</style>
 
-      {/* ── FAB trigger ─────────────────────────────────────────────────────── */}
-      <button
-        onClick={() => setOpen(true)}
-        aria-label="Open navigation"
-        className="fixed z-50 md:hidden"
-        style={{
-          bottom: "max(1.25rem, env(safe-area-inset-bottom, 1.25rem))",
-          right: "max(1.25rem, env(safe-area-inset-right, 1.25rem))",
-        }}
-      >
-        <span
-          className="absolute inset-0 rounded-2xl animate-pulse"
-          style={{
-            background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.25)`,
-            filter: "blur(8px)",
-            transform: "scale(1.3)",
-          }}
-        />
-        <span
-          className="relative flex items-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold shadow-2xl"
-          style={{
-            background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 12, 20)}%))`,
-            color: "white",
-          }}
-        >
-          <Grip size={16} />
-          <span className="text-xs tracking-wide font-heading">
-            {activeMod.label}
-          </span>
-        </span>
-      </button>
-
-      {/* ── Full-screen overlay ──────────────────────────────────────────────── */}
+      {/* ── Sheet (above the bar) ────────────────────────────────────────────── */}
       {open && (
-        <div
-          className="fixed inset-0 z-[60] md:hidden"
-          style={{ animation: "fadeInOverlay 200ms ease-out both" }}
-        >
-          <style>{`
-            @keyframes fadeInOverlay { from { opacity: 0 } to { opacity: 1 } }
-            @keyframes slideUpPanel { from { transform: translateY(100%) } to { transform: translateY(0) } }
-            @keyframes popIn {
-              from { opacity: 0; transform: scale(0.92) translateY(8px) }
-              to   { opacity: 1; transform: scale(1) translateY(0) }
-            }
-            .nav-item-enter { animation: popIn 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
-          `}</style>
-
-          {/* Backdrop */}
+        <div className="fixed inset-0 z-[60] md:hidden">
           <div
-            className="absolute inset-0 bg-background/70 backdrop-blur-md"
-            onClick={() => setOpen(false)}
+            className="absolute inset-0 bg-black/40"
+            style={{ animation: closing ? "mnFadeOut 300ms ease-in both" : "mnFade 220ms ease-out both" }}
+            onClick={close}
           />
-
-          {/* Panel */}
           <div
-            className="absolute inset-x-0 bottom-0 flex flex-col rounded-t-[2rem] border-t border-border overflow-hidden"
-            style={{
-              maxHeight: "93svh",
-              animation:
-                "slideUpPanel 300ms cubic-bezier(0.32, 0.72, 0, 1) both",
-              background: "hsl(var(--card))",
-            }}
+            key={sheet}
+            ref={sheetRef}
+            role="dialog"
+            aria-label={sheet === "menu" ? `${activeMod.label} menu` : "Account"}
+            className={`mn-sheet genie genie-up ${closing ? "genie-close" : "genie-open"}`}
+            style={{ ["--mn-mod" as string]: modColor(), ["--mn-mod-wash" as string]: modColor(0.1) } as React.CSSProperties}
           >
-            {/* Colour accent bar */}
-            <div
-              className="h-1 w-full flex-shrink-0 rounded-full"
-              style={{
-                background: `linear-gradient(90deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.min(activeMod.l + 20, 90)}%))`,
-              }}
-            />
+            <div className="mn-grab"><span /></div>
 
-            {/* Drag handle */}
-            <div className="flex justify-center pt-2 pb-1 flex-shrink-0">
-              <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
-            </div>
-
-            {/* ── Header row ─────────────────────────────────────────────────── */}
-            <div className="flex items-center gap-2.5 px-4 py-3 flex-shrink-0">
-              {/* Avatar */}
-              <div
-                className="relative w-8 h-8 rounded-lg flex-shrink-0 overflow-hidden"
-                style={
-                  currentUser?.avatarUrl
-                    ? { background: "hsl(var(--muted))" }
-                    : {
-                        background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 15, 20)}%))`,
-                      }
-                }
-              >
-                {currentUser?.avatarUrl ? (
-                  <img
-                    src={currentUser.avatarUrl}
-                    alt={currentUser.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="w-full h-full flex items-center justify-center text-white font-heading font-bold text-sm">
-                    {currentUser?.initials || "?"}
+            {sheet === "menu" && (
+              <>
+                {/* Title block: the module you're in, and close */}
+                <div className="mn-head">
+                  <span className="mn-mark lg" style={{ color: modColor() }}>
+                    <ActiveModIcon size={20} />
                   </span>
-                )}
-                {isSuperAdmin && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-violet-600 border-2 border-card flex items-center justify-center">
-                    <Crown size={9} className="text-white" />
-                  </span>
-                )}
-                {!isSuperAdmin && isDba && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-emerald-600 border-2 border-card flex items-center justify-center">
-                    <Data size={9} className="text-white" />
-                  </span>
-                )}
-                {!isSuperAdmin && !isDba && isAdmin && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-blue-600 border-2 border-card flex items-center justify-center">
-                    <ShieldTick size={9} className="text-white" />
-                  </span>
-                )}
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <p className="font-heading font-semibold text-xs text-foreground truncate leading-tight">
-                  {currentUser?.name}
-                </p>
-                <p className="text-[0.6875rem] text-muted-foreground truncate leading-tight">
-                  {currentUser?.email}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => {
-                    setOpen(false);
-                    navigate(
-                      isSuperAdmin
-                        ? "/superadmin/profile"
-                        : isDba
-                          ? "/dba/profile"
-                          : currentUser?.role === "admin"
-                            ? "/admin/profile"
-                            : "/user/profile",
-                    );
-                  }}
-                  className="w-7 h-7 rounded-lg border border-border flex items-center justify-center hover:bg-muted transition-colors"
-                >
-                  <Profile size={15} className="text-muted-foreground" />
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="w-7 h-7 rounded-lg border border-destructive/30 flex items-center justify-center hover:bg-destructive/10 transition-colors"
-                >
-                  <Logout size={15} className="text-destructive" />
-                </button>
-                <button
-                  onClick={() => setOpen(false)}
-                  className="w-7 h-7 rounded-lg border border-border flex items-center justify-center hover:bg-muted transition-colors"
-                >
-                  <X size={15} className="text-muted-foreground" />
-                </button>
-              </div>
-            </div>
-
-            {/* ── Module strip ─────────────────────────────────────────────────── */}
-            <div className="px-4 pb-3 flex-shrink-0">
-              <div
-                className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none"
-                style={{ scrollbarWidth: "none" }}
-              >
-                {moduleModules.map(([id, meta]) => {
-                  const isActive = isAdminPage
-                    ? id === "admin"
-                    : activeModule === id;
-                  const Icon = meta.icon;
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => {
-                        if (id === "admin") {
-                          navigate("/admin/dashboard");
-                          setOpen(false);
-                          return;
-                        }
-                        setActiveModule(id as any);
-                        navigate(meta.route);
-                        setOpen(false);
-                      }}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg flex-shrink-0 transition-all duration-200 text-[0.6875rem] font-heading font-medium border"
-                      style={
-                        isActive
-                          ? {
-                              background: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.15)`,
-                              borderColor: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.4)`,
-                              color: `hsl(${meta.h} ${meta.s}% ${meta.l}%)`,
-                              backdropFilter: "blur(8px)",
-                            }
-                          : {
-                              borderColor: "hsl(var(--border))",
-                              color: "hsl(var(--muted-foreground))",
-                              background: "transparent",
-                            }
-                      }
-                    >
-                      <Icon size={13} />
-                      {meta.label}
-                      {isActive && (
-                        <span
-                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                          style={{
-                            background: `hsl(${meta.h} ${meta.s}% ${meta.l}%)`,
-                          }}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* ── Tab bar ─────────────────────────────────────────────────────── */}
-            <div className="px-4 pb-2.5 flex-shrink-0">
-              <div className="flex gap-1 p-0.5 rounded-lg bg-muted">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className="flex-1 py-1.5 rounded-md text-[0.6875rem] font-heading font-medium transition-all text-center"
-                    style={
-                      activeTab === tab.id
-                        ? {
-                            background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`,
-                            color: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`,
-                          }
-                        : { color: "hsl(var(--muted-foreground))" }
-                    }
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* ── Scrollable content ───────────────────────────────────────────── */}
-            <div className="flex-1 overflow-y-auto overscroll-contain pb-6">
-              {/* ── Navigation tab ──────────────────────────────────────────────── */}
-              {activeTab === "nav" && (
-                <div className="px-4 space-y-0.5 pt-1">
-                  {/* Quick links */}
-                  <div className="grid grid-cols-2 gap-1.5 mb-2">
-                    {[
-                      { label: "Home", icon: Home, path: "/home" },
-                      { label: "Reports", icon: BarChart3, path: "/reports" },
-                      { label: "Widgets", icon: Puzzle, path: "/widgets" },
-                      { label: "Tasks", icon: CheckCircle2, path: "/tasks" },
-                    ].map(({ label, icon: Icon, path }, i) => {
-                      const active = location.pathname === path;
-                      return (
-                        <button
-                          key={path}
-                          onClick={() => go(path)}
-                          className="nav-item-enter flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-heading transition-all text-left"
-                          style={{
-                            animationDelay: `${i * 35}ms`,
-                            borderColor: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.4)`
-                              : "hsl(var(--border))",
-                            background: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.10)`
-                              : "transparent",
-                            color: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                              : "hsl(var(--foreground))",
-                          }}
-                        >
-                          <Icon
-                            size={15}
-                            style={{ opacity: active ? 1 : 0.5 }}
-                          />
-                          {label}
-                        </button>
-                      );
-                    })}
+                  <div className="min-w-0 flex-1">
+                    <p className="mn-label">CivilierERP · {activeModKey === "__none__" ? "Menu" : "You are in"}</p>
+                    <p className="mn-title truncate">{activeModKey === "__none__" ? "Choose a module" : activeMod.label}</p>
                   </div>
+                  <button onClick={close} aria-label="Close menu" className="mn-key">
+                    <TbX size={15} stroke={1.5} />
+                  </button>
+                </div>
 
-                  {navItems.length > 0 ? (
-                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
-                      {isAdminPage ? "Admin" : `${activeMod.label} Module`}
-                    </p>
-                  ) : !activeModule && !isAdminPage ? (
-                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
-                      Select a module above to get started
-                    </p>
-                  ) : null}
+                {/* Search */}
+                <div className="mn-search">
+                  <TbSearch size={15} stroke={1.5} />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={activeModKey === "__none__" ? "Find a page…" : `Find a page in ${activeMod.label}…`}
+                  />
+                  {query && (
+                    <button onClick={() => setQuery("")} aria-label="Clear search"><TbX size={14} stroke={1.5} /></button>
+                  )}
+                </div>
 
-                  {navItems.map((item, idx) => {
-                    const active = isItemActive(item);
-                    const isExpanded = expandedGroup === item.label;
-
-                    if (item.children) {
-                      return (
-                        <div
-                          key={item.label}
-                          className="nav-item-enter"
-                          style={{ animationDelay: `${(idx + 4) * 40}ms` }}
-                        >
-                          <button
-                            onClick={() =>
-                              setExpandedGroup(isExpanded ? null : item.label)
-                            }
-                            className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-heading transition-all text-left border"
-                            style={{
-                              borderColor: active
-                                ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.35)`
-                                : isExpanded
-                                  ? "hsl(var(--border))"
-                                  : "transparent",
-                              background: active
-                                ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.10)`
-                                : isExpanded
-                                  ? "hsl(var(--muted) / 0.5)"
-                                  : "transparent",
-                            }}
-                          >
-                            <div
-                              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                              style={{
-                                background:
-                                  active || isExpanded
-                                    ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.15)`
-                                    : "hsl(var(--muted))",
-                              }}
+                <div className="mn-body">
+                  {/* Modules: always shown - swipe for more */}
+                  {!query.trim() && (
+                    <section>
+                      <header className="mn-sec">
+                        <span className="mn-label ink">All modules</span>
+                        <span className="mn-rule" />
+                        <span className="mn-label">{moduleModules.length} · swipe</span>
+                      </header>
+                      <div className="mn-rail">
+                        {moduleModules.map(([id, meta]) => {
+                          const isActive = isAdminPage ? id === "admin" : activeModule === id;
+                          const Icon = meta.icon;
+                          const c = `hsl(${meta.h} ${meta.s}% ${meta.l}%)`;
+                          return (
+                            <button
+                              key={id}
+                              onClick={() => switchModule(id, meta)}
+                              ref={isActive ? (el) => el?.scrollIntoView({ block: "nearest", inline: "center" }) : undefined}
+                              className={`mn-tile ${isActive ? "on" : ""}`}
+                              style={{ ["--tile" as string]: c } as React.CSSProperties}
+                              aria-current={isActive ? "true" : undefined}
                             >
-                              <item.icon
-                                size={15}
-                                style={{
-                                  color:
-                                    active || isExpanded
-                                      ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                                      : "hsl(var(--muted-foreground))",
-                                }}
-                              />
-                            </div>
-                            <span
-                              className="flex-1"
-                              style={{
-                                color: active
-                                  ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                                  : "hsl(var(--foreground))",
-                              }}
-                            >
-                              {item.label}
-                            </span>
-                            <ChevronRight
-                              size={14}
-                              className="text-muted-foreground transition-transform duration-200"
-                              style={{
-                                transform: isExpanded
-                                  ? "rotate(90deg)"
-                                  : "rotate(0deg)",
-                              }}
-                            />
-                          </button>
+                              <span className="mn-mark" style={{ color: c }}>
+                                <Icon size={17} />
+                              </span>
+                              <span className="mn-tile-name">{meta.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  )}
 
-                          {isExpanded && (
-                            <div
-                              className="ml-5 mt-1 mb-1 pl-4 border-l-2 space-y-0.5"
-                              style={{
-                                borderColor: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.25)`,
-                              }}
-                            >
-                              {item.children.map((child, ci) => {
-                                const childActive =
-                                  location.pathname === child.path;
-                                const ChildIcon = child.icon;
+                  {query.trim() ? (
+                    /* Search results */
+                    <section>
+                      <header className="mn-sec">
+                        <span className="mn-label ink">Pages found</span>
+                        <span className="mn-rule" />
+                        <span className="mn-label">{searchResults.length}</span>
+                      </header>
+                      {searchResults.length === 0 ? (
+                        <p className="mn-empty">No page matches “{query}”.</p>
+                      ) : (
+                        <div className="mn-box">
+                          {searchResults.map((r) => {
+                            const Icon = r.icon;
+                            const active = location.pathname === r.path;
+                            return (
+                              <button key={r.path + r.where} onClick={() => go(r.path)} className={`mn-row ${active ? "on" : ""}`}>
+                                <span className="mn-num">{pad(++rowNo)}</span>
+                                <span className="mn-mark">{Icon && <Icon size={15} />}</span>
+                                <span className="mn-text">
+                                  <span className="mn-name">{r.label}</span>
+                                  <span className="mn-sub">{r.where}</span>
+                                </span>
+                                <TbChevronRight size={14} stroke={1.5} className="mn-chev" />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
+                  ) : (
+                    <>
+                      {/* Pages */}
+                      {navItems.length > 0 && (
+                        <section>
+                          <header className="mn-sec">
+                            <span className="mn-label ink">{activeMod.label} pages</span>
+                            <span className="mn-rule" />
+                            <span className="mn-label">{navItems.length}</span>
+                          </header>
+                          <div className="mn-box">
+                            {navItems.map((item) => {
+                              const active = isItemActive(item);
+                              if (item.children) {
+                                const isExpanded = expandedGroup === item.label;
                                 return (
-                                  <button
-                                    key={child.path}
-                                    onClick={() => go(child.path)}
-                                    className="nav-item-enter w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-heading transition-all text-left"
-                                    style={{
-                                      animationDelay: `${ci * 30}ms`,
-                                      background: childActive
-                                        ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.12)`
-                                        : "transparent",
-                                      color: childActive
-                                        ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                                        : "hsl(var(--muted-foreground))",
-                                    }}
-                                  >
-                                    {ChildIcon && (
-                                      <ChildIcon
-                                        size={14}
-                                        className="flex-shrink-0"
-                                      />
+                                  <div key={item.label}>
+                                    <button
+                                      onClick={() => setExpandedGroup(isExpanded ? null : item.label)}
+                                      className={`mn-row ${active ? "on" : ""} ${isExpanded ? "open" : ""}`}
+                                      aria-expanded={isExpanded}
+                                    >
+                                      <span className="mn-num">{pad(++rowNo)}</span>
+                                      <span className="mn-mark"><item.icon size={15} /></span>
+                                      <span className="mn-text"><span className="mn-name">{item.label}</span></span>
+                                      <span className="mn-count">{item.children.length}</span>
+                                      <TbChevronDown size={15} stroke={1.5} className="mn-chev" style={{ transform: isExpanded ? "rotate(180deg)" : undefined }} />
+                                    </button>
+                                    {isExpanded && (
+                                      <div className="mn-children">
+                                        {item.children.map((child) => {
+                                          const childActive = location.pathname === child.path;
+                                          return (
+                                            <button
+                                              key={child.path}
+                                              onClick={() => go(child.path)}
+                                              className={`mn-child ${childActive ? "on" : ""}`}
+                                              aria-current={childActive ? "page" : undefined}
+                                            >
+                                              <span className="flex-1 min-w-0 truncate">{child.label}</span>
+                                              {!!child.count && <span className="mn-badge">{child.count}</span>}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
                                     )}
-                                    <span className="flex-1">
-                                      {child.label}
-                                    </span>
-                                    {!!child.count && (
-                                      <span className="text-[0.625rem] bg-destructive text-destructive-foreground px-1.5 py-0.5 rounded-full font-medium">
-                                        {child.count}
-                                      </span>
-                                    )}
+                                  </div>
+                                );
+                              }
+                              return (
+                                <button
+                                  key={item.path}
+                                  onClick={() => go(item.path!)}
+                                  className={`mn-row ${active ? "on" : ""}`}
+                                  aria-current={active ? "page" : undefined}
+                                >
+                                  <span className="mn-num">{pad(++rowNo)}</span>
+                                  <span className="mn-mark"><item.icon size={15} /></span>
+                                  <span className="mn-text"><span className="mn-name">{item.label}</span></span>
+                                  {active ? <i className="mn-here" /> : <TbChevronRight size={14} stroke={1.5} className="mn-chev" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      )}
+
+                      {/* Setup */}
+                      {setupConfig.available && visibleSetupItems.length > 0 && (
+                        <section>
+                          <button onClick={() => setShowSetup((v) => !v)} className="mn-sec mn-sec-btn" aria-expanded={showSetup}>
+                            <TbSettings size={12} stroke={1.5} />
+                            <span className="mn-label ink">{setupConfig.label} Setup</span>
+                            <span className="mn-rule" />
+                            <span className="mn-label">{visibleSetupItems.length}</span>
+                            <TbChevronDown size={14} stroke={1.5} className="mn-chev" style={{ transform: showSetup ? "rotate(180deg)" : undefined }} />
+                          </button>
+                          {showSetup && (
+                            <div className="mn-grid">
+                              {visibleSetupItems.map(({ icon: Icon, label, path, color }) => {
+                                const active = location.pathname === path;
+                                return (
+                                  <button key={path} onClick={() => go(path)} className={`mn-cell ${active ? "on" : ""}`} aria-current={active ? "page" : undefined}>
+                                    <span className="mn-mark"><Icon size={15} className={color} /></span>
+                                    <span className="mn-cell-name">{label.replace(/ Master$/, "")}</span>
                                   </button>
                                 );
                               })}
                             </div>
                           )}
-                        </div>
-                      );
-                    }
+                        </section>
+                      )}
 
-                    return (
-                      <button
-                        key={item.path}
-                        onClick={() => go(item.path!)}
-                        className="nav-item-enter w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-heading transition-all text-left border"
-                        style={{
-                          animationDelay: `${(idx + 4) * 40}ms`,
-                          borderColor: active
-                            ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.35)`
-                            : "transparent",
-                          background: active
-                            ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.10)`
-                            : "transparent",
-                        }}
-                      >
-                        <div
-                          className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                          style={{
-                            background: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`
-                              : "hsl(var(--muted))",
-                          }}
-                        >
-                          <item.icon
-                            size={15}
-                            style={{
-                              color: active
-                                ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                                : "hsl(var(--muted-foreground))",
-                            }}
-                          />
-                        </div>
-                        <span
-                          className="flex-1"
-                          style={{
-                            color: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                              : "hsl(var(--foreground))",
-                            fontWeight: active ? 600 : 400,
-                          }}
-                        >
-                          {item.label}
-                        </span>
-                        {active && (
-                          <span
-                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                            style={{
-                              background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`,
-                            }}
-                          />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* ── Setup tab ───────────────────────────────────────────────────── */}
-              {activeTab === "setup" && (
-                <div className="px-4 pt-1.5">
-                  {setupConfig.available ? (
-                    <>
-                      <div className="flex items-center gap-2 mb-2 px-1">
-                        <Settings size={13} className="text-muted-foreground" />
-                        <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
-                          {setupConfig.label} Setup
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {setupConfig.items
-                          .filter((it) => !it.pageKey || canAccessPage(it.pageKey))
-                          .map(
-                          ({ icon: Icon, label, path, color }, i) => {
-                            const active = location.pathname === path;
-                            return (
-                              <button
-                                key={path}
-                                onClick={() => go(path)}
-                                className="nav-item-enter group flex flex-col items-center gap-1.5 p-2 rounded-xl border transition-all duration-150 active:scale-95"
-                                style={{
-                                  animationDelay: `${i * 30}ms`,
-                                  borderColor: active
-                                    ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.4)`
-                                    : "hsl(var(--border))",
-                                  background: active
-                                    ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.10)`
-                                    : "transparent",
-                                }}
-                              >
-                                <div
-                                  className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
-                                  style={{
-                                    background: active
-                                      ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`
-                                      : "hsl(var(--muted))",
-                                  }}
-                                >
-                                  <Icon size={15} className={color} />
-                                </div>
-                                <span className="text-[0.625rem] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
-                                  {label.replace(/ Master$/, "")}
-                                </span>
-                              </button>
-                            );
-                          },
-                        )}
+                      {/* Widgets (the one quick link not in the bottom bar) */}
+                      <div className="mn-box">
+                        <button onClick={() => go("/widgets")} className="mn-row">
+                          <span className="mn-num">{pad(++rowNo)}</span>
+                          <span className="mn-mark"><TbLayoutGrid size={15} stroke={1.5} /></span>
+                          <span className="mn-text"><span className="mn-name">Widgets</span></span>
+                          <TbChevronRight size={14} stroke={1.5} className="mn-chev" />
+                        </button>
                       </div>
                     </>
-                  ) : (
-                    <div className="flex flex-col items-center gap-3 py-10 text-center">
-                      <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center">
-                        <Settings size={20} className="text-muted-foreground" />
-                      </div>
-                      <p className="text-sm font-heading text-muted-foreground">
-                        Select a module to access Setup
-                      </p>
-                    </div>
                   )}
                 </div>
-              )}
+              </>
+            )}
 
-              {/* ── Theme tab ───────────────────────────────────────────────────── */}
-              {activeTab === "theme" && (
-                <div className="px-4 pt-2">
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
-                    Colour theme
-                  </p>
-                  <div className="grid grid-cols-1 gap-2">
-                    {(
-                      Object.entries(THEME_DOTS) as [
-                        Theme,
-                        { bg: string; label: string },
-                      ][]
-                    ).map(([t, { bg, label }], i) => {
+            {sheet === "me" && (
+              <div className="mn-body">
+                {/* Title block: who is signed in */}
+                <div className="mn-head mn-head-flush">
+                  <Avatar size={52} />
+                  <div className="min-w-0 flex-1">
+                    <p className="mn-label">CivilierERP · Signed in</p>
+                    <p className="mn-title truncate">{currentUser?.name}</p>
+                    <p className="mn-sub truncate">{currentUser?.email}</p>
+                    <span className="mn-role">
+                      {isSuperAdmin ? <TbCrown size={10} stroke={1.5} /> : isDba ? <TbDatabase size={10} stroke={1.5} /> : isAdmin ? <TbShieldCheck size={10} stroke={1.5} /> : null}
+                      {roleLabel}
+                    </span>
+                  </div>
+                  <button onClick={close} aria-label="Close" className="mn-key self-start">
+                    <TbX size={15} stroke={1.5} />
+                  </button>
+                </div>
+
+                <div className="mn-box">
+                  <button onClick={() => go(profilePath)} className="mn-row">
+                    <span className="mn-num">01</span>
+                    <span className="mn-mark"><TbUser size={15} stroke={1.5} /></span>
+                    <span className="mn-text"><span className="mn-name">My profile</span></span>
+                    <TbChevronRight size={14} stroke={1.5} className="mn-chev" />
+                  </button>
+                </div>
+
+                {/* Theme */}
+                <section>
+                  <header className="mn-sec">
+                    <span className="mn-label ink">Appearance</span>
+                    <span className="mn-rule" />
+                    <span className="mn-label">{Object.keys(THEME_DOTS).length}</span>
+                  </header>
+                  <div className="mn-themes">
+                    {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }]) => {
                       const isSelected = theme === t;
                       return (
-                        <button
-                          key={t}
-                          onClick={() => setTheme(t)}
-                          className="nav-item-enter flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left"
-                          style={{
-                            animationDelay: `${i * 50}ms`,
-                            borderColor: isSelected
-                              ? `${bg}66`
-                              : "hsl(var(--border))",
-                            background: isSelected ? `${bg}18` : "transparent",
-                          }}
-                        >
-                          <div
-                            className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center shadow-sm"
-                            style={{ background: bg }}
-                          >
+                        <button key={t} onClick={() => setTheme(t)} className={`mn-theme ${isSelected ? "on" : ""}`} aria-pressed={isSelected}>
+                          <span className="mn-swatch" style={{ background: bg }}>
                             {isSelected && (
-                              <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 16 16"
-                                fill="none"
-                              >
-                                <path
-                                  d="M3 8l3.5 3.5L13 5"
-                                  stroke={themeCheck[t]}
-                                  strokeWidth="2.2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
+                              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                <path d="M3 8l3.5 3.5L13 5" stroke={themeCheck[t]} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
                               </svg>
                             )}
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm font-heading font-medium text-foreground">
-                              {label}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {t === "dark"
-                                ? "Deep indigo dark"
-                                : t === "light"
-                                  ? "Clean bright"
-                                  : t === "midnight"
-                                    ? "Teal-accented slate"
-                                    : t === "root"
-                                      ? "Warm amber tone"
-                                      : "Soft glass tone"}
-                            </p>
-                          </div>
-                          {isSelected && (
-                            <span
-                              className="text-[0.625rem] font-heading px-2 py-1 rounded-lg"
-                              style={{ background: `${bg}22`, color: bg }}
-                            >
-                              Active
-                            </span>
-                          )}
+                          </span>
+                          <span className="mn-name">{label}</span>
+                          {isSelected && <span className="mn-tag">In use</span>}
                         </button>
                       );
                     })}
                   </div>
+                </section>
+
+                <div className="mn-box">
+                  <button onClick={handleLogout} className="mn-row danger">
+                    <span className="mn-num">02</span>
+                    <span className="mn-mark"><TbLogout size={15} stroke={1.5} /></span>
+                    <span className="mn-text"><span className="mn-name">Sign out</span></span>
+                  </button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}
+
+      {/* ── Bottom tab bar ───────────────────────────────────────────────────── */}
+      <nav
+        aria-label="Main"
+        className="mn-bar md:hidden"
+        style={{ ["--mn-mod" as string]: modColor() } as React.CSSProperties}
+      >
+        <div className="mn-bar-row" style={{ gridTemplateColumns: `repeat(${barItems.length}, minmax(0, 1fr))` }}>
+          {barItems.map(({ id, label, icon: Icon, active, onClick }) => {
+            const isMenu = id === "menu";
+            return (
+              <button
+                key={id}
+                onClick={onClick}
+                data-tab={id}
+                aria-label={isMenu ? `${label} menu` : label}
+                aria-current={active && !isMenu && id !== "me" ? "page" : undefined}
+                className={`mn-tab ${active ? "on" : ""}`}
+              >
+                {active && !isMenu && <span className="mn-tab-mark" />}
+                {isMenu ? (
+                  <span className={`mn-menu-key ${sheet === "menu" ? "open" : ""}`}>
+                    {sheet === "menu" ? <TbX size={18} stroke={1.5} /> : <Icon size={18} stroke={1.75} />}
+                    {/* The open module, so "Menu" plainly means "this module's pages and every other module". */}
+                    {sheet !== "menu" && activeModKey !== "__none__" && (
+                      <span className="mn-menu-mod">
+                        <ActiveModIcon size={10} />
+                      </span>
+                    )}
+                  </span>
+                ) : id === "me" ? (
+                  <span className={`mn-me ${active ? "on" : ""}`}>
+                    <Avatar size={24} />
+                  </span>
+                ) : (
+                  <Icon size={20} stroke={active ? 2 : 1.5} />
+                )}
+                <span className="mn-tab-label">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </>
   );
 };
+
+// The mobile navigation drawn on the sheet, like the rest of the app: a square bottom bar with an ink rule and
+// capital labels, and pull-up sheets with the faint grid, a title block, ruled sections, numbered rows with square
+// marks and square keys. The open module's colour (--mn-mod) marks where you are. Colours otherwise come from the
+// theme's variables, so every theme matches.
+//
+// Responsive: on a phone the sheet runs edge to edge; from 560px up (a phone in landscape, a small tablet) it becomes
+// a centred panel, so rows don't stretch across the whole screen. The module rail swipes; the Setup and theme grids
+// re-flow to as many columns as fit.
+const MOBILE_NAV_CSS = `
+@keyframes mnFade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes mnFadeOut { from { opacity: 1 } to { opacity: 0 } }
+.mn-sheet, .mn-bar {
+  --mn-ink: hsl(var(--foreground));
+  --mn-graphite: hsl(var(--muted-foreground));
+  --mn-rule: hsl(var(--border));
+  --mn-rule-soft: hsl(var(--border) / 0.55);
+  --mn-paper: hsl(var(--card));
+  font-family: "DM Sans", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.mn-sheet {
+  position: absolute; left: 0; right: 0; display: flex; flex-direction: column; overflow: hidden;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  max-height: calc(100svh - 64px - env(safe-area-inset-bottom, 0px) - 24px);
+  background-color: var(--mn-paper);
+  background-image:
+    linear-gradient(hsl(var(--foreground) / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--foreground) / 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--mn-ink);
+  border-top: 3px solid var(--mn-mod);
+  box-shadow: 0 -1.5px 0 var(--mn-ink), 0 -10px 30px hsl(0 0% 0% / 0.18);
+}
+@media (min-width: 560px) {
+  .mn-sheet { left: 0; right: 0; margin: 0 auto; width: min(560px, calc(100vw - 32px));
+    border: 1.5px solid var(--mn-ink); border-top: 3px solid var(--mn-mod); box-shadow: 6px 6px 0 hsl(var(--foreground) / 0.14);
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+}
+.mn-sheet .mn-grab { display: flex; justify-content: center; padding: 8px 0 2px; flex-shrink: 0; }
+.mn-sheet .mn-grab span { width: 36px; height: 3px; background: var(--mn-rule); }
+.mn-sheet .mn-label { font-family: "Sora", sans-serif; font-weight: 600; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mn-graphite); white-space: nowrap; }
+.mn-sheet .mn-label.ink { color: var(--mn-ink); }
+.mn-sheet .mn-title { font-family: "Sora", sans-serif; font-weight: 700; font-size: 19px; letter-spacing: -0.02em; line-height: 1.15; margin-top: 3px; color: var(--mn-ink); }
+.mn-sheet .mn-head { display: flex; align-items: center; gap: 12px; padding: 6px 16px 12px; border-bottom: 1.5px solid var(--mn-ink); flex-shrink: 0; }
+.mn-sheet .mn-head-flush { padding: 6px 0 14px; margin: 0 0 4px; }
+.mn-sheet .mn-key { width: 34px; height: 34px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--mn-ink); color: var(--mn-ink); background: var(--mn-paper); }
+.mn-sheet .mn-key:active { background: var(--mn-ink); color: var(--mn-paper); }
+.mn-sheet .mn-mark { width: 30px; height: 30px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--mn-rule); background: var(--mn-paper); color: var(--mn-ink); }
+.mn-sheet .mn-mark.lg { width: 44px; height: 44px; border: 1.5px solid var(--mn-ink); }
+.mn-sheet .mn-search { display: flex; align-items: center; gap: 8px; margin: 12px 16px 4px; padding: 0 12px; flex-shrink: 0;
+  border: 1px solid var(--mn-ink); background: var(--mn-paper); color: var(--mn-graphite); }
+.mn-sheet .mn-search input { flex: 1; min-width: 0; height: 42px; background: transparent; border: 0; outline: none; color: var(--mn-ink); font-size: 14px; }
+.mn-sheet .mn-search input::placeholder { color: var(--mn-graphite); opacity: 0.8; }
+.mn-sheet .mn-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 20px; display: flex; flex-direction: column; gap: 6px; }
+.mn-sheet .mn-sec { display: flex; align-items: center; gap: 10px; padding: 14px 0 8px; width: 100%; color: var(--mn-ink); text-align: left; }
+.mn-sheet .mn-rule { flex: 1; height: 1px; background: var(--mn-rule); }
+.mn-sheet .mn-chev { color: var(--mn-graphite); flex-shrink: 0; transition: transform .2s; }
+.mn-sheet .mn-rail { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 0 16px 4px; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: none; }
+.mn-sheet .mn-rail::-webkit-scrollbar { display: none; }
+.mn-sheet .mn-tile { width: 76px; flex-shrink: 0; scroll-snap-align: start; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 4px 8px; border: 1px solid var(--mn-rule); background: var(--mn-paper); }
+.mn-sheet .mn-tile.on { border: 1.5px solid var(--mn-ink); box-shadow: inset 0 -3px 0 var(--tile); }
+.mn-sheet .mn-tile-name { width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mn-ink); }
+.mn-sheet .mn-box { border: 1px solid var(--mn-rule); background: var(--mn-paper); }
+.mn-sheet .mn-row { display: grid; grid-template-columns: 20px 30px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; width: 100%;
+  min-height: 48px; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--mn-rule-soft); transition: background-color .12s; }
+.mn-sheet .mn-box > .mn-row:last-child, .mn-sheet .mn-box > div:last-child > .mn-row { border-bottom: 0; }
+.mn-sheet .mn-row:active, .mn-sheet .mn-row.open { background: hsl(var(--primary) / 0.08); }
+.mn-sheet .mn-row.on { background: var(--mn-mod-wash); box-shadow: inset 3px 0 0 var(--mn-mod); }
+.mn-sheet .mn-row.on .mn-name, .mn-sheet .mn-row.on .mn-mark { color: var(--mn-mod); }
+.mn-sheet .mn-row.on .mn-mark { border-color: var(--mn-mod); }
+.mn-sheet .mn-row.danger .mn-name, .mn-sheet .mn-row.danger .mn-mark { color: hsl(var(--destructive)); }
+.mn-sheet .mn-row.danger:active { background: hsl(var(--destructive) / 0.08); }
+.mn-sheet .mn-num { font-family: "Sora", sans-serif; font-size: 10px; font-weight: 600; color: var(--mn-graphite); }
+.mn-sheet .mn-text { display: flex; flex-direction: column; min-width: 0; }
+.mn-sheet .mn-name { font-size: 14px; font-weight: 600; color: var(--mn-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mn-sheet .mn-sub { font-size: 11.5px; color: var(--mn-graphite); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.mn-sheet .mn-count { font-family: "Sora", sans-serif; font-size: 10px; font-weight: 600; color: var(--mn-graphite); }
+.mn-sheet .mn-here { width: 8px; height: 8px; background: var(--mn-mod); }
+.mn-sheet .mn-children { margin: 0 0 6px 42px; border-left: 1px solid var(--mn-ink); }
+.mn-sheet .mn-child { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 6px 12px; text-align: left;
+  font-size: 13.5px; color: var(--mn-graphite); border-bottom: 1px solid var(--mn-rule-soft); }
+.mn-sheet .mn-child:last-child { border-bottom: 0; }
+.mn-sheet .mn-child.on { color: var(--mn-mod); font-weight: 600; background: var(--mn-mod-wash); box-shadow: inset 2px 0 0 var(--mn-mod); }
+.mn-sheet .mn-badge { min-width: 18px; height: 18px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center;
+  background: hsl(var(--destructive)); color: hsl(var(--destructive-foreground)); font-family: "Sora", sans-serif; font-size: 9.5px; font-weight: 600; }
+.mn-sheet .mn-sec-btn { cursor: pointer; }
+.mn-sheet .mn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.mn-sheet .mn-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 8px; border: 1px solid var(--mn-rule); background: var(--mn-paper); }
+.mn-sheet .mn-cell.on { border: 1.5px solid var(--mn-mod); background: var(--mn-mod-wash); }
+.mn-sheet .mn-cell-name { width: 100%; text-align: center; font-size: 11px; line-height: 1.25; color: var(--mn-ink);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mn-sheet .mn-empty { margin: 4px 0; padding: 22px; text-align: center; border: 1px dashed var(--mn-rule); font-size: 13px; color: var(--mn-graphite); }
+.mn-sheet .mn-role { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; margin-top: 7px; border: 1px solid var(--mn-mod); color: var(--mn-mod);
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; }
+.mn-sheet .mn-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.mn-sheet .mn-theme { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 10px; text-align: left; border: 1px solid var(--mn-rule); background: var(--mn-paper); }
+.mn-sheet .mn-theme.on { border: 1.5px solid var(--mn-ink); }
+.mn-sheet .mn-swatch { width: 26px; height: 26px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--mn-ink); }
+.mn-sheet .mn-tag { margin-left: auto; height: 18px; padding: 0 6px; display: inline-flex; align-items: center; background: var(--mn-ink); color: var(--mn-paper);
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 8.5px; letter-spacing: 0.12em; text-transform: uppercase; }
+.mn-avatar { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;
+  border: 1.5px solid hsl(var(--foreground)); background: hsl(var(--card)); color: hsl(var(--foreground));
+  font-family: "Sora", sans-serif; font-weight: 700; letter-spacing: -0.02em; }
+.mn-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Bottom bar */
+.mn-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--mn-paper); border-top: 1.5px solid var(--mn-ink); }
+.mn-bar .mn-bar-row { display: grid; height: 64px; }
+/* While a pop-up is open (a dialog, or a page's own full-screen overlay) the bar steps aside, so it never covers
+   the bottom of the pop-up's content. The menu's own sheet is a dialog too, and keeps the bar. */
+body:has([role="dialog"]:not(.mn-sheet)) .mn-bar,
+body:has([role="alertdialog"]) .mn-bar,
+body:has(div.fixed.inset-0[class*="bg-black/"]:not([style*="opacity: 0"])) .mn-bar,
+body:has(div.fixed.inset-0[class*="bg-background/"]:not([style*="opacity: 0"])) .mn-bar { display: none; }
+.mn-bar .mn-tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: var(--mn-graphite); transition: transform .12s; }
+.mn-bar .mn-tab:active { transform: scale(0.95); }
+.mn-bar .mn-tab + .mn-tab { border-left: 1px solid var(--mn-rule-soft); }
+.mn-bar .mn-tab.on { color: var(--mn-mod); }
+.mn-bar .mn-tab-mark { position: absolute; top: -1.5px; left: 22%; right: 22%; height: 3px; background: var(--mn-mod); }
+.mn-bar .mn-tab-label { max-width: 100%; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1;
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; }
+.mn-bar .mn-tab.on .mn-tab-label { color: var(--mn-mod); }
+.mn-bar .mn-menu-key { position: relative; width: 46px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--mn-ink); color: var(--mn-paper); box-shadow: 3px 3px 0 var(--mn-mod); }
+.mn-bar .mn-menu-key.open { background: var(--mn-mod); box-shadow: 3px 3px 0 var(--mn-ink); }
+.mn-bar .mn-menu-mod { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--mn-paper); color: var(--mn-mod); border: 1.5px solid var(--mn-ink); }
+.mn-bar .mn-me { display: inline-flex; }
+.mn-bar .mn-me.on { box-shadow: 0 0 0 2px var(--mn-mod); }
+.mn-bar .mn-tab:nth-child(2) .mn-tab-label { color: var(--mn-ink); }
+@media (max-width: 340px) {
+  .mn-bar .mn-tab-label { font-size: 8px; letter-spacing: 0.06em; }
+  .mn-sheet .mn-row { grid-template-columns: 16px 28px minmax(0, 1fr) auto auto; gap: 8px; padding: 8px 10px; }
+  .mn-sheet .mn-themes { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { .mn-sheet { animation: none; } }
+`;
 
 export default MobileNav;

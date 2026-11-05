@@ -1,18 +1,22 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
+const { cleanPhoneFields } = require("../validation/phone");
+const PHONE_LABELS = { Mobile: "Mobile", AltMobile: "Alternate mobile" };
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+// Project access: a customer opens only if one of their applications is in the user's projects.
+router.param("id", require("../services/projectScope").crmCustomerGuard);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
 const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // Fields the Application page ("select company/project, auto-fetch
 // everything from the customer") reads directly — PAN/Aadhaar/Address that
@@ -29,21 +33,61 @@ router.use(apiRateLimit);
 //     permanent fields on every write (see POST/PUT below), so any
 //     consumer reading Current* directly always gets a real value instead
 //     of having to fall back to Permanent* itself.
+// Masked PAN/Aadhaar — for the list/search view only. GET /:id (used to
+// pre-fill the Edit form) must NOT use this: the form round-trips whatever
+// it receives back on save, so a masked value here would silently overwrite
+// the real PAN/Aadhaar on file (and would usually fail the frontend's PAN
+// format check first, blocking the save entirely either way).
 const CUSTOMER_SELECT = `
   SELECT
     c.Id, c.CustomerNo, c.LeadId, c.CustomerName, c.Mobile, c.AltMobile, c.Email,
-    c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome,
+    CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+    CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+    c.Occupation, c.AnnualIncome, c.GstNo,
     c.Address AS PermanentAddress, c.City AS PermanentCity, c.State AS PermanentState, c.Pincode AS PermanentPincode,
     c.CurrentAddress, c.CurrentCity, c.CurrentState, c.CurrentPincode, c.IsCurrentSameAsPermanent,
     c.DateOfBirth, c.InvoiceMode,
     c.Notes, c.IsActive, c.CreatedAt, c.UpdatedAt,
     cu.name AS CreatedByName,
     l.LeadUid, l.Classification AS LeadClassification,
-    (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) AS ApplicationCount
+    (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) AS ApplicationCount,
+    -- Every project the customer is linked to through an application (and so
+    -- its booking), distinct, by name; '|'-separated for the list page.
+    (SELECT STRING_AGG(px.name, '|') WITHIN GROUP (ORDER BY px.name)
+       FROM (SELECT DISTINCT e.name FROM dbo.CrmApplication pa
+             JOIN dbo.enterprise e ON e.id = pa.ProjectId
+             WHERE pa.CustomerId = c.Id) px) AS ProjectNames
   FROM dbo.CrmCustomer c
   LEFT JOIN dbo.Users cu ON cu.id = c.CreatedBy
   LEFT JOIN dbo.SaLead l ON l.Id = c.LeadId
 `;
+
+// Real (unmasked) PAN/Aadhaar — for GET /:id only, see note above.
+const CUSTOMER_SELECT_DETAIL = CUSTOMER_SELECT.replace(
+  "CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,",
+  "c.PanNo,",
+).replace(
+  "CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,",
+  "c.AadhaarNo,",
+);
+
+// Customer identity can span projects, but project restricted staff should
+// only see the application count and project names associated with projects
+// they can access. The scope is resolved by attachProjectScope and contains
+// integer IDs only (projectPredicate emits an SQL-safe integer list).
+function customerSelectForScope(select, projectScope) {
+  if (!projectScope) return select;
+  const projectPredicate = require("../services/projectScope").projectPredicate;
+  return select
+    .replace(
+      "(SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id)",
+      `(SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id${projectPredicate(projectScope, "a.ProjectId")})`,
+    )
+    .replace(
+      "WHERE pa.CustomerId = c.Id) px)",
+      `WHERE pa.CustomerId = c.Id${projectPredicate(projectScope, "pa.ProjectId")}) px)`,
+    );
+}
 
 function normalizeEmail(value) {
   const trimmed = String(value || "").trim().toLowerCase();
@@ -74,7 +118,8 @@ async function assertUniqueCustomerEmail(pool, email, excludeId = null) {
 }
 
 // GET / — all customers
-router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
+// Resale and Ownership Changes pick the new buyer from this list, so their rights read it too.
+router.get("/", requireAnyPageRight(["crm-customers", "crm-resales", "crm-ownership-changes"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { search } = req.query;
@@ -82,9 +127,14 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
+    const countReq = pool.request();
+    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); };
     const conds = ["c.IsActive = 1"];
+    // A restricted user sees customers with an application in their projects, and those with none yet (a new customer
+    // belongs to no project until its first application; crmCustomerGuard lets them open one by id too).
+    if (req.projectScope) conds.push(`(EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")}) OR NOT EXISTS (SELECT 1 FROM dbo.CrmApplication sa2 WHERE sa2.CustomerId = c.Id))`);
     if (search) {
-      req0.input("srch", sql.NVarChar(200), `%${search}%`);
+      bind("srch", sql.NVarChar(200), `%${search}%`);
       conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch OR c.PanNo LIKE @srch)");
     }
     // A customer isn't itself scoped to one Company/Project/Block — it can
@@ -92,13 +142,13 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
     // at least one application matching this scope", via EXISTS against
     // CrmApplication (which always carries CompanyId/ProjectId; BlockId only
     // resolves once a unit is picked, via UnitMaster).
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
     const where = `WHERE ${conds.join(" AND ")}`;
 
     if (!req.query.page) {
-      const result = await req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
+      const result = await req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ORDER BY c.CreatedAt DESC`);
       return res.json(result.recordset);
     }
 
@@ -106,21 +156,10 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
-      req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmCustomer c
-          WHERE c.IsActive = 1
-            AND (@srch2 IS NULL OR (c.CustomerName LIKE @srch2 OR c.Mobile LIKE @srch2 OR c.CustomerNo LIKE @srch2 OR c.PanNo LIKE @srch2))
-            AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId2))
-            AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId2))
-            AND (@blockId2 IS NULL OR (EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId2) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId2)))
-        `),
+      req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      // The same WHERE as the rows (it used to repeat the filters without the project scope, so a restricted
+      // user's total counted customers they can't see).
+      countReq.query(`SELECT COUNT(*) AS total FROM dbo.CrmCustomer c ${where}`),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
@@ -151,6 +190,8 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
     // endpoint threw a SQL syntax error on every single call, regardless of
     // excludeId, and had apparently never actually been exercised live.
     const conds = ["c.IsActive = 1"];
+    // Same scope as the list above.
+    if (req.projectScope) conds.push(`(EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")}) OR NOT EXISTS (SELECT 1 FROM dbo.CrmApplication sa2 WHERE sa2.CustomerId = c.Id))`);
     if (excludeId) conds.push("c.Id <> @excl");
     const orClauses = [];
 
@@ -210,6 +251,46 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
   }
 });
 
+// ── Bulk import (CRM → Customers → Import) ───────────────────────────────────
+// Keep these explicit /import/* routes before /:id. Express route order matters:
+// otherwise "import" is treated as an id and the import UI cannot fetch its
+// field contract.
+router.get("/import/fields", requirePageRight("crm-customers", "create"), (req, res) => {
+  const { FIELDS, MAX_ROWS } = require("../services/crmCustomerImport");
+  res.json({ fields: FIELDS, maxRows: MAX_ROWS });
+});
+
+router.post("/import/preview", requirePageRight("crm-customers", "create"), async (req, res) => {
+  try {
+    const { analyze } = require("../services/crmCustomerImport");
+    res.json(await analyze(getPool(), req.body?.rows));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error("[crm-customers] POST /import/preview:", e.message);
+    res.status(500).json({ error: "Could not check the file" });
+  }
+});
+
+router.post("/import/apply", requirePageRight("crm-customers", "create"), async (req, res) => {
+  try {
+    const { apply } = require("../services/crmCustomerImport");
+    const existing = ["fill", "update"].includes(req.body?.existing) ? req.body.existing : "skip";
+    const out = await apply(getPool(), req.body?.rows, {
+      existing,
+      fileName: req.body?.fileName,
+      sourceTag: req.body?.sourceTag,
+      excludedRowNos: req.body?.excludedRowNos,
+      actorUserId: actorId(req),
+      actorName: req.user?.name || req.user?.email || "import",
+    });
+    res.json(out);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error("[crm-customers] POST /import/apply:", e.message);
+    res.status(500).json({ error: e.message || "The import failed" });
+  }
+});
+
 // GET /:id — single customer plus every application filed under them, so
 // staff can see their full history in one place (not just the latest one).
 // Also aggregates outstanding payment across EVERY booking this customer
@@ -222,24 +303,33 @@ router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) =
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [custRes, appsRes, outstandingRes] = await Promise.all([
-      pool.request().input("id", sql.Int, id).query(`${CUSTOMER_SELECT} WHERE c.Id = @id`),
+      pool.request().input("id", sql.Int, id).query(`${customerSelectForScope(CUSTOMER_SELECT_DETAIL, req.projectScope)} WHERE c.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
         SELECT a.Id, a.ApplicationNo, a.Status, a.InterestedProject, a.CreatedAt,
                b.Id AS BookingId, b.BookingNo, b.Status AS BookingStatus
         FROM dbo.CrmApplication a
         OUTER APPLY (SELECT TOP 1 Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = a.Id ORDER BY CreatedAt DESC) b
-        WHERE a.CustomerId = @id
+        WHERE a.CustomerId = @id ${req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "a.ProjectId") : ""}
         ORDER BY a.CreatedAt DESC
       `),
       pool.request().input("id", sql.Int, id).query(`
         SELECT
           ISNULL(SUM(CASE WHEN m.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0) AS TotalOutstanding,
-          ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) AS TotalPaid,
-          ISNULL(SUM(m.AmountDue), 0) AS TotalDue
+          ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) + ISNULL((
+            SELECT SUM(CASE WHEN ISNULL(oa.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
+              AND oa.Amount > ISNULL(oa.AppliedAmount, 0) THEN oa.Amount - ISNULL(oa.AppliedAmount, 0) ELSE 0 END)
+            FROM dbo.CrmOnAccountPayment oa
+            JOIN dbo.CrmBooking ob ON ob.Id = oa.BookingId
+            JOIN dbo.CrmApplication oapp ON oapp.Id = ob.ApplicationId
+            WHERE oapp.CustomerId = @id AND ob.IsActive = 1 AND ob.Status NOT IN ${DEAD_BOOKING_SQL}
+              ${req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "ob.ProjectId") : ""}
+          ), 0) AS TotalPaid,
+          ISNULL(SUM(CASE WHEN m.Status <> 'Waived' THEN m.AmountDue ELSE 0 END), 0) AS TotalDue
         FROM dbo.CrmPaymentMilestone m
         JOIN dbo.CrmBooking b ON b.Id = m.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE a.CustomerId = @id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+        WHERE a.CustomerId = @id AND b.IsActive = 1 AND b.Status NOT IN ${DEAD_BOOKING_SQL}
+          ${req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : ""}
       `),
     ]);
     if (!custRes.recordset.length) return res.status(404).json({ error: "Customer not found" });
@@ -292,6 +382,13 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const pool = getPool();
     const b = req.body;
 
+    // Full input validation via Zod schema (replaces the manual CustomerName check below)
+    const { customerCreateSchema } = require("../validation/crmBookingSchemas");
+    const parsed = customerCreateSchema.safeParse(b || {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid request body" });
+    }
+
     // Server-side requiredness for Customer Name — the frontend already
     // enforces this, but relying on that alone left this endpoint creating
     // nameless customers whenever it was hit directly, which then crashed
@@ -301,6 +398,10 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     // and CrmCustomer.Mobile / CrmApplication.Mobile are both nullable to
     // match (migrations 425 and 445).
     if (!b.CustomerName?.trim()) return res.status(400).json({ error: "Customer Name is required" });
+    // Stored the one way (validation/phone.js) so the duplicate check below finds the same number however it was typed.
+    const phoneError = cleanPhoneFields(b, PHONE_LABELS);
+    if (phoneError) return res.status(400).json({ error: phoneError });
+
 
     if (b.Mobile?.trim()) {
       const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
@@ -336,53 +437,15 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
 
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email);
+    // A GST-registered buyer's GSTIN (migration 568): checked, PAN must match.
+    const gst = require("../services/gstin").checkGstin(b.GstNo, { pan: b.PanNo });
+    if (gst.error) return res.status(400).json({ error: gst.error });
 
-    // Invoice / Non-Invoice — defaults to NonInvoice (matches the column's
-    // own DB default) when omitted or an unrecognised value is sent, rather
-    // than trusting an arbitrary client string straight into a CHECK-
-    // constrained column.
-    const invoiceMode = b.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice";
-
-    const cur = resolveCurrentAddress(b);
-    const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
-    const result = await pool.request()
-      .input("no",       sql.NVarChar(30),  customerNo)
-      .input("lid",       sql.Int,           b.LeadId !== undefined && b.LeadId !== null && b.LeadId !== "" ? parseInt(b.LeadId) : null)
-      .input("name",      sql.NVarChar(200), b.CustomerName?.trim() || null)
-      .input("mob",       sql.NVarChar(20),  b.Mobile?.trim() || null)
-      .input("altmob",    sql.NVarChar(20),  b.AltMobile || null)
-      .input("email",     sql.NVarChar(200), email)
-      .input("pan",       sql.NVarChar(20),  b.PanNo?.trim() || null)
-      .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo || null)
-      .input("occ",       sql.NVarChar(100), b.Occupation || null)
-      .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
-      .input("addr",      sql.NVarChar(500), b.PermanentAddress?.trim() || null)
-      .input("city",      sql.NVarChar(100), b.PermanentCity || null)
-      .input("state",     sql.NVarChar(100), b.PermanentState || null)
-      .input("pin",       sql.NVarChar(10),  b.PermanentPincode || null)
-      .input("curaddr",   sql.NVarChar(500), cur.currentAddress)
-      .input("curcity",   sql.NVarChar(100), cur.currentCity)
-      .input("curstate",  sql.NVarChar(100), cur.currentState)
-      .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
-      .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
-      .input("dob",       sql.Date,          b.DateOfBirth || null)
-      .input("invmode",   sql.NVarChar(20),  invoiceMode)
-      .input("notes",     sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",        sql.Int,           actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmCustomer
-          (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, PanNo, AadhaarNo, Occupation, AnnualIncome,
-           Address, City, State, Pincode,
-           CurrentAddress, CurrentCity, CurrentState, CurrentPincode, IsCurrentSameAsPermanent,
-           DateOfBirth, InvoiceMode, Notes,
-           CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @aadhaar, @occ, @income,
-                @addr, @city, @state, @pin,
-                @curaddr, @curcity, @curstate, @curpin, @cursame,
-                @dob, @invmode, @notes, @cb, SYSDATETIME())
-      `);
-    const newId = result.recordset[0].Id;
+    // The insert is shared with the bulk import (services/crmCustomerImport.js):
+    // InvoiceMode defaults to NonInvoice for anything but "Invoice" (CHECK-
+    // constrained column), current address follows IsCurrentSameAsPermanent.
+    const { insertCrmCustomer } = require("../services/crmCustomerImport");
+    const { id: newId, customerNo } = await insertCrmCustomer(pool, { ...b, Email: email, GstNo: gst.value }, actorId(req));
 
     // Eagerly create the "Customer Master" ledger head (dbo.AccountHeadMaster,
     // LHeadType='C') instead of waiting for the first GL-posting event —
@@ -415,8 +478,20 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
+    const phoneError = cleanPhoneFields(b, PHONE_LABELS);
+    if (phoneError) return res.status(400).json({ error: phoneError });
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email, id);
+    // GSTIN: changed only when the form sends it ("" clears it); checked
+    // against the PAN being saved (or the one on file).
+    const gstSent = Object.prototype.hasOwnProperty.call(b, "GstNo");
+    let gstValue = null;
+    if (gstSent) {
+      const onFile = b.PanNo ? null : (await pool.request().input("id", sql.Int, id).query("SELECT PanNo FROM dbo.CrmCustomer WHERE Id = @id")).recordset[0]?.PanNo;
+      const gst = require("../services/gstin").checkGstin(b.GstNo, { pan: b.PanNo || onFile });
+      if (gst.error) return res.status(400).json({ error: gst.error });
+      gstValue = gst.value;
+    }
     if (!email) {
       // The portal login is keyed on this email (CrmCustomerPortalUser.Email
       // is NOT NULL), so it can't be cleared while a login exists.
@@ -459,6 +534,8 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
         .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
         .input("dob",       sql.Date,          b.DateOfBirth || null)
         .input("invmode",   sql.NVarChar(20),  b.InvoiceMode === "Invoice" || b.InvoiceMode === "NonInvoice" ? b.InvoiceMode : null)
+        .input("gstset",    sql.Bit,           gstSent ? 1 : 0)
+        .input("gst",       sql.NVarChar(15),  gstValue)
         .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
         .input("ub",        sql.Int,           actorId(req))
         .query(`
@@ -471,6 +548,7 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
             IsCurrentSameAsPermanent = @cursame,
             DateOfBirth = ISNULL(@dob, DateOfBirth),
             InvoiceMode = ISNULL(@invmode, InvoiceMode),
+            GstNo = CASE WHEN @gstset = 1 THEN @gst ELSE GstNo END,
             Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
@@ -574,7 +652,7 @@ router.delete("/:id", requirePageRight("crm-customers", "delete"), async (req, r
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE a.CustomerId = @id
         AND b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired')
+        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
       ORDER BY b.BookingNo
     `);
     if (liveBookings.recordset.length) {

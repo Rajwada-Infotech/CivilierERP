@@ -25,7 +25,9 @@
 
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
+const rateLimit = require("../middleware/rateLimiter");
 router.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -37,6 +39,7 @@ router.use(
 const sql = require("mssql");
 const { getPool } = require("../db");
 const { cache } = require("../middleware/cache");
+const { projectPredicate } = require("../services/projectScope");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 router.use(checkPermissionForMethod("Finance", "Reports"));
@@ -131,7 +134,7 @@ const STATUS_CASE = `
 `;
 
 // ─── GET /filters — party/bank dropdown sources for the report's filter bar ──
-router.get("/filters", cache("pdc-report-filters", 300), async (req, res) => {
+router.get("/filters", cache("pdc-report-filters", 300, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const banks = await pool.request().query(`
@@ -175,6 +178,8 @@ router.get("/", cache("pdc-report", 60), async (req, res) => {
     // a project filter is actually requested, never adds an implicit
     // "ProjectID IS NOT NULL" to the base query.
     if (projectId) conditions.push("u.ProjectID = @projectId");
+    // A user limited to some projects sees only those projects' cheques (not company-wide party cheques either).
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "u.ProjectID", "").trim());
     if (from) conditions.push("u.ChequeDate >= @from");
     if (to) conditions.push("u.ChequeDate <= @to");
     if (status) conditions.push(`${STATUS_CASE} = @status`);
@@ -254,6 +259,7 @@ router.get("/due-count", cache("pdc-due-count", 60), async (req, res) => {
                      THEN 1 END) AS dueSoonCount,
           COUNT(CASE WHEN ${STATUS_CASE} = 'Overdue' THEN 1 END) AS overdueCount
         FROM UnifiedCheques u
+        WHERE 1=1${projectPredicate(req.projectScope, "u.ProjectID")}
       `);
     const row = result.recordset[0] || {};
     res.json({

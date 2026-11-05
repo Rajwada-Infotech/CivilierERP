@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { MasterPage, type DataChangeEvent } from "@/components/MasterPage";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,7 +10,7 @@ import {
   deleteItemGroup,
 } from "@/api/itemGroupApi";
 import { toast } from "sonner";
-import { Layers, Download, Upload, Loader2, Check, X } from "lucide-react";
+import { Download, Upload, Loader2, Check, X } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
@@ -76,6 +76,10 @@ interface ImportRowResult {
   status: "success" | "error";
   message?: string;
 }
+
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
 
 const ItemGroupMaster: React.FC = () => {
   const queryClient = useQueryClient();
@@ -211,17 +215,14 @@ const ItemGroupMaster: React.FC = () => {
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       await addItemGroup(toPayload(event.record));
-      toast.success("Item group saved!");
       await queryClient.invalidateQueries({ queryKey: ["item-groups"] });
     }
     if (event.action === "update") {
       await updateItemGroup(event.id, toPayload(event.record));
-      toast.success("Item group updated!");
       await queryClient.invalidateQueries({ queryKey: ["item-groups"] });
     }
     if (event.action === "delete") {
       await deleteItemGroup(event.id);
-      toast.success("Item group deleted!");
       await queryClient.invalidateQueries({ queryKey: ["item-groups"] });
     }
   };
@@ -231,7 +232,7 @@ const ItemGroupMaster: React.FC = () => {
 
   if (error)
     return (
-      <div className="p-6 text-red-500">
+      <div className="p-6 text-sm text-destructive">
         Failed to load item groups. Check your backend connection.
       </div>
     );
@@ -241,10 +242,10 @@ const ItemGroupMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Material Module", "Item Group Master"]}
       />
-      <MaterialShell
-        title="Item Group Master"
-        subtitle="Group and categorize items"
-        icon={Layers}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Item groups"
+        subtitle="The groups items are filed under, each with a short code."
         action={
           <div className="flex items-center gap-2">
             <input
@@ -257,31 +258,35 @@ const ItemGroupMaster: React.FC = () => {
             <button
               onClick={handleDownloadTemplate}
               title="Download a blank CSV with all Item Group fields"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              className={`${KEY_LINE} h-9 px-3`}
             >
               <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
+              <span className="hidden sm:inline">Template</span>
             </button>
-            <button
-              onClick={handleImportClick}
-              disabled={importing}
-              title="Import item groups from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {importing ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
-              </span>
-            </button>
+            {rights.canCreate && (
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import item groups from a filled-in CSV"
+                className={`${KEY_LINE} h-9 px-3`}
+              >
+                {importing ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Upload size={13} />
+                )}
+                <span className="hidden sm:inline">
+                  {importing ? "Importing…" : "Import CSV"}
+                </span>
+              </button>
+            )}
           </div>
         }
       >
         <MasterPage
-        saveButtonClass="btn-module "
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           title="Item Group"
           fields={[
             { name: "Name", label: "Name", type: "text", required: true },
@@ -322,16 +327,15 @@ const ItemGroupMaster: React.FC = () => {
           open={!!importResults}
           onOpenChange={(open) => !open && setImportResults(null)}
         >
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle className="font-heading text-base">
-                Import Results
-              </DialogTitle>
+          <DialogContent className="sheet-frame max-w-lg p-0 gap-0" style={{ margin: 0 }}>
+            <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Item groups</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Import results</DialogTitle>
             </DialogHeader>
             {importResults && (
-              <div className="space-y-3 pt-1">
+              <div className="space-y-3 px-5 pt-4">
                 <div className="flex items-center gap-3 text-sm">
-                  <span className="flex items-center gap-1.5 text-green-600">
+                  <span className="flex items-center gap-1.5 text-foreground">
                     <Check size={14} />
                     {
                       importResults.filter((r) => r.status === "success").length
@@ -348,7 +352,7 @@ const ItemGroupMaster: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                <div className="max-h-72 overflow-y-auto border border-foreground divide-y divide-foreground/10">
                   {importResults.map((r, i) => (
                     <div
                       key={i}
@@ -359,7 +363,7 @@ const ItemGroupMaster: React.FC = () => {
                       {r.status === "success" ? (
                         <Check
                           size={14}
-                          className="text-green-600 shrink-0 mt-0.5"
+                          className="text-foreground shrink-0 mt-0.5"
                         />
                       ) : (
                         <X
@@ -382,17 +386,17 @@ const ItemGroupMaster: React.FC = () => {
                 </div>
               </div>
             )}
-            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            <div className="flex justify-end gap-2 px-5 py-4">
               <button
                 onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
+                className={`${KEY_INK} h-9 px-4`}
               >
                 Close
               </button>
             </div>
           </DialogContent>
         </Dialog>
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 };

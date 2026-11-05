@@ -4,8 +4,8 @@ const multer = require("multer");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { resolveLayoutType, getLayoutComposition, getEffectiveComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX, ROOM_HAS_WORK, floorLabelOf } = require("../services/unitLayout");
@@ -46,6 +46,7 @@ router.get("/", cache("room-master", 300), async (req, res) => {
         r.RoomCategoryId,
         cat.Alias AS RoomCategoryAlias,
         r.Floor,
+        r.Storey,
         r.IsActive,
         r.BlueprintFileName,
         r.BlueprintMimeType,
@@ -57,7 +58,10 @@ router.get("/", cache("room-master", 300), async (req, res) => {
       LEFT JOIN dbo.UnitMaster   u ON u.Id  = r.UnitId
       LEFT JOIN dbo.RoomCategoryMaster cat ON cat.Id = r.RoomCategoryId
       ${where}
-      ORDER BY ep.name, b.BlockName, u.UnitName, r.RoomName
+      -- A villa's rooms run floor by floor (G, 1, 2, …) before name order.
+      ORDER BY ep.name, b.BlockName, u.UnitName,
+        CASE WHEN r.Storey IS NULL THEN -2 WHEN r.Storey = 'B' THEN -1 WHEN r.Storey = 'G' THEN 0 ELSE ISNULL(TRY_CAST(r.Storey AS INT), 999) END,
+        r.RoomName
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -67,7 +71,7 @@ router.get("/", cache("room-master", 300), async (req, res) => {
 });
 
 // GET projects dropdown (enterprise where business_type = P)
-router.get("/projects", cache("room-master-projects", 600), async (req, res) => {
+router.get("/projects", cache("room-master-projects", 600, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -101,7 +105,11 @@ router.get("/units", cache("room-master-units", 300), async (req, res) => {
         u.BlockId,
         b.BlockName,
         u.UnitType,
-        u.FloorNo
+        u.FloorNo,
+        -- Land (a plot kept as a unit row) never has rooms; a villa built on a
+        -- plot has no tower floor — its rooms sit on the villa's own floors.
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind AND k.IsLand = 1) THEN 1 ELSE 0 END AS BIT) AS IsLand,
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id AND pl.IsActive = 1) THEN 1 ELSE 0 END AS BIT) AS IsVilla
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster b ON b.Id = u.BlockId
       WHERE u.IsActive = 1
@@ -142,7 +150,7 @@ router.get("/structure", cache("room-master-structure", 120), async (req, res) =
         f.Id, f.BlockId, f.FloorNo, f.FloorLabel,
         (SELECT COUNT(*) FROM dbo.UnitMaster u
          WHERE u.BlockId = f.BlockId AND u.IsActive = 1
-           AND ((f.FloorNo = -1 AND u.FloorNo IS NULL) OR (f.FloorNo <> -1 AND u.FloorNo = f.FloorNo))
+           AND ((f.FloorNo = -1 AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)) OR (f.FloorNo <> -1 AND u.FloorNo = f.FloorNo))
         ) AS UnitCount
       FROM dbo.CrmProjectAutoSetupFloor f
       WHERE f.ProjectId = @pid AND f.IsActive = 1
@@ -171,7 +179,7 @@ router.get("/floor-units/:floorId", async (req, res) => {
     const { BlockId, FloorNo } = floorRes.recordset[0];
 
     const request = pool.request().input("bid", sql.Int, BlockId);
-    const floorFilter = FloorNo === -1 ? "u.FloorNo IS NULL" : "u.FloorNo = @fno";
+    const floorFilter = FloorNo === -1 ? `u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)` : "u.FloorNo = @fno";
     if (FloorNo !== -1) request.input("fno", sql.Int, FloorNo);
 
     const result = await request.query(`
@@ -531,6 +539,9 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
       try { await tx.rollback(); } catch (_) { /* already rolled back */ }
       throw e;
     }
+    if (r.skipped === "villa") {
+      return res.status(400).json({ error: "This is a villa built on a plot — its rooms follow its villa type's floor plan. Use Plot Master (Change type / Add missing rooms)." });
+    }
     if (r.skipped === "no-layout") {
       return res.status(400).json({ error: `"${unit.UnitType}" isn't a registered layout type — add it in Unit Composition first.` });
     }
@@ -580,6 +591,9 @@ router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (
       request.input("bid", sql.Int, blockId);
       where += " AND u.BlockId = @bid";
     }
+    // Commercial units (shops, offices…) have no rooms by design — leave them out.
+    const commercialCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c")).recordset[0].c != null;
+    if (commercialCol) where += " AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind AND k.IsCommercial = 1)";
     const units = await request.query(`SELECT u.Id FROM dbo.UnitMaster u WHERE ${where} ORDER BY u.BlockId, u.FloorNo, u.UnitName`);
     const totals = await syncRoomsForUnits(pool, units.recordset.map((u) => u.Id), { removeUnused: true, createdBy: req.user?.userId || null });
     if (totals.created || totals.reactivated || totals.renamed || totals.deactivated) await bumpFlatMasterCaches();
@@ -594,6 +608,7 @@ router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (
     res.json({
       message: baseMsg
         + (totals.skippedNoLayout ? ` — ${totals.skippedNoLayout} unit(s) skipped (no Unit Type / no layout defined)` : "")
+        + (totals.skippedVillas ? ` — ${totals.skippedVillas} villa(s) left as they are (their rooms follow their villa type; see Plot Master)` : "")
         + (totals.failed.length ? ` — ${totals.failed.length} unit(s) failed` : ""),
       unitsChecked: totals.units,
       unitsUpdated: totals.unitsChanged,

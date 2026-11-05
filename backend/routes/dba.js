@@ -1,10 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { recordGLPosting } = require("../services/approvalService");
-const { postCrmOnAccountToGL } = require("../services/crmLedger");
+const { postCrmOnAccountToGL, postCrmRefundPaid } = require("../services/crmLedger");
+const { postPaymentApproval } = require("../services/generalLedger");
 
 // ======================
 //  DBA ROUTES - SECURED
@@ -488,6 +489,8 @@ router.get("/gl-posting-failures", async (req, res) => {
 // double-posting via hasPosting()).
 const RETRY_POSTERS = {
   "crm-on-account-payment": postCrmOnAccountToGL,
+  "crm-refund": postCrmRefundPaid,
+  "crm-refund-payment": postPaymentApproval,
 };
 
 // POST /gl-posting-failures/:logId/retry — re-run the same poster that

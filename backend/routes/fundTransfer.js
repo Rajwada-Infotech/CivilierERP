@@ -1,15 +1,15 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEdit, guardEditAnyStage, restartApprovalCycle, getRecordStatus, getWorkflow, isSuperAdmin, userMatchesLevel } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
-const { postFundTransferApproval, hasPosting } = require("../services/generalLedger");
+const { postFundTransferApproval, hasCompleteFundTransferPosting, reversePostingBySource } = require("../services/generalLedger");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 
 function requireUser(req, res) {
@@ -19,6 +19,21 @@ function requireUser(req, res) {
     return null;
   }
   return email;
+}
+
+// Retrying an approved transfer's posting: anyone named on any level of the Fund Transfer
+// workflow in Approval Setup (role or person), or a super admin — the engine's rule.
+async function authorizeApprovedTransferRetry(req) {
+  const role = req.user?.role;
+  if (isSuperAdmin(role)) return;
+  const userId = req.user?.userId ?? req.user?.id;
+  const workflow = await getWorkflow("fund-transfer");
+  const namedApprover = !!workflow?.LevelDefs?.some((level) => userMatchesLevel(level, role, userId));
+  if (!namedApprover) {
+    const err = new Error("Only a Fund Transfer approver can retry its accounting posting.");
+    err.status = 403;
+    throw err;
+  }
 }
 
 // Shared validation for POST / and PUT /:id — same rules the DB's own
@@ -182,7 +197,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
              ls.LoanNo AS LinkedLoanNo, ls.Status AS LinkedLoanStatus,
              COALESCE(cu.name, ft.CreatedBy) AS CreatedByName
       FROM dbo.FundTransfer ft
-      LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(ft.CreatedBy)
+      LEFT JOIN dbo.users cu ON cu.email = ft.CreatedBy
       LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
       LEFT JOIN dbo.enterprise dc ON dc.id = ft.DestinationCompanyId
       LEFT JOIN dbo.AccountHeadMaster sb ON sb.LHeadId = ft.SourceBankId
@@ -192,7 +207,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
 
-    const postedToGL = await hasPosting(pool, "FundTransfer", id);
+    const postedToGL = await hasCompleteFundTransferPosting(pool, id);
     res.json({ ...result.recordset[0], PostedToGL: postedToGL });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -401,8 +416,13 @@ router.post("/", authenticateToken, requirePageRight("fund-transfer", "create"),
   }
 });
 
-// ── PUT /:id — edit (Draft or Rejected — guardEdit already allows both;
-// saving a Rejected transfer re-submits it, see the resubmit block below) ──
+// ── PUT /:id — edit any field, at any stage ──────────────────────────────────
+//   Draft     → stays Draft
+//   Rejected  → saved, then re-submitted for approval
+//   Pending   → stays Pending (a fresh approval cycle starts, so the edited numbers are
+//               reviewed from level 1 rather than riding on sign-offs given to the old ones)
+//   Approved  → needs the post-approval right; its GL posting is reversed, it goes back to
+//               Pending, and the change is written to the Amendment trail (Finance → Amendment)
 router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
@@ -412,65 +432,133 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-    let wasRejected = false;
+    let currentStatus;
     try {
       const allowPostApproval = await resolveAllowPostApproval(req, "fund-transfer");
-      await guardEdit("fund-transfer", id, { allowPostApproval });
-      wasRejected = (await getRecordStatus("fund-transfer", id)) === "Rejected";
+      currentStatus = await guardEditAnyStage("fund-transfer", id, { allowPostApproval });
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
+    const wasApproved = currentStatus === "Approved";
+    const wasRejected = currentStatus === "Rejected";
+    const wasPending = currentStatus === "Pending";
 
     const b = req.body;
     const linesError = validateTransfer(b);
     if (linesError) return res.status(400).json({ error: linesError });
+
+    // These guards previously only ran when wasApproved, but LinkedLoanId
+    // and an applied CrmRebookingTransfer link are set by an EXTERNAL module
+    // (loan sanction / re-booking), independent of this record's own
+    // approval status — a Draft/Pending/Rejected transfer that already
+    // carries one could still have its Amount/banks/companies edited with
+    // nothing reconciling the edit against the linked loan or claim.
+    const beforeSnapshot = await snapshotRow(pool, "dbo.FundTransfer", "FTId", id);
+    if (beforeSnapshot?.LinkedLoanId) {
+      return res.status(409).json({ error: "This transfer created a loan, so it can't be edited. Reverse the loan first." });
+    }
+    {
+      const applied = await pool.request().input("ft", sql.Int, id).query(
+        "SELECT TOP 1 Id FROM dbo.CrmRebookingTransfer WHERE FundTransferId = @ft AND Status <> 'PendingTransfer'",
+      );
+      if (applied.recordset.length) {
+        return res.status(409).json({ error: "This transfer has already been applied to a booking, so it can't be edited." });
+      }
+    }
+    // POST / refuses to create a new Inter-company transfer at all ("use
+    // Loan Sanction instead") — an edit that flips an existing Intra record
+    // to Inter re-exercises that same deprecated path. An already-Inter row
+    // may still be edited (validateTransfer accepts both by design, for
+    // historical rows), just never created or converted into one here.
+    if (b.TransferType === "Inter" && beforeSnapshot?.TransferType !== "Inter") {
+      return res.status(400).json({ error: "Inter-company transfers are no longer created or converted from Fund Transfer — use Loan Sanction instead." });
+    }
 
     const isChequeMode = b.Mode === "Cheque" || b.Mode === "Post-Dated Cheque";
     if (isChequeMode) {
       await assertChequeAvailable(pool, parseInt(b.ChequeLotId, 10), b.ChequeNo, id);
     }
 
-    const updateResult = await pool.request()
-      .input("id", sql.Int, id)
-      .input("TransferDate", sql.Date, b.TransferDate)
-      .input("TransferType", sql.NVarChar(20), b.TransferType)
-      .input("SourceCompanyId", sql.Int, parseInt(b.SourceCompanyId, 10))
-      .input("DestinationCompanyId", sql.Int, parseInt(b.DestinationCompanyId, 10))
-      .input("SourceBankId", sql.Int, parseInt(b.SourceBankId, 10))
-      .input("DestinationBankId", sql.Int, parseInt(b.DestinationBankId, 10))
-      .input("Amount", sql.Decimal(18, 2), Number(b.Amount))
-      .input("Narration", sql.NVarChar(500), b.Narration || null)
-      .input("Mode", sql.NVarChar(30), b.Mode || null)
-      .input("ChequeLotId", sql.Int, isChequeMode ? parseInt(b.ChequeLotId, 10) : null)
-      .input("ChequeLotNumber", sql.NVarChar(50), isChequeMode ? (b.ChequeLotNumber || null) : null)
-      .input("ChequeNo", sql.NVarChar(20), isChequeMode ? String(b.ChequeNo) : null)
-      .input("ChequeDate", sql.Date, isChequeMode ? (b.ChequeDate || null) : null)
-      .input("IsPostDated", sql.Bit, b.Mode === "Post-Dated Cheque" ? 1 : 0)
-      .input("DigitalRefNumber", sql.NVarChar(100), b.DigitalRefNumber || null)
-      .input("UpdatedBy", sql.NVarChar(150), user).query(`
-        UPDATE dbo.FundTransfer SET
-          TransferDate=@TransferDate, TransferType=@TransferType,
-          SourceCompanyId=@SourceCompanyId, DestinationCompanyId=@DestinationCompanyId,
-          SourceBankId=@SourceBankId, DestinationBankId=@DestinationBankId,
-          Amount=@Amount, Narration=@Narration,
-          Mode=@Mode, ChequeLotId=@ChequeLotId, ChequeLotNumber=@ChequeLotNumber,
-          ChequeNo=@ChequeNo, ChequeDate=@ChequeDate, IsPostDated=@IsPostDated,
-          DigitalRefNumber=@DigitalRefNumber,
-          UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()
-        WHERE FTId=@id AND Status IN ('Draft', 'Rejected')
-      `);
-
-    if (updateResult.rowsAffected[0] === 0) {
-      return res.status(409).json({ error: "Update failed: the transfer status changed before the update could be applied." });
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const updateResult = await tx.request()
+        .input("id", sql.Int, id)
+        .input("status", sql.NVarChar(20), currentStatus)
+        .input("TransferDate", sql.Date, b.TransferDate)
+        .input("TransferType", sql.NVarChar(20), b.TransferType)
+        .input("SourceCompanyId", sql.Int, parseInt(b.SourceCompanyId, 10))
+        .input("DestinationCompanyId", sql.Int, parseInt(b.DestinationCompanyId, 10))
+        .input("SourceBankId", sql.Int, parseInt(b.SourceBankId, 10))
+        .input("DestinationBankId", sql.Int, parseInt(b.DestinationBankId, 10))
+        .input("Amount", sql.Decimal(18, 2), Number(b.Amount))
+        .input("Narration", sql.NVarChar(500), b.Narration || null)
+        .input("Mode", sql.NVarChar(30), b.Mode || null)
+        .input("ChequeLotId", sql.Int, isChequeMode ? parseInt(b.ChequeLotId, 10) : null)
+        .input("ChequeLotNumber", sql.NVarChar(50), isChequeMode ? (b.ChequeLotNumber || null) : null)
+        .input("ChequeNo", sql.NVarChar(20), isChequeMode ? String(b.ChequeNo) : null)
+        .input("ChequeDate", sql.Date, isChequeMode ? (b.ChequeDate || null) : null)
+        .input("IsPostDated", sql.Bit, b.Mode === "Post-Dated Cheque" ? 1 : 0)
+        .input("DigitalRefNumber", sql.NVarChar(100), b.DigitalRefNumber || null)
+        .input("UpdatedBy", sql.NVarChar(150), user).query(`
+          UPDATE dbo.FundTransfer SET
+            TransferDate=@TransferDate, TransferType=@TransferType,
+            SourceCompanyId=@SourceCompanyId, DestinationCompanyId=@DestinationCompanyId,
+            SourceBankId=@SourceBankId, DestinationBankId=@DestinationBankId,
+            Amount=@Amount, Narration=@Narration,
+            Mode=@Mode, ChequeLotId=@ChequeLotId, ChequeLotNumber=@ChequeLotNumber,
+            ChequeNo=@ChequeNo, ChequeDate=@ChequeDate, IsPostDated=@IsPostDated,
+            DigitalRefNumber=@DigitalRefNumber,
+            UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()${wasApproved ? ", Status='Pending'" : ""}
+          WHERE FTId=@id AND Status=@status
+        `);
+      if (updateResult.rowsAffected[0] === 0) {
+        await tx.rollback();
+        return res.status(409).json({ error: "Update failed: the transfer status changed before the update could be applied. Reload and try again." });
+      }
+      // The old numbers no longer describe the transfer — drop what it posted; it re-posts
+      // (idempotently) once it's approved again.
+      if (wasApproved) await reversePostingBySource(tx, "FundTransfer", id);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* original error propagates */ }
+      throw txErr;
     }
 
     await bumpCacheVersion("fund-transfer");
+    if (wasApproved) await bumpCacheVersion("general-ledger");
 
-    // A corrected, previously-Rejected transfer goes straight back into the
-    // approval queue on save — no separate "Submit" click. transition()'s
-    // Pending branch writes a fresh Level=0 marker, which restarts approval
-    // at level 1 regardless of what was approved before the rejection (see
-    // approvalService.js's currentCycleCutoffSql).
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.FundTransfer", "FTId", id);
+        const company = await pool.request().input("c", sql.Int, beforeSnapshot.SourceCompanyId)
+          .query("SELECT name FROM dbo.enterprise WHERE id = @c");
+        await recordAmendment({
+          refDocType: "fund-transfer",
+          refDocId: id,
+          refDocNo: afterSnapshot?.DocNo || beforeSnapshot.DocNo,
+          projectName: null,
+          companyName: company.recordset[0]?.name || null,
+          changedBy: user,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (fund-transfer):", logErr.message);
+      }
+    }
+
+    if (wasPending) {
+      try {
+        await restartApprovalCycle("fund-transfer", id, user, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+      } catch (cycleErr) {
+        console.error("[fund-transfer] could not restart approval cycle after pending edit:", cycleErr.message);
+      }
+    }
+
+    // A corrected, previously-Rejected transfer goes straight back into the approval queue on
+    // save — no separate "Submit" click. transition()'s Pending branch writes a fresh Level=0
+    // marker, which restarts approval at level 1 (see approvalService.js's currentCycleCutoffSql).
     let resubmitted = false;
     if (wasRejected) {
       try {
@@ -486,7 +574,14 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
     }
 
     res.json({
-      message: resubmitted ? "Fund Transfer updated and re-submitted for approval" : "Fund Transfer updated",
+      message: wasApproved
+        ? "Fund Transfer updated — previous GL posting reversed, sent back for approval"
+        : wasPending
+          ? "Fund Transfer updated — still pending approval (approval restarted from level 1)"
+          : resubmitted
+            ? "Fund Transfer updated and re-submitted for approval"
+            : "Fund Transfer updated",
+      reopenedForApproval: wasApproved,
       resubmitted,
     });
   } catch (err) {
@@ -597,8 +692,24 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
 
     // If already Approved (a prior posting attempt failed after the status
     // transition succeeded), skip transition() and just retry the post —
-    // postFundTransferApproval() is idempotent via hasPosting().
+    // postFundTransferApproval() retries any missing company voucher.
     const alreadyApproved = current.recordset[0].Status === "Approved";
+
+    if (!alreadyApproved) {
+      const staleCrmLink = await pool.request().input("ft", sql.Int, id).query(`
+        SELECT TOP 1 Id FROM dbo.CrmRebookingTransfer
+        WHERE FundTransferId = @ft AND Status = 'Rejected'
+      `);
+      if (staleCrmLink.recordset.length) {
+        return res.status(409).json({
+          error: "This Fund Transfer's linked CRM re-booking claim was rejected because its source credit was consumed. Do not approve it as a standalone transfer; reconcile any bank movement manually.",
+        });
+      }
+    }
+
+    // The retry path skips transition(), so apply the same narrow Fund
+    // Transfer approver boundary before allowing any accounting/CRM side effect.
+    if (alreadyApproved) await authorizeApprovedTransferRetry(req);
 
     let transitionResult = {};
     if (!alreadyApproved) {
@@ -615,27 +726,91 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
       }
     }
 
+    if (transitionResult.newStatus === "Pending") {
+      await bumpCacheVersion("fund-transfer");
+      return res.json({
+        message: "Approval step recorded. Fund Transfer is awaiting further approval; GL posting and linked CRM credit will occur after final approval.",
+        ...transitionResult,
+      });
+    }
+
+    // approvalService commits the status before its best-effort GL poster.
+    // Do not apply linked customer credit until the transfer has a live GL
+    // posting. Retrying this route on an Approved record retries the poster.
+    const approvedNow = transitionResult.newStatus === "Approved" || alreadyApproved;
+    const glPosted = approvedNow && await hasCompleteFundTransferPosting(pool, id);
+    if (approvedNow && !glPosted) {
+      await bumpCacheVersion("fund-transfer");
+      await bumpCacheVersion("general-ledger");
+      return res.status(202).json({
+        message: "Fund Transfer is approved, but its GL posting is not complete. Linked CRM credit was not applied. Retry approval after resolving the posting issue.",
+        partialFailure: true,
+        glPostingPending: true,
+        ...transitionResult,
+      });
+    }
+
+    let crmCreditApplyError = null;
+    let linkedRebookingTransferId = null;
+    let crmLedgerRetryId = null;
+    let crmClaimRejected = false;
     // CRM re-booking credit transfer: if this Inter-company transfer was
     // raised to move a cancelled booking's held credit to a new booking in
     // another company, now that it's Approved (real bank + LOAN-C squared),
     // drop the fresh on-account credit on the target booking. Non-fatal.
-    if (transitionResult.newStatus === "Approved" || alreadyApproved) {
+    if (approvedNow && glPosted) {
       try {
         const linked = await pool.request().input("ft", sql.Int, id)
-          .query("SELECT Id FROM dbo.CrmRebookingTransfer WHERE FundTransferId = @ft AND Status = 'PendingTransfer'");
+          .query("SELECT Id, Status FROM dbo.CrmRebookingTransfer WHERE FundTransferId = @ft");
         if (linked.recordset.length) {
-          const { applyRebookingTransferToBooking } = require("./crmRefunds");
-          await applyRebookingTransferToBooking(pool, linked.recordset[0].Id, req.user?.email || req.user?.name || null);
-          await bumpCacheVersion("crm-refunds");
+          linkedRebookingTransferId = linked.recordset[0].Id;
+          if (linked.recordset[0].Status === "Rejected") {
+            crmClaimRejected = true;
+            crmCreditApplyError = "The linked CRM re-booking claim was rejected; no credit was applied to the target booking";
+          } else if (["PendingTransfer", "Applied"].includes(linked.recordset[0].Status)) {
+            const { applyRebookingTransferToBooking } = require("./crmRefunds");
+            const outcome = await applyRebookingTransferToBooking(pool, linked.recordset[0].Id, req.user?.email || req.user?.name || null);
+            // The money has moved between the companies; if the credit couldn't
+            // land on the booking, say why on the transfer instead of dropping it.
+            if (outcome && outcome.ok === false) {
+              console.warn("[fund-transfer] CRM re-booking not applied:", outcome.reason);
+              crmCreditApplyError = outcome.reason || "CRM credit could not be applied";
+              if (outcome.applied) crmLedgerRetryId = linked.recordset[0].Id;
+            }
+            await bumpCacheVersion("crm-refunds");
+          } else {
+            crmCreditApplyError = `The linked CRM re-booking claim is ${linked.recordset[0].Status}; no target booking credit was applied`;
+          }
         }
       } catch (rebookErr) {
         console.warn("[fund-transfer] CRM re-booking apply failed (non-fatal):", rebookErr.message);
+        crmCreditApplyError = rebookErr.message;
       }
     }
 
+    if (crmCreditApplyError && linkedRebookingTransferId) {
+      await pool.request().input("rt", sql.Int, linkedRebookingTransferId)
+        .input("n", sql.NVarChar(500), `${crmLedgerRetryId ? "Fund transfer approved and CRM credit applied, but CRM ledger follow-up failed" : "Fund transfer approved, but CRM credit could not be applied"}: ${String(crmCreditApplyError).slice(0, 400)}`)
+        .query("UPDATE dbo.CrmRebookingTransfer SET Notes = CONCAT(ISNULL(Notes + CHAR(10), ''), @n), UpdatedAt = SYSDATETIME() WHERE Id = @rt AND Status IN ('PendingTransfer', 'Applied')");
+    }
     await bumpCacheVersion("fund-transfer");
     await bumpCacheVersion("general-ledger");
-    res.json({ message: "Fund Transfer approved and posted to GL", ...transitionResult });
+    if (crmCreditApplyError) {
+      return res.status(202).json({
+        message: crmClaimRejected
+          ? "Fund Transfer is approved and posted, but its linked CRM re-booking claim was rejected and no target booking credit was applied. Reconcile the bank movement manually."
+          : crmLedgerRetryId
+            ? "Fund Transfer was approved and posted. CRM credit was applied, but its accounting ledger follow-up is incomplete; use Retry CRM ledger to retry it."
+            : linkedRebookingTransferId
+              ? "Fund Transfer was approved and posted, but its linked CRM re-booking claim is not in an applicable state and no target booking credit was applied. Reconcile the bank movement manually."
+              : "Fund Transfer was approved (confirming the manual bank transfer) and posted to GL, but its CRM re-booking credit is still unapplied. The failure is recorded on the re-booking transfer for follow-up.",
+        partialFailure: true, crmCreditApplyError, crmLedgerRetryId, crmClaimRejected, ...transitionResult,
+      });
+    }
+    res.json({
+      message: "Fund Transfer approved and posted to GL. Approval records confirmation that the bank transfer was completed manually; CivilierERP does not move the funds.",
+      ...transitionResult,
+    });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
   }
@@ -651,6 +826,15 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
     const result = await transition("fund-transfer", id, "Rejected", user, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
+    // A CRM re-booking transfer waiting on this fund transfer is off too —
+    // release it, so the held credit it reserved can be refunded or moved again.
+    if (result?.newStatus === "Rejected") {
+      await getPool().request().input("ft", sql.Int, id)
+        .input("n", sql.NVarChar(500), `Fund transfer rejected${req.body?.note ? `: ${String(req.body.note).slice(0, 300)}` : ""} — the held credit is free again`)
+        .query(`UPDATE dbo.CrmRebookingTransfer SET Status = 'Rejected', Notes = CONCAT(ISNULL(Notes + CHAR(10), ''), @n), UpdatedAt = SYSDATETIME()
+                WHERE FundTransferId = @ft AND Status = 'PendingTransfer'`);
+      await bumpCacheVersion("crm-refunds");
+    }
     await bumpCacheVersion("fund-transfer");
     res.json({ message: "Fund Transfer rejected", ...result });
   } catch (err) {

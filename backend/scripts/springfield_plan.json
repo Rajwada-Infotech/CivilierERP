@@ -1,0 +1,1664 @@
+{
+ "project": "Springfield",
+ "areaColumn": "BuiltUpAreaSqFt",
+ "blocks": [
+  {
+   "name": "A",
+   "floors": [
+    1,
+    1
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1060,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1060
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1465,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1465
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    2,
+    2
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1505,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1505
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1055,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1055
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1010,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1010
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    3,
+    3
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1060,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1060
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1465,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1465
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    4,
+    4
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1505,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1505
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1055,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1055
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1010,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1010
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    5,
+    5
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1060,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1060
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1465,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1465
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    6,
+    6
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1505,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1505
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1055,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1055
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1010,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1010
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    7,
+    7
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1060,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1060
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1465,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1465
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    8,
+    8
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1505,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1505
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1055,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1055
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1010,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1010
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    9,
+    9
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1060,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1060
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1465,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1465
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    10,
+    10
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1505,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1505
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1055,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1055
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1010,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1010
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    11,
+    11
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1060,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1060
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1465,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1465
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "A",
+   "floors": [
+    12,
+    12
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1505,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1505
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 1055,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1055
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 1010,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1010
+     },
+     "facing": "S"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    1,
+    1
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1590,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1590
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    2,
+    2
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1560,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1560
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    3,
+    3
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1590,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1590
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    4,
+    4
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1560,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1560
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    5,
+    5
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1590,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1590
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    6,
+    6
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1560,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1560
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    7,
+    7
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1590,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1590
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    8,
+    8
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1560,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1560
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    9,
+    9
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1590,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1590
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    10,
+    10
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1560,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1560
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "B",
+   "floors": [
+    11,
+    11
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1460,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1460
+     },
+     "facing": "SE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1450,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1450
+     },
+     "facing": "SW"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1590,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1590
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1495,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1495
+     },
+     "facing": "NE"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1360,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1360
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "2 BHK",
+     "area": 1035,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1035
+     },
+     "facing": "SE"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    1,
+    1
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    2,
+    2
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    3,
+    3
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    4,
+    4
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    5,
+    5
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    6,
+    6
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    7,
+    7
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    8,
+    8
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    9,
+    9
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    10,
+    10
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  },
+  {
+   "name": "C",
+   "floors": [
+    11,
+    11
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "SW"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1510,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1510
+     },
+     "facing": "NE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1575,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1575
+     },
+     "facing": "SE"
+    },
+    "D": {
+     "type": "3 BHK",
+     "area": 1565,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1565
+     },
+     "facing": "SW"
+    }
+   }
+  }
+ ]
+}

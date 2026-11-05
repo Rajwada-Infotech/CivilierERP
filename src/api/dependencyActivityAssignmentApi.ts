@@ -40,8 +40,8 @@ export interface AssignmentMaterial {
 export const SOURCE_TYPES = ["CONTRACTOR", "DEVELOPER"] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 export const SOURCE_META: Record<SourceType, { label: string; className: string }> = {
-  CONTRACTOR: { label: "Contractor", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
-  DEVELOPER: { label: "Developer", className: "bg-violet-500/10 text-violet-600 dark:text-violet-400" },
+  CONTRACTOR: { label: "Contractor", className: "!rounded-none border border-foreground/40 text-foreground" },
+  DEVELOPER: { label: "Developer", className: "!rounded-none border border-dashed border-foreground text-foreground" },
 };
 
 export interface Contractor {
@@ -69,6 +69,8 @@ export interface AssignmentCheckpoint {
   isDaily?: boolean;
   /** How many days already have an update logged (server-provided). */
   updateCount?: number;
+  /** Rework attempt: Quality Check rated this one Poor last time and it isn't ticked again yet. */
+  needsRework?: boolean;
 }
 
 export interface CheckpointUpdate {
@@ -79,6 +81,8 @@ export interface CheckpointUpdate {
   note: string | null;
   createdBy: string | null;
   createdAt: string;
+  /** HH:mm the update was last logged (server clock). */
+  loggedTime?: string | null;
 }
 
 export const getCheckpointUpdates = async (checkpointId: number): Promise<CheckpointUpdate[]> => {
@@ -124,9 +128,15 @@ export interface ApprovalLevel {
   mode: "all" | "any";
 }
 
+/** Activity Priority picked on the Work Allocation form, mildest first. */
+export const ASSIGNMENT_PRIORITIES = ["Low", "High", "Urgent", "Very Urgent"] as const;
+export type AssignmentPriority = (typeof ASSIGNMENT_PRIORITIES)[number];
+
 export interface RungAssignmentDetail {
   rungId: number;
   activityId: number;
+  /** The Activity Master's "Days of Completion" — the default for the allocation's Days. */
+  daysOfCompletion?: number | null;
   candidateItems: CandidateItem[];
   assignment: {
     engineerIds: number[];
@@ -139,8 +149,21 @@ export interface RungAssignmentDetail {
     materialSource: SourceType | null;
     labourContractorId: number | null;
     materialContractorId: number | null;
+    /** The company behind each source: the project's developer company, or the named contractor. */
+    labourSourceName?: string | null;
+    materialSourceName?: string | null;
+    /** Latest Quality Check decision on this activity; null while none has been made. */
+    qcStatus?: {
+      decision: "APPROVED" | "REWORK";
+      remarks: string | null;
+      qcAt: string | null;
+      qcBy: string | null;
+      /** How each checkpoint was rated in that decision. */
+      checks?: { fieldName: string; passed: boolean; rating: "POOR" | "GOOD" | "EXCELLENT" | null; note: string | null }[];
+    } | null;
     description: string | null;
     remarks: string | null;
+    priority?: AssignmentPriority | null;
     materials: AssignmentMaterial[];
     checkpoints: AssignmentCheckpoint[];
   } | null;
@@ -159,6 +182,7 @@ export interface RungAssignmentPayload {
   materialContractorId: number | null;
   description: string | null;
   remarks: string | null;
+  priority?: AssignmentPriority | null;
   checkpoints: AssignmentCheckpoint[];
   materials: AssignmentMaterial[];
 }
@@ -212,19 +236,19 @@ export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 // the same badge color wherever it's shown — purely presentational, no
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
-  PENDING: { label: "Pending", className: "bg-slate-500/10 text-slate-600 dark:text-slate-400" },
+  PENDING: { label: "Pending", className: "!rounded-none border border-foreground/30 text-muted-foreground" },
   // Set automatically the moment an engineer is assigned (Work
   // Allocation) — the activity sits here until that engineer reports
   // progress for the first time, which is what actually flips it to
   // IN_PROGRESS (see dependencyActivityAssignment.js's PATCH
   // /:rungId/status autoStatus branch).
-  ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
-  IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
-  HOLD: { label: "Hold", className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400" },
-  CANCELLED: { label: "Cancelled", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
-  APPROVED: { label: "Approved", className: "bg-teal-500/10 text-teal-600 dark:text-teal-400" },
-  REWORK: { label: "Rework", className: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400" },
-  COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
+  ALLOCATED: { label: "Allocated", className: "!rounded-none border border-foreground/50 text-foreground" },
+  IN_PROGRESS: { label: "In Progress", className: "!rounded-none border border-foreground text-foreground" },
+  HOLD: { label: "Hold", className: "!rounded-none border border-dashed border-foreground text-foreground" },
+  CANCELLED: { label: "Cancelled", className: "!rounded-none border border-destructive text-destructive" },
+  APPROVED: { label: "Approved", className: "!rounded-none border border-foreground bg-foreground text-card" },
+  REWORK: { label: "Rework", className: "!rounded-none border border-dashed border-foreground text-foreground" },
+  COMPLETED: { label: "Completed", className: "!rounded-none border border-foreground bg-foreground text-card" },
 };
 
 // The status dropdown is an In Progress <-> Hold toggle, plus Cancelled —
@@ -254,6 +278,8 @@ export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus
 export interface ReportedAssignment {
   assignmentId: number;
   rungId: number;
+  /** Photos taken for this activity (all days, before + after) — counted by the server with the list. */
+  photoCount?: number;
   engineerNames: string | null;
   qcNames: string | null;
   startDate: string | null;
@@ -265,10 +291,19 @@ export interface ReportedAssignment {
   // ever a tentative plan; (firstReportedAt - startDate) is the real delay
   // before work began. Null until that first report happens.
   firstReportedAt: string | null;
+  /** When it was put back In Progress after a hold (null if it never was, or it is on hold again). */
+  resumedAt?: string | null;
   labourSource: SourceType | null;
   materialSource: SourceType | null;
+  /** The company behind the source: the project's developer company, or the named contractor. */
+  labourSourceName?: string | null;
+  materialSourceName?: string | null;
   description: string | null;
   remarks: string | null;
+  priority?: AssignmentPriority | null;
+  /** The activity's tag: the one set in Activity Reporting, else its Activity Master default. */
+  tagId?: number | null;
+  tagName?: string | null;
   status: AssignmentStatus;
   // What Status was right before this activity got Cancelled — only ever
   // non-null while status === "CANCELLED". Determines what restoring it
@@ -288,7 +323,7 @@ export interface ReportedAssignment {
   attemptNo: number;
   reworkFromAssignmentId: number | null;
   reworkReason: string | null;
-  reworkSource: "QC" | "APPROVAL" | null;
+  reworkSource: "QC" | "APPROVAL" | "RESTORE" | null;
   updatedAt: string;
   sequenceNo: number;
   activityId: number;
@@ -305,6 +340,7 @@ export interface ReportedAssignment {
   flatName: string | null;
   roomId: number | null;
   roomName: string | null;
+  storey?: string | null;
   scopePath: string;
   materials: { name: string; quantity: number; uom: string | null }[];
 }
@@ -321,8 +357,17 @@ export const getReportedAssignments = async (params?: {
   // with no room at all, instead of falling through to "every activity".
   roomId?: number | null;
   status?: AssignmentStatus;
+  /** Exactly one activity (its current attempt). */
+  rungId?: number;
+  /** Words matched against activity, flat, room, project, chain alias or engineer (every word must match). */
+  search?: string;
+  /** Page size (server default applies when omitted). */
+  limit?: number;
 }): Promise<ReportedAssignment[]> => {
   const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.rungId) qs.set("rungId", String(params.rungId));
   if (params?.dependencyMasterId) qs.set("dependencyMasterId", String(params.dependencyMasterId));
   if (params && "roomId" in params && params.roomId !== undefined) {
     qs.set("roomId", params.roomId === null ? "null" : String(params.roomId));
@@ -349,6 +394,7 @@ export interface ScopeSummaryRoom {
   flatName: string | null;
   roomId: number | null;
   roomName: string | null;
+  storey?: string | null;
   activityCount: number;
 }
 export interface ActivityScopeSummary {
@@ -359,13 +405,20 @@ export interface ActivityScopeSummary {
 export const getActivityScopeSummary = async (params?: {
   status?: AssignmentStatus;
   search?: string;
+  projectId?: number;
 }): Promise<ActivityScopeSummary> => {
   const qs = new URLSearchParams();
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
   if (params?.status) qs.set("status", params.status);
   if (params?.search) qs.set("search", params.search);
   const query = qs.toString();
   const res = await fetchWithAuth(`${BASE}/scope-summary${query ? `?${query}` : ""}`);
   return handleResponse<ActivityScopeSummary>(res);
+};
+
+export const getScopeProjects = async (): Promise<{ id: number; name: string | null }[]> => {
+  const res = await fetchWithAuth(`${BASE}/scope-summary/projects`);
+  return handleResponse<{ id: number; name: string | null }[]>(res);
 };
 
 // StartDate is only ever a tentative plan — the real measure of how
@@ -415,9 +468,29 @@ export const updateAssignmentStatus = async (
 // independent — the Activity Detail modal's status dropdown, its Remarks
 // textarea (saved on blur), and its draggable progress bar (saved on
 // drag-release) each call this with only the field that actually changed.
+/** Change an activity's Priority (the same field the Work Allocation form sets); null clears it. */
+export const updateAssignmentPriority = async (rungId: number, priority: AssignmentPriority | null): Promise<{ priority: AssignmentPriority | null }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/priority`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ priority }),
+  });
+  return handleResponse<{ priority: AssignmentPriority | null }>(res);
+};
+
+/** Tag one reported activity. A new name is added to the DPR Tag Master; blank clears the activity's own tag. */
+export const setActivityTag = async (rungId: number, tagName: string): Promise<{ message: string; tagId: number | null }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/tag`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tagName }),
+  });
+  return handleResponse<{ message: string; tagId: number | null }>(res);
+};
+
 export const updateAssignmentDetail = async (
   rungId: number,
-  patch: { status?: AssignmentStatus; remarks?: string; progressPercent?: number },
+  patch: { status?: AssignmentStatus; remarks?: string; progressPercent?: number; append?: boolean },
 ): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/status`, {
     method: "PATCH",
@@ -571,6 +644,13 @@ export const getActivityPhotos = async (rungId: number, date?: string): Promise<
   return handleResponse<ActivityPhotos>(res);
 };
 
+/** Day 1's After photos become day 2's Before (server-side, idempotent). Returns how many were added. Runs by itself when
+ *  the Photos tab opens, so it must not make every list on screen (Activity Reporting behind the dialog) read again. */
+export const carryForwardPhotos = async (rungId: number): Promise<{ carried: number }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos/carry-forward`, { method: "POST", skipRefresh: true });
+  return handleResponse<{ carried: number }>(res);
+};
+
 export const getActivityPhoto = async (rungId: number, photoId: number): Promise<ActivityPhotoData> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/photos/${photoId}`);
   return handleResponse<ActivityPhotoData>(res);
@@ -619,8 +699,16 @@ export interface QcHistoryEntry {
 // Quality Check now inspects COMPLETED activities (work dragged to 100%),
 // not IN_PROGRESS ones — an activity only reaches QC once it's actually
 // done, not while it's still being worked on.
-export const getCompletedAssignments = async (): Promise<ReportedAssignment[]> => {
-  const res = await fetchWithAuth(`${BASE}?status=COMPLETED`);
+/** How many rows one Quality Check request brings back; the page says so when a project or search would show more. */
+export const QC_QUEUE_LIMIT = 500;
+
+/** Quality Check's queue: Completed work that hasn't passed QC yet, narrowed on the server by project and search
+ *  (it used to fetch every Completed activity, capped at the route's default of 2000, and filter here). */
+export const getQcQueue = async (params: { projectId?: number; search?: string }): Promise<ReportedAssignment[]> => {
+  const q = new URLSearchParams({ status: "COMPLETED", qcPending: "1", limit: String(QC_QUEUE_LIMIT) });
+  if (params.projectId) q.set("projectId", String(params.projectId));
+  if (params.search) q.set("search", params.search);
+  const res = await fetchWithAuth(`${BASE}?${q}`);
   return handleResponse<ReportedAssignment[]>(res);
 };
 
@@ -712,7 +800,7 @@ export interface AssignmentAttempt {
   endDate: string | null;
   reworkFromAssignmentId: number | null;
   reworkReason: string | null;
-  reworkSource: "QC" | "APPROVAL" | null;
+  reworkSource: "QC" | "APPROVAL" | "RESTORE" | null;
   createdAt: string;
   updatedAt: string | null;
   engineerNames: string | null;
@@ -742,7 +830,7 @@ export interface AmendmentRecord {
   attemptNo: number;
   status: AssignmentStatus;
   reworkReason: string | null;
-  reworkSource: "QC" | "APPROVAL" | null;
+  reworkSource: "QC" | "APPROVAL" | "RESTORE" | null;
   startDate: string | null;
   endDate: string | null;
   updatedAt: string;
@@ -760,6 +848,7 @@ export interface AmendmentRecord {
   flatName: string | null;
   roomId: number | null;
   roomName: string | null;
+  storey?: string | null;
   scopePath: string;
   engineerNames: string | null;
   // The attempt that replaced this one — null only if the rung's current
@@ -775,9 +864,9 @@ export const getAmendments = async (): Promise<AmendmentRecord[]> => {
 // Bringing a Cancelled activity back — super_admin only (enforced
 // server-side by role, not a page right), and only after reviewing the
 // activity's full detail in ActivityDetailModal, where this is called
-// from. Restores to APPROVED if it genuinely was before being cancelled,
-// otherwise IN_PROGRESS regardless of exactly where it was — see the
-// backend route's own comment.
+// from. Restores to APPROVED if it genuinely was before being cancelled;
+// otherwise it starts over as a fresh attempt at ALLOCATED (PENDING if no
+// engineer is on it) with Work Done at 0 — see the backend route's own comment.
 export const restoreCancelledActivity = async (
   rungId: number,
 ): Promise<{ success: boolean; status: AssignmentStatus }> => {
@@ -804,6 +893,40 @@ export const getTransferCandidates = async (engineerId: number, projectId?: numb
   if (projectId) qs.set("projectId", String(projectId));
   const res = await fetchWithAuth(`${BASE}/transfer/candidates?${qs.toString()}`);
   return handleResponse<TransferCandidate[]>(res);
+};
+
+export interface TransferCandidatePage {
+  rows: TransferCandidate[];
+  total: number;
+  /** Counts across ALL of the engineer's transferable work (ignores the project/search filter). */
+  projects: { id: number; name: string | null; count: number }[];
+}
+
+/** One page of an engineer's transferable activities, filtered and ordered on the server. */
+export const getTransferCandidatesPage = async (params: {
+  engineerId: number;
+  page: number;
+  limit?: number;
+  projectId?: number;
+  search?: string;
+  /** Only this activity (a report row opened in Work Transfer). */
+  rungId?: number;
+}): Promise<TransferCandidatePage> => {
+  const qs = new URLSearchParams({ engineerId: String(params.engineerId), page: String(params.page), limit: String(params.limit ?? 50) });
+  if (params.projectId) qs.set("projectId", String(params.projectId));
+  if (params.search) qs.set("search", params.search);
+  if (params.rungId) qs.set("rungId", String(params.rungId));
+  const res = await fetchWithAuth(`${BASE}/transfer/candidates?${qs.toString()}`);
+  return handleResponse<TransferCandidatePage>(res);
+};
+
+/** Every id matching the current project/search filter, for "select all" (the page only holds some). */
+export const getTransferCandidateIds = async (params: { engineerId: number; projectId?: number; search?: string }): Promise<number[]> => {
+  const qs = new URLSearchParams({ engineerId: String(params.engineerId) });
+  if (params.projectId) qs.set("projectId", String(params.projectId));
+  if (params.search) qs.set("search", params.search);
+  const res = await fetchWithAuth(`${BASE}/transfer/candidates/ids?${qs.toString()}`);
+  return (await handleResponse<{ ids: number[] }>(res)).ids;
 };
 
 export const transferWork = async (payload: {
