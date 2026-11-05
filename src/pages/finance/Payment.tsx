@@ -1,3 +1,4 @@
+import { panDisplay } from "@/lib/panDisplay";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { useLiveData } from "@/hooks/useLiveData";
 import { autoPostKey, autoPostUrl, nextEntryToAutoPost } from "./paymentAutoPost";
@@ -5279,7 +5280,7 @@ const Payment: React.FC = () => {
                         ? `GSTIN: ${viewingChain.supplier.gst}`
                         : null,
                       viewingChain.supplier.pan
-                        ? `PAN: ${viewingChain.supplier.pan}`
+                        ? `PAN: ${panDisplay(viewingChain.supplier.pan)}`
                         : null,
                     ]
                       .filter(Boolean)

@@ -97,6 +97,15 @@ export interface MultiGRNAggregateResult {
   grnDocNos: string[];
 }
 
+// A merged invoice's number. The saved number is capped at 100 characters, including the "INV/" the server adds, and payments
+// refer to an invoice by it, so joining every GRN stops working at about 5 GRNs. Past that it names the first GRN and the count;
+// the full list stays on the invoice. A GRN can be on only one active invoice, so the first GRN keeps the number unique.
+const MAX_MERGED_REFERENCE = 96;
+export function mergedGrnReference(grnDocNos: string[]): string {
+  const joined = grnDocNos.join(" + ");
+  return joined.length <= MAX_MERGED_REFERENCE ? joined : `${grnDocNos[0]} +${grnDocNos.length - 1} GRNs`;
+}
+
 function parseGRNItems(raw: GRNItem["GRNItems"]): GRNItemLine[] {
   if (Array.isArray(raw)) return raw;
   if (typeof raw === "string" && raw.trim()) {

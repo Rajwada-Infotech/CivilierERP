@@ -1,3 +1,4 @@
+import { panDisplay } from "@/lib/panDisplay";
 import React, { useState, useMemo, useRef, useCallback } from "react";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -933,7 +934,7 @@ const SupplierMaster: React.FC = () => {
         <tr><td>Phone</td><td>${s.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${s.LHeadEmail || "—"}</td></tr>
         <tr><td>GSTIN (GST Identification Number)</td><td>${s.LGST || "—"}</td></tr>
-        <tr><td>PAN (Permanent Account Number)</td><td>${s.LHeadPan || "—"}</td></tr>
+        <tr><td>PAN (Permanent Account Number)</td><td>${panDisplay(s.LHeadPan) || "—"}</td></tr>
         <tr><td>GST Type</td><td>${s.LGSTType || "—"}</td></tr>
         <tr><td>GST State</td><td>${s.LGSTState || "—"}</td></tr>
         <tr><td>Category</td><td>${s.supplierCategory || "—"}</td></tr>
@@ -1820,7 +1821,7 @@ const SupplierMaster: React.FC = () => {
                 },
                 {
                   label: "PAN (Permanent Account Number)",
-                  value: viewRecord.LHeadPan || "—",
+                  value: panDisplay(viewRecord.LHeadPan) || "—",
                   mono: true,
                 },
                 { label: "GST Type", value: viewRecord.LGSTType || "—" },

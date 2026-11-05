@@ -117,7 +117,7 @@ import { PayablePartyCombobox, type PayablePartyGroup } from "./ExpenseBooking/P
 import { StatusBadge } from "@/components/StatusBadge";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
-import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
+import { aggregateGRNsForInvoice, mergedGrnReference } from "./ExpenseBooking/invoiceLinking";
 import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
 import { ExpenseHeadAllocationEditor } from "./ExpenseBooking/ExpenseHeadAllocationEditor";
 import type {
@@ -1088,7 +1088,7 @@ export default function MaterialExpenseBooking() {
 
     applyDoc({
       kind: "GRN",
-      docNo: agg.grnDocNos.join(" + "),
+      docNo: mergedGrnReference(agg.grnDocNos),
       sourceId: agg.grnIds[0],
       vendorLabel: agg.supplierLabel ?? primary.SupplierName,
       status: "Approved",
