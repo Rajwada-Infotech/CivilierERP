@@ -139,13 +139,13 @@ function tooltipText(step: TrailStep): string {
   return label ? `${label}${when}` : step.label;
 }
 
-export function ApprovalStatusChain({ table, recordId, className, fallback = null, preloaded, preloadedLoading = false }: Props) {
-  const isPreloaded = preloaded !== undefined;
+/** A record's approval trail (GET /api/approval-workflows/trail); skipped when the caller already has it. */
+export function useApprovalTrail(table: ApprovalTable, recordId: string | number | null | undefined, skip = false, refreshKey?: unknown) {
   const [fetchedTrail, setFetchedTrail] = useState<TrailData | null>(null);
   const [fetchLoading, setFetchLoading] = useState(false);
 
   useEffect(() => {
-    if (isPreloaded) return; // caller already fetched this via /trail/bulk
+    if (skip) return; // caller already fetched this via /trail/bulk
     if (!recordId) return;
     let cancelled = false;
     setFetchLoading(true);
@@ -166,10 +166,15 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
     return () => {
       cancelled = true;
     };
-  }, [table, recordId, isPreloaded]);
+  }, [table, recordId, skip, refreshKey]);
+  return { trail: fetchedTrail, loading: fetchLoading };
+}
 
-  const trail = isPreloaded ? preloaded : fetchedTrail;
-  const loading = isPreloaded ? preloadedLoading : fetchLoading;
+export function ApprovalStatusChain({ table, recordId, className, fallback = null, preloaded, preloadedLoading = false }: Props) {
+  const isPreloaded = preloaded !== undefined;
+  const fetched = useApprovalTrail(table, recordId, isPreloaded);
+  const trail = isPreloaded ? preloaded : fetched.trail;
+  const loading = isPreloaded ? preloadedLoading : fetched.loading;
 
   if (loading) {
     return (
@@ -241,5 +246,55 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
       <span className="print:hidden">{badgeText(currentStep, "Pending")}</span>
       <span className="hidden print:inline">{currentStep.label} · Provisional</span>
     </>,
+  );
+}
+
+/**
+ * The whole approval trail as a vertical timeline: each level, who acted (every approver on a parallel level), when,
+ * and their note. For a record page; the one-line ApprovalStatusChain above stays for lists.
+ */
+export function ApprovalTrailTimeline({ table, recordId, empty, refreshKey }: {
+  table: ApprovalTable; recordId: string | number | null | undefined; empty?: React.ReactNode; refreshKey?: unknown;
+}) {
+  const { trail, loading } = useApprovalTrail(table, recordId, false, refreshKey);
+  if (loading) return <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-8 rounded bg-muted animate-pulse" />)}</div>;
+  const steps = (trail?.steps ?? []).filter((s) => s.level > 0);
+  if (!trail || steps.length === 0) return <>{empty ?? <span className="text-muted-foreground">No approval steps recorded.</span>}</>;
+  const tone = (st: string) =>
+    st === "Approved" ? "bg-emerald-600 text-white border-emerald-600"
+      : st === "Rejected" ? "bg-rose-600 text-white border-rose-600"
+        : "bg-card text-amber-600 border-amber-500";
+  const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : null);
+  return (
+    <div>
+      {trail.workflowName && <div className="mb-3 text-xs text-muted-foreground">{trail.workflowName} · {steps.length} level{steps.length === 1 ? "" : "s"}</div>}
+      <ol className="relative ml-3 border-l border-border space-y-4">
+        {steps.map((st) => {
+          const people = st.workflowType === "parallel" && st.approvers?.length
+            ? st.approvers
+            : [{ name: st.approverName, email: st.approverEmail, role: st.role, status: st.status, actionAt: st.actionAt }];
+          return (
+            <li key={st.level} className="relative pl-5">
+              <span className={cn("absolute -left-[9px] top-0.5 w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center text-[0.5625rem] font-bold", tone(st.status))}>
+                {st.status === "Approved" ? "✓" : st.status === "Rejected" ? "✕" : st.level}
+              </span>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[0.8125rem] font-semibold">{st.label}</span>
+                <span className={cn("text-[0.6875rem] font-semibold", st.status === "Approved" ? "text-emerald-600" : st.status === "Rejected" ? "text-rose-600" : "text-amber-600")}>{st.status}</span>
+              </div>
+              {people.map((p, i) => (
+                <div key={i} className="mt-0.5 text-xs text-muted-foreground">
+                  {p.name || p.email || (st.status === "Pending" ? "Waiting for an approver" : "—")}
+                  {p.role ? ` · ${p.role}` : ""}
+                  {when(p.actionAt) ? ` · ${when(p.actionAt)}` : ""}
+                  {people.length > 1 && p.status !== st.status ? ` · ${p.status}` : ""}
+                </div>
+              ))}
+              {st.note && <p className="mt-1 text-xs rounded-md bg-muted/60 px-2 py-1.5 whitespace-pre-line">{st.note}</p>}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }

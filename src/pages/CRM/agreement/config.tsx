@@ -60,9 +60,17 @@ export const SLUG_FOR_TAB: Record<AgrTab, string> = {
 };
 
 export type StepState = "done" | "current" | "upcoming";
-export function agreementStepStates(a: any, documents: any[] | undefined): { label: string; state: StepState; tab: AgrTab }[] {
+/** The mandatory papers on a list row (the list carries counts, not the papers). */
+export function rowFollowupProgress(a: any): { required: number; uploaded: number; percent: number } {
+  const required = Number(a?.MandatoryDocCount) || 0;
+  const uploaded = Number(a?.MandatoryUploadedCount) || 0;
+  return { required, uploaded, percent: required > 0 ? Math.round((uploaded / required) * 100) : 0 };
+}
+/** Each step of the agreement and where it stands. Takes the agreement's papers (its record) or, for a list row, the
+ *  paper counts already worked out. */
+export function agreementStepStates(a: any, documents: any[] | undefined | { required: number; uploaded: number; percent: number }): { label: string; state: StepState; tab: AgrTab }[] {
   const legalAssigned = a?.LegalExecutiveId != null;
-  const followup = followupProgress(documents);
+  const followup = documents && !Array.isArray(documents) ? documents : followupProgress(documents as any[] | undefined);
   const followupDone = followup.required > 0 && followup.percent === 100;
   const senior = a?.SeniorApprovalStatus === CrmStatus.APPROVED;
   const sent = !!a?.SentToCustomerAt;
@@ -82,4 +90,60 @@ export function agreementStepStates(a: any, documents: any[] | undefined): { lab
     { label: "Execution Follow-ups", state: (executed ? "done" : dated ? "current" : "upcoming") as StepState,            tab: "Documents" as AgrTab },
     { label: "Registered",           state: (registered ? "done" : executed ? "current" : "upcoming") as StepState,       tab: "Overview" as AgrTab },
   ];
+}
+/** The step an agreement is on now ("Complete" once registered); the list's Stage column. */
+export function agreementCurrentStep(a: any, documents: Parameters<typeof agreementStepStates>[1]): string {
+  if (a?.Status === CrmStatus.REGISTERED) return "Complete";
+  const i = agreementCurrentIndex(a, documents);
+  return i >= 0 ? agreementStepStates(a, documents)[i].label : "—";
+}
+
+
+// ── Board, insights and alerts: all read off agreementStepStates, so they never disagree with the record's own path ──
+type StepProgress = Parameters<typeof agreementStepStates>[1];
+/** The steps' plain names, in order (the follow-up step without its percentage): the board's columns. */
+export const AGREEMENT_STEP_NAMES: string[] = agreementStepStates(null, { required: 0, uploaded: 0, percent: 0 }).map((s) => s.label);
+/** Where the agreement stands: the index of its current step, or -1 when none is (registered, or cancelled). */
+export function agreementCurrentIndex(a: any, progress: StepProgress): number {
+  // The status settles it first: an executed agreement is waiting to be registered, whatever an older record lacks.
+  if (!a || a.Status === CrmStatus.CANCELLED || a.Status === CrmStatus.REGISTERED) return -1;
+  if (a.Status === CrmStatus.EXECUTED) return AGREEMENT_STEP_NAMES.length - 1;
+  return agreementStepStates(a, progress).findIndex((s) => s.state === "current");
+}
+// When each step began: the last date the record keeps for the step before it (same order as the steps). The early
+// steps record no date of their own, so they count from when the agreement was made; Registered counts from the last
+// update, which is when it was executed.
+const STEP_SINCE: ((a: any) => string | null | undefined)[] = [
+  (a) => a.CreatedAt, (a) => a.CreatedAt, (a) => a.CreatedAt, (a) => a.CreatedAt,
+  (a) => a.SeniorApprovedAt, (a) => a.SentToCustomerAt, (a) => a.CustomerApprovedAt, (a) => a.AgreementDate, (a) => a.UpdatedAt,
+];
+const DAY_MS = 86_400_000;
+/** Whole days the agreement has been on its current step, or null when it isn't on one. */
+export function agreementDaysAtStep(a: any, progress: StepProgress, today = new Date()): number | null {
+  const i = agreementCurrentIndex(a, progress);
+  const since = i >= 0 ? STEP_SINCE[i]?.(a) : null;
+  if (!since) return null;
+  return Math.max(0, Math.floor((today.getTime() - new Date(since).getTime()) / DAY_MS));
+}
+
+export type AgreementAlertTone = "stopped" | "waiting" | "moving";
+/** What needs someone now, read only from what is recorded (no day limits): each with who it waits on. */
+export const AGREEMENT_ALERTS: { key: string; label: string; tone: AgreementAlertTone; test: (a: any, today: Date) => boolean }[] = [
+  { key: "bookingGone", label: "Booking cancelled, agreement still open", tone: "stopped",
+    test: (a) => isBookingCancelled(a) && a.Status !== CrmStatus.CANCELLED && a.Status !== CrmStatus.REGISTERED },
+  { key: "recheck", label: "Customer asked for a recheck", tone: "stopped",
+    test: (a) => a.Status === CrmStatus.DRAFT && a.CustomerApprovalStatus === "RecheckRequested" },
+  { key: "signingPassed", label: "Signing date passed, not executed", tone: "stopped",
+    test: (a, today) => a.Status === CrmStatus.DRAFT && !!a.AgreementDate && new Date(String(a.AgreementDate).slice(0, 10)) < new Date(today.toDateString()) },
+  { key: "noLegal", label: "No legal executive", tone: "waiting",
+    test: (a) => a.Status === CrmStatus.DRAFT && a.LegalExecutiveId == null && !isBookingCancelled(a) },
+  { key: "dateReply", label: "Customer proposed a date: our reply", tone: "moving",
+    test: (a) => a.Status === CrmStatus.DRAFT && a.ProposedDateStatus === "PendingCompanyReview" },
+  { key: "toSend", label: "Senior-approved, not sent to customer", tone: "moving",
+    test: (a) => a.Status === CrmStatus.DRAFT && a.SeniorApprovalStatus === CrmStatus.APPROVED && !a.SentToCustomerAt && !isBookingCancelled(a) },
+  { key: "toRegister", label: "Executed, to register", tone: "moving",
+    test: (a) => a.Status === CrmStatus.EXECUTED && !isBookingCancelled(a) },
+];
+export function agreementAlerts(a: any, today = new Date()) {
+  return AGREEMENT_ALERTS.filter((x) => x.test(a, today));
 }

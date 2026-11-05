@@ -176,6 +176,21 @@ async function agreementFollowupProgress(pool, agreementId) {
   return { required, uploaded, percent };
 }
 
+// The list's sortable columns: sortKey → ORDER BY expression.
+const AGR_SORT = {
+  CreatedAt: "ag.CreatedAt",
+  AgreementNo: "ag.AgreementNo",
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  ProjectName: "COALESCE(bn.ProjectName, b.ProjectName)",
+  AgreementDate: "ag.AgreementDate",
+  Status: "ag.Status",
+  LegalExecutiveName: "le.name",
+  GrandTotal: "b.GrandTotal",
+  UpdatedAt: "ag.UpdatedAt",
+};
+const AGR_ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 // GET / — all agreements
 router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => {
   try {
@@ -188,10 +203,10 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
     // scope, so a restricted user's pages didn't add up).
     const req0 = pool.request();
     const countReq = pool.request();
-    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); };
+    const statusReq = pool.request();
+    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); statusReq.input(name, type, value); };
     const conds = [];
     if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (status) { bind("st", sql.NVarChar(30), status); conds.push("ag.Status = @st"); }
     if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
@@ -199,29 +214,39 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
       bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR ag.AgreementNo LIKE @search OR b.BookingNo LIKE @search)");
     }
+    // Agreement (signing) date between two days, either end optional.
+    if (AGR_ISO_DATE.test(req.query.dateFrom || "")) { bind("dateFrom", sql.Date, req.query.dateFrom); conds.push("ag.AgreementDate >= @dateFrom"); }
+    if (AGR_ISO_DATE.test(req.query.dateTo || "")) { bind("dateTo", sql.Date, req.query.dateTo); conds.push("ag.AgreementDate < DATEADD(day, 1, @dateTo)"); }
+    // The counts by status follow every filter but the status itself, so the tabs show what each would hold.
+    const countsWhere = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    if (status) { bind("st", sql.NVarChar(30), status); conds.push("ag.Status = @st"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${AGR_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const sortCol = Object.hasOwn(AGR_SORT, req.query.sortKey) ? AGR_SORT[req.query.sortKey] : AGR_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const ORDER = `ORDER BY ${sortCol} ${dir}, ag.Id DESC`;
 
+    // No page: every matching row, sorted (the Excel export, and callers that read the whole list).
     if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY ag.CreatedAt DESC`);
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
       return res.json(result.recordset);
     }
 
     const { page, pageSize, offset } = applyPagination(req);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY ag.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      countReq.query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmAgreement ag
+    const FROM = `FROM dbo.CrmAgreement ag
           JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          ${where}
-        `),
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const [result, countResult, statusResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      countReq.query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
+      statusReq.query(`SELECT ag.Status, COUNT(*) AS n ${FROM} ${countsWhere} GROUP BY ag.Status`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const statusCounts = Object.fromEntries(statusResult.recordset.map((r) => [r.Status, r.n]));
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
+
   } catch (e) {
     console.error("[crm-agreements] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -297,8 +322,15 @@ async function buildAgreementDetail(pool, agreementId) {
               d.UploadedAt, d.CreatedBy, d.CreatedAt, d.VersionNo, d.FileSize, d.MimeType, d.UploadedByType,
               d.RequestedBy, d.RequestedAt, d.Label, d.IsMandatory,
               CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS FilePath,
-              cu.name AS CreatedByName
-       FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
+              cu.name AS CreatedByName,
+              CASE WHEN d.Status IN ('Verified', 'Rejected') THEN rv.ReviewedByName END AS ReviewedByName,
+              CASE WHEN d.Status IN ('Verified', 'Rejected') THEN rv.ReviewedAt END AS ReviewedAt
+       FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy
+       OUTER APPLY (SELECT TOP 1 u.name AS ReviewedByName, al.ChangedAt AS ReviewedAt
+                    FROM dbo.CrmAuditLog al LEFT JOIN dbo.Users u ON u.id = al.ChangedBy
+                    WHERE al.EntityType = 'AgreementDocument' AND al.EntityId = d.Id AND al.Field = 'Status' AND al.NewValue = d.Status
+                    ORDER BY al.ChangedAt DESC) rv
+       WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
     pool.request().input("id", sql.Int, id).query(
       `SELECT ISNULL(SUM(CASE WHEN Status <> 'Waived' THEN AmountDue ELSE 0 END),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
        FROM dbo.CrmPaymentMilestone WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),

@@ -6,8 +6,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { SheetMark } from "@/components/sheet/Sheet";
-import { KEY_INK, RULE } from "./customers/config";
+import { GRID_SHEET_KEYS, GridStatusPill } from "@/components/crm/CrmDataTable";
+// Drawn with the CRM record kit; the keys and rules it uses map onto it.
+const { KEY_INK, RULE } = GRID_SHEET_KEYS;
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
@@ -42,15 +43,15 @@ const BKG_API = "/api/crm/bookings";
 // (Pending -> InfoSent -> Confirmed), just a richer pill than before,
 // matching the statusColor convention used on CrmBooking.tsx.
 const STATUS_CFG: Record<string, { label: string; cls: string; dot: string }> = {
-  Pending:   { label: "Pending",    cls: "text-foreground bg-card border-foreground/30",    dot: "bg-foreground" },
-  InfoSent:  { label: "Info Sent",  cls: "text-foreground bg-card border-foreground/30",         dot: "bg-foreground" },
-  Confirmed: { label: "Confirmed",  cls: "text-foreground bg-card border-foreground/30", dot: "bg-foreground" },
+  Pending:   { label: "Pending",    cls: "text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/30",    dot: "bg-amber-500" },
+  InfoSent:  { label: "Info Sent",  cls: "text-sky-700 dark:text-sky-300 bg-sky-500/10 border-sky-500/25",         dot: "bg-sky-500" },
+  Confirmed: { label: "Confirmed",  cls: "text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border-emerald-500/25", dot: "bg-emerald-600" },
 };
 
 function StatusBadge({ status }: { status: string }) {
   const c = STATUS_CFG[status] ?? STATUS_CFG.Pending;
   // A sheet mark: settled once Confirmed, in hand before.
-  return <SheetMark text={c.label} tone={status === "Confirmed" ? "done" : "waiting"} />;
+  return <GridStatusPill status={status} label={c.label} />;
 }
 
 function daysSince(dateStr?: string | null): number | null {
@@ -77,7 +78,7 @@ function Timeline({ detail }: { detail: any }) {
           <div className="flex flex-col items-center gap-1 min-w-[64px]">
             <span className={cn(
               "w-5 h-5 flex items-center justify-center text-[0.625rem] font-bold shrink-0",
-              s.done ? "bg-foreground text-card" : "bg-muted text-muted-foreground border border-border",
+              s.done ? "bg-emerald-600 text-white" : "bg-muted text-muted-foreground border border-border",
             )}>
               {s.done ? <Check size={11} /> : idx + 1}
             </span>
@@ -85,7 +86,7 @@ function Timeline({ detail }: { detail: any }) {
             <span className="text-[0.5625rem] text-muted-foreground">{s.at ? String(s.at).slice(0, 10) : "—"}</span>
           </div>
           {idx < stops.length - 1 && (
-            <div className={cn("h-[2px] flex-1 -mt-4 min-w-[16px]", stops[idx + 1].done ? "bg-foreground" : "bg-border")} />
+            <div className={cn("h-[2px] flex-1 -mt-4 min-w-[16px]", stops[idx + 1].done ? "bg-emerald-600" : "bg-border")} />
           )}
         </React.Fragment>
       ))}
@@ -115,12 +116,12 @@ function StepTabs({ step, onChange, confirmed, infoSent }: { step: number; onCha
             className={cn(
               "flex-1 flex items-center justify-center gap-1.5 text-xs font-medium py-2 rounded-t-lg border-b-2 transition-colors",
               locked ? "opacity-40 cursor-not-allowed border-transparent text-muted-foreground"
-                : active ? "border-foreground/30 text-foreground bg-card" : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                : active ? "border-border text-foreground bg-card" : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40",
             )}
           >
             <span className={cn(
               "w-4 h-4 flex items-center justify-center text-[0.625rem] font-semibold shrink-0",
-              done ? "bg-foreground text-card" : active ? "bg-foreground text-card" : "bg-muted text-muted-foreground",
+              done ? "bg-emerald-600 text-white" : active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
             )}>
               {done ? <Check size={10} /> : s.id}
             </span>
@@ -244,20 +245,20 @@ function AmountEditor({
 
   if (editing) {
     return (
-      <div className="mt-3 border border-foreground/30 bg-card p-3 space-y-2">
+      <div className="mt-3 border border-border bg-card p-3 space-y-2">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div>
             <label className="text-[0.625rem] text-muted-foreground block mb-1">Stamp Duty (₹)</label>
-            <Input type="number" className="h-8 font-heading tabular-nums text-xs focus-visible:ring-foreground/30" placeholder="Optional" value={stamp} onChange={(e) => setStamp(e.target.value)} />
+            <Input type="number" className="h-8 font-heading tabular-nums text-xs focus-visible:ring-primary/30" placeholder="Optional" value={stamp} onChange={(e) => setStamp(e.target.value)} />
           </div>
           <div>
             <label className="text-[0.625rem] text-muted-foreground block mb-1">Registration Fee (₹)</label>
-            <Input type="number" className="h-8 font-heading tabular-nums text-xs focus-visible:ring-foreground/30" placeholder="Optional" value={regFee} onChange={(e) => setRegFee(e.target.value)} />
+            <Input type="number" className="h-8 font-heading tabular-nums text-xs focus-visible:ring-primary/30" placeholder="Optional" value={regFee} onChange={(e) => setRegFee(e.target.value)} />
           </div>
         </div>
         <div>
           <label className="text-[0.625rem] text-muted-foreground block mb-1">Remarks</label>
-          <Input className="h-8 text-xs focus-visible:ring-foreground/30" placeholder="Optional" value={remarks} onChange={(e) => setRemarks(e.target.value)} />
+          <Input className="h-8 text-xs focus-visible:ring-primary/30" placeholder="Optional" value={remarks} onChange={(e) => setRemarks(e.target.value)} />
         </div>
         <div className="flex items-center gap-2 justify-end pt-1">
           <button onClick={() => setEditing(false)} disabled={saving} className="px-2.5 py-1 text-[0.6875rem] border border-border hover:bg-muted transition-colors">Cancel</button>
@@ -285,7 +286,7 @@ function AmountEditor({
           )}
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 text-[0.6875rem] text-foreground bg-card border border-foreground/30 px-3 py-2">
+        <div className="flex items-center gap-1.5 text-[0.6875rem] text-foreground bg-card border border-border px-3 py-2">
           <AlertTriangle size={11} /> No amount set yet — optional; the paperwork can still be sent.
           {canEditNow && (
             <button onClick={startEdit} className="ml-auto text-foreground font-semibold hover:underline shrink-0">Set amounts</button>
@@ -314,13 +315,13 @@ function AttachmentList({ attachments, apiBase }: { attachments: any[]; apiBase:
         return (
           <li key={a.AttachmentId} className="space-y-2">
           <button type="button" onClick={() => setOpenId(open ? null : a.AttachmentId)}
-            className={`w-full text-left flex items-center gap-2.5 border px-3 py-2 transition-colors group ${open ? "border-foreground bg-primary/5" : "border-border bg-muted/20 hover:bg-primary/5"}`}>
+            className={`w-full text-left flex items-center gap-2.5 border px-3 py-2 transition-colors group ${open ? "border-primary bg-primary/5" : "border-border bg-muted/20 hover:bg-primary/5"}`}>
             {isImage(a.MimeType) ? (
               <div className="w-9 h-9 shrink-0 overflow-hidden border border-border bg-muted">
                 <AuthThumb url={url} alt={a.FileName} className="w-full h-full object-cover" />
               </div>
             ) : (
-              <div className="w-9 h-9 shrink-0 bg-card border border-foreground/30 flex items-center justify-center">
+              <div className="w-9 h-9 shrink-0 bg-card border border-border flex items-center justify-center">
                 <FileText size={15} className="text-foreground" />
               </div>
             )}
@@ -331,7 +332,7 @@ function AttachmentList({ attachments, apiBase }: { attachments: any[]; apiBase:
                 {a.UploadedAt ? ` · ${String(a.UploadedAt).slice(0, 10)}` : ""}
               </p>
             </div>
-            <span className={`shrink-0 flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground transition-opacity ${open ? "" : "opacity-0 group-hover:opacity-100"}`}>
+            <span className={`shrink-0 flex items-center gap-1 text-xs font-medium text-foreground transition-opacity ${open ? "" : "opacity-0 group-hover:opacity-100"}`}>
               {open ? "Close" : "Preview"} <ChevronRight size={11} className={open ? "rotate-90" : ""} />
             </span>
           </button>
@@ -757,7 +758,7 @@ const CrmAfsQueryPayment: React.FC<{
       <div className="border border-border bg-card overflow-hidden">
         {/* Header */}
         <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center gap-3 flex-wrap">
-          <div className="w-9 h-9 shrink-0 bg-card border border-foreground/30 flex items-center justify-center">
+          <div className="w-9 h-9 shrink-0 bg-card border border-border flex items-center justify-center">
             <ReceiptIndianRupee size={16} className="text-foreground" />
           </div>
           <div className="flex-1 min-w-0">
@@ -790,7 +791,7 @@ const CrmAfsQueryPayment: React.FC<{
 
         {detail.Status === "Confirmed" ? (
           <div className="px-5 py-5 space-y-4">
-            <div className="flex items-center gap-3 bg-foreground/5 border border-foreground/30 px-4 py-3">
+            <div className="flex items-center gap-3 bg-emerald-500/5 border border-border px-4 py-3">
               <CheckCircle2 size={18} className="text-foreground shrink-0" />
               <div>
                 <p className="text-sm font-semibold text-foreground">Government payment confirmed</p>
@@ -815,7 +816,7 @@ const CrmAfsQueryPayment: React.FC<{
             {/* Step 1: Send paperwork */}
             <div className={`px-5 py-4 space-y-3 ${step === 1 ? "" : "opacity-60 pointer-events-none"}`}>
               <div className="flex items-center gap-2">
-                <span className="w-5 h-5 text-[0.625rem] font-bold flex items-center justify-center shrink-0 bg-foreground text-card">
+                <span className="w-5 h-5 text-[0.625rem] font-bold flex items-center justify-center shrink-0 bg-primary text-primary-foreground rounded-full">
                   {detail.Status !== CrmStatus.PENDING ? <Check size={10} /> : "1"}
                 </span>
                 <p className="text-sm font-semibold">Send Fee Breakdown to Customer</p>
@@ -878,18 +879,18 @@ const CrmAfsQueryPayment: React.FC<{
             <div className={`px-5 py-4 space-y-3 ${step === 2 ? "" : "opacity-60"}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className={`w-5 h-5 text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step === 2 ? "bg-foreground text-card" : "bg-muted text-muted-foreground"}`}>2</span>
+                  <span className={`w-5 h-5 text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step === 2 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>2</span>
                   <p className="text-sm font-semibold">Confirm Customer Paid the Government</p>
                 </div>
                 {step !== 2 && detail.Status !== CrmStatus.PENDING && (
                   <button onClick={() => setStep(2)}
-                    className="text-xs px-3 py-1.5 border border-foreground/30 text-foreground font-semibold hover:bg-primary/10 transition-colors shrink-0">
+                    className="text-xs px-3 py-1.5 border border-border text-foreground font-semibold hover:bg-primary/10 transition-colors shrink-0">
                     Open →
                   </button>
                 )}
                 {step !== 2 && detail.Status === CrmStatus.PENDING && (
                   <span title="Send the fee breakdown to the customer first"
-                    className="text-xs px-3 py-1.5 border border-dashed border-foreground/30 text-muted-foreground shrink-0 cursor-not-allowed">Locked</span>
+                    className="text-xs px-3 py-1.5 border border-dashed border-border text-muted-foreground shrink-0 cursor-not-allowed">Locked</span>
                 )}
               </div>
               {step === 2 && (
@@ -898,11 +899,11 @@ const CrmAfsQueryPayment: React.FC<{
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-[0.6875rem] text-muted-foreground block mb-1">Amount Actually Paid (₹)</label>
-                      <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="Optional" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
+                      <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-primary/30" placeholder="Optional" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
                     </div>
                     <div>
                       <label className="text-[0.6875rem] text-muted-foreground block mb-1">Remarks</label>
-                      <Input className="h-9 text-sm focus-visible:ring-foreground/30" placeholder="Optional" value={confirmRemarks} onChange={(e) => setConfirmRemarks(e.target.value)} />
+                      <Input className="h-9 text-sm focus-visible:ring-primary/30" placeholder="Optional" value={confirmRemarks} onChange={(e) => setConfirmRemarks(e.target.value)} />
                     </div>
                   </div>
                   <div>
@@ -928,7 +929,7 @@ const CrmAfsQueryPayment: React.FC<{
                     )}
                   </div>
                   <button onClick={handleConfirm} disabled={confirming}
-                    className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-semibold bg-foreground text-card hover:bg-foreground/80 disabled:opacity-40 transition-colors">
+                    className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 rounded-md disabled:opacity-40 transition-colors">
                     <CheckCircle2 size={14} /> {confirming ? "Confirming…" : "Mark as Paid — Government Fees Confirmed"}
                   </button>
                 </div>
@@ -962,8 +963,8 @@ const CrmAfsQueryPayment: React.FC<{
         ) : selectedId != null && detail ? (
           InlineDetail()
         ) : registered ? (
-          <div className="border border-foreground/30 bg-foreground/5 px-5 py-5 flex items-start gap-4">
-            <div className="w-10 h-10 shrink-0 bg-card border-2 border-foreground/30 flex items-center justify-center">
+          <div className="border border-border bg-emerald-500/5 px-5 py-5 flex items-start gap-4">
+            <div className="w-10 h-10 shrink-0 bg-card border-2 border-border flex items-center justify-center">
               <CheckCircle2 size={18} className="text-foreground" />
             </div>
             <div>
@@ -982,8 +983,8 @@ const CrmAfsQueryPayment: React.FC<{
             </p>
           </div>
         ) : canCreate ? (
-          <div className="border border-foreground/30 bg-card overflow-hidden">
-            <div className="px-5 py-4 border-b border-foreground/30 bg-card">
+          <div className="border border-border bg-card overflow-hidden">
+            <div className="px-5 py-4 border-b border-border bg-card">
               <p className="text-sm font-semibold">Start Registration Fee Process</p>
               <p className="text-xs text-muted-foreground mt-0.5">Enter the stamp duty and registration fee amounts (both optional now — can be filled before sending to the customer).</p>
             </div>
@@ -991,12 +992,12 @@ const CrmAfsQueryPayment: React.FC<{
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-foreground block mb-1.5">Stamp Duty (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
-                  <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="e.g. 50000"
+                  <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-primary/30" placeholder="e.g. 50000"
                     value={newForm.StampDuty} onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground block mb-1.5">Registration Fee (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
-                  <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="e.g. 30000"
+                  <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-primary/30" placeholder="e.g. 30000"
                     value={newForm.RegistrationFee} onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                 </div>
               </div>
@@ -1047,8 +1048,8 @@ const CrmAfsQueryPayment: React.FC<{
                     <p className="text-xs text-muted-foreground">{deepLinkedBooking.BookingNo} · {deepLinkedBooking.UnitNo} · Agreement {deepLinkedBooking.AgreementStatus}</p>
                   </div>
                   <span className={`shrink-0 text-[0.6875rem] px-2.5 py-1 border font-semibold ${
-                    deepLinkedBooking.AgreementStatus === "Registered" ? "bg-card border-foreground/30 text-foreground"
-                    : deepLinkedBooking.AgreementStatus === "Executed" ? "bg-card border-foreground/30 text-foreground"
+                    deepLinkedBooking.AgreementStatus === "Registered" ? "bg-card border-border text-foreground"
+                    : deepLinkedBooking.AgreementStatus === "Executed" ? "bg-card border-border text-foreground"
                     : "bg-muted/40 border-border text-muted-foreground"
                   }`}>Agreement {deepLinkedBooking.AgreementStatus}</span>
                 </div>
@@ -1057,9 +1058,9 @@ const CrmAfsQueryPayment: React.FC<{
 
             {/* Case A: already registered — no tracker needed */}
             {deepLinkedBooking?.AgreementStatus === "Registered" && !deepLinkedRow && (
-              <div className="border border-foreground/30 bg-foreground/5 overflow-hidden">
+              <div className="border border-border bg-emerald-500/5 overflow-hidden">
                 <div className="px-5 py-5 flex items-start gap-4">
-                  <div className="w-10 h-10 shrink-0 bg-card border-2 border-foreground/30 flex items-center justify-center">
+                  <div className="w-10 h-10 shrink-0 bg-card border-2 border-border flex items-center justify-center">
                     <CheckCircle2 size={18} className="text-foreground" />
                   </div>
                   <div>
@@ -1077,8 +1078,8 @@ const CrmAfsQueryPayment: React.FC<{
 
             {/* Case C: Executed but no record yet — inline start form */}
             {deepLinkedBooking && !deepLinkedRow && deepLinkedBooking.AgreementStatus !== "Registered" && canCreate && (
-              <div className="border border-foreground/30 bg-card overflow-hidden">
-                <div className="px-5 py-4 border-b border-foreground/30 bg-card">
+              <div className="border border-border bg-card overflow-hidden">
+                <div className="px-5 py-4 border-b border-border bg-card">
                   <p className="text-sm font-semibold">Start Registration Fee Process</p>
                   <p className="text-xs text-muted-foreground mt-0.5">Enter the stamp duty and registration fee amounts. The buyer will be notified and can confirm payment through their portal.</p>
                 </div>
@@ -1086,12 +1087,12 @@ const CrmAfsQueryPayment: React.FC<{
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-semibold text-foreground block mb-1.5">Stamp Duty (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
-                      <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="e.g. 50000"
+                      <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-primary/30" placeholder="e.g. 50000"
                         value={newForm.StampDuty} onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-foreground block mb-1.5">Registration Fee (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
-                      <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="e.g. 30000"
+                      <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-primary/30" placeholder="e.g. 30000"
                         value={newForm.RegistrationFee} onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                     </div>
                   </div>
@@ -1111,8 +1112,8 @@ const CrmAfsQueryPayment: React.FC<{
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               <StatCard label="Total Trackers" value={(rows as any[]).length} icon={ReceiptIndianRupee} tint="bg-muted text-foreground" />
               <StatCard label="Pending" value={statusCounts.Pending || 0} icon={Clock} tint="bg-[#ffe2021a] text-amber-600 dark:text-amber-400" />
-              <StatCard label="Info Sent" value={statusCounts.InfoSent || 0} icon={Send} tint="bg-foreground/5 text-foreground" />
-              <StatCard label="Confirmed" value={statusCounts.Confirmed || 0} sub={confirmedTotal > 0 ? formatINR(confirmedTotal) : undefined} icon={CheckCircle2} tint="bg-foreground/5 text-foreground" />
+              <StatCard label="Info Sent" value={statusCounts.InfoSent || 0} icon={Send} tint="bg-emerald-500/5 text-foreground" />
+              <StatCard label="Confirmed" value={statusCounts.Confirmed || 0} sub={confirmedTotal > 0 ? formatINR(confirmedTotal) : undefined} icon={CheckCircle2} tint="bg-emerald-500/5 text-foreground" />
             </div>
 
             {/* Search + status filter + table live in one continuous glass card,
@@ -1124,7 +1125,7 @@ const CrmAfsQueryPayment: React.FC<{
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <input value={search} onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search name, AQP no, booking, unit..."
-                    className="w-full pl-8 pr-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
+                    className="w-full pl-8 pr-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:border-primary" />
                 </div>
                 <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
                 <div className="flex items-center gap-2 flex-wrap">
@@ -1138,7 +1139,7 @@ const CrmAfsQueryPayment: React.FC<{
                         onClick={() => setFilterStatus(s)}
                         className={cn(
                           "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border transition-colors",
-                          active ? "bg-foreground text-card border-foreground" : "bg-background border-border text-muted-foreground hover:bg-muted",
+                          active ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border text-muted-foreground hover:bg-muted",
                         )}
                       >
                         {label}
@@ -1167,10 +1168,10 @@ const CrmAfsQueryPayment: React.FC<{
 
             {/* Start dialog (list-mode only) */}
             <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setDialogFeesLocked(false); setNewForm({ BookingId: "", StampDuty: "", RegistrationFee: "" }); } }}>
-              <DialogContent className="max-w-md p-0 gap-0 overflow-hidden rounded-none" style={{ border: RULE }}>
+              <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
                 <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
                   <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 shrink-0 bg-card border border-foreground/30 flex items-center justify-center">
+                    <div className="w-9 h-9 shrink-0 bg-card border border-border flex items-center justify-center">
                       <ReceiptIndianRupee size={16} className="text-foreground" />
                     </div>
                     <div>
@@ -1190,7 +1191,7 @@ const CrmAfsQueryPayment: React.FC<{
                       setNewForm((f) => ({ ...f, BookingId: bid, StampDuty: stamp, RegistrationFee: fee }));
                       setDialogFeesLocked(stamp !== "" || fee !== "");
                     }}
-                      className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground">
+                      className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-primary">
                       <option value="">Select booking…</option>
                       {startableBookings.map((b: any) => (
                         <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ApplicantName} ({b.AgreementStatus})</option>
@@ -1202,7 +1203,7 @@ const CrmAfsQueryPayment: React.FC<{
                   </div>
 
                   {/* Fee fields — pre-filled from Agreement record when booking selected */}
-                  <div className={`border p-3 space-y-2 ${dialogFeesLocked ? "border-foreground/30 bg-foreground/5" : "border-border"}`}>
+                  <div className={`border p-3 space-y-2 ${dialogFeesLocked ? "border-border bg-emerald-500/5" : "border-border"}`}>
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs font-semibold text-foreground">Government Fees</p>
@@ -1215,19 +1216,19 @@ const CrmAfsQueryPayment: React.FC<{
                           className="shrink-0 text-[0.6875rem] px-2 py-1 border border-border text-muted-foreground hover:bg-muted font-medium">Edit</button>
                       ) : (newForm.StampDuty !== "" || newForm.RegistrationFee !== "") ? (
                         <button type="button" onClick={() => setDialogFeesLocked(true)}
-                          className="shrink-0 text-[0.6875rem] px-2 py-1 border border-foreground/30 text-foreground hover:bg-primary/10 font-medium">Lock</button>
+                          className="shrink-0 text-[0.6875rem] px-2 py-1 border border-border text-foreground hover:bg-primary/10 font-medium">Lock</button>
                       ) : null}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="text-[0.6875rem] text-muted-foreground block mb-1">Stamp Duty (₹)</label>
-                        <Input type="number" className={`h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30 ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
+                        <Input type="number" className={`h-9 font-heading tabular-nums text-sm focus-visible:ring-primary/30 ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
                           value={newForm.StampDuty} readOnly={dialogFeesLocked}
                           onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
                       </div>
                       <div>
                         <label className="text-[0.6875rem] text-muted-foreground block mb-1">Registration Fee (₹)</label>
-                        <Input type="number" className={`h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30 ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
+                        <Input type="number" className={`h-9 font-heading tabular-nums text-sm focus-visible:ring-primary/30 ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
                           value={newForm.RegistrationFee} readOnly={dialogFeesLocked}
                           onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                       </div>
@@ -1247,7 +1248,7 @@ const CrmAfsQueryPayment: React.FC<{
 
             {/* Detail dialog (list-mode: row click → dialog) */}
             <Dialog open={selectedId != null && !deepLinkBookingId} onOpenChange={(o) => { if (!o) { setSelectedId(null); setAwaitingSendConfirm(false); setPendingInfoFiles([]); } }}>
-              <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden rounded-none" style={{ border: RULE }}>
+              <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
                 {/* DialogTitle/Description must always be present for a11y */}
                 <DialogTitle className="sr-only">{detail ? `${detail.AfsQPNo} — AFS Query Payment` : "AFS Query Payment"}</DialogTitle>
                 <DialogDescription className="sr-only">{detail ? `${detail.ApplicantName} · ${detail.BookingNo}` : "Loading record…"}</DialogDescription>
@@ -1296,7 +1297,7 @@ const CrmAfsQueryPayment: React.FC<{
                     {/* Body */}
                     {detail.Status === "Confirmed" ? (
                       <div className="px-5 py-5 space-y-4">
-                        <div className="flex items-center gap-3 text-sm text-foreground bg-card border border-foreground/30 px-4 py-3">
+                        <div className="flex items-center gap-3 text-sm text-foreground bg-card border border-border px-4 py-3">
                           <CheckCircle2 size={18} className="shrink-0" />
                           <div>
                             <div className="font-semibold text-[0.8125rem]">Government payment confirmed</div>
@@ -1333,7 +1334,7 @@ const CrmAfsQueryPayment: React.FC<{
                                   <p className="text-[0.6875rem] font-medium text-muted-foreground mb-2">Ready to send ({pendingInfoFiles.length})</p>
                                   <ul className="space-y-1.5">
                                     {pendingInfoFiles.map((f, idx) => (
-                                      <li key={`${f.name}-${idx}`} className="flex items-center gap-2 text-xs bg-card border border-foreground/30 px-2.5 py-1.5">
+                                      <li key={`${f.name}-${idx}`} className="flex items-center gap-2 text-xs bg-card border border-border px-2.5 py-1.5">
                                         {f.type.startsWith("image/") ? (
                                           <img src={f.dataUri} alt={f.name} className="w-7 h-7 object-cover shrink-0 border border-border" />
                                         ) : (
@@ -1371,7 +1372,7 @@ const CrmAfsQueryPayment: React.FC<{
                               <p className="text-xs text-muted-foreground">Once the customer has paid at the Sub-Registrar, confirm receipt here to advance the record.</p>
                               <div>
                                 <label className="text-[0.6875rem] font-medium text-muted-foreground mb-1 block">Amount paid (optional)</label>
-                                <Input type="number" className="h-9 font-heading tabular-nums focus-visible:ring-foreground/30" placeholder="e.g. 16500" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
+                                <Input type="number" className="h-9 font-heading tabular-nums focus-visible:ring-primary/30" placeholder="e.g. 16500" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
                               </div>
                               <input type="file" ref={proofInputRef} className="hidden" onChange={(e) => stageProofFile(e.target.files)} />
                               {proofFile ? (
@@ -1385,7 +1386,7 @@ const CrmAfsQueryPayment: React.FC<{
                                   <Upload size={12} /> Attach proof (optional)
                                 </button>
                               )}
-                              <button onClick={handleConfirm} disabled={confirming} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-foreground text-card hover:bg-foreground/80 disabled:opacity-40 transition-colors">
+                              <button onClick={handleConfirm} disabled={confirming} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 rounded-md disabled:opacity-40 transition-colors">
                                 <CheckCircle2 size={12} /> {confirming ? "Confirming…" : "Confirm Payment Received"}
                               </button>
                             </div>

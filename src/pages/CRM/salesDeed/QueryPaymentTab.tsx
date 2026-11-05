@@ -7,10 +7,11 @@ import { CrmStatus } from "@/constants/crmStatuses";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
 import { FileText, Pencil, Send, Upload, X } from "lucide-react";
-import { SheetMark } from "@/components/sheet/Sheet";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
-import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "../customers/config";
+import { GRID_SHEET_KEYS, GridToneMark as SheetMark } from "@/components/crm/CrmDataTable";
+// Drawn with the CRM record kit; the keys, labels, inputs and rules it uses map onto it.
+const { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } = GRID_SHEET_KEYS;
 import { API, deedTone, fmtDate } from "./config";
 import { AutoStep, Panel } from "./parts";
 
@@ -224,7 +225,7 @@ export function QueryPaymentTab({ detail, canCreate, canEdit, canConfirm, onChan
                 return (
                   <div className="grid grid-cols-2 lg:grid-cols-4" style={{ border: RULE }}>
                     {cells.map(([l, v, strong]) => (
-                      <div key={l} className={`px-3 py-2 ${strong ? "bg-foreground text-card" : ""}`} style={{ borderRight: RULE_SOFT }}>
+                      <div key={l} className={`px-3 py-2 ${strong ? "bg-primary/10 text-foreground font-semibold" : ""}`} style={{ borderRight: RULE_SOFT }}>
                         <p className={`${LBL} ${strong ? "!text-card/80" : ""}`}>{l}</p>
                         <p className="font-heading font-semibold tabular-nums text-sm mt-0.5">{v}</p>
                       </div>
