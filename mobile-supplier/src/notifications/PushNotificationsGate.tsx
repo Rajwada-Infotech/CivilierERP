@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useAuth } from "@/auth/AuthContext";
 import { registerForPushAsync } from "./pushNotifications";
@@ -32,8 +33,9 @@ export function PushNotificationsGate({
       onOpenRef.current?.(data);
     };
     const sub = Notifications.addNotificationResponseReceivedListener(handle);
-    // The tap that started the app from closed.
-    const launched = Notifications.getLastNotificationResponse();
+    // The tap that started the app from closed. (Not on web: the module has no such call there, and it threw — the web
+    // preview crashed to a blank page the moment someone signed in.)
+    const launched = Platform.OS === "web" ? null : Notifications.getLastNotificationResponse();
     if (launched) {
       handle(launched);
       Notifications.clearLastNotificationResponse();
