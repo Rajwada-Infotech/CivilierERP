@@ -1,4 +1,5 @@
-// RN port of src/pages/material/MaterialExpenseBooking.tsx's "form" view —
+// RN port of src/pages/material/MaterialExpenseBooking.tsx's "form" view, on the drawing sheet (SheetShell, ruled panels,
+// the shared FormParts fields and pickers) —
 // create AND edit (route param `id` switches modes). Covers PO / Work Done
 // / GRN (single or multi-combine off the same PO) / Other Expense (TOD)
 // document sources, EMI, and billing terms. Not ported: file attachments
@@ -7,11 +8,11 @@
 import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, Alert, Modal, Switch } from "react-native";
+import { View, Text, ScrollView, Alert } from "react-native";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, Search, X, FileText, Wallet, Receipt, Truck, CreditCard, Check } from "lucide-react-native";
+import { ArrowLeft, X, FileText, Wallet, Receipt, Truck, CreditCard, Plus } from "lucide-react-native";
 import {
   fetchPOOptions, fetchWorkDoneOptions, fetchExpenseDocTypes, fetchNextExpenseDocNumber,
   fetchSupplierHeads, fetchContractorHeads, fetchBrokerHeads, createExpenseBooking, updateExpenseBooking, fetchInvoiceById,
@@ -23,10 +24,11 @@ import {
 } from "@/api/invoiceApi";
 import { fetchCompanyOptions, fetchProjectOptions, fetchFinYearOptions } from "@/api/newPaymentApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { colors } from "@/theme/colors";
+import { colors, sheet as S } from "@/theme/colors";
+import { Body, IconKey, Key, Label, Panel, Seg, SheetShell, Skel } from "@/components/sheet/Sheet";
+import { DateField, OptionRow, OptionSheet, PickerField, SheetPicker, TextField } from "@/components/sheet/FormParts";
 import { fonts } from "@/theme/fonts";
 
-const ACCENT = "#6467f2";
 
 // A stable reference for "no data yet" — `data: x = []` in a destructure
 // evaluates a brand-new array literal every render while `data` is still
@@ -46,100 +48,6 @@ const SOURCE_TABS: Array<{ kind: SourceKind; label: string; icon: React.Componen
 
 function todayISO() {
   return istToday();
-}
-
-function fieldLabel(text: string) {
-  return (
-    <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 10, fontFamily: fonts.body.medium, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>
-      {text}
-    </Text>
-  );
-}
-
-function TextField({
-  label, value, onChangeText, placeholder, keyboardType, multiline,
-}: {
-  label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; keyboardType?: "default" | "numeric"; multiline?: boolean;
-}) {
-  return (
-    <View style={{ marginBottom: 14 }}>
-      {fieldLabel(label)}
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={`${colors.mutedForeground}80`}
-        keyboardType={keyboardType}
-        multiline={multiline}
-        numberOfLines={multiline ? 3 : 1}
-        style={{
-          color: colors.foreground, fontSize: 13, fontFamily: fonts.body.regular,
-          backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: colors.border,
-          borderRadius: 12, paddingHorizontal: 12, paddingVertical: multiline ? 10 : 11,
-          textAlignVertical: multiline ? "top" : "center",
-        }}
-      />
-    </View>
-  );
-}
-
-function PickerField({
-  label, value, placeholder, onPress, disabled, width = "48%",
-}: {
-  label: string; value: string; placeholder: string; onPress: () => void; disabled?: boolean; width?: `${number}%`;
-}) {
-  return (
-    <View style={{ width, marginBottom: 14, opacity: disabled ? 0.5 : 1 }}>
-      {fieldLabel(label)}
-      <Pressable
-        onPress={disabled ? undefined : onPress}
-        className="flex-row items-center justify-between"
-        style={{ backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11 }}
-      >
-        <Text numberOfLines={1} style={{ color: value ? colors.foreground : `${colors.mutedForeground}80`, fontSize: 12.5, fontFamily: fonts.body.regular, flexShrink: 1 }}>
-          {value || placeholder}
-        </Text>
-        <ChevronDown size={13} color={colors.mutedForeground} />
-      </Pressable>
-    </View>
-  );
-}
-
-function OptionSheet({
-  visible, title, options, onSelect, onClose,
-}: {
-  visible: boolean; title: string; options: Array<{ id: string | number; label: string; sub?: string }>; onSelect: (id: string) => void; onClose: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const filtered = options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase()));
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={onClose}>
-        <Pressable onPress={() => {}} style={{ backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "70%", borderWidth: 1, borderColor: colors.border }}>
-          <View className="flex-row items-center justify-between px-4 py-3" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>{title}</Text>
-            <Pressable onPress={onClose} hitSlop={8}><X size={16} color={colors.mutedForeground} /></Pressable>
-          </View>
-          <View className="px-4 py-2.5 flex-row items-center rounded-xl mx-4 mt-2.5" style={{ backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: colors.border }}>
-            <Search size={13} color={colors.mutedForeground} />
-            <TextInput value={q} onChangeText={setQ} placeholder="Search…" placeholderTextColor={`${colors.mutedForeground}80`} style={{ flex: 1, color: colors.foreground, fontSize: 12.5, paddingVertical: 8, paddingHorizontal: 8 }} />
-          </View>
-          <ScrollView style={{ marginTop: 8 }} contentContainerStyle={{ paddingBottom: 24 }}>
-            {filtered.length === 0 ? (
-              <Text className="text-center py-8" style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>No matches found</Text>
-            ) : (
-              filtered.map((o, i) => (
-                <Pressable key={`${o.id}-${i}`} onPress={() => onSelect(String(o.id))} className="px-5 py-3">
-                  <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.body.medium }}>{o.label}</Text>
-                  {!!o.sub && <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular, marginTop: 2 }}>{o.sub}</Text>}
-                </Pressable>
-              ))
-            )}
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
 }
 
 function fmt(n: number) {
@@ -453,191 +361,167 @@ export default function NewInvoiceScreen() {
 
   if (isEditing && existingLoading) {
     return (
-      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
-        <ActivityIndicator color={colors.mutedForeground} />
-      </View>
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }}>
+        <SheetShell eyebrow="CivilierERP · Finance" title="Edit invoice" action={<Key label="Back" icon={<ArrowLeft size={13} color={S.ink} />} onPress={() => navigation.goBack()} style={{ alignSelf: "flex-start" }} />}>
+          <Skel h={160} />
+          <Skel h={200} />
+        </SheetShell>
+      </ScrollView>
     );
   }
 
+  const sourceLabel = SOURCE_TABS.find((t) => t.kind === sourceKind)?.label ?? "";
+
   return (
-    <ScrollView className="flex-1" style={{ backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
-      <View className="flex-row items-center justify-between mb-1">
-        <Pressable onPress={() => navigation.goBack()} className="flex-row items-center gap-1.5">
-          <ArrowLeft size={15} color={colors.mutedForeground} />
-          <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.body.medium }}>Back</Text>
-        </Pressable>
-      </View>
-      <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 19, marginTop: 6 }}>{isEditing ? "Edit Invoice" : "New Invoice"}</Text>
-
-      {/* Party & Project */}
-      <View className="rounded-2xl mt-5 p-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-        <Text style={{ color: `${colors.mutedForeground}cc`, fontSize: 10, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Party & Project</Text>
-        <View className="flex-row flex-wrap justify-between">
-          <PickerField label="Company *" value={companyLabel} placeholder="Select company…" onPress={() => setCompanyPickerOpen(true)} />
-          <PickerField label="Project" value={projectLabel} placeholder="Select project…" onPress={() => setProjectPickerOpen(true)} disabled={!companyId} />
-          <PickerField label={finYearLocked ? "Financial Year · locked" : "Financial Year"} value={finYear} placeholder="Select FY…" onPress={() => setFinYearPickerOpen(true)} disabled={finYearLocked} />
-          <PickerField
-            label="Supplier / Vendor"
-            value={supplier}
-            placeholder="Select payable party…"
-            onPress={() => setSupplierPickerOpen(true)}
-            disabled={!!selectedPO || !!selectedWD || !!grnMerged}
-          />
-          <PickerField label="Cost Centre" value={costCenterLabel} placeholder="Select cost centre…" onPress={() => setCostCenterPickerOpen(true)} width="100%" />
-        </View>
-      </View>
-
-      {/* Document Selection */}
-      <View className="rounded-2xl mt-4 p-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-        <Text style={{ color: `${colors.mutedForeground}cc`, fontSize: 10, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Document Selection</Text>
-
-        <View className="flex-row gap-1.5 mb-3.5">
-          {SOURCE_TABS.map((t) => {
-            const active = sourceKind === t.kind;
-            return (
-              <Pressable
-                key={t.kind}
-                onPress={() => { setSourceKind(t.kind); setSelectedPO(null); setSelectedWD(null); setSelectedGRNIds([]); setGrnMerged(null); setTodLabel(""); setDocNo(""); setBasicAmount(""); }}
-                className="flex-1 flex-row items-center justify-center gap-1 py-2 rounded-lg"
-                style={{ backgroundColor: active ? ACCENT : "transparent", borderWidth: 1, borderColor: active ? ACCENT : colors.border }}
-              >
-                <t.icon size={12} color={active ? "#fff" : colors.mutedForeground} />
-                <Text numberOfLines={1} style={{ color: active ? "#fff" : colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.heading.medium }}>{t.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <View style={{ marginBottom: 14 }}>
-          {fieldLabel("Selected Document")}
-          <Pressable
-            onPress={() => (sourceKind === "GRN" ? setGrnSheetOpen(true) : setDocPickerOpen(true))}
-            className="flex-row items-center justify-between"
-            style={{ backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11 }}
-          >
-            <Text numberOfLines={1} style={{ color: docLabel ? colors.foreground : `${colors.mutedForeground}80`, fontSize: 12.5, fontFamily: fonts.body.regular, flexShrink: 1 }}>
-              {docLabel || (sourceKind === "GRN" ? "Pick one or more GRNs (same PO to combine)…" : `Pick a ${SOURCE_TABS.find((t) => t.kind === sourceKind)?.label.toLowerCase()}…`)}
-            </Text>
-            <ChevronDown size={13} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
-
-        {!!docNo && (
-          <View className="px-3.5 py-2.5 rounded-xl mb-1" style={{ backgroundColor: `${ACCENT}18`, borderWidth: 1, borderColor: `${ACCENT}33` }}>
-            <Text style={{ color: ACCENT, fontSize: 12, fontFamily: fonts.heading.semibold }}>{docNo}</Text>
-          </View>
-        )}
-
-        {/* GRN Items Summary — only for GRN source; merges every selected GRN's items */}
-        {sourceKind === "GRN" && grnMerged && grnMerged.items.length > 0 && (
-          <View className="rounded-xl mt-2 overflow-hidden" style={{ borderWidth: 1, borderColor: `${colors.border}80` }}>
-            {grnMerged.items.map((it, i) => (
-              <View
-                key={i}
-                className="flex-row items-center justify-between px-3 py-2"
-                style={i < grnMerged.items.length - 1 ? { borderBottomWidth: 1, borderBottomColor: `${colors.border}50` } : undefined}
-              >
-                <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontFamily: fonts.body.medium, flex: 1 }}>{it.itemName || "—"}</Text>
-                <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>{it.receivedQty} {it.uom}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </View>
-
-      {/* Booking Info */}
-      <View className="rounded-2xl mt-4 p-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-        <Text style={{ color: `${colors.mutedForeground}cc`, fontSize: 10, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Booking Information</Text>
-        <View className="flex-row flex-wrap justify-between">
-          <View style={{ width: "48%" }}><TextField label="Booking Date" value={bookingDate} onChangeText={setBookingDate} placeholder="YYYY-MM-DD" /></View>
-          <View style={{ width: "48%" }}><TextField label="Due Date" value={dueDate} onChangeText={setDueDate} placeholder="YYYY-MM-DD" /></View>
-        </View>
-        <TextField label="Remarks" value={remarks} onChangeText={setRemarks} placeholder="Internal remarks…" multiline />
-      </View>
-
-      {/* Amount & GST */}
-      <View className="rounded-2xl mt-4 p-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-        <Text style={{ color: `${colors.mutedForeground}cc`, fontSize: 10, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Amount & GST</Text>
-        <TextField label="Basic Amount (₹)" value={basicAmount} onChangeText={setBasicAmount} placeholder="0.00" keyboardType="numeric" />
-        <View className="flex-row flex-wrap justify-between">
-          <View style={{ width: "31%" }}><TextField label="CGST %" value={cgstRate} onChangeText={setCgstRate} keyboardType="numeric" /></View>
-          <View style={{ width: "31%" }}><TextField label="SGST %" value={sgstRate} onChangeText={setSgstRate} keyboardType="numeric" /></View>
-          <View style={{ width: "31%" }}><TextField label="IGST %" value={igstRate} onChangeText={setIgstRate} keyboardType="numeric" /></View>
-        </View>
-      </View>
-
-      {/* Billing Terms */}
-      <View className="rounded-2xl mt-4 p-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-        <View className="flex-row items-center justify-between mb-3">
-          <Text style={{ color: `${colors.mutedForeground}cc`, fontSize: 10, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 1 }}>Billing Terms</Text>
-          <Pressable onPress={() => setTermsSheetOpen(true)} className="px-2.5 py-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.foreground, fontSize: 10.5, fontFamily: fonts.heading.medium }}>Add Term</Text>
-          </Pressable>
-        </View>
-        {selectedTerms.length === 0 ? (
-          <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 11.5, fontFamily: fonts.body.regular }}>No billing terms applied.</Text>
-        ) : (
-          selectedTerms.map((t, i) => (
-            <View key={i} className="flex-row items-center justify-between px-3 py-2 rounded-lg mb-1.5" style={{ backgroundColor: t.deductionType === "Addition" ? "#10b9811a" : "#ef44441a" }}>
-              <Text style={{ color: t.deductionType === "Addition" ? "#10b981" : "#ef4444", fontSize: 11.5, fontFamily: fonts.body.medium }}>
-                {t.masterTermName} · {t.type === "percentage" ? `${t.value}%` : `₹${t.value}`} · {t.appliedOn === "post-gst" ? "post-GST" : "pre-GST"}
-              </Text>
-              <Pressable onPress={() => setSelectedTerms((prev) => prev.filter((p) => p !== t))} hitSlop={6}>
-                <X size={12} color={colors.mutedForeground} />
-              </Pressable>
-            </View>
-          ))
-        )}
-      </View>
-
-      {/* EMI */}
-      <View className="rounded-2xl mt-4 p-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-        <View className="flex-row items-center justify-between">
-          <View className="flex-row items-center gap-2">
-            <CreditCard size={13} color={ACCENT} />
-            <Text style={{ color: `${colors.mutedForeground}cc`, fontSize: 10, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 1 }}>EMI / Installments</Text>
-          </View>
-          <Switch value={emiEnabled} onValueChange={setEmiEnabled} trackColor={{ false: colors.muted, true: `${ACCENT}80` }} thumbColor={emiEnabled ? ACCENT : colors.mutedForeground} />
-        </View>
-        {emiEnabled && (
-          <View className="flex-row flex-wrap justify-between mt-3">
-            <View style={{ width: "48%" }}><TextField label="Installments" value={emiCount} onChangeText={setEmiCount} keyboardType="numeric" /></View>
-            <View style={{ width: "48%" }}><TextField label="Start Date" value={emiStartDate} onChangeText={setEmiStartDate} placeholder="YYYY-MM-DD" /></View>
-          </View>
-        )}
-      </View>
-
-      {/* Net Payable */}
-      <View className="flex-row items-center justify-between px-4 py-3 rounded-xl mt-4 mb-2" style={{ backgroundColor: `${ACCENT}18`, borderWidth: 1, borderColor: `${ACCENT}33` }}>
-        <Text style={{ color: ACCENT, fontSize: 11, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 0.8 }}>Net Payable</Text>
-        <Text style={{ color: ACCENT, fontSize: 15, fontFamily: fonts.heading.bold }}>₹{fmt(netAmount)}</Text>
-      </View>
-
-      <Pressable
-        onPress={() => saveMutation.mutate()}
-        disabled={saveMutation.isPending}
-        className="rounded-xl items-center mt-1"
-        style={{ backgroundColor: ACCENT, paddingVertical: 13, opacity: saveMutation.isPending ? 0.6 : 1 }}
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }} keyboardShouldPersistTaps="handled">
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title={isEditing ? "Edit invoice" : "New invoice"}
+        subtitle={docNo || "Book an expense against a purchase order, confirmed work done, a GRN or an invoice document"}
+        action={<Key label="Back" icon={<ArrowLeft size={13} color={S.ink} />} onPress={() => navigation.goBack()} style={{ alignSelf: "flex-start" }} />}
       >
-        {saveMutation.isPending ? <ActivityIndicator color="#fff" /> : <Text style={{ color: "#fff", fontSize: 13.5, fontFamily: fonts.heading.semibold }}>{isEditing ? "Update Invoice" : "Create Invoice"}</Text>}
-      </Pressable>
+        <Panel title="Party & project">
+          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
+            <PickerField label="Company *" value={companyLabel} placeholder="Select company…" onPress={() => setCompanyPickerOpen(true)} />
+            <PickerField label="Project" value={projectLabel} placeholder="Select project…" onPress={() => setProjectPickerOpen(true)} disabled={!companyId} />
+            <PickerField label={finYearLocked ? "Financial Year · locked" : "Financial Year"} value={finYear} placeholder="Select FY…" onPress={() => setFinYearPickerOpen(true)} disabled={finYearLocked} />
+            <PickerField label="Supplier / Vendor" value={supplier} placeholder="Select payable party…" onPress={() => setSupplierPickerOpen(true)} disabled={!!selectedPO || !!selectedWD || !!grnMerged} />
+            <PickerField label="Cost Centre" value={costCenterLabel} placeholder="Select cost centre…" onPress={() => setCostCenterPickerOpen(true)} wide />
+          </View>
+        </Panel>
+
+        <Panel title="Document selection">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <Seg
+              options={SOURCE_TABS.map((t) => ({ value: t.kind, label: t.label }))}
+              value={sourceKind}
+              onChange={(kind) => {
+                setSourceKind(kind);
+                setSelectedPO(null);
+                setSelectedWD(null);
+                setSelectedGRNIds([]);
+                setGrnMerged(null);
+                setTodLabel("");
+                setDocNo("");
+                setBasicAmount("");
+              }}
+            />
+          </ScrollView>
+
+          <PickerField
+            label="Selected Document"
+            value={docLabel}
+            placeholder={sourceKind === "GRN" ? "Pick one or more GRNs (same PO to combine)…" : `Pick a ${sourceLabel.toLowerCase()}…`}
+            onPress={() => (sourceKind === "GRN" ? setGrnSheetOpen(true) : setDocPickerOpen(true))}
+            wide
+          />
+
+          {!!docNo && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Label>Doc No.</Label>
+              <Text style={{ color: S.ink, fontSize: 13, fontFamily: fonts.heading.semibold }}>{docNo}</Text>
+            </View>
+          )}
+
+          {/* GRN items: only for a GRN source; every selected GRN's items, merged */}
+          {sourceKind === "GRN" && grnMerged && grnMerged.items.length > 0 && (
+            <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+              {grnMerged.items.map((it, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft }}>
+                  <Text numberOfLines={1} style={{ flex: 1, color: S.ink, fontSize: 12.5, fontFamily: fonts.body.medium }}>{it.itemName || "—"}</Text>
+                  <Text style={{ color: S.ink2, fontSize: 12, fontFamily: fonts.heading.semibold }}>
+                    {it.receivedQty} {it.uom}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </Panel>
+
+        <Panel title="Booking information">
+          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
+            <DateField label="Booking Date" value={bookingDate} onChangeText={setBookingDate} />
+            <DateField label="Due Date" value={dueDate} onChangeText={setDueDate} />
+          </View>
+          <TextField label="Remarks" value={remarks} onChangeText={setRemarks} placeholder="Internal remarks…" multiline />
+        </Panel>
+
+        <Panel title="Amount & GST">
+          <TextField label="Basic Amount (₹)" value={basicAmount} onChangeText={setBasicAmount} placeholder="0.00" keyboardType="numeric" />
+          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+            <TextField label="CGST %" value={cgstRate} onChangeText={setCgstRate} keyboardType="numeric" width="31%" />
+            <TextField label="SGST %" value={sgstRate} onChangeText={setSgstRate} keyboardType="numeric" width="31%" />
+            <TextField label="IGST %" value={igstRate} onChangeText={setIgstRate} keyboardType="numeric" width="31%" />
+          </View>
+        </Panel>
+
+        <Panel title="Billing terms">
+          <Key label="Add term" icon={<Plus size={13} color={S.ink} />} onPress={() => setTermsSheetOpen(true)} style={{ alignSelf: "flex-start", minHeight: 36 }} />
+          {selectedTerms.length === 0 ? (
+            <Body size={12.5} color={S.graphite}>No billing terms applied.</Body>
+          ) : (
+            <View>
+              {selectedTerms.map((t, i) => {
+                const add = t.deductionType === "Addition";
+                return (
+                  <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft }}>
+                    <Text style={{ width: 14, color: add ? S.blue : S.red, fontSize: 15, fontFamily: fonts.heading.semibold }}>{add ? "+" : "−"}</Text>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={{ color: S.ink, fontSize: 12.5, fontFamily: fonts.body.medium }}>{t.masterTermName}</Text>
+                      <Body size={11} color={S.graphite}>{`${t.type === "percentage" ? `${t.value}%` : `₹${t.value}`} · ${t.appliedOn === "post-gst" ? "post-GST" : "pre-GST"}`}</Body>
+                    </View>
+                    <IconKey onPress={() => setSelectedTerms((prev) => prev.filter((x) => x !== t))} size={30} red>
+                      <X size={12} color={S.red} />
+                    </IconKey>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </Panel>
+
+        <Panel title="EMI / installments" icon={<CreditCard size={14} color={S.ink} />}>
+          <Seg
+            options={[
+              { value: "off", label: "No EMI" },
+              { value: "on", label: "Pay by EMI" },
+            ]}
+            value={emiEnabled ? "on" : "off"}
+            onChange={(v) => setEmiEnabled(v === "on")}
+          />
+          {emiEnabled && (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
+              <TextField label="Installments" value={emiCount} onChangeText={setEmiCount} keyboardType="numeric" width="48%" />
+              <DateField label="Start Date" value={emiStartDate} onChangeText={setEmiStartDate} />
+            </View>
+          )}
+        </Panel>
+
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 12, borderTopWidth: 1.5, borderTopColor: S.ink }}>
+          <Label color={S.ink}>Net payable</Label>
+          <Text style={{ color: S.ink, fontSize: 22, letterSpacing: -0.5, fontFamily: fonts.heading.semibold }}>₹{fmt(netAmount)}</Text>
+        </View>
+
+        <Key tone="ink" label={saveMutation.isPending ? "Saving…" : isEditing ? "Update invoice" : "Create invoice"} onPress={() => saveMutation.mutate()} disabled={saveMutation.isPending} />
+      </SheetShell>
 
       {/* ── Pickers ── */}
       <OptionSheet
         visible={companyPickerOpen}
-        title="Select Company"
+        title="Select company"
         options={(companies as any[]).map((c) => ({ id: c.id, label: c.label }))}
         onClose={() => setCompanyPickerOpen(false)}
         onSelect={(id) => {
           setCompanyId(id);
           setCompanyLabel((companies as any[]).find((c) => String(c.id) === id)?.label ?? "");
-          setProjectId(""); setProjectLabel("");
+          setProjectId("");
+          setProjectLabel("");
           setCompanyPickerOpen(false);
         }}
       />
       <OptionSheet
         visible={projectPickerOpen}
-        title="Select Project"
+        title="Select project"
         options={projects.map((p) => ({ id: p.id, label: p.label }))}
         onClose={() => setProjectPickerOpen(false)}
         onSelect={(id) => {
@@ -648,14 +532,17 @@ export default function NewInvoiceScreen() {
       />
       <OptionSheet
         visible={finYearPickerOpen}
-        title="Select Financial Year"
+        title="Select financial year"
         options={(finYears as any[]).map((f) => ({ id: f.label, label: f.label }))}
         onClose={() => setFinYearPickerOpen(false)}
-        onSelect={(id) => { setFinYear(id); setFinYearPickerOpen(false); }}
+        onSelect={(id) => {
+          setFinYear(id);
+          setFinYearPickerOpen(false);
+        }}
       />
       <OptionSheet
         visible={supplierPickerOpen}
-        title="Select Payable Party"
+        title="Select payable party"
         options={payableParties.map((p) => ({ id: p.id, label: p.label, sub: p.group }))}
         onClose={() => setSupplierPickerOpen(false)}
         onSelect={(id) => {
@@ -667,7 +554,7 @@ export default function NewInvoiceScreen() {
       />
       <OptionSheet
         visible={costCenterPickerOpen}
-        title="Select Cost Centre"
+        title="Select cost centre"
         options={costCenters.map((c) => ({ id: c.id, label: c.label }))}
         onClose={() => setCostCenterPickerOpen(false)}
         onSelect={(id) => {
@@ -677,18 +564,22 @@ export default function NewInvoiceScreen() {
       />
       <OptionSheet
         visible={docPickerOpen}
-        title={`Select ${SOURCE_TABS.find((t) => t.kind === sourceKind)?.label}`}
+        title={`Select ${sourceLabel.toLowerCase()}`}
         options={
           sourceKind === "PO"
-            ? (poLoading ? [] : poList.map((po) => ({ id: po.PurchaseOrderID, label: po.PurchaseOrderNo, sub: `${po.SupplierName ?? "—"} · ₹${fmt(po.TotalAmount ?? 0)}` })))
+            ? poLoading
+              ? []
+              : poList.map((po) => ({ id: po.PurchaseOrderID, label: po.PurchaseOrderNo, sub: `${po.SupplierName ?? "—"} · ₹${fmt(po.TotalAmount ?? 0)}` }))
             : sourceKind === "WORK_DONE"
-              ? (wdLoading ? [] : wdList.map((wd) => ({ id: wd.ID, label: wd.DocNo ?? `#${wd.ID}`, sub: `${wd.ContractorName ?? "—"} · ₹${fmt(wd.CertifiedAmount ?? 0)}` })))
+              ? wdLoading
+                ? []
+                : wdList.map((wd) => ({ id: wd.ID, label: wd.DocNo ?? `#${wd.ID}`, sub: `${wd.ContractorName ?? "—"} · ₹${fmt(wd.CertifiedAmount ?? 0)}` }))
               : todTypes.map((t) => ({ id: t.TypeOfDocId, label: t.Description, sub: t.DocNoPrefix ?? t.FullPrefix ?? t.Prefix }))
         }
         onClose={() => setDocPickerOpen(false)}
         onSelect={(id) => {
           if (sourceKind === "PO") {
-            const po = poList.find((p) => String(p.PurchaseOrderID) === id);
+            const po = poList.find((x) => String(x.PurchaseOrderID) === id);
             if (po) applyPO(po);
           } else if (sourceKind === "WORK_DONE") {
             const wd = wdList.find((w) => String(w.ID) === id);
@@ -700,95 +591,80 @@ export default function NewInvoiceScreen() {
         }}
       />
 
-      {/* GRN multi-select — check one or more GRNs off the same PO to
-          combine into one invoice (aggregateGRNsForInvoice); once a GRN is
-          checked, others are narrowed to that same PO. */}
-      <Modal visible={grnSheetOpen} transparent animationType="fade" onRequestClose={() => setGrnSheetOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={() => setGrnSheetOpen(false)}>
-          <Pressable onPress={() => {}} style={{ backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "75%", borderWidth: 1, borderColor: colors.border }}>
-            <View className="flex-row items-center justify-between px-4 py-3" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
-              <View>
-                <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>Select GRN(s)</Text>
-                <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 10, fontFamily: fonts.body.regular, marginTop: 1 }}>
-                  Check more than one to combine — must share the same PO.
-                </Text>
-              </View>
-              <Pressable onPress={() => setGrnSheetOpen(false)} hitSlop={8}><X size={16} color={colors.mutedForeground} /></Pressable>
-            </View>
-            <ScrollView contentContainerStyle={{ paddingVertical: 8, paddingBottom: 20 }}>
-              {grnLoading ? (
-                <View className="py-8 items-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-              ) : grnList.length === 0 ? (
-                <Text className="text-center py-8" style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>No GRNs found</Text>
-              ) : (
-                grnList.map((g) => {
-                  const isSel = selectedGRNIds.includes(g.GRNID);
-                  const anchorPOID = selectedGRNIds.length > 0 ? grnList.find((x) => x.GRNID === selectedGRNIds[0])?.POID : null;
-                  const disabled = !isSel && anchorPOID != null && g.POID !== anchorPOID;
-                  return (
-                    <Pressable
-                      key={g.GRNID}
-                      disabled={disabled}
-                      onPress={() => setSelectedGRNIds((prev) => (isSel ? prev.filter((id) => id !== g.GRNID) : [...prev, g.GRNID]))}
-                      className="flex-row items-center gap-2.5 px-5 py-3"
-                      style={{ opacity: disabled ? 0.35 : 1, backgroundColor: isSel ? `${ACCENT}0d` : "transparent" }}
-                    >
-                      <View className="w-4 h-4 rounded items-center justify-center" style={{ backgroundColor: isSel ? ACCENT : "transparent", borderWidth: 1, borderColor: isSel ? ACCENT : colors.border }}>
-                        {isSel && <Check size={10} color="#fff" />}
-                      </View>
-                      <View className="flex-1 min-w-0">
-                        <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.body.medium }}>{g.GRNNo || g.DocNo || `#${g.GRNID}`}</Text>
-                        <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular, marginTop: 2 }}>{g.SupplierName ?? "—"} · ₹{fmt(g.TotalAmount ?? 0)}</Text>
-                      </View>
-                    </Pressable>
-                  );
-                })
-              )}
-            </ScrollView>
-            <Pressable
+      {/* GRNs: tick one or more off the same PO to combine into one invoice (aggregateGRNsForInvoice); once one is
+          ticked, GRNs from other POs can't be. */}
+      <SheetPicker
+        visible={grnSheetOpen}
+        title="Select GRN(s)"
+        note="Tick more than one to combine; they must share the same PO."
+        onClose={() => setGrnSheetOpen(false)}
+        footer={
+          <View style={{ padding: 12, borderTopWidth: 1, borderTopColor: S.ink }}>
+            <Key
+              tone="ink"
+              label={grnMerging ? "Combining…" : selectedGRNIds.length > 1 ? `Combine ${selectedGRNIds.length} GRNs` : "Use this GRN"}
               onPress={confirmGrnSelection}
               disabled={grnMerging || selectedGRNIds.length === 0}
-              className="items-center py-3 mx-4 mb-4 rounded-xl"
-              style={{ backgroundColor: ACCENT, opacity: grnMerging || selectedGRNIds.length === 0 ? 0.5 : 1 }}
-            >
-              {grnMerging ? <ActivityIndicator color="#fff" /> : (
-                <Text style={{ color: "#fff", fontSize: 13, fontFamily: fonts.heading.semibold }}>
-                  {selectedGRNIds.length > 1 ? `Combine ${selectedGRNIds.length} GRNs` : "Use this GRN"}
-                </Text>
-              )}
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Billing terms multi-select */}
-      <Modal visible={termsSheetOpen} transparent animationType="fade" onRequestClose={() => setTermsSheetOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={() => setTermsSheetOpen(false)}>
-          <Pressable onPress={() => {}} style={{ backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "65%", borderWidth: 1, borderColor: colors.border }}>
-            <View className="flex-row items-center justify-between px-4 py-3" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
-              <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>Billing Terms</Text>
-              <Pressable onPress={() => setTermsSheetOpen(false)} hitSlop={8}><X size={16} color={colors.mutedForeground} /></Pressable>
+            />
+          </View>
+        }
+      >
+        <ScrollView contentContainerStyle={{ paddingBottom: 12 }}>
+          {grnLoading ? (
+            <View style={{ padding: 16 }}>
+              <Skel h={40} />
+              <Skel h={40} />
             </View>
-            <ScrollView contentContainerStyle={{ paddingVertical: 8, paddingBottom: 20 }}>
-              {billingTermOptions.length === 0 ? (
-                <Text className="text-center py-8" style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>No billing terms found</Text>
-              ) : (
-                billingTermOptions.map((t) => {
-                  const isSel = selectedTerms.some((s) => s.masterTermName === t.Name);
-                  return (
-                    <Pressable key={t.BillingTermID} onPress={() => toggleTerm(t)} className="flex-row items-center gap-2.5 px-5 py-3" style={isSel ? { backgroundColor: `${ACCENT}0d` } : undefined}>
-                      <View className="w-4 h-4 rounded items-center justify-center" style={{ backgroundColor: isSel ? ACCENT : "transparent", borderWidth: 1, borderColor: isSel ? ACCENT : colors.border }}>
-                        {isSel && <Check size={10} color="#fff" />}
-                      </View>
-                      <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.body.medium }}>{t.Name} ({t.DiscountValue}{t.CalculationType === "flat" ? "₹" : "%"})</Text>
-                    </Pressable>
-                  );
-                })
-              )}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+          ) : grnList.length === 0 ? (
+            <Body color={S.graphite} style={{ textAlign: "center", paddingVertical: 28 }}>No GRNs found</Body>
+          ) : (
+            grnList.map((g) => {
+              const isSel = selectedGRNIds.includes(g.GRNID);
+              const anchorPOID = selectedGRNIds.length > 0 ? grnList.find((x) => x.GRNID === selectedGRNIds[0])?.POID : null;
+              const blocked = !isSel && anchorPOID != null && g.POID !== anchorPOID;
+              return (
+                <OptionRow
+                  key={g.GRNID}
+                  check
+                  disabled={blocked}
+                  selected={isSel}
+                  label={g.GRNNo || g.DocNo || `#${g.GRNID}`}
+                  sub={`${g.SupplierName ?? "—"} · ₹${fmt(g.TotalAmount ?? 0)}`}
+                  onPress={() => setSelectedGRNIds((prev) => (isSel ? prev.filter((x) => x !== g.GRNID) : [...prev, g.GRNID]))}
+                />
+              );
+            })
+          )}
+        </ScrollView>
+      </SheetPicker>
+
+      {/* Billing terms: several may be chosen */}
+      <SheetPicker
+        visible={termsSheetOpen}
+        title="Billing terms"
+        onClose={() => setTermsSheetOpen(false)}
+        footer={
+          <View style={{ padding: 12, borderTopWidth: 1, borderTopColor: S.ink }}>
+            <Key tone="ink" label={`Done${selectedTerms.length ? ` · ${selectedTerms.length} applied` : ""}`} onPress={() => setTermsSheetOpen(false)} />
+          </View>
+        }
+      >
+        <ScrollView contentContainerStyle={{ paddingBottom: 12 }}>
+          {billingTermOptions.length === 0 ? (
+            <Body color={S.graphite} style={{ textAlign: "center", paddingVertical: 28 }}>No billing terms found</Body>
+          ) : (
+            billingTermOptions.map((t) => (
+              <OptionRow
+                key={t.BillingTermID}
+                check
+                selected={selectedTerms.some((x) => x.masterTermName === t.Name)}
+                label={`${t.Name} (${t.DiscountValue}${t.CalculationType === "flat" ? "₹" : "%"})`}
+                onPress={() => toggleTerm(t)}
+              />
+            ))
+          )}
+        </ScrollView>
+      </SheetPicker>
     </ScrollView>
   );
 }

@@ -1,99 +1,57 @@
-// RN port of StockTransfer.tsx's TransferPreviewModal — single scroll, no
-// tabs (web has none either). "Make GRN from Transfer" lives on the list
-// card (StockTransferListScreen.tsx), same as web keeps it in the table
-// row rather than the preview dialog — see MakeGRNFromTransferModal.tsx.
+// RN port of StockTransfer.tsx's TransferPreviewModal, on the drawing sheet: the transfer's number as the title with its
+// date and who made it; its approval mark; the from → to godowns; the items moved line by line; remarks. "Make GRN"
+// stays on the register's row, as the web keeps it in the table rather than the preview (MakeGRNFromTransferModal).
 import { useQuery } from "@tanstack/react-query";
-import { View, Text, Modal, Pressable, ScrollView, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { X, Repeat, ArrowRight } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { View, Text } from "react-native";
+import { ArrowRight, Repeat } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { getStockTransferById, type StockTransfer } from "@/api/stockTransferApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { InfoGrid, Label, Panel } from "@/components/sheet/Sheet";
+import { DetailSheet, LineList, fmtDate } from "@/components/sheet/Register";
 
-function fmtDate(d: string | null | undefined) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+function Godown({ label, name }: { label: string; name: string }) {
+  return (
+    <View style={{ flex: 1, borderWidth: 1, borderColor: S.ink, padding: 10, gap: 4 }}>
+      <Label>{label}</Label>
+      <Text numberOfLines={2} style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>{name || "—"}</Text>
+    </View>
+  );
 }
 
 export function StockTransferDetailModal({ recordId, onClose }: { recordId: number | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
-
-  const { data: transfer, isLoading } = useQuery<StockTransfer>({
+  const { data: transfer, isLoading, isError, error, refetch } = useQuery<StockTransfer>({
     queryKey: ["trf-detail", recordId],
     queryFn: () => getStockTransferById(recordId!),
     enabled: recordId != null,
   });
 
-  if (recordId == null) return null;
-
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5 flex-1 min-w-0">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#0891b226" }}>
-              <Repeat size={14} color="#0891b2" />
-            </View>
-            <View className="min-w-0">
-              <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>Stock Transfer</Text>
-              {!!transfer?.DocNo && <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>{transfer.DocNo}</Text>}
-            </View>
+    <DetailSheet
+      visible={recordId != null}
+      onClose={onClose}
+      eyebrow="CivilierERP · Material · Stock transfer"
+      title={transfer?.DocNo || "Stock transfer"}
+      subtitle={transfer ? [fmtDate(transfer.TransferDate), transfer.CreatedBy ? transfer.CreatedBy.split("@")[0] : null].filter(Boolean).join(" · ") : undefined}
+      loading={isLoading || !transfer}
+      error={isError ? (error as Error)?.message || "Could not load this transfer." : null}
+      onRetry={() => refetch()}
+    >
+      {transfer && (
+        <>
+          <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Godown label="From" name={transfer.FromGodownName} />
+            <ArrowRight size={16} color={S.ink} />
+            <Godown label="To" name={transfer.ToGodownName} />
           </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
-
-        {isLoading || !transfer ? (
-          <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-        ) : (
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
-            <View className="flex-row items-center justify-between mb-4">
-              <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>
-                {fmtDate(transfer.TransferDate)}{transfer.CreatedBy ? ` · ${transfer.CreatedBy.split("@")[0]}` : ""}
-              </Text>
-              <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} />
-            </View>
-
-            <View className="flex-row items-center gap-2 mb-4">
-              <View className="flex-1 rounded-xl px-3 py-2.5" style={{ borderWidth: 1, borderColor: "#f9731640", backgroundColor: "#f973160d" }}>
-                <Text style={{ color: "#f97316", fontSize: 9, fontFamily: fonts.heading.medium, textTransform: "uppercase" }}>From</Text>
-                <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold, marginTop: 2 }}>{transfer.FromGodownName}</Text>
-              </View>
-              <ArrowRight size={16} color={colors.mutedForeground} />
-              <View className="flex-1 rounded-xl px-3 py-2.5" style={{ borderWidth: 1, borderColor: "#05966940", backgroundColor: "#0596690d" }}>
-                <Text style={{ color: "#059669", fontSize: 9, fontFamily: fonts.heading.medium, textTransform: "uppercase" }}>To</Text>
-                <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold, marginTop: 2 }}>{transfer.ToGodownName}</Text>
-              </View>
-            </View>
-
-            {!!transfer.TransferItems?.length && (
-              <View className="mb-3">
-                <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.heading.semibold, textTransform: "uppercase", marginBottom: 6 }}>
-                  Items ({transfer.TransferItems.length})
-                </Text>
-                <View className="rounded-xl overflow-hidden" style={{ borderWidth: 1, borderColor: colors.border }}>
-                  {transfer.TransferItems.map((it, i) => (
-                    <View key={i} className="flex-row items-center justify-between px-3 py-2.5" style={{ borderTopWidth: i > 0 ? 1 : 0, borderTopColor: `${colors.border}80` }}>
-                      <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, flex: 1, marginRight: 8 }}>{it.itemName || it.itemId}</Text>
-                      <Text style={{ color: colors.primary, fontSize: 12, fontFamily: fonts.heading.semibold }}>{it.qty} {it.uom || ""}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {!!transfer.Remarks && (
-              <View className="rounded-xl px-3 py-2.5" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.muted}30` }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.heading.medium, textTransform: "uppercase", marginBottom: 4 }}>Remarks</Text>
-                <Text style={{ color: colors.foreground, fontSize: 12 }}>{transfer.Remarks}</Text>
-              </View>
-            )}
-          </ScrollView>
-        )}
-      </View>
-    </Modal>
+          <Panel title={`Items (${transfer.TransferItems?.length ?? 0})`} icon={<Repeat size={14} color={S.ink} />}>
+            <LineList empty="No items on this transfer." rows={(transfer.TransferItems ?? []).map((it, i) => ({ key: i, title: it.itemName || it.itemId, right: `${it.qty} ${it.uom || ""}` }))} />
+          </Panel>
+          {!!transfer.Remarks && <InfoGrid items={[{ label: "Remarks", value: transfer.Remarks, wide: true }]} />}
+        </>
+      )}
+    </DetailSheet>
   );
 }

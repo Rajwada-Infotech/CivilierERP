@@ -10,11 +10,17 @@
 // Identical in every Civilier mobile app; only the `appKey` differs.
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
-import Constants from "expo-constants";
+import Constants, { ExecutionEnvironment } from "expo-constants";
+import { isRunningInExpoGo } from "expo";
 import * as SecureStore from "expo-secure-store";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
 const TOKEN_KEY = "push_token";
+
+/** Expo Go (SDK 53 and later) has no remote push on Android, and on SDK 58 its push calls throw. Push needs a real
+ * build (the APK); in Expo Go and on the web the app runs without it. */
+export const pushAvailable =
+  Platform.OS !== "web" && !isRunningInExpoGo() && Constants.executionEnvironment !== ExecutionEnvironment.StoreClient;
 
 // While the app is open, still show the notification as a banner.
 Notifications.setNotificationHandler({
@@ -37,7 +43,7 @@ async function post(path: string, body: unknown): Promise<boolean> {
 
 /** Returns the Expo push token once it is registered with the backend, else null. */
 export async function registerForPushAsync(appKey: string): Promise<string | null> {
-  if (Platform.OS === "web") return null;
+  if (!pushAvailable) return null;
   try {
     // Android needs a channel before it will show the permission prompt (13+) or any notification.
     if (Platform.OS === "android") {

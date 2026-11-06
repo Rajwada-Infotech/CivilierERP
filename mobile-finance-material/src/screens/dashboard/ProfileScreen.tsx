@@ -22,7 +22,7 @@ function InfoRow({ icon: Icon, label, value }: { icon: React.ComponentType<{ siz
   if (!value) return null;
   return (
     <View className="flex-row items-start gap-3" style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.muted }}>
-      <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: `${colors.primary}1a`, alignItems: "center", justifyContent: "center", marginTop: 1 }}>
+      <View style={{ width: 26, height: 26, borderRadius: 0, backgroundColor: `${colors.primary}1a`, alignItems: "center", justifyContent: "center", marginTop: 1 }}>
         <Icon size={12} color={colors.primary} />
       </View>
       <View className="flex-1 min-w-0">
@@ -55,10 +55,10 @@ export default function ProfileScreen() {
         colors={["#1e1b4b", "#312e81", colors.primary]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={{ borderRadius: 18, padding: 20, marginBottom: 16, overflow: "hidden" }}
+        style={{ borderRadius: 0, padding: 20, marginBottom: 16, overflow: "hidden" }}
       >
         <View className="flex-row items-center gap-4">
-          <View style={{ width: 58, height: 58, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)", alignItems: "center", justifyContent: "center" }}>
+          <View style={{ width: 58, height: 58, borderRadius: 0, backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)", alignItems: "center", justifyContent: "center" }}>
             <Text style={{ fontSize: 19, fontFamily: fonts.heading.bold, color: "#fff" }}>{initials}</Text>
           </View>
           <View className="flex-1 min-w-0">
@@ -72,7 +72,7 @@ export default function ProfileScreen() {
         </View>
       </LinearGradient>
 
-      <View style={{ borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 16, marginBottom: 16 }}>
+      <View style={{ borderRadius: 0, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 16, marginBottom: 16 }}>
         <Text style={{ fontSize: 13, fontFamily: fonts.heading.bold, color: colors.foreground, marginBottom: 4 }}>Account</Text>
         <InfoRow icon={Mail} label="Email" value={currentUser?.email} />
         <InfoRow icon={Shield} label="Role" value={role} />
@@ -87,10 +87,10 @@ export default function ProfileScreen() {
       <Pressable
         onPress={confirmSignOut}
         className="flex-row items-center justify-center gap-2"
-        style={{ borderRadius: 12, borderWidth: 1, borderColor: `${colors.destructive}40`, backgroundColor: `${colors.destructive}14`, paddingVertical: 13 }}
+        style={{ borderRadius: 0, borderWidth: 1, borderColor: `${colors.destructive}40`, backgroundColor: `${colors.destructive}14`, paddingVertical: 13 }}
       >
-        <LogOut size={15} color="#f87171" />
-        <Text style={{ fontSize: 13, fontFamily: fonts.body.semibold, color: "#f87171" }}>Sign Out</Text>
+        <LogOut size={15} color="#e34545" />
+        <Text style={{ fontSize: 13, fontFamily: fonts.body.semibold, color: "#e34545" }}>Sign Out</Text>
       </Pressable>
     </ScrollView>
   );

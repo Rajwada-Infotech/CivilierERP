@@ -96,7 +96,7 @@ export function ProjectGroupedList<T>({
       renderSectionHeader={({ section }) => (
         <Pressable
           onPress={() => setToggled((m) => ({ ...m, [section.title]: !section.open }))}
-          className="flex-row items-center gap-2 px-3 py-3 rounded-xl mb-2"
+          className="flex-row items-center gap-2 px-3 py-3 mb-2"
           style={{ backgroundColor: colors.background, borderWidth: 1, borderColor: section.open ? `${accent}55` : `${colors.border}99` }}
         >
           {section.open ? <ChevronDown size={16} color={colors.mutedForeground} /> : <ChevronRight size={16} color={colors.mutedForeground} />}
@@ -118,7 +118,7 @@ export function ProjectGroupedList<T>({
       }
       ListFooterComponent={loadingMore ? (
         <View className="py-4 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-      ) : null}
+      ) : undefined}
     />
   );
 }

@@ -13,13 +13,13 @@ export type PaymentMode = "Cash" | "Check" | "UPI" | "NEFT" | "RTGS" | "Card" | 
 export const PAYMENT_MODES: PaymentMode[] = ["Cash", "Check", "UPI", "NEFT", "RTGS", "Card", "EMI"];
 
 export const MODE_COLOR: Record<string, string> = {
-  Cash: "#10b981",
-  Check: "#3b82f6",
-  UPI: "#8b5cf6",
-  NEFT: "#0ea5e9",
-  RTGS: "#06b6d4",
-  Card: "#f97316",
-  EMI: "#6366f1",
+  Cash: "#6467f2",
+  Check: "#6467f2",
+  UPI: "#6467f2",
+  NEFT: "#6467f2",
+  RTGS: "#6467f2",
+  Card: "#dcdfe5",
+  EMI: "#6467f2",
 };
 
 export interface ReceivedPaymentRecord {

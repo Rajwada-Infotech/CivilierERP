@@ -1,66 +1,54 @@
-// RN port of src/pages/material/ShortClose.tsx. Unlike every other Material
-// port so far, this is a single search-select-confirm screen, not a
-// list+detail+form trio — the web page has no detail view, no create/edit
-// form, no print, no CSV, no approval-chain: it's a direct, irreversible,
-// permission-gated bulk status flip on already partially-fulfilled POs/MRs.
-// The candidate list only ever contains documents the backend has already
-// determined are "Partial" (approved PO with some-but-not-all qty received,
-// or MR with Status='Partially Fulfilled') — there's nothing to validate
-// client-side beyond "at least one selected".
+// RN port of src/pages/material/ShortClose.tsx, on the drawing sheet as the web draws it: a single search-select-confirm
+// page, not a list + detail + form trio. Ink segments choose purchase orders or material requests; financial year,
+// company and project narrow the search; the partly fulfilled documents come back as ruled rows with a box to tick
+// (total / completed / pending); "Short close n selected" (with the edit right) opens a red-ruled confirmation with
+// optional remarks. It is a direct, irreversible bulk status flip: the backend only ever offers documents already in
+// Partial status, so nothing needs validating here beyond "at least one ticked".
 import { useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, TextInput, Alert, Modal } from "react-native";
+import { View, Text, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Search, CheckSquare, Square, AlertTriangle, X } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { Check, Search } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { usePageRights } from "@/hooks/usePageRights";
-import {
-  searchShortCloseCandidates, processShortClose, getCompanies, getProjects, fetchFinYearOptions,
-  type ShortCloseDocType, type ShortCloseCandidate,
-} from "@/api/shortCloseApi";
+import { searchShortCloseCandidates, processShortClose, getCompanies, getProjects, fetchFinYearOptions, type ShortCloseDocType, type ShortCloseCandidate } from "@/api/shortCloseApi";
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/screens/finance/payment/OptionPicker";
+import { Body, Field, Input, Key, Label, Notice, Panel, Press, RegisterHead, Seg, SheetMark, SheetShell } from "@/components/sheet/Sheet";
+import { SheetPicker } from "@/components/sheet/FormParts";
+import { Facts, NoAccess, RegisterBox, RegisterLoading, SheetPage, fmtDate } from "@/components/sheet/Register";
 
-function fmtDate(d: string | null | undefined) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-}
+const fmtQty = (n: number | null | undefined) => (Number(n) || 0).toFixed(2);
 
-function fmtQty(n: number | null | undefined) {
-  return (Number(n) || 0).toFixed(2);
-}
-
-function CandidateRow({ candidate, selected, onToggle }: { candidate: ShortCloseCandidate; selected: boolean; onToggle: () => void }) {
+function Tickbox({ on }: { on: boolean }) {
   return (
-    <Pressable onPress={onToggle} className="rounded-2xl p-3.5 mb-2.5 flex-row" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: selected ? colors.primary : `${colors.border}99` }}>
-      <View className="mr-3 justify-center">
-        {selected ? <CheckSquare size={20} color={colors.primary} /> : <Square size={20} color={colors.mutedForeground} />}
+    <View style={{ width: 18, height: 18, borderWidth: 1.5, borderColor: S.ink, backgroundColor: on ? S.ink : "transparent", alignItems: "center", justifyContent: "center" }}>
+      {on && <Check size={11} color={S.paper} />}
+    </View>
+  );
+}
+
+function CandidateRow({ c, on, onToggle, last }: { c: ShortCloseCandidate; on: boolean; onToggle: () => void; last: boolean }) {
+  return (
+    <Press
+      onPress={onToggle}
+      style={(pressed) => ({ flexDirection: "row", gap: 12, paddingVertical: 12, borderBottomWidth: last ? 0 : 1, borderBottomColor: S.ruleSoft, backgroundColor: on || pressed ? S.blueWash : "transparent" })}
+    >
+      <View style={{ paddingTop: 1 }}>
+        <Tickbox on={on} />
       </View>
-      <View style={{ flex: 1 }}>
-        <View className="flex-row items-center justify-between mb-1">
-          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.bold, flex: 1, marginRight: 8 }}>{candidate.docNo}</Text>
-          <View className="px-1.5 py-0.5 rounded" style={{ backgroundColor: `${colors.mutedForeground}1a`, borderWidth: 1, borderColor: `${colors.mutedForeground}40` }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 8.5, fontFamily: fonts.heading.bold }}>{candidate.status}</Text>
-          </View>
+      <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+          <Text style={{ flex: 1, fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>
+            {c.docNo}
+            <Text style={{ color: S.graphite, fontFamily: fonts.body.regular, fontSize: 11.5 }}>{`  ${fmtDate(c.docDate)}`}</Text>
+          </Text>
+          <SheetMark text={c.status} tone="waiting" />
         </View>
-        <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginBottom: 6 }}>{fmtDate(candidate.docDate)} · {candidate.party || "—"}</Text>
-        <View className="flex-row" style={{ gap: 14 }}>
-          <View>
-            <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Total</Text>
-            <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.medium, marginTop: 1 }}>{fmtQty(candidate.totalQty)}</Text>
-          </View>
-          <View>
-            <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Completed</Text>
-            <Text style={{ color: "#059669", fontSize: 11.5, fontFamily: fonts.heading.medium, marginTop: 1 }}>{fmtQty(candidate.completedQty)}</Text>
-          </View>
-          <View>
-            <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Pending</Text>
-            <Text style={{ color: "#d97706", fontSize: 11.5, fontFamily: fonts.heading.medium, marginTop: 1 }}>{fmtQty(candidate.pendingQty)}</Text>
-          </View>
-        </View>
+        <Body size={12.5} weight="medium">{c.party || "—"}</Body>
+        <Facts items={[["Total", fmtQty(c.totalQty)], ["Completed", fmtQty(c.completedQty)], ["Pending", fmtQty(c.pendingQty)]]} />
       </View>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -70,8 +58,10 @@ export default function ShortCloseScreen() {
   const rights = usePageRights("short-close");
   const [docType, setDocType] = useState<ShortCloseDocType>("PO");
   const [finYear, setFinYear] = useState<{ id: string; label: string } | null>(null);
-  const [companyId, setCompanyId] = useState(""); const [companyName, setCompanyName] = useState("");
-  const [projectId, setProjectId] = useState(""); const [projectName, setProjectName] = useState("");
+  const [companyId, setCompanyId] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [projectName, setProjectName] = useState("");
   const [picker, setPicker] = useState<"finYear" | "company" | "project" | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -82,7 +72,7 @@ export default function ShortCloseScreen() {
   const { data: projects = [] } = useQuery({ queryKey: ["sc-projects"], queryFn: getProjects });
   const { data: finYears = [] } = useQuery({ queryKey: ["sc-finyears"], queryFn: fetchFinYearOptions });
 
-  const { data: candidates = [], isFetching, refetch } = useQuery({
+  const { data: candidates = [], isFetching, isError, refetch } = useQuery({
     queryKey: ["sc-candidates", docType, finYear?.id, companyId, projectId],
     queryFn: () => searchShortCloseCandidates({ docType, finYearId: finYear?.id, companyId: companyId || undefined, projectId: projectId || undefined }),
     enabled: false,
@@ -98,14 +88,8 @@ export default function ShortCloseScreen() {
       queryClient.invalidateQueries({ queryKey: ["purchase-orders-mobile"], exact: false });
       refetch();
       const failed = res.results.filter((r) => !r.ok);
-      if (failed.length) {
-        Alert.alert(
-          `${res.succeeded} short closed, ${failed.length} skipped`,
-          failed.map((f) => `${f.docNo ?? f.docId}: ${f.reason ?? "Unknown reason"}`).join("\n"),
-        );
-      } else {
-        Alert.alert("Done", res.message || `${res.succeeded} document(s) short closed.`);
-      }
+      if (failed.length) Alert.alert(`${res.succeeded} short closed, ${failed.length} skipped`, failed.map((f) => `${f.docNo ?? f.docId}: ${f.reason ?? "Unknown reason"}`).join("\n"));
+      else Alert.alert("Done", res.message || `${res.succeeded} document(s) short closed.`);
     },
     onError: (err: any) => Alert.alert("Short close failed", err.message ?? "Something went wrong."),
   });
@@ -115,154 +99,110 @@ export default function ShortCloseScreen() {
     setSearched(true);
     refetch();
   };
-
-  const toggleRow = (docId: number) => {
+  const toggleRow = (id: number) =>
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(docId)) next.delete(docId); else next.add(docId);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
-  };
-
   const allSelected = candidates.length > 0 && selected.size === candidates.length;
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(candidates.map((c) => c.docId)));
 
   const companyOptions: PickerOption[] = companies.map((c) => ({ key: c.id, label: c.name }));
   const projectOptions: PickerOption[] = (companyId ? projects.filter((p) => p.companyId === companyId) : projects).map((p) => ({ key: p.id, label: p.name }));
   const finYearOptions: PickerOption[] = finYears.map((f) => ({ key: String(f.id), label: f.label }));
+  const what = docType === "PO" ? "purchase orders" : "material requests";
 
-  if (!rights.canView) {
-    return (
-      <View className="flex-1 items-center justify-center px-8" style={{ backgroundColor: colors.background }}>
-        <Archive size={28} color={colors.mutedForeground} />
-        <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold, marginTop: 12 }}>No access</Text>
-        <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 4, textAlign: "center" }}>
-          You don't have permission to use Short Close.
-        </Text>
-      </View>
-    );
-  }
+  if (!rights.canView) return <NoAccess eyebrow="CivilierERP · Material" title="Short close" what="short close" />;
 
-  const ListHeader = (
-    <View>
-      <View className="flex-row items-center gap-2.5 mb-3">
-        <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: "#64748b26", borderWidth: 1, borderColor: "#64748b4d" }}>
-          <Archive size={16} color="#64748b" />
-        </View>
-        <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 18, flex: 1 }}>Short Close</Text>
-      </View>
-
-      <View className="flex-row rounded-xl mb-3 p-1" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}>
-        {(["PO", "MR"] as ShortCloseDocType[]).map((dt) => {
-          const active = docType === dt;
-          return (
-            <Pressable
-              key={dt}
-              onPress={() => { setDocType(dt); setSelected(new Set()); setSearched(false); }}
-              className="flex-1 items-center py-2 rounded-lg"
-              style={{ backgroundColor: active ? colors.primary : "transparent" }}
-            >
-              <Text style={{ color: active ? "#fff" : colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
-                {dt === "PO" ? "Purchase Orders" : "Material Requests"}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <PickerRow label="Financial Year" value={finYear?.label ?? ""} placeholder="All" onPress={() => setPicker("finYear")} />
-      <PickerRow label="Company" value={companyName} placeholder="All" onPress={() => setPicker("company")} />
-      <PickerRow label="Project" value={projectName} placeholder="All" onPress={() => setPicker("project")} />
-
-      <Pressable onPress={handleSearch} disabled={isFetching} className="flex-row items-center justify-center gap-1.5 py-3 rounded-xl mb-3" style={{ backgroundColor: colors.primary, opacity: isFetching ? 0.7 : 1 }}>
-        {isFetching ? <ActivityIndicator size="small" color="#fff" /> : <Search size={14} color="#fff" />}
-        <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Search</Text>
-      </Pressable>
-
-      {searched && candidates.length > 0 && (
-        <Pressable onPress={toggleAll} className="flex-row items-center gap-2 mb-2.5 px-1">
-          {allSelected ? <CheckSquare size={16} color={colors.primary} /> : <Square size={16} color={colors.mutedForeground} />}
-          <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.heading.medium }}>
-            {allSelected ? "Deselect all" : `Select all (${candidates.length})`}
-          </Text>
-        </Pressable>
-      )}
-    </View>
-  );
+  const showBar = rights.canEdit && selected.size > 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <FlatList
-        data={candidates}
-        keyExtractor={(c) => String(c.docId)}
-        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + (rights.canEdit && selected.size > 0 ? 90 : 24) }}
-        ListHeaderComponent={ListHeader}
-        renderItem={({ item }) => <CandidateRow candidate={item} selected={selected.has(item.docId)} onToggle={() => toggleRow(item.docId)} />}
-        ListEmptyComponent={
-          searched && !isFetching ? (
-            <View className="items-center py-16">
-              <AlertTriangle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8, textAlign: "center" }}>
-                No {docType === "PO" ? "Purchase Orders" : "Material Requests"} in Partial status match these filters.
-              </Text>
-            </View>
-          ) : null
-        }
-      />
+    <View style={{ flex: 1 }}>
+      <SheetPage>
+        <SheetShell
+          eyebrow="CivilierERP · Material"
+          title="Short close"
+          subtitle="Year-end housekeeping: retire partly fulfilled purchase orders and material requests, cancelling what is still pending on them."
+        >
+          <Seg
+            options={[
+              { value: "PO", label: "Purchase orders" },
+              { value: "MR", label: "Material requests" },
+            ]}
+            value={docType}
+            onChange={(d) => {
+              setDocType(d as ShortCloseDocType);
+              setSelected(new Set());
+              setSearched(false);
+            }}
+          />
 
-      {rights.canEdit && selected.size > 0 && (
-        <View className="absolute left-0 right-0 bottom-0 px-4" style={{ paddingBottom: insets.bottom + 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.background }}>
-          <Pressable onPress={() => setConfirmOpen(true)} className="items-center justify-center py-3 rounded-xl" style={{ backgroundColor: "#dc2626" }}>
-            <Text style={{ color: "#fff", fontSize: 13, fontFamily: fonts.heading.semibold }}>Short Close {selected.size} Selected</Text>
-          </Pressable>
+          <Panel title="Find documents">
+            <View>
+              <PickerRow label="Financial year" value={finYear?.label ?? ""} placeholder="All" onPress={() => setPicker("finYear")} />
+              <PickerRow label="Company" value={companyName} placeholder="All" onPress={() => setPicker("company")} />
+              <PickerRow label="Project" value={projectName} placeholder="All" onPress={() => setPicker("project")} />
+            </View>
+            <Key tone="ink" label={isFetching ? "Searching…" : "Search"} icon={<Search size={13} color={S.paper} />} onPress={handleSearch} disabled={isFetching} />
+          </Panel>
+
+          {searched && (
+            <RegisterBox>
+              <RegisterHead title={`Partly fulfilled ${what}`} count={candidates.length} unit={["document", "documents"]} />
+              {isFetching ? (
+                <RegisterLoading />
+              ) : isError ? (
+                <Notice>Could not search. Try again.</Notice>
+              ) : candidates.length === 0 ? (
+                <Body color={S.graphite}>{`No ${what} in Partial status match these filters.`}</Body>
+              ) : (
+                <>
+                  <Press onPress={toggleAll} style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 4, opacity: pressed ? 0.7 : 1 })}>
+                    <Tickbox on={allSelected} />
+                    <Label color={S.ink}>{allSelected ? "Clear all" : `Select all (${candidates.length})`}</Label>
+                  </Press>
+                  <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+                    {candidates.map((c, i) => (
+                      <CandidateRow key={c.docId} c={c} on={selected.has(c.docId)} onToggle={() => toggleRow(c.docId)} last={i === candidates.length - 1} />
+                    ))}
+                  </View>
+                </>
+              )}
+            </RegisterBox>
+          )}
+          {showBar && <View style={{ height: 40 }} />}
+        </SheetShell>
+      </SheetPage>
+
+      {showBar && (
+        <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: insets.bottom + 12, borderTopWidth: 1, borderTopColor: S.ink, backgroundColor: S.paper }}>
+          <Key tone="red" label={`Short close ${selected.size} selected`} onPress={() => setConfirmOpen(true)} />
         </View>
       )}
 
-      <Modal visible={confirmOpen} transparent animationType="slide" onRequestClose={() => setConfirmOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }} onPress={() => !processMutation.isPending && setConfirmOpen(false)}>
-          <Pressable onPress={() => {}} style={{ position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: colors.border, padding: 20, paddingBottom: insets.bottom + 20 }}>
-            <View className="flex-row items-center justify-between mb-3">
-              <Text style={{ color: colors.foreground, fontSize: 14.5, fontFamily: fonts.heading.bold }}>Short Close {selected.size} Document{selected.size === 1 ? "" : "s"}?</Text>
-              <Pressable onPress={() => setConfirmOpen(false)} className="w-7 h-7 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-                <X size={13} color={colors.mutedForeground} />
-              </Pressable>
-            </View>
+      <SheetPicker visible={confirmOpen} title={`Short close ${selected.size} document${selected.size === 1 ? "" : "s"}?`} onClose={() => !processMutation.isPending && setConfirmOpen(false)}>
+        <View style={{ padding: 16, paddingBottom: insets.bottom + 16, gap: 14 }}>
+          <Notice>
+            {'This cannot be undone. What is still pending is closed out and the document set to "Short Closed". Quantities already received or ordered stay as they are.'}
+          </Notice>
+          <Field label="Remarks (optional)">
+            <Input value={remarks} onChangeText={setRemarks} placeholder="Reason for short closing…" multiline style={{ minHeight: 70, paddingVertical: 10, textAlignVertical: "top" }} />
+          </Field>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Key label="Cancel" onPress={() => setConfirmOpen(false)} disabled={processMutation.isPending} />
+            <Key tone="red" label={processMutation.isPending ? "Closing…" : "Confirm short close"} onPress={() => processMutation.mutate()} disabled={processMutation.isPending} style={{ flex: 1 }} />
+          </View>
+        </View>
+      </SheetPicker>
 
-            <View className="flex-row gap-2 rounded-xl px-3 py-2.5 mb-3" style={{ backgroundColor: "#dc262614", borderWidth: 1, borderColor: "#dc262640" }}>
-              <AlertTriangle size={15} color="#dc2626" />
-              <Text style={{ color: colors.foreground, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
-                This is irreversible. The remaining pending quantity will be closed out and the document status set to "Short Closed". Quantities already received/ordered are kept as-is.
-              </Text>
-            </View>
-
-            <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase" }}>Remarks (optional)</Text>
-            <TextInput
-              value={remarks} onChangeText={setRemarks} placeholder="Reason for short closing…" multiline
-              placeholderTextColor={`${colors.mutedForeground}99`}
-              style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, minHeight: 70, textAlignVertical: "top", marginBottom: 16 }}
-            />
-
-            <View className="flex-row gap-2.5">
-              <Pressable onPress={() => setConfirmOpen(false)} disabled={processMutation.isPending} className="px-5 py-3 rounded-xl items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-              </Pressable>
-              <Pressable onPress={() => processMutation.mutate()} disabled={processMutation.isPending} className="flex-1 items-center justify-center py-3 rounded-xl" style={{ backgroundColor: "#dc2626", opacity: processMutation.isPending ? 0.7 : 1 }}>
-                {processMutation.isPending ? <ActivityIndicator size="small" color="#fff" /> : (
-                  <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Confirm Short Close</Text>
-                )}
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <OptionPickerModal visible={picker === "finYear"} title="Select Financial Year" options={finYearOptions} selectedKey={finYear?.id ?? ""}
+      <OptionPickerModal visible={picker === "finYear"} title="Select financial year" options={finYearOptions} selectedKey={finYear?.id ?? ""}
         onSelect={(k) => { const f = finYears.find((x) => String(x.id) === k); setFinYear(f ? { id: String(f.id), label: f.label } : null); setPicker(null); }}
         onClose={() => setPicker(null)} clearable />
-      <OptionPickerModal visible={picker === "company"} title="Select Company" options={companyOptions} selectedKey={companyId}
+      <OptionPickerModal visible={picker === "company"} title="Select company" options={companyOptions} selectedKey={companyId}
         onSelect={(k) => { const c = companies.find((x) => x.id === k); setCompanyId(k); setCompanyName(c?.name ?? ""); setProjectId(""); setProjectName(""); setPicker(null); }}
         onClose={() => setPicker(null)} searchable clearable />
-      <OptionPickerModal visible={picker === "project"} title="Select Project" options={projectOptions} selectedKey={projectId}
+      <OptionPickerModal visible={picker === "project"} title="Select project" options={projectOptions} selectedKey={projectId}
         onSelect={(k) => { const p = projects.find((x) => x.id === k); setProjectId(k); setProjectName(p?.name ?? ""); setPicker(null); }}
         onClose={() => setPicker(null)} searchable clearable />
     </View>

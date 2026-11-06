@@ -1,102 +1,51 @@
-// RN port of SupplierLogin.tsx's WelcomeCard (web) — full-screen blur-in
-// overlay with a checkmark badge, "Welcome back" copy, and a filling
-// progress bar, shown for ~1.8s between a successful login and the
-// navigator swapping over to MainStack (see AuthContext.tsx's
-// onAuthenticated/navHoldMs — the delay this overlay fills is real, not
-// decorative: it's giving the credential-verified-but-not-yet-navigated
-// window something to show).
+// RN port of SupplierLogin.tsx's WelcomeCard (web), on the drawing sheet: a small sheet over the page with a tick,
+// "Welcome back" and a ruled bar that fills for the ~1.8s between a successful login and the navigator swapping over to
+// MainStack (see AuthContext.tsx's onAuthenticated/navHoldMs — the delay this fills is real, not decorative: it's
+// giving the credential-verified-but-not-yet-navigated window something to show).
 import { useEffect, useRef } from "react";
 import { Animated, Text, View } from "react-native";
 import { Check } from "lucide-react-native";
+import { Body, Label, SheetFrame } from "@/components/sheet/Sheet";
+import { colors, sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 
 export function WelcomeOverlay({ name, durationMs }: { name?: string; durationMs: number }) {
   const firstName = name?.trim().split(/\s+/)[0] || "";
   const fade = useRef(new Animated.Value(0)).current;
-  const cardScale = useRef(new Animated.Value(0.92)).current;
-  const cardY = useRef(new Animated.Value(24)).current;
-  const badgeScale = useRef(new Animated.Value(0)).current;
-  const textFade = useRef(new Animated.Value(0)).current;
-  const barWidth = useRef(new Animated.Value(0)).current;
+  const rise = useRef(new Animated.Value(14)).current;
+  const bar = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(fade, { toValue: 1, duration: 250, useNativeDriver: true }).start();
-    Animated.spring(cardScale, { toValue: 1, friction: 9, tension: 90, useNativeDriver: true }).start();
-    Animated.spring(cardY, { toValue: 0, friction: 9, tension: 90, useNativeDriver: true }).start();
+    Animated.timing(rise, { toValue: 0, duration: 350, useNativeDriver: true }).start();
     Animated.sequence([
-      Animated.delay(100),
-      Animated.spring(badgeScale, { toValue: 1, friction: 8, tension: 140, useNativeDriver: true }),
+      Animated.delay(250),
+      Animated.timing(bar, { toValue: 1, duration: Math.max(400, durationMs - 450), useNativeDriver: false }),
     ]).start();
-    Animated.sequence([
-      Animated.delay(300),
-      Animated.timing(textFade, { toValue: 1, duration: 300, useNativeDriver: true }),
-    ]).start();
-    Animated.sequence([
-      Animated.delay(300),
-      Animated.timing(barWidth, { toValue: 1, duration: Math.max(400, durationMs - 500), useNativeDriver: false }),
-    ]).start();
-  }, [fade, cardScale, cardY, badgeScale, textFade, barWidth, durationMs]);
+  }, [fade, rise, bar, durationMs]);
 
   return (
     <Animated.View
-      style={{
-        position: "absolute",
-        inset: 0,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "rgba(255,255,255,0.88)",
-        opacity: fade,
-      }}
+      style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: `${colors.background}ee`, opacity: fade, padding: 24 }}
     >
-      <Animated.View
-        style={{
-          alignItems: "center",
-          gap: 16,
-          paddingHorizontal: 40,
-          paddingVertical: 32,
-          borderRadius: 24,
-          backgroundColor: "#fff",
-          borderWidth: 1,
-          borderColor: "rgba(5,150,105,0.15)",
-          shadowColor: "#059669",
-          shadowOpacity: 0.18,
-          shadowRadius: 32,
-          shadowOffset: { width: 0, height: 12 },
-          elevation: 10,
-          transform: [{ scale: cardScale }, { translateY: cardY }],
-        }}
-      >
-        <Animated.View
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 28,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "#059669",
-            transform: [{ scale: badgeScale }],
-          }}
-        >
-          <Check size={22} color="#fff" strokeWidth={3} />
-        </Animated.View>
-        <Animated.View style={{ alignItems: "center", opacity: textFade }}>
-          <Text style={{ fontSize: 20, fontFamily: fonts.heading.bold, color: "#1e293b" }}>
-            Welcome back{firstName ? `, ${firstName}` : ""}!
-          </Text>
-          <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: "#94a3b8", marginTop: 4 }}>
-            Taking you to your supplier portal…
-          </Text>
-        </Animated.View>
-        <View style={{ width: 190, height: 4, borderRadius: 2, backgroundColor: "#f1f5f9", overflow: "hidden" }}>
-          <Animated.View
-            style={{
-              height: "100%",
-              borderRadius: 2,
-              backgroundColor: "#10b981",
-              width: barWidth.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }),
-            }}
-          />
-        </View>
+      <Animated.View style={{ width: "100%", maxWidth: 340, transform: [{ translateY: rise }] }}>
+        <SheetFrame>
+          <View style={{ padding: 20, gap: 14, alignItems: "flex-start" }}>
+            <View style={{ width: 34, height: 34, borderWidth: 1.5, borderColor: S.ink, backgroundColor: S.blue, alignItems: "center", justifyContent: "center" }}>
+              <Check size={18} color="#ffffff" strokeWidth={3} />
+            </View>
+            <View style={{ gap: 6 }}>
+              <Label>Signed in</Label>
+              <Text style={{ fontFamily: fonts.heading.bold, fontSize: 22, letterSpacing: -0.6, color: S.ink }}>
+                Welcome back{firstName ? `, ${firstName}` : ""}
+              </Text>
+              <Body size={13} color={S.ink2}>Taking you to your supplier portal…</Body>
+            </View>
+            <View style={{ width: "100%", height: 5, borderWidth: 1, borderColor: S.ink }}>
+              <Animated.View style={{ height: "100%", backgroundColor: S.ink, width: bar.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) }} />
+            </View>
+          </View>
+        </SheetFrame>
       </Animated.View>
     </Animated.View>
   );

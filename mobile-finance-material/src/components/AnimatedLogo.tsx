@@ -7,7 +7,8 @@
 // character resolving left-to-right through random glyphs before landing.
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, Text, View } from "react-native";
-import MaskedView from "@react-native-masked-view/masked-view";
+import MaskedViewClass from "@react-native-masked-view/masked-view";
+const MaskedView = MaskedViewClass as unknown as React.ComponentType<any>;
 import { LinearGradient } from "expo-linear-gradient";
 import { fonts } from "@/theme/fonts";
 import { useAppVersion } from "@/hooks/useAppVersion";
@@ -101,7 +102,7 @@ export function AnimatedLogo({ iconSize = 32 }: { iconSize?: number }) {
       <AnimatedLogoIcon size={iconSize} />
       <View>
         <MaskedView maskElement={<Text style={{ fontSize: 15, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}>CivilierERP</Text>}>
-          <LinearGradient colors={["#8b5cf6", "#3b82f6"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+          <LinearGradient colors={["#6467f2", "#6467f2"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <Text style={{ fontSize: 15, fontFamily: fonts.heading.bold, letterSpacing: -0.3, opacity: 0 }}>CivilierERP</Text>
           </LinearGradient>
         </MaskedView>

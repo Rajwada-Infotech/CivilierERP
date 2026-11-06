@@ -30,7 +30,7 @@ export function ImagePreviewModal({
         <Pressable
           onPress={onClose}
           hitSlop={10}
-          style={{ position: "absolute", top: insets.top + 10, right: 14, width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.14)", alignItems: "center", justifyContent: "center" }}
+          style={{ position: "absolute", top: insets.top + 10, right: 14, width: 34, height: 34, borderRadius: 0, backgroundColor: "rgba(255,255,255,0.14)", alignItems: "center", justifyContent: "center" }}
         >
           <X size={18} color="#fff" />
         </Pressable>

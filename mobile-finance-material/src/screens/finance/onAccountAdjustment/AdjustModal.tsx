@@ -1,28 +1,28 @@
-// RN port of OnAccountAdjustment.tsx's inline <AdjustDialog> — a focused
-// bottom-sheet action (not a full-screen modal like PaymentFormModal, since
-// web renders this as a small centered dialog, not a page). Applies a
-// party's on-account credit against a different outstanding invoice than
-// the one that generated it (excludeOriginatingInvoice keeps that invoice
-// out of the picker).
+// RN port of OnAccountAdjustment.tsx's inline <AdjustDialog>, on the drawing sheet: the sheet's list-picker frame (a paper
+// panel up from the bottom under an ink rule — web renders this as a small dialog, not a page), ruled figures, Cancel and
+// Confirm keys. Applies a party's on-account credit against a different outstanding invoice than the one that generated
+// it (excludeOriginatingInvoice keeps that invoice out of the picker).
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, ActivityIndicator, Alert } from "react-native";
+import { View, Text, ScrollView, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
-import { X, CheckCircle2, ChevronRight } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import {
   getInvoicesForParty, applyOAAdjustment, previewOAAdjustment, excludeOriginatingInvoice,
   type CreditEntry,
 } from "@/api/onAccountApi";
-import { OptionPickerModal, type PickerOption } from "../payment/OptionPicker";
+import { Body, Field, Input, Key, Label, SheetMark, Skel } from "@/components/sheet/Sheet";
+import { SheetPicker } from "@/components/sheet/FormParts";
+import { OptionPickerModal, PickerRow, type PickerOption } from "../payment/OptionPicker";
 
-function Row({ label, value, color, bold }: { label: string; value: string; color?: string; bold?: boolean }) {
+/** A ruled line of figures: label left, amount right. */
+function Row({ label, value, tone, bold, last }: { label: string; value: string; tone?: "red" | "blue"; bold?: boolean; last?: boolean }) {
   return (
-    <View className="flex-row items-center justify-between px-3 py-2.5">
-      <Text style={{ color: color ?? colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.regular }}>{label}</Text>
-      <Text style={{ color: color ?? colors.foreground, fontSize: 12.5, fontFamily: bold ? fonts.heading.bold : fonts.body.semibold }}>{value}</Text>
+    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingVertical: 9, borderBottomWidth: last ? 0 : 1, borderBottomColor: S.ruleSoft }}>
+      <Body size={12.5} color={S.ink2}>{label}</Body>
+      <Text style={{ color: tone === "red" ? S.red : tone === "blue" ? S.blue : S.ink, fontSize: bold ? 15 : 13, fontFamily: fonts.heading.semibold }}>{value}</Text>
     </View>
   );
 }
@@ -101,146 +101,84 @@ export function AdjustModal({
   if (!entry) return null;
 
   return (
-    <Modal visible={!!entry} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)" }} onPress={onClose}>
-        <Pressable
-          onPress={() => {}}
-          style={{
-            position: "absolute", left: 0, right: 0, bottom: 0, maxHeight: "88%",
-            backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-            borderWidth: 1, borderColor: colors.border, overflow: "hidden",
-          }}
-        >
-          <View className="items-center pt-2 pb-1">
-            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${colors.mutedForeground}4d` }} />
-          </View>
-
-          <View className="flex-row items-center justify-between px-4 py-2.5">
-            <View>
-              <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.semibold }}>Adjust On A/C Balance</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 1 }}>{entry.PartyName}</Text>
+    <>
+      <SheetPicker
+        visible={!!entry && !pickerOpen}
+        title="Adjust On A/C balance"
+        note={entry.PartyName}
+        onClose={onClose}
+        footer={
+          done ? undefined : (
+            <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingTop: 12, paddingBottom: insets.bottom + 14, borderTopWidth: 1, borderTopColor: S.ink }}>
+              <Key label="Cancel" onPress={onClose} disabled={submitting} />
+              <Key tone="ink" label={submitting ? "Adjusting…" : "Confirm adjust"} onPress={handleSubmit} disabled={!canSubmit} style={{ flex: 1 }} />
             </View>
-            <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-              <X size={15} color={colors.mutedForeground} />
-            </Pressable>
-          </View>
-
-          {done ? (
-            <View className="px-5 py-8 items-center" style={{ paddingBottom: insets.bottom + 24 }}>
-              <View className="w-12 h-12 rounded-full items-center justify-center mb-3" style={{ backgroundColor: "#10b98120" }}>
-                <CheckCircle2 size={24} color="#10b981" />
-              </View>
-              <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.semibold }}>Adjustment Applied</Text>
-              <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.regular, marginTop: 4, textAlign: "center" }}>
-                {formatINR(done.applied)} adjusted against {selectedDoc}
-              </Text>
-              <View className="w-full rounded-xl mt-4 flex-row items-center justify-between px-4 py-3" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.muted}40` }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>Remaining Balance</Text>
-                <Text style={{ color: "#10b981", fontSize: 13, fontFamily: fonts.heading.bold }}>{formatINR(done.remaining)}</Text>
-              </View>
-              <Pressable onPress={onClose} className="mt-4 px-6 py-2.5 rounded-xl" style={{ borderWidth: 1, borderColor: colors.border }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.medium }}>Close</Text>
-              </Pressable>
+          )
+        }
+      >
+        {done ? (
+          <View style={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 14 }}>
+            <SheetMark text="Adjustment applied" tone="done" />
+            <Body size={13} color={S.ink2}>{`${formatINR(done.applied)} adjusted against ${selectedDoc}.`}</Body>
+            <View style={{ borderTopWidth: 1.5, borderTopColor: S.ink }}>
+              <Row label="Remaining balance" value={formatINR(done.remaining)} tone="blue" bold last />
             </View>
-          ) : (
-            <>
-              <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 8 }} keyboardShouldPersistTaps="handled">
-                <View className="rounded-xl flex-row items-center justify-between px-4 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.muted}30` }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular }}>Available On A/C Balance</Text>
-                  <Text style={{ color: "#10b981", fontSize: 13.5, fontFamily: fonts.heading.bold }}>{formatINR(currentBalance)}</Text>
-                </View>
+            <Key label="Close" onPress={onClose} />
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 8, gap: 14 }} keyboardShouldPersistTaps="handled">
+            <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+              <Label>Available On A/C balance</Label>
+              <Text style={{ color: S.ink, fontSize: 18, letterSpacing: -0.3, fontFamily: fonts.heading.semibold }}>{formatINR(currentBalance)}</Text>
+            </View>
 
-                <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-                  Select Invoice / Contract
-                </Text>
-                {isLoading ? (
-                  <View className="py-3"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-                ) : adjustableInvoices.length === 0 ? (
-                  <Text style={{ color: colors.mutedForeground, fontSize: 12, paddingVertical: 8 }}>No other invoices found for this supplier.</Text>
-                ) : (
-                  <Pressable
-                    onPress={() => setPickerOpen(true)}
-                    className="flex-row items-center justify-between px-3.5 py-3 rounded-xl mb-1"
-                    style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}
-                  >
-                    <Text style={{ color: selected ? colors.primary : `${colors.mutedForeground}99`, fontSize: 12.5, fontFamily: fonts.body.medium }}>
-                      {selected ? selected.docNo : "Choose an invoice…"}
-                    </Text>
-                    <ChevronRight size={15} color={colors.mutedForeground} />
-                  </Pressable>
+            {isLoading ? (
+              <Skel h={44} />
+            ) : adjustableInvoices.length === 0 ? (
+              <Body size={12.5} color={S.graphite}>No other invoices found for this supplier.</Body>
+            ) : (
+              <PickerRow label="Invoice / contract" value={selected ? selected.docNo : ""} placeholder="Choose an invoice…" onPress={() => setPickerOpen(true)} />
+            )}
+
+            {selected && (
+              <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+                <Row label="Invoice amount (incl. GST)" value={formatINR(selected.invoiceAmount)} />
+                <Row label="Total paid" value={formatINR(selected.totalPaid)} />
+                <Row label="Remaining to pay" value={formatINR(invoiceRemaining)} last={!(adjAmount > 0 && preview)} />
+                {adjAmount > 0 && preview && (
+                  <Row label="Remaining after this adjustment" value={formatINR(preview.invoiceRemainingAfter)} tone={preview.isFullyCovered ? "blue" : undefined} last />
                 )}
-
-                {selected && (
-                  <View className="rounded-xl overflow-hidden mt-3 mb-1" style={{ borderWidth: 1, borderColor: colors.border }}>
-                    <Row label="Invoice Amount (incl. GST)" value={formatINR(selected.invoiceAmount)} />
-                    <Row label="Total Paid" value={formatINR(selected.totalPaid)} color="#10b981" />
-                    <Row label="Remaining to Pay" value={formatINR(invoiceRemaining)} color="#d97706" />
-                    {adjAmount > 0 && preview && (
-                      <Row
-                        label="Remaining After This Adjustment"
-                        value={formatINR(preview.invoiceRemainingAfter)}
-                        color={preview.isFullyCovered ? "#10b981" : "#d97706"}
-                      />
-                    )}
-                  </View>
-                )}
-
-                <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginTop: 14, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-                  Amount to Adjust
-                </Text>
-                <TextInput
-                  value={amount}
-                  onChangeText={(v) => setAmount(v.replace(/[^0-9.]/g, ""))}
-                  placeholder="Enter amount"
-                  placeholderTextColor={`${colors.mutedForeground}99`}
-                  keyboardType="numeric"
-                  style={{
-                    borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
-                    color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13,
-                  }}
-                />
-                {adjAmount > currentBalance && (
-                  <Text style={{ color: "#ef4444", fontSize: 11, marginTop: 5 }}>Exceeds available balance of {formatINR(currentBalance)}</Text>
-                )}
-
-                {adjAmount > 0 && adjAmount <= currentBalance && (
-                  <View className="rounded-xl overflow-hidden mt-4" style={{ borderWidth: 1, borderColor: colors.border }}>
-                    <Row label="Current Balance" value={formatINR(currentBalance)} />
-                    <Row label="Adjusting" value={`− ${formatINR(adjAmount)}`} color="#ef4444" />
-                    <Row label="New Balance" value={formatINR(previewBalance)} color={previewBalance > 0 ? "#10b981" : colors.mutedForeground} bold />
-                  </View>
-                )}
-              </ScrollView>
-
-              <View className="flex-row gap-2.5 px-4" style={{ paddingBottom: insets.bottom + 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
-                <Pressable onPress={onClose} disabled={submitting} className="flex-1 items-center justify-center py-3 rounded-xl" style={{ borderWidth: 1, borderColor: colors.border }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleSubmit}
-                  disabled={!canSubmit}
-                  className="flex-1 items-center justify-center py-3 rounded-xl"
-                  style={{ backgroundColor: "#10b981", opacity: canSubmit ? 1 : 0.5 }}
-                >
-                  {submitting ? <ActivityIndicator size="small" color="#fff" /> : (
-                    <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Confirm Adjust</Text>
-                  )}
-                </Pressable>
               </View>
-            </>
-          )}
-        </Pressable>
-      </Pressable>
+            )}
+
+            <Field label="Amount to adjust">
+              <Input value={amount} onChangeText={(v) => setAmount(v.replace(/[^0-9.]/g, ""))} placeholder="Enter amount" keyboardType="numeric" />
+            </Field>
+            {adjAmount > currentBalance && <Body size={12} color={S.red}>{`Exceeds the available balance of ${formatINR(currentBalance)}.`}</Body>}
+
+            {adjAmount > 0 && adjAmount <= currentBalance && (
+              <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+                <Row label="Current balance" value={formatINR(currentBalance)} />
+                <Row label="Adjusting" value={`− ${formatINR(adjAmount)}`} tone="red" />
+                <Row label="New balance" value={formatINR(previewBalance)} tone={previewBalance > 0 ? "blue" : undefined} bold last />
+              </View>
+            )}
+          </ScrollView>
+        )}
+      </SheetPicker>
 
       <OptionPickerModal
-        visible={pickerOpen}
-        title="Select Invoice"
+        visible={!!entry && pickerOpen}
+        title="Select invoice"
         options={invoiceOptions}
         selectedKey={selectedDoc}
-        onSelect={(k) => { setSelectedDoc(k); setPickerOpen(false); }}
+        onSelect={(k) => {
+          setSelectedDoc(k);
+          setPickerOpen(false);
+        }}
         onClose={() => setPickerOpen(false)}
         searchable
       />
-    </Modal>
+    </>
   );
 }

@@ -390,3 +390,42 @@ export async function fetchHomeDashboard(
     errors,
   };
 }
+
+// ── The web home page's own calls (src/pages/Home.tsx), scoped to the modules this app covers ──────────────────
+
+export interface LiveActivityItem {
+  Kind: string;
+  Module: string;
+  DocNo: string | null;
+  Title: string;
+  Subtitle: string | null;
+  Actor: string | null;
+  Amount: number | null;
+  Status: string | null;
+  At: string;
+  Href: string;
+}
+
+/** Latest documents across the given modules (server-side union), newest first. */
+export async function fetchActivityFeed(modules: string[]): Promise<LiveActivityItem[]> {
+  const qs = `?modules=${encodeURIComponent(modules.join(","))}&limit=50`;
+  const res = await fetchWithAuth(`/api/home/activity-feed${qs}`);
+  if (!res.ok) throw new Error("activity feed unavailable");
+  const j = await res.json().catch(() => ({}));
+  return Array.isArray(j?.items) ? j.items : [];
+}
+
+/** Per-day totals for the last seven India days: documents made and their rupee value. */
+export async function fetchActivityWeek(modules: string[]): Promise<Array<{ date: string; count: number; amount: number }>> {
+  const res = await fetchWithAuth(`/api/home/activity-week?modules=${encodeURIComponent(modules.join(","))}`);
+  if (!res.ok) throw new Error("activity totals unavailable");
+  const j = await res.json().catch(() => ({}));
+  return Array.isArray(j?.days) ? j.days : [];
+}
+
+/** The user's own module ranking (how often they open each), best first. */
+export async function fetchModuleRanking(modules: string[]): Promise<{ modules: Array<{ module: string; visits: number }> }> {
+  const res = await fetchWithAuth(`/api/home/module-ranking?modules=${encodeURIComponent(modules.join(","))}`);
+  if (!res.ok) throw new Error("Failed to load module ranking");
+  return res.json();
+}

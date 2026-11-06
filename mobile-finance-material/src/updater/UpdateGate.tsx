@@ -126,7 +126,7 @@ export function UpdateGate({ appKey }: { appKey: string }) {
   const busy = phase === "downloading" || phase === "installing";
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={() => !mandatory && !busy && later()}>
+    <Modal visible transparent animationType="fade" onRequestClose={() => { if (!mandatory && !busy) later(); }}>
       <View style={s.backdrop}>
         <View style={s.card}>
           <Text style={s.title}>{mandatory ? "Update required" : "Update available"}</Text>
@@ -152,7 +152,7 @@ export function UpdateGate({ appKey }: { appKey: string }) {
           )}
           {phase === "installing" && (
             <View style={s.row}>
-              <ActivityIndicator color="#a78bfa" />
+              <ActivityIndicator color="#6467f2" />
               <Text style={s.progressText}>Opening the installer…</Text>
             </View>
           )}
@@ -182,23 +182,23 @@ export function UpdateGate({ appKey }: { appKey: string }) {
 
 const s = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", alignItems: "center", justifyContent: "center", padding: 24 },
-  card: { width: "100%", maxWidth: 420, borderRadius: 20, padding: 22, backgroundColor: "#15112b", borderWidth: 1, borderColor: "#2a2352" },
+  card: { width: "100%", maxWidth: 420, borderRadius: 0, padding: 22, backgroundColor: "#17191e", borderWidth: 1, borderColor: "#17191e" },
   title: { color: "#fff", fontSize: 19, fontWeight: "700" },
-  sub: { color: "#a1a1c2", fontSize: 13, marginTop: 4 },
-  notes: { maxHeight: 160, marginTop: 14, padding: 12, borderRadius: 12, backgroundColor: "#1d1840" },
+  sub: { color: "#9ba0ab", fontSize: 13, marginTop: 4 },
+  notes: { maxHeight: 160, marginTop: 14, padding: 12, borderRadius: 0, backgroundColor: "#1d1840" },
   notesText: { color: "#d4d4ee", fontSize: 13, lineHeight: 19 },
-  warn: { color: "#fbbf24", fontSize: 12, marginTop: 12 },
+  warn: { color: "#dcdfe5", fontSize: 12, marginTop: 12 },
   progressWrap: { marginTop: 16 },
-  progressTrack: { height: 8, borderRadius: 4, backgroundColor: "#2a2352", overflow: "hidden" },
-  progressFill: { height: 8, backgroundColor: "#7c3aed" },
-  progressText: { color: "#a1a1c2", fontSize: 12, marginTop: 6 },
+  progressTrack: { height: 8, borderRadius: 0, backgroundColor: "#17191e", overflow: "hidden" },
+  progressFill: { height: 8, backgroundColor: "#6467f2" },
+  progressText: { color: "#9ba0ab", fontSize: 12, marginTop: 6 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 16 },
-  error: { color: "#f87171", fontSize: 12, marginTop: 12 },
+  error: { color: "#e34545", fontSize: 12, marginTop: 12 },
   buttons: { flexDirection: "row", gap: 10, marginTop: 18 },
-  btn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: "center" },
-  btnPrimary: { backgroundColor: "#7c3aed" },
+  btn: { flex: 1, paddingVertical: 12, borderRadius: 0, alignItems: "center" },
+  btnPrimary: { backgroundColor: "#6467f2" },
   btnPrimaryText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   btnGhost: { borderWidth: 1, borderColor: "#3b3470" },
   btnGhostText: { color: "#c4c4e6", fontWeight: "600", fontSize: 14 },
-  link: { color: "#a78bfa", fontSize: 12, textAlign: "center", textDecorationLine: "underline" },
+  link: { color: "#6467f2", fontSize: 12, textAlign: "center", textDecorationLine: "underline" },
 });
