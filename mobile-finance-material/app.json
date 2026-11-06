@@ -24,7 +24,6 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.rajwadainfotech.civiliererp",
-      "googleServicesFile": "./google-services.json",
       "permissions": [
         "REQUEST_INSTALL_PACKAGES"
       ]
