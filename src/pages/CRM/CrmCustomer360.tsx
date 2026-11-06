@@ -324,7 +324,7 @@ const BookingLedger: React.FC<{ b: any; expanded: boolean; onToggle: () => void 
           <Field l="Booked on" v={<span className={num}>{dt(b.BookingDate)}</span>} />
           <Field l="Milestones" v={milestones.length ? (
             <span className={cn(num, overdueCount > 0 && "text-destructive font-semibold")}>
-              {milestones.length - pendingCount}/{milestones.length} paid{coveredCount > 0 ? ` · ${coveredCount} ${MONEY_STAGE.Verified.label.toLowerCase()} on account` : ""}{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}
+              {milestones.length - pendingCount}/{milestones.length} paid{coveredCount > 0 ? ` · ${coveredCount} ${MONEY_STAGE.Verified.label.toLowerCase()}` : ""}{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}
             </span>) : "—"} />
           <Field l="Agreement" v={b.AgreementStatus || "—"} />
           <Field l="Legal" v={b.LegalMilestoneStatus || "—"} />
