@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as Notifications from "expo-notifications";
 import { useAuth } from "@/auth/AuthContext";
-import { registerForPushAsync } from "./pushNotifications";
+import { pushAvailable, registerForPushAsync } from "./pushNotifications";
 
 export type PushPayload = Record<string, unknown>;
 
@@ -19,14 +19,14 @@ export function PushNotificationsGate({
   onOpenRef.current = onOpen;
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !pushAvailable) return;
     void registerForPushAsync(appKey);
     const sub = Notifications.addPushTokenListener(() => void registerForPushAsync(appKey));
     return () => sub.remove();
   }, [userId, appKey]);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !pushAvailable) return;
     const handle = (response: Notifications.NotificationResponse) => {
       const data = (response.notification.request.content.data ?? {}) as PushPayload;
       onOpenRef.current?.(data);

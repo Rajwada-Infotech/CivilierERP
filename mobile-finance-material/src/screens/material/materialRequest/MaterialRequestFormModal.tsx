@@ -1,4 +1,5 @@
-// RN port of MaterialRequest.tsx's create/edit form. Scope trim vs. web:
+// RN port of MaterialRequest.tsx's create/edit form (MRForm), on the drawing sheet: a page of the stack (asScreen, from
+// MaterialRequestFormScreen) with Cancel / Save along its foot. Scope trim vs. web:
 // the UOM item-alternates live cross-unit conversion display is dropped
 // for a plain UOM picker (any active UOM, no category filtering) — the
 // most complex part of the web form and not needed for correctness, since
@@ -8,16 +9,17 @@ import { DateTimeField } from "@/components/DateTimeField";
 import { filterProjectsByCompany } from "@/utils/projectBelongsTo";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Alert } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, ClipboardList, Plus, Trash2 } from "lucide-react-native";
-import { colors } from "@/theme/colors";
-import { fonts } from "@/theme/fonts";
+import { ClipboardList } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
+import { Field, Input, Panel } from "@/components/sheet/Sheet";
+import { TextField } from "@/components/sheet/FormParts";
+import { AddLineKey, FormPage, KeyRow, LineBox, ShownValue } from "@/components/sheet/Register";
 import {
   getMaterialRequestById, createMaterialRequest, updateMaterialRequest,
   getMRCompanies, getMRProjects, getMRFinYears, getMRItemOptions, getMRUomOptions, previewNextMRNumber, fetchDocTypes,
-  PRIORITY_OPTIONS, PRIORITY_COLOR,
+  PRIORITY_OPTIONS,
   type CreateMRPayload, type MRLineItem,
 } from "@/api/materialRequestApi";
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/screens/finance/payment/OptionPicker";
@@ -48,32 +50,9 @@ function blankForm(): FormState {
   };
 }
 
-function FieldLabel({ children, required }: { children: string; required?: boolean }) {
-  return (
-    <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-      {children}{required ? " *" : ""}
-    </Text>
-  );
-}
-
-function TextField({ value, onChangeText, placeholder, multiline }: { value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean }) {
-  return (
-    <TextInput
-      value={value} onChangeText={onChangeText} placeholder={placeholder} multiline={multiline}
-      placeholderTextColor={`${colors.mutedForeground}99`}
-      style={{
-        borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: multiline ? 12 : 10,
-        color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, marginBottom: 14,
-        textAlignVertical: multiline ? "top" : "center", minHeight: multiline ? 70 : undefined,
-      }}
-    />
-  );
-}
-
 export function MaterialRequestFormModal({
-  visible, editingId, onClose,
-}: { visible: boolean; editingId: number | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
+  visible, editingId, onClose, asScreen,
+}: { visible: boolean; editingId: number | null; onClose: () => void; asScreen?: boolean }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(blankForm());
   const [cart, setCart] = useState<CartItem[]>([blankCartItem()]);
@@ -212,137 +191,81 @@ export function MaterialRequestFormModal({
   const activeLine = linePicker ? cart[linePicker.idx] : null;
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#10b98126" }}>
-              <ClipboardList size={14} color="#10b981" />
-            </View>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>{editingId ? "Edit Material Request" : "New Material Request"}</Text>
-          </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
+    <FormPage
+      asScreen={asScreen}
+      visible={visible}
+      onClose={onClose}
+      eyebrow="CivilierERP · Material · Material request"
+      title={editingId ? "Edit request" : "New request"}
+      subtitle={editingId ? existing?.DocNo || undefined : "Ask for materials for a project; it goes for approval on save."}
+      loading={editingId != null && loadingExisting}
+      saving={saving}
+      onSave={handleSave}
+      saveLabel={editingId ? "Save changes" : "Submit request"}
+      overlays={
+        <>
+          <OptionPickerModal visible={picker === "company"} title="Select company" options={companyOptions} selectedKey={form.companyId}
+            onSelect={(k) => { const c = companies.find((x) => String(x.id) === k); setForm((f) => ({ ...f, companyId: k, companyName: c?.name ?? "", projectId: "", projectName: "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "project"} title="Select project" options={projectOptions} selectedKey={form.projectId}
+            onSelect={(k) => { const p = projects.find((x) => String(x.id) === k); setForm((f) => ({ ...f, projectId: k, projectName: p?.name ?? "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "finYear"} title="Select financial year" options={finYearOptions} selectedKey={form.finYearId}
+            onSelect={(k) => { const f = finYears.find((x) => String(x.id) === k); setForm((st) => ({ ...st, finYearId: k, finYearName: f?.name ?? "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} clearable />
+          <OptionPickerModal
+            visible={linePicker?.kind === "item"} title="Select item" options={itemPickerOptions}
+            selectedKey={activeLine?.itemId ?? ""} onSelect={(k) => linePicker && pickItem(linePicker.idx, k)}
+            onClose={() => setLinePicker(null)} searchable
+          />
+          <OptionPickerModal
+            visible={linePicker?.kind === "uom"} title="Select UOM" options={uomPickerOptions}
+            selectedKey={activeLine?.uomCode ?? ""} onSelect={(k) => { if (linePicker) updateCartField(linePicker.idx, { uomCode: k }); setLinePicker(null); }}
+            onClose={() => setLinePicker(null)} searchable
+          />
+        </>
+      }
+    >
+      <Panel title="Request">
+        <View>
+          <ShownValue label="Doc number" value={editingId ? existing?.DocNo || "—" : docNoPreview?.nextDocNo || "Made on save"} />
+          <PickerRow label="Company *" value={form.companyName} placeholder="Select company…" onPress={() => setPicker("company")} />
+          <PickerRow label="Project *" value={form.projectName} placeholder={form.companyId ? "Select project…" : "Choose a company first"} onPress={() => setPicker("project")} disabled={!form.companyId} />
+          <PickerRow label={finYearLocked ? "Financial year · locked to current" : "Financial year"} value={form.finYearName} placeholder="Auto" onPress={() => setPicker("finYear")} disabled={finYearLocked} />
         </View>
+        <Field label="Priority" required>
+          <KeyRow options={PRIORITY_OPTIONS.map((p) => ({ value: p as string, label: p }))} value={form.priority} onChange={(p) => set("priority", p)} />
+        </Field>
+        <Field label="Request date" required>
+          <DateTimeField mode="date" value={form.requestDate} onChange={(v) => set("requestDate", v)} title="Request date" />
+        </Field>
+        <Field label="Required by">
+          <DateTimeField mode="date" value={form.requiredByDate} onChange={(v) => set("requiredByDate", v)} title="Required by" placeholder="Select a date (optional)" clearable />
+        </Field>
+        <View>
+          <TextField label="Reason *" value={form.reason} onChangeText={(v) => set("reason", v)} placeholder="Why is this material needed?" multiline />
+          <TextField label="Remarks" value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" />
+        </View>
+      </Panel>
 
-        {loadingExisting ? (
-          <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-        ) : (
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
-            <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
-            <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYearName} placeholder="Auto" onPress={() => setPicker("finYear")} disabled={finYearLocked} />
-
-            <FieldLabel required>Priority</FieldLabel>
-            <View className="flex-row flex-wrap gap-2 mb-4">
-              {PRIORITY_OPTIONS.map((p) => {
-                const active = form.priority === p;
-                const color = PRIORITY_COLOR[p];
-                return (
-                  <Pressable key={p} onPress={() => set("priority", p)} className="px-3 py-1.5 rounded-full" style={{ borderWidth: 1, borderColor: active ? color : colors.border, backgroundColor: active ? `${color}1a` : "transparent" }}>
-                    <Text style={{ color: active ? color : colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.heading.medium }}>{p}</Text>
-                  </Pressable>
-                );
-              })}
+      <Panel title={`Requested items (${cart.length})`} icon={<ClipboardList size={14} color={S.ink} />}>
+        {cart.map((ci, idx) => (
+          <LineBox key={ci.key} index={idx} title={`Item ${idx + 1}`} onRemove={cart.length > 1 ? () => removeCartRow(idx) : undefined}>
+            <View>
+              <PickerRow label="Item" value={ci.itemName} placeholder="Select item…" onPress={() => setLinePicker({ idx, kind: "item" })} />
             </View>
-
-            <FieldLabel required>Request Date</FieldLabel>
-            <DateTimeField mode="date" value={form.requestDate} onChange={(v) => set("requestDate", v)} title="Request date" />
-            <FieldLabel>Required By Date</FieldLabel>
-            <DateTimeField mode="date" value={form.requiredByDate} onChange={(v) => set("requiredByDate", v)} title="Required by" placeholder="Select a date (optional)" clearable />
-
-            <View className="rounded-xl px-3.5 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 10, textTransform: "uppercase" }}>Doc Number</Text>
-              <Text style={{ color: colors.primary, fontSize: 13, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
-                {editingId ? (existing?.DocNo || "—") : (docNoPreview?.nextDocNo || "Auto-generated on save")}
-              </Text>
-            </View>
-
-            <FieldLabel required>Reason</FieldLabel>
-            <TextField value={form.reason} onChangeText={(v) => set("reason", v)} placeholder="Why is this material needed?" multiline />
-            <FieldLabel>Remarks</FieldLabel>
-            <TextField value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" />
-
-            <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 6, marginBottom: 10 }}>
-              Requested Items ({cart.length})
-            </Text>
-            {cart.map((ci, idx) => (
-              <View key={ci.key} className="rounded-xl p-3 mb-2.5" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}>
-                <View className="flex-row items-center justify-between mb-2">
-                  <Pressable onPress={() => setLinePicker({ idx, kind: "item" })} style={{ flex: 1, marginRight: 8 }}>
-                    <Text numberOfLines={1} style={{ color: ci.itemName ? colors.foreground : colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.body.medium }}>
-                      {ci.itemName || "— Select Item —"}
-                    </Text>
-                  </Pressable>
-                  {cart.length > 1 && (
-                    <Pressable onPress={() => removeCartRow(idx)} className="p-1">
-                      <Trash2 size={14} color={colors.destructive} />
-                    </Pressable>
-                  )}
-                </View>
-                <View className="flex-row gap-2">
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>UOM</Text>
-                    <Pressable onPress={() => setLinePicker({ idx, kind: "uom" })} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, marginTop: 3 }}>
-                      <Text numberOfLines={1} style={{ color: ci.uomCode ? colors.foreground : colors.mutedForeground, fontSize: 12 }}>{ci.uomCode || "—"}</Text>
-                    </Pressable>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Quantity</Text>
-                    <TextInput
-                      value={ci.quantity}
-                      onChangeText={(v) => updateCartField(idx, { quantity: v.replace(/[^0-9.]/g, "") })}
-                      keyboardType="numeric"
-                      style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, color: colors.foreground, fontSize: 12, marginTop: 3 }}
-                    />
-                  </View>
-                </View>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <PickerRow label="UOM" value={ci.uomCode} placeholder="—" onPress={() => setLinePicker({ idx, kind: "uom" })} />
               </View>
-            ))}
-            <Pressable onPress={addCartRow} className="flex-row items-center justify-center gap-1.5 py-2.5 rounded-xl mb-2" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-              <Plus size={13} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontSize: 12, fontFamily: fonts.heading.medium }}>Add Item</Text>
-            </Pressable>
-          </ScrollView>
-        )}
-
-        <View className="flex-row gap-2.5 px-4" style={{ paddingBottom: insets.bottom + 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <Pressable onPress={onClose} className="px-5 py-3 rounded-xl items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleSave} disabled={saving}
-            className="flex-1 items-center justify-center py-3 rounded-xl"
-            style={{ backgroundColor: colors.primary, opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : (
-              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{editingId ? "Save Changes" : "Submit Request"}</Text>
-            )}
-          </Pressable>
-        </View>
-      </View>
-
-      <OptionPickerModal visible={picker === "company"} title="Select Company" options={companyOptions} selectedKey={form.companyId}
-        onSelect={(k) => { const c = companies.find((x) => String(x.id) === k); setForm((f) => ({ ...f, companyId: k, companyName: c?.name ?? "", projectId: "", projectName: "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "project"} title="Select Project" options={projectOptions} selectedKey={form.projectId}
-        onSelect={(k) => { const p = projects.find((x) => String(x.id) === k); setForm((f) => ({ ...f, projectId: k, projectName: p?.name ?? "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "finYear"} title="Select Financial Year" options={finYearOptions} selectedKey={form.finYearId}
-        onSelect={(k) => { const f = finYears.find((x) => String(x.id) === k); setForm((s) => ({ ...s, finYearId: k, finYearName: f?.name ?? "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} clearable />
-
-      <OptionPickerModal
-        visible={linePicker?.kind === "item"} title="Select Item" options={itemPickerOptions}
-        selectedKey={activeLine?.itemId ?? ""} onSelect={(k) => linePicker && pickItem(linePicker.idx, k)}
-        onClose={() => setLinePicker(null)} searchable
-      />
-      <OptionPickerModal
-        visible={linePicker?.kind === "uom"} title="Select UOM" options={uomPickerOptions}
-        selectedKey={activeLine?.uomCode ?? ""} onSelect={(k) => { if (linePicker) updateCartField(linePicker.idx, { uomCode: k }); setLinePicker(null); }}
-        onClose={() => setLinePicker(null)} searchable
-      />
-    </Modal>
+              <Field label="Quantity" style={{ flex: 1 }}>
+                <Input value={ci.quantity} onChangeText={(v) => updateCartField(idx, { quantity: v.replace(/[^0-9.]/g, "") })} keyboardType="numeric" placeholder="0" />
+              </Field>
+            </View>
+          </LineBox>
+        ))}
+        <AddLineKey onPress={addCartRow} />
+      </Panel>
+    </FormPage>
   );
 }

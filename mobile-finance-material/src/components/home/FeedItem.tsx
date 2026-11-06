@@ -19,7 +19,7 @@ export function FeedItem({ item, isLast }: { item: FeedItemData; isLast: boolean
     >
       <View className="items-center mt-0.5">
         <View
-          style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: `${item.color}2e` }}
+          style={{ width: 22, height: 22, borderRadius: 0, backgroundColor: `${item.color}2e` }}
           className="items-center justify-center"
         >
           <item.icon size={11} color={item.color} />

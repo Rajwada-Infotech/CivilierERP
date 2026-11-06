@@ -1,4 +1,5 @@
-// RN port of src/pages/finance/Contract.tsx's detail view — summary tiles,
+// RN port of src/pages/finance/Contract.tsx's detail view, on the drawing sheet as the web draws it (SheetShell with
+// Back / Edit / Print / Delete keys, then ruled panels) — summary tiles,
 // Contract Details card, Contract Ledger (advances/adjustments + live
 // balance summary — the same transparency view as web, hitting the same
 // /api/contract/:id/ledger endpoint), Parties, and Attachments. Edit
@@ -7,31 +8,17 @@
 // expo-print and opens the share sheet (same approach as Invoice's Print).
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { View, Text, ScrollView, ActivityIndicator, Pressable, Alert, Linking } from "react-native";
+import { View, Text, ScrollView, Alert, Linking } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import { FileText, Wallet, ArrowDownCircle, ArrowUpCircle, AlertTriangle, Paperclip, Eye, Printer } from "lucide-react-native";
+import { ArrowLeft, FileText, Wallet, Eye, Printer } from "lucide-react-native";
 import { getContract, getContractLedger, deleteContract, type ContractDetail, type ContractLedgerEntry, type PartyPill, type Attachment } from "@/api/contractApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { colors } from "@/theme/colors";
+import { colors, sheet as S } from "@/theme/colors";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { Body, InfoGrid, Key, Label, Notice, Panel, Press, SheetMark, SheetShell, Skel, StatGrid } from "@/components/sheet/Sheet";
 import { fonts } from "@/theme/fonts";
-
-const ACCENT = "#8b5cf6";
-
-const STATUS_STYLE: Record<string, string> = {
-  Active: "#8b5cf6",
-  Expired: "#ef4444",
-  Draft: "#f59e0b",
-  Approved: "#10b981",
-  Pending: "#f59e0b",
-};
-
-const PARTY_COLOR: Record<string, string> = {
-  Supplier: "#3b82f6",
-  Contractor: "#f59e0b",
-  Applicant: "#10b981",
-};
 
 function fmtDate(d?: string | null) {
   if (!d) return "—";
@@ -44,7 +31,7 @@ function fmtAmt(n: number | null | undefined) {
 }
 
 function notBuiltYet(title: string) {
-  Alert.alert(title, `The ${title} isn't built on mobile yet — use the web app for now.`);
+  Alert.alert(title, `The ${title} isn't built on mobile yet. Use the web app for now.`);
 }
 
 function parseJson<T>(raw: string | null, fallback: T): T {
@@ -54,44 +41,6 @@ function parseJson<T>(raw: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-function SectionTitle({ icon: Icon, children }: { icon: React.ComponentType<{ size?: number; color?: string }>; children: string }) {
-  return (
-    <View className="flex-row items-center gap-1.5 mb-3">
-      <Icon size={11} color={ACCENT} />
-      <Text style={{ color: `${colors.mutedForeground}cc`, fontSize: 10, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 1.2 }}>
-        {children}
-      </Text>
-    </View>
-  );
-}
-
-function InfoTile({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
-  return (
-    <View
-      className="rounded-xl px-3 py-2.5"
-      style={{ width: "48%", marginBottom: 8, backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: `${colors.border}80` }}
-    >
-      <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</Text>
-      {typeof value === "string" ? (
-        <Text numberOfLines={1} style={{ color: accent ?? colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
-          {value}
-        </Text>
-      ) : (
-        <View style={{ marginTop: 4 }}>{value}</View>
-      )}
-    </View>
-  );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const color = STATUS_STYLE[status] ?? colors.mutedForeground;
-  return (
-    <View className="px-2 py-1 rounded-md self-start" style={{ backgroundColor: `${color}22`, borderWidth: 1, borderColor: `${color}40` }}>
-      <Text style={{ color, fontSize: 10, fontFamily: fonts.heading.semibold }}>{status || "Draft"}</Text>
-    </View>
-  );
 }
 
 // Plain, print-safe HTML — mirrors InvoicePreviewScreen's buildInvoiceHtml
@@ -192,221 +141,194 @@ export default function ContractDetailScreen() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
-        <ActivityIndicator color={colors.mutedForeground} />
-      </View>
-    );
-  }
+  /** Web's StatusBadge. */
+  const statusMark = (status: string) => {
+    const st = (status || "Draft").toLowerCase();
+    const tone = st === "active" || st === "approved" ? "done" : st === "expired" || st === "deleted" || st === "rejected" ? "stopped" : "waiting";
+    return <SheetMark text={status || "Draft"} tone={tone} />;
+  };
 
-  if (isError || !c) {
+  if (isLoading || isError || !c) {
     return (
-      <View className="flex-1 items-center justify-center px-6" style={{ backgroundColor: colors.background }}>
-        <Text style={{ color: colors.destructive, fontSize: 13, fontFamily: fonts.body.medium, textAlign: "center" }}>
-          Could not load this contract.
-        </Text>
-      </View>
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }}>
+        <SheetShell
+          eyebrow="CivilierERP · Finance"
+          title="Contract"
+          action={<Key label="Back" icon={<ArrowLeft size={13} color={S.ink} />} onPress={() => navigation.goBack()} style={{ alignSelf: "flex-start" }} />}
+        >
+          {isLoading ? (
+            <>
+              <Skel h={60} />
+              <Skel h={120} />
+              <Skel h={120} />
+            </>
+          ) : (
+            <Notice>Could not load this contract.</Notice>
+          )}
+        </SheetShell>
+      </ScrollView>
     );
   }
 
   const attachments = parseJson<Attachment[]>(c.Attachments, []);
   const parties = parseJson<PartyPill[]>(c.Parties, []);
+  // As on the web: a contract waiting on approval, or approved, is not edited.
+  const canEdit = c.Status !== "Pending" && c.Status !== "Approved";
 
   return (
-    <ScrollView className="flex-1" style={{ backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
-      {/* Header */}
-      <View className="flex-row items-center gap-2 mb-1">
-        <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: `${ACCENT}22`, borderWidth: 1, borderColor: `${ACCENT}40` }}>
-          <FileText size={14} color={ACCENT} />
-        </View>
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 16, flexShrink: 1 }}>
-          {c.DocNo || "Contract"}
-        </Text>
-      </View>
-      <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 10, fontFamily: fonts.body.regular, marginLeft: 40 }}>
-        {fmtDate(c.DocDate)} · {c.FinYear || ""}
-      </Text>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }}>
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title={c.DocNo || "Contract"}
+        subtitle={`${fmtDate(c.DocDate)} · ${c.FinYear || ""}`}
+        action={
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            <Key label="Back" icon={<ArrowLeft size={13} color={S.ink} />} onPress={() => navigation.goBack()} />
+            {canEdit && <Key tone="ink" label="Edit" onPress={() => navigation.navigate("NewContract", { id: c.ContractId })} />}
+            <Key label="Print" icon={<Printer size={13} color={S.ink} />} onPress={handlePrint} />
+            <Key tone="red" label={deleteMutation.isPending ? "Deleting…" : "Delete"} onPress={confirmDelete} disabled={deleteMutation.isPending} />
+          </View>
+        }
+      >
+        <InfoGrid
+          items={[
+            { label: "Status", value: <ApprovalStatusChain table="Contract" recordId={c.ContractId} fallback={statusMark(c.Status)} /> },
+            { label: "Doc Date", value: fmtDate(c.DocDate) },
+            { label: "Contract Date", value: fmtDate(c.ContractDate) },
+            { label: "Financial Year", value: c.FinYear || "—" },
+            { label: "Company", value: c.CompanyName || "—" },
+            { label: "Project", value: c.ProjectName || "—" },
+          ]}
+        />
 
-      <View className="flex-row gap-2 mt-4 mb-1">
-        <Pressable
-          onPress={() => navigation.navigate("NewContract", { id: c.ContractId })}
-          className="flex-1 rounded-xl items-center"
-          style={{ backgroundColor: ACCENT, paddingVertical: 10 }}
-        >
-          <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Edit</Text>
-        </Pressable>
-        <Pressable
-          onPress={handlePrint}
-          className="rounded-xl items-center justify-center"
-          style={{ paddingHorizontal: 16, borderWidth: 1, borderColor: `${colors.border}80` }}
-        >
-          <Printer size={15} color={colors.mutedForeground} />
-        </Pressable>
-        <Pressable
-          onPress={confirmDelete}
-          disabled={deleteMutation.isPending}
-          className="rounded-xl items-center justify-center"
-          style={{ paddingHorizontal: 16, borderWidth: 1, borderColor: `${colors.destructive}4d`, opacity: deleteMutation.isPending ? 0.6 : 1 }}
-        >
-          {deleteMutation.isPending ? <ActivityIndicator size="small" color={colors.destructive} /> : <Text style={{ color: colors.destructive, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Delete</Text>}
-        </Pressable>
-      </View>
-
-      {/* Summary */}
-      <View className="mt-6">
-        <View className="flex-row flex-wrap justify-between">
-          <InfoTile label="Status" value={<StatusPill status={c.Status} />} />
-          <InfoTile label="Contract Date" value={fmtDate(c.ContractDate)} />
-          <InfoTile label="Company" value={c.CompanyName || "—"} />
-          <InfoTile label="Project" value={c.ProjectName || "—"} />
-        </View>
-      </View>
-
-      {/* Contract Details */}
-      <View className="mt-4">
-        <SectionTitle icon={FileText}>Contract Details</SectionTitle>
-        <View className="flex-row flex-wrap justify-between">
-          <InfoTile label="Contact Person" value={c.ContactPerson || "—"} />
-          <InfoTile label="Contract Type" value={c.NatureOfContract || "—"} />
-          <InfoTile label="Contract Amount" value={fmtAmt(c.ContractAmount)} accent={ACCENT} />
-          <InfoTile
-            label="Period"
-            value={
-              c.ContractStartDate || c.ContractEndDate
-                ? `${c.ContractStartDate ? fmtDate(c.ContractStartDate) : ""}${c.ContractStartDate && c.ContractEndDate ? " – " : ""}${c.ContractEndDate ? fmtDate(c.ContractEndDate) : ""}`
-                : "—"
-            }
+        <Panel title="Contract details">
+          <InfoGrid
+            items={[
+              { label: "Contact Person", value: c.ContactPerson || "—" },
+              { label: "Contract Type", value: c.NatureOfContract || "—" },
+              { label: "Contract Amount", value: <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 15, color: S.ink }}>{fmtAmt(c.ContractAmount)}</Text> },
+              {
+                label: "Period",
+                wide: true,
+                value:
+                  c.ContractStartDate || c.ContractEndDate
+                    ? `${c.ContractStartDate ? fmtDate(c.ContractStartDate) : ""}${c.ContractStartDate && c.ContractEndDate ? " – " : ""}${c.ContractEndDate ? fmtDate(c.ContractEndDate) : ""}`
+                    : "—",
+              },
+            ]}
           />
-        </View>
-        {!!c.Reason && (
-          <View className="rounded-xl px-3.5 py-3 mt-1" style={{ backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: `${colors.border}80` }}>
-            <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase", marginBottom: 3 }}>Purpose / Description</Text>
-            <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.regular, lineHeight: 17 }}>{c.Reason}</Text>
-          </View>
-        )}
-        {!!c.Remarks && (
-          <View className="rounded-xl px-3.5 py-3 mt-2" style={{ backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: `${colors.border}80` }}>
-            <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase", marginBottom: 3 }}>Remarks</Text>
-            <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.regular, lineHeight: 17 }}>{c.Remarks}</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Contract Ledger */}
-      <View className="mt-4">
-        <SectionTitle icon={Wallet}>Contract Ledger</SectionTitle>
-        {ledgerLoading ? (
-          <View className="py-8 items-center">
-            <ActivityIndicator color={colors.mutedForeground} />
-          </View>
-        ) : ledgerData ? (
-          <>
-            <View className="flex-row flex-wrap justify-between">
-              <InfoTile label="Total Advance" value={fmtAmt(ledgerData.summary.TotalAdvance)} accent="#10b981" />
-              <InfoTile label="Allocated" value={fmtAmt(ledgerData.summary.TotalAllocated)} accent="#f59e0b" />
-              <InfoTile label="Unallocated Balance" value={fmtAmt(ledgerData.summary.UnallocatedBalance)} accent={ACCENT} />
-              <InfoTile label="Documented" value={fmtAmt(ledgerData.summary.TotalDocumented)} />
+          {!!c.Reason && (
+            <View style={{ gap: 4 }}>
+              <Label>Purpose / Description</Label>
+              <Body size={13} color={S.ink2}>{c.Reason}</Body>
             </View>
+          )}
+          {!!c.Remarks && (
+            <View style={{ gap: 4 }}>
+              <Label>Remarks</Label>
+              <Body size={13} color={S.ink2}>{c.Remarks}</Body>
+            </View>
+          )}
+        </Panel>
 
-            {ledgerData.summary.OverBilled && (
-              <View className="flex-row items-center gap-2 px-3.5 py-2.5 rounded-xl mb-2" style={{ backgroundColor: "#ffe2021a", borderWidth: 1, borderColor: "#f59e0b33" }}>
-                <AlertTriangle size={13} color="#f59e0b" />
-                <Text style={{ color: "#f59e0b", fontSize: 10.5, fontFamily: fonts.body.medium, flex: 1 }}>
-                  Total documented exceeds contract value — expected for change orders, worth a look otherwise.
-                </Text>
-              </View>
-            )}
-
-            {ledgerData.ledger.length === 0 ? (
-              <Text className="py-4 text-center" style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>
-                No advances or adjustments recorded yet.
-              </Text>
-            ) : (
-              <View className="rounded-xl overflow-hidden" style={{ borderWidth: 1, borderColor: `${colors.border}80` }}>
-                {ledgerData.ledger.map((entry, i) => {
-                  const positive = entry.Amount >= 0;
-                  return (
-                    <View
-                      key={entry.LedgerId}
-                      className="flex-row items-center justify-between px-3.5 py-2.5"
-                      style={i < ledgerData.ledger.length - 1 ? { borderBottomWidth: 1, borderBottomColor: `${colors.border}50` } : undefined}
-                    >
-                      <View className="flex-1 min-w-0 pr-2">
-                        <View className="flex-row items-center gap-1.5">
-                          {positive ? <ArrowDownCircle size={11} color="#10b981" /> : <ArrowUpCircle size={11} color="#f59e0b" />}
-                          <Text style={{ color: positive ? "#10b981" : "#f59e0b", fontSize: 10.5, fontFamily: fonts.heading.semibold }}>{entry.TxnType}</Text>
+        {/* Advances paid / received against this contract, the adjustments made when an invoice or expense booking is
+            raised against it, and the live unallocated balance: the transparency view of the same money that posts to
+            the party in the General Ledger. */}
+        <Panel title="Contract ledger" icon={<Wallet size={14} color={S.ink} />}>
+          {ledgerLoading ? (
+            <>
+              <Skel h={60} />
+              <Skel h={30} />
+            </>
+          ) : ledgerData ? (
+            <>
+              <StatGrid
+                size={16}
+                items={[
+                  { label: "Total advance", value: fmtAmt(ledgerData.summary.TotalAdvance) },
+                  { label: "Allocated", value: fmtAmt(ledgerData.summary.TotalAllocated) },
+                  { label: "Unallocated balance", value: fmtAmt(ledgerData.summary.UnallocatedBalance) },
+                  { label: "Documented", value: fmtAmt(ledgerData.summary.TotalDocumented) },
+                ]}
+              />
+              {ledgerData.summary.OverBilled && (
+                <Notice tone="ink">Total documented against this contract exceeds its contract value: legitimate for change orders, but worth a look.</Notice>
+              )}
+              {ledgerData.ledger.length === 0 ? (
+                <Body size={12.5} color={S.graphite}>
+                  No advances or adjustments recorded yet. Pay this contractor or supplier with the contract selected on the Payment page to start one.
+                </Body>
+              ) : (
+                <View>
+                  {ledgerData.ledger.map((entry, i) => {
+                    const positive = entry.Amount >= 0;
+                    return (
+                      <View key={entry.LedgerId} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft }}>
+                        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                          <SheetMark text={entry.TxnType} tone={positive ? "done" : "moving"} />
+                          <Text numberOfLines={1} style={{ fontFamily: fonts.heading.semibold, fontSize: 12, color: S.ink }}>
+                            {entry.SourceDocNo || `${entry.SourceType} #${entry.SourceId}`}
+                          </Text>
+                          <Text numberOfLines={1} style={{ fontFamily: fonts.body.regular, fontSize: 11.5, color: S.graphite }}>
+                            {fmtDate(entry.CreatedAt)}
+                            {entry.Remarks ? ` · ${entry.Remarks}` : ""}
+                          </Text>
                         </View>
-                        <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular, marginTop: 2 }}>
-                          {entry.SourceDocNo || `${entry.SourceType} #${entry.SourceId}`} · {fmtDate(entry.CreatedAt)}
+                        <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 14, color: positive ? S.blue : S.ink }}>
+                          {positive ? "+" : "−"}
+                          {fmtAmt(Math.abs(entry.Amount))}
                         </Text>
                       </View>
-                      <Text style={{ color: positive ? "#10b981" : "#f59e0b", fontFamily: fonts.heading.bold, fontSize: 12.5 }}>
-                        {positive ? "+" : "−"}{fmtAmt(Math.abs(entry.Amount))}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-          </>
-        ) : (
-          <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>Ledger unavailable.</Text>
-        )}
-      </View>
-
-      {/* Parties */}
-      {parties.length > 0 && (
-        <View className="mt-4">
-          <SectionTitle icon={FileText}>Parties</SectionTitle>
-          <View className="flex-row flex-wrap gap-2">
-            {parties.map((p, i) => {
-              const color = PARTY_COLOR[p.type] ?? colors.mutedForeground;
-              return (
-                <View key={i} className="flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-full" style={{ backgroundColor: `${color}1a`, borderWidth: 1, borderColor: `${color}33` }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
-                  <Text style={{ color, fontSize: 9, fontFamily: fonts.heading.semibold, textTransform: "uppercase" }}>{p.type}</Text>
-                  <Text style={{ color: colors.foreground, fontSize: 11, fontFamily: fonts.body.medium }}>{p.name}</Text>
+                    );
+                  })}
                 </View>
-              );
-            })}
-          </View>
-        </View>
-      )}
+              )}
+            </>
+          ) : (
+            <Body size={12.5} color={S.graphite}>Ledger unavailable.</Body>
+          )}
+        </Panel>
 
-      {/* Attachments */}
-      {attachments.length > 0 && (
-        <View className="mt-4">
-          <SectionTitle icon={Paperclip}>{`Attachments (${attachments.length})`}</SectionTitle>
-          {attachments.map((att, i) => (
-            <Pressable
-              key={i}
-              onPress={() => Linking.openURL(att.url).catch(() => notBuiltYet("Attachment preview"))}
-              className="flex-row items-center gap-2.5 px-3 py-2.5 rounded-xl mb-1.5"
-              style={{ backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: `${colors.border}80` }}
-            >
-              <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: `${ACCENT}22` }}>
-                <FileText size={14} color={ACCENT} />
-              </View>
-              <View className="flex-1 min-w-0">
-                <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.medium }}>{att.name}</Text>
-                {!!att.size && <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular }}>{(att.size / 1024).toFixed(1)} KB</Text>}
-              </View>
-              <Eye size={14} color={colors.mutedForeground} />
-            </Pressable>
-          ))}
-        </View>
-      )}
+        {parties.length > 0 && (
+          <Panel title="Parties">
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {parties.map((p, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: S.line40 }}>
+                  <Label>{p.type}</Label>
+                  <Body size={12.5}>{p.name}</Body>
+                </View>
+              ))}
+            </View>
+          </Panel>
+        )}
 
-      {/* T&C */}
-      {!!c.TermsAndConditions && (
-        <View className="mt-4 mb-2">
-          <SectionTitle icon={FileText}>Terms & Conditions</SectionTitle>
-          <View className="rounded-xl px-3.5 py-3" style={{ backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: `${colors.border}80` }}>
-            <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.regular, lineHeight: 17 }}>{c.TermsAndConditions}</Text>
-          </View>
-        </View>
-      )}
+        {attachments.length > 0 && (
+          <Panel title={`Attachments (${attachments.length})`}>
+            {attachments.map((att, i) => (
+              <Press
+                key={i}
+                onPress={() => Linking.openURL(att.url).catch(() => notBuiltYet("Attachment preview"))}
+                style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
+              >
+                <View style={{ width: 32, height: 32, borderWidth: 1, borderColor: S.ink, alignItems: "center", justifyContent: "center" }}>
+                  <FileText size={14} color={S.ink} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ color: S.ink, fontSize: 12.5, fontFamily: fonts.body.medium }}>{att.name}</Text>
+                  {!!att.size && <Body size={11} color={S.graphite}>{`${(att.size / 1024).toFixed(1)} KB`}</Body>}
+                </View>
+                <Eye size={14} color={S.graphite} />
+              </Press>
+            ))}
+          </Panel>
+        )}
+
+        {!!c.TermsAndConditions && (
+          <Panel title="Terms & conditions">
+            <Body size={13} color={S.ink2}>{c.TermsAndConditions}</Body>
+          </Panel>
+        )}
+      </SheetShell>
     </ScrollView>
   );
 }

@@ -1,162 +1,260 @@
-// RN port of src/pages/finance/FinanceDashboard.tsx (web). Web has no
-// separate mobile layout — its Tailwind grids just collapse at narrow
-// widths (grid-cols-2 lg:grid-cols-4 stays 2-col on phones, grid-cols-1
-// sm:grid-cols-3 fully stacks, grid-cols-1 lg:grid-cols-2 stacks the two
-// recent-activity tables) — so this screen reproduces that same collapsed
-// arrangement natively rather than inventing a new one: Today's Activity
-// (2-col stat tiles), Totals (stacked), Recent Activity (two stacked row
-// lists in place of web's <table>s), Cheque Summary (2-col tiles), Quick
-// Actions (2-col nav buttons). No chart library — web doesn't use one either.
-import { fmtIstClock } from "@/utils/istTime";
+// RN port of src/pages/finance/FinanceDashboard.tsx (web), on the same drawing sheet and in the same order:
+// the title block with the date and Re-read, then A received against paid, B today, C fourteen days about the cash
+// line, D instruments, E income by month, F latest payments made, G latest receipts, H go to.
+//
+// The one idea of the page is the cash line: money received is drawn solid above it, money paid out is drawn hatched
+// below it — in the totals (A) and day by day (C). Red is kept for a net outflow. The web's hover becomes a tap here:
+// tap a day or a month to read its figures. The sheet's parts rise in one after another, the bars grow and the net
+// line draws itself, as on the web.
 import { useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
+import { View, Text, ScrollView, Pressable, RefreshControl } from "react-native";
+import Svg, { Circle, Defs, G, Line, Pattern, Rect, Text as SvgText } from "react-native-svg";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 import {
-  RefreshCw, CreditCard, Landmark, BookOpen, Receipt, BadgeDollarSign,
-  CheckCircle2, Clock, Plus, ArrowDownToLine, Wallet,
-} from "lucide-react-native";
-import { fetchFinanceDashboard, type FinanceDashboardData, type RecentPaymentMade, type RecentPaymentReceived } from "@/api/financeDashboardApi";
-import { colors } from "@/theme/colors";
+  fetchFinanceDashboard,
+  fetchMonthlyIncome,
+  type FinanceDashboardData,
+  type MonthlyIncomePoint,
+  type RecentPaymentMade,
+  type RecentPaymentReceived,
+} from "@/api/financeDashboardApi";
+import { colors, sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { SectionLabel } from "@/components/home/SectionLabel";
-import { FadeSlideIn } from "@/components/FadeSlideIn";
+import {
+  Body,
+  Detail,
+  Dimension,
+  Grow,
+  Hatch,
+  Label,
+  LinkLabel,
+  Notice,
+  SheetFrame,
+  SheetTable,
+  Skel,
+  Swatch,
+  TitleText,
+  AnimatedPath,
+  fmtInt,
+  n0,
+  useDraw,
+  type Col, Press } from "@/components/sheet/Sheet";
 import type { MainStackParamList } from "@/navigation/MainStack";
+import { Alert } from "react-native";
 
-const FINANCE = "#3b82f6";
+// ─── Helpers (the web page's own) ─────────────────────────────────────────────
+const split = (v: unknown) => {
+  const n = Math.abs(n0(v));
+  if (n >= 1_00_00_000) return { num: (n / 1_00_00_000).toFixed(2), unit: "Cr" };
+  if (n >= 1_00_000) return { num: (n / 1_00_000).toFixed(1), unit: "L" };
+  if (n >= 1_000) return { num: (n / 1_000).toFixed(0), unit: "K" };
+  return { num: n.toFixed(0), unit: "" };
+};
+const money = (v: unknown) => {
+  const m = split(v);
+  return `${n0(v) < 0 ? "−" : ""}₹${m.num}${m.unit ? ` ${m.unit}` : ""}`;
+};
+const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—");
+const share = (part: number, whole: number) => (whole > 0 ? Math.min(100, Math.max(0, (part / whole) * 100)) : 0);
 
-function fmtDay(d?: string) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? "—" : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-}
-
-function fmtRupees(n: number) {
-  if (!n) return "₹0";
-  if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
-  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}K`;
-  return `₹${n.toLocaleString("en-IN")}`;
-}
-
-function notBuiltYet(title: string) {
-  Alert.alert(title, `The ${title} screen isn't built on mobile yet — use the web app for now.`);
-}
-
-function StatTile({
-  label, value, icon: Icon, accent, onPress, wide,
-}: {
-  label: string; value: string | number; icon: React.ComponentType<{ size?: number; color?: string }>; accent: string; onPress?: () => void; wide?: boolean;
-}) {
+/** A money figure: a small ₹, the number, and its unit (Cr / L / K) set smaller after it. */
+function MoneyFigure({ value, size = 40, color = S.ink }: { value: unknown; size?: number; color?: string }) {
+  const m = split(value);
   return (
-    <Pressable
-      onPress={onPress}
-      style={{ width: wide ? "100%" : "48%", marginBottom: 10 }}
-      className="rounded-xl overflow-hidden"
-    >
-      <View
-        className="flex-row items-center gap-2.5 px-3.5 py-3"
-        style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80`, borderLeftWidth: 3, borderLeftColor: accent }}
-      >
-        <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: `${accent}26`, borderWidth: 1, borderColor: `${accent}4d` }}>
-          <Icon size={14} color={accent} />
-        </View>
-        <View className="flex-1 min-w-0">
-          <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>
-            {label}
-          </Text>
-          <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 16, marginTop: 1 }}>{value}</Text>
-        </View>
-      </View>
-    </Pressable>
+    <Text style={{ fontFamily: fonts.heading.semibold, fontSize: size, lineHeight: size * 1.05, letterSpacing: -size * 0.02, color, fontVariant: ["tabular-nums"] }}>
+      {n0(value) < 0 ? "−" : ""}
+      <Text style={{ fontSize: size * 0.5, fontFamily: fonts.heading.medium }}>₹ </Text>
+      {m.num}
+      {!!m.unit && <Text style={{ fontSize: size * 0.36, fontFamily: fonts.heading.medium }}> {m.unit}</Text>}
+    </Text>
   );
 }
 
-function GlassPanel({ title, onViewAll, children }: { title: string; onViewAll?: () => void; children: React.ReactNode }) {
+/** The plot's caption line: the legend on the left, the tapped day's figures (or how to read it) under it. */
+function PlotHead({ legend, reading, scale }: { legend: React.ReactNode; reading: string; scale?: string }) {
   return (
-    <View className="rounded-2xl mb-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-      <View className="flex-row items-center justify-between px-4 pt-3.5 pb-2">
-        <Text style={{ color: colors.foreground, fontFamily: fonts.heading.semibold, fontSize: 13 }}>{title}</Text>
-        {onViewAll && (
-          <Pressable onPress={onViewAll}>
-            <Text style={{ color: FINANCE, fontSize: 11, fontFamily: fonts.body.medium }}>View all →</Text>
-          </Pressable>
+    <View style={{ gap: 6, marginBottom: 8 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>{legend}</View>
+      {!!scale && <Body size={11} color={S.graphite}>{scale}</Body>}
+      <Body size={12} color={S.ink2}>{reading}</Body>
+    </View>
+  );
+}
+
+// ── C: fourteen days about the cash line — received above it, paid below ────
+function CashLinePlot({ rows }: { rows: { date: string; made: number; received: number }[] }) {
+  const [tap, setTap] = useState<number | null>(null);
+  const [box, setBox] = useState(320);
+  const H = 276, pad = 4, top = 44, bottom = 218, mid = (top + bottom) / 2;
+  const n = Math.max(1, rows.length);
+  const W = box;
+  const slot = (W - pad * 2) / n;
+  const max = Math.max(1, ...rows.map((r) => Math.max(n0(r.made), n0(r.received))));
+  const half = mid - top;
+  const cx = (i: number) => pad + slot * i + slot / 2;
+  const w = Math.min(18, slot * 0.56);
+  const ny = (r: { made: number; received: number }) => mid - ((n0(r.received) - n0(r.made)) / max) * half;
+  const net = rows.map((r, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${ny(r).toFixed(1)}`).join(" ");
+  const len = rows.reduce((acc, r, i) => (i ? acc + Math.hypot(slot, ny(r) - ny(rows[i - 1])) : 0), 0) + 2;
+  const dash = useDraw(len);
+  const active = tap != null ? rows[tap] : null;
+  return (
+    <View onLayout={(e) => setBox(Math.max(200, e.nativeEvent.layout.width))}>
+      <PlotHead
+        legend={
+          <>
+            <Swatch kind="solid" label="Received" />
+            <Swatch kind="hatch" label="Paid out" />
+            <Swatch kind="line" label="Net for the day" />
+          </>
+        }
+        scale={`Dashed lines: ${money(max)} in · ${money(max)} out`}
+        reading={
+          active
+            ? `${fmtDate(active.date)} · ${money(active.received)} in · ${money(active.made)} out · net ${money(n0(active.received) - n0(active.made))}`
+            : "Tap a day for its figures"
+        }
+      />
+      <Svg width={W} height={H}>
+        <Defs>
+          <Pattern id="fin-hatch" width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <Line x1={0} y1={0} x2={0} y2={6} stroke={S.ink} strokeWidth={1} opacity={0.55} />
+          </Pattern>
+        </Defs>
+        <Line x1={pad} x2={W - pad} y1={top} y2={top} stroke={S.rule} strokeDasharray="2 5" />
+        <Line x1={pad} x2={W - pad} y1={bottom} y2={bottom} stroke={S.rule} strokeDasharray="2 5" />
+        {rows.map((r, i) => {
+          const up = (n0(r.received) / max) * half;
+          const down = (n0(r.made) / max) * half;
+          const d = new Date(r.date);
+          const on = tap == null || tap === i;
+          return (
+            <G key={r.date || i} onPress={() => setTap(tap === i ? null : i)}>
+              <Rect x={pad + slot * i} y={0} width={slot} height={H} fill={tap === i ? S.blueWash : "transparent"} />
+              <Rect x={cx(i) - w / 2} y={mid - up} width={w} height={up} fill={S.blue} fillOpacity={on ? 0.92 : 0.4} />
+              <Rect x={cx(i) - w / 2} y={mid} width={w} height={down} fill="url(#fin-hatch)" stroke={S.ink} strokeWidth={1} opacity={on ? 1 : 0.45} />
+              {n0(r.received) > 0 && <BarFigure x={cx(i)} y={mid - up} text={barFigure(r.received)} slot={slot} index={i} color={S.blue} />}
+              {n0(r.made) > 0 && <BarFigure x={cx(i)} y={mid + down} text={barFigure(r.made)} slot={slot} index={i} below />}
+              <SvgText x={cx(i)} y={H - 16} textAnchor="middle" fontFamily={fonts.heading.semibold} fontSize={9.5} fill={tap === i ? S.ink : S.graphite}>
+                {String(d.getDate())}
+              </SvgText>
+              {(i === 0 || d.getDate() === 1) && (
+                <SvgText x={cx(i)} y={H - 4} textAnchor="middle" fontFamily={fonts.heading.semibold} fontSize={8} letterSpacing={1} fill={S.faint}>
+                  {d.toLocaleDateString("en-IN", { month: "short" }).toUpperCase()}
+                </SvgText>
+              )}
+            </G>
+          );
+        })}
+        {/* the cash line itself */}
+        <Line x1={pad} x2={W - pad} y1={mid} y2={mid} stroke={S.ink} strokeWidth={1.5} />
+        {rows.length > 1 && (
+          <AnimatedPath d={net} fill="none" stroke={S.ink} strokeWidth={1.6} strokeLinejoin="round" opacity={0.85} strokeDasharray={`${len} ${len}`} strokeDashoffset={dash} />
         )}
-      </View>
-      <View className="px-4 pb-1">{children}</View>
+        {rows.map((r, i) => (
+          <Circle key={i} cx={cx(i)} cy={ny(r)} r={tap === i ? 4 : 2.6} fill={S.paper} stroke={S.ink} strokeWidth={1.4} />
+        ))}
+      </Svg>
     </View>
   );
 }
 
-function PaymentMadeRow({ item, isLast }: { item: RecentPaymentMade; isLast: boolean }) {
+// ── E: income by month; a fall from the month before is drawn in red ────────
+function IncomePlot({ rows }: { rows: MonthlyIncomePoint[] }) {
+  const [tap, setTap] = useState<number | null>(null);
+  const [box, setBox] = useState(320);
+  const H = 214, pad = 4, top = 44, base = 176;
+  const n = Math.max(1, rows.length);
+  const W = box;
+  const slot = (W - pad * 2) / n;
+  const max = Math.max(1, ...rows.map((r) => Math.abs(n0(r.income))));
+  const cx = (i: number) => pad + slot * i + slot / 2;
+  const w = Math.min(28, slot * 0.56);
+  const active = tap != null ? rows[tap] : null;
   return (
-    <View
-      className="flex-row items-center justify-between py-2.5"
-      style={!isLast ? { borderBottomWidth: 1, borderBottomColor: `${colors.border}60` } : undefined}
-    >
-      <View className="flex-1 min-w-0 pr-2">
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontFamily: fonts.body.semibold, fontSize: 12 }}>
-          {item.PPaymentName || item.PProject || "—"}
-        </Text>
-        <Text style={{ color: colors.mutedForeground, fontSize: 10, marginTop: 2, fontFamily: fonts.body.regular }}>
-          {item.PMode ?? "—"} · {fmtDay(item.PDate)}
-        </Text>
-      </View>
-      <Text style={{ color: "#f43f5e", fontFamily: fonts.heading.semibold, fontSize: 12 }}>
-        {fmtRupees(Number(item.PAmount ?? 0))}
-      </Text>
+    <View onLayout={(e) => setBox(Math.max(200, e.nativeEvent.layout.width))}>
+      <PlotHead
+        legend={
+          <>
+            <Swatch kind="solid" label="Up on the month before" />
+            <Swatch kind="red" label="Down" />
+          </>
+        }
+        scale={`Dashed line: ${money(max)}`}
+        reading={active ? `${active.month} ${active.year} · ${money(active.income)}` : "Tap a month for its figure"}
+      />
+      <Svg width={W} height={H}>
+        <Line x1={pad} x2={W - pad} y1={base} y2={base} stroke={S.ink} />
+        <Line x1={pad} x2={W - pad} y1={top} y2={top} stroke={S.rule} strokeDasharray="2 5" />
+        {rows.map((r, i) => {
+          const h = (Math.abs(n0(r.income)) / max) * (base - top);
+          const fill = r.trend === "degrowth" ? S.red : S.blue;
+          return (
+            <G key={r.key || i} onPress={() => setTap(tap === i ? null : i)}>
+              <Rect x={pad + slot * i} y={0} width={slot} height={H} fill={tap === i ? S.blueWash : "transparent"} />
+              <Rect x={cx(i) - w / 2} y={base - h} width={w} height={h} fill={fill} fillOpacity={(tap == null || tap === i ? 0.92 : 0.4) * (r.trend === "neutral" ? 0.6 : 1)} />
+              {Math.abs(n0(r.income)) > 0.005 && <BarFigure x={cx(i)} y={base - h} text={barFigure(r.income)} slot={slot} index={i} color={r.trend === "degrowth" ? S.red : S.ink} />}
+              <SvgText x={cx(i)} y={base + 16} textAnchor="middle" fontFamily={fonts.heading.semibold} fontSize={9} letterSpacing={0.6} fill={tap === i ? S.ink : S.graphite}>
+                {String(r.month).slice(0, 3).toUpperCase()}
+              </SvgText>
+              <SvgText x={cx(i)} y={base + 28} textAnchor="middle" fontFamily={fonts.body.regular} fontSize={8} fill={S.faint}>
+                {String(r.year).slice(-2)}
+              </SvgText>
+            </G>
+          );
+        })}
+      </Svg>
     </View>
   );
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  Approved: "#10b981",
-  Draft: "#f59e0b",
-  Cleared: "#3b82f6",
-  Rejected: "#ef4444",
+/** A bar's figure, lying flat over (or, with `below`, under) the end of its bar, sized to the bar's slot. When figures
+ * are wider than their bars, every other one (odd `index`) stands one line further off, so neighbours alternate
+ * between two heights instead of running into each other. */
+function BarFigure({ x, y, text, slot, index, color = S.ink, below }: { x: number; y: number; text: string; slot: number; index: number; color?: string; below?: boolean }) {
+  const size = Math.min(9, Math.max(7, slot / 3.2));
+  const crowded = text.length * size * 0.6 > slot - 3;
+  const off = 4 + (crowded && index % 2 ? size + 3 : 0);
+  return (
+    <SvgText x={x} y={below ? y + size + off - 1 : y - off} textAnchor="middle" fontFamily={fonts.heading.semibold} fontSize={size} fill={color}>
+      {text}
+    </SvgText>
+  );
+}
+
+/** A bar's own figure, short enough to sit over a narrow bar: 1.2Cr, 14L, 950K. */
+const barFigure = (v: unknown) => {
+  const n = Math.abs(n0(v));
+  const t = n >= 1e7 ? `${(n / 1e7).toFixed(1)}Cr` : n >= 1e5 ? `${Math.round(n / 1e5)}L` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : `${Math.round(n)}`;
+  return `${n0(v) < 0 ? "−" : ""}${t}`;
 };
 
-function PaymentReceivedRow({ item, isLast }: { item: RecentPaymentReceived; isLast: boolean }) {
-  const statusColor = STATUS_COLOR[item.RPStatus] ?? colors.mutedForeground;
+/** One instrument: a bar measured out of its total, in use solid and the rest hatched. */
+function Measure({ name, live, total, onOpen, last }: { name: string; live: number; total: number; onOpen: () => void; last?: boolean }) {
   return (
-    <View
-      className="flex-row items-center justify-between py-2.5"
-      style={!isLast ? { borderBottomWidth: 1, borderBottomColor: `${colors.border}60` } : undefined}
-    >
-      <View className="flex-1 min-w-0 pr-2">
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontFamily: fonts.body.semibold, fontSize: 12 }}>
-          {item.RPReceivedFrom || "—"}
+    <Press onPress={onOpen} style={(pressed) => ({ paddingVertical: 11, borderBottomWidth: last ? 0 : 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}>
+      <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+        <LinkLabel onPress={onOpen}>{name}</LinkLabel>
+        <Text>
+          <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 22, color: S.ink, letterSpacing: -0.4 }}>{fmtInt(live)}</Text>
+          <Text style={{ fontSize: 12, color: S.graphite, fontFamily: fonts.body.regular }}> of {fmtInt(total)}</Text>
         </Text>
-        <View className="flex-row items-center gap-1.5 mt-1">
-          <View className="px-1.5 py-0.5 rounded-full" style={{ backgroundColor: `${statusColor}26` }}>
-            <Text style={{ color: statusColor, fontSize: 8.5, fontFamily: fonts.heading.semibold }}>{item.RPStatus}</Text>
-          </View>
-          <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular }}>
-            {item.RPMode ?? "—"} · {fmtDay(item.RPDocDate)}
-          </Text>
-        </View>
       </View>
-      <Text style={{ color: "#10b981", fontFamily: fonts.heading.semibold, fontSize: 12 }}>
-        {fmtRupees(Number(item.RPAmount ?? 0))}
-      </Text>
-    </View>
+      <View style={{ height: 9, marginTop: 8, borderWidth: 1, borderColor: S.ink, overflow: "hidden" }}>
+        <Hatch id={`m-${name}`} />
+        <Grow style={{ height: "100%", width: `${share(live, total)}%`, backgroundColor: S.blue }} />
+      </View>
+      <Body size={11.5} color={S.graphite} style={{ marginTop: 6 }}>
+        {fmtInt(live)} active · {fmtInt(Math.max(0, total - live))} inactive
+      </Body>
+    </Press>
   );
 }
 
-function QuickAction({ label, icon: Icon, onPress }: { label: string; icon: React.ComponentType<{ size?: number; color?: string }>; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={{ width: "48%", marginBottom: 10 }} className="rounded-xl overflow-hidden">
-      <View
-        className="items-center justify-center gap-1.5 py-3.5"
-        style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}
-      >
-        <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: `${FINANCE}26` }}>
-          <Icon size={15} color={FINANCE} />
-        </View>
-        <Text style={{ color: colors.foreground, fontSize: 11, fontFamily: fonts.body.medium }}>{label}</Text>
-      </View>
-    </Pressable>
-  );
+function notOnMobile(title: string) {
+  Alert.alert(title, `The ${title} screen isn't built on mobile yet. Use the web app for now.`);
 }
 
 export default function FinanceDashboardScreen() {
@@ -165,135 +263,288 @@ export default function FinanceDashboardScreen() {
   const goToPayments = (openForm?: boolean) => navigation.navigate("Payment", openForm ? { openForm: true } : undefined);
   const goToReceived = (openForm?: boolean) => navigation.navigate("ReceivedPayment", openForm ? { openForm: true } : undefined);
 
-  const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useQuery<FinanceDashboardData>({
+  const { data: raw, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useQuery<FinanceDashboardData>({
     queryKey: ["finance-dashboard"],
     queryFn: fetchFinanceDashboard,
     staleTime: 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
     retry: 2,
   });
+  const { data: monthlyIncome, isLoading: incomeLoading, refetch: refetchIncome } = useQuery<MonthlyIncomePoint[]>({
+    queryKey: ["finance-monthly-income"],
+    queryFn: fetchMonthlyIncome,
+    staleTime: 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+  });
+  const income = monthlyIncome ?? [];
+  const data = raw;
 
-  const lastUpdated = dataUpdatedAt
-    ? fmtIstClock(dataUpdatedAt)
-    : null;
+  const received = n0(data?.receivedPayments.totalAmount);
+  const paid = n0(data?.paymentsMade.totalAmount);
+  const net = received - paid;
+  const receivedPct = share(received, received + paid);
+  const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
+  const todayNet = n0(data?.receivedPayments.todayAmount) - n0(data?.paymentsMade.todayAmount);
 
+  const reread = () => {
+    void refetch();
+    void refetchIncome();
+  };
   const onRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetch(), refetchIncome()]);
     setRefreshing(false);
   };
 
+  const madeCols: Col<RecentPaymentMade>[] = [
+    {
+      title: "Paid to",
+      width: 170,
+      render: (p) => (
+        <View>
+          <Body weight="semibold" size={12.5}>{p.PPaymentName || "—"}</Body>
+          {!!(p.PProject || p.PBankName) && <Body size={11} color={S.graphite}>{[p.PProject, p.PBankName].filter(Boolean).join(" · ")}</Body>}
+        </View>
+      ),
+    },
+    { title: "Mode", width: 74, render: (p) => <Label>{p.PMode || "—"}</Label> },
+    { title: "Date", width: 62, render: (p) => <Body size={12} color={S.ink2}>{fmtDate(p.PDate)}</Body> },
+    { title: "Amount", width: 84, num: true, render: (p) => <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>{money(p.PAmount)}</Text> },
+  ];
+  const receivedCols: Col<RecentPaymentReceived>[] = [
+    {
+      title: "Received from",
+      width: 160,
+      render: (p) => (
+        <View>
+          <Body weight="semibold" size={12.5}>{p.RPReceivedFrom || "—"}</Body>
+          {!!(p.RPMode || p.RPBankName) && <Body size={11} color={S.graphite}>{[p.RPMode, p.RPBankName].filter(Boolean).join(" · ")}</Body>}
+        </View>
+      ),
+    },
+    { title: "Status", width: 78, render: (p) => <Label color={/reject|bounce|cancel/i.test(p.RPStatus || "") ? S.red : S.graphite}>{p.RPStatus || "—"}</Label> },
+    { title: "Date", width: 62, render: (p) => <Body size={12} color={S.ink2}>{fmtDate(p.RPDocDate)}</Body> },
+    { title: "Amount", width: 84, num: true, render: (p) => <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>{money(p.RPAmount)}</Text> },
+  ];
+
+  const go = [
+    { label: "New payment", onPress: () => goToPayments(true) },
+    { label: "New receipt", onPress: () => goToReceived(true) },
+    { label: "Cheques", onPress: () => notOnMobile("Cheques") },
+    { label: "Cards", onPress: () => notOnMobile("Cards") },
+    { label: "Banks", onPress: () => notOnMobile("Banks") },
+  ];
+
   return (
     <ScrollView
-      className="flex-1"
-      style={{ backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={{ paddingBottom: 96 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={S.ink} />}
     >
-      {/* Header */}
-      <FadeSlideIn delay={0}>
-        <View className="flex-row items-center gap-2.5 mb-1">
-          <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: `${FINANCE}26`, borderWidth: 1, borderColor: `${FINANCE}4d` }}>
-            <Landmark size={16} color={FINANCE} />
+      <SheetFrame>
+        {/* Title block */}
+        <View>
+          <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 18, gap: 8 }}>
+            <Label>CivilierERP · Finance</Label>
+            <TitleText size={30}>Finance overview</TitleText>
+            <Body size={13} color={S.ink2}>What has been received and paid, how the last fortnight ran, and the cheques, cards and banks behind it.</Body>
           </View>
-          <View className="flex-1">
-            <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 20 }}>Finance Overview</Text>
-            {lastUpdated && (
-              <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 10, fontFamily: fonts.body.regular }}>Updated {lastUpdated}</Text>
-            )}
+          <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+            <View style={{ paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+              <Label style={{ marginBottom: 3 }}>Date</Label>
+              <Body size={13}>{readAt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</Body>
+            </View>
+            <View style={{ flexDirection: "row" }}>
+              <View style={{ flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRightWidth: 1, borderRightColor: S.ink }}>
+                <Label style={{ marginBottom: 3 }}>Read at</Label>
+                <Body size={13}>{readAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</Body>
+              </View>
+              <View style={{ flex: 1, paddingHorizontal: 14, paddingVertical: 10, justifyContent: "flex-end" }}>
+                <LinkLabel onPress={reread} color={S.blue}>{isFetching ? "Reading…" : "Re-read"}</LinkLabel>
+              </View>
+            </View>
           </View>
-          <Pressable onPress={() => refetch()} disabled={isFetching} hitSlop={8} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-            {isFetching ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <RefreshCw size={14} color={colors.mutedForeground} />}
-          </Pressable>
         </View>
-      </FadeSlideIn>
 
-      {isError && (
-        <View className="mt-3 flex-row items-center gap-2 px-4 py-2.5 rounded-xl" style={{ backgroundColor: `${colors.destructive}1a`, borderWidth: 1, borderColor: `${colors.destructive}33` }}>
-          <Text style={{ color: colors.destructive, fontSize: 11, fontFamily: fonts.body.medium, flex: 1 }}>
-            Could not reach the server — showing cached data.
-          </Text>
-        </View>
-      )}
-
-      {isLoading ? (
-        <View className="py-16 items-center">
-          <ActivityIndicator color={colors.mutedForeground} />
-        </View>
-      ) : (
-        <>
-          {/* Today's Activity */}
-          <View className="mt-7">
-            <SectionLabel>Today's Activity</SectionLabel>
-            <View className="flex-row flex-wrap justify-between">
-              <StatTile label="Payments Made Today" value={data?.paymentsMade.todayCount ?? 0} icon={Receipt} accent="#f43f5e" onPress={() => goToPayments()} />
-              <StatTile label="Received Today" value={data?.receivedPayments.todayCount ?? 0} icon={BadgeDollarSign} accent="#10b981" onPress={() => goToReceived()} />
-              <StatTile label="Cheque Lots" value={data?.cheques.totalCount ?? 0} icon={BookOpen} accent="#f59e0b" onPress={() => notBuiltYet("Cheques")} />
-              <StatTile label="Active Cards" value={data?.cards.activeCount ?? 0} icon={CreditCard} accent="#8b5cf6" onPress={() => notBuiltYet("Cards")} />
-            </View>
+        {isError && (
+          <View style={{ borderTopWidth: 1, borderTopColor: S.rule, padding: 16 }}>
+            <Notice>Could not load the finance figures. Use Re-read to try again.</Notice>
           </View>
+        )}
 
-          {/* Totals */}
-          <View className="mt-3">
-            <SectionLabel>Totals</SectionLabel>
-            <View className="flex-row flex-wrap justify-between">
-              <StatTile label="Bank Accounts" value={data?.banks.totalCount ?? 0} icon={Landmark} accent="#3b82f6" wide onPress={() => notBuiltYet("Banks")} />
-              <StatTile label="Total Payments Made" value={fmtRupees(data?.paymentsMade.totalAmount ?? 0)} icon={Receipt} accent="#f43f5e" wide />
-              <StatTile label="Total Received" value={fmtRupees(data?.receivedPayments.totalAmount ?? 0)} icon={BadgeDollarSign} accent="#10b981" wide />
-            </View>
-          </View>
+        <Detail tag="A" title="Received against paid" note="All time">
+          {isLoading ? (
+            <>
+              <Skel h={54} w="60%" />
+              <Skel h={28} />
+              <Skel w="70%" />
+            </>
+          ) : (
+            <>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
+                <Pressable onPress={() => goToReceived()} style={{ gap: 8 }}>
+                  <LinkLabel onPress={() => goToReceived()} color={S.graphite}>Received</LinkLabel>
+                  <MoneyFigure value={received} />
+                </Pressable>
+                <Pressable onPress={() => goToPayments()} style={{ gap: 8 }}>
+                  <LinkLabel onPress={() => goToPayments()} color={S.graphite}>Paid out</LinkLabel>
+                  <MoneyFigure value={paid} color={S.ink2} />
+                </Pressable>
+                <View style={{ marginLeft: "auto", alignItems: "flex-end", gap: 8 }}>
+                  <Label>{net >= 0 ? "Net inflow" : "Net outflow"}</Label>
+                  <MoneyFigure value={net} size={26} color={net < 0 ? S.red : S.blue} />
+                </View>
+              </View>
 
-          {/* Recent Activity */}
-          <View className="mt-3">
-            <SectionLabel>Recent Activity</SectionLabel>
-            <GlassPanel title="Recent Payments Made" onViewAll={() => goToPayments()}>
-              {(data?.recentPaymentsMade ?? []).length === 0 ? (
-                <Text className="py-6 text-center" style={{ color: `${colors.mutedForeground}66`, fontSize: 12, fontFamily: fonts.body.regular }}>
-                  No recent payments.
-                </Text>
-              ) : (
-                data!.recentPaymentsMade.map((p, i) => (
-                  <PaymentMadeRow key={p.PPaymentID ?? i} item={p} isLast={i === data!.recentPaymentsMade.length - 1} />
-                ))
-              )}
-            </GlassPanel>
-            <GlassPanel title="Recent Received Payments" onViewAll={() => goToReceived()}>
-              {(data?.recentPaymentsReceived ?? []).length === 0 ? (
-                <Text className="py-6 text-center" style={{ color: `${colors.mutedForeground}66`, fontSize: 12, fontFamily: fonts.body.regular }}>
-                  No recent receipts.
-                </Text>
-              ) : (
-                data!.recentPaymentsReceived.map((p, i) => (
-                  <PaymentReceivedRow key={p.RPPaymentID ?? i} item={p} isLast={i === data!.recentPaymentsReceived.length - 1} />
-                ))
-              )}
-            </GlassPanel>
-          </View>
+              <View style={{ marginTop: 22 }}>
+                <View style={{ flexDirection: "row", height: 30, borderWidth: 1.5, borderColor: S.ink, backgroundColor: S.paper, overflow: "hidden" }}>
+                  <Grow style={{ width: `${receivedPct}%`, backgroundColor: S.blue }} />
+                  <View style={{ flex: 1, borderLeftWidth: received + paid > 0 ? 1.5 : 0, borderLeftColor: S.ink, overflow: "hidden" }}>
+                    <Hatch id="fin-a" />
+                  </View>
+                </View>
+                <View style={{ flexDirection: "row" }}>
+                  <View style={{ width: `${Math.min(Math.max(receivedPct, 24), 76)}%`, minWidth: 0 }}>
+                    <Dimension text={`${fmtInt(data?.receivedPayments.totalCount)} receipts`} color={S.blue} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                    <Dimension text={`${fmtInt(data?.paymentsMade.totalCount)} payments`} />
+                  </View>
+                </View>
+              </View>
 
-          {/* Cheque Summary */}
-          <View className="mt-1">
-            <SectionLabel>Cheque Summary</SectionLabel>
-            <View className="flex-row flex-wrap justify-between">
-              <StatTile label="Total Cheque Lots" value={data?.cheques.totalCount ?? 0} icon={BookOpen} accent="#3b82f6" />
-              <StatTile label="Active" value={data?.cheques.activeCount ?? 0} icon={CheckCircle2} accent="#10b981" />
-              <StatTile label="Inactive" value={data?.cheques.inactiveCount ?? 0} icon={Clock} accent="#f59e0b" />
-              <StatTile label="Active Cards" value={data?.cards.activeCount ?? 0} icon={CreditCard} accent="#8b5cf6" />
-            </View>
-          </View>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 18, alignItems: "center" }}>
+                <Swatch kind="solid" label="Received" />
+                <Swatch kind="hatch" label="Paid out" />
+              </View>
+              <Body size={11.5} color={S.ink2} style={{ marginTop: 8 }}>
+                {fmtInt(data?.receivedPayments.approvedCount)} receipts approved · {fmtInt(data?.receivedPayments.draftCount)} in draft
+              </Body>
+            </>
+          )}
+        </Detail>
 
-          {/* Quick Actions */}
-          <View className="mt-3 mb-2">
-            <SectionLabel>Quick Actions</SectionLabel>
-            <View className="flex-row flex-wrap justify-between">
-              <QuickAction label="New Payment" icon={Plus} onPress={() => goToPayments(true)} />
-              <QuickAction label="New Received" icon={ArrowDownToLine} onPress={() => goToReceived(true)} />
-              <QuickAction label="Cheques" icon={BookOpen} onPress={() => notBuiltYet("Cheques")} />
-              <QuickAction label="Cards" icon={CreditCard} onPress={() => notBuiltYet("Cards")} />
-              <QuickAction label="Banks" icon={Wallet} onPress={() => notBuiltYet("Banks")} />
-            </View>
+        <Detail tag="B" title="Today">
+          {isLoading ? (
+            <>
+              <Skel h={40} />
+              <Skel h={40} />
+              <Skel h={40} />
+            </>
+          ) : (
+            [
+              {
+                label: "Received today",
+                value: money(data?.receivedPayments.todayAmount),
+                sub: `${fmtInt(data?.receivedPayments.todayCount)} receipt${n0(data?.receivedPayments.todayCount) === 1 ? "" : "s"}`,
+                onPress: () => goToReceived(),
+                red: false,
+              },
+              {
+                label: "Paid out today",
+                value: money(data?.paymentsMade.todayAmount),
+                sub: `${fmtInt(data?.paymentsMade.todayCount)} payment${n0(data?.paymentsMade.todayCount) === 1 ? "" : "s"}`,
+                onPress: () => goToPayments(),
+                red: false,
+              },
+              {
+                label: "Net for today",
+                value: money(todayNet),
+                sub: todayNet < 0 ? "more went out than came in" : "in hand after today's payments",
+                onPress: undefined,
+                red: todayNet < 0,
+              },
+            ].map((s, i) => (
+              <Press
+                key={s.label}
+                onPress={s.onPress}
+                disabled={!s.onPress}
+                style={(pressed) => ({ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingVertical: 13, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
+              >
+                <View style={{ flexShrink: 1, gap: 4 }}>
+                  {s.onPress ? <LinkLabel onPress={s.onPress}>{s.label}</LinkLabel> : <Label color={S.ink}>{s.label}</Label>}
+                  <Body size={12} color={S.graphite}>{s.sub}</Body>
+                </View>
+                <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 26, letterSpacing: -0.5, color: s.red ? S.red : S.ink }}>{s.value}</Text>
+              </Press>
+            ))
+          )}
+        </Detail>
+
+        <Detail tag="C" title="Fourteen days about the cash line" note="In above, out below">
+          {isLoading ? <Skel h={220} /> : (data?.timeline ?? []).length === 0 ? <Body color={S.graphite}>No payments in the last fourteen days.</Body> : <CashLinePlot rows={data!.timeline} />}
+        </Detail>
+
+        <Detail tag="D" title="Instruments" note="In use against held">
+          {isLoading ? (
+            <>
+              <Skel h={44} />
+              <Skel h={44} />
+              <Skel h={44} />
+            </>
+          ) : (
+            <>
+              <Measure name="Bank accounts" live={n0(data?.banks.activeCount)} total={n0(data?.banks.totalCount)} onOpen={() => notOnMobile("Banks")} />
+              <Measure name="Cheque lots" live={n0(data?.cheques.activeCount)} total={n0(data?.cheques.totalCount)} onOpen={() => notOnMobile("Cheques")} />
+              <Measure name="Cards" live={n0(data?.cards.activeCount)} total={n0(data?.cards.totalCount)} onOpen={() => notOnMobile("Cards")} last />
+            </>
+          )}
+        </Detail>
+
+        <Detail tag="E" title="Income by month" note="From the trial balance">
+          {incomeLoading ? <Skel h={190} /> : !income.some((m) => Math.abs(n0(m.income)) > 0.005) ? <Body color={S.graphite}>No income is posted for these months yet.</Body> : <IncomePlot rows={income} />}
+        </Detail>
+
+        <Detail tag="F" title="Latest payments made" note={`${fmtInt(data?.paymentsMade.totalCount)} in all`}>
+          {isLoading ? (
+            <>
+              <Skel h={26} />
+              <Skel h={26} />
+              <Skel h={26} />
+            </>
+          ) : (data?.recentPaymentsMade ?? []).length === 0 ? (
+            <Body color={S.graphite}>No payments recorded yet.</Body>
+          ) : (
+            <SheetTable rows={data!.recentPaymentsMade.slice(0, 7)} cols={madeCols} keyOf={(p, i) => p.PPaymentID ?? i} onRowPress={() => goToPayments()} />
+          )}
+          <View style={{ marginTop: 14 }}>
+            <LinkLabel onPress={() => goToPayments()}>All payments</LinkLabel>
           </View>
-        </>
-      )}
+        </Detail>
+
+        <Detail tag="G" title="Latest receipts" note={`${fmtInt(data?.receivedPayments.totalCount)} in all`}>
+          {isLoading ? (
+            <>
+              <Skel h={26} />
+              <Skel h={26} />
+              <Skel h={26} />
+            </>
+          ) : (data?.recentPaymentsReceived ?? []).length === 0 ? (
+            <Body color={S.graphite}>No receipts recorded yet.</Body>
+          ) : (
+            <SheetTable rows={data!.recentPaymentsReceived.slice(0, 7)} cols={receivedCols} keyOf={(p, i) => p.RPPaymentID ?? i} onRowPress={() => goToReceived()} />
+          )}
+          <View style={{ marginTop: 14 }}>
+            <LinkLabel onPress={() => goToReceived()}>All receipts</LinkLabel>
+          </View>
+        </Detail>
+
+        <Detail tag="H" title="Go to">
+          {/* Two even columns of link rows, as Material's Go to: nothing to overhang when the last row is short. */}
+          <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+            {go.map((q) => (
+              <Press
+                key={q.label}
+                onPress={q.onPress}
+                style={(pressed) => ({ width: "50%", flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
+              >
+                <LinkLabel onPress={q.onPress}>{q.label}</LinkLabel>
+                <Text style={{ color: S.graphite, fontSize: 13 }}>→</Text>
+              </Press>
+            ))}
+          </View>
+        </Detail>
+      </SheetFrame>
     </ScrollView>
   );
 }

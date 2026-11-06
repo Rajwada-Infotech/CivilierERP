@@ -1,15 +1,17 @@
+import type React from "react";
 // RN equivalent of the web login's WebkitBackgroundClip gradient-text trick
-// (src/pages/Login.tsx: "linear-gradient(135deg,#4c1d95,#7c3aed,#a78bfa)"
+// (src/pages/Login.tsx: "linear-gradient(135deg,#17191e,#6467f2,#6467f2)"
 // clipped to text). CSS background-clip:text has no RN equivalent, so this
 // masks a LinearGradient with the text shape via @react-native-masked-view.
 import { Text, type TextStyle } from "react-native";
-import MaskedView from "@react-native-masked-view/masked-view";
+import MaskedViewClass from "@react-native-masked-view/masked-view";
+const MaskedView = MaskedViewClass as unknown as React.ComponentType<any>;
 import { LinearGradient } from "expo-linear-gradient";
 
 export function GradientText({
   children,
   style,
-  colors = ["#4c1d95", "#7c3aed", "#a78bfa"],
+  colors = ["#17191e", "#6467f2", "#6467f2"],
 }: {
   children: string;
   style?: TextStyle;

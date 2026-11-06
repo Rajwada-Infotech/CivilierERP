@@ -85,7 +85,7 @@ export function LogoRing({ size = 84 }: { size?: number }) {
           height: size,
           borderRadius: size / 2,
           overflow: "hidden",
-          shadowColor: "#7c3aed",
+          shadowColor: "#6467f2",
           shadowOpacity: 0.4,
           shadowRadius: 14,
           shadowOffset: { width: 0, height: 8 },

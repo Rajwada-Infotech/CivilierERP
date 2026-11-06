@@ -34,7 +34,7 @@ export function FloatingLabelInput({
         pointerEvents="none"
         className="absolute left-4 z-10"
         style={{
-          color: focused ? "#c4b5fd" : "rgba(255,255,255,0.35)",
+          color: focused ? "#6467f2" : "rgba(255,255,255,0.35)",
           top: anim.interpolate({ inputRange: [0, 1], outputRange: [18, 6] }),
           fontSize: anim.interpolate({ inputRange: [0, 1], outputRange: [13, 9] }),
           letterSpacing: active ? 0.8 : 0,
@@ -56,7 +56,7 @@ export function FloatingLabelInput({
           animateTo(value ? 1 : 0);
           onBlur?.(e);
         }}
-        className="rounded-xl px-4 pt-6 pb-2.5 text-sm text-white/90"
+        className="px-4 pt-6 pb-2.5 text-sm text-white/90"
         style={{
           backgroundColor: focused ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
           borderWidth: 1.5,

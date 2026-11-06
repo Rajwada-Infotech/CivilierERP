@@ -1,4 +1,5 @@
-// RN port of src/pages/finance/TrialBalance.tsx — account tree with all
+// RN port of src/pages/finance/TrialBalance.tsx, on the drawing sheet (SheetShell, ruled panels, ink segments for the
+// period, a ruled account tree) — account tree with all
 // three period modes (FY / Range / As On), Company/Project/Cost Centre
 // filters, expand/collapse, tap-to-drill inline transaction list per
 // account (with payment-detail drill-through — tapping a payment-sourced
@@ -8,15 +9,11 @@
 // Centre panel (individual PO/GRN/Invoice postings) that REPLACES the tree
 // when a cost centre is selected — same behavior as web, not a filter on it.
 import { useMemo, useState } from "react";
-import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, RefreshControl, Modal, Alert } from "react-native";
+import { View, Text, ScrollView, RefreshControl, Alert } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import {
-  Scale, ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw,
-  TrendingUp, TrendingDown, IndianRupee, Briefcase, FolderKanban, Target, Calendar,
-  CalendarRange, CalendarCheck, X, Download, Landmark,
-} from "lucide-react-native";
+import { ChevronDown, ChevronRight, RefreshCw, Target, Download } from "lucide-react-native";
 import {
   fetchFinYears, fetchCompanyOptionsTB, fetchProjectOptionsTB, fetchCostCenterOptions,
   fetchTrialBalance, fetchTrialBalanceEntityTransactions, fetchCostCentreTransactions,
@@ -24,15 +21,15 @@ import {
   type TBNode, type Option, type TBTransaction, type TBTransactionsResponse, type CCTransactionsResponse,
 } from "@/api/trialBalanceApi";
 import { getPaymentById, type PaymentRecord } from "@/api/newPaymentApi";
-import { colors } from "@/theme/colors";
+import { colors, sheet as S } from "@/theme/colors";
+import { Body, Field, InfoGrid, Input, Key, Label, Notice, Panel, Press, Seg, SheetShell, Skel, StatRow } from "@/components/sheet/Sheet";
+import { SheetPicker } from "@/components/sheet/FormParts";
+import { OptionPickerModal, PickerRow } from "./payment/OptionPicker";
 import { fonts } from "@/theme/fonts";
-import { SectionLabel } from "@/components/home/SectionLabel";
 
 type FilterMode = "fy" | "range" | "ason";
 
-const ACCENT = "#6467f2";
 
-const TYPE_DOT: Record<string, string> = { S: "#60a5fa", C: "#fb923c", B: "#34d399", A: "#a78bfa", GL: `${ACCENT}b3` };
 const TYPE_LABEL: Record<string, string> = { S: "Supplier", C: "Contractor", B: "Bank", A: "Customer", GL: "GL" };
 
 function fmt(n: number) {
@@ -88,81 +85,6 @@ function flattenAll(nodes: TBNode[]): TBNode[] {
   return result;
 }
 
-function StatTile({ label, value, icon: Icon, accent }: { label: string; value: string; icon: React.ComponentType<{ size?: number; color?: string }>; accent: string }) {
-  return (
-    <View style={{ width: "48%", marginBottom: 10 }} className="rounded-xl overflow-hidden">
-      <View className="px-3.5 py-3" style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80`, borderLeftWidth: 3, borderLeftColor: accent }}>
-        <View className="flex-row items-center justify-between mb-1.5">
-          <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>{label}</Text>
-          <Icon size={12} color={accent} />
-        </View>
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 14 }}>{value}</Text>
-      </View>
-    </View>
-  );
-}
-
-function OptionSheet({
-  visible, title, options, value, onSelect, onClose,
-}: {
-  visible: boolean; title: string; options: Array<{ id: number | string; label: string }>; value: number | string | null; onSelect: (id: number | string | null) => void; onClose: () => void;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={onClose}>
-        <Pressable onPress={() => {}} style={{ backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "65%", borderWidth: 1, borderColor: colors.border }}>
-          <View className="flex-row items-center justify-between px-4 py-3" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>{title}</Text>
-            <Pressable onPress={onClose} hitSlop={8}><X size={16} color={colors.mutedForeground} /></Pressable>
-          </View>
-          <ScrollView contentContainerStyle={{ paddingVertical: 8, paddingBottom: 20 }}>
-            <Pressable onPress={() => onSelect(null)} className="px-5 py-3">
-              <Text style={{ color: value == null ? ACCENT : colors.foreground, fontSize: 13, fontFamily: value == null ? fonts.heading.semibold : fonts.body.regular }}>All</Text>
-            </Pressable>
-            {options.map((o, i) => (
-              <Pressable key={`${o.id}-${i}`} onPress={() => onSelect(o.id)} className="px-5 py-3">
-                <Text style={{ color: value === o.id ? ACCENT : colors.foreground, fontSize: 13, fontFamily: value === o.id ? fonts.heading.semibold : fonts.body.regular }}>{o.label}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-function DateField({ label, value, onChangeText, highlight }: { label: string; value: string; onChangeText: (v: string) => void; highlight?: boolean }) {
-  return (
-    <View style={{ width: "48%", marginBottom: 8 }}>
-      <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase", marginBottom: 4 }}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder="YYYY-MM-DD"
-        placeholderTextColor={`${colors.mutedForeground}80`}
-        style={{
-          color: colors.foreground, fontSize: 12, fontFamily: fonts.body.regular,
-          backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: highlight ? ACCENT : colors.border,
-          borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9,
-        }}
-      />
-    </View>
-  );
-}
-
-function ModeTab({ active, onPress, icon: Icon, label }: { active: boolean; onPress: () => void; icon: React.ComponentType<{ size?: number; color?: string }>; label: string }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className="flex-row items-center gap-1 px-2.5 py-1.5 rounded-lg"
-      style={{ backgroundColor: active ? ACCENT : "transparent", borderWidth: 1, borderColor: active ? ACCENT : colors.border }}
-    >
-      <Icon size={10} color={active ? "#fff" : colors.mutedForeground} />
-      <Text style={{ color: active ? "#fff" : colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.medium }}>{label}</Text>
-    </Pressable>
-  );
-}
-
 // Plain, print-safe HTML — same approach as Invoice/Contract's Print.
 function buildTrialBalanceHtml(nodes: TBNode[], periodLabel: string): string {
   const fmtHtml = (n: number) => (n === 0 ? "—" : `₹${Math.round(n).toLocaleString("en-IN")}`);
@@ -211,18 +133,6 @@ function buildTrialBalanceHtml(nodes: TBNode[], periodLabel: string): string {
       </body>
     </html>
   `;
-}
-
-function FilterChip({ label, icon: Icon, onPress }: { label: string; icon: React.ComponentType<{ size?: number; color?: string }>; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={{ width: "48%", marginBottom: 8 }} className="flex-row items-center justify-between rounded-xl px-3 py-2.5" >
-      <View className="flex-row items-center gap-1.5 flex-1 min-w-0" style={{ backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 9, flex: 1 }}>
-        <Icon size={11} color={colors.mutedForeground} />
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.body.medium, flexShrink: 1 }}>{label}</Text>
-        <ChevronDown size={11} color={colors.mutedForeground} style={{ marginLeft: "auto" }} />
-      </View>
-    </Pressable>
-  );
 }
 
 export default function TrialBalanceScreen() {
@@ -375,350 +285,343 @@ export default function TrialBalanceScreen() {
     }
   };
 
+  const companyLabel = companies.find((c) => c.id === selCompanyId)?.label || "";
+  const projectLabel = projects.find((p) => p.id === selProjectId)?.label || "";
+  const costCenterLabel = costCenters.find((c) => c.id === selCostCenterId)?.label || "";
+  const dc = (d: number, c: number) => (d ? `Dr ${fmt(d)}` : c ? `Cr ${fmt(c)}` : "—");
+
   return (
-    <ScrollView
-      className="flex-1"
-      style={{ backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-    >
-      {/* Header */}
-      <View className="flex-row items-center gap-2.5 mb-1">
-        <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: `${ACCENT}26`, borderWidth: 1, borderColor: `${ACCENT}4d` }}>
-          <Scale size={16} color={ACCENT} />
-        </View>
-        <View className="flex-1">
-          <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 20 }}>Trial Balance</Text>
-          <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 10.5, fontFamily: fonts.body.regular, marginTop: 1 }}>
-            Account-wise opening, transaction and closing balances
-          </Text>
-        </View>
-        <Pressable onPress={handleExportPdf} disabled={exporting || rows.length === 0} hitSlop={8} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border, opacity: rows.length === 0 ? 0.4 : 1 }}>
-          {exporting ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <Download size={14} color={colors.mutedForeground} />}
-        </Pressable>
-        <Pressable onPress={() => refetch()} disabled={isFetching} hitSlop={8} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-          {isFetching ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <RefreshCw size={14} color={colors.mutedForeground} />}
-        </Pressable>
-      </View>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 96 }}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={S.ink} />}
+      >
+        <SheetShell
+          eyebrow="CivilierERP · Finance"
+          title="Trial balance"
+          subtitle={[periodLabel, companyLabel, projectLabel].filter(Boolean).join(" · ") || "Opening, movement and closing balance of every account."}
+          action={
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              <Key label={exporting ? "Exporting…" : "Export PDF"} icon={<Download size={13} color={S.ink} />} onPress={handleExportPdf} disabled={exporting || rows.length === 0} />
+              <Key label={isFetching ? "Reading…" : "Refresh"} icon={<RefreshCw size={13} color={S.ink} />} onPress={() => refetch()} disabled={isFetching} />
+            </View>
+          }
+        >
+          {isError && <Notice>Could not load the report. Pull down to try again.</Notice>}
 
-      {isError && (
-        <View className="mt-3 flex-row items-center gap-2 px-4 py-2.5 rounded-xl" style={{ backgroundColor: `${colors.destructive}1a`, borderWidth: 1, borderColor: `${colors.destructive}33` }}>
-          <Text style={{ color: colors.destructive, fontSize: 11, fontFamily: fonts.body.medium, flex: 1 }}>Could not load the report.</Text>
-        </View>
-      )}
+          <Panel title="Period">
+            <Seg
+              options={[
+                { value: "fy", label: "Fin. year" },
+                { value: "range", label: "Range" },
+                { value: "ason", label: "As on" },
+              ]}
+              value={filterMode}
+              onChange={(m) => switchMode(m as FilterMode)}
+            />
+            {filterMode === "fy" ? (
+              <PickerRow label="Financial Year" value={activeFY ? activeFY.FName : ""} placeholder="Select FY…" onPress={() => setFyPickerOpen(true)} />
+            ) : filterMode === "range" ? (
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Field label="From" style={{ flex: 1 }}>
+                  <Input value={rangeFrom} onChangeText={setRangeFrom} placeholder="YYYY-MM-DD" />
+                </Field>
+                <Field label="To" style={{ flex: 1 }}>
+                  <Input value={rangeTo} onChangeText={setRangeTo} placeholder="YYYY-MM-DD" />
+                </Field>
+              </View>
+            ) : (
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Field label="FY start" style={{ flex: 1 }}>
+                  <Input value={asOnFyStart} onChangeText={setAsOnFyStart} placeholder="YYYY-MM-DD" />
+                </Field>
+                <Field label="As on" style={{ flex: 1 }}>
+                  <Input value={asOn} onChangeText={setAsOn} placeholder="YYYY-MM-DD" />
+                </Field>
+              </View>
+            )}
+          </Panel>
 
-      {/* Period mode */}
-      <View className="mt-5">
-        <SectionLabel>Period</SectionLabel>
-        <View className="flex-row gap-1.5 mb-2.5">
-          <ModeTab active={filterMode === "fy"} onPress={() => switchMode("fy")} icon={Calendar} label="FY" />
-          <ModeTab active={filterMode === "range"} onPress={() => switchMode("range")} icon={CalendarRange} label="Range" />
-          <ModeTab active={filterMode === "ason"} onPress={() => switchMode("ason")} icon={CalendarCheck} label="As On" />
-        </View>
-        {filterMode === "fy" ? (
-          <FilterChip label={activeFY ? activeFY.FName : "Select FY…"} icon={Calendar} onPress={() => setFyPickerOpen(true)} />
-        ) : filterMode === "range" ? (
-          <View className="flex-row flex-wrap justify-between">
-            <DateField label="From" value={rangeFrom} onChangeText={setRangeFrom} />
-            <DateField label="To" value={rangeTo} onChangeText={setRangeTo} />
-          </View>
-        ) : (
-          <View className="flex-row flex-wrap justify-between">
-            <DateField label="FY Start" value={asOnFyStart} onChangeText={setAsOnFyStart} />
-            <DateField label="As On" value={asOn} onChangeText={setAsOn} highlight />
-          </View>
-        )}
-      </View>
+          <Panel title="Filters">
+            <View>
+              <PickerRow label="Company" value={companyLabel} placeholder="All companies" onPress={() => setCompanyPickerOpen(true)} />
+              <PickerRow label="Project" value={projectLabel} placeholder="All projects" onPress={() => setProjectPickerOpen(true)} />
+              <PickerRow label="Cost Centre" value={costCenterLabel} placeholder="All cost centres" onPress={() => setCostCenterPickerOpen(true)} />
+              <Press onPress={() => setHideEmpty((v) => !v)} style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 4, opacity: pressed ? 0.7 : 1 })}>
+                <View style={{ width: 18, height: 18, borderWidth: 1.5, borderColor: S.ink, backgroundColor: hideEmpty ? S.ink : "transparent", alignItems: "center", justifyContent: "center" }}>
+                  {hideEmpty && <Text style={{ color: S.paper, fontSize: 11, fontFamily: fonts.heading.bold }}>✓</Text>}
+                </View>
+                <Body size={12.5} color={S.ink2}>Hide accounts with no activity</Body>
+              </Press>
+            </View>
+          </Panel>
 
-      {/* Filters */}
-      <View className="mt-3">
-        <SectionLabel>Filters</SectionLabel>
-        <View className="flex-row flex-wrap justify-between">
-          <FilterChip label={companies.find((c) => c.id === selCompanyId)?.label || "All companies"} icon={Briefcase} onPress={() => setCompanyPickerOpen(true)} />
-          <FilterChip label={projects.find((p) => p.id === selProjectId)?.label || "All projects"} icon={FolderKanban} onPress={() => setProjectPickerOpen(true)} />
-          <FilterChip label={costCenters.find((c) => c.id === selCostCenterId)?.label || "All cost centres"} icon={Target} onPress={() => setCostCenterPickerOpen(true)} />
-        </View>
-        <Pressable onPress={() => setHideEmpty((v) => !v)} className="flex-row items-center gap-2 mt-1">
-          <View className="w-4 h-4 rounded items-center justify-center" style={{ borderWidth: 1, borderColor: hideEmpty ? ACCENT : colors.border, backgroundColor: hideEmpty ? ACCENT : "transparent" }}>
-            {hideEmpty && <View style={{ width: 7, height: 7, borderRadius: 1, backgroundColor: "#fff" }} />}
-          </View>
-          <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular }}>Hide accounts with no activity</Text>
-        </Pressable>
-      </View>
-
-      {isLoading ? (
-        <View className="py-16 items-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-      ) : selCostCenterId ? (
-        /* ── Cost Centre panel — replaces the tree entirely ── */
-        <View className="mt-5">
-          <SectionLabel>{costCenters.find((c) => c.id === selCostCenterId)?.label ?? "Cost Centre"}</SectionLabel>
-          {ccLoading ? (
-            <View className="py-12 items-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-          ) : !ccData || ccData.transactions.length === 0 ? (
-            <Text className="text-center py-10" style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>
-              No postings found for this cost centre in the selected period.
-            </Text>
+          {isLoading ? (
+            <>
+              <Skel h={60} />
+              <Skel h={200} />
+            </>
+          ) : selCostCenterId ? (
+            /* ── The cost centre's own postings — replaces the tree, as on the web ── */
+            <Panel title={costCenterLabel || "Cost centre"} icon={<Target size={14} color={S.ink} />}>
+              {ccLoading ? (
+                <>
+                  <Skel h={50} />
+                  <Skel h={50} />
+                </>
+              ) : !ccData || ccData.transactions.length === 0 ? (
+                <Body size={12.5} color={S.graphite}>No postings found for this cost centre in the selected period.</Body>
+              ) : (
+                <>
+                  <StatRow
+                    items={[
+                      { label: "Total debit", value: fmt(ccData.totals.debit) },
+                      { label: "Total credit", value: fmt(ccData.totals.credit) },
+                    ]}
+                  />
+                  <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+                    {ccData.transactions.map((t, i) => (
+                      <View key={t.entryId} style={{ flexDirection: "row", gap: 10, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft }}>
+                        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                          <Text numberOfLines={1} style={{ color: S.ink, fontSize: 12, fontFamily: fonts.heading.semibold }}>{t.voucherNo || "—"}</Text>
+                          <Text numberOfLines={1} style={{ color: S.ink, fontSize: 12, fontFamily: fonts.body.medium }}>{t.account.name || "—"}</Text>
+                          {!!(t.poNo || t.docNo) && <Body size={11} color={S.graphite}>{t.poNo || t.docNo || ""}</Body>}
+                          {!!t.narration && <Body size={11} color={S.graphite}>{t.narration}</Body>}
+                        </View>
+                        <View style={{ alignItems: "flex-end", gap: 3 }}>
+                          <Body size={11} color={S.graphite}>{fmtDate(t.date)}</Body>
+                          {t.debit > 0 && <Text style={{ color: S.ink, fontSize: 13, fontFamily: fonts.heading.semibold }}>{`Dr ${fmt(t.debit)}`}</Text>}
+                          {t.credit > 0 && <Text style={{ color: S.blue, fontSize: 13, fontFamily: fonts.heading.semibold }}>{`Cr ${fmt(t.credit)}`}</Text>}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              )}
+            </Panel>
           ) : (
             <>
-              <View className="flex-row justify-between mb-3">
-                <StatTile label="Total Debit" value={fmt(ccData.totals.debit)} icon={TrendingUp} accent="#fb7185" />
-                <StatTile label="Total Credit" value={fmt(ccData.totals.credit)} icon={TrendingDown} accent="#34d399" />
-              </View>
-              {ccData.transactions.map((t) => (
-                <View key={t.entryId} className="rounded-xl p-3 mb-2" style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}>
-                  <View className="flex-row items-start justify-between gap-2">
-                    <View className="flex-1 min-w-0">
-                      <Text numberOfLines={1} style={{ color: ACCENT, fontSize: 11.5, fontFamily: fonts.heading.semibold }}>{t.voucherNo || "—"}</Text>
-                      <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.body.medium, marginTop: 2 }}>{t.account.name || "—"}</Text>
-                      {(t.poNo || t.docNo) && (
-                        <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular, marginTop: 1 }}>
-                          {t.poNo || t.docNo}
-                        </Text>
-                      )}
-                    </View>
-                    <View className="items-end">
-                      <Text style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.regular }}>{fmtDate(t.date)}</Text>
-                      {t.debit > 0 && <Text style={{ color: "#fb7185", fontSize: 12, fontFamily: fonts.heading.semibold, marginTop: 3 }}>{fmt(t.debit)}</Text>}
-                      {t.credit > 0 && <Text style={{ color: "#34d399", fontSize: 12, fontFamily: fonts.heading.semibold, marginTop: 3 }}>{fmt(t.credit)}</Text>}
-                    </View>
-                  </View>
-                  {!!t.narration && (
-                    <Text numberOfLines={2} style={{ color: `${colors.mutedForeground}99`, fontSize: 10, fontFamily: fonts.body.regular, marginTop: 5 }}>{t.narration}</Text>
-                  )}
+              {summary && (
+                <StatRow
+                  items={[
+                    { label: "Opening balance", value: fmt(summary.openingDebit + summary.openingCredit), note: "debit and credit" },
+                    { label: "Transaction debit", value: fmt(summary.totalDebit), note: "in the period" },
+                    { label: "Transaction credit", value: fmt(summary.totalCredit), note: "in the period" },
+                    { label: "Net balance", value: fmt(Math.abs(summary.totalDebit - summary.totalCredit)), note: balanced ? "debit and credit agree" : "debit and credit differ", red: !balanced },
+                  ]}
+                />
+              )}
+
+              <View style={{ borderWidth: 1, borderColor: S.ink }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+                  <Label color={S.ink}>Accounts</Label>
+                  <Seg
+                    options={[
+                      { value: "expand", label: "Expand all" },
+                      { value: "collapse", label: "Collapse" },
+                    ]}
+                    value={expanded.size > 0 ? "expand" : "collapse"}
+                    onChange={(v) => (v === "expand" ? expandAll() : setExpanded(new Set()))}
+                  />
                 </View>
-              ))}
+
+                {visible.length === 0 ? (
+                  <Body color={S.graphite} style={{ padding: 12 }}>No accounts to show for this period.</Body>
+                ) : (
+                  visible.map((node, idx) => {
+                    const hasKids = node.children.length > 0;
+                    const isOpen = expanded.has(node.id);
+                    const isDrillOpen = drillNodeId === node.id;
+                    const top = node.isGroup && node.level === 0;
+                    return (
+                      <View key={node.id}>
+                        <Press
+                          onPress={() => (node.isGroup ? (hasKids ? toggle(node.id) : undefined) : openDrill(node))}
+                          style={(pressed) => ({
+                            paddingVertical: 10,
+                            paddingRight: 12,
+                            paddingLeft: 12 + node.level * 14,
+                            borderTopWidth: idx ? 1 : 0,
+                            borderTopColor: top ? S.ink : S.ruleSoft,
+                            backgroundColor: isDrillOpen || pressed ? S.blueWash : "transparent",
+                            gap: 6,
+                          })}
+                        >
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                            {node.isGroup && hasKids ? (
+                              isOpen ? <ChevronDown size={13} color={S.ink} /> : <ChevronRight size={13} color={S.ink} />
+                            ) : (
+                              <View style={{ width: 13 }} />
+                            )}
+                            <Text
+                              numberOfLines={1}
+                              style={{
+                                flexShrink: 1,
+                                color: S.ink,
+                                fontSize: node.isGroup ? 10.5 : 12.5,
+                                letterSpacing: node.isGroup ? 1.1 : 0,
+                                textTransform: node.isGroup ? "uppercase" : "none",
+                                fontFamily: node.isGroup ? fonts.heading.semibold : fonts.body.medium,
+                              }}
+                            >
+                              {node.name}
+                            </Text>
+                            {!node.isGroup && !!node.type && <Label>{TYPE_LABEL[node.type] ?? node.type}</Label>}
+                          </View>
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8, paddingLeft: 19 }}>
+                            <View style={{ flex: 1 }}>
+                              <Label>Opening</Label>
+                              <Text style={{ color: S.ink2, fontSize: 11.5, fontFamily: fonts.body.medium, marginTop: 2 }}>{dc(node.opening.debit, node.opening.credit)}</Text>
+                            </View>
+                            <View style={{ flex: 1.3 }}>
+                              <Label>Dr / Cr</Label>
+                              <Text style={{ color: S.ink2, fontSize: 11.5, fontFamily: fonts.body.medium, marginTop: 2 }}>{`${fmt(node.transactions.debit)} / ${fmt(node.transactions.credit)}`}</Text>
+                            </View>
+                            <View style={{ flex: 1, alignItems: "flex-end" }}>
+                              <Label>Closing</Label>
+                              <Text style={{ color: node.closing.credit > 0 && !node.closing.debit ? S.blue : S.ink, fontSize: 12, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
+                                {dc(node.closing.debit, node.closing.credit)}
+                              </Text>
+                            </View>
+                          </View>
+                        </Press>
+
+                        {isDrillOpen && (
+                          <View style={{ marginLeft: 12 + node.level * 14, marginRight: 12, marginBottom: 10, borderWidth: 1, borderColor: S.ink }}>
+                            <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+                              <Label color={S.ink}>{`${node.name} · in the period`}</Label>
+                            </View>
+                            {drillLoading ? (
+                              <View style={{ padding: 10 }}>
+                                <Skel h={30} />
+                                <Skel h={30} />
+                              </View>
+                            ) : !drillData || drillData.transactions.length === 0 ? (
+                              <Body size={12} color={S.graphite} style={{ padding: 10 }}>No transactions found in the selected period.</Body>
+                            ) : (
+                              drillData.transactions.map((t, i) => {
+                                const isPayment = (t.sourceType ?? "").toLowerCase() === "newpayment" && !!(t.payment?.id ?? t.sourceId);
+                                return (
+                                  <Press
+                                    key={t.entryId ?? i}
+                                    onPress={isPayment ? () => openSourceEntry(t) : undefined}
+                                    disabled={!isPayment}
+                                    style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 9, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
+                                  >
+                                    <View style={{ flex: 1, minWidth: 0 }}>
+                                      <Text
+                                        numberOfLines={1}
+                                        style={{ color: S.ink, fontSize: 12, fontFamily: fonts.heading.semibold, textDecorationLine: isPayment ? "underline" : "none", textDecorationStyle: "dashed" }}
+                                      >
+                                        {t.voucherNo || "—"}
+                                      </Text>
+                                      <Text numberOfLines={1} style={{ color: S.graphite, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 1 }}>
+                                        {fmtDate(t.date)}
+                                        {t.narration ? ` · ${t.narration}` : ""}
+                                      </Text>
+                                    </View>
+                                    <Text style={{ color: t.debit ? S.ink : S.blue, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{t.debit ? `Dr ${fmt(t.debit)}` : `Cr ${fmt(t.credit)}`}</Text>
+                                  </Press>
+                                );
+                              })
+                            )}
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })
+                )}
+              </View>
             </>
           )}
-        </View>
-      ) : (
-        <>
-          {/* Stats */}
-          {summary && (
-            <View className="mt-5">
-              <SectionLabel>Overview</SectionLabel>
-              <View className="flex-row flex-wrap justify-between">
-                <StatTile label="Transaction Debit" value={fmt(summary.totalDebit)} icon={TrendingUp} accent="#fb7185" />
-                <StatTile label="Transaction Credit" value={fmt(summary.totalCredit)} icon={TrendingDown} accent="#34d399" />
-                <StatTile label="Net Balance" value={fmt(Math.abs(summary.totalDebit - summary.totalCredit))} icon={Scale} accent={balanced ? "#34d399" : "#f59e0b"} />
-                <StatTile label="Opening Balance" value={fmt(summary.openingDebit + summary.openingCredit)} icon={IndianRupee} accent={ACCENT} />
-              </View>
-            </View>
-          )}
+        </SheetShell>
+      </ScrollView>
 
-          {/* Tree */}
-          <View className="mt-1 mb-2">
-            <View className="flex-row items-center justify-between mb-2">
-              <SectionLabel>Accounts</SectionLabel>
-              <View className="flex-row gap-1.5 mb-4">
-                <Pressable onPress={expandAll} className="px-2.5 py-1 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium }}>Expand</Text>
-                </Pressable>
-                <Pressable onPress={() => setExpanded(new Set())} className="px-2.5 py-1 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium }}>Collapse</Text>
-                </Pressable>
-              </View>
-            </View>
-
-            {visible.length === 0 ? (
-              <Text className="text-center py-10" style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>
-                No accounts to show for this period.
-              </Text>
-            ) : (
-              visible.map((node) => {
-                const hasKids = node.children.length > 0;
-                const isOpen = expanded.has(node.id);
-                const isDrillOpen = drillNodeId === node.id;
-                const dot = node.type ? TYPE_DOT[node.type] : null;
-                return (
-                  <View key={node.id}>
-                    <Pressable
-                      onPress={() => (node.isGroup ? (hasKids ? toggle(node.id) : undefined) : openDrill(node))}
-                      className="rounded-lg mb-1 px-2.5 py-2.5"
-                      style={{
-                        marginLeft: node.level * 12,
-                        backgroundColor: node.isGroup ? (node.level === 0 ? `${colors.muted}80` : `${colors.muted}40`) : isDrillOpen ? `${ACCENT}18` : `${colors.card}80`,
-                        borderWidth: 1,
-                        borderColor: isDrillOpen ? `${ACCENT}40` : `${colors.border}60`,
-                      }}
-                    >
-                      <View className="flex-row items-center justify-between gap-2">
-                        <View className="flex-row items-center gap-1.5 flex-1 min-w-0">
-                          {node.isGroup && hasKids ? (
-                            isOpen ? <ChevronDown size={13} color={colors.mutedForeground} /> : <ChevronRight size={13} color={colors.mutedForeground} />
-                          ) : (
-                            <View style={{ width: 13 }} />
-                          )}
-                          {node.isGroup ? (
-                            isOpen && hasKids ? <FolderOpen size={12} color="#fbbf24" /> : <Folder size={12} color="#fbbf24" />
-                          ) : dot ? (
-                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dot }} />
-                          ) : null}
-                          <Text
-                            numberOfLines={1}
-                            style={{
-                              color: colors.foreground,
-                              fontSize: node.isGroup ? (node.level === 0 ? 11 : 11.5) : 11.5,
-                              fontFamily: node.isGroup ? fonts.heading.bold : fonts.body.medium,
-                              textTransform: node.isGroup ? "uppercase" : "none",
-                              flexShrink: 1,
-                            }}
-                          >
-                            {node.name}
-                          </Text>
-                          {!node.isGroup && node.type && (
-                            <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 8.5, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>
-                              {TYPE_LABEL[node.type] ?? node.type}
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-                      <View className="flex-row justify-between mt-1.5">
-                        <View>
-                          <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 8.5, fontFamily: fonts.body.regular }}>Opening</Text>
-                          <Text style={{ color: colors.foreground, fontSize: 10.5, fontFamily: fonts.body.medium }}>
-                            {node.opening.debit ? `Dr ${fmt(node.opening.debit)}` : node.opening.credit ? `Cr ${fmt(node.opening.credit)}` : "—"}
-                          </Text>
-                        </View>
-                        <View>
-                          <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 8.5, fontFamily: fonts.body.regular }}>Txn Dr / Cr</Text>
-                          <Text style={{ color: colors.foreground, fontSize: 10.5, fontFamily: fonts.body.medium }}>
-                            {fmt(node.transactions.debit)} / {fmt(node.transactions.credit)}
-                          </Text>
-                        </View>
-                        <View style={{ alignItems: "flex-end" }}>
-                          <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 8.5, fontFamily: fonts.body.regular }}>Closing</Text>
-                          <Text style={{ color: node.closing.debit > 0 ? "#fb7185" : node.closing.credit > 0 ? "#34d399" : `${colors.mutedForeground}60`, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>
-                            {node.closing.debit > 0 ? `Dr ${fmt(node.closing.debit)}` : node.closing.credit > 0 ? `Cr ${fmt(node.closing.credit)}` : "—"}
-                          </Text>
-                        </View>
-                      </View>
-                    </Pressable>
-
-                    {isDrillOpen && (
-                      <View style={{ marginLeft: node.level * 12 }} className="rounded-xl mb-2 overflow-hidden" >
-                        <View className="px-3 py-2" style={{ backgroundColor: `${ACCENT}12`, borderWidth: 1, borderColor: `${ACCENT}30`, borderBottomWidth: 0, borderTopLeftRadius: 12, borderTopRightRadius: 12 }}>
-                          <Text style={{ color: ACCENT, fontSize: 10, fontFamily: fonts.heading.semibold }}>{node.name} · transactions in period</Text>
-                        </View>
-                        <View style={{ borderWidth: 1, borderColor: `${ACCENT}30`, borderTopWidth: 0, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
-                          {drillLoading ? (
-                            <View className="py-6 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-                          ) : !drillData || drillData.transactions.length === 0 ? (
-                            <Text className="text-center py-6" style={{ color: `${colors.mutedForeground}80`, fontSize: 11, fontFamily: fonts.body.regular }}>
-                              No transactions found in the selected period.
-                            </Text>
-                          ) : (
-                            drillData.transactions.map((t, i) => {
-                              const isPayment = (t.sourceType ?? "").toLowerCase() === "newpayment" && !!(t.payment?.id ?? t.sourceId);
-                              return (
-                                <Pressable
-                                  key={t.entryId ?? i}
-                                  onPress={isPayment ? () => openSourceEntry(t) : undefined}
-                                  className="flex-row items-center justify-between px-3 py-2"
-                                  style={i < drillData.transactions.length - 1 ? { borderBottomWidth: 1, borderBottomColor: `${colors.border}40` } : undefined}
-                                >
-                                  <View className="flex-1 min-w-0 pr-2">
-                                    <Text numberOfLines={1} style={{ color: isPayment ? ACCENT : colors.foreground, fontSize: 10.5, fontFamily: fonts.body.medium, textDecorationLine: isPayment ? "underline" : "none" }}>
-                                      {t.voucherNo || "—"}
-                                    </Text>
-                                    <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.regular, marginTop: 1 }}>
-                                      {fmtDate(t.date)}{t.narration ? ` · ${t.narration}` : ""}
-                                    </Text>
-                                  </View>
-                                  <Text style={{ color: t.debit ? "#fb7185" : "#34d399", fontSize: 11, fontFamily: fonts.heading.semibold }}>
-                                    {t.debit ? fmt(t.debit) : fmt(t.credit)}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })
-                          )}
-                        </View>
-                      </View>
-                    )}
-                  </View>
-                );
-              })
-            )}
-          </View>
-        </>
-      )}
-
-      <OptionSheet
+      <OptionPickerModal
         visible={fyPickerOpen}
-        title="Select Financial Year"
-        options={finYears.map((f) => ({ id: f.FId, label: f.FName }))}
-        value={selectedFYId}
+        title="Select financial year"
+        options={finYears.map((f) => ({ key: String(f.FId), label: f.FName }))}
+        selectedKey={activeFY ? String(activeFY.FId) : null}
         onClose={() => setFyPickerOpen(false)}
-        onSelect={(id) => { setSelectedFYId(id as number | null); setFyPickerOpen(false); }}
+        onSelect={(k) => {
+          setSelectedFYId(k ? Number(k) : null);
+          setFyPickerOpen(false);
+        }}
       />
-      <OptionSheet
+      <OptionPickerModal
         visible={companyPickerOpen}
-        title="Select Company"
-        options={companies.map((c) => ({ id: c.id, label: c.label }))}
-        value={selCompanyId}
+        title="Select company"
+        options={companies.map((c) => ({ key: String(c.id), label: c.label }))}
+        selectedKey={selCompanyId != null ? String(selCompanyId) : null}
+        clearable
+        searchable
         onClose={() => setCompanyPickerOpen(false)}
-        onSelect={(id) => { setSelCompanyId(id as number | null); setSelProjectId(null); setCompanyPickerOpen(false); }}
+        onSelect={(k) => {
+          setSelCompanyId(k ? Number(k) : null);
+          setSelProjectId(null);
+          setCompanyPickerOpen(false);
+        }}
       />
-      <OptionSheet
+      <OptionPickerModal
         visible={projectPickerOpen}
-        title="Select Project"
-        options={projects.map((p) => ({ id: p.id, label: p.label }))}
-        value={selProjectId}
+        title="Select project"
+        options={projects.map((p) => ({ key: String(p.id), label: p.label }))}
+        selectedKey={selProjectId != null ? String(selProjectId) : null}
+        clearable
+        searchable
         onClose={() => setProjectPickerOpen(false)}
-        onSelect={(id) => { setSelProjectId(id as number | null); setProjectPickerOpen(false); }}
+        onSelect={(k) => {
+          setSelProjectId(k ? Number(k) : null);
+          setProjectPickerOpen(false);
+        }}
       />
-      <OptionSheet
+      <OptionPickerModal
         visible={costCenterPickerOpen}
-        title="Select Cost Centre"
-        options={costCenters.map((c) => ({ id: c.id, label: c.label }))}
-        value={selCostCenterId}
+        title="Select cost centre"
+        options={costCenters.map((c) => ({ key: String(c.id), label: c.label }))}
+        selectedKey={selCostCenterId != null ? String(selCostCenterId) : null}
+        clearable
+        searchable
         onClose={() => setCostCenterPickerOpen(false)}
-        onSelect={(id) => { setSelCostCenterId(id as number | null); setDrillNodeId(null); setCostCenterPickerOpen(false); }}
+        onSelect={(k) => {
+          setSelCostCenterId(k ? Number(k) : null);
+          setDrillNodeId(null);
+          setCostCenterPickerOpen(false);
+        }}
       />
 
-      {/* Payment-detail drill-through */}
-      <Modal visible={payDetailId != null} transparent animationType="fade" onRequestClose={() => setPayDetailId(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={() => setPayDetailId(null)}>
-          <Pressable onPress={() => {}} style={{ backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "70%", borderWidth: 1, borderColor: colors.border }}>
-            <View className="flex-row items-center justify-between px-4 py-3" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
-              <View className="flex-row items-center gap-2">
-                <Landmark size={14} color={ACCENT} />
-                <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>Payment Detail</Text>
-              </View>
-              <Pressable onPress={() => setPayDetailId(null)} hitSlop={8}><X size={16} color={colors.mutedForeground} /></Pressable>
+      {/* A payment-sourced line opens that payment's own detail */}
+      <SheetPicker visible={payDetailId != null} title="Payment detail" onClose={() => setPayDetailId(null)}>
+        {payDetailLoading ? (
+          <View style={{ padding: 16 }}>
+            <Skel h={40} />
+            <Skel h={120} />
+          </View>
+        ) : !payDetail ? (
+          <Body color={S.graphite} style={{ padding: 16 }}>Could not load this payment.</Body>
+        ) : (
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 28, gap: 14 }}>
+            <InfoGrid
+              items={[
+                { label: "Reference", value: payDetail.docNo || "—" },
+                { label: "Date", value: fmtDate(payDetail.date) },
+                { label: "Mode", value: payDetail.mode || "—" },
+                { label: "Status", value: payDetail.displayStatus || payDetail.status || "—" },
+                { label: "Paid To", value: payDetail.paidTo || "—" },
+                { label: "Bank", value: payDetail.bankName || "—" },
+                { label: "Company", value: payDetail.company || "—" },
+                { label: "Project", value: payDetail.project || "—" },
+                { label: "Expense Ref", value: payDetail.expenseRef || "—" },
+              ]}
+            />
+            <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", paddingTop: 10, borderTopWidth: 1.5, borderTopColor: S.ink }}>
+              <Label color={S.ink}>Amount</Label>
+              <Text style={{ color: S.ink, fontSize: 18, fontFamily: fonts.heading.semibold }}>{fmt(payDetail.amount ?? 0)}</Text>
             </View>
-            {payDetailLoading ? (
-              <View className="py-10 items-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-            ) : !payDetail ? (
-              <Text className="text-center py-10" style={{ color: `${colors.mutedForeground}80`, fontSize: 12, fontFamily: fonts.body.regular }}>Could not load this payment.</Text>
-            ) : (
-              <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
-                <View className="flex-row flex-wrap justify-between">
-                  {[
-                    ["Reference", payDetail.docNo || "—"],
-                    ["Date", fmtDate(payDetail.date)],
-                    ["Mode", payDetail.mode || "—"],
-                    ["Status", payDetail.displayStatus || payDetail.status || "—"],
-                    ["Paid To", payDetail.paidTo || "—"],
-                    ["Bank", payDetail.bankName || "—"],
-                    ["Company", payDetail.company || "—"],
-                    ["Project", payDetail.project || "—"],
-                    ["Expense Ref", payDetail.expenseRef || "—"],
-                  ].map(([label, value]) => (
-                    <View key={label} className="rounded-xl px-3 py-2.5" style={{ width: "48%", marginBottom: 10, backgroundColor: `${colors.muted}50`, borderWidth: 1, borderColor: colors.border }}>
-                      <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>{label}</Text>
-                      <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold, marginTop: 2 }}>{value}</Text>
-                    </View>
-                  ))}
-                </View>
-                <View className="flex-row items-center justify-between px-4 py-3 rounded-xl mt-1" style={{ backgroundColor: `${ACCENT}18`, borderWidth: 1, borderColor: `${ACCENT}33` }}>
-                  <Text style={{ color: ACCENT, fontSize: 11, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 0.8 }}>Amount</Text>
-                  <Text style={{ color: ACCENT, fontSize: 15, fontFamily: fonts.heading.bold }}>{fmt(payDetail.amount ?? 0)}</Text>
-                </View>
-              </ScrollView>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </ScrollView>
+          </ScrollView>
+        )}
+      </SheetPicker>
+    </View>
   );
 }

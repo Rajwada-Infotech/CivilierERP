@@ -53,7 +53,7 @@ export function ModuleCard({
         transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
       }}
     >
-      <Pressable onPress={onPress} className="rounded-lg overflow-hidden mb-2.5">
+      <Pressable onPress={onPress} className="overflow-hidden mb-2.5">
         <View
           className="flex-row items-center"
           style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}
@@ -61,7 +61,7 @@ export function ModuleCard({
         <View style={{ width: 3, alignSelf: "stretch", backgroundColor: accent }} />
         <View className="flex-1 flex-row items-center gap-2 pl-2.5 pr-2.5 py-2.5">
           <View
-            className="w-7 h-7 rounded-lg items-center justify-center shrink-0"
+            className="w-7 h-7 items-center justify-center shrink-0"
             style={{ backgroundColor: `${accent}30`, borderWidth: 1, borderColor: `${accent}4d` }}
           >
             <Icon size={13} color={accent} />
@@ -82,7 +82,7 @@ export function ModuleCard({
               )}
             </View>
             {loading ? (
-              <View className="h-3 w-16 rounded mt-1" style={{ backgroundColor: colors.muted }} />
+              <View className="h-3 w-16 mt-1" style={{ backgroundColor: colors.muted }} />
             ) : primary ? (
               <View className="flex-row items-baseline gap-1 mt-0.5">
                 <Text style={{ color: primary.accent ?? colors.foreground, fontFamily: fonts.heading.bold, fontSize: 13 }}>

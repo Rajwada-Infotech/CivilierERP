@@ -1,114 +1,83 @@
-// RN port of StockTransfer.tsx's TransferHistory table (plain Stock
-// Transfers only — Inter-Company Transfer rows are out of scope, see
-// stockTransferApi.ts). No Edit/Delete actions exist at all: the backend
-// has no PUT/DELETE route for StockTransfers, a transfer executes
-// immediately and is immutable, so the only row actions are View and
-// "Make GRN" (ported — see MakeGRNFromTransferModal.tsx).
+// RN port of StockTransfer.tsx's TransferHistory, on the drawing sheet as the web draws it: the title block with New
+// transfer; the transfer register — its count and one ruled row per transfer with its from → to godowns, items, its
+// approval mark, the GRN made from it (or a Make GRN key) and View. Plain stock transfers only (inter-company transfers
+// are out of scope, see stockTransferApi.ts). No Edit / Delete: a transfer executes at once and the backend has no PUT /
+// DELETE for it. A row opens StockTransferDetailModal; New opens the form as its own page (StockTransferFormScreen).
 import { useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Text, Alert } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Repeat, Plus, Eye, ShieldOff, AlertCircle, ArrowRight, FileText } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { FileText, Plus, RefreshCw } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { usePageRights } from "@/hooks/usePageRights";
+import type { MainStackParamList } from "@/navigation/MainStack";
 import { getStockTransfers, type StockTransfer } from "@/api/stockTransferApi";
 import { getGRNsByTransfer } from "@/api/grnApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
-import { StockTransferFormModal } from "./stockTransfer/StockTransferFormModal";
+import { Body, Key, Notice, RegisterHead, SheetMark, SheetShell } from "@/components/sheet/Sheet";
+import { NoAccess, RecordRow, RegisterBox, RegisterFoot, RegisterLoading, RowKeys, SheetPage, fmtDate } from "@/components/sheet/Register";
 import { StockTransferDetailModal } from "./stockTransfer/StockTransferDetailModal";
 import { MakeGRNFromTransferModal } from "./stockTransfer/MakeGRNFromTransferModal";
 
 const PAGE_SIZE = 15;
 
-function fmtDate(d: string | null | undefined) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function TransferCard({
-  transfer, onView, onMakeGRN, canMakeGRN,
-}: {
-  transfer: StockTransfer; onView: () => void; onMakeGRN: () => void; canMakeGRN: boolean;
-}) {
-  // Fetched per-card (not one useEffect loop over the whole list) so a
-  // FlatList's own windowing keeps the number of in-flight requests bounded
-  // to what's actually rendered, the way DependencyMaster's chain browser
-  // should have from the start (see backend/routes/dependencyMaster.js's
-  // GET / — the fix for that page's own version of this same N+1 pattern).
+function TransferRow({ transfer, last, onView, onMakeGRN }: { transfer: StockTransfer; last: boolean; onView: () => void; onMakeGRN?: () => void }) {
+  // Fetched per row so only the rows on screen ask for their GRNs.
   const { data: linkedGRNs = [] } = useQuery({
     queryKey: ["transfer-grns", transfer.TransferID],
     queryFn: () => getGRNsByTransfer(transfer.TransferID),
     staleTime: 30_000,
   });
-  const hasGRN = linkedGRNs.length > 0;
-
+  const n = (transfer.TransferItems ?? []).length;
   return (
-    <Pressable onPress={onView} className="rounded-2xl p-3.5 mb-2.5" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-      <View className="flex-row items-start justify-between gap-2 mb-2">
-        <Text numberOfLines={1} style={{ color: "#0891b2", fontSize: 12.5, fontFamily: fonts.heading.bold, flex: 1, marginRight: 8 }}>{transfer.DocNo}</Text>
-        <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} />
-      </View>
-
-      <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginBottom: 8 }}>{fmtDate(transfer.TransferDate)}</Text>
-
-      <View className="flex-row items-center gap-1.5 mb-2">
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, flex: 1 }}>{transfer.FromGodownName}</Text>
-        <ArrowRight size={12} color={colors.mutedForeground} />
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, flex: 1, textAlign: "right" }}>{transfer.ToGodownName}</Text>
-      </View>
-
-      <View className="flex-row items-center justify-between pt-2" style={{ borderTopWidth: 1, borderTopColor: `${colors.border}80` }}>
-        <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>{(transfer.TransferItems ?? []).length} item{(transfer.TransferItems ?? []).length === 1 ? "" : "s"}</Text>
-        <View className="flex-row items-center gap-2">
-          {hasGRN ? (
-            <View className="flex-row items-center gap-1 px-2 py-1 rounded-md" style={{ backgroundColor: `${colors.muted}80`, borderWidth: 1, borderColor: colors.border }}>
-              <FileText size={9} color={colors.mutedForeground} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.medium }}>
-                {linkedGRNs.length > 1 ? `${linkedGRNs.length} GRNs` : (linkedGRNs[0].GRNNo || linkedGRNs[0].DocNo)}
-              </Text>
-            </View>
-          ) : canMakeGRN ? (
-            <Pressable
-              onPress={(e) => { e.stopPropagation(); onMakeGRN(); }}
-              hitSlop={6}
-              className="flex-row items-center gap-1 px-2 py-1 rounded-md"
-              style={{ borderWidth: 1, borderColor: "#10b98166", backgroundColor: "#10b9810d" }}
-            >
-              <FileText size={10} color="#10b981" />
-              <Text style={{ color: "#10b981", fontSize: 9.5, fontFamily: fonts.body.medium }}>Make GRN</Text>
-            </Pressable>
-          ) : null}
-          <Eye size={13} color={colors.mutedForeground} />
-        </View>
-      </View>
-    </Pressable>
+    <RecordRow
+      last={last}
+      title={transfer.DocNo}
+      date={fmtDate(transfer.TransferDate)}
+      side={`${n} item${n === 1 ? "" : "s"}`}
+      onPress={onView}
+      lines={[
+        <Text key="route" style={{ fontFamily: fonts.body.medium, fontSize: 12.5, color: S.ink }}>
+          {transfer.FromGodownName}
+          <Text style={{ color: S.graphite }}>{"  →  "}</Text>
+          {transfer.ToGodownName}
+        </Text>,
+      ]}
+      marks={
+        <>
+          <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} />
+          {linkedGRNs.length > 0 && <SheetMark text={linkedGRNs.length > 1 ? `${linkedGRNs.length} GRNs` : `GRN ${linkedGRNs[0].GRNNo || linkedGRNs[0].DocNo}`} tone="done" />}
+        </>
+      }
+      actions={
+        <RowKeys onView={onView}>
+          {linkedGRNs.length === 0 && onMakeGRN && <Key label="Make GRN" icon={<FileText size={12} color={S.ink} />} onPress={onMakeGRN} style={{ minHeight: 32, paddingHorizontal: 10 }} />}
+        </RowKeys>
+      }
+    />
   );
 }
 
 export default function StockTransferListScreen() {
-  const insets = useSafeAreaInsets();
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const qc = useQueryClient();
   const rights = usePageRights("stock-transfers");
   const [refreshing, setRefreshing] = useState(false);
   const [viewingId, setViewingId] = useState<number | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
   const [grnTransfer, setGrnTransfer] = useState<StockTransfer | null>(null);
 
-  const {
-    data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage, refetch,
-  } = useInfiniteQuery({
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage, refetch, isFetching } = useInfiniteQuery({
     queryKey: ["stock-transfers-mobile"],
     queryFn: ({ pageParam }) => getStockTransfers({ page: pageParam, limit: PAGE_SIZE }),
     initialPageParam: 1,
-    getNextPageParam: (lastPage, pages) => {
+    getNextPageParam: (last, pages) => {
       const loaded = pages.reduce((s, p) => s + (p?.data?.length ?? 0), 0);
-      return loaded < (lastPage?.total ?? 0) ? pages.length + 1 : undefined;
+      return loaded < (last?.total ?? 0) ? pages.length + 1 : undefined;
     },
     enabled: rights.canView,
   });
-
   const records: StockTransfer[] = useMemo(() => (data?.pages ?? []).flatMap((p) => p?.data ?? []), [data]);
 
   const onRefresh = async () => {
@@ -117,74 +86,48 @@ export default function StockTransferListScreen() {
     setRefreshing(false);
   };
 
-  if (!rights.canView) {
-    return (
-      <View className="flex-1 items-center justify-center px-8" style={{ backgroundColor: colors.background }}>
-        <ShieldOff size={28} color={colors.mutedForeground} />
-        <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold, marginTop: 12 }}>No access</Text>
-        <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 4, textAlign: "center" }}>
-          You don't have permission to view Stock Transfers.
-        </Text>
-      </View>
-    );
-  }
-
-  const ListHeader = (
-    <View className="flex-row items-center gap-2.5 mb-3">
-      <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: "#0891b226", borderWidth: 1, borderColor: "#0891b24d" }}>
-        <Repeat size={16} color="#0891b2" />
-      </View>
-      <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 18, flex: 1 }}>Stock Transfers</Text>
-      {rights.canCreate && (
-        <Pressable onPress={() => setFormOpen(true)} className="flex-row items-center gap-1.5 px-3 py-2 rounded-xl" style={{ backgroundColor: "#0891b2" }}>
-          <Plus size={14} color="#fff" />
-          <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>New</Text>
-        </Pressable>
-      )}
-    </View>
-  );
+  if (!rights.canView) return <NoAccess eyebrow="CivilierERP · Material" title="Stock transfer" what="stock transfers" />;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {isLoading ? (
-        <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-      ) : isError ? (
-        <View className="flex-1 items-center justify-center px-8">
-          <AlertCircle size={20} color={colors.destructive} />
-          <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.medium, marginTop: 8, textAlign: "center" }}>
-            Failed to load Stock Transfers. Please try again.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={records}
-          keyExtractor={(r) => String(r.TransferID)}
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          onEndReachedThreshold={0.4}
-          onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => (
-            <TransferCard
-              transfer={item}
-              onView={() => setViewingId(item.TransferID)}
-              onMakeGRN={() => setGrnTransfer(item)}
-              canMakeGRN={rights.canCreate}
-            />
-          )}
-          ListEmptyComponent={
-            <View className="items-center py-16">
-              <AlertCircle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No Stock Transfers yet.</Text>
+    <View style={{ flex: 1 }}>
+      <SheetPage refreshing={refreshing} onRefresh={onRefresh} onEndReached={() => hasNextPage && !isFetchingNextPage && fetchNextPage()}>
+        <SheetShell
+          eyebrow="CivilierERP · Material"
+          title="Stock transfer"
+          subtitle="Move stock between godowns, checked against what the source godown holds."
+          action={
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {rights.canCreate && <Key tone="ink" label="New transfer" icon={<Plus size={13} color={S.paper} />} onPress={() => navigation.navigate("StockTransferForm")} />}
+              <Key label={isFetching && !isFetchingNextPage ? "Reading…" : "Refresh"} icon={<RefreshCw size={13} color={S.ink} />} onPress={() => refetch()} />
             </View>
           }
-          ListFooterComponent={isFetchingNextPage ? (
-            <View className="py-4 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-          ) : null}
-        />
-      )}
+        >
+          <RegisterBox>
+            <RegisterHead title="Transfer history" count={records.length} unit={["transfer loaded", "transfers loaded"]} />
+            {isLoading ? (
+              <RegisterLoading />
+            ) : isError ? (
+              <Notice>Could not load the stock transfers. Pull down to try again.</Notice>
+            ) : records.length === 0 ? (
+              <Body color={S.graphite}>No stock transfers yet.</Body>
+            ) : (
+              <View>
+                {records.map((t, i) => (
+                  <TransferRow
+                    key={t.TransferID}
+                    transfer={t}
+                    last={i === records.length - 1}
+                    onView={() => setViewingId(t.TransferID)}
+                    onMakeGRN={rights.canCreate ? () => setGrnTransfer(t) : undefined}
+                  />
+                ))}
+                <RegisterFoot loadingMore={isFetchingNextPage} done={!hasNextPage} shown={records.length} />
+              </View>
+            )}
+          </RegisterBox>
+        </SheetShell>
+      </SheetPage>
 
-      <StockTransferFormModal visible={formOpen} onClose={() => setFormOpen(false)} />
       <StockTransferDetailModal recordId={viewingId} onClose={() => setViewingId(null)} />
       <MakeGRNFromTransferModal
         transfer={grnTransfer}

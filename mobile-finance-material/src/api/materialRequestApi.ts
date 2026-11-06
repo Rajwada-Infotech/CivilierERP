@@ -169,8 +169,8 @@ export const getMRLinkedPOs = (id: number | string) =>
 export const PRIORITY_OPTIONS = ["Low", "Normal", "High", "Urgent"] as const;
 
 export const PRIORITY_COLOR: Record<string, string> = {
-  Low: "#64748b",
-  Normal: "#059669",
-  High: "#d97706",
-  Urgent: "#dc2626",
+  Low: "#9ba0ab",
+  Normal: "#6467f2",
+  High: "#dcdfe5",
+  Urgent: "#e34545",
 };

@@ -1,20 +1,17 @@
-// RN port of src/pages/finance/Brs.tsx (web) — Bank Reconciliation
-// Statement. Web's `md:hidden` mobile card block is the direct template
-// for BrsCard below. Clear/Unclear toggle, Bounce, and Re-issue (bounced
-// → prefilled new Payment, via navigation params instead of web's
-// router-state) are all supported now, matching web's handleReissue flow.
+// RN port of src/pages/finance/Brs.tsx (web) — Bank Reconciliation Statement — on the drawing sheet as the web draws
+// it: the sheet's title block with Refresh, the four figures (clear, unclear, bounced — red when there are any — and
+// total), the one red note for bounced cheques, the "Reconciled" bar (cleared solid, the rest hatched, with dimension
+// lines), then the entries register: search, bank filter, date range, status keys, "Hide dummy bank", and one ruled row
+// per entry with the passbook tick. Clear / Unclear, Bounce and Re-issue (bounced → the payment form, prefilled) are
+// all supported, matching web's handleReissue flow.
 import { useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput, Switch, Alert } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Switch, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ShieldCheck, CheckCircle2, Clock, Ban, IndianRupee, AlertTriangle, Landmark,
-  Search, X, RefreshCw, ShieldOff, ArrowRight, CornerDownRight, SlidersHorizontal,
-} from "lucide-react-native";
+import { AlertTriangle, Landmark, RefreshCw, ArrowRight, CornerDownRight, Ban } from "lucide-react-native";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { colors } from "@/theme/colors";
+import { colors, sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -22,9 +19,10 @@ import {
   getBRS, getBRSFilters, markClear, markUnclear, isCleared, isBounced,
   type BrsEntry, type BrsFilterOption,
 } from "@/api/brsApi";
+import { Body, Dimension, Field, Grow, Hatch, Input, Key, Label, Notice, RegisterHead, SearchBox, Seg, SheetShell, Skel, StatRow } from "@/components/sheet/Sheet";
 import { TypePill, ClearBadge } from "./brs/BrsBadges";
 import { BounceModal } from "./brs/BounceModal";
-import { OptionPickerModal, type PickerOption } from "./payment/OptionPicker";
+import { OptionPickerModal, PickerRow, type PickerOption } from "./payment/OptionPicker";
 
 const PAGE_SIZE = 25;
 
@@ -34,146 +32,95 @@ function fmt(d: string | null | undefined) {
   return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function StatTile({ label, value, sub, icon: Icon, accent }: {
-  label: string; value: string; sub: string; icon: React.ComponentType<{ size?: number; color?: string }>; accent: string;
-}) {
-  return (
-    <View style={{ width: "48%", marginBottom: 10 }} className="rounded-xl overflow-hidden">
-      <View
-        className="flex-row items-center gap-2.5 px-3.5 py-3"
-        style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80`, borderLeftWidth: 3, borderLeftColor: accent }}
-      >
-        <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: `${accent}26`, borderWidth: 1, borderColor: `${accent}4d` }}>
-          <Icon size={14} color={accent} />
-        </View>
-        <View className="flex-1 min-w-0">
-          <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 15 }}>{value}</Text>
-          <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>{label}</Text>
-          <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10, marginTop: 1 }}>{sub}</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-// blocked: the backend says this row can't be cleared (un-clear stays possible).
+// The passbook tick: an ink-ruled square, filled ink when the entry is in the passbook. blocked: the backend says this
+// row can't be cleared yet (un-clearing stays possible).
 function PassbookCheck({ checked, loading, onPress, blocked }: { checked: boolean; loading: boolean; onPress: () => void; blocked?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={loading}
-      accessibilityState={{ disabled: !!blocked && !checked }}
-      style={{
-        width: 22, height: 22, borderRadius: 5, borderWidth: 2, alignItems: "center", justifyContent: "center",
-        borderColor: checked ? "#10b981" : colors.border, backgroundColor: checked ? "#10b981" : "transparent", opacity: loading ? 0.5 : blocked && !checked ? 0.3 : 1,
-      }}
+      hitSlop={8}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked, disabled: !!blocked && !checked }}
+      style={{ width: 24, height: 24, borderWidth: 1.5, borderColor: S.ink, alignItems: "center", justifyContent: "center", backgroundColor: checked ? S.ink : "transparent", opacity: loading ? 0.5 : blocked && !checked ? 0.3 : 1 }}
     >
-      {loading ? <ActivityIndicator size="small" color={checked ? "#fff" : colors.mutedForeground} /> : checked ? (
-        <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>✓</Text>
-      ) : null}
+      {loading ? <ActivityIndicator size="small" color={checked ? S.paper : S.ink} /> : checked ? <Text style={{ color: S.paper, fontSize: 13, fontFamily: fonts.heading.bold }}>✓</Text> : null}
     </Pressable>
   );
 }
 
-function BrsCard({ entry, toggling, onToggle, onBounce, onReissue }: {
-  entry: BrsEntry; toggling: boolean; onToggle: () => void; onBounce: () => void; onReissue: () => void;
+function BrsRow({ entry, last, toggling, onToggle, onBounce, onReissue }: {
+  entry: BrsEntry; last: boolean; toggling: boolean; onToggle: () => void; onBounce: () => void; onReissue: () => void;
 }) {
   const cleared = isCleared(entry);
   const bounced = isBounced(entry);
   return (
     <View
-      className="rounded-2xl p-3.5 mb-2.5"
       style={{
-        borderWidth: 1, borderColor: bounced ? "#dc262640" : `${colors.border}99`,
-        backgroundColor: bounced ? "#dc26260d" : cleared ? "#05966908" : `${colors.card}80`,
-        borderLeftWidth: bounced ? 3 : 0, borderLeftColor: "#dc2626",
+        paddingVertical: 12,
+        paddingLeft: bounced ? 8 : 0,
+        borderBottomWidth: last ? 0 : 1,
+        borderBottomColor: S.ruleSoft,
+        borderLeftWidth: bounced ? 2 : 0,
+        borderLeftColor: S.red,
+        backgroundColor: bounced ? S.redWash : "transparent",
+        gap: 8,
       }}
     >
-      <View className="flex-row items-start gap-3">
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
         <View style={{ paddingTop: 2 }}>
           <PassbookCheck checked={cleared && !bounced} loading={toggling} onPress={onToggle} blocked={entry.Clearable === false} />
         </View>
-        <View className="flex-1 min-w-0">
-          <View className="flex-row items-center gap-1.5 flex-wrap mb-0.5">
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <TypePill type={entry.SourceType} />
-            <Text style={{ color: colors.mutedForeground, fontSize: 10 }}>{fmt(entry.PayDate)}</Text>
+            <Body size={11.5} color={S.graphite}>{fmt(entry.PayDate)}</Body>
           </View>
-          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>
-            {entry.CompanyName || "—"}
-          </Text>
-          {!!entry.PaymentName && entry.PaymentName !== entry.CompanyName && (
-            <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 1 }}>{entry.PaymentName}</Text>
-          )}
-          {!!entry.DocNo && (
-            <View className="self-start px-1.5 py-0.5 rounded mt-1" style={{ backgroundColor: `${colors.primary}15`, borderWidth: 1, borderColor: `${colors.primary}30` }}>
-              <Text style={{ color: colors.primary, fontSize: 9.5, fontFamily: fonts.body.medium }}>{entry.DocNo}</Text>
-            </View>
-          )}
+          <Text numberOfLines={1} style={{ color: S.ink, fontSize: 13, fontFamily: fonts.heading.semibold }}>{entry.CompanyName || "—"}</Text>
+          {!!entry.PaymentName && entry.PaymentName !== entry.CompanyName && <Body size={11.5} color={S.ink2}>{entry.PaymentName}</Body>}
+          {!!entry.DocNo && <Text style={{ color: S.ink, fontSize: 11.5, fontFamily: fonts.heading.semibold, letterSpacing: 0.2 }}>{entry.DocNo}</Text>}
           {!!entry.BankName && (
-            <View className="flex-row items-center gap-1 mt-1.5">
-              <Landmark size={9} color="#60a5fa" />
-              <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10 }}>{entry.BankName}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <Landmark size={11} color={S.graphite} />
+              <Text numberOfLines={1} style={{ flexShrink: 1, color: S.graphite, fontSize: 11.5, fontFamily: fonts.body.regular }}>{entry.BankName}</Text>
             </View>
           )}
-          {!!entry.Mode && (
-            <Text style={{ color: colors.mutedForeground, fontSize: 10, marginTop: 1 }}>
-              {entry.Mode}{entry.ChequeNo ? `  #${entry.ChequeNo}` : ""}
-            </Text>
-          )}
+          {!!entry.Mode && <Body size={11.5} color={S.graphite}>{`${entry.Mode}${entry.ChequeNo ? `  #${entry.ChequeNo}` : ""}`}</Body>}
         </View>
         <View style={{ alignItems: "flex-end", gap: 6 }}>
-          <Text style={{
-            color: bounced ? "#dc2626" : colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.bold,
-            textDecorationLine: bounced ? "line-through" : "none",
-          }}>
+          <Text style={{ color: bounced ? S.red : S.ink, fontSize: 14.5, fontFamily: fonts.heading.semibold, textDecorationLine: bounced ? "line-through" : "none" }}>
             {formatINR(entry.Amount)}
           </Text>
           <ClearBadge cleared={cleared} bounced={bounced} />
-          {entry.Clearable === false && !cleared && (
-            <Text style={{ color: colors.mutedForeground, fontSize: 9.5, textAlign: "right" }}>Awaiting approval</Text>
-          )}
-          {cleared && !!entry.ClearingDate && (
-            <Text style={{ color: "#10b981", fontSize: 9.5, textAlign: "right" }}>{fmt(entry.ClearingDate)}</Text>
-          )}
+          {entry.Clearable === false && !cleared && <Body size={10.5} color={S.graphite} style={{ textAlign: "right" }}>Awaiting approval</Body>}
+          {cleared && !!entry.ClearingDate && <Body size={10.5} color={S.graphite} style={{ textAlign: "right" }}>{fmt(entry.ClearingDate)}</Body>}
         </View>
       </View>
 
       {bounced && (entry.BounceReason || entry.BounceRemarks) && (
-        <View className="rounded-lg px-3 py-2 mt-2.5" style={{ backgroundColor: "#dc262610", borderWidth: 1, borderColor: "#dc262630" }}>
-          {!!entry.BounceReason && (
-            <Text style={{ color: "#dc2626", fontSize: 10.5, fontFamily: fonts.body.medium }}>
-              {entry.BounceReason}{entry.BounceDate ? ` · ${fmt(entry.BounceDate)}` : ""}
-            </Text>
-          )}
-          {!!entry.BounceRemarks && (
-            <Text style={{ color: colors.mutedForeground, fontSize: 10, marginTop: 2 }}>{entry.BounceRemarks}</Text>
-          )}
+        <View style={{ marginLeft: 36, gap: 2 }}>
+          {!!entry.BounceReason && <Body size={12} color={S.red} weight="medium">{`${entry.BounceReason}${entry.BounceDate ? ` · ${fmt(entry.BounceDate)}` : ""}`}</Body>}
+          {!!entry.BounceRemarks && <Body size={11.5} color={S.graphite}>{entry.BounceRemarks}</Body>}
         </View>
       )}
 
-      <View className="mt-2.5" style={{ paddingLeft: 34 }}>
+      <View style={{ marginLeft: 36 }}>
         {bounced ? (
           entry.ReplacementDocNo ? (
-            <View className="self-start flex-row items-center gap-1.5 px-2 py-1.5 rounded-lg" style={{ backgroundColor: "#05966915", borderWidth: 1, borderColor: "#05966940" }}>
-              <ArrowRight size={10} color="#059669" />
-              <Text style={{ color: "#059669", fontSize: 10, fontFamily: fonts.body.semibold }}>{entry.ReplacementDocNo}</Text>
+            <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <ArrowRight size={12} color={S.ink} />
+              <Label color={S.ink}>{`Reissued as ${entry.ReplacementDocNo}`}</Label>
             </View>
           ) : (
-            <Pressable onPress={onReissue} className="self-start flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: "#d9770660" }}>
-              <CornerDownRight size={10} color="#d97706" />
-              <Text style={{ color: "#d97706", fontSize: 10.5, fontFamily: fonts.body.medium }}>Re-issue</Text>
-            </Pressable>
+            <Key label="Re-issue" icon={<CornerDownRight size={12} color={S.ink} />} onPress={onReissue} style={{ alignSelf: "flex-start", minHeight: 34, paddingHorizontal: 12 }} />
           )
         ) : entry.OriginalDocNo ? (
-          <View className="self-start flex-row items-center gap-1.5 px-2 py-1.5 rounded-lg" style={{ backgroundColor: "#d9770615", borderWidth: 1, borderColor: "#d9770640" }}>
-            <CornerDownRight size={10} color="#d97706" />
-            <Text style={{ color: "#d97706", fontSize: 10, fontFamily: fonts.body.semibold }}>{entry.OriginalDocNo}</Text>
+          <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <CornerDownRight size={12} color={S.graphite} />
+            <Label>{`Replaces ${entry.OriginalDocNo}`}</Label>
           </View>
         ) : entry.ChequeNo && !cleared && entry.Clearable !== false ? (
-          <Pressable onPress={onBounce} className="self-start flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: "#dc262660" }}>
-            <Ban size={10} color="#dc2626" />
-            <Text style={{ color: "#dc2626", fontSize: 10.5, fontFamily: fonts.body.medium }}>Mark Bounced</Text>
-          </Pressable>
+          <Key tone="red" label="Mark bounced" icon={<Ban size={12} color="#ffffff" />} onPress={onBounce} style={{ alignSelf: "flex-start", minHeight: 34, paddingHorizontal: 12 }} />
         ) : null}
       </View>
     </View>
@@ -181,7 +128,6 @@ function BrsCard({ entry, toggling, onToggle, onBounce, onReissue }: {
 }
 
 export default function BrsScreen() {
-  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const rights = usePageRights("brs");
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -261,7 +207,8 @@ export default function BrsScreen() {
   };
 
   const handleReissue = (entry: BrsEntry) => {
-    navigation.navigate("Payment", {
+    // Straight to the payment form page, prefilled to replace the bounced payment.
+    navigation.navigate("PaymentForm", {
       reissue: {
         replacesPaymentId: entry.SourceID,
         replacesDocNo: entry.DocNo || "",
@@ -275,167 +222,148 @@ export default function BrsScreen() {
 
   if (!rights.canView) {
     return (
-      <View className="flex-1 items-center justify-center px-8" style={{ backgroundColor: colors.background }}>
-        <ShieldOff size={28} color={colors.mutedForeground} />
-        <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold, marginTop: 12 }}>No access</Text>
-        <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 4, textAlign: "center" }}>
-          You don't have permission to view BRS.
-        </Text>
-      </View>
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }}>
+        <SheetShell eyebrow="CivilierERP · Finance" title="Bank reconciliation">
+          <Notice tone="ink">You don't have permission to view BRS.</Notice>
+        </SheetShell>
+      </ScrollView>
     );
   }
 
   const bankOptions: PickerOption[] = banks.map((b) => ({ key: String(b.id), label: b.name }));
-  const statusPills: { key: typeof statusFilter; label: string }[] = [
-    { key: "", label: "All" }, { key: "clear", label: "Clear" }, { key: "unclear", label: "Unclear" }, { key: "bounced", label: "Bounced" },
-  ];
-
-  const ListHeader = (
-    <View>
-      <View className="flex-row items-center gap-2.5 mb-3">
-        <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: "#6366f126", borderWidth: 1, borderColor: "#6366f14d" }}>
-          <ShieldCheck size={16} color="#6366f1" />
-        </View>
-        <View className="flex-1">
-          <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 18 }}>BRS</Text>
-          <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular }}>Bank Reconciliation Statement</Text>
-        </View>
-        <Pressable onPress={onRefresh} disabled={isRefetching} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-          {isRefetching ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <RefreshCw size={14} color={colors.mutedForeground} />}
-        </Pressable>
-      </View>
-
-      <View className="flex-row flex-wrap justify-between">
-        <StatTile label="Clear" value={String(clearCount)} sub={formatINR(clearAmount)} icon={CheckCircle2} accent="#10b981" />
-        <StatTile label="Unclear" value={String(unclearCount)} sub={formatINR(unclearAmount)} icon={Clock} accent="#d97706" />
-        <StatTile label="Bounced" value={String(bounceCount)} sub={formatINR(bounceAmount)} icon={Ban} accent="#dc2626" />
-        <StatTile label="Total Entries" value={String(total)} sub={formatINR(clearAmount + unclearAmount + bounceAmount)} icon={IndianRupee} accent={colors.primary} />
-      </View>
-
-      {bounceCount > 0 && (
-        <View className="flex-row items-center gap-2.5 rounded-xl px-4 py-3 mb-3" style={{ backgroundColor: "#dc262614", borderWidth: 1, borderColor: "#dc262640" }}>
-          <AlertTriangle size={14} color="#dc2626" />
-          <Text style={{ color: "#dc2626", fontSize: 11, fontFamily: fonts.body.medium, flex: 1 }}>
-            {bounceCount} payment{bounceCount !== 1 ? "s" : ""} bounced, totalling {formatINR(bounceAmount)}.
-          </Text>
-        </View>
-      )}
-
-      {total > 0 && (
-        <View className="rounded-xl px-4 py-3 mb-3" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: colors.border }}>
-          <View className="flex-row items-center justify-between mb-1.5">
-            <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>Reconciliation progress</Text>
-            <Text style={{ color: colors.foreground, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>{reconcileRate}% · {clearCount}/{total}</Text>
-          </View>
-          <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.muted, overflow: "hidden" }}>
-            <View style={{ width: `${reconcileRate}%`, height: "100%", borderRadius: 3, backgroundColor: reconcileRate === 100 ? "#10b981" : "#f59e0b" }} />
-          </View>
-        </View>
-      )}
-
-      <View className="flex-row items-center gap-2 mb-3">
-        <View className="flex-1 flex-row items-center gap-2 px-3 rounded-xl" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}>
-          <Search size={14} color={colors.mutedForeground} />
-          <TextInput
-            value={search} onChangeText={setSearch}
-            placeholder="Search company, bank, txn, cheque…"
-            placeholderTextColor={`${colors.mutedForeground}99`}
-            style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }}
-          />
-          {!!search && <Pressable onPress={() => setSearch("")}><X size={14} color={colors.mutedForeground} /></Pressable>}
-        </View>
-        <Pressable
-          onPress={() => setBankPickerOpen(true)}
-          className="flex-row items-center gap-1.5 px-3 py-2.5 rounded-xl"
-          style={{ borderWidth: 1, borderColor: bankId ? colors.primary : colors.border, backgroundColor: bankId ? `${colors.primary}1a` : "transparent" }}
-        >
-          <SlidersHorizontal size={14} color={bankId ? colors.primary : colors.mutedForeground} />
-        </Pressable>
-      </View>
-
-      <View className="flex-row gap-2 mb-3">
-        <TextInput
-          value={fromDate} onChangeText={setFromDate} placeholder="From (YYYY-MM-DD)"
-          placeholderTextColor={`${colors.mutedForeground}99`}
-          style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, color: colors.foreground, fontSize: 11.5 }}
-        />
-        <TextInput
-          value={toDate} onChangeText={setToDate} placeholder="To (YYYY-MM-DD)"
-          placeholderTextColor={`${colors.mutedForeground}99`}
-          style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, color: colors.foreground, fontSize: 11.5 }}
-        />
-      </View>
-
-      <View className="flex-row items-center justify-between mb-3">
-        <View className="flex-row gap-1.5">
-          {statusPills.map((s) => {
-            const active = statusFilter === s.key;
-            return (
-              <Pressable
-                key={s.label}
-                onPress={() => setStatusFilter(s.key)}
-                className="px-3 py-1.5 rounded-full"
-                style={{ borderWidth: 1, borderColor: active ? colors.primary : colors.border, backgroundColor: active ? `${colors.primary}1a` : "transparent" }}
-              >
-                <Text style={{ color: active ? colors.primary : colors.mutedForeground, fontSize: 11, fontFamily: fonts.heading.medium }}>{s.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <View className="flex-row items-center gap-1.5">
-          <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>Hide Dummy</Text>
-          <Switch value={hideDummyBank} onValueChange={setHideDummyBank} trackColor={{ false: colors.muted, true: `${colors.primary}80` }} thumbColor={hideDummyBank ? colors.primary : "#f4f3f4"} />
-        </View>
-      </View>
-    </View>
-  );
+  const bankLabel = bankId ? banks.find((b) => b.id === bankId)?.name ?? "" : "";
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {isLoading ? (
-        <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-      ) : isError ? (
-        <View className="flex-1 items-center justify-center px-8">
-          <AlertTriangle size={20} color={colors.destructive} />
-          <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.medium, marginTop: 8, textAlign: "center" }}>
-            {(error as Error)?.message || "Failed to load BRS data. Please try again."}
-          </Text>
-          <Pressable onPress={() => refetch()} className="mt-4 px-4 py-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.medium }}>Retry</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={(e) => `${e.SourceType}-${e.SourceID}`}
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          onEndReachedThreshold={0.4}
-          onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => (
-            <BrsCard
-              entry={item}
-              toggling={togglingKey === `${item.SourceType}-${item.SourceID}`}
-              onToggle={() => handleToggle(item)}
-              onBounce={() => setBounceEntry(item)}
-              onReissue={() => handleReissue(item)}
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 96 }}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={S.ink} />}
+        scrollEventThrottle={200}
+        onScroll={({ nativeEvent: e }) => {
+          if (e.layoutMeasurement.height + e.contentOffset.y >= e.contentSize.height - 600 && hasNextPage && !isFetchingNextPage) fetchNextPage();
+        }}
+      >
+        <SheetShell
+          eyebrow="CivilierERP · Finance"
+          title="Bank reconciliation"
+          subtitle="Check each entry against the bank passbook: tick the ones that appear in it, and mark a returned cheque as bounced."
+          action={<Key label={isRefetching ? "Reading…" : "Refresh"} icon={<RefreshCw size={13} color={S.ink} />} onPress={onRefresh} disabled={isRefetching} style={{ alignSelf: "flex-start" }} />}
+        >
+          {!isLoading && (
+            <StatRow
+              items={[
+                { label: "Clear", value: String(clearCount), note: formatINR(clearAmount) },
+                { label: "Unclear", value: String(unclearCount), note: formatINR(unclearAmount) },
+                { label: "Bounced", value: String(bounceCount), note: formatINR(bounceAmount), red: bounceCount > 0 },
+                { label: "Total entries", value: String(total), note: formatINR(clearAmount + unclearAmount + bounceAmount) },
+              ]}
             />
           )}
-          ListEmptyComponent={
-            <View className="items-center py-16">
-              <AlertTriangle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No entries match your filters.</Text>
+
+          {bounceCount > 0 && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: S.red, backgroundColor: S.redWash }}>
+              <AlertTriangle size={15} color={S.red} />
+              <Text style={{ flex: 1, color: S.red, fontSize: 12.5, fontFamily: fonts.body.medium }}>
+                {`${bounceCount} payment${bounceCount !== 1 ? "s" : ""} returned by the bank, totalling `}
+                <Text style={{ fontFamily: fonts.heading.bold }}>{formatINR(bounceAmount)}</Text>
+                {". Use the Bounced filter to review them."}
+              </Text>
             </View>
-          }
-          ListFooterComponent={isFetchingNextPage ? (
-            <View className="py-4 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-          ) : null}
-        />
-      )}
+          )}
+
+          {total > 0 && (
+            <View>
+              <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                <Label color={S.ink}>Reconciled</Label>
+                <Text style={{ color: S.ink, fontSize: 22, fontFamily: fonts.heading.semibold }}>
+                  {reconcileRate}
+                  <Text style={{ fontSize: 12, fontFamily: fonts.heading.medium }}>%</Text>
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", height: 22, borderWidth: 1.5, borderColor: S.ink, backgroundColor: S.paper, overflow: "hidden" }}>
+                <Grow style={{ width: `${reconcileRate}%`, backgroundColor: S.blue }} />
+                <View style={{ flex: 1, overflow: "hidden" }}>
+                  <Hatch id="brs-rest" />
+                </View>
+              </View>
+              <View style={{ flexDirection: "row" }}>
+                <View style={{ width: `${Math.min(Math.max(reconcileRate, 22), 78)}%`, minWidth: 0 }}>
+                  <Dimension text={`${clearCount} clear`} color={S.blue} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>{total - clearCount > 0 && <Dimension text={`${total - clearCount} to go`} />}</View>
+              </View>
+            </View>
+          )}
+
+          <View style={{ borderWidth: 1, borderColor: S.ink, padding: 12, gap: 12 }}>
+            <RegisterHead title="Entries" count={filtered.length} unit={["entry", "entries"]} />
+            <SearchBox value={search} onChange={setSearch} placeholder="Search company, bank, txn, cheque…" />
+            <PickerRow label="Bank" value={bankLabel} placeholder="All banks" onPress={() => setBankPickerOpen(true)} />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Field label="From" style={{ flex: 1 }}>
+                <Input value={fromDate} onChangeText={setFromDate} placeholder="YYYY-MM-DD" />
+              </Field>
+              <Field label="To" style={{ flex: 1 }}>
+                <Input value={toDate} onChangeText={setToDate} placeholder="YYYY-MM-DD" />
+              </Field>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <Seg
+                options={[
+                  { value: "", label: "All" },
+                  { value: "clear", label: "Clear" },
+                  { value: "unclear", label: "Unclear" },
+                  { value: "bounced", label: "Bounced" },
+                ]}
+                value={statusFilter}
+                onChange={(v) => setStatusFilter(v as typeof statusFilter)}
+              />
+            </ScrollView>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <Label>Hide dummy bank</Label>
+              <Switch value={hideDummyBank} onValueChange={setHideDummyBank} trackColor={{ false: S.ruleSoft, true: S.blueTint }} thumbColor={hideDummyBank ? S.ink : S.graphite} />
+            </View>
+
+            {isLoading ? (
+              <>
+                <Skel h={90} />
+                <Skel h={90} />
+                <Skel h={90} />
+              </>
+            ) : isError ? (
+              <View style={{ gap: 10 }}>
+                <Notice>{(error as Error)?.message || "Could not load the BRS. Try again."}</Notice>
+                <Key label="Retry" onPress={() => refetch()} style={{ alignSelf: "flex-start" }} />
+              </View>
+            ) : filtered.length === 0 ? (
+              <Body color={S.graphite}>No entries match your filters.</Body>
+            ) : (
+              <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+                {filtered.map((item, i) => (
+                  <BrsRow
+                    key={`${item.SourceType}-${item.SourceID}`}
+                    entry={item}
+                    last={i === filtered.length - 1 && !hasNextPage}
+                    toggling={togglingKey === `${item.SourceType}-${item.SourceID}`}
+                    onToggle={() => handleToggle(item)}
+                    onBounce={() => setBounceEntry(item)}
+                    onReissue={() => handleReissue(item)}
+                  />
+                ))}
+                {isFetchingNextPage && (
+                  <View style={{ paddingTop: 10 }}>
+                    <Skel h={60} />
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        </SheetShell>
+      </ScrollView>
 
       <OptionPickerModal
-        visible={bankPickerOpen} title="Filter by Bank" options={bankOptions}
+        visible={bankPickerOpen} title="Filter by bank" options={bankOptions}
         selectedKey={bankId ? String(bankId) : null}
         onSelect={(k) => { setBankId(k ? Number(k) : undefined); setBankPickerOpen(false); }}
         onClose={() => setBankPickerOpen(false)} searchable clearable

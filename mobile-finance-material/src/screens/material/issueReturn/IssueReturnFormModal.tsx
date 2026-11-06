@@ -1,4 +1,5 @@
-// RN port of IssueReturn.tsx's create/edit form. A return sources its line
+// RN port of IssueReturn.tsx's create/edit form, on the drawing sheet: a page of the stack (asScreen, from
+// IssueReturnFormScreen) with Cancel / Save along its foot. A return sources its line
 // items from a chosen Approved Material Issue — picking Company/Project/
 // Issue Reference cascades down and clears the cart at each step, then the
 // Issue's own items get pulled in as the starting cart (create mode only,
@@ -7,12 +8,13 @@
 // does not subtract quantity already returned in earlier Return docs.
 import { istToday } from "@/utils/istTime";
 import { useEffect, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Alert } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, RotateCcw as RotateCcwIcon, Undo2, Trash2 } from "lucide-react-native";
-import { colors } from "@/theme/colors";
-import { fonts } from "@/theme/fonts";
+import { RotateCcw as RotateCcwIcon, Undo2 } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
+import { Body, Field, Input, Key, Label, Panel } from "@/components/sheet/Sheet";
+import { TextField } from "@/components/sheet/FormParts";
+import { FormPage, LineBox } from "@/components/sheet/Register";
 import {
   getIssueReturnById, createIssueReturn, updateIssueReturn,
   getCompanies, getProjects, getSourceIssues, getSourceIssueItems,
@@ -37,32 +39,9 @@ function blankForm(): FormState {
   return { returnDate: todayISO(), companyId: "", companyName: "", projectId: "", projectName: "", issueId: "", issueDocNo: "", reason: "", remarks: "" };
 }
 
-function FieldLabel({ children, required }: { children: string; required?: boolean }) {
-  return (
-    <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-      {children}{required ? " *" : ""}
-    </Text>
-  );
-}
-
-function TextField({ value, onChangeText, placeholder, multiline }: { value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean }) {
-  return (
-    <TextInput
-      value={value} onChangeText={onChangeText} placeholder={placeholder} multiline={multiline}
-      placeholderTextColor={`${colors.mutedForeground}99`}
-      style={{
-        borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: multiline ? 12 : 10,
-        color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, marginBottom: 14,
-        textAlignVertical: multiline ? "top" : "center", minHeight: multiline ? 70 : undefined,
-      }}
-    />
-  );
-}
-
 export function IssueReturnFormModal({
-  visible, editingId, onClose,
-}: { visible: boolean; editingId: number | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
+  visible, editingId, onClose, asScreen,
+}: { visible: boolean; editingId: number | null; onClose: () => void; asScreen?: boolean }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(blankForm());
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -178,114 +157,68 @@ export function IssueReturnFormModal({
   const issueOptions: PickerOption[] = sourceIssues.map((i) => ({ key: String(i.IssueId), label: i.DocNo, sublabel: i.IssueDate?.slice(0, 10) }));
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#0ea5e926" }}>
-              <Undo2 size={14} color="#0ea5e9" />
-            </View>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>{editingId ? "Edit Issue Return" : "New Issue Return"}</Text>
-          </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
+    <FormPage
+      asScreen={asScreen}
+      visible={visible}
+      onClose={onClose}
+      eyebrow="CivilierERP · Material · Issue return"
+      title={editingId ? "Edit return" : "New return"}
+      subtitle="Material coming back from a project, against an approved issue. Saved as a draft; submit it from the return."
+      loading={editingId != null && loadingExisting}
+      saving={saving}
+      onSave={handleSave}
+      saveLabel={editingId ? "Save changes" : "Save as draft"}
+      overlays={
+        <>
+          <OptionPickerModal visible={picker === "company"} title="Select company" options={companyOptions} selectedKey={form.companyId}
+            onSelect={(k) => { const c = companies.find((x) => x.id === k); setForm((f) => ({ ...f, companyId: k, companyName: c?.name ?? "", projectId: "", projectName: "", issueId: "", issueDocNo: "" })); setCart([]); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable clearable />
+          <OptionPickerModal visible={picker === "project"} title="Select project" options={projectOptions} selectedKey={form.projectId}
+            onSelect={(k) => { const p = projects.find((x) => x.id === k); setForm((f) => ({ ...f, projectId: k, projectName: p?.name ?? "", issueId: "", issueDocNo: "" })); setCart([]); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable clearable />
+          <OptionPickerModal visible={picker === "issue"} title="Select issue reference" options={issueOptions} selectedKey={form.issueId}
+            onSelect={(k) => { const i = sourceIssues.find((x) => String(x.IssueId) === k); setForm((f) => ({ ...f, issueId: k, issueDocNo: i?.DocNo ?? "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable clearable />
+        </>
+      }
+    >
+      <Panel title="Return">
+        <Field label="Return date" required>
+          <Input value={form.returnDate} onChangeText={(v) => set("returnDate", v)} placeholder="YYYY-MM-DD" />
+        </Field>
+        <View>
+          <PickerRow label="Company" value={form.companyName} placeholder="Select company…" onPress={() => setPicker("company")} />
+          <PickerRow label="Project" value={form.projectName} placeholder="Select project…" onPress={() => setPicker("project")} />
+          <PickerRow label="Issue reference *" value={form.issueDocNo} placeholder="Select an approved issue…" onPress={() => setPicker("issue")} />
+          <TextField label="Reason" value={form.reason} onChangeText={(v) => set("reason", v)} placeholder="Why is this being returned?" />
+          <TextField label="Remarks" value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" />
         </View>
+      </Panel>
 
-        {loadingExisting ? (
-          <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
+      <Panel title={`Return items (${cart.length})`} icon={<Undo2 size={14} color={S.ink} />}>
+        {!!form.issueId && <Key label="Load from issue" icon={<RotateCcwIcon size={13} color={S.ink} />} onPress={() => loadItemsFromIssue(form.issueId)} style={{ alignSelf: "flex-start" }} />}
+        {cart.length === 0 ? (
+          <Body size={12.5} color={S.graphite} style={{ textAlign: "center", paddingVertical: 14 }}>{form.issueId ? "No items on this issue." : "Select an issue reference first."}</Body>
         ) : (
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
-            <FieldLabel required>Return Date</FieldLabel>
-            <TextField value={form.returnDate} onChangeText={(v) => set("returnDate", v)} placeholder="YYYY-MM-DD" />
-
-            <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
-            <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label="Issue Reference" value={form.issueDocNo} placeholder="Select an approved issue" onPress={() => setPicker("issue")} />
-
-            <FieldLabel>Reason</FieldLabel>
-            <TextField value={form.reason} onChangeText={(v) => set("reason", v)} placeholder="Why is this being returned?" />
-            <FieldLabel>Remarks</FieldLabel>
-            <TextField value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" />
-
-            <View className="flex-row items-center justify-between mb-2.5">
-              <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6 }}>
-                Return Items ({cart.length})
-              </Text>
-              {!!form.issueId && (
-                <Pressable onPress={() => loadItemsFromIssue(form.issueId)} className="flex-row items-center gap-1 px-2.5 py-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-                  <RotateCcwIcon size={11} color={colors.mutedForeground} />
-                  <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.medium }}>Load from Issue</Text>
-                </Pressable>
-              )}
-            </View>
-
-            {cart.length === 0 ? (
-              <View className="rounded-xl px-3.5 py-4 items-center mb-2" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 11.5, textAlign: "center" }}>
-                  {form.issueId ? "No items on this issue." : "Select an issue reference first."}
-                </Text>
-              </View>
-            ) : (
-              cart.map((ci, idx) => {
-                const qty = Number(ci.quantity) || 0;
-                const overMax = qty > ci.maxQty;
-                return (
-                  <View key={ci.key} className="rounded-xl p-3 mb-2.5" style={{ borderWidth: 1, borderColor: overMax ? colors.destructive : colors.border, backgroundColor: `${colors.card}80` }}>
-                    <View className="flex-row items-center justify-between mb-2">
-                      <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium, flex: 1, marginRight: 8 }}>{ci.itemName}</Text>
-                      <Pressable onPress={() => removeCartRow(idx)} className="p-1">
-                        <Trash2 size={14} color={colors.destructive} />
-                      </Pressable>
-                    </View>
-                    <View className="flex-row gap-2">
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Issued Qty</Text>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 6 }}>{ci.maxQty} {ci.uom}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Return Qty</Text>
-                        <TextInput
-                          value={ci.quantity}
-                          onChangeText={(v) => updateCartQty(idx, v.replace(/[^0-9.]/g, ""))}
-                          keyboardType="numeric"
-                          style={{ borderWidth: 1, borderColor: overMax ? colors.destructive : colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, color: colors.foreground, fontSize: 12, marginTop: 3 }}
-                        />
-                      </View>
-                    </View>
-                    {overMax && <Text style={{ color: colors.destructive, fontSize: 10, marginTop: 6 }}>Exceeds issued quantity ({ci.maxQty} {ci.uom})</Text>}
+          cart.map((ci, idx) => {
+            const overMax = (Number(ci.quantity) || 0) > ci.maxQty;
+            return (
+              <LineBox key={ci.key} index={idx} title={ci.itemName} onRemove={() => removeCartRow(idx)}>
+                <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-end" }}>
+                  <View style={{ flex: 1, gap: 6 }}>
+                    <Label>Issued qty</Label>
+                    <Body size={13.5} color={S.graphite} style={{ paddingVertical: 12 }}>{`${ci.maxQty} ${ci.uom}`}</Body>
                   </View>
-                );
-              })
-            )}
-          </ScrollView>
+                  <Field label="Return qty" style={{ flex: 1 }}>
+                    <Input value={ci.quantity} onChangeText={(v) => updateCartQty(idx, v.replace(/[^0-9.]/g, ""))} keyboardType="numeric" style={overMax ? { color: S.red } : undefined} />
+                  </Field>
+                </View>
+                {overMax && <Body size={11} color={S.red}>{`More than was issued (${ci.maxQty} ${ci.uom})`}</Body>}
+              </LineBox>
+            );
+          })
         )}
-
-        <View className="flex-row gap-2.5 px-4" style={{ paddingBottom: insets.bottom + 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <Pressable onPress={onClose} className="px-5 py-3 rounded-xl items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleSave} disabled={saving}
-            className="flex-1 items-center justify-center py-3 rounded-xl"
-            style={{ backgroundColor: colors.primary, opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : (
-              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{editingId ? "Save Changes" : "Save as Draft"}</Text>
-            )}
-          </Pressable>
-        </View>
-      </View>
-
-      <OptionPickerModal visible={picker === "company"} title="Select Company" options={companyOptions} selectedKey={form.companyId}
-        onSelect={(k) => { const c = companies.find((x) => x.id === k); setForm((f) => ({ ...f, companyId: k, companyName: c?.name ?? "", projectId: "", projectName: "", issueId: "", issueDocNo: "" })); setCart([]); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable clearable />
-      <OptionPickerModal visible={picker === "project"} title="Select Project" options={projectOptions} selectedKey={form.projectId}
-        onSelect={(k) => { const p = projects.find((x) => x.id === k); setForm((f) => ({ ...f, projectId: k, projectName: p?.name ?? "", issueId: "", issueDocNo: "" })); setCart([]); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable clearable />
-      <OptionPickerModal visible={picker === "issue"} title="Select Issue Reference" options={issueOptions} selectedKey={form.issueId}
-        onSelect={(k) => { const i = sourceIssues.find((x) => String(x.IssueId) === k); setForm((f) => ({ ...f, issueId: k, issueDocNo: i?.DocNo ?? "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable clearable />
-    </Modal>
+      </Panel>
+    </FormPage>
   );
 }

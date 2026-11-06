@@ -53,6 +53,8 @@ export interface FinanceDashboardData {
   parties: { supplierCount: number; activeSupplierCount: number; customerCount: number; activeGLCount: number };
   recentPaymentsMade: RecentPaymentMade[];
   recentPaymentsReceived: RecentPaymentReceived[];
+  /** The last fourteen days: money paid out (made) and received, per day. */
+  timeline: { date: string; made: number; received: number }[];
 }
 
 export const EMPTY_FINANCE_DASHBOARD: FinanceDashboardData = {
@@ -65,6 +67,7 @@ export const EMPTY_FINANCE_DASHBOARD: FinanceDashboardData = {
   parties: { supplierCount: 0, activeSupplierCount: 0, customerCount: 0, activeGLCount: 0 },
   recentPaymentsMade: [],
   recentPaymentsReceived: [],
+  timeline: [],
 };
 
 export async function fetchFinanceDashboard(): Promise<FinanceDashboardData> {
@@ -72,4 +75,20 @@ export async function fetchFinanceDashboard(): Promise<FinanceDashboardData> {
   if (!res.ok) throw new Error("Failed to fetch finance dashboard");
   const raw = await res.json().catch(() => ({}));
   return { ...EMPTY_FINANCE_DASHBOARD, ...raw };
+}
+
+export interface MonthlyIncomePoint {
+  key: string;
+  month: string;
+  year: number;
+  income: number;
+  trend: "growth" | "degrowth" | "neutral";
+}
+
+/** Income by month, from the trial balance — the same call the web Finance Dashboard makes. */
+export async function fetchMonthlyIncome(): Promise<MonthlyIncomePoint[]> {
+  const res = await fetchWithAuth("/api/financial-statements/monthly-income");
+  if (!res.ok) throw new Error("Failed to fetch monthly income");
+  const json = await res.json().catch(() => ({}));
+  return Array.isArray(json?.months) ? json.months : [];
 }
