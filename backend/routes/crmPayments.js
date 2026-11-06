@@ -16,8 +16,8 @@ const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking
 const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
-const { areEarlierMilestonesCoveredByOnAccount, getMilestoneMoneyStages, pendingVerificationEntries, returnedEntries } = require("../services/crmOnAccountCoverage");
-const { getBookingFunding, onAccountAvailableSql, onAccountWithAvailableSql } = require("../services/crmPaymentFunding");
+const { areEarlierMilestonesCoveredByOnAccount, getBookingMoneyTrail, getMilestoneMoneyStages, stageMilestones, pendingVerificationEntries, returnedEntries } = require("../services/crmOnAccountCoverage");
+const { getBookingFunding, onAccountAvailableSql, onAccountWithAvailableSql, recordedMoneySql } = require("../services/crmPaymentFunding");
 const { bulkDemandSchema } = require("../validation/crmBookingSchemas");
 const ON_ACCOUNT_AVAILABLE_SQL = onAccountAvailableSql("o");
 
@@ -399,6 +399,176 @@ async function autoApplyOnAccountIfFullyFunded(pool, bookingId, actorUserId, act
 function buildDemandNo(bookingNo, milestoneNo) {
   return `DEM-${bookingNo}-${String(milestoneNo).padStart(3, "0")}`;
 }
+
+// ── The collections desk: every booking's money, worked out on the server ─────
+// How late the money still missing is. "soon" is due in the next 30 days (today included); the rest are past due.
+const LEDGER_AGES = [
+  { key: "soon", label: "Due in 30 days", from: -30, to: 0 },
+  { key: "d30", label: "1–30 days late", from: 1, to: 30 },
+  { key: "d60", label: "31–60 days late", from: 31, to: 60 },
+  { key: "d90", label: "61–90 days late", from: 61, to: 90 },
+  { key: "d90p", label: "Over 90 days late", from: 91, to: null },
+];
+const ageTest = (a) => `s.DaysLate >= ${a.from}${a.to == null ? "" : ` AND s.DaysLate <= ${a.to}`}`;
+const FULLY_COLLECTED = "y.PlanCount > 0 AND y.Collected + 0.009 >= y.TotalDue";
+const LEDGER_FOCUS = {
+  everything: "1 = 1",
+  attention: "y.Closed = 0 AND (y.OverdueAmount > 0 OR y.A_soon > 0)",
+  all: "y.Closed = 0",
+  overdue: "y.Closed = 0 AND y.OverdueAmount > 0",
+  soon: "y.Closed = 0 AND y.A_soon > 0",
+  finance: "y.Closed = 0 AND y.WithFinance > 0",
+  recorded: "y.Closed = 0 AND y.Recorded > 0",
+  collected: `y.Closed = 0 AND ${FULLY_COLLECTED}`,
+  closed: "y.Closed = 1",
+};
+// Priority: the most money late for the longest (rupee-days), then the most money falling due soon.
+const LEDGER_SORT = {
+  Priority: "y.OverdueAmount * y.DaysLate", ApplicantName: "y.ApplicantName", BookingNo: "y.BookingNo", TotalDue: "y.TotalDue", Collected: "y.CollectedPct",
+  ToCollect: "y.ToCollect", OverdueAmount: "y.OverdueAmount", DaysLate: "y.DaysLate", AssignedToName: "y.AssignedToName",
+  NotDue: "y.ToCollect - y.OverdueAmount",
+  ...Object.fromEntries(LEDGER_AGES.map((a) => [`A_${a.key}`, `y.A_${a.key}`])),
+};
+// One row per booking. The missing money follows the on-account rule (stageMilestones, the same test as
+// MILESTONE_OVERDUE_SQL): money covers milestones in order, counting verified money held On Account and what is
+// entered, with Finance or not yet. What a pending milestone's running dues exceed that money by, up to its own dues,
+// is the money still missing on it.
+const ledgerSelect = (where) => {
+  const money = "ISNULL(oa.Held, 0) + ISNULL(rp.WithFinance, 0) + ISNULL(rec.Recorded, 0)";
+  const ageSums = LEDGER_AGES.map((a) => `SUM(CASE WHEN ${ageTest(a)} THEN s.Short ELSE 0 END) AS A_${a.key}`).join(", ");
+  const ageCols = LEDGER_AGES.map((a) => `ISNULL(cov.A_${a.key}, 0) AS A_${a.key}`).join(", ");
+  return `
+  SELECT z.*, CASE WHEN z.TotalDue > 0 THEN CAST(z.Collected * 100.0 / z.TotalDue AS DECIMAL(9, 2)) ELSE 0 END AS CollectedPct,
+         CASE WHEN z.TotalDue - z.Collected - z.WithFinance - z.Recorded > 0 THEN z.TotalDue - z.Collected - z.WithFinance - z.Recorded ELSE 0 END AS ToCollect
+  FROM (
+    SELECT b.Id AS BookingId, b.ApplicationId, b.BookingNo, b.Status AS BookingStatus, a.ApplicantName, a.Mobile,
+           COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, u.name AS AssignedToName,
+           CASE WHEN b.Status IN ${DEAD_BOOKING_SQL} THEN 1 ELSE 0 END AS Closed,
+           ISNULL(mx.TotalDue, 0) AS TotalDue, ISNULL(mx.Settled, 0) AS Settled, ISNULL(mx.PlanCount, 0) AS PlanCount,
+           ISNULL(oa.Held, 0) AS Held, ISNULL(mx.Settled, 0) + ISNULL(oa.Held, 0) AS Collected,
+           ISNULL(rp.WithFinance, 0) AS WithFinance, ISNULL(rp.FinanceCount, 0) AS FinanceCount, ISNULL(rec.Recorded, 0) AS Recorded,
+           ISNULL(cov.OverdueAmount, 0) AS OverdueAmount, ISNULL(cov.OverdueCount, 0) AS OverdueCount, ISNULL(cov.DaysLate, 0) AS DaysLate,
+           ${ageCols}
+    FROM dbo.CrmBooking b
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+    LEFT JOIN dbo.Users u ON u.id = b.AssignedTo
+    OUTER APPLY (SELECT SUM(o.AvailableAmount) AS Held FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = b.Id) oa
+    OUTER APPLY (SELECT SUM(r.RPAmount) AS WithFinance, COUNT(*) AS FinanceCount FROM dbo.ReceivedPayment r
+                 WHERE r.CrmBookingId = b.Id AND r.RPStatus = N'${CrmStatus.PENDING}') rp
+    OUTER APPLY (SELECT ${recordedMoneySql("b.Id")} AS Recorded) rec
+    OUTER APPLY (SELECT SUM(CASE WHEN m.Status = 'Waived' THEN 0 ELSE m.AmountDue END) AS TotalDue, SUM(ISNULL(m.AmountPaid, 0)) AS Settled, COUNT(*) AS PlanCount
+                 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id) mx
+    OUTER APPLY (
+      SELECT SUM(CASE WHEN s.DaysLate >= 1 THEN s.Short ELSE 0 END) AS OverdueAmount,
+             SUM(CASE WHEN s.DaysLate >= 1 AND s.Short > 0 THEN 1 ELSE 0 END) AS OverdueCount,
+             MAX(CASE WHEN s.DaysLate >= 1 AND s.Short > 0 THEN s.DaysLate END) AS DaysLate,
+             ${ageSums}
+      FROM (
+        SELECT c.DaysLate,
+               CASE WHEN c.Status <> '${CrmStatus.PENDING}' OR c.Upto - (${money}) <= 0.009 THEN 0
+                    WHEN c.Upto - (${money}) >= c.Need THEN c.Need ELSE c.Upto - (${money}) END AS Short
+        FROM (
+          SELECT m.Status, DATEDIFF(DAY, m.DueDate, CAST(SYSDATETIME() AS DATE)) AS DaysLate, n.Need,
+                 SUM(n.Need) OVER (ORDER BY m.MilestoneNo, m.Id ROWS UNBOUNDED PRECEDING) AS Upto
+          FROM dbo.CrmPaymentMilestone m
+          CROSS APPLY (SELECT CASE WHEN m.Status = 'Waived' OR m.AmountDue <= ISNULL(m.AmountPaid, 0) THEN 0 ELSE m.AmountDue - ISNULL(m.AmountPaid, 0) END AS Need) n
+          WHERE m.BookingId = b.Id
+        ) c
+      ) s
+    ) cov
+    ${where}
+  ) z`;
+};
+
+// The search and filters both desk routes share, bound to each request given.
+function ledgerWhere(req, requests) {
+  const bind = (name, type, value) => requests.forEach((r) => r.input(name, type, value));
+  const conds = ["b.IsActive = 1"];
+  if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+  for (const [key, col] of [["companyId", "b.CompanyId"], ["projectId", "b.ProjectId"], ["blockId", "b.BlockId"]]) {
+    const v = req.query[key] ? parseInt(req.query[key], 10) : null;
+    if (v) { bind(key, sql.Int, v); conds.push(`${col} = @${key}`); }
+  }
+  if (req.query.search) {
+    bind("search", sql.NVarChar(200), `%${req.query.search}%`);
+    conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search)");
+  }
+  return `WHERE ${conds.join(" AND ")}`;
+}
+
+// GET /ledger — one page of the work queue (one query: the rows and their total together), each row with its plan.
+// Without ?page, the rows alone (for the export).
+router.get("/ledger", requirePageRight("crm-payments", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const req0 = pool.request();
+    const BASE = ledgerSelect(ledgerWhere(req, [req0]));
+    const focus = Object.hasOwn(LEDGER_FOCUS, req.query.focus) ? req.query.focus : "attention";
+    const age = LEDGER_AGES.find((a) => a.key === req.query.age);
+    const match = `${LEDGER_FOCUS[focus]}${age ? ` AND y.A_${age.key} > 0` : ""}`;
+    const sortCol = Object.hasOwn(LEDGER_SORT, req.query.sortKey) ? LEDGER_SORT[req.query.sortKey] : LEDGER_SORT.Priority;
+    const orderBy = `ORDER BY ${sortCol} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, y.A_soon DESC, y.BookingId DESC`;
+
+    if (!req.query.page) {
+      const all = await req0.query(`SELECT y.* FROM (${BASE}) y WHERE ${match} ${orderBy}`);
+      return res.json(all.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req, 25);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await req0.query(`SELECT y.*, COUNT(*) OVER () AS TotalRows FROM (${BASE}) y WHERE ${match} ${orderBy} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`);
+    const rows = rowsRes.recordset;
+    // Each row's plan, through the one money-stage rule (one query for the whole page).
+    if (rows.length) {
+      const plan = await pool.request().query(`
+        SELECT Id, BookingId, MilestoneNo, MilestoneName, AmountDue, AmountPaid, DueDate, Status
+        FROM dbo.CrmPaymentMilestone WHERE BookingId IN (${rows.map((r) => Number(r.BookingId)).join(",")})
+        ORDER BY BookingId, MilestoneNo, Id`);
+      const byBooking = new Map();
+      for (const m of plan.recordset) {
+        if (!byBooking.has(m.BookingId)) byBooking.set(m.BookingId, []);
+        byBooking.get(m.BookingId).push(m);
+      }
+      for (const r of rows) r.plan = stageMilestones(byBooking.get(r.BookingId) || [], Number(r.Held) || 0, Number(r.WithFinance) || 0, Number(r.Recorded) || 0);
+    }
+    res.json({ rows, total: rows[0]?.TotalRows || 0, page, pageSize });
+  } catch (e) {
+    console.error("[crm-payments] GET /ledger error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /ledger/summary — the queue's counts and the money across every booking under the search and filters. Its own
+// call, so paging and sorting the queue never work these out again.
+router.get("/ledger/summary", requirePageRight("crm-payments", "view"), async (req, res) => {
+  try {
+    const sumReq = getPool().request();
+    const BASE = ledgerSelect(ledgerWhere(req, [sumReq]));
+    const live = (test) => `SUM(CASE WHEN y.Closed = 0 AND ${test} THEN 1 ELSE 0 END)`;
+    const liveSum = (col) => `SUM(CASE WHEN y.Closed = 0 THEN ${col} ELSE 0 END)`;
+    const sumRes = await sumReq.query(`
+      SELECT ${live("1 = 1")} AS LiveCount, SUM(y.Closed) AS ClosedCount,
+             ${["attention", "overdue", "soon", "finance", "recorded", "collected"].map((k) => `SUM(CASE WHEN ${LEDGER_FOCUS[k]} THEN 1 ELSE 0 END) AS C_${k}`).join(", ")},
+             ${["TotalDue", "Settled", "Held", "WithFinance", "Recorded", "ToCollect", "OverdueAmount"].map((c) => `${liveSum(`y.${c}`)} AS S_${c}`).join(", ")},
+             ${LEDGER_AGES.map((a) => `${liveSum(`y.A_${a.key}`)} AS Amt_${a.key}, ${live(`y.A_${a.key} > 0`)} AS Cnt_${a.key}`).join(", ")}
+      FROM (${BASE}) y`);
+    const sm = sumRes.recordset[0] || {};
+    res.json({
+      counts: {
+        everything: (sm.LiveCount || 0) + (sm.ClosedCount || 0), all: sm.LiveCount || 0, closed: sm.ClosedCount || 0, attention: sm.C_attention || 0, overdue: sm.C_overdue || 0,
+        soon: sm.C_soon || 0, finance: sm.C_finance || 0, recorded: sm.C_recorded || 0, collected: sm.C_collected || 0,
+      },
+      totalDue: round2(sm.S_TotalDue || 0), settled: round2(sm.S_Settled || 0), held: round2(sm.S_Held || 0),
+      withFinance: round2(sm.S_WithFinance || 0), recorded: round2(sm.S_Recorded || 0), toCollect: round2(sm.S_ToCollect || 0), overdue: round2(sm.S_OverdueAmount || 0),
+      ages: LEDGER_AGES.filter((a) => a.from > 0).map((a) => ({ key: a.key, label: a.label, amount: round2(sm[`Amt_${a.key}`] || 0), count: sm[`Cnt_${a.key}`] || 0 })),
+    });
+  } catch (e) {
+    console.error("[crm-payments] GET /ledger/summary error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // GET /demands — every milestone across every booking, for the CRM Demand
 // page's list + summary. Deliberately not scoped to "has a demand raised
@@ -1239,7 +1409,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
                b.ProjectId,
                COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
                b.BookingAmount,
-               b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal, b.UnitParkingGstRate,
+               b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal, b.UnitParkingGstRate, b.UnitGstAmount, b.TokenValue, b.PaymentMode,
                a.ApplicantName, a.Mobile
         FROM dbo.CrmBooking b
         JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -1272,11 +1442,11 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
     // "customer has paid this" transparently instead of a misleading
     // Pending/Overdue on money that's already, verifiably, in hand.
     // Each milestone's money stage (getMilestoneMoneyStages: the one rule every screen uses).
-    const { milestones: staged } = await getMilestoneMoneyStages(pool, bid);
+    const { milestones: staged, recorded } = await getMilestoneMoneyStages(pool, bid);
     const stageById = new Map(staged.map((c) => [c.Id, c]));
     const milestones = milRes.recordset.map((m) => {
       const c = stageById.get(m.Id);
-      return { ...m, VirtuallyCovered: !!c?.VirtuallyCovered, HeldOnAccount: c?.HeldOnAccount || 0, MoneyStage: c ? c.MoneyStage : null };
+      return { ...m, VirtuallyCovered: !!c?.VirtuallyCovered, HeldOnAccount: c?.HeldOnAccount || 0, WithFinanceCover: c?.WithFinanceCover || 0, RecordedCover: c?.RecordedCover || 0, MoneyStage: c ? c.MoneyStage : null };
     });
     // Overdue = past due with no money for it, verified or entered.
     const overdue = milestones.filter((m) => m.MoneyStage == null && m.DueDate && new Date(m.DueDate) < new Date()).length;
@@ -1289,8 +1459,9 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
     const collected = round2(totalPaid + held);
     const money = {
       adjusted: round2(totalPaid), held, collected,
-      inVerification, inVerificationCount: pending.length,
-      toCollect: Math.max(0, round2(totalDue - collected - inVerification)),
+      inVerification, inVerificationCount: pending.length, recorded,
+      toCollect: Math.max(0, round2(totalDue - collected - inVerification - recorded)),
+      trail: await getBookingMoneyTrail(pool, bid),
       entries: pending.map((r) => ({
         id: r.RPPaymentID, docNo: r.RPDocNo, amount: Number(r.RPAmount), mode: r.RPMode, date: r.RPDocDate,
         ref: r.RPTransactionID, milestone: r.MilestoneName || null, enteredBy: r.RPCreatedBy, enteredAt: r.RPCreatedAt,

@@ -1,6 +1,7 @@
 const { sql } = require("../db");
 const { round2, sumMoney } = require("./bookingUnits");
-const { onAccountWithAvailableSql } = require("./crmPaymentFunding");
+const { onAccountWithAvailableSql, recordedMoneySql } = require("./crmPaymentFunding");
+const { DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 
 // Business rule (confirmed 2026-09-15): every rupee a customer pays lands in
 // On Account and stays there, on hold — it is never swept onto a specific
@@ -26,20 +27,9 @@ const { onAccountWithAvailableSql } = require("./crmPaymentFunding");
 // hasn't verified yet counts too — used only to decide whether the NEXT entry
 // may be made / verified, so payments can be entered one after another without
 // waiting for each verification. Shown coverage never uses it.
-async function getBookingOnAccountCoverage(pool, bookingId, { withPendingVerification = false } = {}) {
-  const milestonesRes = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT Id, MilestoneNo, MilestoneName, AmountDue, AmountPaid, Status, ExtraChargeId, ParkingAllotmentId
-    FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo, Id
-  `);
-  const oaRes = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT ISNULL(SUM(o.AvailableAmount), 0) AS TotalOnAccount FROM ${onAccountWithAvailableSql("o")}
-    WHERE o.BookingId = @bid
-  `);
-  const pendingVerification = withPendingVerification ? await pendingVerificationTotal(pool, bookingId) : 0;
-  const totalOnAccount = round2((Number(oaRes.recordset[0]?.TotalOnAccount) || 0) + pendingVerification);
-
+function coverMilestones(rows, totalOnAccount) {
   let cumulativeRequired = 0;
-  const milestones = milestonesRes.recordset.map((m) => {
+  const milestones = rows.map((m) => {
     const required = m.Status === "Waived" ? 0 : Math.max(0, round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)));
     const before = cumulativeRequired;
     cumulativeRequired = round2(cumulativeRequired + required);
@@ -53,28 +43,149 @@ async function getBookingOnAccountCoverage(pool, bookingId, { withPendingVerific
       HeldOnAccount: Math.min(required, Math.max(0, round2(totalOnAccount - before))),
     };
   });
-
-  return { milestones, totalOnAccount, grandRequired: cumulativeRequired };
+  return { milestones, grandRequired: cumulativeRequired };
 }
 
-// Each milestone's money stage — one answer, so no screen guesses:
+// Each milestone's money stage: one answer, so no screen guesses.
 //   Adjusted        settled on the milestone
 //   Verified        Finance-verified money held On Account covers it
 //   InVerification  covered once the entries waiting for Finance are verified
+//   Recorded        covered once money entered but not yet with Finance gets there and is verified
 //   null            nothing entered for it yet
-// Returns the milestones (coverage order) with VirtuallyCovered, HeldOnAccount and MoneyStage.
+// Rows come in milestone order; held = verified money On Account, pending = entered and waiting for Finance,
+// recorded = entered but not yet with Finance. WithFinanceCover and RecordedCover = how much of the milestone those
+// would cover, on top of what is held.
+function stageMilestones(rows, held, pending, recorded = 0) {
+  const verified = coverMilestones(rows, held).milestones;
+  const entered = coverMilestones(rows, round2(held + pending)).milestones;
+  const all = coverMilestones(rows, round2(held + pending + recorded)).milestones;
+  return verified.map((m, i) => {
+    let stage = null;
+    if (m.Status === "Waived") stage = "Waived";
+    else if (m.Status === "Paid" || Number(m.AmountPaid || 0) >= Number(m.AmountDue || 0)) stage = "Adjusted";
+    else if (m.VirtuallyCovered) stage = "Verified";
+    else if (entered[i].VirtuallyCovered) stage = "InVerification";
+    else if (all[i].VirtuallyCovered) stage = "Recorded";
+    return { ...m, WithFinanceCover: round2(entered[i].HeldOnAccount - m.HeldOnAccount), RecordedCover: round2(all[i].HeldOnAccount - entered[i].HeldOnAccount), MoneyStage: stage };
+  });
+}
+
+async function getBookingOnAccountCoverage(pool, bookingId, { withPendingVerification = false } = {}) {
+  const milestonesRes = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT Id, MilestoneNo, MilestoneName, AmountDue, AmountPaid, Status, ExtraChargeId, ParkingAllotmentId
+    FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo, Id
+  `);
+  const oaRes = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT ISNULL(SUM(o.AvailableAmount), 0) AS TotalOnAccount FROM ${onAccountWithAvailableSql("o")}
+    WHERE o.BookingId = @bid
+  `);
+  const pendingVerification = withPendingVerification ? await pendingVerificationTotal(pool, bookingId) : 0;
+  const totalOnAccount = round2((Number(oaRes.recordset[0]?.TotalOnAccount) || 0) + pendingVerification);
+
+  const { milestones, grandRequired } = coverMilestones(milestonesRes.recordset, totalOnAccount);
+  return { milestones, totalOnAccount, grandRequired };
+}
+
+// One booking's milestones with their money stage and the money against each (stageMilestones).
 async function getMilestoneMoneyStages(pool, bookingId) {
   const { milestones, totalOnAccount } = await getBookingOnAccountCoverage(pool, bookingId);
-  const { milestones: entered } = await getBookingOnAccountCoverage(pool, bookingId, { withPendingVerification: true });
-  const enteredById = new Map(entered.map((c) => [c.Id, c.VirtuallyCovered]));
-  const stageOf = (m) => {
-    if (m.Status === "Waived") return "Waived";
-    if (m.Status === "Paid" || Number(m.AmountPaid || 0) >= Number(m.AmountDue || 0)) return "Adjusted";
-    if (m.VirtuallyCovered) return "Verified";
-    if (enteredById.get(m.Id)) return "InVerification";
-    return null;
+  const pending = await pendingVerificationTotal(pool, bookingId);
+  const recorded = await recordedTotal(pool, bookingId);
+  return { milestones: stageMilestones(milestones, totalOnAccount, pending, recorded), totalOnAccount, pending, recorded };
+}
+
+async function recordedTotal(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId).query(`SELECT ${recordedMoneySql("@bid")} AS Recorded`);
+  return Number(r.recordset[0]?.Recorded) || 0;
+}
+
+// Every rupee of a booking, one row per payment, from where it was entered to where it sits now. It joins up what the
+// flows keep apart: the Money Receipt, Finance's Received Payment, the On Account deposit and any refund out of it.
+async function getBookingMoneyTrail(pool, bookingId) {
+  const bid = () => pool.request().input("bid", sql.Int, bookingId);
+  const [bkRes, mrRes, rpRes, oaRes, refundRes] = await Promise.all([
+    bid().query("SELECT TokenType, TokenValue, PaymentMode, Status FROM dbo.CrmBooking WHERE Id = @bid"),
+    bid().query(`SELECT Id, ReceiptNo, Amount, Status, ReceivedPaymentId, PaymentMode, ChequeNo, TransactionRef, ReceivedDate, BouncedReason
+                 FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid ORDER BY ReceivedDate, Id`),
+    bid().query(`SELECT rp.RPPaymentID, rp.RPDocNo, rp.RPAmount, rp.RPStatus, rp.RPMode, rp.RPTransactionID, rp.RPDocDate, rp.RPRejectionNote, m.MilestoneName
+                 FROM dbo.ReceivedPayment rp LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
+                 WHERE rp.CrmBookingId = @bid ORDER BY rp.RPDocDate, rp.RPPaymentID`),
+    bid().query(`SELECT o.Id, o.ReceiptNo, o.Amount, o.AppliedAmount, o.AvailableAmount, o.Status, o.PaymentMode, o.ReceivedDate, o.SourceReceivedPaymentId
+                 FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = @bid ORDER BY o.ReceivedDate, o.Id`),
+    bid().query(`SELECT r.SourceOnAccountId, SUM(r.GrossAmount) AS Paid FROM dbo.CrmRefund r
+                 JOIN dbo.CrmOnAccountPayment o ON o.Id = r.SourceOnAccountId
+                 WHERE o.BookingId = @bid AND r.Status = N'Paid' GROUP BY r.SourceOnAccountId`),
+  ]);
+  const booking = bkRes.recordset[0] || {};
+  const receipts = mrRes.recordset;
+  const entries = rpRes.recordset;
+  const deposits = oaRes.recordset;
+  const usedDeposits = new Set();
+  const closed = DEAD_BOOKING_STATUSES.includes(booking.Status);
+  const refundedOf = new Map(refundRes.recordset.map((r) => [r.SourceOnAccountId, Number(r.Paid) || 0]));
+  const row = (x) => ({ settled: 0, held: 0, out: 0, note: null, milestone: null, ...x });
+  // A deposit's money: settled on milestones, still held, or gone out (refunded, reserved for a refund or transfer). A
+  // paid refund also counts in the deposit's applied figure, and on a closed booking nothing stays settled: the
+  // cancellation moved it on.
+  const fromDeposit = (o) => {
+    const amount = Number(o.Amount) || 0;
+    const held = Number(o.AvailableAmount) || 0;
+    const settled = closed ? 0 : round2(Math.max(0, (Number(o.AppliedAmount) || 0) - (refundedOf.get(o.Id) || 0)));
+    return { settled, held, out: round2(Math.max(0, amount - settled - held)) };
   };
-  return { milestones: milestones.map((m) => ({ ...m, MoneyStage: stageOf(m) })), totalOnAccount };
+  const whereNow = ({ settled, held, out }) => {
+    if (out > 0 && !settled && !held) return "out";
+    if (held > 0 && !settled && !out) return "held";
+    if (settled > 0 && !held && !out) return "settled";
+    return "split";
+  };
+  const rows = [];
+  for (const rp of entries) {
+    const mr = receipts.find((r) => r.ReceivedPaymentId === rp.RPPaymentID);
+    const docs = [mr?.ReceiptNo, rp.RPDocNo].filter(Boolean);
+    const base = { id: `rp-${rp.RPPaymentID}`, date: mr?.ReceivedDate || rp.RPDocDate, mode: rp.RPMode || mr?.PaymentMode || null, ref: rp.RPTransactionID || mr?.ChequeNo || mr?.TransactionRef || null, amount: Number(rp.RPAmount) || 0, milestone: rp.MilestoneName };
+    if (rp.RPStatus === "Pending") { rows.push(row({ ...base, docs, stage: "finance" })); continue; }
+    if (rp.RPStatus === "Rejected") { rows.push(row({ ...base, docs, stage: "returned", note: rp.RPRejectionNote })); continue; }
+    const o = deposits.find((d) => d.SourceReceivedPaymentId === rp.RPPaymentID);
+    if (o) {
+      usedDeposits.add(o.Id);
+      const money = fromDeposit(o);
+      rows.push(row({ ...base, docs: [...docs, o.ReceiptNo], ...money, stage: whereNow(money) }));
+    } else {
+      const money = closed ? { out: base.amount } : { settled: base.amount };
+      rows.push(row({ ...base, docs, ...money, stage: closed ? "out" : "settled" }));
+    }
+  }
+  for (const mr of receipts) {
+    if (mr.ReceivedPaymentId && entries.some((e) => e.RPPaymentID === mr.ReceivedPaymentId)) continue;
+    const base = { id: `mr-${mr.Id}`, date: mr.ReceivedDate, docs: [mr.ReceiptNo], mode: mr.PaymentMode, ref: mr.ChequeNo || mr.TransactionRef, amount: Number(mr.Amount) || 0 };
+    if (mr.Status === "Bounced") rows.push(row({ ...base, stage: "bounced", note: mr.BouncedReason }));
+    else if (mr.Status === "Pending") rows.push(row({ ...base, stage: "recorded" }));
+    else rows.push(row({ ...base, ...(closed ? { out: base.amount } : { settled: base.amount }), stage: closed ? "out" : "settled" }));
+  }
+  // On-account lines Finance never received as a payment (a credit note, a cancellation's hold): the system's own
+  // moves, listed so nothing is hidden, but not money the customer paid.
+  for (const o of deposits) {
+    if (usedDeposits.has(o.Id)) continue;
+    rows.push(row({ id: `oa-${o.Id}`, date: o.ReceivedDate, docs: [o.ReceiptNo], mode: o.PaymentMode, ref: null, amount: Number(o.Amount) || 0, stage: "adjustment" }));
+  }
+  const token = booking.TokenType === "Amount" ? Number(booking.TokenValue) || 0 : 0;
+  if (!receipts.length && token > 0) {
+    rows.push(row({ id: "token", date: null, docs: [], mode: booking.PaymentMode, ref: null, amount: token, stage: "recorded", note: "Entered on the application; no Money Receipt yet" }));
+  }
+  rows.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+  const counted = rows.filter((r) => !["returned", "bounced", "adjustment"].includes(r.stage));
+  const liveReceipt = receipts.find((r) => r.Status !== "Bounced");
+  return {
+    rows,
+    totals: {
+      received: sumMoney(counted, (r) => r.amount), settled: sumMoney(counted, (r) => r.settled), held: sumMoney(counted, (r) => r.held), out: sumMoney(counted, (r) => r.out),
+      finance: sumMoney(counted.filter((r) => r.stage === "finance"), (r) => r.amount), recorded: sumMoney(counted.filter((r) => r.stage === "recorded"), (r) => r.amount),
+    },
+    // What the application said, against the Money Receipt actually made.
+    applicationToken: token,
+    receiptAmount: liveReceipt ? Number(liveReceipt.Amount) || 0 : null,
+  };
 }
 
 // Convenience for the common case — is Milestone #1 (the one every
@@ -132,4 +243,4 @@ async function pendingVerificationTotal(pool, bookingId) {
   return sumMoney(await pendingVerificationEntries(pool, bookingId), (r) => r.RPAmount);
 }
 
-module.exports = { getBookingOnAccountCoverage, getMilestoneMoneyStages, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };
+module.exports = { coverMilestones, stageMilestones, getBookingOnAccountCoverage, getMilestoneMoneyStages, getBookingMoneyTrail, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };

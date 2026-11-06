@@ -20,6 +20,15 @@ function onAccountWithAvailableSql(alias = "o") {
     FROM dbo.CrmOnAccountPayment ${alias}) ${alias}`;
 }
 
+// Money entered for a booking that Finance has not been handed yet: its Money Receipts still waiting to go (they go when
+// the Director approves the booking), or, before any receipt exists, the token typed on the application.
+function recordedMoneySql(bookingIdExpr) {
+  return `(SELECT CASE WHEN COUNT(x.Id) = 0
+      THEN (SELECT CASE WHEN bk.TokenType = N'Amount' THEN ISNULL(bk.TokenValue, 0) ELSE 0 END FROM dbo.CrmBooking bk WHERE bk.Id = ${bookingIdExpr})
+      ELSE ISNULL(SUM(CASE WHEN x.Status = N'Pending' AND x.ReceivedPaymentId IS NULL THEN x.Amount ELSE 0 END), 0) END
+    FROM dbo.CrmMoneyReceipt x WHERE x.BookingId = ${bookingIdExpr})`;
+}
+
 // SQL twin of getBookingFunding for larger list queries. The caller supplies
 // a trusted booking-id expression (for example `b.Id` or `@bid`).
 function bookingFullyFundedSql(bookingIdExpr) {
@@ -63,4 +72,4 @@ async function getBookingFunding(pool, bookingId) {
   };
 }
 
-module.exports = { getBookingFunding, bookingFullyFundedSql, onAccountAvailableSql, onAccountWithAvailableSql };
+module.exports = { getBookingFunding, bookingFullyFundedSql, onAccountAvailableSql, recordedMoneySql, onAccountWithAvailableSql };

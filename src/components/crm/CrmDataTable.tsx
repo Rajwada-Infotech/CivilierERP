@@ -624,7 +624,7 @@ export function GridTabs<K extends string>({ tabs, active, onChange, label, end 
   tabs: { key: K; label: string; count?: number | null }[]; active: K; onChange: (k: K) => void; label: string; end?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-end gap-1 px-3 border-b border-border overflow-x-auto" role="tablist" aria-label={label}>
+    <div className="flex items-end gap-1 px-3 border-b border-border overflow-x-auto overflow-y-hidden" role="tablist" aria-label={label}>
       {tabs.map((t) => {
         const on = t.key === active;
         return (
@@ -744,12 +744,14 @@ interface CrmGridProps<T> {
   /** Tick boxes: the picked rows (kept across pages), and the change. Leave out for a grid without them. */
   selected?: ReadonlyMap<string | number, T>;
   onSelect?: (next: Map<string | number, T>) => void;
+  /** Leave out the row-number column. */
+  noRowNumbers?: boolean;
 }
 
 /** The grid itself: row numbers, sortable and resizable headers, the viewer's columns, and the footer pager. */
 export function CrmGrid<T>({
   cols: allCols, prefs, onPrefs, rows, rowKey, loading, fetching, error, onRetry, sort, onSort, onRowClick, activeKey, empty,
-  page, pageSize, total, onPage, onPageSize, selected, onSelect,
+  page, pageSize, total, onPage, onPageSize, selected, onSelect, noRowNumbers,
 }: CrmGridProps<T>) {
   const cols = gridVisibleCols(allCols, prefs);
   const selectable = !!selected && !!onSelect;
@@ -766,7 +768,7 @@ export function CrmGrid<T>({
     if (allOnPage) pageKeys.forEach((k) => next.delete(k)); else rows.forEach((r) => next.set(rowKey(r), r));
     onSelect!(next);
   };
-  const extra = selectable ? 2 : 1;
+  const extra = (selectable ? 1 : 0) + (noRowNumbers ? 0 : 1);
   const showSkeleton = !!loading && rows.length === 0;
 
   // Same as CrmDataTable: a shrinking total must not strand the page past the last one.
@@ -806,7 +808,7 @@ export function CrmGrid<T>({
                     className="h-3.5 w-3.5 accent-[hsl(var(--primary))] cursor-pointer align-middle" />
                 </th>
               )}
-              <th scope="col" className={cn(GRID_TH, "w-10 text-right")}>#</th>
+              {!noRowNumbers && <th scope="col" className={cn(GRID_TH, "w-10 text-right")}>#</th>}
               {cols.map((c) => (
                 <th key={c.id} scope="col" style={widthStyle(c.id)} className={cn(GRID_TH, "relative", c.align === "right" ? "text-right" : "text-left")}
                   aria-sort={c.sortKey && sort.key === c.sortKey ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}>
@@ -823,7 +825,7 @@ export function CrmGrid<T>({
               Array.from({ length: 10 }).map((_, r) => (
                 <tr key={r}>
                   {selectable && <td className={GRID_TD} />}
-                  <td className={GRID_TD} />
+                  {!noRowNumbers && <td className={GRID_TD} />}
                   {cols.map((c, i) => <td key={c.id} className={GRID_TD}><div className="h-2.5 rounded bg-muted animate-pulse" style={{ width: `${45 + ((r + i) % 4) * 12}%` }} /></td>)}
                 </tr>
               ))
@@ -846,7 +848,7 @@ export function CrmGrid<T>({
                         className="h-3.5 w-3.5 accent-[hsl(var(--primary))] cursor-pointer align-middle" />
                     </td>
                   )}
-                  <td className={cn(GRID_TD, "text-right text-muted-foreground tabular-nums text-xs")}>{(page - 1) * pageSize + i + 1}</td>
+                  {!noRowNumbers && <td className={cn(GRID_TD, "text-right text-muted-foreground tabular-nums text-xs")}>{(page - 1) * pageSize + i + 1}</td>}
                   {cols.map((col) => (
                     <td key={col.id} style={widthStyle(col.id)} className={cn(GRID_TD, "whitespace-nowrap overflow-hidden text-ellipsis", col.align === "right" && "text-right")}>{col.cell(row)}</td>
                   ))}
