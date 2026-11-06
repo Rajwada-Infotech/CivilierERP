@@ -8,7 +8,7 @@ import { View, Text, Image, Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
-import { Bell } from "lucide-react-native";
+import { ReminderBell } from "@/notifications/ReminderBell";
 import { colors, sheet as S } from "@/theme/colors";
 import { Press, motionOff } from "@/components/sheet/Sheet";
 import { fonts } from "@/theme/fonts";
@@ -111,9 +111,7 @@ export function TopHeader(_props: NativeStackHeaderProps) {
         </View>
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <IconKey onPress={() => navigate("Notifications")}>
-            <Bell size={17} color={S.ink} />
-          </IconKey>
+          <ReminderBell />
           <IconKey onPress={() => navigate("Profile")}>
             {avatar && !avatarFailed ? (
               <Image

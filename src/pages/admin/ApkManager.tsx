@@ -209,10 +209,12 @@ export default function ApkManager() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {catalog.map((a) => (
-              <div key={a.appKey} className={`bg-card p-4 flex flex-col gap-3 border ${a.current ? "border-foreground" : "border-dashed border-foreground/50"}`}>
+              // min-w-0: a grid item is as wide as its content by default, so a long app name widened its column and pushed
+              // the Publish key out of line; with it the name truncates inside the card instead.
+              <div key={a.appKey} className={`min-w-0 bg-card p-4 flex flex-col gap-3 border ${a.current ? "border-foreground" : "border-dashed border-foreground/50"}`}>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-heading text-base font-bold tracking-tight text-foreground truncate">{a.label}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-heading text-base font-bold tracking-tight text-foreground truncate" title={a.label}>{a.label}</p>
                     <p className="text-[0.6875rem] font-heading tabular-nums text-muted-foreground truncate">{a.packageName}</p>
                   </div>
                   {a.current?.mandatory && (
@@ -240,17 +242,17 @@ export default function ApkManager() {
                   <p className="text-xs text-muted-foreground italic">Nothing published yet. Users with no update record see no prompt.</p>
                 )}
 
-                <div className="flex items-center gap-2 mt-auto pt-1">
+                <div className="flex flex-wrap items-center gap-2 mt-auto pt-1">
                   <button
                     onClick={() => setPublishing(a)}
-                    className={`${KEY_INK} h-9 px-4`}
+                    className={`${KEY_INK} h-9 px-4 shrink-0`}
                   >
                     <Upload size={13} /> Publish new build
                   </button>
                   {a.current && (
                     <a
                       href={a.current.downloadPath}
-                      className={`${KEY_LINE} h-9 px-3`}
+                      className={`${KEY_LINE} h-9 px-3 shrink-0`}
                     >
                       <Download size={13} /> Download APK
                     </a>
