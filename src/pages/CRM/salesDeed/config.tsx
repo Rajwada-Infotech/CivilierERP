@@ -77,27 +77,35 @@ export function deedDocumentProgress(documents: any[] | undefined): { required: 
 
 // A step is "done" only if its own flag is true AND every step before it is done; the first not-done step is the one
 // "current" step; everything after it is "upcoming" (out-of-sequence legacy rows used to show two current steps).
-export function deedStepStates(d: any, documents: any[] | undefined, context: any): { label: string; state: StepState; tab: DeedTab }[] {
-  const docs = deedDocumentProgress(documents);
-  const raw: { label: string; done: boolean; tab: DeedTab }[] = [
-    { label: "Draft Setup", done: true, tab: "Overview" },
-    { label: "Legal Assigned", done: !!d?.LegalExecutiveId, tab: "Legal & Approval" },
-    { label: `Draft Docs${docs.required > 0 ? ` (${docs.percent}%)` : ""}`, done: docs.required > 0 && docs.percent === 100, tab: "Documents" },
-    { label: "Senior Approve", done: d?.SeniorApprovalStatus === "Approved", tab: "Legal & Approval" },
-    { label: "Customer Review", done: d?.CustomerApprovalStatus === "Approved", tab: "Legal & Approval" },
-    { label: "Director Approve", done: d?.DirectorApprovalStatus === "Approved", tab: "Legal & Approval" },
-    { label: "Stamp Duty", done: context?.queryPaymentStatus === "Confirmed", tab: "Query Payment" },
-    { label: "Execution", done: !!d?.ExecutedBy || d?.Status === "Executed" || d?.Status === "Registered", tab: "Legal & Approval" },
-    { label: "Registered", done: !!d?.RegistrationNo || d?.Status === "Registered", tab: "Registry" },
-  ];
-  let blocked = false;
-  return raw.map((s) => {
-    let state: StepState;
-    if (!blocked && s.done) state = "done";
-    else if (!blocked) { state = "current"; blocked = true; }
-    else state = "upcoming";
-    return { label: s.label, state, tab: s.tab };
-  });
+/** The mandatory papers on a deed row (the server counts them: MandatoryDocCount / MandatoryUploadedCount). */
+export function rowDeedProgress(d: any): { required: number; uploaded: number; percent: number } {
+  const required = Number(d?.MandatoryDocCount) || 0;
+  const uploaded = Number(d?.MandatoryUploadedCount) || 0;
+  return { required, uploaded, percent: required > 0 ? Math.round((uploaded / required) * 100) : 0 };
+}
+// The deed's steps, in order. Whether each is done is decided on the server (routes/crmSalesDeed.js, DEED_STEPS) and
+// comes on every deed row as D_<key>, with StepIndex the one it is on; this only names them and says which tab works each.
+const DEED_STEP_VIEW: { key: string; label: string; tab: DeedTab }[] = [
+  { key: "setup", label: "Draft Setup", tab: "Overview" },
+  { key: "legal", label: "Legal Assigned", tab: "Legal & Approval" },
+  { key: "docs", label: "Draft Docs", tab: "Documents" },
+  { key: "senior", label: "Senior Approve", tab: "Legal & Approval" },
+  { key: "customer", label: "Customer Review", tab: "Legal & Approval" },
+  { key: "director", label: "Director Approve", tab: "Legal & Approval" },
+  { key: "stampDuty", label: "Stamp Duty", tab: "Query Payment" },
+  { key: "execution", label: "Execution", tab: "Legal & Approval" },
+  { key: "registered", label: "Registered", tab: "Registry" },
+];
+export const DEED_STEP_NAMES = DEED_STEP_VIEW.map((s) => s.label);
+/** Each step of a deed row and where it stands: done up to the step it is on, then that one, then the rest. */
+export function deedStepStates(d: any): { label: string; state: StepState; tab: DeedTab }[] {
+  const at = Number(d?.StepIndex ?? 0);
+  const docs = rowDeedProgress(d);
+  return DEED_STEP_VIEW.map((s, i) => ({
+    label: s.key === "docs" && docs.required > 0 ? `${s.label} (${docs.percent}%)` : s.label,
+    state: i < at ? "done" : i === at ? "current" : "upcoming",
+    tab: s.tab,
+  }));
 }
 
 export const EMPTY_FORM = {
@@ -105,22 +113,44 @@ export const EMPTY_FORM = {
   StampDutyCredit: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "",
 };
 
-export const PAGE_SIZE = 20;
-export interface DeedListFilters { search: string; status: string; companyId: string; projectId: string; blockId: string }
+/** The step a deed is on now ("Complete" once registered, "—" when cancelled): the list's Stage column. */
+export function deedCurrentStep(d: any): string {
+  if (d?.Status === "Registered") return "Complete";
+  if (d?.Status === "Cancelled") return "—";
+  return deedStepStates(d).find((s) => s.state === "current")?.label ?? "Complete";
+}
 
-export async function fetchDeedsList(filters: DeedListFilters, page: number): Promise<{ rows: any[]; total: number; statusCounts: Record<string, number> }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.status) params.set("status", filters.status);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  // A failed load used to read as "No deeds found".
+export type DeedAlertTone = "stopped" | "waiting" | "moving";
+// What needs someone now. Which deeds it applies to is decided on the server (DEED_ALERTS) and comes on every deed row
+// as A_<key>; this names each one and says who it waits on.
+export const DEED_ALERTS: { key: string; label: string; tone: DeedAlertTone }[] = [
+  { key: "overdue", label: "Overdue", tone: "stopped" },
+  { key: "recheck", label: "Customer asked for a recheck", tone: "stopped" },
+  { key: "noLegal", label: "No legal executive", tone: "waiting" },
+  { key: "director", label: "Waiting for the director", tone: "waiting" },
+  { key: "toSend", label: "Senior-approved, not sent", tone: "moving" },
+  { key: "stampDuty", label: "Stamp duty to confirm", tone: "moving" },
+  { key: "toRegister", label: "Executed, to register", tone: "moving" },
+];
+export const deedAlerts = (d: any) => DEED_ALERTS.filter((a) => d?.[`A_${a.key}`] === 1);
+
+/** One page of the list for the given query (page, sort, status, search, filters), with the counts by status. */
+export async function fetchDeedsList(params: URLSearchParams): Promise<{ rows: any[]; total: number; statusCounts: Record<string, number> }> {
   const r = await fetchWithAuth(`${API}?${params}`);
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data?.error || `Could not load the sale deeds (${r.status}).`);
   return { rows: data.rows || [], total: data.total || 0, statusCounts: data.statusCounts || {} };
 }
+/** Every deed matching the query, sorted (the Excel export). */
+export async function fetchAllDeeds(params: URLSearchParams): Promise<any[]> {
+  const p = new URLSearchParams(params);
+  p.delete("page"); p.delete("pageSize");
+  const r = await fetchWithAuth(`${API}?${p}`);
+  const data = await r.json().catch(() => []);
+  if (!r.ok) throw new Error((data as any)?.error || `Could not export the sale deeds (${r.status}).`);
+  return data;
+}
+
 export async function fetchEligible(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
 }

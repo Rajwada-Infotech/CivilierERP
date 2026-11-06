@@ -151,6 +151,76 @@ const LM_SELECT = `
 `;
 
 // GET / — all legal milestone trackers
+// ── The journey's steps: when each is done and when it is locked ─────────────
+// The one place these rules live. The list works them out in SQL (so the gate counts, the "where they are" filter,
+// the progress order and the paging run on the server, however many journeys there are), and every row carries the
+// result as D_<step> / L_<step> (1 = done / locked), which the page draws from. Columns are LM_SELECT's (alias x).
+const S = (col) => `ISNULL(x.${col}, '')`;
+const NOC_STATUS = `CASE WHEN x.NocResolvedType = 'Bank' THEN ${S("BankNocStatus")} ELSE ${S("OrgNocStatus")} END`;
+const AGREEMENT_DONE = `${S("FinalExecutionStatus")} = 'Completed'`;
+const AFS_REGISTERED = `${S("AgreementStatus")} = 'Registered'`;
+const AGREEMENT_STEP_KEYS = ["DocCollection", "LegalReview", "Drafting", "InternalApproval", "DocShared", "MutualAgreement", "DirectorMeeting", "FinalExecution"];
+const LM_STAGES = [
+  ...AGREEMENT_STEP_KEYS.map((k, i) => ({
+    key: k, phase: "agreement", manual: k === "DirectorMeeting",
+    done: `${S(`${k}Status`)} = 'Completed'`,
+    locked: `${i + 1} > ISNULL(x.CurrentStep, 1)`,
+  })),
+  { key: "afsQP", phase: "afsVisit1", done: `${S("AfsQPStatus")} = 'Confirmed' OR ${AFS_REGISTERED}`, locked: `NOT (${AGREEMENT_DONE})` },
+  { key: "afsReg", phase: "afsVisit1", done: AFS_REGISTERED, locked: `NOT (${AGREEMENT_DONE}) OR (${S("AfsQPStatus")} <> 'Confirmed' AND NOT (${AFS_REGISTERED}))` },
+  { key: "noc", phase: "noc", done: `${NOC_STATUS} = 'Issued'`, locked: `NOT (${AFS_REGISTERED})` },
+  { key: "ocCc", phase: "possession", done: `ISNULL(x.OcCcReceived, 0) = 1`, locked: `1 = 0` },
+  { key: "prePossession", phase: "possession", done: `${S("PrePossessionStatus")} = 'Ready'`, locked: `NOT (${AFS_REGISTERED}) OR ISNULL(x.OcCcReceived, 0) <> 1` },
+  { key: "possessionNotice", phase: "possession", done: `${S("PossessionNoticeStatus")} = 'Acknowledged'`, locked: `${S("PrePossessionStatus")} <> 'Ready'` },
+  {
+    key: "handover", phase: "possession", done: `${S("HandoverStatus")} = 'Completed'`,
+    // Handover's own four gates (crmHandover.js POST /).
+    locked: `NOT (${AFS_REGISTERED}) OR ${S("PossessionNoticeStatus")} <> 'Acknowledged' OR ${NOC_STATUS} IN ('Pending', 'Approved') OR ISNULL(x.HasOutstandingDues, 0) = 1`,
+  },
+  { key: "salesDeed", phase: "saleDeed", done: `x.SalesDeedId IS NOT NULL`, locked: `NOT (${AFS_REGISTERED})` },
+  { key: "queryPayment", phase: "afsVisit2", done: `${S("QueryPaymentStatus")} = 'Confirmed'`, locked: `x.SalesDeedId IS NULL OR ${S("DeedDirectorApprovalStatus")} <> 'Approved'` },
+  { key: "registry", phase: "afsVisit2", done: `${S("RegistryStatus")} = 'Completed'`, locked: `x.SalesDeedId IS NULL OR ${S("QueryPaymentStatus")} <> 'Confirmed'` },
+  { key: "mutation", phase: "mutation", done: `${S("MutationStatus")} = 'Approved'`, locked: `${S("RegistryStatus")} <> 'Completed'` },
+];
+const LM_PHASES = ["agreement", "afsVisit1", "noc", "possession", "saleDeed", "afsVisit2", "mutation"];
+const flag = (cond) => `CAST(CASE WHEN ${cond} THEN 1 ELSE 0 END AS INT)`;
+const phaseStages = (p) => LM_STAGES.filter((s) => s.phase === p);
+/** LM_SELECT (with its WHERE) wrapped so each row also carries every step's flags, each phase's state
+ *  (P_<phase>: 2 done, 1 workable now, 0 waiting) and DoneCount; the result's alias is y. */
+function withJourneyFlags(innerSql) {
+  const stepFlags = LM_STAGES.map((s) => `${flag(s.done)} AS D_${s.key}, ${flag(`NOT (${s.done}) AND (${s.locked})`)} AS L_${s.key}`).join(",\n      ");
+  const phaseCols = LM_PHASES.map((p) => {
+    const st = phaseStages(p);
+    const allDone = st.map((s) => `f.D_${s.key} = 1`).join(" AND ");
+    const anyOpen = st.map((s) => `(f.D_${s.key} = 0 AND f.L_${s.key} = 0)`).join(" OR ");
+    return `CASE WHEN ${allDone} THEN 2 WHEN ${anyOpen} THEN 1 ELSE 0 END AS P_${p}`;
+  }).join(",\n      ");
+  const doneCount = LM_STAGES.map((s) => `f.D_${s.key}`).join(" + ");
+  const manualOpen = LM_STAGES.filter((s) => s.manual).map((s) => `(f.D_${s.key} = 0 AND f.L_${s.key} = 0)`).join(" OR ");
+  return `
+    SELECT f.*,
+      ${phaseCols},
+      (${doneCount}) AS DoneCount, ${LM_STAGES.length} AS StepCount,
+      CAST(CASE WHEN ${manualOpen} THEN 1 ELSE 0 END AS INT) AS ManualDue
+    FROM (
+      SELECT x.*,
+      ${stepFlags}
+      FROM (${innerSql}) x
+    ) f`;
+}
+// The list's "where they are" filter and its orders (y = withJourneyFlags' result).
+const LM_FOCUS = {
+  all: "1 = 1",
+  complete: `y.DoneCount = y.StepCount`,
+  ...Object.fromEntries(LM_PHASES.map((p) => [p, `y.P_${p} = 1`])),
+};
+const LM_ORDER = {
+  least: "CAST(y.DoneCount AS FLOAT) / y.StepCount ASC, y.CreatedAt ASC",
+  most: "CAST(y.DoneCount AS FLOAT) / y.StepCount DESC, y.CreatedAt DESC",
+  name: "y.ApplicantName ASC",
+  newest: "y.CreatedAt DESC",
+};
+
 router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -183,21 +253,34 @@ router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, re
       return res.json(result.recordset);
     }
 
+    // A page of journeys, each with its steps' flags and phases, filtered to where they are and in the asked order;
+    // and the summary across every journey under the search and filters (the gates, the counts for each tab).
     const { page, pageSize, offset } = applyPagination(req);
+    const focus = Object.hasOwn(LM_FOCUS, req.query.focus) ? req.query.focus : "all";
+    const order = Object.hasOwn(LM_ORDER, req.query.order) ? req.query.order : "least";
+    const FLAGGED = withJourneyFlags(`${SELECT_WITH_BLOCK} ${where}`);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY m.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+    const phaseSums = LM_PHASES.map((ph) => `SUM(CASE WHEN y.P_${ph} = 2 THEN 1 ELSE 0 END) AS G_${ph}, SUM(CASE WHEN y.P_${ph} = 1 THEN 1 ELSE 0 END) AS O_${ph}`).join(", ");
+    const [result, summaryResult] = await Promise.all([
+      req0.query(`SELECT y.* FROM (${FLAGGED}) y WHERE ${LM_FOCUS[focus]} ORDER BY ${LM_ORDER[order]}, y.Id DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       countReq.query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmLegalMilestone m
-          JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          ${where}
-        `),
+        SELECT COUNT(*) AS Total,
+               SUM(CASE WHEN y.DoneCount = y.StepCount THEN 1 ELSE 0 END) AS Complete,
+               AVG(CAST(y.DoneCount AS FLOAT) / y.StepCount) AS AvgProgress,
+               SUM(y.ManualDue) AS ManualDue,
+               ${phaseSums}
+        FROM (${FLAGGED}) y`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const sm = summaryResult.recordset[0] || {};
+    const summary = {
+      total: sm.Total || 0, complete: sm.Complete || 0, manualDue: sm.ManualDue || 0,
+      avgProgress: Math.round((sm.AvgProgress || 0) * 100),
+      gates: Object.fromEntries(LM_PHASES.map((ph) => [ph, sm[`G_${ph}`] || 0])),
+      atPhase: Object.fromEntries(LM_PHASES.map((ph) => [ph, sm[`O_${ph}`] || 0])),
+    };
+    const total = focus === "all" ? summary.total : focus === "complete" ? summary.complete : summary.atPhase[focus];
+    res.json({ rows: result.recordset, total, page, pageSize, summary, phases: LM_PHASES });
   } catch (e) {
     console.error("[crm-legal-milestones] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -238,7 +321,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-legal-milestones", "view
   try {
     const pool = getPool();
     const result = await pool.request().input("bid", sql.Int, parseInt(req.params.bookingId))
-      .query(`${LM_SELECT} WHERE m.BookingId = @bid`);
+      .query(`SELECT y.* FROM (${withJourneyFlags(`${LM_SELECT} WHERE m.BookingId = @bid`)}) y`);
     res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-legal-milestones] GET /booking/:id error:", e.message);

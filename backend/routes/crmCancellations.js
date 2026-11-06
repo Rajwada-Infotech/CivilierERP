@@ -63,6 +63,19 @@ async function resolveDefaultDeductionPct(pool) {
   }
 }
 
+// A cancellation's latest refund request, and when that refund counts as overdue: one rule for the list's flag,
+// its "overdue refunds" filter and the count.
+const LATEST_REFUND = `(
+    SELECT TOP 1 r.Id, r.RefundNo, r.Status, r.NetAmount, r.RefundDueDate
+    FROM dbo.CrmRefund r
+    WHERE r.SourceCancellationId = c.Id
+    ORDER BY r.Id DESC
+  )`;
+const refundOverdue = (lr) =>
+  `${lr}.RefundDueDate IS NOT NULL AND ISNULL(${lr}.Status,'') <> 'Paid' AND CAST(SYSDATETIME() AS DATE) > ${lr}.RefundDueDate`;
+const REFUND_OVERDUE_EXISTS = `EXISTS (SELECT 1 FROM ${LATEST_REFUND} lro WHERE ${refundOverdue("lro")})`;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 const CANCEL_SELECT = `
   SELECT
     c.Id, c.CancellationNo, c.BookingId, c.RequestedDate, c.Reason, c.AmountPaidTillDate,
@@ -73,7 +86,7 @@ const CANCEL_SELECT = `
     COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
     COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
     b.ProjectId, b.TotalValue, b.AssignedTo,
-    a.ApplicantName, a.Mobile,
+    b.ApplicationId, a.ApplicantName, a.Mobile,
     rb.name AS RequestedByName, ab.name AS ApprovedByName,
     -- Settlement/refund is no longer tracked on CrmCancellation — the money
     -- side moved to the general-purpose Refund page (dbo.CrmRefund). These
@@ -87,11 +100,7 @@ const CANCEL_SELECT = `
       WHEN hc.Status = 'Applied' OR hc.AppliedAmount >= hc.Amount THEN 'Settled'
       ELSE 'RefundPending'
     END AS SettlementStatus,
-    CASE
-      WHEN lr.RefundDueDate IS NOT NULL AND ISNULL(lr.Status,'') <> 'Paid'
-           AND CAST(SYSDATETIME() AS DATE) > lr.RefundDueDate
-      THEN 1 ELSE 0
-    END AS IsRefundOverdue,
+    CASE WHEN ${refundOverdue("lr")} THEN 1 ELSE 0 END AS IsRefundOverdue,
     CASE
       WHEN lr.RefundDueDate IS NOT NULL AND ISNULL(lr.Status,'') <> 'Paid'
       THEN DATEDIFF(day, CAST(SYSDATETIME() AS DATE), lr.RefundDueDate)
@@ -111,12 +120,7 @@ const CANCEL_SELECT = `
     WHERE oa.HeldSourceType = 'Cancellation' AND oa.HeldSourceRefId = c.Id
     ORDER BY oa.Id DESC
   ) hc
-  OUTER APPLY (
-    SELECT TOP 1 r.Id, r.RefundNo, r.Status, r.NetAmount, r.RefundDueDate
-    FROM dbo.CrmRefund r
-    WHERE r.SourceCancellationId = c.Id
-    ORDER BY r.Id DESC
-  ) lr
+  OUTER APPLY ${LATEST_REFUND} lr
 `;
 
 // GET /policy — returns the applicable cancellation penalty slab for a given
@@ -182,6 +186,19 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
   }
 });
 
+// The list's sortable columns: sortKey → ORDER BY expression.
+const CANCEL_SORT = {
+  CreatedAt: "c.CreatedAt",
+  RequestedDate: "c.RequestedDate",
+  CancellationNo: "c.CancellationNo",
+  BookingNo: "b.BookingNo",
+  ApplicantName: "a.ApplicantName",
+  ProjectName: "COALESCE(bn.ProjectName, b.ProjectName)",
+  AmountPaidTillDate: "c.AmountPaidTillDate",
+  DeductionPercent: "c.DeductionPercent",
+  Status: "c.Status",
+};
+
 // GET / — all cancellation requests
 router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) => {
   try {
@@ -191,7 +208,7 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     // One set of conditions for the rows, the total and the counts by status (the total ignored the user's projects).
-    const reqs = [pool.request(), pool.request(), pool.request()];
+    const reqs = [pool.request(), pool.request(), pool.request(), pool.request()];
     const req0 = reqs[0];
     const bind = (name, type, value) => reqs.forEach((r) => r.input(name, type, value));
     const conds = [];
@@ -203,13 +220,21 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
       bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR c.CancellationNo LIKE @search)");
     }
+    // Requested between two dates (either end optional), and only those whose refund is overdue.
+    if (ISO_DATE.test(req.query.dateFrom || "")) { bind("dateFrom", sql.Date, req.query.dateFrom); conds.push("c.RequestedDate >= @dateFrom"); }
+    if (ISO_DATE.test(req.query.dateTo || "")) { bind("dateTo", sql.Date, req.query.dateTo); conds.push("c.RequestedDate < DATEADD(day, 1, @dateTo)"); }
+    if (req.query.refundOverdue === "1") conds.push(REFUND_OVERDUE_EXISTS);
     const countsWhere = conds.length ? "WHERE " + conds.join(" AND ") : "";
     if (status) { bind("st", sql.NVarChar(30), status); conds.push("c.Status = @st"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${CANCEL_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const sortCol = Object.hasOwn(CANCEL_SORT, req.query.sortKey) ? CANCEL_SORT[req.query.sortKey] : CANCEL_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const ORDER = `ORDER BY ${sortCol} ${dir}, c.Id DESC`;
 
+    // No page: every matching row (the Excel export, and callers that read the whole list).
     if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY c.CreatedAt DESC`);
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
       return res.json(result.recordset);
     }
 
@@ -220,13 +245,19 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
           JOIN dbo.CrmBooking b ON b.Id = c.BookingId
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
-    const [result, countResult, statusResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
+    const [result, countResult, statusResult, overdueResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      // the total, and the paid-till-date across the same rows for the totals strip
+      reqs[1].query(`SELECT COUNT(*) AS total, ISNULL(SUM(c.AmountPaidTillDate), 0) AS paidTillDate ${FROM} ${where}`),
       reqs[2].query(`SELECT c.Status, COUNT(*) AS n ${FROM} ${countsWhere} GROUP BY c.Status`),
+      // how many of the listed ones have an overdue refund (an aggregate can't hold the subquery, so its own count)
+      reqs[3].query(`SELECT COUNT(*) AS n ${FROM} ${where ? `${where} AND` : "WHERE"} ${REFUND_OVERDUE_EXISTS}`),
     ]);
     const statusCounts = Object.fromEntries(statusResult.recordset.map((r) => [r.Status, r.n]));
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
+    res.json({
+      rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts,
+      summary: { paidTillDate: countResult.recordset[0].paidTillDate, refundsOverdue: overdueResult.recordset[0].n },
+    });
   } catch (e) {
     console.error("[crm-cancellations] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -248,6 +279,21 @@ router.get("/bookings", requirePageRight("crm-cancellations", "create"), async (
     res.json(r.recordset);
   } catch (e) {
     console.error("[crm-cancellations] GET /bookings error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /:id — one cancellation with everything its record page shows (the same columns as the list).
+// The id param guard above keeps it to the user's projects.
+router.get("/:id", requirePageRight("crm-cancellations", "view"), async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid cancellation id" });
+    const r = await getPool().request().input("id", sql.Int, id).query(`${CANCEL_SELECT} WHERE c.Id = @id`);
+    if (!r.recordset.length) return res.status(404).json({ error: "Cancellation not found" });
+    res.json(r.recordset[0]);
+  } catch (e) {
+    console.error("[crm-cancellations] GET /:id error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });

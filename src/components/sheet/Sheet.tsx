@@ -145,15 +145,16 @@ export const SHEET_FRAME_CSS =
 .sheet-frame .glass { background: hsl(var(--card)) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important; }
 .sheet-frame .shadow-sm, .sheet-frame .shadow, .sheet-frame .shadow-md, .sheet-frame .shadow-lg { box-shadow: none !important; }
 /* Every table on a working page reads as a schedule: an ink rule under capital headings, hairlines between rows,
-   no header tint and no zebra striping. Covers the shared DataTable as well as tables written on the page. */
-.sheet-frame table { border-collapse: collapse; }
-.sheet-frame thead tr { background: transparent !important; border-bottom: 1px solid var(--ink) !important; }
-.sheet-frame thead th { font-family: "Sora", sans-serif; font-weight: 600; font-size: 0.625rem !important; letter-spacing: 0.12em;
+   no header tint and no zebra striping. Covers the shared DataTable as well as tables written on the page.
+   A dense data grid (class sheet-grid, e.g. Customer 360) keeps its own solid, sticky header and striping. */
+.sheet-frame table:where(:not(.sheet-grid)) { border-collapse: collapse; }
+.sheet-frame table:where(:not(.sheet-grid)) thead tr { background: transparent !important; border-bottom: 1px solid var(--ink) !important; }
+.sheet-frame table:where(:not(.sheet-grid)) thead th { font-family: "Sora", sans-serif; font-weight: 600; font-size: 0.625rem !important; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--graphite); background: transparent !important; }
-.sheet-frame tbody { border: 0; }
-.sheet-frame tbody tr { background: transparent !important; border-top: 0 !important; border-bottom: 1px solid var(--rule-soft) !important; transition: background-color .15s; }
-.sheet-frame tbody tr:hover { background: var(--blue-wash) !important; }
-.sheet-frame tbody tr:last-child { border-bottom: 0 !important; }
+.sheet-frame table:where(:not(.sheet-grid)) tbody { border: 0; }
+.sheet-frame table:where(:not(.sheet-grid)) tbody tr { background: transparent !important; border-top: 0 !important; border-bottom: 1px solid var(--rule-soft) !important; transition: background-color .15s; }
+.sheet-frame table:where(:not(.sheet-grid)) tbody tr:hover { background: var(--blue-wash) !important; }
+.sheet-frame table:where(:not(.sheet-grid)) tbody tr:last-child { border-bottom: 0 !important; }
 .sheet-frame .dt-toolbar { background: transparent !important; border-bottom: 1px solid var(--rule) !important; }
 .sheet-frame .dt-toolbar input { background: hsl(var(--card)) !important; border-color: var(--ink) !important; }
 .sheet-frame tfoot tr, .sheet-frame tfoot td { background: transparent !important; border-top: 1px solid var(--ink); }

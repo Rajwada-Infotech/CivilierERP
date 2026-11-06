@@ -7,12 +7,12 @@ import { Check, ArrowRight, BarChart3 } from "lucide-react";
 import { AgrTab, StepState } from "./config";
 
 export const docStatusColor: Record<string, string> = {
-  Pending:   "text-muted-foreground bg-card border-foreground/25 border-dashed",
-  Requested: "text-foreground bg-card border-foreground/30",
-  Uploaded:  "text-foreground bg-card border-foreground/40",
-  Submitted: "text-foreground bg-card border-foreground/40",
-  Verified:  "text-card bg-foreground border-foreground",
-  Rejected:  "text-destructive bg-destructive/5 border-destructive/40",
+  Pending:   "text-muted-foreground bg-card border-border border-dashed rounded-full",
+  Requested: "text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/30 rounded-full",
+  Uploaded:  "text-sky-700 dark:text-sky-300 bg-sky-500/10 border-sky-500/25 rounded-full",
+  Submitted: "text-sky-700 dark:text-sky-300 bg-sky-500/10 border-sky-500/25 rounded-full",
+  Verified:  "text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border-emerald-500/25 rounded-full",
+  Rejected:  "text-rose-700 dark:text-rose-300 bg-rose-500/10 border-rose-500/25 rounded-full",
 };
 
 export type TlState = "done" | "current" | "upcoming" | "blocked";
@@ -21,8 +21,8 @@ export function TlRow({ n, title, detailText, state, badge, onJump, last }: {
   onJump: () => void; last?: boolean;
 }) {
   const ring =
-    state === "done" ? "bg-foreground text-card border border-foreground" :
-    state === "current" ? "bg-card text-foreground border-2 border-foreground" :
+    state === "done" ? "bg-emerald-600 text-white border border-emerald-600 rounded-full" :
+    state === "current" ? "bg-card text-primary border-2 border-primary rounded-full" :
     state === "blocked" ? "bg-muted text-muted-foreground" :
     "bg-muted text-muted-foreground";
   return (
@@ -31,13 +31,13 @@ export function TlRow({ n, title, detailText, state, badge, onJump, last }: {
         <span className={`w-7 h-7 flex items-center justify-center font-heading text-[0.6875rem] font-bold tabular-nums shrink-0 ${ring}`}>
           {state === "done" ? <Check size={13} /> : n}
         </span>
-        {!last && <span className={`w-px flex-1 my-1 ${state === "done" ? "bg-foreground" : "bg-foreground/20"}`} />}
+        {!last && <span className={`w-px flex-1 my-1 ${state === "done" ? "bg-emerald-600" : "bg-border"}`} />}
       </div>
       <div className={`flex-1 min-w-0 pb-4 ${last ? "pb-0" : ""}`}>
         <div className="flex items-center gap-2 flex-wrap">
           <span className={`font-heading text-[0.75rem] font-bold uppercase tracking-[0.1em] ${state === "upcoming" || state === "blocked" ? "text-muted-foreground" : "text-foreground"}`}>{title}</span>
           {badge && (
-            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border border-foreground/30 text-muted-foreground">{badge}</span>
+            <span className="text-xs font-medium px-1.5 py-0.5 border border-border text-muted-foreground">{badge}</span>
           )}
           <ArrowRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>

@@ -41,16 +41,40 @@ async function getBookingOnAccountCoverage(pool, bookingId, { withPendingVerific
   let cumulativeRequired = 0;
   const milestones = milestonesRes.recordset.map((m) => {
     const required = m.Status === "Waived" ? 0 : Math.max(0, round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)));
+    const before = cumulativeRequired;
     cumulativeRequired = round2(cumulativeRequired + required);
     const alreadyPaid = m.Status === "Paid" || m.Status === "Waived" || Number(m.AmountPaid || 0) >= Number(m.AmountDue || 0);
     return {
       ...m,
       CumulativeRequired: cumulativeRequired,
       VirtuallyCovered: alreadyPaid || totalOnAccount >= cumulativeRequired,
+      // The on-account money that sits against this milestone, in milestone order (the same order the real sweep
+      // follows): shown so a customer's payments are visible on the plan while they are held. Nothing is moved.
+      HeldOnAccount: Math.min(required, Math.max(0, round2(totalOnAccount - before))),
     };
   });
 
   return { milestones, totalOnAccount, grandRequired: cumulativeRequired };
+}
+
+// Each milestone's money stage — one answer, so no screen guesses:
+//   Adjusted        settled on the milestone
+//   Verified        Finance-verified money held On Account covers it
+//   InVerification  covered once the entries waiting for Finance are verified
+//   null            nothing entered for it yet
+// Returns the milestones (coverage order) with VirtuallyCovered, HeldOnAccount and MoneyStage.
+async function getMilestoneMoneyStages(pool, bookingId) {
+  const { milestones, totalOnAccount } = await getBookingOnAccountCoverage(pool, bookingId);
+  const { milestones: entered } = await getBookingOnAccountCoverage(pool, bookingId, { withPendingVerification: true });
+  const enteredById = new Map(entered.map((c) => [c.Id, c.VirtuallyCovered]));
+  const stageOf = (m) => {
+    if (m.Status === "Waived") return "Waived";
+    if (m.Status === "Paid" || Number(m.AmountPaid || 0) >= Number(m.AmountDue || 0)) return "Adjusted";
+    if (m.VirtuallyCovered) return "Verified";
+    if (enteredById.get(m.Id)) return "InVerification";
+    return null;
+  };
+  return { milestones: milestones.map((m) => ({ ...m, MoneyStage: stageOf(m) })), totalOnAccount };
 }
 
 // Convenience for the common case — is Milestone #1 (the one every
@@ -108,4 +132,4 @@ async function pendingVerificationTotal(pool, bookingId) {
   return sumMoney(await pendingVerificationEntries(pool, bookingId), (r) => r.RPAmount);
 }
 
-module.exports = { getBookingOnAccountCoverage, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };
+module.exports = { getBookingOnAccountCoverage, getMilestoneMoneyStages, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };

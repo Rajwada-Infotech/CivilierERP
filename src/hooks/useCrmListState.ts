@@ -84,6 +84,13 @@ export function useCrmListState({ pageSize = 25, defaultSort, defaultStatus = "A
     setStatusRaw(defaultStatus); setCpbRaw(EMPTY_CPB); setSort(defaultSort); setPage(1);
   }, [defaultStatus, defaultSort]);
 
+  /** Puts back a whole saved state at once (a saved view): search, status, filter and sort; back to page 1. */
+  const apply = useCallback((v: { search?: string; status?: string; cpb?: CrmCompanyProjectBlockValue; sort?: CrmSort }) => {
+    const term = (v.search ?? "").trim();
+    setSearchInput(term); setSearch(term); lastSearch.current = term;
+    setStatusRaw(v.status ?? defaultStatus); setCpbRaw(v.cpb ?? EMPTY_CPB); setSort(v.sort ?? defaultSort); setPage(1);
+  }, [defaultStatus, defaultSort]);
+
   const query: CrmListQuery = useMemo(
     () => ({
       page, pageSize, search, status,
@@ -95,5 +102,5 @@ export function useCrmListState({ pageSize = 25, defaultSort, defaultStatus = "A
 
   const hasFilters = !!(search || status !== defaultStatus || cpb.companyId || cpb.projectId || cpb.blockId);
 
-  return { query, page, setPage, pageSize, searchInput, setSearchInput, status, setStatus, sort, toggleSort, cpb, setCpb, hasFilters, reset };
+  return { query, page, setPage, pageSize, searchInput, setSearchInput, status, setStatus, sort, toggleSort, cpb, setCpb, hasFilters, reset, apply };
 }

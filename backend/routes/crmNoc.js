@@ -25,12 +25,18 @@ const NOC_TYPES = ["Organisation", "Bank"];
 const NOC_SELECT = `
   SELECT n.*, b.BookingNo,
          COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
-         a.ApplicantName, a.Mobile
+         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+         a.ApplicantName, a.Mobile, b.ApplicationId,
+         -- the Agreement for Sale the NOC rests on (the live one before a cancelled one)
+         ag.AgreementNo, ag.Status AS AgreementStatus
   FROM dbo.CrmNoc n
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  OUTER APPLY (SELECT TOP 1 x.AgreementNo, x.Status FROM dbo.CrmAgreement x WHERE x.BookingId = b.Id
+               ORDER BY CASE WHEN x.Status = 'Cancelled' THEN 1 ELSE 0 END, x.Id DESC) ag
 `;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // ── List: server-side paging / search / sort / status counts ─────────────────
 // Same contract as CrmPossessionNotice / CrmMutation:
@@ -48,6 +54,10 @@ const NOC_SORT = {
   Status: "n.Status",
   IssuedDate: "n.IssuedDate",
   CreatedAt: "n.CreatedAt",
+  NocDate: "n.NocDate",
+  ApprovalDate: "n.ApprovalDate",
+  LoanAmount: "n.LoanAmount",
+  ProjectName: "COALESCE(bn.ProjectName, b.ProjectName)",
 };
 function buildNocWhere(request, query, includeStatus, projectScope = null) {
   const conds = [];
@@ -65,6 +75,9 @@ function buildNocWhere(request, query, includeStatus, projectScope = null) {
     request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
     conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR n.NocNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search)");
   }
+  // Requested between two dates (either end optional).
+  if (ISO_DATE.test(query.dateFrom || "")) { request.input("dateFrom", sql.Date, query.dateFrom); conds.push("n.NocDate >= @dateFrom"); }
+  if (ISO_DATE.test(query.dateTo || "")) { request.input("dateTo", sql.Date, query.dateTo); conds.push("n.NocDate < DATEADD(day, 1, @dateTo)"); }
   if (includeStatus && NOC_STATUSES.includes(query.status)) {
     request.input("status", sql.NVarChar(30), query.status);
     conds.push("n.Status = @status");
@@ -77,18 +90,19 @@ router.get("/", requirePageRight("crm-noc", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const SELECT_WITH_BLOCK = `${NOC_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const sortCol = Object.hasOwn(NOC_SORT, req.query.sortKey) ? NOC_SORT[req.query.sortKey] : NOC_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
 
+    // No page: every matching row, sorted (the Excel export, and callers that read the whole list).
     if (req.query.page === undefined) {
       const r0 = pool.request();
       const where = buildNocWhere(r0, req.query, true, req.projectScope);
-      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC`);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY ${sortCol} ${dir}, n.Id DESC`);
       return res.json(result.recordset);
     }
 
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
-    const sortCol = Object.hasOwn(NOC_SORT, req.query.sortKey) ? NOC_SORT[req.query.sortKey] : NOC_SORT.CreatedAt;
-    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
 
     const countReq = pool.request();
     const countWhere = buildNocWhere(countReq, req.query, false, req.projectScope);
@@ -216,6 +230,7 @@ router.get("/by-booking", requirePageRight("crm-noc", "view"), async (req, res) 
 });
 
 // GET /eligible-bookings — bookings eligible for a new NOC. NOC is a single
+
 // step per booking (never both Bank and Organisation — see resolveNocType in
 // crmWorkflowGuards.js), so this returns each candidate along with its
 // resolved type; the frontend no longer offers a manual type choice.
@@ -259,6 +274,21 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
   } catch (e) {
     console.error("[crm-noc] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id — one NOC with everything its record page shows (the same columns as the list). The project guard on :id
+// keeps it to the user's projects.
+router.get("/:id", requirePageRight("crm-noc", "view"), async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const r = await getPool().request().input("id", sql.Int, id).query(`${NOC_SELECT} WHERE n.Id = @id`);
+    if (!r.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    res.json(r.recordset[0]);
+  } catch (e) {
+    console.error("[crm-noc] GET /:id error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 

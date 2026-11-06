@@ -1,6 +1,5 @@
 // The deed's Registry tab: the Sub-Registrar appointment (start → schedule → reschedule → complete / cancel), its
 // documents, then the deed's registration and Index II. Formerly its own page; now scoped to the deed's booking.
-import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import React, { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -9,11 +8,12 @@ import { translateError } from "@/lib/translateError";
 import { Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
-import { SheetMark } from "@/components/sheet/Sheet";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
-import { INP, KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "../customers/config";
-import { API, deedTone, downloadFile, fmtDate, localDay } from "./config";
-import { AutoStep, DateStep, DocRow, Panel } from "./parts";
+import { GRID_SHEET_KEYS, GridToneMark as SheetMark } from "@/components/crm/CrmDataTable";
+// Drawn with the CRM record kit; the keys, labels, inputs and rules it uses map onto it.
+const { INP, KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } = GRID_SHEET_KEYS;
+import { API, deedTone, fmtDate, localDay } from "./config";
+import { AutoStep, DateStep, DocumentCentre, Panel } from "./parts";
 
 /** The booking's current registry tracker, its documents and history. Shared with the page (timeline, history). */
 export function useDeedRegistry(bookingId: number | null | undefined) {
@@ -44,14 +44,12 @@ const EMPTY_COMPLETE = () => ({
   RegistrationDate: localDay(), WitnessNames: "", BuyerAttended: false, SellerAttended: false,
 });
 
-export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canCompleteOrCancel, canEditDeed, previewingId, onPreview, onSaveIndex2, savingIndex2, onChanged }: {
+export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canCompleteOrCancel, canEditDeed, onSaveIndex2, savingIndex2, onChanged }: {
   detail: any; qpConfirmed: boolean;
   canCreate: boolean; canEdit: boolean; canCompleteOrCancel: boolean; canEditDeed: boolean;
-  previewingId: number | null; onPreview: (url: string, doc: any) => void;
   onSaveIndex2: (date: string) => void; savingIndex2: boolean;
   onChanged: () => void;
 }) {
-  const ask = useSheetAsk();
   const qc = useQueryClient();
   const { registryId, registry, documents, refetch } = useDeedRegistry(detail.BookingId);
   const { data: eligible = [] } = useQuery({
@@ -78,11 +76,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const [newDocType, setNewDocType] = useState("Other");
-  const [newDocLabel, setNewDocLabel] = useState("");
-  const [uploading, setUploading] = useState(false);
   const [requesting, setRequesting] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const changed = (alsoPage = false) => {
     qc.invalidateQueries({ queryKey: ["crm-sales-deed-registry-by-booking"] });
@@ -147,19 +141,13 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setBusy(false); }
   };
-  const handleUpload = async (file: File, documentType: string, label?: string) => {
-    if (registryId == null) return;
-    setUploading(true);
-    try {
-      const fd = new FormData(); fd.append("files", file); fd.append("DocumentType", documentType);
-      if (label) fd.append("Label", label);
-      await send(`${API}/registry/${registryId}/documents/upload`, "POST", fd);
-      toast.success("Document uploaded");
-      setNewDocLabel("");
-      if (fileRef.current) fileRef.current.value = "";
-      changed();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setUploading(false); }
+  // The document centre's upload (one file onto a requested paper, or several supporting ones).
+  const uploadFiles = (files: File[], documentType: string, label?: string) => {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    fd.append("DocumentType", documentType);
+    if (label) fd.append("Label", label);
+    return send(`${API}/registry/${registryId}/documents/upload`, "POST", fd);
   };
   const handleRequest = async (documentType: string, label?: string) => {
     if (registryId == null) return;
@@ -171,19 +159,6 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setRequesting(false); }
   };
-  const handleReview = async (docId: number, verify: boolean) => {
-    if (registryId == null) return;
-    let remarks: string | undefined;
-    if (!verify) {
-      remarks = (await ask.prompt("Describe what's wrong with this document. The uploader sees this.", { title: "Reject document", okLabel: "Reject", danger: true })) ?? undefined;
-      if (!remarks) return;
-    }
-    try {
-      await send(`${API}/registry/${registryId}/documents/${docId}`, "PUT", verify ? { Status: "Verified" } : { Status: "Rejected", Remarks: remarks });
-      toast.success(verify ? "Document verified" : "Document rejected");
-      changed();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
   const fileUrl = (doc: any) => `${API}/registry/documents/file/${doc.Id}`;
 
   const sheetDialog = "rounded-none p-5 gap-4";
@@ -191,7 +166,6 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
 
   return (
     <div className="space-y-4">
-      {ask.node}
       <Panel title="Sub-Registrar office registration" right={status ? <SheetMark text={status} tone={deedTone(status)} /> : undefined}>
         <div className="p-4 space-y-3">
           <p className="text-xs text-muted-foreground">Both parties appear at the Sub-Registrar Office to register the Sale Deed — this legally transfers ownership to the buyer.</p>
@@ -274,47 +248,25 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
                   </div>
                 )}
 
-                <div style={{ border: RULE }}>
-                  <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: RULE }}>
-                    <p className={LBL}>Registry documents</p>
-                    {required.length > 0 && <span className={`font-heading text-[0.6875rem] font-semibold tabular-nums ${verified === required.length ? "text-foreground" : "text-muted-foreground"}`}>{verified}/{required.length} verified</span>}
-                  </div>
-                  {required.length === 0 ? (
-                    <div className="px-3 py-2.5 flex items-center justify-between gap-2" style={{ borderBottom: RULE_SOFT }}>
-                      <p className="text-[0.6875rem]">No mandatory document requested yet.</p>
+                <DocumentCentre documents={[...required, ...supporting]} hasFile={(d) => !!d.HasFile} fileUrl={fileUrl} onChanged={() => changed()}
+                  requiredTitle="Registry papers"
+                  review={(d, verify, remarks) => send(`${API}/registry/${registryId}/documents/${d.Id}`, "PUT", verify ? { Status: "Verified" } : { Status: "Rejected", Remarks: remarks })}
+                  attach={(d, f) => uploadFiles([f], d.DocumentType, d.Label)}
+                  upload={{ types: [{ value: "StampedDeedCopy", label: "Stamped deed copy" }, { value: "Other", label: "Other" }], run: uploadFiles }}
+                  canAttach={{ ok: canAct, reason: "Working the registry's papers needs the registry right." }}
+                  canReview={{ ok: canAct, reason: "Reviewing the registry's papers needs the registry right." }}
+                  nextStep={(d) => (d.Remarks?.startsWith("Synced automatically") ? "Pulled from the sale deed's own verified copy — nothing to do here." : undefined)}
+                  extraTag={(d) => (d.Remarks?.startsWith("Synced automatically") ? <span className="inline-flex items-center h-5 px-2 rounded-full border border-dashed border-border text-[0.6875rem] text-muted-foreground">Synced from sale deed</span> : null)}
+                  emptyRequired={(
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <p className="text-xs text-muted-foreground">No mandatory paper asked for yet.</p>
                       {canAct && (
-                        <button onClick={() => handleRequest("RegistrationReceipt", "Registration Receipt / Challan")} disabled={requesting} className={`${KEY_INK} h-7 px-2 shrink-0`}>
+                        <button type="button" onClick={() => handleRequest("RegistrationReceipt", "Registration Receipt / Challan")} disabled={requesting} className={`${KEY_INK} h-8 px-3`}>
                           {requesting ? "Requesting…" : "Request receipt"}
                         </button>
                       )}
                     </div>
-                  ) : [...required, ...supporting].map((doc: any) => (
-                    <DocRow key={doc.Id} doc={doc} previewing={previewingId === doc.Id}
-                      onPreview={() => onPreview(fileUrl(doc), doc)}
-                      onDownload={() => downloadFile(fileUrl(doc), doc.FileName || doc.DocumentType || "document").catch((e) => toast.error(translateError(e.message)))}
-                      attach={canAct ? { onFile: (f) => handleUpload(f, doc.DocumentType, doc.Label) } : undefined}
-                      review={canAct ? { onVerify: () => handleReview(doc.Id, true), onReject: () => handleReview(doc.Id, false) } : undefined}
-                      extraTag={doc.Remarks?.startsWith("Synced automatically")
-                        ? <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border border-foreground/30 border-dashed">Synced from sale deed</span>
-                        : undefined} />
-                  ))}
-                  {canAct && (
-                    <div className="p-3">
-                      <p className={`${LBL} mb-1.5`}>Add a supporting document</p>
-                      <div className="flex items-end gap-2 flex-wrap">
-                        <select value={newDocType} onChange={(e) => setNewDocType(e.target.value)} className={`${INP} flex-1 min-w-[9rem]`}>
-                          <option value="StampedDeedCopy">Stamped deed copy</option>
-                          <option value="Other">Other</option>
-                        </select>
-                        <input className={`${INP} flex-1 min-w-[9rem]`} value={newDocLabel} onChange={(e) => setNewDocLabel(e.target.value)} placeholder="Label (optional)" />
-                        <input type="file" className="hidden" ref={fileRef} onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], newDocType, newDocLabel)} />
-                        <button onClick={() => fileRef.current?.click()} disabled={uploading} className={`${KEY_INK} h-9 px-3`}>
-                          <Upload size={11} /> {uploading ? "Uploading…" : "Upload"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                  )} />
               </div>
             )}
           </AutoStep>
