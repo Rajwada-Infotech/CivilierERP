@@ -3,7 +3,7 @@
 // PO / GRN reminders drop once an invoice (expense booking) has been built from them; everything is sorted overdue →
 // today → this week → later. Scoped to this app's two modules (material and finance), as the web's bell is scoped to
 // the module the user is in: the follow-up and loan reminders belong to the other apps.
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { useAuth } from "@/auth/AuthContext";
@@ -188,6 +188,38 @@ export async function fetchReminders(role?: string, perms?: Perm[]): Promise<Rem
   return items.sort((a, b) => order[a.urgency] - order[b.urgency]);
 }
 
+// The reminders download whole lists (POs, GRNs, MRs, expense bookings, cheques…). Fetched the moment the header drew,
+// they raced the dashboard's own requests on the phone and the server, and the stats sometimes came back late or not at
+// all. As the web does (runWhenIdle), they now wait until the app has settled: a few seconds after start, once nothing
+// is animating. Opening the bell fetches them at once. Once started, it stays started for the session.
+const SETTLE_MS = 4000;
+let started = false;
+const startListeners = new Set<() => void>();
+function startNow() {
+  if (started) return;
+  started = true;
+  startListeners.forEach((l) => l());
+}
+function useStarted() {
+  const [ready, setReady] = useState(started);
+  useEffect(() => {
+    if (started) return setReady(true);
+    const mark = () => setReady(true);
+    startListeners.add(mark);
+    const t = setTimeout(() => {
+      // React Native 0.88 dropped InteractionManager; requestIdleCallback waits for the JS thread to go quiet.
+      const idle = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
+      if (idle) idle(startNow, { timeout: 3000 });
+      else startNow();
+    }, SETTLE_MS);
+    return () => {
+      clearTimeout(t);
+      startListeners.delete(mark);
+    };
+  }, []);
+  return ready;
+}
+
 /**
  * The reminders, shared by every caller (the header's badge and its panel). Refreshing by hand more than five times in
  * a couple of seconds locks the key for five seconds, as on the web, since each refresh downloads whole lists.
@@ -198,11 +230,17 @@ export function useReminders() {
   const role = currentUser?.role;
   const perms = currentUser?.pagePermissions as Perm[] | undefined;
   const key = ["reminders", role, currentUser?.id];
+  const ready = useStarted();
+  // Every screen's header mounts a bell; the list is shared and kept five minutes, not re-downloaded per screen.
   const query = useQuery({
     queryKey: key,
     queryFn: () => fetchReminders(role, perms),
-    enabled: !!role,
-    staleTime: 60_000,
+    enabled: !!role && ready,
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: 0,
   });
 
   const [locked, setLocked] = useState(false);
@@ -219,6 +257,7 @@ export function useReminders() {
       }, 5000);
       return;
     }
+    if (!started) return startNow(); // the first open fetches straight away
     void qc.invalidateQueries({ queryKey: key });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, qc, role, currentUser?.id]);
