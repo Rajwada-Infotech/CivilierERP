@@ -1,5 +1,6 @@
 const express = require("express");
 const { sumMoney } = require("../services/bookingUnits");
+const { getMilestoneMoneyStages } = require("../services/crmOnAccountCoverage");
 const { CrmStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { projectPredicate, crmCustomerGuard } = require("../services/projectScope");
 const router = express.Router();
@@ -20,6 +21,47 @@ router.use(authMiddleware);
 // detail view (Waived milestones don't count as still-owed; a Cancelled/
 // Rejected booking's balance isn't real collectible debt) so the two pages
 // never disagree on what a customer actually owes.
+// The list's sortable columns: sortKey → a column of the list row (x below).
+const C360_SORT = {
+  CreatedAt: "x.CreatedAt",
+  CustomerName: "x.CustomerName",
+  CustomerNo: "x.CustomerNo",
+  City: "x.City",
+  ApplicationCount: "x.ApplicationCount",
+  ActiveBookingCount: "x.ActiveBookingCount",
+  TotalPaid: "x.TotalPaid",
+  TotalOutstanding: "x.TotalOutstanding",
+};
+// The list's saved views: view → which list rows it keeps. The summary counts each one with the same test.
+const C360_VIEWS = {
+  all: "1 = 1",
+  due: "x.TotalOutstanding > 0",
+  clear: "x.ActiveBookingCount > 0 AND x.TotalOutstanding <= 0",
+  nobooking: "x.ActiveBookingCount = 0",
+};
+
+// Each listed customer's live units (project · unit), read for the given rows only, in batches that stay under
+// SQL Server's 2,100-parameter limit (the export can list every customer).
+async function attachUnits(pool, rows, scopeApp) {
+  const byCustomer = new Map();
+  for (let at = 0; at < rows.length; at += 1000) {
+    const ur = pool.request();
+    const ids = rows.slice(at, at + 1000).map((r, i) => { ur.input(`c${i}`, sql.Int, r.Id); return `@c${i}`; }).join(",");
+    const units = await ur.query(`
+      SELECT a.CustomerId, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      WHERE a.CustomerId IN (${ids}) AND b.Status NOT IN ${DEAD_BOOKING_SQL} ${scopeApp}
+      ORDER BY b.CreatedAt DESC`);
+    for (const u of units.recordset) {
+      if (!byCustomer.has(u.CustomerId)) byCustomer.set(u.CustomerId, []);
+      byCustomer.get(u.CustomerId).push({ ProjectName: u.ProjectName, UnitNo: u.UnitNo });
+    }
+  }
+  for (const r of rows) r.Units = byCustomer.get(r.Id) || [];
+}
+
 router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -27,41 +69,31 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
+    const view = Object.hasOwn(C360_VIEWS, req.query.status) ? req.query.status : "all";
     const conds = ["c.IsActive = 1"];
+    const inputs = [];
     // A restricted user sees customers with an application in their projects.
     if (req.projectScope) conds.push(`EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${projectPredicate(req.projectScope, "sa.ProjectId")})`);
     if (search) {
-      req0.input("srch", sql.NVarChar(200), `%${search}%`);
+      inputs.push(["srch", sql.NVarChar(200), `%${search}%`]);
       conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch)");
     }
-    // Matched by the real CustomerId foreign key, not Mobile string equality
-    // — the old (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) pattern
-    // silently dropped every application/booking/payment for any customer
-    // with a blank Mobile (NULL = NULL is never true in SQL, so the whole
-    // rollup would just show zero) — which used to be a rare corruption
-    // case and is now a normal, expected state (Mobile is optional by
-    // business decision — see migration 445). CustomerId is also strictly
-    // more correct even for customers who DO have a mobile: string matching
-    // could under- or over-match on typos/shared numbers in a way a real FK
-    // never can.
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
-    const where = `WHERE ${conds.join(" AND ")}`;
+    // Matched by the real CustomerId foreign key, not Mobile string equality: a customer with a blank Mobile
+    // (optional since migration 445) would otherwise lose every application, booking and payment.
+    if (companyId) { inputs.push(["companyId", sql.Int, companyId]); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
+    if (projectId) { inputs.push(["projectId", sql.Int, projectId]); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
+    if (blockId) { inputs.push(["blockId", sql.Int, blockId]); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
+    const newReq = () => { const r = pool.request(); for (const [n, t, v] of inputs) r.input(n, t, v); return r; };
     const scopeApp = req.projectScope ? projectPredicate(req.projectScope, "a.ProjectId") : "";
-    const BASE_SELECT = `
+    // One row per customer; the views, the sort and the summary all read these columns.
+    const LIST = `
       SELECT
-        c.Id, c.CustomerNo, c.CustomerName, c.Mobile, c.City, c.State,
+        c.Id, c.CustomerNo, c.CustomerName, c.Mobile, c.City, c.State, c.CreatedAt,
         (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id ${scopeApp}) AS ApplicationCount,
         (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           WHERE a.CustomerId = c.Id AND b.Status NOT IN ${DEAD_BOOKING_SQL} ${scopeApp}) AS ActiveBookingCount,
-        -- Includes each booking's unswept On Account balance alongside
-        -- milestone AmountPaid — under the current "everything holds in On
-        -- Account until an explicit sweep" rule (crmPayments.js
-        -- applyCrmMilestonePaymentApproval / applyCrmOnAccountPaymentApproval)
-        -- every payment sits un-swept by default, so AmountPaid alone would
-        -- under-report real cash received from this customer.
+        -- Includes each booking's unswept On Account balance alongside milestone AmountPaid: every payment
+        -- holds On Account until an explicit sweep, so AmountPaid alone would under-report cash received.
         ((SELECT ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           WHERE a.CustomerId = c.Id AND b.Status NOT IN ${DEAD_BOOKING_SQL} ${scopeApp})
@@ -72,40 +104,42 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           WHERE a.CustomerId = c.Id AND b.Status NOT IN ${DEAD_BOOKING_SQL} ${scopeApp}) AS TotalOutstanding
       FROM dbo.CrmCustomer c
+      WHERE ${conds.join(" AND ")}
     `;
+    const sortCol = Object.hasOwn(C360_SORT, req.query.sortKey) ? C360_SORT[req.query.sortKey] : C360_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const ORDER = `ORDER BY ${sortCol} ${dir}, x.Id DESC`;
+    const VIEW_WHERE = `WHERE ${C360_VIEWS[view]}`;
 
+    // No page: every matching row (the Excel export).
     if (!req.query.page) {
-      const result = await req0.query(`${BASE_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
+      const result = await newReq().query(`SELECT x.* FROM (${LIST}) x ${VIEW_WHERE} ${ORDER}`);
+      await attachUnits(pool, result.recordset, scopeApp);
       return res.json(result.recordset);
     }
 
     const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${BASE_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      (() => {
-        const countReq = pool.request()
-          .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
-          .input("companyId2", sql.Int, companyId)
-          .input("projectId2", sql.Int, projectId)
-          .input("blockId2", sql.Int, blockId);
-        const scopeClause = req.projectScope
-          ? ` AND EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${projectPredicate(req.projectScope, "sa.ProjectId")})`
-          : "";
-        return countReq.query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmCustomer c
-          WHERE c.IsActive = 1
-            AND (@srch2 IS NULL OR (c.CustomerName LIKE @srch2 OR c.Mobile LIKE @srch2 OR c.CustomerNo LIKE @srch2))
-            AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId2))
-            AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId2))
-            AND (@blockId2 IS NULL OR (EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId2) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId2)))
-            ${scopeClause}
-        `);
-      })(),
+    const viewCounts = Object.entries(C360_VIEWS)
+      .map(([k, cond]) => `SUM(CASE WHEN ${cond} THEN 1 ELSE 0 END) AS View_${k}`).join(", ");
+    const [result, summaryResult] = await Promise.all([
+      newReq().input("offset", sql.Int, offset).input("pageSize", sql.Int, pageSize)
+        .query(`SELECT x.* FROM (${LIST}) x ${VIEW_WHERE} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      // Each view's count and the money across the current view: the view tabs and the totals strip.
+      newReq().query(`
+        SELECT ${viewCounts},
+               SUM(CASE WHEN ${C360_VIEWS[view]} THEN x.TotalPaid ELSE 0 END) AS totalPaid,
+               SUM(CASE WHEN ${C360_VIEWS[view]} THEN x.TotalOutstanding ELSE 0 END) AS totalOutstanding,
+               SUM(CASE WHEN ${C360_VIEWS[view]} THEN x.ActiveBookingCount ELSE 0 END) AS activeBookings
+        FROM (${LIST}) x`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const rows = result.recordset;
+    await attachUnits(pool, rows, scopeApp);
+    const sm = summaryResult.recordset[0] || {};
+    const views = Object.fromEntries(Object.keys(C360_VIEWS).map((k) => [k, sm[`View_${k}`] || 0]));
+    res.json({
+      rows, total: views[view], page, pageSize, views,
+      summary: { totalPaid: sm.totalPaid || 0, totalOutstanding: sm.totalOutstanding || 0, activeBookings: sm.activeBookings || 0 },
+    });
   } catch (e) {
     console.error("[crm-customer-360] GET / error:", e.message);
     res.status(500).json({ error: e.message });
@@ -287,6 +321,17 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
       for (const oa of onAccountRes.recordset) (onAccountByBooking[oa.BookingId] ??= []).push(oa);
       for (const br of brokerageRes.recordset) (brokerageByBooking[br.BookingId] ??= []).push(br);
       for (const m of milestonesRes.recordset) (milestonesByBooking[m.BookingId] ??= []).push(m);
+      // Each milestone's money stage and the on-account money held against it — the same rule the Payments page
+      // uses, so a customer's payments show on the plan while they are held On Account.
+      const staged = await Promise.all(bookingIds.map((id) => getMilestoneMoneyStages(pool, id)));
+      const stageById = new Map(staged.flatMap((s) => s.milestones).map((c) => [c.Id, c]));
+      for (const list of Object.values(milestonesByBooking)) {
+        for (const m of list) {
+          const c = stageById.get(m.Id);
+          m.MoneyStage = c ? c.MoneyStage : null;
+          m.HeldOnAccount = c?.HeldOnAccount || 0;
+        }
+      }
     }
 
     const enrichedBookings = bookingRows.map((b) => ({
