@@ -1300,14 +1300,18 @@ const MASTERS = {
     title: "Deed Registration Office", group: "Registration", pageKey: "legal-registration-office-master", table: "LegalRegistrationOffice", pk: "OfficeId",
     desc: "Government offices where deeds and other registrable documents are registered.",
     label: "OfficeName", orderBy: "District, OfficeName",
+    // State and District text follow the picked district (older screens read the text columns).
+    derived: [
+      { name: "District", from: "DistrictId", column: "DistrictName" },
+      { name: "State", from: "DistrictId", column: "State" },
+    ],
     unique: [["OfficeCode"], "This office code already exists"],
     fields: [
       { name: "OfficeCode", label: "Office code", type: "text", required: true, max: 30, upper: true },
       { name: "OfficeName", label: "Official name", type: "text", required: true, max: 200 },
       { name: "OfficeType", label: "Office type", type: "select", required: true, options: ["ADSR", "DSR", "ARA", "Registrar", "Sub-Registrar", "Other"] },
-      { name: "State", label: "State", type: "text", required: true, max: 100, default: "West Bengal" },
-      { name: "District", label: "District", type: "text", required: true, max: 100 },
-      { name: "Jurisdiction", label: "Jurisdiction", type: "textarea", max: 500 },
+      { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
+      { name: "Jurisdiction", label: "Jurisdiction (blocks / areas it covers)", type: "textarea", max: 500 },
       { name: "Address", label: "Address", type: "textarea", max: 500 },
       { name: "Phone", label: "Phone", type: "text", max: 30 },
       { name: "Email", label: "Email", type: "text", max: 150, pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", patternMsg: "Enter a valid email" },
