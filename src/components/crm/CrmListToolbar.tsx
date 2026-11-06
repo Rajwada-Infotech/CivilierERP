@@ -1,8 +1,7 @@
 import React, { useContext, useEffect, useState } from "react";
 import { Link, useInRouterContext, useLocation } from "react-router-dom";
 import { QueryClientContext, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, CornerUpLeft, RotateCcw, Search, X } from "lucide-react";
-import { SheetMark } from "@/components/sheet/Sheet";
+import { ArrowRight, ChevronDown, CornerUpLeft, RotateCcw, Search, X } from "lucide-react";
 import { bookingSendBack } from "@/constants/crmStatuses";
 import { cn } from "@/lib/utils";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -73,8 +72,8 @@ export function CrmListToolbar({ tabs, status, onStatus, searchValue, onSearch, 
 // What a checker or approver sent back (the maker must update it) and what was
 // corrected and sent in again (the checker must look again), read from what
 // each flow already records (GET /api/crm/dashboard/sent-back). Read-only: it
-// only points at the record. Drawn in the sheet's own language (ruled rows,
-// small caps labels, the SheetMark square) so it reads as part of the page.
+// only points at the record. One slim line on the page (the counts and the
+// latest reason); the entries open under it when wanted.
 export const SENT_BACK_STATE = {
   SentBack: { label: "Sent back", note: "to update", tone: "stopped" as const },
   Resubmitted: { label: "Resubmitted", note: "to recheck", tone: "waiting" as const },
@@ -113,82 +112,74 @@ export function sinceLabel(d: string | null | undefined): string {
   return t.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
-
 // The sheet wrapper renders this on every page; outside the app's router and
 // data provider (a test, an isolated screen) it simply shows nothing.
-export function SentBackPanel() {
+export function SentBackPanel({ chip = false }: { chip?: boolean }) {
   const inRouter = useInRouterContext();
   const hasQueryClient = !!useContext(QueryClientContext);
-  return inRouter && hasQueryClient ? <SentBackPanelInner /> : null;
+  return inRouter && hasQueryClient ? <SentBackPanelInner chip={chip} /> : null;
 }
 
-function SentBackPanelInner() {
+function SentBackPanelInner({ chip }: { chip: boolean }) {
   const { pathname } = useLocation();
   // Applications and Bookings show it on each row (status note + Next button) instead.
   const onPage = pathname.startsWith("/crm/") && !["/crm/dashboard", "/crm/applications", "/crm/bookings"].includes(pathname);
   const { data } = useSentBack(onPage);
-  const [all, setAll] = useState(false);
+  const [open, setOpen] = useState(false);
   if (!onPage || !data?.rows?.length) return null;
   const rows: any[] = data.rows.filter((r: any) => r.path === pathname || r.also === pathname);
   if (!rows.length) return null;
   const sentBack = rows.filter((r) => r.State === "SentBack").length;
   const resubmitted = rows.length - sentBack;
-  const shown = all ? rows : rows.slice(0, 3);
-  return (
-    <section className="bg-card border border-foreground" style={{ borderLeft: `3px solid hsl(var(--${sentBack ? "destructive" : "foreground"}))` }}
-      aria-label="Sent back and resubmitted entries">
-      <header className="flex flex-wrap items-baseline gap-x-6 gap-y-1 px-4 py-2.5 border-b border-foreground/15">
-        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">Needs attention</span>
-        {sentBack > 0 && <span className="text-xs"><b className="font-heading tabular-nums text-destructive">{sentBack}</b> <span className="text-muted-foreground">sent back — to update</span></span>}
-        {resubmitted > 0 && <span className="text-xs"><b className="font-heading tabular-nums">{resubmitted}</b> <span className="text-muted-foreground">resubmitted — to recheck</span></span>}
-      </header>
-      <div className="overflow-x-auto thin-scroll">
-        <table className="w-full text-sm min-w-[760px]">
-          <thead>
-            <tr className="border-b border-foreground/15">
-              <th className={`px-4 py-1.5 text-left w-[8.5rem] ${LBL}`}>State</th>
-              <th className={`px-2 py-1.5 text-left w-[15rem] ${LBL}`}>Entry</th>
-              <th className={`px-2 py-1.5 text-left ${LBL}`}>Reason</th>
-              <th className={`px-2 py-1.5 text-left w-[11rem] ${LBL}`}>Sent back by</th>
-              <th className="px-4 py-1.5 w-[4.5rem]" />
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((r) => {
-              const st = SENT_BACK_STATE[r.State as keyof typeof SENT_BACK_STATE];
-              return (
-                <tr key={`${r.Kind}-${r.RecordId}-${r.State}`} className="border-b border-foreground/15 last:border-0 align-top hover:bg-primary/5">
-                  <td className="px-4 py-2.5">
-                    <SheetMark text={st.label} tone={st.tone} />
-                    <div className="text-[0.6875rem] text-muted-foreground mt-0.5">{st.note}</div>
-                  </td>
-                  <td className="px-2 py-2.5">
-                    <div className="font-medium leading-snug">{r.area}{r.Item ? <span className="text-muted-foreground font-normal"> · {r.Item}</span> : null}</div>
-                    <div className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground mt-0.5">{r.RecordNo || `#${r.RecordId}`}{r.BookingNo && r.BookingNo !== r.RecordNo ? ` · ${r.BookingNo}` : ""}</div>
-                  </td>
-                  <td className="px-2 py-2.5 leading-snug">{r.Reason ? `“${r.Reason}”` : <span className="text-muted-foreground">No reason given</span>}</td>
-                  <td className="px-2 py-2.5">
-                    <div className="truncate max-w-[11rem]" title={r.ByName || ""}>{r.ByName || "—"}</div>
-                    <div className="text-[0.6875rem] text-muted-foreground mt-0.5">{sinceLabel(r.At)}</div>
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    {/* Already on that page: reload it, since pages read their record from the address when they open. */}
-                    <Link to={r.link} reloadDocument={r.path === pathname} className="inline-flex items-center gap-1 h-7 px-2.5 border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground hover:text-card transition-colors">
-                      Open <ArrowRight size={11} />
-                    </Link>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {rows.length > 3 && (
-        <button type="button" onClick={() => setAll((a) => !a)} className={`w-full px-4 py-2 text-left border-t border-foreground/15 hover:text-foreground ${LBL}`}>
-          {all ? "Show fewer" : `Show all ${rows.length}`}
+  const latest = rows[0];
+  const entries = (
+        <ul className="max-h-64 overflow-y-auto thin-scroll">
+          {rows.map((r) => {
+            const st = SENT_BACK_STATE[r.State as keyof typeof SENT_BACK_STATE];
+            return (
+              <li key={`${r.Kind}-${r.RecordId}-${r.State}`} className="px-3 py-1.5 border-b border-border/70 last:border-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs hover:bg-muted/40">
+                <span className={cn("w-[5.5rem] shrink-0 font-semibold", r.State === "SentBack" ? "text-destructive" : "text-muted-foreground")} title={st.note}>{st.label}</span>
+                <span className="w-[17rem] max-w-full min-w-0 truncate shrink-0" title={`${r.RecordNo || `#${r.RecordId}`}${r.BookingNo && r.BookingNo !== r.RecordNo ? ` \u00b7 ${r.BookingNo}` : ""}`}>
+                  {r.area}{r.Item ? ` \u00b7 ${r.Item}` : ""} <span className="text-muted-foreground tabular-nums">{r.BookingNo || r.RecordNo || `#${r.RecordId}`}</span>
+                </span>
+                <span className="flex-1 min-w-[10rem] truncate" title={r.Reason || undefined}>{r.Reason ? `\u201c${r.Reason}\u201d` : <span className="text-muted-foreground">No reason given</span>}</span>
+                <span className="shrink-0 text-muted-foreground">{r.ByName || "\u2014"} \u00b7 {sinceLabel(r.At)}</span>
+                {/* Already on that page: reload it, since pages read their record from the address when they open. */}
+                <Link to={r.link} reloadDocument={r.path === pathname} className="shrink-0 inline-flex items-center gap-1 font-medium text-primary hover:underline">Open <ArrowRight size={11} /></Link>
+              </li>
+            );
+          })}
+        </ul>
+  );
+  if (chip) {
+    return (
+      <div className="relative">
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-xs font-medium bg-rose-500/20 text-rose-100 hover:bg-rose-500/30">
+          <CornerUpLeft size={13} />
+          {[sentBack ? `${sentBack} sent back` : null, resubmitted ? `${resubmitted} resubmitted` : null].filter(Boolean).join(" \u00b7 ")}
+          <ChevronDown size={13} className={cn("transition-transform", open && "rotate-180")} />
         </button>
-      )}
+        {open && (
+          <>
+            <button type="button" aria-label="Close" className="fixed inset-0 z-30 cursor-default" onClick={() => setOpen(false)} />
+            <div className="absolute right-0 top-full mt-2 z-40 w-[48rem] max-w-[90vw] rounded-lg border border-border bg-card text-foreground shadow-xl overflow-hidden">{entries}</div>
+          </>
+        )}
+      </div>
+    );
+  }
+  return (
+    <section className="bg-card border border-border rounded-lg overflow-hidden" aria-label="Sent back and resubmitted entries">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        className="w-full h-9 px-3 flex items-center gap-3 text-xs text-left hover:bg-muted/40">
+        <CornerUpLeft size={13} className={cn("shrink-0", sentBack ? "text-destructive" : "text-muted-foreground")} />
+        {sentBack > 0 && <span className="shrink-0"><b className="tabular-nums text-destructive">{sentBack}</b> sent back</span>}
+        {resubmitted > 0 && <span className="shrink-0"><b className="tabular-nums">{resubmitted}</b> resubmitted</span>}
+        {!open && latest.Reason && <span className="min-w-0 truncate text-muted-foreground">Latest: {`\u201c${latest.Reason}\u201d`}{latest.ByName ? ` from ${latest.ByName}` : ""}</span>}
+        <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-primary">{open ? "Hide" : "Review"} <ChevronDown size={13} className={cn("transition-transform", open && "rotate-180")} /></span>
+      </button>
+      {open && <div className="border-t border-border">{entries}</div>}
     </section>
   );
 }
