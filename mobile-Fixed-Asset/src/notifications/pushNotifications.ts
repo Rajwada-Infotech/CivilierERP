@@ -9,6 +9,7 @@
 // configured, a denied permission, or a flaky connection must not break login.
 // Identical in every Civilier mobile app; only the `appKey` differs.
 import { Platform } from "react-native";
+import * as Application from "expo-application";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
@@ -57,7 +58,9 @@ export async function registerForPushAsync(appKey: string): Promise<string | nul
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
     if (!token) return null;
 
-    const ok = await post("/api/push-devices/register", { token, appKey, platform: Platform.OS });
+    // The installed build (Android version code), so publishing a newer one in APK Manager notifies this phone.
+    const versionCode = Number(Application.nativeBuildVersion) || undefined;
+    const ok = await post("/api/push-devices/register", { token, appKey, platform: Platform.OS, versionCode });
     if (!ok) return null;
     await SecureStore.setItemAsync(TOKEN_KEY, token);
     return token;
