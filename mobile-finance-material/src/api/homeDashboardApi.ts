@@ -172,13 +172,27 @@ export interface HomeDashboardData {
   errors: Record<string, string>;
 }
 
-async function safeFetch<T>(url: string): Promise<{ data: T | null; error: string | null }> {
+// Each part of the dashboard is fetched on its own and a failure only blanks that part. Because the failure is folded
+// into the result, React Query sees a success and never retries — so one dropped request (a busy moment on the phone's
+// connection or the server) left a stat empty until a manual refresh. A network error or a 5xx is now tried once more
+// after a short pause; a 4xx (no permission, not found) is final.
+async function safeFetch<T>(url: string, attempt = 0): Promise<{ data: T | null; error: string | null }> {
   try {
     const res = await fetchWithAuth(url);
-    if (!res.ok) return { data: null, error: `HTTP ${res.status}` };
+    if (!res.ok) {
+      if (res.status >= 500 && attempt === 0) {
+        await new Promise((r) => setTimeout(r, 800));
+        return safeFetch<T>(url, 1);
+      }
+      return { data: null, error: `HTTP ${res.status}` };
+    }
     const data = await res.json();
     return { data, error: null };
   } catch (err: any) {
+    if (attempt === 0) {
+      await new Promise((r) => setTimeout(r, 800));
+      return safeFetch<T>(url, 1);
+    }
     return { data: null, error: err.message ?? "Unknown error" };
   }
 }

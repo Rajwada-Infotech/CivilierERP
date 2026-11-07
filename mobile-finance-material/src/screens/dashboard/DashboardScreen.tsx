@@ -99,10 +99,10 @@ function pickHero(ordered: TileDef[], order: Mod[], count = 4): TileDef[] {
 
 /** The web's AnimatedCounter: counts 0 → target once, ease-out quart, 1.2s. */
 function Counter({ target, prefix = "", suffix = "" }: { target: number; prefix?: string; suffix?: string }) {
-  const [v, setV] = useState(() => (motionOff() ? target : 0));
+  const [v, setV] = useState(() => (motionOff("counts") ? target : 0));
   const from = useRef(0);
   useEffect(() => {
-    if (motionOff()) {
+    if (motionOff("counts")) {
       setV(target);
       return;
     }
@@ -289,9 +289,21 @@ export default function DashboardScreen() {
     k.value == null ? null : `${k.prefix ?? ""}${typeof k.value === "number" ? k.value.toLocaleString("en-IN") : k.value}${k.suffix ?? ""}`;
 
   type Attention = { severity: "high" | "low"; label: string; count: number; hint: string; go?: () => void };
+  // Admins and super admins approve (in the Admin app); every other role waits on the appointed approver.
+  const approver = role === "admin" || role === "super_admin";
   const attention: Attention[] = (
     [
-      privileged && { severity: "high", label: "Approvals awaiting you", count: pendingApprovals.length, hint: `${new Set(pendingApprovals.map((a) => a.Module)).size} module(s) affected` },
+      {
+        severity: "high",
+        label: approver ? "Approvals awaiting you" : "Awaiting approval",
+        count: pendingApprovals.length,
+        hint: `${new Set(pendingApprovals.map((a) => a.Module)).size} module(s) affected`,
+        // Approving is not done in this app: an admin approves in the Admin app; anyone else waits on the approver.
+        go: () =>
+          approver
+            ? Alert.alert("Approvals awaiting you", "Approve these in the CivilierERP Admin app. Approvals aren't done in the Finance & Material app.")
+            : Alert.alert("Awaiting approval", "These are waiting for the person appointed to approve them. They'll move on here once that person approves them."),
+      },
       access.material && { severity: "low", label: "Purchase orders open", count: mat?.purchaseOrders?.open ?? 0, hint: "Not yet closed / cancelled", go: () => navigation.navigate("PurchaseOrder") },
     ].filter(Boolean) as Attention[]
   ).filter((a) => a.count > 0);
@@ -428,7 +440,7 @@ export default function DashboardScreen() {
                 return (
                   <Press
                     key={x.label}
-                    onPress={x.go ?? (() => Alert.alert(x.label, "The approval inbox isn't on mobile yet. Use the web app to approve."))}
+                    onPress={x.go}
                     style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? (hot ? S.redWash : S.blueWash) : "transparent" })}
                   >
                     <Text style={{ width: 18, fontSize: 10, color: hot ? S.red : S.graphite, fontFamily: fonts.body.regular }}>{String(i + 1).padStart(2, "0")}</Text>

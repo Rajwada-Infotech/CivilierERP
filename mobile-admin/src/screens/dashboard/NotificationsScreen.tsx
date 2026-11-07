@@ -38,8 +38,8 @@ function NotificationCard({ item, onPress }: { item: InboxItem; onPress: () => v
       onPress={onPress}
       style={{ flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 16, padding: 12, marginBottom: 8, backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}
     >
-      <View style={{ width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: `${cfg?.color ?? colors.mutedForeground}1f` }}>
-        <Icon size={15} color={cfg?.color ?? colors.mutedForeground} />
+      <View style={{ width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border }}>
+        <Icon size={15} color={colors.foreground} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{item.ModuleLabel}</Text>
@@ -89,7 +89,7 @@ export default function NotificationsScreen() {
           data={items}
           keyExtractor={(item) => `${item.Module}-${item.RecordId}`}
           contentContainerStyle={{ padding: 16 }}
-          refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.primary} />}
+          refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => void refetch()} tintColor={colors.primary} />}
           ListHeaderComponent={
             <View style={{ marginBottom: 14 }}>
               <Text style={{ color: colors.foreground, fontSize: 15, fontFamily: fonts.heading.bold, marginBottom: 3 }}>Notifications</Text>

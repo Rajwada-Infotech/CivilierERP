@@ -3,6 +3,9 @@ import DashboardScreen from "@/screens/dashboard/DashboardScreen";
 import NotificationsScreen from "@/screens/dashboard/NotificationsScreen";
 import ProfileScreen from "@/screens/dashboard/ProfileScreen";
 import ApprovalInboxScreen from "@/screens/admin/ApprovalInboxScreen";
+import ApprovalSetupFormScreen from "@/screens/admin/ApprovalSetupFormScreen";
+import FinYearFormScreen from "@/screens/admin/FinYearFormScreen";
+import type { FinYear } from "@/api/finYearRightsApi";
 import ApprovalSetupScreen from "@/screens/admin/ApprovalSetupScreen";
 import PostApprovalRightsScreen from "@/screens/admin/PostApprovalRightsScreen";
 import PasswordResetScreen from "@/screens/admin/PasswordResetScreen";
@@ -17,6 +20,9 @@ export type MainStackParamList = {
   Profile: undefined;
   ApprovalInbox: undefined;
   ApprovalSetup: undefined;
+  /** An approval rule as its own page: nothing for a new rule, `id` to edit one. */
+  ApprovalSetupForm: { id?: number } | undefined;
+  FinYearForm: { fy?: FinYear } | undefined;
   PostApprovalRights: undefined;
   PasswordReset: undefined;
   MenuRights: undefined;
@@ -39,6 +45,8 @@ export default function MainStack() {
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
       <Stack.Screen name="ApprovalInbox" component={ApprovalInboxScreen} options={{ title: "Approval Inbox" }} />
       <Stack.Screen name="ApprovalSetup" component={ApprovalSetupScreen} options={{ title: "Approval Setup" }} />
+      <Stack.Screen name="ApprovalSetupForm" component={ApprovalSetupFormScreen} options={{ title: "Approval Rule" }} />
+      <Stack.Screen name="FinYearForm" component={FinYearFormScreen} options={{ title: "Financial Year" }} />
       <Stack.Screen name="PostApprovalRights" component={PostApprovalRightsScreen} options={{ title: "Post Approval Rights" }} />
       <Stack.Screen name="PasswordReset" component={PasswordResetScreen} options={{ title: "Password Reset" }} />
       <Stack.Screen name="MenuRights" component={MenuRightsScreen} options={{ title: "Menu Rights" }} />

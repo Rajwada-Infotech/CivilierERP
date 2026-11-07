@@ -2,6 +2,7 @@
 // src/pages/CRM/customers/config.tsx), for React Native: one ink-bordered sheet of paper on a faint grid, a title block,
 // lettered details, capital labels, figures in Sora, square corners everywhere, status drawn as a small square mark.
 // Colours come from src/theme/colors.ts (the web's default theme), fonts from src/theme/fonts.ts.
+import * as SecureStore from "expo-secure-store";
 import React, { useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -35,13 +36,43 @@ AccessibilityInfo.isReduceMotionEnabled?.()
     reduceMotion = !!v;
   })
   .catch(() => {});
-export const motionOff = () => reduceMotion;
+
+// The profile's Settings → Animations switches (the web's uiPrefs): what moves, on this phone only. "menus" is the bell's
+// genie, "pages" the rise / fade / draw of pages and figures, "counts" the dashboards' numbers counting up.
+export type UiPrefs = { menus: boolean; pages: boolean; counts: boolean };
+const PREFS_KEY = "ui_prefs";
+let uiPrefs: UiPrefs = { menus: true, pages: true, counts: true };
+const prefListeners = new Set<(p: UiPrefs) => void>();
+SecureStore.getItemAsync(PREFS_KEY)
+  .then((raw) => {
+    if (!raw) return;
+    uiPrefs = { ...uiPrefs, ...JSON.parse(raw) };
+    prefListeners.forEach((l) => l(uiPrefs));
+  })
+  .catch(() => {});
+export function setUiPrefs(patch: Partial<UiPrefs>) {
+  uiPrefs = { ...uiPrefs, ...patch };
+  prefListeners.forEach((l) => l(uiPrefs));
+  SecureStore.setItemAsync(PREFS_KEY, JSON.stringify(uiPrefs)).catch(() => {});
+}
+export function useUiPrefs(): UiPrefs {
+  const [p, setP] = useState(uiPrefs);
+  useEffect(() => {
+    prefListeners.add(setP);
+    setP(uiPrefs);
+    return () => void prefListeners.delete(setP);
+  }, []);
+  return p;
+}
+
+/** True when this kind of animation should not play: the phone asks for reduced motion, or it is switched off. */
+export const motionOff = (kind: keyof UiPrefs = "pages") => reduceMotion || !uiPrefs[kind];
 
 /** A value that runs 0 → 1 once on mount (or straight to 1 when motion is off). */
 export function useEnter(duration: number, delay = 0, easing = EASE) {
-  const v = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+  const v = useRef(new Animated.Value(motionOff() ? 1 : 0)).current;
   useEffect(() => {
-    if (reduceMotion) return;
+    if (motionOff()) return;
     const a = Animated.timing(v, { toValue: 1, duration, delay, easing, useNativeDriver: true });
     a.start();
     return () => a.stop();
@@ -361,7 +392,7 @@ export const Notice: React.FC<{ children: React.ReactNode; tone?: "red" | "ink" 
 export const Skel: React.FC<{ h?: number; w?: number | `${number}%` }> = ({ h = 14, w = "100%" }) => {
   const v = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    if (reduceMotion) return;
+    if (motionOff()) return;
     const loop = Animated.loop(Animated.sequence([Animated.timing(v, { toValue: 0.45, duration: 700, useNativeDriver: true }), Animated.timing(v, { toValue: 1, duration: 700, useNativeDriver: true })]));
     loop.start();
     return () => loop.stop();
@@ -530,9 +561,9 @@ const TICK_EASE = Easing.bezier(0.16, 1, 0.3, 1);
  * Renders text, so put it inside a <Text>. */
 export function Tick({ value, format = fmtInt }: { value: number; format?: (n: number) => string }) {
   const from = useRef(0);
-  const [v, setV] = useState(() => (reduceMotion ? value : 0));
+  const [v, setV] = useState(() => (motionOff("counts") ? value : 0));
   useEffect(() => {
-    if (reduceMotion) {
+    if (motionOff("counts")) {
       from.current = value;
       setV(value);
       return;
@@ -560,9 +591,9 @@ export const AnimatedPath = Animated.createAnimatedComponent(Path);
 /** The dash offset for a line of the given length: runs from the whole length to 0 on mount (0 at once when motion
  * is off). Use with strokeDasharray={`${len} ${len}`} on an AnimatedPath. */
 export function useDraw(len: number) {
-  const v = useRef(new Animated.Value(reduceMotion ? 0 : len)).current;
+  const v = useRef(new Animated.Value(motionOff() ? 0 : len)).current;
   useEffect(() => {
-    if (reduceMotion) return;
+    if (motionOff()) return;
     v.setValue(len);
     const a = Animated.timing(v, { toValue: 0, duration: 1400, easing: Easing.out(Easing.ease), useNativeDriver: false });
     a.start();

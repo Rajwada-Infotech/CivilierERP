@@ -126,7 +126,7 @@ export function UpdateGate({ appKey }: { appKey: string }) {
   const busy = phase === "downloading" || phase === "installing";
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={() => !mandatory && !busy && later()}>
+    <Modal visible transparent animationType="fade" onRequestClose={() => { if (!mandatory && !busy) later(); }}>
       <View style={s.backdrop}>
         <View style={s.card}>
           <Text style={s.title}>{mandatory ? "Update required" : "Update available"}</Text>

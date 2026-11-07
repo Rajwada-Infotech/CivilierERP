@@ -1,3 +1,4 @@
+import type React from "react";
 // RN port of src/components/Logo.tsx's LogoFull (web) — same three
 // animations: the icon spring-entrances in on mount (rotate -180°→0°,
 // scale 0→1, opacity 0→1), the wordmark is a purple→blue gradient (web's
@@ -7,7 +8,9 @@
 // character resolving left-to-right through random glyphs before landing.
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, Text, View } from "react-native";
-import MaskedView from "@react-native-masked-view/masked-view";
+import MaskedViewClass from "@react-native-masked-view/masked-view";
+// The package types MaskedView as a class without props, which React 19.3's JSX types reject; it works as a component.
+const MaskedView = MaskedViewClass as unknown as React.ComponentType<any>;
 import { LinearGradient } from "expo-linear-gradient";
 import { fonts } from "@/theme/fonts";
 import { useAppVersion } from "@/hooks/useAppVersion";

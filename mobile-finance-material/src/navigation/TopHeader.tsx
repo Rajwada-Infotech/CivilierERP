@@ -8,7 +8,7 @@ import { View, Text, Image, Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
-import { Bell } from "lucide-react-native";
+import { ReminderBell } from "@/notifications/ReminderBell";
 import { colors, sheet as S } from "@/theme/colors";
 import { Press, motionOff } from "@/components/sheet/Sheet";
 import { fonts } from "@/theme/fonts";
@@ -102,18 +102,23 @@ export function TopHeader(_props: NativeStackHeaderProps) {
   return (
     <SafeAreaView edges={["top"]} style={{ backgroundColor: colors.background, borderBottomWidth: 1.5, borderBottomColor: S.ink }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10 }}>
-        <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 10 }}>
+        {/* The logo and name go home, as the web's navbar logo does. */}
+        <Press
+          onPress={() => navigate("Dashboard")}
+          hitSlop={6}
+          accessibilityRole="link"
+          accessibilityLabel="CivilierERP home"
+          style={(pressed) => ({ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 10, opacity: pressed ? 0.6 : 1 })}
+        >
           <SpinInLogo />
           <View style={{ minWidth: 0 }}>
             <Text style={{ fontFamily: fonts.heading.bold, fontSize: 15, letterSpacing: -0.4, color: S.ink }}>CivilierERP</Text>
             <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 8.5, letterSpacing: 1, color: S.graphite, marginTop: 1, fontVariant: ["tabular-nums"] }}>{version}</Text>
           </View>
-        </View>
+        </Press>
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <IconKey onPress={() => navigate("Notifications")}>
-            <Bell size={17} color={S.ink} />
-          </IconKey>
+          <ReminderBell />
           <IconKey onPress={() => navigate("Profile")}>
             {avatar && !avatarFailed ? (
               <Image
