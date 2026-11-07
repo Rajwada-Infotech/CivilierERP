@@ -9,7 +9,7 @@
 import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, Alert, Modal, Image } from "react-native";
+import { View, Text, ScrollView, ActivityIndicator, Alert, Image } from "react-native";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,13 +17,11 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import {
-  ArrowLeft, Check, ChevronDown, Plus, RefreshCw, Search, X, Paperclip, Camera, FileText,
+  ArrowLeft, Plus, RefreshCw, X, Paperclip, Camera, FileText,
 } from "lucide-react-native";
 import {
   fetchDocTypes, fetchNextDocNumber, fetchContactPersons, fetchTCRecords,
-  createContract, updateContract, getContract,
-  type ContactPerson, type TCRecord, type ContractPayload, type Attachment,
-} from "@/api/contractApi";
+  createContract, updateContract, getContract, type TCRecord, type ContractPayload, type Attachment } from "@/api/contractApi";
 import { fetchCompanyOptions, fetchProjectOptions, fetchFinYearOptions } from "@/api/newPaymentApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors, sheet as S } from "@/theme/colors";

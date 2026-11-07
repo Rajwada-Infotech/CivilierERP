@@ -22,8 +22,7 @@ import { formatINR } from "@/utils/formatCurrency";
 import {
   getPaymentChain, getPaymentPosting, fetchPaymentSummary, computePaymentStatus,
   deletePayment, approvePayment, rejectPayment, postPaymentToGL, postBounceChargeToGL,
-  type PaymentRecord, type PaymentChainItem, type DisplayStatus, type ChainSummary,
-} from "@/api/newPaymentApi";
+  type PaymentRecord, type PaymentChainItem, type ChainSummary } from "@/api/newPaymentApi";
 import { StatusBadge, ModeBadge, DisplayStatusBadge } from "./PaymentBadges";
 
 type Tab = "details" | "chain" | "posting";

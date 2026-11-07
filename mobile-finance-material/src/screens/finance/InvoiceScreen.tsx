@@ -106,7 +106,7 @@ export default function InvoiceScreen() {
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["invoices", page, statusFilter],
     queryFn: () => fetchInvoices(page, statusFilter),
     staleTime: 60 * 1000,

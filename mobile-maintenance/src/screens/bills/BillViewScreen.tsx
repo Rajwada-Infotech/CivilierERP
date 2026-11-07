@@ -21,7 +21,6 @@ import { numberToWordsIndian } from "@/utils/numberToWords";
 import { getMaintenanceBill, cancelMaintenanceBill } from "@/api/maintenanceBillApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
-const ACCENT = "#65a30d";
 
 type Props = NativeStackScreenProps<MainStackParamList, "BillView">;
 

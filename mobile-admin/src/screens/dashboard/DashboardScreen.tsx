@@ -1,21 +1,38 @@
-// RN port of src/pages/admin/AdminDashboard.tsx — the Admin "Control center", on the drawing sheet as the web draws it.
-// The sheet's title block: "CivilierERP · Admin", the title, a line on what the page is, and the drawing's corner box —
-// the date, when it was read, and Re-read. Then four lettered details:
-//   A Accounts         users, how many can sign in and the active share; a bar measuring every account out — active
-//                      solid blue, discontinued hatched — with dimension lines under each part
-//   B On record        roles, discontinued accounts, entries in the activity log
+// The Admin app's "Control center", on the drawing sheet as the web's AdminDashboard draws it: the title block with the
+// drawing's corner box (the date, when it was read, Re-read), then four lettered details, the first two about what this
+// app is for:
+//   A Approvals        how many records are waiting, how many this admin can act on now, how many have waited over a
+//                      week (red); a bar measuring them out by age — over a week red, this week ink, today blue — with
+//                      dimension lines under it, and a key to the Approval Inbox
+//   B Set-up           three small charts, each opening its page:
+//                        Approval rules by area  a bar per area (Material, Engineering, Finance, Sales, CRM): the
+//                                                approvable modules a switched-on rule covers, of the area's; red note
+//                                                when a switched-on rule has a step no one can approve
+//                        People by role          a bar per role, active people, longest first (past six fold into
+//                                                Other); accounts, discontinued and unused roles under it
+//                        Financial year          the current year as a timeline from its start to its end, filled to
+//                                                today with a Today mark, % through and days left; Locked when locked
 //   C Latest activity  the last six things done: the page (named as the web names it), what was done, by whom, when
 //   D Newest accounts  the five latest accounts, with initials and an Active mark (or Discontinued)
-// Numbers count up and parts rise in as on the web. Read from GET /api/admin-dashboard and /api/user-activity, every
-// two minutes and on pull-down. Anyone who lands here without an admin role sees a plain access notice instead.
+// Numbers count up and parts rise in as on the web. Read from the approval inbox, the approval rules, the financial years,
+// GET /api/admin-dashboard and /api/user-activity — every two minutes (the inbox every minute) and on pull-down. Anyone
+// who lands here without an admin role sees a plain access notice instead.
 import { useState } from "react";
 import { View, Text, ScrollView, RefreshControl } from "react-native";
+import { ChevronRight, Lock } from "lucide-react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useIsAdmin } from "@/auth/adminAccess";
 import { fetchAdminDashboard, fetchRecentActivity, type AdminDashboardData } from "@/api/adminDashboardApi";
+import { fetchInbox } from "@/api/approvalInboxApi";
+import { fetchWorkflows } from "@/api/approvalSetupApi";
+import { getAllFinYears } from "@/api/finYearRightsApi";
+import { getUsers } from "@/api/passwordResetApi";
+import { MODULE_GROUPS, MODULE_OPTIONS } from "@/screens/admin/approvalSetupConfig";
+import { ageOf } from "@/notifications/ApprovalBell";
+import { navigate } from "@/navigation/navigationRef";
 import { colors, sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { Body, Detail, Dimension, Grow, Hatch, Label, Notice, Press, SheetFrame, SheetMark, Skel, Tick, TitleText } from "@/components/sheet/Sheet";
+import { Body, Detail, Grow, Label, Notice, Press, SheetFrame, SheetMark, Skel, Tick, TitleText } from "@/components/sheet/Sheet";
 
 const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n);
 const share = (part: number, whole: number) => (whole > 0 ? Math.min(100, Math.max(0, (part / whole) * 100)) : 0);
@@ -78,6 +95,36 @@ function BigFigure({ label, value, color = S.ink, size = 44 }: { label: string; 
   );
 }
 
+/** One Set-up chart: a ruled block with its capital title and a chevron, the whole block opening its page. */
+function ChartBlock({ title, note, onPress, children, first }: { title: string; note?: string; onPress: () => void; children: React.ReactNode; first?: boolean }) {
+  return (
+    <Press onPress={onPress} style={(pressed) => ({ paddingVertical: 14, gap: 12, borderTopWidth: first ? 0 : 1, borderTopColor: S.rule, backgroundColor: pressed ? S.blueWash : "transparent" })}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Label color={S.ink} style={{ flex: 1 }}>{title}</Label>
+        {!!note && <Label>{note}</Label>}
+        <ChevronRight size={13} color={S.graphite} />
+      </View>
+      {children}
+    </Press>
+  );
+}
+
+/** A horizontal bar: the name on the left, a track scaled to `max`, the filled part, and its value at the end. */
+function BarRow({ name, value, max, label, color = S.ink }: { name: string; value: number; max: number; label: string; color?: string }) {
+  const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+      <Text numberOfLines={1} style={{ width: 92, fontFamily: fonts.body.medium, fontSize: 12, color: S.ink }}>{name}</Text>
+      <View style={{ flex: 1, height: 12, backgroundColor: S.line15 }}>
+        <Grow style={{ height: "100%", width: `${pct}%`, backgroundColor: color }} />
+      </View>
+      <Text style={{ width: 44, textAlign: "right", fontFamily: fonts.heading.semibold, fontSize: 12, color: S.ink, fontVariant: ["tabular-nums"] }}>{label}</Text>
+    </View>
+  );
+}
+
+const fmtDay = (ms: number) => new Date(ms).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
 export default function DashboardScreen() {
   const isAdmin = useIsAdmin();
   const [refreshing, setRefreshing] = useState(false);
@@ -99,20 +146,68 @@ export default function DashboardScreen() {
     retry: 1,
   });
 
+  // The same queries (and keys) the Approval Inbox, Approval Setup and Financial years pages use, so they share one cache.
+  const inbox = useQuery({ queryKey: ["approval-inbox"], queryFn: fetchInbox, enabled: isAdmin, refetchInterval: 60_000, staleTime: 30_000 });
+  const rules = useQuery({ queryKey: ["approval-workflows"], queryFn: fetchWorkflows, enabled: isAdmin, staleTime: 30_000, refetchInterval: 2 * 60_000 });
+  const years = useQuery({ queryKey: ["fin-years"], queryFn: getAllFinYears, enabled: isAdmin, staleTime: 60_000, refetchInterval: 5 * 60_000 });
+  const people = useQuery({ queryKey: ["reset-users"], queryFn: getUsers, enabled: isAdmin, staleTime: 60_000, refetchInterval: 5 * 60_000 });
+
   const loading = dash.isLoading || activity.isLoading;
+  const waitingItems = Array.isArray(inbox.data) ? inbox.data : [];
+  const waiting = waitingItems.length;
+  const forYou = waitingItems.filter((it) => it._canAct !== false).length;
+  const ages = waitingItems.map((it) => ageOf(it.RecordDate).age);
+  const old = ages.filter((a) => a === "old").length;
+  const today = ages.filter((a) => a === "today").length;
+  const week = waiting - old - today;
+  const ruleList = Array.isArray(rules.data) ? rules.data : [];
+  const rulesOn = ruleList.filter((r) => r.active).length;
+  const yearList = Array.isArray(years.data) ? years.data : [];
+  const currentYear = yearList.find((y) => y.status === "Active") ?? null;
+
+  // Approval rules: per area, how many approvable modules a switched-on rule covers; and any switched-on rule with a step
+  // that no one (neither a named person nor a role) can approve — records on it would wait forever.
+  const covered = new Set(ruleList.filter((r) => r.active).flatMap((r) => r.modules ?? []));
+  const validIds = new Set(MODULE_OPTIONS.map((m) => m.id));
+  const areas = MODULE_GROUPS.map((g) => {
+    const mods = g.modules.filter((m) => validIds.has(m));
+    return { label: g.label, total: mods.length, covered: mods.filter((m) => covered.has(m)).length };
+  }).filter((a) => a.total > 0);
+  const coveredCount = areas.reduce((n, a) => n + a.covered, 0);
+  const coverableCount = areas.reduce((n, a) => n + a.total, 0);
+  const stuckRules = ruleList.filter((r) => r.active && (r.levels ?? []).some((l) => !(l.userIds?.length) && !(l.roles?.length))).length;
+  // Financial year: the current one as a timeline.
+  const yearStart = currentYear ? new Date(currentYear.startDate).getTime() : NaN;
+  const yearEnd = currentYear ? new Date(currentYear.endDate).getTime() : NaN;
+  const yearOk = yearEnd > yearStart;
+  const yearPct = yearOk ? share(Date.now() - yearStart, yearEnd - yearStart) : 0;
+  const daysLeft = yearOk ? Math.max(0, Math.ceil((yearEnd - Date.now()) / 86_400_000)) : 0;
+  // People by role, from the full user list (Password reset's): active people per role, longest first, past six as Other.
+  const userList = Array.isArray(people.data) ? people.data : [];
+  const roleCounts = new Map<string, number>();
+  userList.filter((u) => u.isActive).forEach((u) => {
+    const r = u.role || "No role";
+    roleCounts.set(r, (roleCounts.get(r) ?? 0) + 1);
+  });
+  const roleRows = [...roleCounts.entries()].sort((x, y) => y[1] - x[1]);
+  const roleBars = roleRows.length > 7 ? [...roleRows.slice(0, 6), ["Other", roleRows.slice(6).reduce((n, r) => n + r[1], 0)] as [string, number]] : roleRows;
+  const roleMax = Math.max(1, ...roleBars.map((r) => r[1]));
+  const rolesHeld = roleRows.filter(([r]) => r !== "No role").length;
+  const roleName = (r: string) => (r === "Other" || r === "No role" ? r : r.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()));
+
   const st = dash.data?.stats;
   const totalUsers = st?.totalUsers ?? 0;
   const activeUsers = st?.activeUsers ?? 0;
   const inactiveUsers = Math.max(0, totalUsers - activeUsers);
   const totalRoles = st?.totalRoles ?? 0;
   const actions = activity.data?.total ?? 0;
-  const activePct = share(activeUsers, totalUsers);
   const recentUsers = dash.data?.recentUsers ?? [];
   const recent = activity.data?.data ?? [];
   const readAt = dash.dataUpdatedAt ? new Date(dash.dataUpdatedAt) : new Date();
-  const reading = dash.isFetching || activity.isFetching;
 
-  const reread = () => Promise.all([dash.refetch(), activity.refetch()]);
+  const reading = dash.isFetching || activity.isFetching || inbox.isFetching || rules.isFetching || years.isFetching || people.isFetching;
+
+  const reread = () => Promise.all([dash.refetch(), activity.refetch(), inbox.refetch(), rules.refetch(), years.refetch(), people.refetch()]);
   const onRefresh = async () => {
     setRefreshing(true);
     await reread();
@@ -131,7 +226,7 @@ export default function DashboardScreen() {
           <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 18, gap: 8 }}>
             <Label>CivilierERP · Admin</Label>
             <TitleText size={30}>Control center</TitleText>
-            <Body size={13} color={S.ink2}>Who has an account, who can still sign in, and what was last done in the system.</Body>
+            <Body size={13} color={S.ink2}>What is waiting for approval, how the approvals and rights are set up, and what was last done in the system.</Body>
           </View>
           <View style={{ flexDirection: "row", flexWrap: "wrap", borderTopWidth: 1, borderTopColor: S.ink }}>
             <View style={{ width: "100%", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ink, gap: 3 }}>
@@ -159,72 +254,151 @@ export default function DashboardScreen() {
         ) : null}
 
         {isAdmin && (
-          <Detail tag="A" title="Accounts" note="All time">
-            {loading ? (
+          <Detail tag="A" title="Approvals" note="Waiting now">
+            {inbox.isLoading ? (
               <>
                 <Skel h={54} w="60%" />
                 <Skel h={28} />
                 <Skel w="70%" />
               </>
+            ) : inbox.isError ? (
+              <Body size={13} color={S.graphite}>Could not read the approval inbox. Use Re-read to try again.</Body>
             ) : (
               <>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", columnGap: 30, rowGap: 14 }}>
-                  <BigFigure label="Users" value={totalUsers} />
-                  <BigFigure label="Can sign in" value={activeUsers} color={S.ink2} />
+                  <BigFigure label="Waiting" value={waiting} />
+                  <BigFigure label="For you" value={forYou} color={S.ink2} />
                   <View style={{ marginLeft: "auto", alignItems: "flex-end" }}>
-                    <Label>Active</Label>
-                    <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 30, letterSpacing: -0.9, color: S.blue, marginTop: 8, fontVariant: ["tabular-nums"] }}>
-                      {Math.round(activePct)}
-                      <Text style={{ fontSize: 15, fontFamily: fonts.heading.medium }}> %</Text>
+                    <Label color={old ? S.red : S.graphite}>Over a week</Label>
+                    <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 30, letterSpacing: -0.9, color: old ? S.red : S.ink, marginTop: 8, fontVariant: ["tabular-nums"] }}>
+                      <Tick value={old} />
                     </Text>
                   </View>
                 </View>
 
-                {/* Every account, measured out: active solid, discontinued hatched. */}
-                <View style={{ marginTop: 22 }}>
-                  <View style={{ height: 30, borderWidth: 1.5, borderColor: S.ink, backgroundColor: S.paper, overflow: "hidden" }}>
-                    <Hatch id="admin-accounts" />
-                    <Grow style={{ height: "100%", width: `${activePct}%`, backgroundColor: S.blue }} />
-                  </View>
-                  <View style={{ flexDirection: "row" }}>
-                    <View style={{ width: `${Math.min(Math.max(activePct, 24), 76)}%`, overflow: "hidden" }}>
-                      <Dimension text={`${fmtNum(activeUsers)} active`} color={S.blue} />
+                {waiting === 0 ? (
+                  <Body size={13} color={S.graphite} style={{ marginTop: 16 }}>Nothing is waiting for approval.</Body>
+                ) : (
+                  // Everything waiting, measured out by how long it has waited.
+                  <View style={{ marginTop: 22 }}>
+                    <View style={{ height: 30, flexDirection: "row", borderWidth: 1.5, borderColor: S.ink, backgroundColor: S.paper, overflow: "hidden" }}>
+                      {old > 0 && <Grow style={{ height: "100%", width: `${share(old, waiting)}%`, backgroundColor: S.red }} />}
+                      {week > 0 && <Grow delay={80} style={{ height: "100%", width: `${share(week, waiting)}%`, backgroundColor: S.ink }} />}
+                      {today > 0 && <Grow delay={160} style={{ height: "100%", width: `${share(today, waiting)}%`, backgroundColor: S.blue }} />}
                     </View>
-                    <View style={{ flex: 1, overflow: "hidden" }}>
-                      <Dimension text={`${fmtNum(inactiveUsers)} discontinued`} />
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 14, rowGap: 4, marginTop: 8 }}>
+                      {[
+                        { label: "over a week", n: old, color: S.red },
+                        { label: "this week", n: week, color: S.ink },
+                        { label: "today", n: today, color: S.blue },
+                      ].map((p) => (
+                        <View key={p.label} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <View style={{ width: 9, height: 9, backgroundColor: p.color }} />
+                          <Text style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite }}>
+                            <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{fmtNum(p.n)}</Text>
+                            {` ${p.label}`}
+                          </Text>
+                        </View>
+                      ))}
                     </View>
                   </View>
-                </View>
+                )}
+
+                <Press
+                  onPress={() => navigate("ApprovalInbox")}
+                  style={(pressed) => ({ marginTop: 16, minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: S.ink, backgroundColor: pressed ? S.blueWash : "transparent" })}
+                >
+                  <Label color={S.ink}>Open the approval inbox</Label>
+                </Press>
               </>
             )}
           </Detail>
         )}
 
         {isAdmin && (
-          <Detail tag="B" title="On record">
-            {loading ? (
+          <Detail tag="B" title="Set-up" note="Tap a chart to open it">
+            {loading || rules.isLoading || years.isLoading || people.isLoading ? (
               <>
-                <Skel h={40} />
-                <Skel h={40} />
-                <Skel h={40} />
+                <Skel h={110} />
+                <Skel h={110} />
+                <Skel h={70} />
               </>
             ) : (
-              <View>
-                {[
-                  { label: "Roles", value: totalRoles, sub: "that rights are granted to" },
-                  { label: "Discontinued", value: inactiveUsers, sub: inactiveUsers ? "accounts that can no longer sign in" : "every account can sign in" },
-                  { label: "Activity logged", value: actions, sub: "entries in the activity log" },
-                ].map((s, i) => (
-                  <View key={s.label} style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 12, paddingVertical: 13, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft }}>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Label color={S.ink}>{s.label}</Label>
-                      <Body size={12} color={S.graphite} style={{ marginTop: 4 }}>{s.sub}</Body>
+              <View style={{ marginTop: -14 }}>
+                {/* Approval rules by area */}
+                <ChartBlock first title="Approval rules by area" note={rules.isError ? undefined : `${coveredCount}/${coverableCount} modules`} onPress={() => navigate("ApprovalSetup")}>
+                  {rules.isError ? (
+                    <Body size={12.5} color={S.graphite}>Could not read the approval rules.</Body>
+                  ) : (
+                    <View style={{ gap: 9 }}>
+                      {areas.map((ar) => (
+                        <BarRow key={ar.label} name={ar.label} value={ar.covered} max={ar.total} label={`${ar.covered}/${ar.total}`} />
+                      ))}
+                      <Text style={{ fontFamily: fonts.body.regular, fontSize: 11.5, color: stuckRules || rulesOn === 0 ? S.red : S.graphite }}>
+                        {stuckRules
+                          ? `${stuckRules} switched-on rule${stuckRules === 1 ? " has" : "s have"} a step no one can approve.`
+                          : rulesOn === 0
+                            ? "No rule is switched on: nothing needs approval."
+                            : `Modules covered by a switched-on rule · ${rulesOn} of ${ruleList.length} rule${ruleList.length === 1 ? "" : "s"} on`}
+                      </Text>
                     </View>
-                    <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 28, letterSpacing: -0.8, color: S.ink, fontVariant: ["tabular-nums"] }}>
-                      <Tick value={s.value} />
-                    </Text>
-                  </View>
-                ))}
+                  )}
+                </ChartBlock>
+
+                {/* People by role */}
+                <ChartBlock title="People by role" note={`${fmtNum(activeUsers)} active`} onPress={() => navigate("PasswordReset")}>
+                  {people.isError ? (
+                    <Body size={12.5} color={S.graphite}>Could not read the user list.</Body>
+                  ) : roleBars.length === 0 ? (
+                    <Body size={12.5} color={S.graphite}>No active accounts.</Body>
+                  ) : (
+                    <View style={{ gap: 9 }}>
+                      {roleBars.map(([r, n]) => (
+                        <BarRow key={r} name={roleName(r)} value={n} max={roleMax} label={fmtNum(n)} color={r === "Other" || r === "No role" ? S.graphite : S.ink} />
+                      ))}
+                      <Text style={{ fontFamily: fonts.body.regular, fontSize: 11.5, color: S.graphite }}>
+                        {`${fmtNum(totalUsers)} accounts · ${fmtNum(inactiveUsers)} discontinued · ${Math.max(0, totalRoles - rolesHeld)} of ${fmtNum(totalRoles)} roles unused`}
+                      </Text>
+                    </View>
+                  )}
+                </ChartBlock>
+
+                {/* Financial year, as a timeline */}
+                <ChartBlock title="Financial year" note={currentYear?.year} onPress={() => navigate("FinYearRights")}>
+                  {years.isError ? (
+                    <Body size={12.5} color={S.graphite}>Could not read the financial years.</Body>
+                  ) : !currentYear || !yearOk ? (
+                    <Text style={{ fontFamily: fonts.body.regular, fontSize: 12.5, color: S.red }}>No active financial year is set up.</Text>
+                  ) : (
+                    <View style={{ gap: 6 }}>
+                      <View style={{ height: 22, justifyContent: "center" }}>
+                        <View style={{ height: 12, backgroundColor: S.line15 }}>
+                          <Grow style={{ height: "100%", width: `${yearPct}%`, backgroundColor: currentYear.locked ? S.red : S.blue }} />
+                        </View>
+                        {/* Today */}
+                        <View style={{ position: "absolute", left: `${yearPct}%`, top: 0, bottom: 0, width: 2, marginLeft: -1, backgroundColor: S.ink }} />
+                      </View>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                        <Text style={{ fontFamily: fonts.body.regular, fontSize: 11, color: S.graphite }}>{fmtDay(yearStart)}</Text>
+                        <Text style={{ fontFamily: fonts.body.regular, fontSize: 11, color: S.graphite }}>{fmtDay(yearEnd)}</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+                        <Text style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite }}>
+                          <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{`${Math.round(yearPct)}%`}</Text>
+                          {" through · "}
+                          <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{fmtNum(daysLeft)}</Text>
+                          {` day${daysLeft === 1 ? "" : "s"} left`}
+                        </Text>
+                        {currentYear.locked && (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: S.red }}>
+                            <Lock size={9} color="#ffffff" />
+                            <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 9, letterSpacing: 0.9, textTransform: "uppercase", color: "#ffffff" }}>Locked</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  )}
+                </ChartBlock>
               </View>
             )}
           </Detail>

@@ -7,7 +7,7 @@ import { View, Text, ScrollView, ActivityIndicator } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useQuery } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { Phone, Mail, Home, Building2, History, Wallet, ListChecks, Receipt, Ticket } from "lucide-react-native";
+import { Phone, Mail, Home, Building2, Wallet, ListChecks, Receipt, Ticket } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { getMaintenanceCustomer, getMaintenanceCharges } from "@/api/maintenanceApi";

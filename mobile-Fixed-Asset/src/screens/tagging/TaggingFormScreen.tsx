@@ -2,7 +2,7 @@
 // POST /api/fixed-asset-tagging. Opened from a received-stock row it starts on that stock (prefill).
 // Editing only touches date + remarks (the route allows nothing else).
 import { useEffect, useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Text } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RouteProp } from "@react-navigation/native";
 import { useNavigation, useRoute } from "@react-navigation/native";
