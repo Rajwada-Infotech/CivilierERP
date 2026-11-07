@@ -1,7 +1,8 @@
 // RN port of the web inbox's record preview and its approve / reject (ApprovalActions), on the drawing sheet: a page up
 // over the inbox with the record's reference as the title (module, date, party under it), its status and step; the
 // summary (date, party, amount, created / approved / rejected by); a rejection note when there is one; the record's
-// lines; and every other field of the full record from its own detail endpoint. Along the foot, while Pending:
+// lines; and every other field of the full record from its own detail endpoint. A Download PDF key by the status prints
+// all of that to a PDF and opens the share sheet (approvalPdf.ts). Along the foot, while Pending:
 //   Approve / Reject (Reject asks for a reason)      — the usual case
 //   Confirm                                          — an engineer confirming their own Civil Work DPR assignment
 //   "Waiting on level n of m"                        — named on the workflow, but not at its current level
@@ -11,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { View, Text, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CheckCircle2, ClipboardList, FileText, XCircle } from "lucide-react-native";
+import { CheckCircle2, ClipboardList, Download, FileText, XCircle } from "lucide-react-native";
 import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
@@ -19,6 +20,7 @@ import { confirmEngineerAssignment, fetchRecordDetail, runApprovalAction, type I
 import { Body, Field, InfoGrid, Input, Key, Label, Notice, Panel, SheetMark, Skel, statusTone } from "@/components/sheet/Sheet";
 import { FormPage, LineList, fmtDate } from "@/components/sheet/Register";
 import { MODULE_CONFIG, REVIEW_INSTEAD, SUB_GATE_SUFFIX, needsBankReview } from "./approvalInboxConfig";
+import { downloadApprovalPdf, type PdfLine } from "./approvalPdf";
 
 const fmtAmount = (n: number | null) => (n == null ? "—" : formatINR(n, { decimals: 2 }));
 
@@ -76,6 +78,7 @@ export function ApprovalInboxDetailModal({
   const [rejecting, setRejecting] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
   const [acting, setActing] = useState<"approve" | "reject" | "confirm" | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const cfg = item ? MODULE_CONFIG[item.Module] : undefined;
 
@@ -109,6 +112,46 @@ export function ApprovalInboxDetailModal({
         ([k, v]) => !PREVIEW_HIDDEN_KEYS.has(stripDbPrefix(k).toLowerCase()) && !isIdField(k) && !isJsonBlob(v) && !(Array.isArray(v) && v.length === 0) && typeof v !== "object",
       )
     : [];
+  const summary = [
+    { label: "Date", value: fmtDate(item.RecordDate) },
+    { label: "Amount", value: item.Module === "civilworkdpr-approval" && item.Amount == null ? item.ActivityName || "—" : fmtAmount(item.Amount) },
+    { label: "Party", value: party, wide: true },
+    { label: "Created by", value: item.CreatedBy || "—" },
+    { label: "Approved by", value: item.ApprovedBy || "—" },
+    ...(item.RejectedBy ? [{ label: "Rejected by", value: item.RejectedBy }] : []),
+    ...(item.SourceTransferDocNo ? [{ label: "Transfer", value: `${item.SourceTransferDocNo}${item.FromGodownName && item.ToGodownName ? ` · ${item.FromGodownName} → ${item.ToGodownName}` : ""}`, wide: true }] : []),
+  ];
+  const lines: PdfLine[] = lineItems.map((li) => {
+    const name = String(li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—");
+    const qty = Number(li.Quantity ?? li.quantity ?? 0);
+    const uom = String(li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "");
+    const rate = Number(li.Rate ?? li.rate ?? 0);
+    const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
+    const q = `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""}`;
+    return isMaterialRequest ? { name, qty: q } : { name, qty: q, rate: formatINR(rate), amount: formatINR(amount) };
+  });
+  const stageText = item._stage ? `${item.Status} · ${item._stage.label}` : item.Status;
+
+  const download = async () => {
+    setDownloading(true);
+    try {
+      await downloadApprovalPdf({
+        module: cfg?.label ?? item.ModuleLabel,
+        reference: item.Reference || `#${item.RecordId}`,
+        status: stageText,
+        summary: summary.map(({ label, value }) => ({ label, value: String(value) })),
+        rejectionNote: item.RejectionNote,
+        lines,
+        quantityOnly: isMaterialRequest,
+        fields: extraFields.map(([k, v]) => ({ label: labelizeKey(k), value: formatPreviewValue(v) })),
+      });
+    } catch (e: any) {
+      Alert.alert("Could not make the PDF", e?.message || "Something went wrong.");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const pending = item.Status === "Pending";
   const engineerConfirm = item.Module === "work-allocation-engineer";
   const notYourLevel = pending && item._canAct === false;
@@ -192,37 +235,28 @@ export function ApprovalInboxDetailModal({
       saveLabel=""
       footer={footer}
     >
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-        <SheetMark text={item._stage ? `${item.Status} · ${item._stage.label}` : item.Status} tone={/draft/i.test(item.Status) ? "draft" : statusTone(item.Status)} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <SheetMark text={stageText} tone={/draft/i.test(item.Status) ? "draft" : statusTone(item.Status)} />
+        {/* Waits for the full record, so the PDF carries every field the page shows. */}
+        <Key
+          label={downloading ? "Preparing…" : loading ? "Loading…" : "Download PDF"}
+          icon={<Download size={13} color={S.ink} />}
+          onPress={download}
+          disabled={downloading || loading}
+          style={{ minHeight: 36, paddingHorizontal: 12 }}
+        />
       </View>
 
-      <InfoGrid
-        items={[
-          { label: "Date", value: fmtDate(item.RecordDate) },
-          { label: "Amount", value: item.Module === "civilworkdpr-approval" && item.Amount == null ? item.ActivityName || "—" : fmtAmount(item.Amount) },
-          { label: "Party", value: party, wide: true },
-          { label: "Created by", value: item.CreatedBy || "—" },
-          { label: "Approved by", value: item.ApprovedBy || "—" },
-          ...(item.RejectedBy ? [{ label: "Rejected by", value: item.RejectedBy }] : []),
-          ...(item.SourceTransferDocNo ? [{ label: "Transfer", value: `${item.SourceTransferDocNo}${item.FromGodownName && item.ToGodownName ? ` · ${item.FromGodownName} → ${item.ToGodownName}` : ""}`, wide: true }] : []),
-        ]}
-      />
+      <InfoGrid items={summary} />
 
       {!!item.RejectionNote && <Notice>{`Rejection note: ${item.RejectionNote}`}</Notice>}
 
       {lineItems.length > 0 && (
         <Panel title={`Items (${lineItems.length})`} icon={<ClipboardList size={14} color={S.ink} />}>
           <LineList
-            rows={lineItems.map((li, i) => {
-              const name = String(li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—");
-              const qty = Number(li.Quantity ?? li.quantity ?? 0);
-              const uom = String(li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "");
-              const rate = Number(li.Rate ?? li.rate ?? 0);
-              const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
-              return isMaterialRequest
-                ? { key: i, title: name, right: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""}` }
-                : { key: i, title: name, note: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""} × ${formatINR(rate)}`, right: formatINR(amount) };
-            })}
+            rows={lines.map((l, i) =>
+              isMaterialRequest ? { key: i, title: l.name, right: l.qty } : { key: i, title: l.name, note: `${l.qty} × ${l.rate}`, right: l.amount ?? "" },
+            )}
           />
         </Panel>
       )}

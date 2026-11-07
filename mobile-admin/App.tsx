@@ -7,6 +7,7 @@ import { queryClient } from "@/services/queryClient";
 import { AuthProvider } from "@/auth/AuthContext";
 import RootNavigator from "@/navigation/RootNavigator";
 import { UpdateGate } from "@/updater/UpdateGate";
+import { OtaUpdateGate } from "@/updater/OtaUpdateGate";
 import { PushNotificationsGate } from "@/notifications/PushNotificationsGate";
 import { navigationRef } from "@/navigation/navigationRef";
 import { useAppFonts } from "@/theme/fonts";
@@ -43,6 +44,7 @@ export default function App() {
         </AuthProvider>
       </QueryClientProvider>
       <UpdateGate appKey="admin" />
+      <OtaUpdateGate />
       <StatusBar style="light" />
     </SafeAreaProvider>
   );
