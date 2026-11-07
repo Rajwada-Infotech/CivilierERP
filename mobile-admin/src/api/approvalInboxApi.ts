@@ -37,6 +37,10 @@ export interface InboxItem {
   // the web app's InboxItem (src/pages/admin/ApprovalInbox.tsx) — omitted
   // (undefined) for every normal, actionable row.
   _canAct?: boolean;
+  /** A multi-step approval names the step it is waiting on ("Final Level"). */
+  _stage?: { level: number; total: number; label: string };
+  /** Civil Work DPR: the activity an approval is for (it has no amount). */
+  ActivityName?: string | null;
   _currentLevel?: number;
   _totalLevels?: number;
 }
@@ -71,6 +75,14 @@ export const runApprovalAction = async (
     headers: { "Content-Type": "application/json" },
     body: action === "reject" ? JSON.stringify({ note: opts?.note ?? "" }) : undefined,
   });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+};
+
+/** An engineer confirming their own Civil Work DPR task assignment (web: confirmEngineerAssignment). */
+export const confirmEngineerAssignment = async (id: number): Promise<{ success: boolean; allApproved: boolean }> => {
+  const res = await fetchWithAuth(`/api/dependency-activity-assignment/engineer-approval/${id}/confirm`, { method: "PUT" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   return data;

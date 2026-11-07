@@ -1,52 +1,66 @@
-// RN port of ApprovalSetup.tsx's MODULE_OPTIONS / MODULE_GROUPS /
-// APPROVAL_TYPES (web) — same modules, same emoji icons (kept as literal
-// strings, same as web, rather than mapped to lucide icons), same three
-// approval styles.
-import { ArrowDown, Users, GitBranch } from "lucide-react-native";
+// RN port of src/pages/admin/approvalSetup/config.tsx (web): every module that can carry an approval rule, with the
+// web's labels and descriptions, and how they group (Material, Engineering, Finance, Sales, CRM). Generated from the
+// web's own list so the two stay the same; the sheet has no emoji, so a module is its name.
 
-export const MODULE_OPTIONS = [
-  { id: "GRN", label: "Goods Receipt (GRN)", icon: "📦", desc: "When goods arrive at site" },
-  { id: "PurchaseOrders", label: "Purchase Order", icon: "🛒", desc: "Before a PO is raised" },
-  { id: "MaterialIssues", label: "Material Issue", icon: "🚚", desc: "When materials leave store" },
-  { id: "Expenses", label: "Expense Booking", icon: "🧾", desc: "Staff expense claims" },
-  { id: "WorkOrderHeader", label: "Work Order", icon: "🔧", desc: "Before work begins" },
-  { id: "NewPayment", label: "Payment", icon: "💳", desc: "Before payments are made" },
-  { id: "StockTransfer", label: "Stock Transfer", icon: "🔄", desc: "Moving stock between sites" },
-  { id: "SaleOrder", label: "Sale Order", icon: "🛍️", desc: "Inter-company / inter-project item sales" },
-  { id: "JournalVoucher", label: "Journal Voucher", icon: "📒", desc: "Forceful account-head mismatch correction — approval is always restricted to super_admin regardless of who's assigned here" },
-  { id: "InterCompanyTransfer", label: "Inter-Company Transfer", icon: "🏭", desc: "Approving fires the full auto-generated document chain (SO→SI→Payment→PO→GRN→Expense→Payment) — restricted to super_admin regardless of who's assigned here" },
-  { id: "Contract", label: "Contract", icon: "📄", desc: "Auto-submitted for approval as soon as it's created — no Draft step" },
-  { id: "crm-agreements", label: "CRM Agreement (Senior Approval)", icon: "📝", desc: "Before an agreement is sent to the customer portal — approver roles here are always restricted to admin/super_admin/marketing_head regardless of who's assigned" },
-] as const;
+export const MODULE_OPTIONS: { id: string; label: string; desc: string }[] = [
+  { id: "GRN", label: "Goods Receipt (GRN)", desc: "When goods arrive at site" },
+  { id: "PurchaseOrders", label: "Purchase Order", desc: "Before a PO is raised" },
+  { id: "MaterialIssues", label: "Material Issue", desc: "When materials leave store" },
+  { id: "MaterialIssueReturn", label: "Material Issue Return", desc: "Before returned material is credited back to stock" },
+  { id: "Expenses", label: "Invoice", desc: "Before an invoice is booked" },
+  { id: "WorkOrderHeader", label: "Work Order", desc: "Before work begins" },
+  { id: "NewPayment", label: "Payment", desc: "Before payments are made" },
+  { id: "CrmRefundPayment", label: "CRM Refund Payment", desc: "A CRM refund's payout voucher — single level by default, matching Received Payments' own approval pattern rather than the general Payment workflow above" },
+  { id: "MaterialRequests", label: "Material Request", desc: "Before store issues material against a request" },
+  { id: "VehicleInOut", label: "Vehicle In/Out", desc: "Site gate entry/exit log" },
+  { id: "debit-note", label: "Debit Note", desc: "Supplier debit note before it's finalized" },
+  { id: "StockTransfer", label: "Stock Transfer", desc: "Stock only moves between godowns once this is fully approved" },
+  { id: "SaleOrder", label: "Sale Order", desc: "Inter-company / inter-project item sales" },
+  { id: "JournalVoucher", label: "Journal Voucher", desc: "Forceful account-head mismatch correction" },
+  { id: "InterCompanyTransfer", label: "Inter-Company Transfer", desc: "Approving fires the full auto-generated document chain (SO→SI→Payment→PO→GRN→Expense→Payment)" },
+  { id: "FundTransfer", label: "Fund Transfer", desc: "Bank-to-bank cash movement — inter-company transfers book as a loan on approval" },
+  { id: "Contract", label: "Contract", desc: "Auto-submitted for approval as soon as it's created — no Draft step" },
+  { id: "BOQ", label: "BOQ", desc: "Bill of Quantities before it's locked" },
+  { id: "WorkDone", label: "Work Done", desc: "Measured work-done entry before certification" },
+  { id: "crm-agreements", label: "CRM Agreement (Senior Approval)", desc: "Before an agreement is sent to the customer portal" },
+  { id: "crm-agreement-date", label: "CRM Agreement (Date Approval)", desc: "Once both sides' proposed dates match, before the Agreement Date is locked" },
+  { id: "crm-applications", label: "CRM Application", desc: "Customer application before it converts to a booking" },
+  { id: "crm-bookings", label: "CRM Booking", desc: "Unit booking confirmation" },
+  { id: "crm-booking-verification", label: "CRM Booking — Data Verification", desc: "Ticks the Data Review checklist and sends the booking for approval (Verify & Send for Approval)" },
+  { id: "crm-booking-amendment", label: "CRM Booking Amendment", desc: "Changes to an existing booking" },
+  { id: "crm-sales-deed-senior", label: "CRM Sale Deed (Senior Approval)", desc: "Senior sign-off on the Sale Deed" },
+  { id: "crm-sales-deed-director", label: "CRM Sale Deed (Director Approval)", desc: "Before Sale Deed registration proceeds" },
+  { id: "crm-registry-complete", label: "CRM Registry Complete", desc: "Confirms the Sale Deed was registered at the Sub-Registrar" },
+  { id: "crm-registry-cancel", label: "CRM Registry Cancel", desc: "Cancels a registry step" },
+  { id: "crm-mutation-approve", label: "CRM Mutation Approve", desc: "Confirms the municipal authority's Khata transfer" },
+  { id: "crm-query-payment-confirm", label: "CRM Query Payment Confirm", desc: "Confirms government stamp-duty/query fee payment" },
+  { id: "crm-noc", label: "CRM NOC", desc: "Organisation & bank No-Objection Certificate" },
+  { id: "crm-brokerage", label: "CRM Brokerage", desc: "Broker payment/brokerage record" },
+  { id: "crm-cancellations", label: "CRM Cancellation", desc: "Booking cancellation" },
+  { id: "crm-transfer-deeds", label: "Transfer Deed — Legal Head", desc: "A resale's deed of assignment or a buy-back's cancellation deed, before it goes to the parties" },
+  { id: "crm-transfer-deed-date", label: "Transfer Deed — Date Approval", desc: "The signing date every party accepted, before it is fixed" },
+  { id: "crm-resales", label: "Property Resale & Buy-back", desc: "A sold property passing to a new buyer, or bought back by us" },
+  { id: "crm-ownership-changes", label: "Ownership Change", desc: "A new owner after the sale deed is registered, recorded from their own registered sale deed" },
+  { id: "crm-credit-notes", label: "Credit Note (invoice reduced)", desc: "An invoice reduced without a refund — discount, area change, price correction" },
+  { id: "crm-credit-note-cancel", label: "Credit Note — Cancellation", desc: "Cancelling an issued credit note (a GST document)" },
+  { id: "crm-refunds", label: "CRM Refund", desc: "Customer refund before it's paid out" },
+  { id: "crm-refunds-finance", label: "CRM Refund — Finance", desc: "Finance's sign-off on a refund before payment" },
+  { id: "received-payment", label: "Received Payment", desc: "Money received, before it posts to the ledger" },
+  { id: "crm-money-receipts", label: "CRM Money Receipt", desc: "Bouncing a customer's money receipt before it goes to Finance (it goes when the Director approves the booking)" },
+  { id: "crm-bank-details-edit", label: "Edit locked bank / KYC details", desc: "Who besides the assigned salesperson may change a customer's saved bank and KYC details" },
+  { id: "crm-sales-deed-docs", label: "Upload sale deed documents", desc: "Who besides the assigned legal executive may upload a sale deed's documents" },
+  { id: "account-heads", label: "Account Head", desc: "A new account head before it can be used" },
+  { id: "activity-master", label: "Activity Master", desc: "A project activity before it can be used" },
+  { id: "engineering-activity-master", label: "Engineering Activity Master", desc: "An engineering activity before it can be used" },
+  { id: "sa-lead-transfers", label: "SA Lead Transfer", desc: "A team lead's request to move leads to another team" },
+];
 
-export const MODULE_GROUPS = [
-  { id: "material", label: "Material", icon: "🏗️", modules: ["GRN", "PurchaseOrders", "MaterialIssues", "Expenses", "StockTransfer", "InterCompanyTransfer"] },
-  { id: "finance", label: "Finance", icon: "💰", modules: ["NewPayment", "JournalVoucher", "Contract"] },
-  { id: "engineering", label: "Engineering", icon: "⚙️", modules: ["WorkOrderHeader"] },
-  { id: "sales", label: "Sales", icon: "🛍️", modules: ["SaleOrder"] },
-  { id: "crm", label: "CRM", icon: "🏠", modules: ["crm-agreements"] },
-] as const;
+export const MODULE_GROUPS: { id: string; label: string; modules: string[] }[] = [
+  { id: "material", label: "Material", modules: ["GRN", "PurchaseOrders", "MaterialIssues", "MaterialIssueReturn", "MaterialRequests", "InterCompanyTransfer", "VehicleInOut", "debit-note", "StockTransfer"] },
+  { id: "engineering", label: "Engineering", modules: ["WorkOrderHeader", "BOQ", "WorkDone", "activity-master", "engineering-activity-master"] },
+  { id: "finance", label: "Finance", modules: ["NewPayment", "received-payment", "account-heads", "CrmRefundPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"] },
+  { id: "sales", label: "Sales", modules: ["SaleOrder", "sa-lead-transfers"] },
+  { id: "crm", label: "CRM", modules: ["crm-applications", "crm-booking-verification", "crm-bookings", "crm-booking-amendment", "crm-agreements", "crm-agreement-date", "crm-sales-deed-director", "crm-sales-deed-senior", "crm-registry-complete", "crm-registry-cancel", "crm-mutation-approve", "crm-query-payment-confirm", "crm-noc", "crm-brokerage", "crm-money-receipts", "crm-refunds-finance", "crm-bank-details-edit", "crm-sales-deed-docs", "crm-refunds", "crm-resales", "crm-transfer-deeds", "crm-transfer-deed-date", "crm-ownership-changes", "crm-credit-notes", "crm-credit-note-cancel", "crm-cancellations"] },
+];
 
-export const APPROVAL_TYPES = [
-  {
-    id: "sequential" as const,
-    label: "One by one",
-    icon: ArrowDown,
-    desc: "Each person must approve before the next is asked. Like a chain — first Manager, then Director.",
-    example: "Manager → Director → CFO",
-  },
-  {
-    id: "any" as const,
-    label: "Anyone can approve",
-    icon: Users,
-    desc: "Any one person from the list can approve. Useful when multiple people share the same role.",
-    example: "Manager A or Manager B",
-  },
-  {
-    id: "parallel" as const,
-    label: "Everyone at once",
-    icon: GitBranch,
-    desc: "All approvers are asked at the same time. All must approve before it moves forward.",
-    example: "Manager + Director + CFO (simultaneously)",
-  },
-] as const;
+export const moduleLabel = (id: string) => MODULE_OPTIONS.find((m) => m.id === id)?.label ?? id;

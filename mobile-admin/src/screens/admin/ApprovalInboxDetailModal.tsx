@@ -1,66 +1,51 @@
-// RN port of ApprovalInbox.tsx's RecordPreviewModal (web) — fetches the
-// record's own detail endpoint so the reviewer sees every field, not just
-// the inbox row's summary. "Open in Module" is dropped (no module screens
-// exist on mobile-admin yet to deep-link to).
+// RN port of the web inbox's record preview and its approve / reject (ApprovalActions), on the drawing sheet: a page up
+// over the inbox with the record's reference as the title (module, date, party under it), its status and step; the
+// summary (date, party, amount, created / approved / rejected by); a rejection note when there is one; the record's
+// lines; and every other field of the full record from its own detail endpoint. Along the foot, while Pending:
+//   Approve / Reject (Reject asks for a reason)      — the usual case
+//   Confirm                                          — an engineer confirming their own Civil Work DPR assignment
+//   "Waiting on level n of m"                        — named on the workflow, but not at its current level
+//   a note instead of Approve                        — a received payment still waiting for its deposit bank, and the
+//                                                      modules whose approval needs a review step (bookings, brokerage,
+//                                                      refunds at finance) that only the web app has. Reject still works.
 import { useEffect, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, ActivityIndicator, Alert } from "react-native";
+import { View, Text, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { X, CheckCircle2, XCircle } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { CheckCircle2, ClipboardList, FileText, XCircle } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
-import { fetchRecordDetail, runApprovalAction, type InboxItem } from "@/api/approvalInboxApi";
-import { MODULE_CONFIG, SUB_GATE_SUFFIX } from "./approvalInboxConfig";
-import { StatusBadge } from "./StatusBadge";
+import { confirmEngineerAssignment, fetchRecordDetail, runApprovalAction, type InboxItem } from "@/api/approvalInboxApi";
+import { Body, Field, InfoGrid, Input, Key, Label, Notice, Panel, SheetMark, Skel, statusTone } from "@/components/sheet/Sheet";
+import { FormPage, LineList, fmtDate } from "@/components/sheet/Register";
+import { MODULE_CONFIG, REVIEW_INSTEAD, SUB_GATE_SUFFIX, needsBankReview } from "./approvalInboxConfig";
 
-const fmtDate = (d: string | null) => {
-  if (!d) return "—";
-  try {
-    return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  } catch {
-    return "—";
-  }
-};
 const fmtAmount = (n: number | null) => (n == null ? "—" : formatINR(n, { decimals: 2 }));
 
 const PREVIEW_HIDDEN_KEYS = new Set([
-  "id", "_id", "attachments", "parties", "lineitems", "items", "poitems",
-  "billingtermsdata", "termsandconditions", "createdat", "updatedat",
-  "approvedat", "rejectedat", "docnumber", "belongsto",
-  "createdby", "updatedby", "approvedby", "rejectedby", "projectname",
+  "id", "_id", "attachments", "parties", "lineitems", "items", "poitems", "billingtermsdata", "termsandconditions", "createdat",
+  "updatedat", "approvedat", "rejectedat", "docnumber", "belongsto", "createdby", "updatedby", "approvedby", "rejectedby", "projectname",
 ]);
-
-function stripDbPrefix(key: string): string {
-  return key.replace(/^[A-Z](?=[A-Z])/, "");
-}
-function isIdField(key: string): boolean {
-  return /id$/i.test(key);
-}
+const stripDbPrefix = (key: string) => key.replace(/^[A-Z](?=[A-Z])/, "");
+const isIdField = (key: string) => /id$/i.test(key);
 function isJsonBlob(value: unknown): boolean {
-  if (typeof value !== "string") return false;
-  const s = value.trim();
-  if (!s) return false;
+  if (typeof value !== "string" || !value.trim()) return false;
   try {
-    let parsed = JSON.parse(s);
+    let parsed = JSON.parse(value);
     if (typeof parsed === "string") parsed = JSON.parse(parsed);
     return typeof parsed === "object" && parsed !== null;
   } catch {
     return false;
   }
 }
-function labelizeKey(key: string): string {
-  return stripDbPrefix(key)
+const labelizeKey = (key: string) =>
+  stripDbPrefix(key)
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/^./, (c) => c.toUpperCase())
     .trim();
-}
 function extractLineItems(detail: Record<string, unknown> | null): Record<string, unknown>[] {
   if (!detail) return [];
-  // "items" (lowercase) covers Material Requests' own GET /:id response
-  // (materialRequests.js: `{ ...header, items: [...] }`) — missing it meant
-  // this modal's line-items list silently never rendered for MRs at all,
-  // even though the data was right there in `detail`. Same fix as web's
-  // ApprovalInbox.tsx's extractLineItems.
+  // "items" (lowercase) is a material request's own GET /:id shape.
   for (const key of ["LineItems", "POItems", "Items", "items"]) {
     const v = detail[key];
     if (Array.isArray(v) && v.length > 0) return v as Record<string, unknown>[];
@@ -81,15 +66,6 @@ function formatPreviewValue(value: unknown): string {
   return str;
 }
 
-function SummaryCell({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={{ width: "48%", marginBottom: 12 }}>
-      <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 9, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</Text>
-      <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.regular, marginTop: 2 }}>{value}</Text>
-    </View>
-  );
-}
-
 export function ApprovalInboxDetailModal({
   item, onClose, onActionDone,
 }: { item: InboxItem | null; onClose: () => void; onActionDone: (recordId: string, module: string) => void }) {
@@ -99,10 +75,9 @@ export function ApprovalInboxDetailModal({
   const [fetchFailed, setFetchFailed] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
-  const [acting, setActing] = useState<"approve" | "reject" | null>(null);
+  const [acting, setActing] = useState<"approve" | "reject" | "confirm" | null>(null);
 
   const cfg = item ? MODULE_CONFIG[item.Module] : undefined;
-  const Icon = cfg?.icon ?? CheckCircle2;
 
   useEffect(() => {
     if (!item) return;
@@ -114,10 +89,12 @@ export function ApprovalInboxDetailModal({
     setLoading(true);
     let cancelled = false;
     fetchRecordDetail(cfg.apiEndpoint, item.RecordId)
-      .then((d) => { if (!cancelled) setDetail(d); })
-      .catch(() => { if (!cancelled) setFetchFailed(true); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .then((d) => !cancelled && setDetail(d))
+      .catch(() => !cancelled && setFetchFailed(true))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item?.Module, item?.RecordId]);
 
@@ -125,21 +102,17 @@ export function ApprovalInboxDetailModal({
 
   const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
   const lineItems = extractLineItems(detail);
-  // A Material Request has no Rate/Amount at all — pricing only enters the
-  // picture once a PO is raised against it — so showing "qty × ₹0.00 = ₹0.00"
-  // per line here was just wrong, not merely empty. Name + Qty (+ UOM) is
-  // all that's meaningful for an MR. Matches web's ApprovalReviewPanel.tsx.
+  // A material request has no rate or amount yet (pricing comes with its PO): name and quantity only.
   const isMaterialRequest = item.Module === "material-requests";
   const extraFields = detail
     ? Object.entries(detail).filter(
-        ([k, v]) =>
-          !PREVIEW_HIDDEN_KEYS.has(stripDbPrefix(k).toLowerCase()) &&
-          !isIdField(k) &&
-          !isJsonBlob(v) &&
-          !(Array.isArray(v) && v.length === 0) &&
-          typeof v !== "object",
+        ([k, v]) => !PREVIEW_HIDDEN_KEYS.has(stripDbPrefix(k).toLowerCase()) && !isIdField(k) && !isJsonBlob(v) && !(Array.isArray(v) && v.length === 0) && typeof v !== "object",
       )
     : [];
+  const pending = item.Status === "Pending";
+  const engineerConfirm = item.Module === "work-allocation-engineer";
+  const notYourLevel = pending && item._canAct === false;
+  const approveBlockedNote = needsBankReview(item) ? "Waiting for Accounts to set the deposit bank on the Received Payment page (web app)." : REVIEW_INSTEAD[item.Module];
 
   const doAction = async (action: "approve" | "reject") => {
     setActing(action);
@@ -151,187 +124,125 @@ export function ApprovalInboxDetailModal({
       onActionDone(item.RecordId, item.Module);
       onClose();
     } catch (e: any) {
-      Alert.alert(action === "approve" ? "Approve failed" : "Reject failed", e.message || "Something went wrong.");
+      Alert.alert(action === "approve" ? "Could not approve" : "Could not reject", e.message || "Something went wrong.");
     } finally {
       setActing(null);
     }
   };
 
-  return (
-    <Modal visible={!!item} animationType="slide" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top }}>
-        <View className="flex-row items-center justify-between px-4 py-3" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
-          <View className="flex-row items-center gap-2.5 flex-1 min-w-0">
-            <View className="w-9 h-9 rounded-lg items-center justify-center" style={{ backgroundColor: `${cfg?.color ?? colors.mutedForeground}1f` }}>
-              <Icon size={16} color={cfg?.color ?? colors.mutedForeground} />
-            </View>
-            <View className="flex-1 min-w-0">
-              <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.semibold }}>{item.ModuleLabel}</Text>
-              <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>{item.Reference || `#${item.RecordId}`}</Text>
-            </View>
-          </View>
-          <StatusBadge status={item.Status} />
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center ml-2.5" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
+  const doConfirm = async () => {
+    setActing("confirm");
+    try {
+      const r = await confirmEngineerAssignment(Number(item.RecordId));
+      Alert.alert("Confirmed", r.allApproved ? "The activity moved to In Progress." : "Waiting on the other assigned engineer(s).");
+      onActionDone(item.RecordId, item.Module);
+      onClose();
+    } catch (e: any) {
+      Alert.alert("Could not confirm", e.message || "Something went wrong.");
+    } finally {
+      setActing(null);
+    }
+  };
+
+  const foot = (children: React.ReactNode) => (
+    <View style={{ gap: 10, paddingHorizontal: 16, paddingTop: 10, paddingBottom: insets.bottom + 12, borderTopWidth: 1, borderTopColor: S.ink, backgroundColor: S.paper }}>{children}</View>
+  );
+
+  const footer = !pending ? null : engineerConfirm ? (
+    foot(<Key tone="ink" label={acting === "confirm" ? "Confirming…" : "Confirm assignment"} icon={<CheckCircle2 size={13} color={S.paper} />} onPress={doConfirm} disabled={acting !== null} />)
+  ) : notYourLevel ? (
+    foot(
+      <View style={{ minHeight: 44, alignItems: "center", justifyContent: "center", borderWidth: 1, borderStyle: "dashed", borderColor: S.line40 }}>
+        <Label>{`Waiting on level ${item._currentLevel}${item._totalLevels ? ` of ${item._totalLevels}` : ""}`}</Label>
+      </View>,
+    )
+  ) : rejecting ? (
+    foot(
+      <>
+        <Field label="Reason for rejection">
+          <Input value={rejectNote} onChangeText={setRejectNote} placeholder="Optional, but it helps the person who raised it" multiline style={{ minHeight: 64, paddingVertical: 10, textAlignVertical: "top" }} />
+        </Field>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Key label="Cancel" onPress={() => setRejecting(false)} disabled={acting !== null} />
+          <Key tone="red" label={acting === "reject" ? "Rejecting…" : "Confirm rejection"} onPress={() => doAction("reject")} disabled={acting !== null} style={{ flex: 1 }} />
         </View>
-
-        <ScrollView className="flex-1 px-4" contentContainerStyle={{ paddingTop: 16, paddingBottom: insets.bottom + 24 }}>
-          <View className="flex-row flex-wrap rounded-2xl p-3.5 mb-4" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-            <SummaryCell label="Date" value={fmtDate(item.RecordDate)} />
-            <SummaryCell label="Party" value={party} />
-            <SummaryCell label="Amount" value={fmtAmount(item.Amount)} />
-            <SummaryCell label="Created By" value={item.CreatedBy || "—"} />
-            <SummaryCell label="Approved By" value={item.ApprovedBy || "—"} />
-            <SummaryCell label="Rejected By" value={item.RejectedBy || "—"} />
-          </View>
-
-          {item.RejectionNote && (
-            <View className="rounded-xl p-3 mb-4" style={{ backgroundColor: `${colors.destructive}0d`, borderWidth: 1, borderColor: `${colors.destructive}33` }}>
-              <Text style={{ color: `${colors.destructive}cc`, fontSize: 9, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>Rejection Note</Text>
-              <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.regular }}>{item.RejectionNote}</Text>
-            </View>
+      </>,
+    )
+  ) : (
+    foot(
+      <>
+        {!!approveBlockedNote && <Body size={12} color={S.graphite}>{approveBlockedNote}</Body>}
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Key tone="red" label="Reject" icon={<XCircle size={13} color="#ffffff" />} onPress={() => setRejecting(true)} disabled={acting !== null} style={{ flex: approveBlockedNote ? 1 : undefined }} />
+          {!approveBlockedNote && (
+            <Key tone="ink" label={acting === "approve" ? "Approving…" : "Approve"} icon={<CheckCircle2 size={13} color={S.paper} />} onPress={() => doAction("approve")} disabled={acting !== null} style={{ flex: 1 }} />
           )}
+        </View>
+      </>,
+    )
+  );
 
-          {lineItems.length > 0 && (
-            <View className="mb-4">
-              <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
-                Items ({lineItems.length})
-              </Text>
-              <View className="rounded-xl overflow-hidden" style={{ borderWidth: 1, borderColor: colors.border }}>
-                {lineItems.map((li, i) => {
-                  const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
-                  const qty = Number(li.Quantity ?? li.quantity ?? 0);
-                  // Every line-item shape across PO/WO/GRN/MR/etc. spells this
-                  // differently (a real PO's own line items use "UomName",
-                  // mixed case) — same broad fallback chain as web's own
-                  // ApprovalReviewPanel.tsx.
-                  const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
-                  const rate = Number(li.Rate ?? li.rate ?? 0);
-                  const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
-                  return (
-                    <View key={i} className="flex-row items-center justify-between px-3 py-2.5" style={{ borderTopWidth: i === 0 ? 0 : 1, borderTopColor: `${colors.border}66` }}>
-                      <View className="flex-1 min-w-0 pr-2">
-                        <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.medium }}>{name}</Text>
-                        {!isMaterialRequest && (
-                          <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 1 }}>
-                            {qty.toLocaleString("en-IN")}{uom ? ` ${uom}` : ""} × {formatINR(rate)}
-                          </Text>
-                        )}
-                      </View>
-                      {isMaterialRequest ? (
-                        <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
-                          {qty.toLocaleString("en-IN")}{uom ? ` ${uom}` : ""}
-                        </Text>
-                      ) : (
-                        <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{formatINR(amount)}</Text>
-                      )}
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
-          )}
-
-          <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
-            Full Record
-          </Text>
-          {loading ? (
-            <ActivityIndicator color={colors.mutedForeground} style={{ marginVertical: 12 }} />
-          ) : fetchFailed || extraFields.length === 0 ? (
-            <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular }}>
-              {fetchFailed ? "Couldn't load the full record — showing summary only." : "No additional fields."}
-            </Text>
-          ) : (
-            <View className="flex-row flex-wrap rounded-xl p-3.5" style={{ borderWidth: 1, borderColor: colors.border }}>
-              {extraFields.map(([k, v]) => (
-                <SummaryCell key={k} label={labelizeKey(k)} value={formatPreviewValue(v)} />
-              ))}
-            </View>
-          )}
-        </ScrollView>
-
-        {item.Status === "Pending" && item._canAct === false ? (
-          // Named on this record's workflow, but not this level — approving/
-          // rejecting here would just 403 from transition()'s own per-level
-          // gate (see approvalService.js). Say so instead of showing live-
-          // looking buttons guaranteed to fail, same as the web inbox does.
-          <View
-            style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: insets.bottom + 12 }}
-            className="px-4 pt-3"
-          >
-            <View
-              className="flex-row items-center justify-center gap-1.5 py-3 rounded-xl"
-              style={{ backgroundColor: colors.muted, borderWidth: 1, borderColor: colors.border }}
-            >
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
-                Waiting on Level {item._currentLevel}
-                {item._totalLevels ? ` of ${item._totalLevels}` : ""}
-              </Text>
-            </View>
-          </View>
-        ) : item.Status === "Pending" && (
-          <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: insets.bottom + 12 }}>
-            {rejecting ? (
-              <View className="px-4 pt-3">
-                <TextInput
-                  value={rejectNote}
-                  onChangeText={setRejectNote}
-                  placeholder="Reason for rejection (optional but recommended)"
-                  placeholderTextColor={`${colors.mutedForeground}99`}
-                  multiline
-                  numberOfLines={3}
-                  style={{
-                    borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12,
-                    color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, minHeight: 72, textAlignVertical: "top", marginBottom: 10,
-                  }}
-                />
-                <View className="flex-row gap-3">
-                  <Pressable onPress={() => setRejecting(false)} className="flex-1 items-center py-3 rounded-xl" style={{ borderWidth: 1, borderColor: colors.border }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 13, fontFamily: fonts.heading.semibold }}>Cancel</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => doAction("reject")}
-                    disabled={acting !== null}
-                    className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl"
-                    style={{ backgroundColor: colors.destructive, opacity: acting ? 0.6 : 1 }}
-                  >
-                    {acting === "reject" && <ActivityIndicator size="small" color="#fff" />}
-                    <Text style={{ color: "#fff", fontSize: 13, fontFamily: fonts.heading.semibold }}>Confirm Rejection</Text>
-                  </Pressable>
-                </View>
-              </View>
-            ) : (
-              <View className="flex-row gap-3 px-4 pt-3">
-                <Pressable
-                  onPress={() => setRejecting(true)}
-                  disabled={acting !== null}
-                  className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl"
-                  style={{ backgroundColor: `${colors.destructive}14`, borderWidth: 1, borderColor: `${colors.destructive}40` }}
-                >
-                  <XCircle size={15} color={colors.destructive} />
-                  <Text style={{ color: colors.destructive, fontSize: 13, fontFamily: fonts.heading.semibold }}>Reject</Text>
-                </Pressable>
-                {item.NeedsReview ? (
-                <View className="flex-1 items-center justify-center py-2 px-2 rounded-xl" style={{ borderWidth: 1, borderColor: "#f59e0b66", backgroundColor: "#f59e0b14" }}>
-                  <Text style={{ color: "#b45309", fontSize: 11, fontFamily: fonts.heading.semibold, textAlign: "center" }}>Waiting for Accounts to set the deposit bank (web)</Text>
-                </View>
-                ) : (
-                <Pressable
-                  onPress={() => doAction("approve")}
-                  disabled={acting !== null}
-                  className="flex-1 flex-row items-center justify-center gap-2 py-3 rounded-xl"
-                  style={{ backgroundColor: "#10b981", opacity: acting ? 0.6 : 1 }}
-                >
-                  {acting === "approve" ? <ActivityIndicator size="small" color="#fff" /> : <CheckCircle2 size={15} color="#fff" />}
-                  <Text style={{ color: "#fff", fontSize: 13, fontFamily: fonts.heading.semibold }}>Approve</Text>
-                </Pressable>
-                )}
-              </View>
-            )}
-          </View>
-        )}
+  return (
+    <FormPage
+      visible={!!item}
+      onClose={onClose}
+      eyebrow={`CivilierERP · Approvals · ${cfg?.label ?? item.ModuleLabel}`}
+      title={item.Reference || `#${item.RecordId}`}
+      subtitle={[fmtDate(item.RecordDate), party].filter(Boolean).join(" · ")}
+      saveLabel=""
+      footer={footer}
+    >
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+        <SheetMark text={item._stage ? `${item.Status} · ${item._stage.label}` : item.Status} tone={/draft/i.test(item.Status) ? "draft" : statusTone(item.Status)} />
       </View>
-    </Modal>
+
+      <InfoGrid
+        items={[
+          { label: "Date", value: fmtDate(item.RecordDate) },
+          { label: "Amount", value: item.Module === "civilworkdpr-approval" && item.Amount == null ? item.ActivityName || "—" : fmtAmount(item.Amount) },
+          { label: "Party", value: party, wide: true },
+          { label: "Created by", value: item.CreatedBy || "—" },
+          { label: "Approved by", value: item.ApprovedBy || "—" },
+          ...(item.RejectedBy ? [{ label: "Rejected by", value: item.RejectedBy }] : []),
+          ...(item.SourceTransferDocNo ? [{ label: "Transfer", value: `${item.SourceTransferDocNo}${item.FromGodownName && item.ToGodownName ? ` · ${item.FromGodownName} → ${item.ToGodownName}` : ""}`, wide: true }] : []),
+        ]}
+      />
+
+      {!!item.RejectionNote && <Notice>{`Rejection note: ${item.RejectionNote}`}</Notice>}
+
+      {lineItems.length > 0 && (
+        <Panel title={`Items (${lineItems.length})`} icon={<ClipboardList size={14} color={S.ink} />}>
+          <LineList
+            rows={lineItems.map((li, i) => {
+              const name = String(li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—");
+              const qty = Number(li.Quantity ?? li.quantity ?? 0);
+              const uom = String(li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "");
+              const rate = Number(li.Rate ?? li.rate ?? 0);
+              const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
+              return isMaterialRequest
+                ? { key: i, title: name, right: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""}` }
+                : { key: i, title: name, note: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""} × ${formatINR(rate)}`, right: formatINR(amount) };
+            })}
+          />
+        </Panel>
+      )}
+
+      <Panel title="Full record" icon={<FileText size={14} color={S.ink} />}>
+        {loading ? (
+          <>
+            <Skel h={30} />
+            <Skel h={30} />
+          </>
+        ) : fetchFailed || extraFields.length === 0 ? (
+          <Body size={12.5} color={S.graphite}>{fetchFailed ? "Couldn't load the full record; the summary above is from the inbox." : "No further fields."}</Body>
+        ) : (
+          <InfoGrid items={extraFields.map(([k, v]) => ({ label: labelizeKey(k), value: formatPreviewValue(v) }))} />
+        )}
+      </Panel>
+
+      {!pending && (
+        <Text style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite }}>{`This record is ${item.Status.toLowerCase()}; there is nothing to act on.`}</Text>
+      )}
+    </FormPage>
   );
 }

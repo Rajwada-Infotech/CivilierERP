@@ -1,210 +1,273 @@
-// RN port of src/pages/admin/ApprovalInbox.tsx (web) — same endpoint, same
-// module filter + card list, rebuilt as a single-column mobile list instead
-// of the desktop table/mobile-card split web does inline. Tapping a card
-// opens ApprovalInboxDetailModal (full record + approve/reject); the
-// desktop table's inline actions column doesn't apply here — the card
-// itself is the tap target, matching every other RN list screen in
-// mobile-admin/mobile.
-//
-// Header (title + module chips) is passed as FlatList's ListHeaderComponent
-// rather than rendered as a sibling above it — same structure
-// GRNListScreen.tsx/MaterialRequestListScreen.tsx use in mobile/. Rendering
-// it as a sibling `View` next to the FlatList left a large dead gap between
-// the two on-device: with the header outside the scrollable content, Yoga's
-// flex layout pass for a horizontal-scrolling ScrollView sibling to a
-// non-flexed FlatList doesn't settle to natural content height reliably. As
-// one measured tree it lays out exactly like every other list screen here.
-import { useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ScrollView, ActivityIndicator, RefreshControl, useWindowDimensions } from "react-native";
+// RN port of src/pages/admin/ApprovalInbox.tsx, on the drawing sheet as the web draws it: the title block with Refresh;
+// the figures (waiting, types, showing); a search box over document numbers; the type filter (several types at once,
+// grouped by business category, each with its count) beside the date-order key; then every record waiting on this
+// approver, grouped by category (Material, Finance, Engineering, Civil Work DPR, Sales / CRM, Admin) and, within it, by
+// module — each module a ruled head with its count that opens to its records (collapsed at first, as on the web, so a
+// long inbox reads as a short list of kinds). A record's row carries its reference, date, party, amount (or activity),
+// status and step, and opens ApprovalInboxDetailModal to approve, reject or confirm. Approving or rejecting hides the
+// row at once; the next fetch is the truth again.
+import { useEffect, useMemo, useRef, useState } from "react";
+import { View, Text, ScrollView } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, RefreshCw, CheckCircle2 } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { ArrowDownWideNarrow, ArrowUpWideNarrow, ChevronDown, ChevronRight, ClipboardCheck, RefreshCw, SlidersHorizontal } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import { fetchInbox, type InboxItem } from "@/api/approvalInboxApi";
-import { MODULE_CONFIG, ALL_MODULES } from "./approvalInboxConfig";
-import { StatusBadge } from "./StatusBadge";
+import { Body, IconKey, Key, Label, Notice, Press, SearchBox, SheetMark, SheetShell, StatRow, statusTone } from "@/components/sheet/Sheet";
+import { OptionRow, SheetPicker } from "@/components/sheet/FormParts";
+import { RegisterBox, RegisterLoading, SheetPage, fmtDate } from "@/components/sheet/Register";
+import { ALL_MODULES, CATEGORY_LABEL, CATEGORY_ORDER, DISPLAY_GROUP, MODULE_CONFIG, categoryOf, moduleOrderOf, type CategoryId } from "./approvalInboxConfig";
 import { ApprovalInboxDetailModal } from "./ApprovalInboxDetailModal";
 
-const fmtDate = (d: string | null) => {
-  if (!d) return "—";
-  try {
-    return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-  } catch {
-    return "—";
-  }
-};
+const statusText = (item: InboxItem) => (item._stage ? `${item.Status} · ${item._stage.label}` : item.Status);
+const markOf = (status?: string | null) => (/draft/i.test(status || "") ? "draft" : statusTone(status || "Pending")) as "draft" | "done" | "waiting" | "stopped";
 
-function ModuleChip({
-  label, icon: Icon, color, count, active, onPress,
-}: { label: string; icon?: React.ComponentType<{ size?: number; color?: string }>; color?: string; count: number; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        alignSelf: "flex-start",
-        gap: 6,
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 999,
-        marginRight: 8,
-        borderWidth: 1,
-        borderColor: active ? (color ?? colors.primary) : colors.border,
-        backgroundColor: active ? (color ?? colors.primary) : "transparent",
-      }}
-    >
-      {Icon && <Icon size={11} color={active ? "#fff" : (color ?? colors.mutedForeground)} />}
-      <Text style={{ color: active ? "#fff" : colors.mutedForeground, fontSize: 11, fontFamily: fonts.heading.medium }}>{label}</Text>
-      {count > 0 && (
-        <View style={{ paddingHorizontal: 5, borderRadius: 999, backgroundColor: active ? "rgba(255,255,255,0.25)" : colors.muted }}>
-          <Text style={{ color: active ? "#fff" : colors.foreground, fontSize: 9.5, fontFamily: fonts.heading.bold }}>{count}</Text>
-        </View>
-      )}
-    </Pressable>
-  );
-}
-
-function InboxCard({ item, onPress }: { item: InboxItem; onPress: () => void }) {
-  const cfg = MODULE_CONFIG[item.Module];
-  const Icon = cfg?.icon ?? Inbox;
+function InboxRow({ item, onPress, last }: { item: InboxItem; onPress: () => void; last: boolean }) {
   const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
-
+  const activity = item.Module === "civilworkdpr-approval" ? item.ActivityName?.trim() || null : null;
+  const transfer = item.Module === "goods-receipt" && item.SourceTransferDocNo;
   return (
-    <Pressable
+    <Press
       onPress={onPress}
-      style={{ borderRadius: 16, padding: 14, marginBottom: 10, backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}
+      style={(pressed) => ({ paddingVertical: 11, paddingLeft: 30, paddingRight: 4, gap: 5, borderBottomWidth: last ? 0 : 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: `${cfg?.color ?? colors.mutedForeground}1f` }}>
-            <Icon size={14} color={cfg?.color ?? colors.mutedForeground} />
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{item.ModuleLabel}</Text>
-            <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>{item.Reference || `#${item.RecordId}`}</Text>
-          </View>
-        </View>
-        <StatusBadge status={item.Status} />
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+        <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.heading.semibold, fontSize: 13, letterSpacing: 0.2, color: S.ink }}>
+          {item.Reference || `#${item.RecordId}`}
+          <Text style={{ color: S.graphite, fontFamily: fonts.body.regular, fontSize: 11.5, letterSpacing: 0 }}>{`  ${fmtDate(item.RecordDate)}`}</Text>
+        </Text>
+        {/* A material request has no amount (pricing comes with its PO): no "₹0.00". */}
+        {item.Amount != null ? (
+          <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 13.5, color: S.ink, fontVariant: ["tabular-nums"] }}>{formatINR(item.Amount, { decimals: 2 })}</Text>
+        ) : activity ? (
+          <Text numberOfLines={1} style={{ maxWidth: "45%", fontFamily: fonts.body.medium, fontSize: 12, color: S.ink }}>{activity}</Text>
+        ) : null}
       </View>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.regular, flex: 1, marginRight: 8 }}>{party}</Text>
-        <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>{fmtDate(item.RecordDate)}</Text>
+      <Text numberOfLines={1} style={{ fontFamily: fonts.body.medium, fontSize: 12.5, color: S.ink2 }}>
+        {transfer ? `Transfer ${item.SourceTransferDocNo}${item.FromGodownName && item.ToGodownName ? ` · ${item.FromGodownName} → ${item.ToGodownName}` : ""}` : party}
+      </Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+        <SheetMark text={statusText(item)} tone={markOf(item.Status)} />
+        {item.Status === "Pending" && item._canAct === false && <Label>{`Waiting on level ${item._currentLevel}${item._totalLevels ? ` of ${item._totalLevels}` : ""}`}</Label>}
+        {!!item.RejectedBy && <Label color={S.red}>{`Rejected · ${item.RejectedBy}`}</Label>}
       </View>
-      {/* A Material Request has no Amount at all — the backend deliberately
-          sends it as NULL (pricing only enters the picture once a PO is
-          raised against the MR) — formatINR's `Number(null) || 0` used to
-          turn that into a misleading "₹0.00" on every MR card. Only render
-          this line when there's a real amount. */}
-      {item.Amount != null && (
-        <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.semibold, marginTop: 4 }}>{formatINR(item.Amount, { decimals: 2 })}</Text>
-      )}
-    </Pressable>
+    </Press>
   );
 }
 
 export default function ApprovalInboxScreen() {
   const queryClient = useQueryClient();
-  const { width } = useWindowDimensions();
-  const [activeModule, setActiveModule] = useState<string | null>(null);
+  const [activeModules, setActiveModules] = useState<string[]>([]);
+  const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
+  const [docSearch, setDocSearch] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [filterOpen, setFilterOpen] = useState(false);
   const [selected, setSelected] = useState<InboxItem | null>(null);
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
 
-  const { data: allItems = [], isLoading, isFetching, refetch } = useQuery({
+  const { data: allItems = [], dataUpdatedAt, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["approval-inbox"],
     queryFn: fetchInbox,
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
 
-  const items = useMemo(
+  // A fresh fetch is the truth about what is pending, so the rows hidden on approve / reject come back into its hands.
+  // (A Civil Work DPR rung keeps its id across rework attempts: without this, rejecting attempt 1 hid attempt 2 for the
+  // rest of the session.)
+  const lastFetch = useRef(dataUpdatedAt);
+  useEffect(() => {
+    if (dataUpdatedAt !== lastFetch.current) {
+      lastFetch.current = dataUpdatedAt;
+      setRemovedKeys(new Set());
+    }
+  }, [dataUpdatedAt]);
+
+  const items = useMemo(() => {
+    const q = docSearch.trim().toLowerCase();
+    return (activeModules.length ? allItems.filter((i) => activeModules.includes(i.Module)) : allItems)
+      .filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`))
+      .filter((i) => !q || (i.Reference ?? "").toLowerCase().includes(q) || String(i.RecordId).includes(q))
+      .sort((a, b) => {
+        const m = moduleOrderOf(a.Module) - moduleOrderOf(b.Module);
+        if (m) return m;
+        const da = a.RecordDate ? new Date(a.RecordDate).getTime() : 0;
+        const db = b.RecordDate ? new Date(b.RecordDate).getTime() : 0;
+        return dateSort === "desc" ? db - da : da - db;
+      });
+  }, [allItems, activeModules, removedKeys, docSearch, dateSort]);
+
+  const grouped = useMemo(
     () =>
-      (activeModule ? allItems.filter((i) => i.Module === activeModule) : allItems).filter(
-        (i) => !removedKeys.has(`${i.Module}-${i.RecordId}`),
-      ),
-    [allItems, activeModule, removedKeys],
+      CATEGORY_ORDER.map((cat) => {
+        const byModule = new Map<string, InboxItem[]>();
+        items
+          .filter((i) => categoryOf(i.Module) === cat)
+          .forEach((i) => {
+            const key = DISPLAY_GROUP[i.Module] ?? i.Module;
+            if (!byModule.has(key)) byModule.set(key, []);
+            byModule.get(key)!.push(i);
+          });
+        return { cat, count: Array.from(byModule.values()).reduce((s, l) => s + l.length, 0), modules: Array.from(byModule.entries()) };
+      }).filter((g) => g.count > 0),
+    [items],
   );
 
-  const countFor = (mod: string) => allItems.filter((i) => i.Module === mod).length;
-  const totalCount = allItems.length;
+  const countOf = (mod: string) => allItems.filter((i) => i.Module === mod).length;
+  const toggle = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  const filtering = activeModules.length > 0 || !!docSearch.trim();
 
   const handleActionDone = (recordId: string, module: string) => {
     setRemovedKeys((prev) => new Set(prev).add(`${module}-${recordId}`));
     queryClient.invalidateQueries({ queryKey: ["approval-inbox"] });
   };
 
-  const ListHeader = (
-    <View style={{ width: width - 32 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Text style={{ color: colors.foreground, fontSize: 15, fontFamily: fonts.heading.bold }}>Approval Inbox</Text>
-          {totalCount > 0 && (
-            <View style={{ minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: colors.destructive }}>
-              <Text style={{ color: "#fff", fontSize: 10.5, fontFamily: fonts.heading.bold }}>{totalCount}</Text>
-            </View>
-          )}
-        </View>
-        <Pressable onPress={() => refetch()} disabled={isFetching} hitSlop={8} style={{ padding: 6 }}>
-          {isFetching ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <RefreshCw size={14} color={colors.mutedForeground} />}
-        </Pressable>
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ marginHorizontal: -16, marginBottom: 14 }}
-        contentContainerStyle={{ paddingHorizontal: 16, alignItems: "center" }}
-      >
-        <ModuleChip label="All" count={totalCount} active={activeModule === null} onPress={() => setActiveModule(null)} />
-        {ALL_MODULES.map((mod) => {
-          const cfg = MODULE_CONFIG[mod];
-          const count = countFor(mod);
-          if (count === 0 && activeModule !== mod) return null;
-          return (
-            <ModuleChip
-              key={mod}
-              label={cfg.label}
-              icon={cfg.icon}
-              color={cfg.color}
-              count={count}
-              active={activeModule === mod}
-              onPress={() => setActiveModule(activeModule === mod ? null : mod)}
-            />
-          );
-        })}
-      </ScrollView>
-    </View>
-  );
-
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {isLoading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator color={colors.mutedForeground} />
-        </View>
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(item) => `${item.Module}-${item.RecordId}`}
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 16, paddingTop: 12 }}
-          refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.primary} />}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => <InboxCard item={item} onPress={() => setSelected(item)} />}
-          ListEmptyComponent={
-            <View style={{ alignItems: "center", paddingVertical: 48 }}>
-              <CheckCircle2 size={28} color={`${colors.mutedForeground}4d`} />
-              <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 13, fontFamily: fonts.body.medium, marginTop: 12 }}>
-                {activeModule ? "No pending items in this module." : "All clear!"}
-              </Text>
-              <Text style={{ color: `${colors.mutedForeground}66`, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 3 }}>
-                {activeModule ? "Switch to All to see the full inbox." : "No records are awaiting approval right now."}
-              </Text>
+    <View style={{ flex: 1 }}>
+      <SheetPage refreshing={isFetching && !isLoading} onRefresh={() => void refetch()}>
+        <SheetShell
+          eyebrow="CivilierERP · Approvals"
+          title="Approval inbox"
+          subtitle="Every record waiting on your approval, across all modules, grouped by the kind of document."
+          action={<Key label={isFetching ? "Reading…" : "Refresh"} icon={<RefreshCw size={13} color={S.ink} />} onPress={() => void refetch()} disabled={isFetching} style={{ alignSelf: "flex-start" }} />}
+        >
+          <StatRow
+            items={[
+              { label: "Waiting", value: isLoading ? "…" : allItems.length.toLocaleString("en-IN"), note: allItems.length ? "records for you to act on" : "nothing waiting" },
+              { label: "Types", value: isLoading ? "…" : String(new Set(allItems.map((i) => i.Module)).size), note: "kinds of document waiting" },
+              { label: "Showing", value: isLoading ? "…" : items.length.toLocaleString("en-IN"), note: filtering ? "after search and filter" : "everything" },
+            ]}
+          />
+
+          <RegisterBox>
+            <SearchBox value={docSearch} onChange={setDocSearch} placeholder="Search by document number (e.g. JV-2026-00067)…" />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Press
+                onPress={() => setFilterOpen(true)}
+                style={(pressed) => ({ flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: activeModules.length ? S.ink : S.line40, backgroundColor: pressed ? S.blueWash : S.paper })}
+              >
+                <SlidersHorizontal size={14} color={activeModules.length ? S.blue : S.graphite} />
+                <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.body.regular, fontSize: 13.5, color: activeModules.length ? S.ink : S.faint }}>
+                  {activeModules.length === 0
+                    ? "All approval types"
+                    : activeModules.length === 1
+                      ? MODULE_CONFIG[activeModules[0]]?.label ?? activeModules[0]
+                      : `${activeModules.length} types`}
+                </Text>
+                <ChevronDown size={13} color={S.graphite} />
+              </Press>
+              <IconKey onPress={() => setDateSort((s) => (s === "desc" ? "asc" : "desc"))} size={44}>
+                {dateSort === "desc" ? <ArrowDownWideNarrow size={15} color={S.ink} /> : <ArrowUpWideNarrow size={15} color={S.ink} />}
+              </IconKey>
             </View>
-          }
-        />
-      )}
+            <Label>{dateSort === "desc" ? "Newest first" : "Oldest first"}</Label>
+
+            {isLoading ? (
+              <RegisterLoading />
+            ) : isError ? (
+              <Notice>Could not load the inbox. Pull down to try again.</Notice>
+            ) : items.length === 0 ? (
+              <View style={{ alignItems: "center", paddingVertical: 28, gap: 4 }}>
+                <Text style={{ fontFamily: fonts.heading.bold, fontSize: 15, color: S.ink }}>
+                  {docSearch.trim() ? `No document matches "${docSearch.trim()}"` : activeModules.length ? "No pending items for the chosen types" : "All clear"}
+                </Text>
+                <Body size={12} color={S.graphite}>
+                  {docSearch.trim() ? "Clear the search to see the full inbox." : activeModules.length ? "Clear the filter to see the full inbox." : "No records are awaiting approval right now."}
+                </Body>
+              </View>
+            ) : (
+              <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+                {grouped.map(({ cat, count, modules }) => (
+                  <View key={cat}>
+                    {/* The category heading only when the list spans more than one. */}
+                    {grouped.length > 1 && (
+                      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+                        <Label color={S.ink}>{CATEGORY_LABEL[cat as CategoryId]}</Label>
+                        <Label>{String(count)}</Label>
+                      </View>
+                    )}
+                    {modules.map(([mod, modItems]) => {
+                      const key = `${cat}:${mod}`;
+                      const open = expanded.has(key) || !!docSearch.trim();
+                      const cfg = MODULE_CONFIG[mod];
+                      const Icon = cfg?.icon ?? ClipboardCheck;
+                      return (
+                        <View key={key} style={{ borderBottomWidth: 1, borderBottomColor: S.line15 }}>
+                          <Press
+                            onPress={() => toggle(key)}
+                            style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, backgroundColor: pressed ? S.blueWash : "transparent" })}
+                          >
+                            {open ? <ChevronDown size={13} color={S.graphite} /> : <ChevronRight size={13} color={S.graphite} />}
+                            <View style={{ width: 28, height: 28, borderWidth: 1, borderColor: S.line40, alignItems: "center", justifyContent: "center" }}>
+                              <Icon size={13} color={S.ink} />
+                            </View>
+                            <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.body.semibold, fontSize: 13.5, color: S.ink }}>{cfg?.label ?? modItems[0]?.ModuleLabel ?? mod}</Text>
+                            <View style={{ borderWidth: 1, borderColor: S.line40, paddingHorizontal: 6, paddingVertical: 2 }}>
+                              <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 10.5, color: S.graphite, fontVariant: ["tabular-nums"] }}>{modItems.length}</Text>
+                            </View>
+                          </Press>
+                          {open && modItems.map((item, i) => <InboxRow key={`${item.Module}-${item.RecordId}`} item={item} last={i === modItems.length - 1} onPress={() => setSelected(item)} />)}
+                        </View>
+                      );
+                    })}
+                  </View>
+                ))}
+                <Label style={{ paddingTop: 10 }}>
+                  {`${items.length} record${items.length === 1 ? "" : "s"} pending approval${activeModules.length ? ` · ${activeModules.map((m) => MODULE_CONFIG[m]?.label ?? m).join(", ")}` : ""}`}
+                </Label>
+              </View>
+            )}
+          </RegisterBox>
+        </SheetShell>
+      </SheetPage>
+
+      {/* The type filter: every module, grouped by category, several at once, with its pending count. */}
+      <SheetPicker
+        visible={filterOpen}
+        title="Filter by type"
+        note={activeModules.length ? `${activeModules.length} chosen` : "All approval types"}
+        onClose={() => setFilterOpen(false)}
+        footer={
+          <View style={{ flexDirection: "row", gap: 10, padding: 16, borderTopWidth: 1, borderTopColor: S.ink }}>
+            <Key label="Clear" onPress={() => setActiveModules([])} disabled={!activeModules.length} />
+            <Key tone="ink" label="Done" onPress={() => setFilterOpen(false)} style={{ flex: 1 }} />
+          </View>
+        }
+      >
+        <ScrollView>
+          {CATEGORY_ORDER.map((cat) => {
+            const mods = ALL_MODULES.filter((m) => categoryOf(m) === cat);
+            if (!mods.length) return null;
+            return (
+              <View key={cat}>
+                <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+                  <Label color={S.ink}>{CATEGORY_LABEL[cat]}</Label>
+                </View>
+                {mods.map((m) => {
+                  const n = countOf(m);
+                  const on = activeModules.includes(m);
+                  return (
+                    <OptionRow
+                      key={m}
+                      check
+                      selected={on}
+                      label={MODULE_CONFIG[m].label}
+                      sub={n ? `${n} waiting` : undefined}
+                      onPress={() => setActiveModules((prev) => (on ? prev.filter((x) => x !== m) : [...prev, m]))}
+                    />
+                  );
+                })}
+              </View>
+            );
+          })}
+        </ScrollView>
+      </SheetPicker>
 
       <ApprovalInboxDetailModal item={selected} onClose={() => setSelected(null)} onActionDone={handleActionDone} />
     </View>

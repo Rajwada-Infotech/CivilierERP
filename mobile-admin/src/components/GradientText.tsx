@@ -1,9 +1,12 @@
+import type React from "react";
 // RN equivalent of the web login's WebkitBackgroundClip gradient-text trick
 // (src/pages/Login.tsx: "linear-gradient(135deg,#4c1d95,#7c3aed,#a78bfa)"
 // clipped to text). CSS background-clip:text has no RN equivalent, so this
 // masks a LinearGradient with the text shape via @react-native-masked-view.
 import { Text, type TextStyle } from "react-native";
-import MaskedView from "@react-native-masked-view/masked-view";
+import MaskedViewClass from "@react-native-masked-view/masked-view";
+// The package types MaskedView as a class without props, which React 19.3's JSX types reject; it works as a component.
+const MaskedView = MaskedViewClass as unknown as React.ComponentType<any>;
 import { LinearGradient } from "expo-linear-gradient";
 
 export function GradientText({

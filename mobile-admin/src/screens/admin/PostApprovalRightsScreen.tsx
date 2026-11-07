@@ -1,12 +1,13 @@
-// RN port of src/pages/admin/PostApprovalRights.tsx (web) — same two
-// subject modes (Role-wise baseline vs. Custom User-wise override), same
-// single "post-approval" action toggle per eligible page. Web's inline
-// positioned dropdowns become PickerRow + OptionPickerModal (bottom sheet),
-// same as every other "choose one" field in this app.
+// RN port of src/pages/admin/PostApprovalRights.tsx (web), on the drawing sheet as the web draws it: the title block;
+// the subject box — "Choose a role" / "Choose a person" with ink segments for Role-wise and Custom user-wise (a role's
+// baseline, which every holder inherits at once, or one person's additions on top of it) and the picker; then, for the
+// chosen role or person, how many of the eligible pages are granted, an Unsaved mark, Save, and one ruled row per page
+// that enforces a post-approval check (page, module, a square switch for "allow editing after approved"). Only pages
+// whose edit guard actually checks this right are listed — granting it elsewhere would do nothing.
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, Switch, Alert, useWindowDimensions } from "react-native";
-import { ShieldCheck, Save, Users } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { View, Text, Alert } from "react-native";
+import { Save } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/components/OptionPicker";
 import {
@@ -14,52 +15,13 @@ import {
   getRolesList, getRolePermissions, saveRolePermissions,
   POST_APPROVAL_ACTION, type PageDef, type PagePermission,
 } from "@/api/postApprovalRightsApi";
+import { Body, Key, Label, Notice, Seg, SheetShell, Skel } from "@/components/sheet/Sheet";
+import { SheetPage } from "@/components/sheet/Register";
+import { SquareSwitch } from "./ApprovalSetupScreen";
 
 type Subject = "user" | "role";
 
-function SubjectToggle({ subject, onChange }: { subject: Subject; onChange: (s: Subject) => void }) {
-  return (
-    <View style={{ flexDirection: "row", gap: 4, padding: 4, borderRadius: 12, backgroundColor: colors.muted, alignSelf: "flex-start", marginBottom: 12 }}>
-      {(["role", "user"] as Subject[]).map((s) => {
-        const active = subject === s;
-        return (
-          <Pressable
-            key={s}
-            onPress={() => onChange(s)}
-            style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9, backgroundColor: active ? colors.card : "transparent", borderWidth: active ? 1 : 0, borderColor: colors.border }}
-          >
-            <Text style={{ color: active ? colors.foreground : colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.heading.medium }}>
-              {s === "role" ? "Role-wise" : "Custom User-wise"}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-function PageRow({ page, checked, onToggle }: { page: PageDef; checked: boolean; onToggle: () => void }) {
-  return (
-    <View
-      style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 14, padding: 12, marginBottom: 8, backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}
-    >
-      <View style={{ flex: 1, minWidth: 0, marginRight: 10 }}>
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium }}>{page.label}</Text>
-        <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 2 }}>{page.module}</Text>
-      </View>
-      <Switch
-        value={checked}
-        onValueChange={onToggle}
-        trackColor={{ false: colors.muted, true: `${colors.primary}80` }}
-        thumbColor={checked ? colors.primary : "#f4f3f4"}
-      />
-    </View>
-  );
-}
-
 export default function PostApprovalRightsScreen() {
-  const { width } = useWindowDimensions();
-
   const [pageDefs, setPageDefs] = useState<PageDef[]>([]);
   const [loadingDefs, setLoadingDefs] = useState(true);
 
@@ -82,21 +44,21 @@ export default function PostApprovalRightsScreen() {
   useEffect(() => {
     fetchPageDefinitions()
       .then(setPageDefs)
-      .catch(() => Alert.alert("Error", "Failed to load page definitions"))
+      .catch(() => Alert.alert("Could not load", "The page list could not be loaded."))
       .finally(() => setLoadingDefs(false));
   }, []);
 
   useEffect(() => {
     getUsersForRights()
       .then(setUsers)
-      .catch(() => Alert.alert("Error", "Failed to load users"))
+      .catch(() => Alert.alert("Could not load", "The users could not be loaded."))
       .finally(() => setLoadingUsers(false));
   }, []);
 
   useEffect(() => {
     getRolesList()
       .then(setRoles)
-      .catch(() => Alert.alert("Error", "Failed to load roles"))
+      .catch(() => Alert.alert("Could not load", "The roles could not be loaded."))
       .finally(() => setLoadingRoles(false));
   }, []);
 
@@ -120,7 +82,7 @@ export default function PostApprovalRightsScreen() {
     setDirty(false);
     getUserPermissions(selectedUserId)
       .then(setPermissions)
-      .catch(() => { Alert.alert("Error", "Failed to load permissions"); setPermissions([]); })
+      .catch(() => { Alert.alert("Could not load", "This person's rights could not be loaded."); setPermissions([]); })
       .finally(() => setLoadingPerms(false));
   }, [subject, selectedUserId]);
 
@@ -130,7 +92,7 @@ export default function PostApprovalRightsScreen() {
     setDirty(false);
     getRolePermissions(selectedRoleId)
       .then(setPermissions)
-      .catch(() => { Alert.alert("Error", "Failed to load role permissions"); setPermissions([]); })
+      .catch(() => { Alert.alert("Could not load", "This role's rights could not be loaded."); setPermissions([]); })
       .finally(() => setLoadingPerms(false));
   }, [subject, selectedRoleId]);
 
@@ -168,7 +130,7 @@ export default function PostApprovalRightsScreen() {
         setDirty(false);
       }
     } catch (e: any) {
-      Alert.alert("Save failed", e.message || "Something went wrong.");
+      Alert.alert("Could not save", e.message || "Something went wrong.");
     } finally {
       setSaving(false);
     }
@@ -179,119 +141,118 @@ export default function PostApprovalRightsScreen() {
   const userOptions: PickerOption[] = users.map((u) => ({ key: String(u.id), label: u.name, sublabel: u.role.replace(/_/g, " ") }));
   const roleOptions: PickerOption[] = roles.map((r) => ({ key: String(r.RId), label: r.RName }));
 
-  const ListHeader = (
-    <View style={{ width: width - 32 }}>
-      <Text style={{ color: colors.foreground, fontSize: 15, fontFamily: fonts.heading.bold, marginBottom: 3 }}>Post Approval Rights</Text>
-      <Text style={{ color: colors.mutedForeground, fontSize: 11.5, marginBottom: 14 }}>
-        Who can edit a record after it has already been Approved.
-      </Text>
-
-      <View style={{ borderRadius: 16, padding: 14, marginBottom: 14, backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
-          <Users size={12} color={colors.mutedForeground} />
-          <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.5 }}>
-            {subject === "user" ? "Select User" : "Select Role"}
-          </Text>
-        </View>
-
-        <SubjectToggle subject={subject} onChange={switchSubject} />
-
-        {subject === "role" && (
-          <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 10.5, lineHeight: 15, marginBottom: 10 }}>
-            Sets the baseline every user with this role inherits, effective immediately — a user's own overrides (Custom User-wise) can only add on top of this.
-          </Text>
-        )}
-
-        {subject === "user" ? (
-          <PickerRow
-            label="User"
-            value={loadingUsers ? "" : selectedUser?.name ?? ""}
-            placeholder={loadingUsers ? "Loading users…" : "Choose a user…"}
-            sublabel={selectedUser?.role}
-            onPress={() => setUserPickerOpen(true)}
-          />
-        ) : (
-          <PickerRow
-            label="Role"
-            value={loadingRoles ? "" : selectedRole?.RName ?? ""}
-            placeholder={loadingRoles ? "Loading roles…" : "Choose a role…"}
-            onPress={() => setRolePickerOpen(true)}
-          />
-        )}
-      </View>
-
-      {loadingDefs && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <ActivityIndicator size="small" color={colors.mutedForeground} />
-          <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>Loading eligible pages…</Text>
-        </View>
-      )}
-
-      {hasSubjectSelected && !loadingPerms && (
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", flex: 1 }}>
-            <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: `${colors.primary}1a` }}>
-              <Text style={{ color: colors.primary, fontSize: 10.5, fontFamily: fonts.heading.semibold }}>
-                {grantedCount}/{eligiblePages.length} granted
-              </Text>
-            </View>
-            {dirty && (
-              <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: "#ffe2021a", borderWidth: 1, borderColor: "#f59e0b40" }}>
-                <Text style={{ color: "#f59e0b", fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Unsaved</Text>
-              </View>
-            )}
-          </View>
-          <Pressable
-            onPress={handleSave}
-            disabled={saving || !dirty}
-            style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.primary, opacity: saving || !dirty ? 0.5 : 1 }}
-          >
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : <Save size={13} color="#fff" />}
-            <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>{saving ? "Saving…" : "Save"}</Text>
-          </Pressable>
-        </View>
-      )}
-    </View>
-  );
+  const subjectName = subject === "user" ? selectedUser?.name : selectedRole?.RName;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {!hasSubjectSelected ? (
-        <View style={{ flex: 1, padding: 16 }}>
-          {ListHeader}
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", borderRadius: 16, borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, marginTop: 8 }}>
-            <ShieldCheck size={36} color={`${colors.mutedForeground}33`} />
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium, marginTop: 12, textAlign: "center", paddingHorizontal: 30 }}>
-              {subject === "user" ? "Select a user to manage post-approval rights" : "Select a role to manage its post-approval baseline"}
-            </Text>
+    <View style={{ flex: 1 }}>
+      <SheetPage>
+        <SheetShell
+          eyebrow="CivilierERP · Approvals"
+          title="Post-approval rights"
+          subtitle="Who may still edit a record after it has been approved, page by page. Set it for a role, or add to it for one person."
+        >
+          {/* Whose rights: a role's baseline, or one person's additions. */}
+          <View style={{ borderWidth: 1, borderColor: S.ink }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+              <Label color={S.ink}>{subject === "user" ? "Choose a person" : "Choose a role"}</Label>
+              <Seg
+                options={[
+                  { value: "role", label: "Role-wise" },
+                  { value: "user", label: "Custom user-wise" },
+                ]}
+                value={subject}
+                onChange={switchSubject}
+              />
+            </View>
+            <View style={{ padding: 12, gap: 10 }}>
+              {subject === "role" && (
+                <Body size={12} color={S.graphite}>
+                  Sets the baseline every user with this role inherits, effective at once — a person's own additions (Custom user-wise) can only add on top of it.
+                </Body>
+              )}
+              {subject === "user" ? (
+                <PickerRow
+                  label="Person"
+                  value={loadingUsers ? "" : selectedUser?.name ?? ""}
+                  placeholder={loadingUsers ? "Loading users…" : "Choose a user…"}
+                  sublabel={selectedUser?.role?.replace(/_/g, " ")}
+                  onPress={() => setUserPickerOpen(true)}
+                />
+              ) : (
+                <PickerRow
+                  label="Role"
+                  value={loadingRoles ? "" : selectedRole?.RName ?? ""}
+                  placeholder={loadingRoles ? "Loading roles…" : "Choose a role…"}
+                  onPress={() => setRolePickerOpen(true)}
+                />
+              )}
+            </View>
           </View>
-        </View>
-      ) : loadingPerms ? (
-        <View style={{ flex: 1, padding: 16 }}>
-          {ListHeader}
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <ActivityIndicator color={colors.mutedForeground} />
-          </View>
-        </View>
-      ) : (
-        <FlatList
-          data={eligiblePages}
-          keyExtractor={(p) => p.key}
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 16, paddingTop: 12 }}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => <PageRow page={item} checked={isGranted(item.key)} onToggle={() => toggle(item.key)} />}
-          ListEmptyComponent={
-            <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", paddingVertical: 32 }}>
-              No pages currently support post-approval editing.
-            </Text>
-          }
-        />
-      )}
+
+          {loadingDefs && <Label>Loading eligible pages…</Label>}
+
+          {!hasSubjectSelected ? (
+            <View style={{ minHeight: 120, alignItems: "center", justifyContent: "center", padding: 16, borderWidth: 1, borderStyle: "dashed", borderColor: S.line40 }}>
+              <Body size={13} color={S.graphite} style={{ textAlign: "center" }}>
+                {subject === "user" ? "Choose a person to manage their post-approval rights." : "Choose a role to manage its post-approval baseline."}
+              </Body>
+            </View>
+          ) : loadingPerms ? (
+            <View style={{ gap: 8 }}>
+              <Skel h={40} />
+              <Skel h={160} />
+            </View>
+          ) : (
+            <View style={{ borderWidth: 1, borderColor: S.ink }}>
+              <View style={{ paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ink, gap: 10 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", gap: 10 }}>
+                  <Label color={S.ink}>{subjectName ?? ""}</Label>
+                  <Text style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite }}>
+                    <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{grantedCount}</Text>
+                    {` of ${eligiblePages.length} pages granted`}
+                  </Text>
+                  {dirty && (
+                    <View style={{ borderWidth: 1, borderStyle: "dashed", borderColor: S.ink, paddingHorizontal: 6, paddingVertical: 1 }}>
+                      <Label color={S.ink}>Unsaved</Label>
+                    </View>
+                  )}
+                </View>
+                <Key tone="ink" label={saving ? "Saving…" : "Save"} icon={<Save size={13} color={S.paper} />} onPress={handleSave} disabled={saving || !dirty} style={{ alignSelf: "flex-start" }} />
+              </View>
+
+              {eligiblePages.length === 0 ? (
+                <Body size={13} color={S.graphite} style={{ textAlign: "center", paddingVertical: 24 }}>No pages currently support post-approval editing.</Body>
+              ) : (
+                <View>
+                  <View style={{ flexDirection: "row", paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: S.line15 }}>
+                    <Label style={{ flex: 1 }}>Page · module</Label>
+                    <Label>Edit after approved</Label>
+                  </View>
+                  {eligiblePages.map((page, i) => {
+                    const checked = isGranted(page.key);
+                    return (
+                      <View key={page.key} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft }}>
+                        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                          <Text numberOfLines={2} style={{ fontFamily: checked ? fonts.body.semibold : fonts.body.medium, fontSize: 13, color: S.ink }}>{page.label}</Text>
+                          <View style={{ alignSelf: "flex-start", borderWidth: 1, borderColor: S.line40, paddingHorizontal: 5, paddingVertical: 1 }}>
+                            <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 9, letterSpacing: 0.9, textTransform: "uppercase", color: S.graphite }}>{page.module}</Text>
+                          </View>
+                        </View>
+                        <SquareSwitch on={checked} onChange={() => toggle(page.key)} />
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          )}
+          {!loadingDefs && pageDefs.length === 0 && <Notice>The page list came back empty. Reopen this page to try again.</Notice>}
+        </SheetShell>
+      </SheetPage>
 
       <OptionPickerModal
         visible={userPickerOpen}
-        title="Select User"
+        title="Choose a person"
         options={userOptions}
         selectedKey={selectedUserId != null ? String(selectedUserId) : null}
         searchable
@@ -300,7 +261,7 @@ export default function PostApprovalRightsScreen() {
       />
       <OptionPickerModal
         visible={rolePickerOpen}
-        title="Select Role"
+        title="Choose a role"
         options={roleOptions}
         selectedKey={selectedRoleId != null ? String(selectedRoleId) : null}
         searchable
