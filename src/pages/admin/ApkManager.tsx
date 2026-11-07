@@ -51,23 +51,26 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
 
   return (
     <Dialog open onOpenChange={(o) => !o && !publish.isPending && onClose()}>
-      <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
+      <DialogContent className="sheet-frame max-w-lg grid-cols-[minmax(0,1fr)]" style={{ margin: 0 }}>
         <DialogHeader>
           <div className="pb-3" style={{ borderBottom: RULE }}>
             <p className={LBL}>{app.label}</p>
             <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Publish a new build</DialogTitle>
           </div>
         </DialogHeader>
-        <div className="space-y-4">
-          <div>
+        {/* minmax(0,1fr) above and min-w-0 here: a long APK file name is cut off with "…" instead of widening the dialog
+            past the screen and clipping the note and the Publish key. */}
+        <div className="space-y-4 min-w-0">
+          <div className="min-w-0">
             <p className={`${LBL} mb-1.5`}>APK file</p>
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="w-full flex items-center gap-2 px-3 py-2.5 border border-dashed border-foreground/50 hover:border-foreground text-sm text-left transition-colors"
+              className="w-full min-w-0 flex items-center gap-2 px-3 py-2.5 border border-dashed border-foreground/50 hover:border-foreground text-sm text-left transition-colors"
             >
               <Upload size={14} className="text-muted-foreground shrink-0" />
-              <span className="truncate">{file ? `${file.name} (${fmtMB(file.size)})` : "Choose the .apk built for this app"}</span>
+              <span className="truncate min-w-0 flex-1" title={file?.name}>{file ? file.name : "Choose the .apk built for this app"}</span>
+              {file && <span className="shrink-0 text-muted-foreground tabular-nums">{fmtMB(file.size)}</span>}
             </button>
             <input
               ref={fileRef}
