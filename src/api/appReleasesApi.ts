@@ -37,14 +37,26 @@ export const getAppCatalog = () => fetchWithAuth(`${BASE}/catalog`).then((r) => 
 export const getAppReleases = (appKey?: string) =>
   fetchWithAuth(appKey ? `${BASE}?app=${encodeURIComponent(appKey)}` : BASE).then((r) => handle<AppRelease[]>(r));
 
-export const publishAppRelease = (input: { appKey: string; file: File; releaseNotes: string; mandatory: boolean }) => {
+/** What an "Update available" push reached: phones on an older build (targeted), and how many Expo accepted. */
+export interface UpdateNotified {
+  targeted: number;
+  sent: number;
+  failed: number;
+}
+
+export const publishAppRelease = (input: { appKey: string; file: File; releaseNotes: string; mandatory: boolean; notify: boolean }) => {
   const form = new FormData();
   form.append("appKey", input.appKey);
   form.append("releaseNotes", input.releaseNotes);
   form.append("mandatory", input.mandatory ? "true" : "false");
+  form.append("notify", input.notify ? "true" : "false");
   form.append("file", input.file);
-  return fetchWithAuth(BASE, { method: "POST", body: form }).then((r) => handle<AppRelease>(r));
+  return fetchWithAuth(BASE, { method: "POST", body: form }).then((r) => handle<AppRelease & { notified: UpdateNotified | null }>(r));
 };
+
+/** Sends the current build's "Update available" push again to the phones still on an older one. */
+export const notifyOutdatedPhones = (id: number) =>
+  fetchWithAuth(`${BASE}/${id}/notify`, { method: "POST" }).then((r) => handle<{ notified: UpdateNotified }>(r));
 
 export const updateAppRelease = (id: number, input: { releaseNotes: string; mandatory: boolean }) =>
   fetchWithAuth(`${BASE}/${id}`, { method: "PATCH", body: JSON.stringify(input) }).then((r) => handle<AppRelease>(r));

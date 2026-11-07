@@ -1,18 +1,28 @@
 import React, { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Smartphone, Upload, Download, Loader2, ShieldAlert, Pencil } from "lucide-react";
+import { Smartphone, Upload, Download, Loader2, ShieldAlert, Pencil, BellRing } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   getAppCatalog,
   getAppReleases,
+  notifyOutdatedPhones,
   publishAppRelease,
   updateAppRelease,
   type AppCatalogEntry,
   type AppRelease,
+  type UpdateNotified,
 } from "@/api/appReleasesApi";
+
+/** One line on what the update push reached, for the toast after publishing or re-sending. */
+const notifiedLine = (n: UpdateNotified | null | undefined) =>
+  !n
+    ? ""
+    : n.targeted === 0
+      ? "No phones on an older version to notify."
+      : `Notified ${n.sent} of ${n.targeted} phone${n.targeted === 1 ? "" : "s"} on an older version${n.failed ? ` (${n.failed} could not be reached)` : ""}.`;
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -37,11 +47,12 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
   const [file, setFile] = useState<File | null>(null);
   const [notes, setNotes] = useState("");
   const [mandatory, setMandatory] = useState(false);
+  const [notify, setNotify] = useState(true);
 
   const publish = useMutation({
-    mutationFn: () => publishAppRelease({ appKey: app.appKey, file: file as File, releaseNotes: notes, mandatory }),
+    mutationFn: () => publishAppRelease({ appKey: app.appKey, file: file as File, releaseNotes: notes, mandatory, notify }),
     onSuccess: (r) => {
-      toast.success(`Published ${app.label} ${r.versionName ?? ""} (build ${r.versionCode}).`);
+      toast.success(`Published ${app.label} ${r.versionName ?? ""} (build ${r.versionCode}).`, { description: notifiedLine(r.notified) || undefined });
       qc.invalidateQueries({ queryKey: ["app-catalog"] });
       qc.invalidateQueries({ queryKey: ["app-releases"] });
       onClose();
@@ -101,6 +112,15 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
               <span className="font-medium">Mandatory update</span>
               <span className="block text-[0.6875rem] text-muted-foreground">
                 Blocks the app until it is updated. Use for changes older versions can't work with.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="mt-0.5 accent-foreground" />
+            <span className="text-sm">
+              <span className="font-medium">Notify phones on older versions</span>
+              <span className="block text-[0.6875rem] text-muted-foreground">
+                Sends an "Update available" notification to everyone with this app on an older build. Tapping it opens the app's update prompt.
               </span>
             </span>
           </label>
@@ -175,6 +195,11 @@ function EditDialog({ release, onClose }: { release: AppRelease; onClose: () => 
 
 export default function ApkManager() {
   const [publishing, setPublishing] = useState<AppCatalogEntry | null>(null);
+  const notifyAgain = useMutation({
+    mutationFn: (rel: AppRelease) => notifyOutdatedPhones(rel.id),
+    onSuccess: (r) => toast.success(notifiedLine(r.notified)),
+    onError: (e: any) => toast.error(e?.message || "Could not send the notification."),
+  });
   const [editing, setEditing] = useState<AppRelease | null>(null);
   const [filter, setFilter] = useState("");
 
@@ -259,6 +284,16 @@ export default function ApkManager() {
                     >
                       <Download size={13} /> Download APK
                     </a>
+                  )}
+                  {a.current && (
+                    <button
+                      onClick={() => notifyAgain.mutate(a.current as AppRelease)}
+                      disabled={notifyAgain.isPending}
+                      title="Send the Update available notification again to phones still on an older build"
+                      className={`${KEY_LINE} h-9 px-3 shrink-0`}
+                    >
+                      {notifyAgain.isPending && notifyAgain.variables?.appKey === a.appKey ? <Loader2 size={13} className="animate-spin" /> : <BellRing size={13} />} Notify outdated phones
+                    </button>
                   )}
                 </div>
               </div>

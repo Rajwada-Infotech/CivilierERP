@@ -15,6 +15,8 @@ import { useAppFonts } from "@/theme/fonts";
 // A tapped notification opens the Approval Inbox (approvals) or Notifications
 // (everything else). The app may have been closed, so wait briefly for the navigator.
 function openFromNotification(data: Record<string, unknown>) {
+  // "Update available": opening the app is enough — UpdateGate checks for the new build as the app comes forward.
+  if (data?.type === "app-update") return;
   const screen = data?.type === "approval-waiting" || data?.type === "approval-outcome" ? "ApprovalInbox" : "Notifications";
   let tries = 0;
   const go = () => {
