@@ -4,7 +4,7 @@ const { getNextDocNumber } = require("./docNumber");
 const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
 const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
-const { onAccountWithAvailableSql } = require("./crmPaymentFunding");
+const { onAccountWithAvailableSql, bookingFullyFundedSql } = require("./crmPaymentFunding");
 
 // Server-side backstop for "a cancelled booking must be released from every
 // workflow action, not just hidden from dropdowns" — a stale client-side
@@ -1393,7 +1393,27 @@ async function assertWelcomeChecklistUnlocked(pool, bookingId) {
   return null;
 }
 
-module.exports = { requireNotMidApproval, releaseBookingInventoryLines,
+// Pre-Possession's status, from its three checks and whether the booking is fully funded. The one rule for saving a
+// check and for the refresh below.
+const prePossessionStatusSql = ({ funded, doc, qc, util }) => `CASE
+    WHEN ${funded} AND ${doc} = 1 AND ${qc} = 1 AND ${util} = 1 THEN 'Ready'
+    WHEN ${funded} OR ${doc} = 1 OR ${qc} = 1 OR ${util} = 1 THEN 'InProgress'
+    ELSE 'Pending' END`;
+
+// Money moves after the last time someone saved the checklist, so the saved status can be out of date. Brought up to
+// date at every gate that reads it, and hourly. Blocked is an operator's decision and is left alone.
+async function refreshPrePossessionStatus(executor, bookingId = null) {
+  const live = prePossessionStatusSql({ funded: bookingFullyFundedSql("p.BookingId"), doc: "p.DocumentationCheck", qc: "p.QualityInspectionCheck", util: "p.UtilityReadinessCheck" });
+  const r = await executor.request().input("bid", sql.Int, bookingId).query(`
+    UPDATE p SET Status = x.Live, UpdatedAt = SYSDATETIME()
+    FROM dbo.CrmPrePossession p
+    JOIN dbo.CrmBooking b ON b.Id = p.BookingId
+    CROSS APPLY (SELECT ${live} AS Live) x
+    WHERE p.Status <> N'Blocked' AND p.Status <> x.Live AND b.IsActive = 1 AND (@bid IS NULL OR p.BookingId = @bid)`);
+  return r.rowsAffected?.[0] || 0;
+}
+
+module.exports = { prePossessionStatusSql, refreshPrePossessionStatus, requireNotMidApproval, releaseBookingInventoryLines,
   assertWelcomeChecklistUnlocked,
   resolveNocType,
   resolveOcCcGate,

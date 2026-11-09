@@ -966,7 +966,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       });
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Submission failed");
-      toast.success(`Money Receipt ${resData.ReceiptNo || ""} created — Pending approval.`);
+      toast.success(`Money Receipt ${resData.ReceiptNo || ""} created.`);
       setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });

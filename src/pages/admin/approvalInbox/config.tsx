@@ -337,6 +337,20 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/refunds/gst-notes/cancel-requests",
     label: "Credit Note (cancel)",
   },
+  "crm-milestone-waiver": {
+    icon: Undo2,
+    color: "text-orange-600 bg-orange-600/10",
+    navPath: "/crm/payments",
+    apiEndpoint: "/api/crm/payments/waivers",
+    label: "Milestone Waiver",
+  },
+  "crm-milestone-waiver-reversal": {
+    icon: Undo2,
+    color: "text-red-600 bg-red-600/10",
+    navPath: "/crm/payments",
+    apiEndpoint: "/api/crm/payments/waiver-reversals",
+    label: "Milestone Waiver (reversal)",
+  },
   "crm-ownership-changes": {
     icon: Undo2,
     color: "text-teal-600 bg-teal-600/10",
@@ -487,6 +501,8 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "crm-ownership-changes": "sales",
   "crm-credit-notes": "sales",
   "crm-credit-note-cancel": "sales",
+  "crm-milestone-waiver": "sales",
+  "crm-milestone-waiver-reversal": "sales",
 };
 
 export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";

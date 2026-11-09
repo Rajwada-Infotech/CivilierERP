@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { unitPrice, rateSqlType, sumMoney } = require("../services/bookingUnits");
+const { unitPrice, rateSqlType, sumMoney, round2 } = require("../services/bookingUnits");
 const { returnLeadToPool } = require("../services/saHandoff");
 const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 const multer = require("multer");
@@ -1978,10 +1978,12 @@ async function generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, 
   if (invoiceableErr) { const e = new Error(invoiceableErr); e.status = 400; throw e; }
 
   const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, bookingId).query(`
-    SELECT Id, MilestoneName, AmountDue, DemandStatus, DemandRaisedOn FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
+    SELECT Id, MilestoneName, AmountDue, Status, DemandStatus, DemandRaisedOn FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
   `);
   const mRow = m.recordset[0];
   if (!mRow) { const e = new Error("Milestone not found on this booking"); e.status = 404; throw e; }
+  // The list may have been opened before the waiver was approved.
+  if (mRow.Status === "Waived") { const e = new Error(`"${mRow.MilestoneName}" has been waived, so there is nothing to invoice`); e.status = 400; throw e; }
   if (mRow.DemandStatus === CrmStatus.PENDING) {
     const e = new Error(`A demand must be raised for "${mRow.MilestoneName}" before its invoice can be generated`);
     e.status = 400; throw e;
@@ -2071,6 +2073,18 @@ async function invoiceModeOf(pool, bookingId) {
   return r.recordset[0]?.InvoiceMode || null;
 }
 
+// A discount has to be recorded on the invoice to stay out of the taxable value (CGST Act s.15(3)(a)): the final invoice
+// says what was agreed, what was waived and on which milestones.
+async function finalInvoiceDescription(pool, bookingId, bk, invoiceAmount) {
+  const w = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT m.MilestoneName, m.AmountDue, ISNULL(m.AmountPaid, 0) AS AmountPaid FROM dbo.CrmPaymentMilestone m
+    WHERE m.BookingId = @bid AND m.Status = 'Waived' ORDER BY m.MilestoneNo, m.Id`)).recordset;
+  if (!w.length) return `Final invoice for ${bk.BookingNo}`;
+  const waived = sumMoney(w, (m) => Number(m.AmountDue) - Number(m.AmountPaid));
+  const rs = (n) => Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `Final invoice for ${bk.BookingNo}. Agreed price Rs. ${rs(round2(Number(invoiceAmount) + waived))} less discount of Rs. ${rs(waived)} (${w.map((m) => m.MilestoneName).join(", ")} waived).`;
+}
+
 async function generateFinalInvoiceForBooking(pool, bookingId, actorUserId) {
   const activeErr = await requireActiveBooking(pool, bookingId);
   if (activeErr) { const e = new Error(activeErr); e.status = 400; throw e; }
@@ -2107,7 +2121,7 @@ async function generateFinalInvoiceForBooking(pool, bookingId, actorUserId) {
   const result = await pool.request()
     .input("no", sql.NVarChar(30), invoiceNo).input("bid", sql.Int, bookingId)
     .input("amt", sql.Decimal(18, 2), invoiceAmount)
-    .input("desc", sql.NVarChar(500), `Final invoice — ${bk.BookingNo}, after waived milestones`)
+    .input("desc", sql.NVarChar(500), (await finalInvoiceDescription(pool, bookingId, bk, invoiceAmount)).slice(0, 500))
     .input("cb", sql.Int, actorUserId)
     .query(`INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt)
             OUTPUT INSERTED.Id
@@ -2955,3 +2969,5 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
 module.exports = router;
 module.exports.softDeleteBooking = softDeleteBooking;
 module.exports.isBookingFullyApproved = isBookingFullyApproved;
+module.exports.finalInvoiceDescription = finalInvoiceDescription;
+module.exports.generateMilestoneInvoiceForBooking = generateMilestoneInvoiceForBooking;

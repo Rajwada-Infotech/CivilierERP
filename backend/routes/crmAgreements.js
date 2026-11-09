@@ -800,7 +800,7 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
     // approvalTransition owns its own transaction/locking on `pool` and must
     // run and commit before we open ours below (same established pattern as
     // /approve above and crmCancellations.js/crmSalesDeed.js's equivalents).
-    const result = await approvalTransition("crm-agreements", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
+    const result = await approvalTransition("crm-agreements", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks, req.user?.userId ?? null);
     // Check if customer had already approved before resetting — log it so the
     // reset is traceable and not a silent discard.
     const priorCustomer = (await pool.request().input("id", sql.Int, id)
@@ -943,7 +943,7 @@ router.put("/:id/date/reject", requirePageRight("crm-agreements", "edit"), async
     // file) — but the reset + approval-log write that follow it are wrapped
     // together so a failure between them can't leave the negotiation reset
     // with no trace of the rejection in the approval log.
-    const result = await approvalTransition("crm-agreement-date", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
+    const result = await approvalTransition("crm-agreement-date", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks, req.user?.userId ?? null);
     const tx = pool.transaction();
     await tx.begin();
     try {

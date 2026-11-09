@@ -468,7 +468,7 @@ router.put("/:id/approve", requirePageRight("crm-noc", "edit"), async (req, res)
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-noc", id, CrmStatus.APPROVED, userEmail, req.user?.role);
+    const result = await approvalTransition("crm-noc", id, CrmStatus.APPROVED, userEmail, req.user?.role, null, req.user?.userId ?? null);
     // Only the final level approves the NOC - an intermediate level leaves it Pending.
     if (result.newStatus === CrmStatus.APPROVED) {
       await getPool().request()
@@ -495,7 +495,7 @@ router.put("/:id/reject", requirePageRight("crm-noc", "edit"), async (req, res) 
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-noc", id, CrmStatus.REJECTED, userEmail, req.user?.role, req.body?.note || null);
+    const result = await approvalTransition("crm-noc", id, CrmStatus.REJECTED, userEmail, req.user?.role, req.body?.note || null, req.user?.userId ?? null);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-noc] reject error:", e.message);

@@ -1470,6 +1470,39 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
+    // A milestone waiver, and the reversal of one.
+    for (const [mod, label, col, why, by] of [
+      ["crm-milestone-waiver", "Milestone Waiver", "Status", "w.Reason", "w.RequestedById"],
+      ["crm-milestone-waiver-reversal", "Milestone Waiver — Reversal", "ReversalStatus", "w.ReversalReason", "w.ReversalRequestedById"],
+    ]) {
+      if (module && module !== mod) continue;
+      queries.push(`
+        SELECT
+          '${mod}'                               AS Module,
+          '${label}'                             AS ModuleLabel,
+          CAST(w.Id AS NVARCHAR)                 AS RecordId,
+          CONCAT(b.BookingNo, ' · ', m.MilestoneName) AS Reference,
+          w.CreatedAt                            AS RecordDate,
+          w.${col}                               AS Status,
+          CAST(a.ApplicantName AS NVARCHAR(255)) AS ContractorName,
+          CAST(${why} AS NVARCHAR(255))          AS SupplierName,
+          w.Amount                               AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), '') AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ''                                     AS RejectionNote,
+          w.CreatedAt                            AS LastModified
+        FROM dbo.CrmMilestoneWaiver w
+        JOIN dbo.CrmPaymentMilestone m ON m.Id = w.MilestoneId
+        JOIN dbo.CrmBooking b ON b.Id = w.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.Users rq ON rq.id = ${by}
+        WHERE w.${col} = 'Pending'${pp("b.ProjectId")}
+      `);
+    }
+
     // A new owner of a conveyed property, recorded from their registered sale deed.
     if (!module || module === "crm-ownership-changes") {
       queries.push(`

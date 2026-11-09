@@ -150,6 +150,7 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
     if (!require("../services/projectScope").assertProjectAllowed(req, res, parseInt(b.ProjectId, 10))) return;
     if (!b.CertType)   return res.status(400).json({ error: "CertType is required (OC / CC / OC+CC)" });
     if (!["OC", "CC", "OC+CC"].includes(b.CertType)) return res.status(400).json({ error: "CertType must be OC, CC, or OC+CC" });
+    if (b.Status && !["Applied", "Received"].includes(b.Status)) return res.status(400).json({ error: "Status must be Applied or Received" });
 
     const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
       .query("SELECT name FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");

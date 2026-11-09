@@ -25,15 +25,14 @@ import {
   API, BKG_API, PAY_MODES, modeHasBank, fmt, fmtDate, fmtShort, todayStr, isOverdue, milestoneFill, nextOpenMilestone, pct,
   fetchLedger, fetchLedgerExport, fetchLedgerSummary, fetchMilestones, fetchMoneyReceipts, fetchOnAccount, fetchProjectBanks, fetchCustomerBank,
   type DeskTab, type LedgerRow,
+  pendingWaiverIds, planCoverage,
 } from "./payments/config";
-import { BAND_DOT, CollectionBar, EntryTable, LEDGER_COLS, MilestoneTable, MoneyBand, MoneyTrail, OnAccountPanel, PlanRibbon, PriceTable, TokenNote } from "./payments/parts";
+import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, CollectionBar, EntryTable, LEDGER_COLS, MilestoneTable, MoneyBand, MoneyTrail, OnAccountPanel, WaiverNotes, WaiverSection, PlanRibbon, PriceTable, TokenNote } from "./payments/parts";
 
 const { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } = GRID_SHEET_KEYS;
 const LABEL = `block mb-1.5 ${LBL}`;
 const DIALOG = "p-5 gap-4";
 const PREFS_KEY = "crm-payments-queue-cols-v5";
-const BAND_KEY = "inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-md border border-white/25 text-xs font-medium text-white hover:bg-white/10 disabled:opacity-50";
-const BAND_KEY_MAIN = "inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-md bg-white text-xs font-semibold text-slate-900 hover:bg-slate-100";
 const VIEWS_KEY = "crm-payments-queue-views";
 const DESK_TABS: { key: DeskTab; label: string }[] = [
   { key: "everything", label: "All bookings" }, { key: "all", label: "Live" }, { key: "attention", label: "Needs action" }, { key: "overdue", label: "Overdue" },
@@ -198,7 +197,7 @@ const CrmPaymentMilestones: React.FC = () => {
   };
 
   const handleWaiveConfirm = async () => {
-    if (!waiveDialog?.reason.trim()) return;
+    if ((waiveDialog?.reason.trim().length || 0) < 10) return;
     setWaiving(true);
     try {
       const res = await fetchWithAuth(`${API}/${waiveDialog.milestone.Id}/waive`, {
@@ -206,10 +205,8 @@ const CrmPaymentMilestones: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error);
-      toast.success("Milestone waived");
-      const allOthersCleared = milestones.filter((x) => x.Id !== waiveDialog.milestone.Id).every((x) => ["Paid", "Waived"].includes(x.Status));
+      toast.success("Waiver sent for approval. The milestone stays due until it is approved.");
       setWaiveDialog(null);
-      if (allOthersCleared) promptNextStep(navigate, "All payment milestones are cleared — the Sales Deed is ready to prepare.", "/crm/sales-deed", "Go to Sales Deed");
       reloadMilestones();
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setWaiving(false); }
@@ -372,20 +369,22 @@ const CrmPaymentMilestones: React.FC = () => {
   );
   const collectedAll = figures ? figures.settled + figures.held : 0;
   const receivedAll = figures ? collectedAll + figures.withFinance + figures.recorded : 0;
+  const coverage = planCoverage(receivedAll, figures?.totalDue || 0, figures?.toCollect || 0);
 
   const queue = (
     <div hidden={!!selectedBookingId} className="space-y-4">
       <MoneyBand eyebrow="CRM · Finance" title="Payment Milestones" sub="Receipts and balances across live bookings."
         actions={<><SentBackPanel chip />{refreshOnBand(refreshQueue, ledgerFetching)}</>}
-        lead={fmtShort(receivedAll)} leadNote={figures ? `received of ${fmtShort(figures.totalDue)} · ${pct(receivedAll, figures.totalDue)}%` : ""}
-        bar={<CollectionBar onDark due={figures?.totalDue || 0} collected={collectedAll} finance={figures?.withFinance || 0} recorded={figures?.recorded || 0}
+        lead={fmtShort(receivedAll)} leadNote={figures ? `received of ${fmtShort(figures.totalDue)} · ${pct(coverage.covered, figures.totalDue)}%` : ""}
+        bar={<CollectionBar onDark due={figures?.totalDue || 0} collected={Math.max(0, collectedAll - coverage.excess)} finance={figures?.withFinance || 0} recorded={figures?.recorded || 0}
           title={figures ? `Total due ${fmt(figures.totalDue)} · Adjusted ${fmt(figures.settled)} · On account ${fmt(figures.held)}` : undefined} />}
         figures={[
           { label: "Approved by Finance", dot: BAND_DOT.collected, value: fmtShort(collectedAll), note: `${fmtShort(figures?.held)} on account`, exact: figures ? `Adjusted ${fmt(figures.settled)} · On account ${fmt(figures.held)}` : undefined },
           { label: "Pending with Finance", dot: BAND_DOT.finance, value: fmtShort(figures?.withFinance), note: `${figures?.counts.finance ?? 0} booking${figures?.counts.finance === 1 ? "" : "s"}`, exact: fmt(figures?.withFinance) },
           { label: "Not sent to Finance", dot: BAND_DOT.recorded, value: fmtShort(figures?.recorded), note: `${figures?.counts.recorded ?? 0} booking${figures?.counts.recorded === 1 ? "" : "s"}`, exact: fmt(figures?.recorded) },
           { label: "Balance to collect", dot: BAND_DOT.notDue, value: fmtShort(figures?.toCollect), note: "Yet to be received", exact: fmt(figures?.toCollect) },
-        ]} />
+        ]}
+        footer={coverage.excess > 0 ? <span className="text-amber-200">{fmt(coverage.excess)} of the amount received is more than those bookings owe, so {fmt(coverage.covered)} counts against the {fmt(figures?.totalDue)} due.</span> : undefined} />
       <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
         <GridTabs<DeskTab> label="Queues" active={tab} onChange={setTab}
           tabs={DESK_TABS.map((t) => ({ ...t, count: figures ? figures.counts[t.key] : null }))} />
@@ -464,7 +463,7 @@ const CrmPaymentMilestones: React.FC = () => {
           { label: "Not sent to Finance", dot: BAND_DOT.recorded, value: fmtShort(money?.recorded), note: "Sent on Director approval", exact: fmt(money?.recorded) },
           { label: "Balance to collect", dot: BAND_DOT.notDue, value: fmtShort(money?.toCollect), note: "Yet to be received", exact: fmt(money?.toCollect) },
         ]}
-        footer={nextSentence} />
+        footer={<>{nextSentence}<WaiverNotes agreed={Number(booking.GrandTotal) || 0} waived={Number(summary.waivedDue) || 0} net={Number(summary.totalDue) || 0} excess={Number(money?.excess) || 0} bookingId={selectedBookingId} /></>} />
       {needsResync && (
         <GridGuidance tone="stopped" title={!milestone1 ? "No Booking Amount milestone" : "Milestone 1 doesn't match the booking amount"}
           text={!milestone1
@@ -478,9 +477,11 @@ const CrmPaymentMilestones: React.FC = () => {
       <GridRelated icon={ListChecks} title="Payment schedule" count={milestones.length}>
         <MilestoneTable milestones={milestones} canEdit={rights.canEdit} onAccountData={onAccountData} onAccountBalance={onAccountBalance}
           notFullyPaid={notFullyPaid} fullPaymentShortfall={fullPaymentShortfall} activeId={activeMilestone}
+          pendingWaivers={pendingWaiverIds(milestoneData.waivers)}
           nextMilestone={nextOutstandingMilestone} canManuallyApply={canManuallyApplyOnAccount}
           onPay={handleOpenPayment} onApply={openApplyDialog} onWaive={(m) => setWaiveDialog({ milestone: m, reason: "" })} onRemarks={(m) => setRemarksDialog({ milestone: m })} />
       </GridRelated>
+      <WaiverSection waivers={milestoneData.waivers || []} canEdit={rights.canEdit} onChanged={reloadMilestones} />
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
         <GridRelated icon={Landmark} title="On-account deposits" count={accountCount}>
           <OnAccountPanel onAccountData={onAccountData} notFullyPaid={notFullyPaid}
@@ -726,12 +727,18 @@ const CrmPaymentMilestones: React.FC = () => {
         {/* Waive */}
         <Dialog open={!!waiveDialog} onOpenChange={(o) => { if (!o) setWaiveDialog(null); }}>
           <DialogContent className={`max-w-sm ${DIALOG}`} style={{ border: RULE }}>
-            <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><AlertTriangle size={16} className="text-destructive" /> Waive milestone</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><AlertTriangle size={16} className="text-destructive" /> Ask to waive this milestone</DialogTitle></DialogHeader>
             {waiveDialog && (
               <>
                 <p className="text-sm text-muted-foreground">
-                  Waiving <span className="font-semibold text-foreground">{waiveDialog.milestone.MilestoneName}</span> (<span className="font-heading tabular-nums">{fmt(waiveDialog.milestone.AmountDue)}</span>) clears it without payment. This can't be undone.
+                  <span className="font-semibold text-foreground">{waiveDialog.milestone.MilestoneName}</span>: <span className="font-semibold tabular-nums text-foreground">{fmt(Math.max(0, Number(waiveDialog.milestone.AmountDue) - Number(waiveDialog.milestone.AmountPaid || 0)))}</span> would no longer be owed. This goes for approval, and the milestone stays due until it is approved. Once approved it counts as a discount: invoices bill the lower amount.
                 </p>
+                {milestoneFill(waiveDialog.milestone).held + milestoneFill(waiveDialog.milestone).finance + milestoneFill(waiveDialog.milestone).recorded > 0 && (
+                  <p className="text-xs flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5 text-amber-600" />
+                    <span>The customer has already paid <b className="tabular-nums">{fmt(milestoneFill(waiveDialog.milestone).held + milestoneFill(waiveDialog.milestone).finance + milestoneFill(waiveDialog.milestone).recorded)}</b> towards this milestone. If it is waived, that money moves to later milestones, and anything beyond them is left to refund or adjust.</span>
+                  </p>
+                )}
                 <div>
                   <label className={LABEL}>Reason *</label>
                   <textarea value={waiveDialog.reason} onChange={(e) => setWaiveDialog((d) => (d ? { ...d, reason: e.target.value } : d))} rows={3} autoFocus
@@ -739,7 +746,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 <DialogFooter className="gap-2">
                   <button onClick={() => setWaiveDialog(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-                  <button onClick={handleWaiveConfirm} disabled={waiving || !waiveDialog.reason.trim()} className={`${KEY_INK} h-9 px-4 !bg-destructive !border-destructive`}>{waiving ? "Waiving…" : "Waive milestone"}</button>
+                  <button onClick={handleWaiveConfirm} disabled={waiving || waiveDialog.reason.trim().length < 10} title={waiveDialog.reason.trim().length < 10 ? "Say why: at least 10 characters" : undefined} className={`${KEY_INK} h-9 px-4`}>{waiving ? "Sending…" : "Send for approval"}</button>
                 </DialogFooter>
               </>
             )}

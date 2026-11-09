@@ -9,7 +9,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, resolveOcCcGate, prePossessionStatusSql } = require("../services/crmWorkflowGuards");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
@@ -260,6 +260,20 @@ router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"
   }
 });
 
+// GET /:id — one check, for its own page. Registered after the named routes above.
+router.get("/:id", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const r = await getPool().request().input("id", sql.Int, id).query(`${PP_SELECT} WHERE p.Id = @id`);
+    if (!r.recordset.length) return res.status(404).json({ error: "Pre-possession record not found" });
+    res.json(r.recordset[0]);
+  } catch (e) {
+    console.error("[crm-pre-possession] GET /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST / — create a new pre-possession check record.
 // Gates: active booking, AFS Registered, project OC/CC Received.
 router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, res) => {
@@ -367,15 +381,7 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
         -- Consistent with the Handover payment gate (AmountDue/AmountPaid check).
         DECLARE @dues_cleared BIT = CASE WHEN ${bookingFullyFundedSql("@bid")} THEN 1 ELSE 0 END;
 
-        DECLARE @new_status NVARCHAR(30) =
-          CASE
-            -- All four checks pass → Ready
-            WHEN @dues_cleared = 1 AND @doc_eff = 1 AND @qc_eff = 1 AND @util_eff = 1 THEN 'Ready'
-            -- At least one check done or dues clear → InProgress
-            WHEN @dues_cleared = 1 OR @doc_eff = 1 OR @qc_eff = 1 OR @util_eff = 1   THEN 'InProgress'
-            -- Nothing done → Pending
-            ELSE 'Pending'
-          END;
+        DECLARE @new_status NVARCHAR(30) = ${prePossessionStatusSql({ funded: "@dues_cleared = 1", doc: "@doc_eff", qc: "@qc_eff", util: "@util_eff" })};
 
         DECLARE @upd TABLE (Status NVARCHAR(30));
 

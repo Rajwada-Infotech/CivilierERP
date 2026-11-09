@@ -11,14 +11,10 @@ class MoneyReceiptError extends Error {
   }
 }
 
-// The booking-amount money receipt has no approval of its own: it is handed
-// to Finance automatically when the Director approves the booking (see
-// crmBookingStageService), and Finance's approval of the Received Payment is
-// the one check on the money. Approval Setup's "crm-money-receipts" names only
-// who may bounce a receipt before that hand-off.
-function isMoneyReceiptApprover(role, userId) {
-  return require("./approvalService").isApproverFor("crm-money-receipts", userId, role);
-}
+// A money receipt has no approval of its own. The booking-amount receipt is
+// handed to Finance automatically when the Director approves the booking (see
+// crmBookingStageService), every other receipt is made when its payment is
+// approved, and Finance's approval of the Received Payment is the one check.
 
 function cleanString(v) {
   return v == null ? null : String(v).trim() || null;
@@ -533,7 +529,6 @@ async function retryConfirmedPendingMoneyReceipts(pool, actorEmail = "CRM system
 
 module.exports = {
   MoneyReceiptError,
-  isMoneyReceiptApprover,
   createMoneyReceiptForBooking,
   createMoneyReceiptAfterDataReview,
   refreshUnsentMoneyReceipt,

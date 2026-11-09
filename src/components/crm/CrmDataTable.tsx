@@ -875,7 +875,7 @@ export function GridBulkBar({ count, onClear, children }: { count: number; onCle
 }
 
 // ── Date range filter ────────────────────────────────────────────────────────
-export type GridDatePreset = "any" | "7d" | "30d" | "month" | "fy" | "custom";
+export type GridDatePreset = "any" | "7d" | "30d" | "month" | "lastMonth" | "fy" | "lastFy" | "custom";
 export interface GridDateRange { preset: GridDatePreset; from: string; to: string }
 export const GRID_ANY_DATE: GridDateRange = { preset: "any", from: "", to: "" };
 const DATE_PRESETS: { key: GridDatePreset; label: string }[] = [
@@ -883,7 +883,9 @@ const DATE_PRESETS: { key: GridDatePreset; label: string }[] = [
   { key: "7d", label: "Last 7 days" },
   { key: "30d", label: "Last 30 days" },
   { key: "month", label: "This month" },
+  { key: "lastMonth", label: "Last month" },
   { key: "fy", label: "This financial year" },
+  { key: "lastFy", label: "Last financial year" },
   { key: "custom", label: "Custom range" },
 ];
 const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -895,6 +897,11 @@ export function resolveGridDateRange(r: GridDateRange, today = new Date()): { fr
     case "7d": return { from: back(6), to: isoDay(today) };
     case "30d": return { from: back(29), to: isoDay(today) };
     case "month": return { from: isoDay(new Date(today.getFullYear(), today.getMonth(), 1)), to: isoDay(today) };
+    case "lastMonth": return { from: isoDay(new Date(today.getFullYear(), today.getMonth() - 1, 1)), to: isoDay(new Date(today.getFullYear(), today.getMonth(), 0)) };
+    case "lastFy": {
+      const startYear = (today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1) - 1;
+      return { from: isoDay(new Date(startYear, 3, 1)), to: isoDay(new Date(startYear + 1, 2, 31)) };
+    }
     case "fy": {
       const startYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
       return { from: isoDay(new Date(startYear, 3, 1)), to: isoDay(today) };

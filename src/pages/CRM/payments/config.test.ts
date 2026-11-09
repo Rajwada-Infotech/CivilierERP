@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { daysLate, isOverdue, milestoneFill, nextOpenMilestone } from "./config";
-import { todayStr } from "./config";
+import { pendingWaiverIds, planCoverage, todayStr, waiverState } from "./config";
 
 const dayOffset = (n: number) => {
   const d = new Date(`${todayStr()}T00:00:00`);
@@ -37,5 +37,31 @@ describe("what a milestone's amount is made of", () => {
     ];
     expect(nextOpenMilestone(plan)?.Id).toBe(3);
     expect(nextOpenMilestone([plan[0], plan[1]])).toBeNull();
+  });
+});
+
+describe("money received against the plans of many bookings", () => {
+  it("splits out what is above what the bookings owe, so received plus balance adds up", () => {
+    const c = planCoverage(25146425.53, 53484627.65, 31894000);
+    expect(c.excess).toBe(3555797.88);
+    expect(c.covered + 31894000).toBeCloseTo(53484627.65, 2);
+  });
+  it("nothing above what is owed: nothing to split", () => {
+    expect(planCoverage(40, 100, 60)).toEqual({ excess: 0, covered: 40 });
+  });
+});
+
+describe("where a waiver stands", () => {
+  it("only a request still waiting counts as waiting", () => {
+    expect([...pendingWaiverIds([{ Status: "Pending", MilestoneId: 3 }, { Status: "Approved", MilestoneId: 2 }, { Status: "Rejected", MilestoneId: 1 }])]).toEqual([3]);
+    expect(pendingWaiverIds(undefined).size).toBe(0);
+  });
+  it("only an approved waiver with no reversal under way can be reversed", () => {
+    expect(waiverState({ Status: "Approved" })).toMatchObject({ label: "Waived", reversible: true });
+    expect(waiverState({ Status: "Approved", ReversalStatus: "Rejected" })).toMatchObject({ label: "Waived", reversible: true });
+    expect(waiverState({ Status: "Pending" })).toMatchObject({ label: "Awaiting approval", reversible: false });
+    expect(waiverState({ Status: "Rejected" })).toMatchObject({ label: "Rejected", reversible: false });
+    expect(waiverState({ Status: "Approved", ReversalStatus: "Pending" })).toMatchObject({ label: "Reversal awaiting approval", reversible: false });
+    expect(waiverState({ Status: "Approved", ReversalStatus: "Approved" })).toMatchObject({ label: "Reversed", reversible: false });
   });
 });

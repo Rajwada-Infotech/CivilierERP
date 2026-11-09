@@ -241,7 +241,7 @@ const SELECT_NOTE_BASE = `
   LEFT JOIN dbo.CrmGstNote rn ON rn.Id = n.ReplacesId`;
 
 const SELECT_NOTE_DETAIL = `
-  SELECT n.Id, n.DocNo, n.DocType, n.Status, n.RefundId, n.BookingId, n.CustomerId, n.CompanyId, n.ProjectId, n.InvoiceId,
+  SELECT n.Id, n.DocNo, n.DocType, n.Status, n.MilestoneSpread, n.RefundId, n.BookingId, n.CustomerId, n.CompanyId, n.ProjectId, n.InvoiceId,
          n.AgainstRef, n.AgainstDate, n.DocDate, n.TaxableValue, n.GstRate, n.GstAmount, n.TotalAmount, n.DeadlineDate,
          n.Remarks, n.CreatedBy, n.CreatedAt, n.CancelledAt, n.CancelledBy, n.CancelReason, n.ReplacesId, n.Source,
          n.ReasonType, n.ApprovalStatus, n.RequestedById, n.RequestedAt, n.ApprovedAt, n.RejectionNote, n.MilestoneId,
@@ -269,10 +269,12 @@ const KIND_SQL = `CASE WHEN n.Status IN (N'Draft', N'Pending', N'Rejected') THEN
   WHEN n.Status = N'Cancelled' THEN 'cancelled' WHEN n.Status = N'TimeBarred' THEN 'barred'
   WHEN n.DocType = N'CreditNote' THEN 'invoice' ELSE 'advance' END`;
 
+const NOTE_SORT = { CustomerName: "c.CustomerName", DocNo: "n.DocNo", DocDate: "n.DocDate", AgainstRef: "n.AgainstRef", TaxableValue: "n.TaxableValue", GstAmount: "n.GstAmount", TotalAmount: "n.TotalAmount", Status: "n.Status" };
+
 async function list(pool, {
   refundId = null, customerId = null, companyId = null, projectId = null, blockId = null,
   from = null, to = null, type = null, status = null, search = null,
-  projectScope = null, includeCancelled = true, page = null, pageSize = null, offset = null
+  projectScope = null, includeCancelled = true, page = null, pageSize = null, offset = null, sortKey = null, sortDir = null
 } = {}) {
   const req = pool.request();
   const w = ["1 = 1"];
@@ -316,17 +318,17 @@ async function list(pool, {
     const total = (await req.query(`SELECT COUNT(*) AS total ${FROM} WHERE ${w.join(" AND ")}`)).recordset[0].total;
     // Per kind for the same filters, the tab aside — the page's figures and tabs (it used to fetch every note).
     const kw = w.filter((x) => !x.startsWith("n.Status") && !x.startsWith("n.DocType = N'"));
-    const kinds = (await req.query(`SELECT ${KIND_SQL} AS Kind, COUNT(*) AS n, SUM(n.GstAmount) AS gst,
+    const kinds = (await req.query(`SELECT ${KIND_SQL} AS Kind, COUNT(*) AS n, SUM(n.GstAmount) AS gst, SUM(n.TotalAmount) AS amount,
         SUM(CASE WHEN n.Status = N'Issued' AND n.DocType = N'CreditNote' AND n.DeadlineDate >= CAST(SYSDATETIME() AS DATE)
                   AND n.DeadlineDate <= DATEADD(DAY, 30, CAST(SYSDATETIME() AS DATE)) THEN 1 ELSE 0 END) AS dueSoon
       ${FROM} WHERE ${kw.join(" AND ")} GROUP BY ${KIND_SQL}`)).recordset;
     const kindCounts = {};
-    for (const k of kinds) kindCounts[k.Kind] = { count: k.n, gst: Number(k.gst) || 0, dueSoon: k.dueSoon };
+    for (const k of kinds) kindCounts[k.Kind] = { count: k.n, gst: Number(k.gst) || 0, amount: Number(k.amount) || 0, dueSoon: k.dueSoon };
 
     const off = offset != null ? offset : (page - 1) * pageSize;
     req.input("offset", sql.Int, off);
     req.input("limit", sql.Int, pageSize);
-    const dataSql = `${SELECT_NOTE_BASE} WHERE ${w.join(" AND ")} ORDER BY n.DocDate DESC, n.Id DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
+    const dataSql = `${SELECT_NOTE_BASE} WHERE ${w.join(" AND ")} ${Object.hasOwn(NOTE_SORT, sortKey) ? `ORDER BY ${NOTE_SORT[sortKey]} ${sortDir === "asc" ? "ASC" : "DESC"}, n.Id DESC` : "ORDER BY n.DocDate DESC, n.Id DESC"} OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
     const rows = (await req.query(dataSql)).recordset;
     return { rows, total, kindCounts };
   }
@@ -608,45 +610,66 @@ async function applyAdjustment(pool, id, user) {
   const docNo = await getNextDocNumber(pool, "CRN", "CRN");
   const tx = new sql.Transaction(pool);
   await tx.begin();
-  let moved = 0, onAccountId = null, n, dueReducedBy = null;
+  let moved = 0, onAccountId = null, n, dueReducedBy = null, spread = null;
   try {
     n = (await tx.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmGstNote WITH (UPDLOCK) WHERE Id = @id")).recordset[0];
     const amount = r2(n.TotalAmount);
     await tx.request().input("b", sql.Int, n.BookingId).input("t", sql.Decimal(18, 2), amount).input("g", sql.Decimal(18, 2), r2(n.GstAmount))
       .query("UPDATE dbo.CrmBooking SET CreditNoteTotal = ISNULL(CreditNoteTotal, 0) + @t, CreditNoteGst = ISNULL(CreditNoteGst, 0) + @g, UpdatedAt = SYSDATETIME() WHERE Id = @b");
+    // Which milestones come down, and by how much. A note on one milestone takes it all from that one. A Final invoice
+    // bills the whole plan, so its note comes off the milestones last first; without this the customer got no credit.
+    let cuts = [];
     if (n.MilestoneId) {
       const m = (await tx.request().input("m", sql.Int, n.MilestoneId)
         .query("SELECT Id, AmountDue, AmountPaid, MilestoneName FROM dbo.CrmPaymentMilestone WITH (UPDLOCK) WHERE Id = @m")).recordset[0];
-      if (m) {
-        const newDue = r2(Math.max(0, Number(m.AmountDue) - amount));
-        dueReducedBy = r2(Number(m.AmountDue) - newDue);
-        moved = r2(Math.max(0, Number(m.AmountPaid || 0) - newDue));
-        if (moved > 0) {
-          // The milestone's paid figure is the sum of its receipts: an
-          // offsetting line moves the extra off it, onto the account.
-          await tx.request().input("no", sql.NVarChar(30), docNo).input("m", sql.Int, m.Id).input("amt", sql.Decimal(18, 2), -moved)
-            .input("by", sql.Int, user.userId ?? null).input("note", sql.NVarChar(200), `Moved to the customer's account by credit note ${docNo}`)
-            .query(`INSERT INTO dbo.CrmPaymentReceipt (ReceiptNo, MilestoneId, Amount, BaseAmount, GSTAmount, ReceivedDate, PaymentMode, Notes, CreatedBy, CreatedAt)
-                    VALUES (@no, @m, @amt, @amt, 0, CAST(SYSDATETIME() AS DATE), N'CreditNote', @note, @by, SYSDATETIME())`);
-          const oa = await tx.request().input("no", sql.NVarChar(30), docNo).input("b", sql.Int, n.BookingId).input("amt", sql.Decimal(18, 2), moved).input("by", sql.Int, user.userId ?? null)
-            .input("note", sql.NVarChar(500), `Credit from credit note ${docNo} (${m.MilestoneName || "milestone"} reduced) — use on later milestones or refund it from Refunds.`)
-            .query(`INSERT INTO dbo.CrmOnAccountPayment (ReceiptNo, BookingId, Amount, AppliedAmount, Status, ReceivedDate, PaymentMode, Notes, CreatedBy, CreatedAt)
-                    OUTPUT INSERTED.Id VALUES (@no, @b, @amt, 0, N'Unapplied', CAST(SYSDATETIME() AS DATE), N'CreditNote', @note, @by, SYSDATETIME())`);
-          onAccountId = oa.recordset[0].Id;
-        }
-        await tx.request().input("m", sql.Int, m.Id).input("due", sql.Decimal(18, 2), newDue).query(`
-          UPDATE dbo.CrmPaymentMilestone SET AmountDue = @due,
-            AmountPaid = (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m),
-            Status = CASE WHEN (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m) >= @due THEN N'Paid' ELSE Status END,
-            DemandStatus = CASE WHEN DemandStatus IS NOT NULL AND (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m) >= @due THEN N'Paid' ELSE DemandStatus END,
-            UpdatedAt = SYSDATETIME()
-          WHERE Id = @m`);
+      if (m) cuts = [{ m, cut: amount }];
+    } else if ((await tx.request().input("i", sql.Int, n.InvoiceId).query("SELECT InvoiceType FROM dbo.CrmInvoice WHERE Id = @i")).recordset[0]?.InvoiceType === "Final") {
+      const plan = (await tx.request().input("b", sql.Int, n.BookingId)
+        .query("SELECT Id, AmountDue, AmountPaid, MilestoneName FROM dbo.CrmPaymentMilestone WITH (UPDLOCK) WHERE BookingId = @b AND Status <> N'Waived' ORDER BY MilestoneNo DESC, Id DESC")).recordset;
+      let left = amount;
+      for (const m of plan) {
+        if (left <= 0) break;
+        const cut = r2(Math.min(left, Number(m.AmountDue)));
+        if (cut > 0) cuts.push({ m, cut });
+        left = r2(left - cut);
       }
+      spread = [];
+    }
+    for (const { m, cut } of cuts) {
+      const newDue = r2(Math.max(0, Number(m.AmountDue) - cut));
+      const reduced = r2(Number(m.AmountDue) - newDue);
+      const movedHere = r2(Math.max(0, Number(m.AmountPaid || 0) - newDue));
+      dueReducedBy = r2((dueReducedBy || 0) + reduced);
+      moved = r2(moved + movedHere);
+      if (spread) spread.push({ m: m.Id, reduced, moved: movedHere });
+      if (movedHere > 0) {
+        // The milestone's paid figure is the sum of its receipts: an
+        // offsetting line moves the extra off it, onto the account.
+        await tx.request().input("no", sql.NVarChar(30), docNo).input("m", sql.Int, m.Id).input("amt", sql.Decimal(18, 2), -movedHere)
+          .input("by", sql.Int, user.userId ?? null).input("note", sql.NVarChar(200), `Moved to the customer's account by credit note ${docNo}`)
+          .query(`INSERT INTO dbo.CrmPaymentReceipt (ReceiptNo, MilestoneId, Amount, BaseAmount, GSTAmount, ReceivedDate, PaymentMode, Notes, CreatedBy, CreatedAt)
+                  VALUES (@no, @m, @amt, @amt, 0, CAST(SYSDATETIME() AS DATE), N'CreditNote', @note, @by, SYSDATETIME())`);
+      }
+      await tx.request().input("m", sql.Int, m.Id).input("due", sql.Decimal(18, 2), newDue).query(`
+        UPDATE dbo.CrmPaymentMilestone SET AmountDue = @due,
+          AmountPaid = (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m),
+          Status = CASE WHEN (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m) >= @due THEN N'Paid' ELSE Status END,
+          DemandStatus = CASE WHEN DemandStatus IS NOT NULL AND (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m) >= @due THEN N'Paid' ELSE DemandStatus END,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @m`);
+    }
+    if (moved > 0) {
+      const what = spread ? "final invoice" : cuts[0].m.MilestoneName || "milestone";
+      const oa = await tx.request().input("no", sql.NVarChar(30), docNo).input("b", sql.Int, n.BookingId).input("amt", sql.Decimal(18, 2), moved).input("by", sql.Int, user.userId ?? null)
+        .input("note", sql.NVarChar(500), `Credit from credit note ${docNo} (${what} reduced) — use on later milestones or refund it from Refunds.`)
+        .query(`INSERT INTO dbo.CrmOnAccountPayment (ReceiptNo, BookingId, Amount, AppliedAmount, Status, ReceivedDate, PaymentMode, Notes, CreatedBy, CreatedAt)
+                OUTPUT INSERTED.Id VALUES (@no, @b, @amt, 0, N'Unapplied', CAST(SYSDATETIME() AS DATE), N'CreditNote', @note, @by, SYSDATETIME())`);
+      onAccountId = oa.recordset[0].Id;
     }
     await tx.request().input("id", sql.Int, id).input("no", sql.NVarChar(16), docNo).input("mv", sql.Decimal(18, 2), moved || null).input("oa", sql.Int, onAccountId)
-      .input("dr", sql.Decimal(18, 2), dueReducedBy)
+      .input("dr", sql.Decimal(18, 2), dueReducedBy).input("sp", sql.NVarChar(sql.MAX), spread ? JSON.stringify(spread) : null)
       .query(`UPDATE dbo.CrmGstNote SET DocNo = @no, Status = N'Issued', ApprovedAt = SYSDATETIME(), DocDate = CAST(SYSDATETIME() AS DATE),
-                MovedToAccount = @mv, OnAccountId = @oa, DueReducedBy = @dr WHERE Id = @id`);
+                MovedToAccount = @mv, OnAccountId = @oa, DueReducedBy = @dr, MilestoneSpread = @sp WHERE Id = @id`);
     await tx.commit();
   } catch (e) {
     try { await tx.rollback(); } catch { /* rolled back */ }
@@ -661,7 +684,7 @@ async function applyAdjustment(pool, id, user) {
     // A note tied to a milestone has already moved that milestone itself. One
     // on the booking as a whole changes only the total, so the unpaid steps
     // must follow it, or the schedule still asks for the old price.
-    if (!n.MilestoneId) await require("./crmWorkflowGuards").recalculateRemainingMilestones(pool, n.BookingId);
+    if (!n.MilestoneId && !spread) await require("./crmWorkflowGuards").recalculateRemainingMilestones(pool, n.BookingId);
   } catch (err) {
     console.error("[crmGstNotes] Critical post-commit failure:", err);
     throw err;
@@ -769,25 +792,28 @@ async function reverseAdjustment(pool, n, user) {
   try {
     await tx.request().input("b", sql.Int, n.BookingId).input("t", sql.Decimal(18, 2), r2(n.TotalAmount)).input("g", sql.Decimal(18, 2), r2(n.GstAmount))
       .query("UPDATE dbo.CrmBooking SET CreditNoteTotal = ISNULL(CreditNoteTotal, 0) - @t, CreditNoteGst = ISNULL(CreditNoteGst, 0) - @g, UpdatedAt = SYSDATETIME() WHERE Id = @b");
-    if (n.MilestoneId) {
-      if (Number(n.MovedToAccount) > 0) {
-        await tx.request().input("no", sql.NVarChar(30), n.DocNo).input("m", sql.Int, n.MilestoneId).input("amt", sql.Decimal(18, 2), r2(n.MovedToAccount))
+    // Put back what really came off (it never went below zero), not the
+    // whole note - older notes have no record of it and keep the total.
+    const backs = n.MilestoneSpread ? JSON.parse(n.MilestoneSpread)
+      : n.MilestoneId ? [{ m: n.MilestoneId, reduced: n.DueReducedBy != null ? r2(n.DueReducedBy) : r2(n.TotalAmount), moved: r2(n.MovedToAccount || 0) }] : [];
+    for (const b of backs) {
+      if (Number(b.moved) > 0) {
+        await tx.request().input("no", sql.NVarChar(30), n.DocNo).input("m", sql.Int, b.m).input("amt", sql.Decimal(18, 2), r2(b.moved))
           .input("by", sql.Int, user.userId ?? null).input("note", sql.NVarChar(200), `Credit note ${n.DocNo} cancelled — money back on this milestone`)
           .query(`INSERT INTO dbo.CrmPaymentReceipt (ReceiptNo, MilestoneId, Amount, BaseAmount, GSTAmount, ReceivedDate, PaymentMode, Notes, CreatedBy, CreatedAt)
                   VALUES (@no, @m, @amt, @amt, 0, CAST(SYSDATETIME() AS DATE), N'CreditNote', @note, @by, SYSDATETIME())`);
-        await tx.request().input("o", sql.Int, n.OnAccountId).input("no", sql.NVarChar(30), n.DocNo)
-          .query("UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = Amount, Status = N'Applied', Notes = ISNULL(Notes, '') + CHAR(10) + N'Withdrawn: credit note ' + @no + N' cancelled.' WHERE Id = @o");
       }
-      // Put back what really came off (it never went below zero), not the
-      // whole note - older notes have no record of it and keep the total.
-      const putBack = n.DueReducedBy != null ? r2(n.DueReducedBy) : r2(n.TotalAmount);
-      await tx.request().input("m", sql.Int, n.MilestoneId).input("t", sql.Decimal(18, 2), putBack).query(`
+      await tx.request().input("m", sql.Int, b.m).input("t", sql.Decimal(18, 2), r2(b.reduced)).query(`
         UPDATE dbo.CrmPaymentMilestone SET AmountDue = AmountDue + @t,
           AmountPaid = (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m),
           Status = CASE WHEN (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m) >= AmountDue + @t THEN N'Paid'
                         WHEN Status = N'Paid' THEN N'Pending' ELSE Status END,
           UpdatedAt = SYSDATETIME()
         WHERE Id = @m`);
+    }
+    if (backs.length && Number(n.MovedToAccount) > 0) {
+      await tx.request().input("o", sql.Int, n.OnAccountId).input("no", sql.NVarChar(30), n.DocNo)
+        .query("UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = Amount, Status = N'Applied', Notes = ISNULL(Notes, '') + CHAR(10) + N'Withdrawn: credit note ' + @no + N' cancelled.' WHERE Id = @o");
     }
     await tx.commit();
   } catch (e) { try { await tx.rollback(); } catch { /* rolled back */ } throw e; }
@@ -796,7 +822,7 @@ async function reverseAdjustment(pool, n, user) {
     // A note tied to a milestone has already moved that milestone itself. One
     // on the booking as a whole changes only the total, so the unpaid steps
     // must follow it, or the schedule still asks for the old price.
-    if (!n.MilestoneId) await require("./crmWorkflowGuards").recalculateRemainingMilestones(pool, n.BookingId);
+    if (!n.MilestoneId && !n.MilestoneSpread) await require("./crmWorkflowGuards").recalculateRemainingMilestones(pool, n.BookingId);
   } catch (err) {
     console.error("[crmGstNotes] Critical post-commit failure:", err);
     throw err;

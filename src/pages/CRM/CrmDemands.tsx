@@ -1,5 +1,4 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import { round2, sumMoney } from "@/lib/crmPriceQuote";
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -7,198 +6,125 @@ import { translateError } from "@/lib/translateError";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  Send, Undo2, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight, Building2, User, Phone,
-  CalendarClock, Hash, LayoutList, Rows3, Zap, RefreshCw,
-} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Send, Undo2, AlertTriangle, Zap, RefreshCw, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
-import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import {
+  CrmGrid, GridColumnChooser, GridSavedViews, GridSearch, GridTabs, GridToneMark,
+  exportGrid, useGridPrefs, GRID_BTN, GRID_CARD, GRID_PAGE_SIZES, GRID_SHEET_KEYS, type GridCol,
+} from "@/components/crm/CrmDataTable";
+import { useCrmListState, useSticky, listParams, type CrmSort } from "@/hooks/useCrmListState";
+import { useUrlParam } from "@/hooks/useUrlParam";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, Initials, MoneyBand, asName } from "./payments/parts";
+import { fmtShort } from "./payments/config";
 import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 
-import { useUrlParam } from "@/hooks/useUrlParam";
+// A demand needs no approval: it is raised when a milestone falls due, or by hand here.
 const API = "/api/crm/payments";
+const PREFS_KEY = "crm-demands-cols-v1";
+const VIEWS_KEY = "crm-demands-views";
+const DEFAULT_SORT: CrmSort = { key: "", dir: "asc" };
+const DIALOG = "rounded-none p-5 gap-4";
+const SMALL = "h-7 px-2.5";
 
 type DemandStatus = "Pending" | "Demanded" | "Paid";
-type TabKey = "overdue" | "pending" | "demanded" | "paid";
-
+type TabKey = "all" | "overdue" | "pending" | "demanded" | "paid";
 interface DemandRow {
-  Id: number;
-  MilestoneNo: number;
-  MilestoneName: string;
-  AmountDue: number;
-  AmountPaid: number;
-  Percent: number | null;
-  DueDate: string | null;
-  Status: string;
-  DemandStatus: DemandStatus;
-  DemandNo: string | null;
-  DemandRaisedOn: string | null;
-  DemandNotes: string | null;
-  BookingId: number;
-  BookingNo: string;
-  ProjectName: string | null;
-  UnitNo: string;
-  ApplicantName: string;
-  Mobile: string | null;
-  AssignedToName: string | null;
-  BookingGrandTotal: number | null;
-  BookingTotalValue: number | null;
-  IsOverdue: number;
-  DaysOverdue: number | null;
+  Id: number; MilestoneNo: number; MilestoneName: string; AmountDue: number; AmountPaid: number; Percent: number | null; DueDate: string | null; Status: string;
+  DemandStatus: DemandStatus; DemandNo: string | null; DemandRaisedOn: string | null; DemandNotes: string | null; BookingId: number; BookingNo: string;
+  ProjectName: string | null; UnitNo: string; ApplicantName: string; Mobile: string | null; AssignedToName: string | null; IsOverdue: number; OverdueShort: number; Missing: number; DaysOverdue: number | null;
 }
+type Tabs = Record<Exclude<TabKey, "all">, { count: number; amount: number }>;
 
-interface BookingGroup {
-  bookingId: number;
-  bookingNo: string;
-  projectName: string | null;
-  unitNo: string;
-  applicantName: string;
-  mobile: string | null;
-  assignedToName: string | null;
-  milestones: DemandRow[]; // only the milestones belonging to THIS tab
-  tabDue: number;
-  tabPaid: number;
-}
-
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "all", label: "All demands" }, { key: "overdue", label: "Overdue" }, { key: "pending", label: "Not raised" },
+  { key: "demanded", label: "Raised, awaiting payment" }, { key: "paid", label: "Paid" },
+];
 const fmt = (v?: number | null) => (v == null ? "—" : fmtRupees(Number(v)));
 function fmtDate(v?: string | null) {
   if (!v) return "—";
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
+const balanceOf = (m: DemandRow) => Math.max(0, Number(m.AmountDue || 0) - Number(m.AmountPaid || 0));
+const stateOf = (m: DemandRow): { label: string; tone: "done" | "waiting" | "stopped" | "draft" } => (
+  m.DemandStatus === CrmStatus.PAID ? { label: "Paid", tone: "done" }
+    : m.IsOverdue ? { label: "Overdue", tone: "stopped" }
+    : m.DemandStatus === CrmStatus.DEMANDED ? { label: "Raised", tone: "waiting" }
+    : { label: "Not raised", tone: "draft" }
+);
 
-// Fetched in full (view=all): each row is a milestone, bucketed into the four tabs and grouped per booking here —
-// paginating the raw rows would split a booking across pages and break the grouping and the counts. Company /
-// project / block narrow the set server-side.
-interface DemandListFilters { search: string; companyId: string; projectId: string; blockId: string }
-async function fetchDemands(filters: DemandListFilters): Promise<{ demands: DemandRow[] }> {
-  const q = new URLSearchParams();
-  q.set("view", "all");
-  if (filters.search) q.set("search", filters.search);
-  if (filters.companyId) q.set("companyId", filters.companyId);
-  if (filters.projectId) q.set("projectId", filters.projectId);
-  if (filters.blockId) q.set("blockId", filters.blockId);
-  const res = await fetchWithAuth(`${API}/demands?${q}`);
+async function fetchDemands(params: URLSearchParams): Promise<{ demands: DemandRow[]; total: number; summary: { tabs: Tabs } }> {
+  const res = await fetchWithAuth(`${API}/demands?${params}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || "Failed to load demands");
   return data;
 }
 
-// Every milestone belongs to exactly one tab, most urgent first: overdue > demanded > pending.
-function classify(m: DemandRow): TabKey | null {
-  if (m.DemandStatus === CrmStatus.PAID) return "paid";
-  if (m.IsOverdue) return "overdue";
-  if (m.DemandStatus === CrmStatus.DEMANDED) return "demanded";
-  if (m.DemandStatus === CrmStatus.PENDING) return "pending";
-  return null;
-}
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "overdue", label: "Overdue" },
-  { key: "pending", label: "Ready to raise" },
-  { key: "demanded", label: "Raised — awaiting pay" },
-  { key: "paid", label: "Cleared" },
-];
-
-function DemandMark({ status }: { status: DemandStatus }) {
-  return <SheetMark text={status === CrmStatus.PAID ? "Cleared" : status === CrmStatus.DEMANDED ? "Demanded" : "Not raised"} tone={status === CrmStatus.PAID ? "done" : "waiting"} />;
-}
-
-function MilestoneRow({ m, canEdit, onRaise, onUndo, showBooking }: {
-  m: DemandRow; canEdit: boolean; onRaise: (row: DemandRow) => void; onUndo: (row: DemandRow) => void; showBooking?: boolean;
-}) {
-  const balance = Math.max(0, Number(m.AmountDue || 0) - Number(m.AmountPaid || 0));
-  const overdue = !!m.IsOverdue && m.DemandStatus !== CrmStatus.PAID;
-  return (
-    <div className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: RULE_SOFT, borderLeft: overdue ? "3px solid hsl(var(--destructive))" : undefined }}>
-      {showBooking && (
-        <div className="shrink-0 w-40 min-w-0">
-          <div className="font-heading text-xs font-semibold tabular-nums">{m.BookingNo}</div>
-          <div className="mt-1 text-xs text-muted-foreground truncate"><ApplicantNames name={m.ApplicantName} bookingId={m.BookingId} /></div>
-        </div>
-      )}
-      <span className="shrink-0 w-7 h-7 flex items-center justify-center font-heading text-xs font-bold tabular-nums" style={{ border: RULE_SOFT }}>{m.MilestoneNo}</span>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium">{m.MilestoneName}</span>
-          <DemandMark status={m.DemandStatus} />
-        </div>
-        <div className="flex items-center gap-3 mt-1 text-[0.6875rem] text-muted-foreground flex-wrap tabular-nums">
-          {m.Percent != null && <span>{m.Percent}%</span>}
-          <span className="flex items-center gap-1"><CalendarClock className="w-3 h-3" />{m.DueDate ? fmtDate(m.DueDate) : "No due date"}</span>
-          {overdue && m.DaysOverdue != null && <span className="text-destructive font-semibold flex items-center gap-0.5"><AlertTriangle className="w-3 h-3" /> {m.DaysOverdue}d overdue</span>}
-          {m.DemandNo && <span className="flex items-center gap-1 font-heading text-foreground"><Hash className="w-3 h-3" />{m.DemandNo}</span>}
-        </div>
-      </div>
-      <div className="shrink-0 text-right w-32">
-        <div className={`font-heading font-semibold tabular-nums ${overdue ? "text-destructive" : ""}`}>{fmt(balance)}</div>
-        <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{fmt(m.AmountPaid)} of {fmt(m.AmountDue)}</div>
-      </div>
-      <div className="shrink-0 w-20">
-        {!canEdit ? null : m.DemandStatus === CrmStatus.PENDING && balance > 0 ? (
-          <button onClick={(e) => { e.stopPropagation(); onRaise(m); }} className={`${KEY_INK} h-8 w-full`}><Send className="w-3 h-3" /> Raise</button>
-        ) : m.DemandStatus === CrmStatus.DEMANDED ? (
-          <button onClick={(e) => { e.stopPropagation(); onUndo(m); }} className={`${KEY_LINE} h-8 w-full`}><Undo2 className="w-3 h-3" /> Undo</button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function BookingCard({ group, canEdit, onRaise, onUndo, defaultExpanded }: {
-  group: BookingGroup; canEdit: boolean; onRaise: (row: DemandRow) => void; onUndo: (row: DemandRow) => void; defaultExpanded: boolean;
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-  const balance = Math.max(0, group.tabDue - group.tabPaid);
-  const paidPct = group.tabDue > 0 ? Math.min(100, (group.tabPaid / group.tabDue) * 100) : 0;
-  return (
-    <div className="bg-card" style={{ border: RULE }}>
-      <button onClick={() => setExpanded(!expanded)} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-primary/5 transition-colors text-left">
-        <span className="shrink-0 text-muted-foreground">{expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-heading text-sm font-bold tabular-nums">{group.bookingNo}</span>
-            <span className="text-sm font-semibold truncate"><ApplicantNames name={group.applicantName} bookingId={group.bookingId} /></span>
-            <span className="text-[0.6875rem] text-muted-foreground tabular-nums">({group.milestones.length} milestone{group.milestones.length !== 1 ? "s" : ""} here)</span>
-          </div>
-          <div className="flex items-center gap-3 mt-1 text-[0.6875rem] text-muted-foreground flex-wrap">
-            {group.projectName && <span className="flex items-center gap-1"><Building2 className="w-3 h-3" /> {group.projectName}</span>}
-            <span>Unit {group.unitNo}</span>
-            {group.mobile && <span className="flex items-center gap-1 tabular-nums"><Phone className="w-3 h-3" /> {group.mobile}</span>}
-            {group.assignedToName && <span className="flex items-center gap-1"><User className="w-3 h-3" /> {group.assignedToName}</span>}
-          </div>
-        </div>
-        <div className="shrink-0 text-right">
-          <div className="font-heading text-sm font-bold tabular-nums">{fmt(balance)}</div>
-          <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{fmt(group.tabPaid)} / {fmt(group.tabDue)}</div>
-          {group.tabDue > 0 && <div className="w-28 h-1.5 mt-1.5 ml-auto" style={{ border: RULE_SOFT }}><div className="h-full bg-foreground" style={{ width: `${paidPct}%` }} /></div>}
-        </div>
-      </button>
-      {expanded && (
-        <div style={{ borderTop: RULE_SOFT }}>
-          {group.milestones.map((m) => <MilestoneRow key={m.Id} m={m} canEdit={canEdit} onRaise={onRaise} onUndo={onUndo} />)}
-        </div>
-      )}
-    </div>
-  );
+function demandCols(canEdit: boolean, onRaise: (m: DemandRow) => void, onUndo: (m: DemandRow) => void): GridCol<DemandRow>[] {
+  return [
+    { id: "customer", label: "Customer", locked: true, sortKey: "ApplicantName", csv: (m) => m.ApplicantName, cell: (m) => (
+      <span className="flex items-center gap-3 py-1.5 min-w-0">
+        <Initials name={m.ApplicantName} />
+        <span className="min-w-0">
+          <span className="block font-semibold text-foreground capitalize truncate" title={m.ApplicantName}>{asName(m.ApplicantName)}</span>
+          <span className="block text-xs text-muted-foreground tabular-nums truncate">{m.BookingNo} · {m.UnitNo}{m.ProjectName ? ` · ${m.ProjectName}` : ""}</span>
+        </span>
+      </span>
+    ) },
+    { id: "milestone", label: "Milestone", sortKey: "MilestoneName", csv: (m) => m.MilestoneName, cell: (m) => (
+      <span className="inline-flex flex-col leading-tight">
+        <span className="font-medium"><span className="text-muted-foreground tabular-nums mr-1.5">{m.MilestoneNo}</span>{m.MilestoneName}</span>
+        <span className="mt-0.5 text-xs text-muted-foreground tabular-nums">{m.DemandNo || "No demand yet"}{m.DemandRaisedOn ? ` · ${fmtDate(m.DemandRaisedOn)}` : ""}</span>
+      </span>
+    ) },
+    { id: "due", label: "Due date", sortKey: "DueDate", csv: (m) => m.DueDate, cell: (m) => (
+      <span className="inline-flex flex-col leading-tight">
+        <span className="tabular-nums">{m.DueDate ? fmtDate(m.DueDate) : "No due date"}</span>
+        {!!m.IsOverdue && m.DaysOverdue != null && <span className="mt-0.5 text-xs font-semibold text-destructive tabular-nums">{m.DaysOverdue} days late</span>}
+      </span>
+    ) },
+    { id: "amount", label: "Amount", align: "right", sortKey: "AmountDue", csv: (m) => m.AmountDue, cell: (m) => <span className="tabular-nums" title={fmt(m.AmountDue)}>{fmtShort(m.AmountDue)}</span> },
+    { id: "balance", label: "Balance", align: "right", sortKey: "Balance", csv: (m) => m.Missing, cell: (m) => {
+      const held = Math.max(0, balanceOf(m) - Number(m.Missing || 0));
+      return (
+        <span className="inline-flex flex-col items-end leading-tight" title={`Amount ${fmt(m.AmountDue)} · Adjusted ${fmt(m.AmountPaid)} · On account or entered ${fmt(held)} · Balance ${fmt(m.Missing)}`}>
+          <span className={cn("tabular-nums font-semibold", m.IsOverdue ? "text-destructive" : Number(m.Missing) > 0 ? "text-foreground" : "text-muted-foreground")}>{Number(m.Missing) > 0 ? fmtShort(m.Missing) : "Nil"}</span>
+          {held > 0 && <span className="mt-0.5 text-xs text-muted-foreground tabular-nums">{fmtShort(held)} on account</span>}
+        </span>
+      );
+    } },
+    { id: "status", label: "Status", csv: (m) => stateOf(m).label, cell: (m) => { const s = stateOf(m); return <GridToneMark text={s.label} tone={s.tone} />; } },
+    { id: "act", label: "Actions", locked: true, cell: (m) => (!canEdit ? null
+      : m.DemandStatus === CrmStatus.PENDING && balanceOf(m) > 0
+        ? <button type="button" onClick={(e) => { e.stopPropagation(); onRaise(m); }} className={cn(GRID_SHEET_KEYS.KEY_INK, SMALL)}><Send size={12} /> Raise</button>
+      : m.DemandStatus === CrmStatus.DEMANDED
+        ? <button type="button" onClick={(e) => { e.stopPropagation(); onUndo(m); }} className={cn(GRID_SHEET_KEYS.KEY_LINE, SMALL)}><Undo2 size={12} /> Undo</button>
+      : null) },
+    { id: "booking", label: "Booking", hiddenByDefault: true, sortKey: "BookingNo", csv: (m) => m.BookingNo, cell: (m) => <span className="tabular-nums">{m.BookingNo}</span> },
+    { id: "project", label: "Project", hiddenByDefault: true, csv: (m) => m.ProjectName, cell: (m) => m.ProjectName || "—" },
+    { id: "unit", label: "Unit", hiddenByDefault: true, csv: (m) => m.UnitNo, cell: (m) => m.UnitNo },
+    { id: "mobile", label: "Mobile", hiddenByDefault: true, csv: (m) => m.Mobile, cell: (m) => <span className="tabular-nums">{m.Mobile || "—"}</span> },
+    { id: "owner", label: "Owner", hiddenByDefault: true, csv: (m) => m.AssignedToName, cell: (m) => m.AssignedToName || "—" },
+    { id: "share", label: "Share of value", align: "right", hiddenByDefault: true, csv: (m) => m.Percent, cell: (m) => (m.Percent != null ? <span className="tabular-nums">{m.Percent}%</span> : "—") },
+    { id: "adjusted", label: "Adjusted", align: "right", hiddenByDefault: true, csv: (m) => m.AmountPaid, cell: (m) => <span className="tabular-nums">{fmt(m.AmountPaid)}</span> },
+    { id: "demandNo", label: "Demand no", hiddenByDefault: true, sortKey: "DemandNo", csv: (m) => m.DemandNo, cell: (m) => <span className="tabular-nums">{m.DemandNo || "—"}</span> },
+    { id: "notes", label: "Notes", hiddenByDefault: true, csv: (m) => m.DemandNotes, cell: (m) => m.DemandNotes || "—" },
+  ];
 }
 
 const CrmDemands: React.FC = () => {
   const qc = useQueryClient();
   const { canDoAction } = useAuth();
   const canEdit = canDoAction("crm-payments", "edit");
-  const [search, setSearch] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => setSearch(v));
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
+  const list = useCrmListState({ pageSize, defaultSort: DEFAULT_SORT });
   // In the address, so a refresh or a shared link keeps it.
-  const [activeTab, setActiveTab] = useUrlParam<TabKey>("tab", "overdue", TABS.map((t) => t.key));
-  const [density, setDensity] = useState<"grouped" | "compact">("grouped");
+  const [tab, setTabRaw] = useUrlParam<TabKey>("tab", "all", TABS.map((t) => t.key));
+  const setTab = (t: TabKey) => { setTabRaw(t); list.setPage(1); };
   const [raiseRow, setRaiseRow] = useState<DemandRow | null>(null);
   const [raiseNotes, setRaiseNotes] = useState("");
   const [undoRow, setUndoRow] = useState<DemandRow | null>(null);
@@ -207,54 +133,35 @@ const CrmDemands: React.FC = () => {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkMilestone, setBulkMilestone] = useState("");
   const [bulkRunning, setBulkRunning] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  const listFilters: DemandListFilters = useMemo(
-    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, cpb]
-  );
-  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
-    queryKey: ["crm-demands", listFilters],
-    queryFn: () => fetchDemands(listFilters),
-    placeholderData: (prev) => prev,
-    staleTime: 30_000,
-  });
-  const rows = data?.demands ?? [];
-
-  // Bucket every milestone into one tab, then group by booking within it — a group's total only sums what it shows.
-  const tabbed = useMemo(() => {
-    const result = {} as Record<TabKey, { groups: BookingGroup[]; amount: number; count: number }>;
-    const buckets: Record<TabKey, DemandRow[]> = { overdue: [], pending: [], demanded: [], paid: [] };
-    for (const r of rows) { const key = classify(r); if (key) buckets[key].push(r); }
-    for (const key of Object.keys(buckets) as TabKey[]) {
-      const map = new Map<number, BookingGroup>();
-      for (const r of buckets[key]) {
-        if (!map.has(r.BookingId)) {
-          map.set(r.BookingId, { bookingId: r.BookingId, bookingNo: r.BookingNo, projectName: r.ProjectName, unitNo: r.UnitNo,
-            applicantName: r.ApplicantName, mobile: r.Mobile, assignedToName: r.AssignedToName, milestones: [], tabDue: 0, tabPaid: 0 });
-        }
-        const g = map.get(r.BookingId)!;
-        g.milestones.push(r);
-        g.tabDue = round2(g.tabDue + Number(r.AmountDue || 0));
-        g.tabPaid = round2(g.tabPaid + Number(r.AmountPaid || 0));
-      }
-      const groups = Array.from(map.values());
-      result[key] = { groups, amount: sumMoney(groups, (g) => Math.max(0, round2(g.tabDue - g.tabPaid))), count: buckets[key].length };
-    }
-    return result;
-  }, [rows]);
+  const params = useMemo(() => {
+    const p = listParams({ ...list.query, status: "All" });
+    p.set("view", "all");
+    if (tab !== "all") p.set("focus", tab);
+    return p;
+  }, [list.query, tab]);
+  const { data, isLoading, error, isFetching, refetch } = useQuery({ queryKey: ["crm-demands", params.toString()], queryFn: () => fetchDemands(params), staleTime: 30_000 });
+  const result = useSticky(data);
+  const t = result?.summary?.tabs;
+  const zero = { count: 0, amount: 0 };
+  const overdue = t?.overdue ?? zero, ready = t?.pending ?? zero, raised = t?.demanded ?? zero, paid = t?.paid ?? zero;
+  const outstanding = overdue.amount + ready.amount + raised.amount;
+  const counts: Record<TabKey, number> = { all: overdue.count + ready.count + raised.count + paid.count, overdue: overdue.count, pending: ready.count, demanded: raised.count, paid: paid.count };
 
   const changed = () => { qc.invalidateQueries({ queryKey: ["crm-demands"] }); qc.invalidateQueries({ queryKey: ["crm-milestones"] }); };
+  const openRaise = (row: DemandRow) => { setRaiseRow(row); setRaiseNotes(""); };
+  const cols = demandCols(canEdit, openRaise, setUndoRow);
+  const [prefs, setPrefs] = useGridPrefs(PREFS_KEY, cols);
 
   async function handleRaise() {
     if (!raiseRow) return;
     setRaising(true);
     try {
-      const res = await fetchWithAuth(`${API}/${raiseRow.Id}/demand`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Notes: raiseNotes || undefined }),
-      });
+      const res = await fetchWithAuth(`${API}/${raiseRow.Id}/demand`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Notes: raiseNotes || undefined }) });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Failed to raise demand");
-      toast.success(`Demand raised — ${body.DemandNo}`);
+      toast.success(`Demand raised: ${body.DemandNo}`);
       setRaiseRow(null); setRaiseNotes("");
       changed();
     } catch (e: any) { toast.error(translateError(e.message)); }
@@ -278,13 +185,7 @@ const CrmDemands: React.FC = () => {
     try {
       const res = await fetchWithAuth(`${API}/demands/bulk`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // The page's company / project / block filter narrows it.
-          companyId: cpb.companyId || undefined,
-          projectId: cpb.projectId || undefined,
-          blockId: cpb.blockId || undefined,
-          milestoneName: bulkMilestone.trim() || undefined,
-        }),
+        body: JSON.stringify({ companyId: list.cpb.companyId || undefined, projectId: list.cpb.projectId || undefined, blockId: list.cpb.blockId || undefined, milestoneName: bulkMilestone.trim() || undefined }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Bulk demand failed");
@@ -294,145 +195,105 @@ const CrmDemands: React.FC = () => {
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setBulkRunning(false); }
   }
-
-  // pending / demanded exclude overdue rows (classify moved them), so the three add up to what's outstanding.
-  const totalOutstanding = tabbed.pending.amount + tabbed.demanded.amount + tabbed.overdue.amount;
-  const activeGroups = tabbed[activeTab].groups;
-  const activeLabel = TABS.find((t) => t.key === activeTab)!.label;
-  const figures: { label: string; value: string; note: string; tab: TabKey | null; red?: boolean }[] = [
-    { label: "Outstanding", value: fmt(totalOutstanding), note: `${tabbed.pending.count + tabbed.demanded.count + tabbed.overdue.count} milestones`, tab: null },
-    { label: "Overdue", value: String(tabbed.overdue.count), note: fmt(tabbed.overdue.amount), tab: "overdue", red: tabbed.overdue.count > 0 },
-    { label: "Ready to raise", value: String(tabbed.pending.count), note: fmt(tabbed.pending.amount), tab: "pending" },
-    { label: "Raised", value: String(tabbed.demanded.count), note: `${fmt(tabbed.demanded.amount)} awaiting payment`, tab: "demanded" },
-  ];
-  const tabClass = (on: boolean) => `inline-flex items-center gap-2 px-3 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`;
-  const DIALOG = "rounded-none p-5 gap-4";
-  const openRaise = (row: DemandRow) => { setRaiseRow(row); setRaiseNotes(""); };
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const p = new URLSearchParams(params);
+      p.delete("page"); p.delete("pageSize");
+      exportGrid((await fetchDemands(p)).demands, cols, `demands-${tab}`);
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setExporting(false); }
+  };
+  const w = (n: number) => `${outstanding > 0 ? (n / outstanding) * 100 : 0}%`;
 
   return (
-    <>
+    <div className="space-y-4">
       <Breadcrumbs items={["Dashboard", "CRM", "Demands"]} />
-      <SheetShell
-        eyebrow="CivilierERP · CRM · Finance"
-        title="Payment Demands"
-        subtitle="Formal demands for each instalment across every booking: what's overdue, what's ready to raise, what's raised and awaiting payment, and what's cleared."
-        action={
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
-            {canEdit && <button onClick={() => setBulkOpen(true)} className={`${KEY_INK} h-9 px-4`}><Zap size={13} /> Raise all</button>}
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          <div className="bg-card" style={{ border: RULE }}>
-            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
-              {figures.map((x) => (
-                <div key={x.label}>
-                  {x.tab ? <button onClick={() => setActiveTab(x.tab!)} className="label link">{x.label}</button> : <span className="label">{x.label}</span>}
-                  <p className="figure" style={{ fontSize: "clamp(16px, 1.8vw, 24px)", marginTop: 9, color: x.red ? "var(--red)" : undefined }}>{isLoading && !data ? "…" : x.value}</p>
-                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }} className="tabular-nums">{x.note}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-card" style={{ border: RULE }}>
-            <div className="px-5 py-4 space-y-3" style={{ borderBottom: RULE }}>
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="inline-flex items-stretch flex-wrap" style={{ border: RULE }}>
-                  {TABS.map((t) => (
-                    <button key={t.key} onClick={() => setActiveTab(t.key)} style={{ borderRight: RULE_SOFT }}
-                      className={`${tabClass(activeTab === t.key)} ${t.key === "overdue" && tabbed.overdue.count > 0 && activeTab !== t.key ? "!text-destructive" : ""}`}>
-                      {t.label} <span className="tabular-nums">{tabbed[t.key].count}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="ml-auto inline-flex items-stretch" style={{ border: RULE }}>
-                  <button onClick={() => setDensity("grouped")} title="Grouped by booking" className={tabClass(density === "grouped")} style={{ borderRight: RULE_SOFT }}><Rows3 className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => setDensity("compact")} title="One line per milestone" className={tabClass(density === "compact")}><LayoutList className="w-3.5 h-3.5" /></button>
-                </div>
-              </div>
-              <div className="flex gap-3 flex-wrap items-center">
-                <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setSearch(searchInput.trim())}
-                  placeholder="Search customer, booking, demand no…"
-                  className="h-9 flex-1 min-w-48 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
-                <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
-              </div>
-            </div>
-
-            {isError ? (
-              <p className="py-12 text-center text-sm text-destructive">{(error as Error)?.message}</p>
-            ) : isLoading && !data ? (
-              <p className="py-12 text-center text-sm text-muted-foreground">Loading demands…</p>
-            ) : activeGroups.length === 0 ? (
-              <div className="py-14 text-center text-muted-foreground">
-                <CheckCircle2 className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                <p className="text-sm font-medium">Nothing under "{activeLabel}" right now.</p>
-              </div>
-            ) : density === "grouped" ? (
-              <div className="p-4 space-y-3">
-                {activeGroups.map((g) => (
-                  <BookingCard key={g.bookingId} group={g} canEdit={canEdit} onRaise={openRaise} onUndo={setUndoRow}
-                    defaultExpanded={activeTab === "overdue" || activeGroups.length <= 3} />
-                ))}
-              </div>
-            ) : (
-              <div>
-                {activeGroups.flatMap((g) => g.milestones.map((m) => (
-                  <MilestoneRow key={m.Id} m={m} canEdit={canEdit} showBooking onRaise={openRaise} onUndo={setUndoRow} />
-                )))}
-              </div>
-            )}
+      <MoneyBand eyebrow="CRM · Finance" title="Payment Demands" sub="Raised when a milestone falls due, or by hand here. A demand needs no approval."
+        actions={<>
+          {canEdit && <button type="button" onClick={() => setBulkOpen(true)} className={BAND_KEY_MAIN}><Zap size={13} /> Raise all</button>}
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+        </>}
+        lead={fmtShort(outstanding)} leadNote={result ? `balance to collect · ${counts.all - paid.count} open milestones` : ""}
+        bar={<span className="flex w-full h-2.5 rounded-full overflow-hidden bg-white/15" title={`Overdue ${fmt(overdue.amount)} · Raised ${fmt(raised.amount)} · Not raised ${fmt(ready.amount)}`}>
+          {overdue.amount > 0 && <span className={BAND_DOT.overdue} style={{ width: w(overdue.amount), minWidth: 3 }} />}
+          {raised.amount > 0 && <span className={BAND_DOT.finance} style={{ width: w(raised.amount), minWidth: 3 }} />}
+          {ready.amount > 0 && <span className={BAND_DOT.notDue} style={{ width: w(ready.amount), minWidth: 3 }} />}
+        </span>}
+        figures={[
+          { label: "Overdue", dot: BAND_DOT.overdue, value: fmtShort(overdue.amount), note: `${overdue.count} milestone${overdue.count === 1 ? "" : "s"}`, exact: fmt(overdue.amount), alert: overdue.count > 0 },
+          { label: "Raised, awaiting payment", dot: BAND_DOT.finance, value: fmtShort(raised.amount), note: `${raised.count} milestone${raised.count === 1 ? "" : "s"}`, exact: fmt(raised.amount) },
+          { label: "Not raised", dot: BAND_DOT.notDue, value: fmtShort(ready.amount), note: `${ready.count} milestone${ready.count === 1 ? "" : "s"}`, exact: fmt(ready.amount) },
+          { label: "Paid", dot: BAND_DOT.collected, value: fmtShort(paid.amount), note: `${paid.count} milestone${paid.count === 1 ? "" : "s"}`, exact: fmt(paid.amount) },
+        ]} />
+      <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
+        <GridTabs<TabKey> label="Demands" active={tab} onChange={setTab} tabs={TABS.map((x) => ({ ...x, count: result ? counts[x.key] : null }))} />
+        <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-border">
+          <GridSearch value={list.searchInput} onChange={list.setSearchInput} placeholder="Customer, booking or milestone" />
+          <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+          {list.hasFilters && <button type="button" onClick={list.reset} className={GRID_BTN}>Clear filters</button>}
+          <div className="ml-auto flex items-center gap-2">
+            <GridSavedViews storageKey={VIEWS_KEY}
+              current={{ status: tab, search: list.searchInput.trim(), cpb: list.cpb, sort: list.sort, pageSize }}
+              onApply={(v) => {
+                setPageSize(GRID_PAGE_SIZES.includes(v.pageSize as typeof GRID_PAGE_SIZES[number]) ? v.pageSize : GRID_PAGE_SIZES[0]);
+                list.apply({ ...v, status: "All" });
+                setTabRaw(TABS.some((x) => x.key === v.status) ? (v.status as TabKey) : "all");
+              }} />
+            <GridColumnChooser cols={cols} prefs={prefs} onChange={setPrefs} />
+            <button type="button" onClick={handleExport} disabled={exporting} className={GRID_BTN} title="Export to Excel"><Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span></button>
           </div>
         </div>
+        <CrmGrid cols={cols} prefs={prefs} onPrefs={setPrefs} rows={result?.demands ?? []} rowKey={(m) => m.Id} noRowNumbers
+          loading={isLoading} fetching={isFetching} error={error ? translateError((error as Error).message) : null} onRetry={() => refetch()}
+          sort={list.sort} onSort={list.toggleSort} empty={`Nothing under "${TABS.find((x) => x.key === tab)!.label}" right now.`}
+          page={list.page} pageSize={pageSize} total={result?.total ?? 0} onPage={list.setPage} onPageSize={(n) => { setPageSize(n); list.setPage(1); }} />
+      </div>
 
-        {/* Raise one demand */}
-        <Dialog open={!!raiseRow} onOpenChange={(o) => { if (!o) { setRaiseRow(null); setRaiseNotes(""); } }}>
+      {raiseRow && (
+        <Dialog open onOpenChange={(o) => { if (!o) { setRaiseRow(null); setRaiseNotes(""); } }}>
           <DialogContent className={`max-w-md ${DIALOG}`} style={{ border: RULE }}>
             <DialogHeader>
               <DialogTitle className="font-heading">Raise payment demand</DialogTitle>
               <DialogDescription className="text-xs">Gives it a demand number and notifies the assigned staff.</DialogDescription>
             </DialogHeader>
-            {raiseRow && (
-              <>
-                <div style={{ border: RULE_SOFT }}>
-                  {[
-                    { label: "Booking", value: `${raiseRow.BookingNo}${raiseRow.ProjectName ? ` · ${raiseRow.ProjectName}` : ""} · ${raiseRow.UnitNo}` },
-                    { label: "Customer", value: raiseRow.ApplicantName },
-                    { label: "Milestone", value: `#${raiseRow.MilestoneNo} ${raiseRow.MilestoneName}` },
-                    { label: "Balance due", value: fmt(Math.max(0, Number(raiseRow.AmountDue || 0) - Number(raiseRow.AmountPaid || 0))), num: true },
-                    { label: "Due date", value: fmtDate(raiseRow.DueDate), num: true },
-                  ].map(({ label, value, num }) => (
-                    <div key={label} className="flex justify-between items-center gap-3 px-3 py-2" style={{ borderBottom: RULE_SOFT }}>
-                      <span className={LBL}>{label}</span>
-                      <span className={`text-sm font-medium text-right ${num ? "font-heading tabular-nums" : ""}`}>{value}</span>
-                    </div>
-                  ))}
+            <div style={{ border: RULE_SOFT }}>
+              {[
+                { label: "Booking", value: `${raiseRow.BookingNo}${raiseRow.ProjectName ? ` · ${raiseRow.ProjectName}` : ""} · ${raiseRow.UnitNo}` },
+                { label: "Customer", value: raiseRow.ApplicantName },
+                { label: "Milestone", value: `#${raiseRow.MilestoneNo} ${raiseRow.MilestoneName}` },
+                { label: "Amount", value: fmt(balanceOf(raiseRow)), num: true },
+                { label: "Due date", value: fmtDate(raiseRow.DueDate), num: true },
+              ].map(({ label, value, num }) => (
+                <div key={label} className="flex justify-between items-center gap-3 px-3 py-2" style={{ borderBottom: RULE_SOFT }}>
+                  <span className={LBL}>{label}</span>
+                  <span className={`text-sm font-medium text-right ${num ? "font-heading tabular-nums" : ""}`}>{value}</span>
                 </div>
-                {raiseRow.IsOverdue ? (
-                  <p className="px-3 py-2 text-xs text-destructive flex items-center gap-1.5" style={{ border: "1px solid hsl(var(--destructive) / 0.4)", borderLeft: "3px solid hsl(var(--destructive))" }}>
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> This milestone is <span className="tabular-nums">{raiseRow.DaysOverdue}</span> days overdue.
-                  </p>
-                ) : null}
-                <div>
-                  <label className={`block mb-1 ${LBL}`}>Notes (optional)</label>
-                  <textarea value={raiseNotes} onChange={(e) => setRaiseNotes(e.target.value)} rows={2} placeholder="Any remarks for this demand…" className={TEXTAREA} />
-                </div>
-              </>
-            )}
+              ))}
+            </div>
+            {raiseRow.IsOverdue ? (
+              <p className="px-3 py-2 text-xs text-destructive flex items-center gap-1.5" style={{ border: "1px solid hsl(var(--destructive) / 0.4)", borderLeft: "3px solid hsl(var(--destructive))" }}>
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> This milestone is <span className="tabular-nums">{raiseRow.DaysOverdue}</span> days overdue.
+              </p>
+            ) : null}
+            <div>
+              <label className={`block mb-1 ${LBL}`}>Notes (optional)</label>
+              <textarea value={raiseNotes} onChange={(e) => setRaiseNotes(e.target.value)} rows={2} placeholder="Any remarks for this demand…" className={TEXTAREA} />
+            </div>
             <DialogFooter className="gap-2">
               <button onClick={() => { setRaiseRow(null); setRaiseNotes(""); }} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
               <button onClick={handleRaise} disabled={raising} className={`${KEY_INK} h-9 px-4`}><Send className="w-3.5 h-3.5" /> {raising ? "Raising…" : "Raise demand"}</button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
 
-        {/* Undo a demand */}
-        <Dialog open={!!undoRow} onOpenChange={(o) => !o && setUndoRow(null)}>
+      {undoRow && (
+        <Dialog open onOpenChange={(o) => !o && setUndoRow(null)}>
           <DialogContent className={`max-w-md ${DIALOG}`} style={{ border: RULE }}>
-            <DialogHeader><DialogTitle className="font-heading">Undo demand {undoRow?.DemandNo}?</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle className="font-heading">Undo demand {undoRow.DemandNo}?</DialogTitle></DialogHeader>
             <p className="text-sm text-muted-foreground">
-              It goes back to "Not raised" for <span className="font-semibold text-foreground"><ApplicantNames name={undoRow?.ApplicantName} bookingId={undoRow?.BookingId} /></span> ({undoRow?.MilestoneName}) and its demand number is cleared.
+              It goes back to "Not raised" for <span className="font-semibold text-foreground"><ApplicantNames name={undoRow.ApplicantName} bookingId={undoRow.BookingId} /></span> ({undoRow.MilestoneName}) and its demand number is cleared.
             </p>
             <DialogFooter className="gap-2">
               <button onClick={() => setUndoRow(null)} className={`${KEY_LINE} h-9 px-4`}>Keep it</button>
@@ -440,14 +301,15 @@ const CrmDemands: React.FC = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
 
-        {/* Raise every eligible demand */}
-        <Dialog open={bulkOpen} onOpenChange={(o) => { if (!o) { setBulkOpen(false); setBulkMilestone(""); } }}>
+      {bulkOpen && (
+        <Dialog open onOpenChange={(o) => { if (!o) { setBulkOpen(false); setBulkMilestone(""); } }}>
           <DialogContent className={`max-w-md ${DIALOG}`} style={{ border: RULE }}>
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2"><Zap size={16} /> Raise all eligible demands</DialogTitle>
               <DialogDescription className="text-xs">
-                Raises a demand for every milestone not yet raised that still has a balance, in the company / project / block chosen on the page{cpb.projectId || cpb.companyId ? "" : " (none chosen: every project you can see)"}. Raised or paid milestones are skipped.
+                Raises a demand for every milestone not yet raised that still has a balance, in the company / project / block chosen on the page{list.cpb.projectId || list.cpb.companyId ? "" : " (none chosen: every project you can see)"}. Raised or paid milestones are skipped.
               </DialogDescription>
             </DialogHeader>
             <div>
@@ -460,8 +322,8 @@ const CrmDemands: React.FC = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </SheetShell>
-    </>
+      )}
+    </div>
   );
 };
 

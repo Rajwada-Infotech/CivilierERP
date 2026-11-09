@@ -1,31 +1,35 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import { round2 } from "@/lib/crmPriceQuote";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { FileText, Download, RotateCcw, X, Ban, RefreshCw, ChevronRight } from "lucide-react";
+import { translateError } from "@/lib/translateError";
+import { cn } from "@/lib/utils";
+import { FileText, Download, RotateCcw, X, Ban, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
-import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { DateInput } from "@/components/ui/date-input";
-import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
-import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import {
+  CrmGrid, GridColumnChooser, GridDateFilter, GridSavedViews, GridSearch, GridTabs, GridToneMark,
+  exportGrid, resolveGridDateRange, useGridPrefs, GRID_ANY_DATE, GRID_BTN, GRID_CARD, GRID_PAGE_SIZES, GRID_SHEET_KEYS, type GridCol, type GridDateRange,
+} from "@/components/crm/CrmDataTable";
+import { useCrmListState, useSticky, listParams, type CrmSort } from "@/hooks/useCrmListState";
+import { useUrlParam } from "@/hooks/useUrlParam";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
-import { useCanApprove } from "@/hooks/useCanApprove";
+import { BAND_DOT, BAND_KEY, CollectionBar, Initials, MoneyBand, asName } from "./payments/parts";
+import { fmtShort, pct } from "./payments/config";
 import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 
-// One row per booking (its receipts on the loaded page, grouped here — BookingId is on every receipt), opened
-// to a dialog listing each receipt with its own actions. A receipt has no approval of its own: it goes to Finance
-// when the Director approves the booking, and Finance's approval is its approval. Bounce (before that hand-off)
-// is for whoever Approval Setup names for crm-money-receipts; the server checks the same.
-
+// A money receipt is made automatically for every payment and has no approval of its own. Finance approving the
+// payment is the one check on the money, and the receipt follows it.
 const API = "/api/crm/money-receipts";
-const PAGE_SIZE = 20;
+const PREFS_KEY = "crm-money-receipts-cols-v1";
+const VIEWS_KEY = "crm-money-receipts-views";
+const DEFAULT_SORT: CrmSort = { key: "", dir: "desc" };
+const SMALL = "h-7 px-2.5";
+const DIALOG = "rounded-none p-5 gap-4";
 
 type ReceiptStatus = typeof CrmStatus.PENDING | typeof CrmStatus.APPROVED | "Bounced";
 interface ReceiptRow {
@@ -34,20 +38,7 @@ interface ReceiptRow {
   TransactionRef: string | null; ReceivedDate: string; Status: ReceiptStatus; BouncedReason: string | null; RPDocNo: string | null;
   BookingNo: string; ProjectName: string | null; UnitNo: string; ApplicantName: string; Mobile: string | null; CreatedAt: string;
 }
-interface BookingGroup {
-  bookingId: number; bookingNo: string; applicantName: string; mobile: string | null; projectName: string | null; unitNo: string;
-  totalAmount: number; receipts: ReceiptRow[];
-}
-interface ReceiptListFilters { search: string; companyId: string; projectId: string; blockId: string; status: string; fromDate: string; toDate: string }
-type StatusCounts = Record<ReceiptStatus, { count: number; amount: number }>;
-
-const EMPTY_FILTERS: ReceiptListFilters = { search: "", companyId: "", projectId: "", blockId: "", status: "", fromDate: "", toDate: "" };
-const STATUS_TABS: { value: string; label: string }[] = [
-  { value: "", label: "All" },
-  { value: CrmStatus.PENDING, label: "Pending approval" },
-  { value: CrmStatus.APPROVED, label: "Approved" },
-  { value: "Bounced", label: "Bounced" },
-];
+type Counts = Record<string, { count: number; amount: number }>;
 
 const fmt = (v?: number | null) => (v == null ? "—" : fmtRupees(Number(v)));
 function fmtDate(v?: string | null) {
@@ -55,34 +46,20 @@ function fmtDate(v?: string | null) {
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
+// Where the money behind a receipt stands, in the same words as the Payment Milestones page.
+const receiptState = (r: ReceiptRow): { label: string; tone: "done" | "waiting" | "stopped" } => (
+  r.Status === "Bounced" ? { label: "Bounced", tone: "stopped" }
+    : r.Status === CrmStatus.APPROVED ? { label: "Approved by Finance", tone: "done" }
+    : r.ReceivedPaymentId == null ? { label: "Not sent to Finance", tone: "waiting" }
+    : { label: "Pending with Finance", tone: "waiting" }
+);
 
-async function fetchReceipts(bookingId: string): Promise<ReceiptRow[]> {
-  const res = await fetchWithAuth(`${API}?bookingId=${encodeURIComponent(bookingId)}`);
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.error || "Failed to load money receipts");
-  return Array.isArray(data) ? data : [];
-}
-async function fetchReceiptsList(filters: ReceiptListFilters, page: number): Promise<{ rows: ReceiptRow[]; total: number; statusCounts?: StatusCounts }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  for (const k of Object.keys(filters) as (keyof ReceiptListFilters)[]) if (filters[k]) params.set(k, filters[k]);
+async function fetchList(params: URLSearchParams): Promise<{ rows: ReceiptRow[]; total: number; statusCounts?: Counts }> {
   const res = await fetchWithAuth(`${API}?${params}`);
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(data?.error || "Failed to load money receipts");
   return { rows: data.rows || [], total: data.total || 0, statusCounts: data.statusCounts };
 }
-
-function ReceiptMark({ status }: { status: ReceiptStatus }) {
-  return <SheetMark text={status === CrmStatus.APPROVED ? "Approved" : status === "Bounced" ? "Bounced" : "Pending"}
-    tone={status === CrmStatus.APPROVED ? "done" : status === "Bounced" ? "stopped" : "waiting"} />;
-}
-// A booking's state, worst first: any bounced receipt, then any pending, else all approved.
-function BookingMark({ receipts }: { receipts: ReceiptRow[] }) {
-  if (receipts.some((r) => r.Status === "Bounced")) return <SheetMark text="Needs attention" tone="stopped" />;
-  if (receipts.some((r) => r.Status === CrmStatus.PENDING)) return <SheetMark text="Pending approval" tone="waiting" />;
-  return <SheetMark text="All approved" tone="done" />;
-}
-
-const DIALOG = "rounded-none p-5 gap-4";
 
 function ReceiptPdfDialog({ receipt, onClose }: { receipt: ReceiptRow; onClose: () => void }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -100,19 +77,17 @@ function ReceiptPdfDialog({ receipt, onClose }: { receipt: ReceiptRow; onClose: 
       .catch(() => { if (!cancelled) setFailed(true); });
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [receipt.Id]);
-
+  const st = receiptState(receipt);
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className={`max-w-2xl ${DIALOG}`} style={{ border: RULE }}>
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
             <DialogTitle className="font-heading flex items-center gap-2 tabular-nums"><FileText size={15} /> {receipt.ReceiptNo}</DialogTitle>
-            {blobUrl && (
-              <a href={blobUrl} download={`${receipt.ReceiptNo}.pdf`} className={`${KEY_INK} h-8 px-3 shrink-0`}><Download size={12} /> Download PDF</a>
-            )}
+            {blobUrl && <a href={blobUrl} download={`${receipt.ReceiptNo}.pdf`} className={`${KEY_INK} h-8 px-3 shrink-0`}><Download size={12} /> Download PDF</a>}
           </div>
           <DialogDescription className="text-xs flex items-center gap-2 flex-wrap">
-            <span className="font-heading tabular-nums">{receipt.BookingNo}</span> · <span className="font-heading tabular-nums">{fmt(receipt.Amount)}</span> · <ReceiptMark status={receipt.Status} />
+            <span className="font-heading tabular-nums">{receipt.BookingNo}</span> · <span className="font-heading tabular-nums">{fmt(receipt.Amount)}</span> · <GridToneMark text={st.label} tone={st.tone} />
           </DialogDescription>
         </DialogHeader>
         <div className="flex items-center justify-center min-h-[300px] overflow-hidden" style={{ border: RULE_SOFT }}>
@@ -120,9 +95,7 @@ function ReceiptPdfDialog({ receipt, onClose }: { receipt: ReceiptRow; onClose: 
             : !blobUrl ? <span className="text-sm text-muted-foreground">Loading preview…</span>
             : <iframe src={blobUrl} title={receipt.ReceiptNo} className="w-full h-[60vh] border-0" />}
         </div>
-        {receipt.Status === "Bounced" && receipt.BouncedReason && (
-          <p className="text-xs text-destructive">Bounce reason: {receipt.BouncedReason}</p>
-        )}
+        {receipt.Status === "Bounced" && receipt.BouncedReason && <p className="text-xs text-destructive">Bounce reason: {receipt.BouncedReason}</p>}
       </DialogContent>
     </Dialog>
   );
@@ -141,8 +114,7 @@ function BounceDialog({ receipt, onClose, onConfirm, submitting }: {
         </DialogHeader>
         <div>
           <label className={`block mb-1 ${LBL}`}>Reason *</label>
-          <textarea autoFocus value={reason} onChange={(e) => setReason(e.target.value)} rows={3}
-            placeholder="Why this receipt bounced…" className={TEXTAREA} />
+          <textarea autoFocus value={reason} onChange={(e) => setReason(e.target.value)} rows={3} placeholder="Why this receipt bounced…" className={TEXTAREA} />
         </div>
         <DialogFooter className="gap-2">
           <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
@@ -155,340 +127,210 @@ function BounceDialog({ receipt, onClose, onConfirm, submitting }: {
   );
 }
 
-// One receipt inside the booking dialog.
-function ReceiptDetailRow({ r, canEdit, canBounce, busy, onPreview, onResubmit, onBounce }: {
-  r: ReceiptRow; canEdit: boolean; canBounce: boolean; busy: boolean;
-  onPreview: () => void; onResubmit: () => void; onBounce: () => void;
-}) {
-  const showResubmit = canEdit && r.Status === "Bounced" && r.ReceivedPaymentId == null;
-  const notYetSent = r.Status === CrmStatus.PENDING && r.ReceivedPaymentId == null;
-  const withFinance = r.Status === CrmStatus.PENDING && r.ReceivedPaymentId != null;
-  return (
-    <div className="px-4 py-3.5 space-y-2" style={{ borderBottom: RULE_SOFT, borderLeft: r.Status === "Bounced" ? "3px solid hsl(var(--destructive))" : undefined }}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-heading text-xs font-semibold tabular-nums">{r.ReceiptNo}</span>
-        <ReceiptMark status={r.Status} />
-      </div>
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <div className="font-heading text-sm font-bold tabular-nums">{fmt(r.Amount)}</div>
-          {r.BaseAmount != null && r.GSTAmount != null && (
-            <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">Base {fmt(r.BaseAmount)} + GST {fmt(r.GSTAmount)}</div>
-          )}
-        </div>
-        <div className="text-right text-[0.6875rem] text-muted-foreground tabular-nums">
-          <div>{r.PaymentMode}{r.ChequeNo ? ` · ${r.ChequeNo}` : r.TransactionRef ? ` · ${r.TransactionRef}` : ""}</div>
-          <div className="mt-1">{fmtDate(r.ReceivedDate)}</div>
-        </div>
-      </div>
-      {r.Status === "Bounced" && r.BouncedReason && <p className="text-[0.6875rem] text-destructive">Reason: {r.BouncedReason}</p>}
-      {notYetSent && <p className="text-[0.6875rem] text-muted-foreground">Goes to Finance automatically when the Director approves the booking.</p>}
-      {withFinance && <p className="text-[0.6875rem] text-muted-foreground">With Finance for approval{r.RPDocNo ? <> — <span className="font-heading tabular-nums text-foreground">{r.RPDocNo}</span></> : null}.</p>}
-      {r.Status === CrmStatus.APPROVED && r.RPDocNo && (
-        <p className="text-[0.6875rem] text-muted-foreground">Finance doc <span className="font-heading tabular-nums text-foreground">{r.RPDocNo}</span></p>
-      )}
-      <div className="flex items-center gap-2 flex-wrap pt-0.5">
-        <button onClick={onPreview} className={`${KEY_LINE} h-8 px-3`}><FileText size={12} /> PDF</button>
-        {showResubmit && <button onClick={onResubmit} disabled={busy} className={`${KEY_LINE} h-8 px-3`}><RotateCcw size={12} /> Resubmit</button>}
-        {canBounce && notYetSent && (
-          <button onClick={onBounce} disabled={busy} className={`${KEY_LINE} h-8 px-3 !text-destructive !border-destructive`}><Ban size={12} /> Bounce</button>
-        )}
-      </div>
-    </div>
-  );
+function receiptCols(actions: (r: ReceiptRow) => React.ReactNode): GridCol<ReceiptRow>[] {
+  return [
+    { id: "customer", label: "Customer", locked: true, sortKey: "ApplicantName", csv: (r) => r.ApplicantName, cell: (r) => (
+      <span className="flex items-center gap-3 py-1.5 min-w-0">
+        <Initials name={r.ApplicantName} />
+        <span className="min-w-0">
+          <span className="block font-semibold text-foreground capitalize truncate" title={r.ApplicantName}>{asName(r.ApplicantName)}</span>
+          <span className="block text-xs text-muted-foreground tabular-nums truncate">{r.BookingNo} · {r.UnitNo}{r.ProjectName ? ` · ${r.ProjectName}` : ""}</span>
+        </span>
+      </span>
+    ) },
+    { id: "no", label: "Receipt", sortKey: "ReceiptNo", csv: (r) => r.ReceiptNo, cell: (r) => (
+      <span className="inline-flex flex-col leading-tight">
+        <span className={cn("tabular-nums font-semibold", r.Status === "Bounced" ? "line-through text-muted-foreground" : "text-foreground")}>{r.ReceiptNo}</span>
+        <span className="mt-0.5 text-xs text-muted-foreground tabular-nums">{fmtDate(r.ReceivedDate)}</span>
+      </span>
+    ) },
+    { id: "mode", label: "Mode · Ref. no.", sortKey: "PaymentMode", csv: (r) => r.PaymentMode, cell: (r) => (
+      <span className="inline-flex flex-col leading-tight">
+        <span>{r.PaymentMode}</span>
+        {(r.ChequeNo || r.TransactionRef) && <span className="mt-0.5 text-xs text-muted-foreground tabular-nums truncate max-w-[10rem]" title={r.ChequeNo || r.TransactionRef || undefined}>{r.ChequeNo || r.TransactionRef}</span>}
+      </span>
+    ) },
+    { id: "amount", label: "Amount", align: "right", sortKey: "Amount", csv: (r) => r.Amount, cell: (r) => (
+      <span className="inline-flex flex-col items-end leading-tight">
+        <span className={cn("tabular-nums font-semibold", r.Status === "Bounced" && "line-through font-normal text-muted-foreground")}>{fmt(r.Amount)}</span>
+        {r.BaseAmount != null && r.GSTAmount != null && Number(r.GSTAmount) > 0 && <span className="mt-0.5 text-xs text-muted-foreground tabular-nums">GST {fmt(r.GSTAmount)}</span>}
+      </span>
+    ) },
+    { id: "status", label: "Status", csv: (r) => receiptState(r).label, cell: (r) => {
+      const st = receiptState(r);
+      return (
+        <span className="block leading-tight">
+          <GridToneMark text={st.label} tone={st.tone} />
+          {r.Status === "Bounced" && r.BouncedReason
+            ? <span className="block mt-1 text-xs text-destructive truncate max-w-[14rem]" title={r.BouncedReason}>{r.BouncedReason}</span>
+            : r.RPDocNo ? <span className="block mt-1 text-xs text-muted-foreground tabular-nums">{r.RPDocNo}</span> : null}
+        </span>
+      );
+    } },
+    { id: "act", label: "Actions", locked: true, cell: actions },
+    { id: "booking", label: "Booking", hiddenByDefault: true, sortKey: "BookingNo", csv: (r) => r.BookingNo, cell: (r) => <span className="tabular-nums">{r.BookingNo}</span> },
+    { id: "unit", label: "Unit", hiddenByDefault: true, csv: (r) => r.UnitNo, cell: (r) => r.UnitNo },
+    { id: "project", label: "Project", hiddenByDefault: true, csv: (r) => r.ProjectName, cell: (r) => r.ProjectName || "—" },
+    { id: "mobile", label: "Mobile", hiddenByDefault: true, csv: (r) => r.Mobile, cell: (r) => <span className="tabular-nums">{r.Mobile || "—"}</span> },
+    { id: "base", label: "Taxable value", align: "right", hiddenByDefault: true, csv: (r) => r.BaseAmount, cell: (r) => <span className="tabular-nums">{fmt(r.BaseAmount)}</span> },
+    { id: "gst", label: "GST", align: "right", hiddenByDefault: true, csv: (r) => r.GSTAmount, cell: (r) => <span className="tabular-nums">{fmt(r.GSTAmount)}</span> },
+    { id: "chequeDate", label: "Cheque date", hiddenByDefault: true, csv: (r) => r.ChequeDate, cell: (r) => <span className="tabular-nums">{fmtDate(r.ChequeDate)}</span> },
+    { id: "finance", label: "Finance doc", hiddenByDefault: true, csv: (r) => r.RPDocNo, cell: (r) => <span className="tabular-nums">{r.RPDocNo || "—"}</span> },
+  ];
 }
 
-function BookingDetailDialog({ group, canEdit, canBounce, busyId, onClose, onPreview, onResubmit, onBounce }: {
-  group: BookingGroup; canEdit: boolean; canBounce: boolean; busyId: number | null; onClose: () => void;
-  onPreview: (r: ReceiptRow) => void; onResubmit: (r: ReceiptRow) => void; onBounce: (r: ReceiptRow) => void;
-}) {
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className={`max-w-lg ${DIALOG}`} style={{ border: RULE }}>
-        <DialogHeader>
-          <DialogTitle className="font-heading tabular-nums">{group.bookingNo}</DialogTitle>
-          <DialogDescription className="text-xs space-y-1">
-            <span className="block text-foreground font-medium"><ApplicantNames name={group.applicantName} bookingId={group.bookingId} />{group.mobile ? <span className="tabular-nums text-muted-foreground font-normal"> · {group.mobile}</span> : null}</span>
-            {group.projectName && <span className="block">{group.projectName} · Unit {group.unitNo}</span>}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex justify-between items-center px-3 py-2" style={{ border: RULE_SOFT }}>
-          <span className={LBL}>{group.receipts.length} receipt{group.receipts.length === 1 ? "" : "s"}</span>
-          <span className="font-heading text-sm font-bold tabular-nums">{fmt(group.totalAmount)}</span>
-        </div>
-        <div className="max-h-[55vh] overflow-y-auto thin-scroll" style={{ border: RULE_SOFT, borderBottom: 0 }}>
-          {group.receipts.map((r) => (
-            <ReceiptDetailRow key={r.Id} r={r} canEdit={canEdit} canBounce={canBounce} busy={busyId === r.Id}
-              onPreview={() => onPreview(r)} onResubmit={() => onResubmit(r)} onBounce={() => onBounce(r)} />
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
+const REPORT_TABS = [
+  { key: "All", label: "All receipts" }, { key: "NotSent", label: "Not sent to Finance" }, { key: "WithFinance", label: "Pending with Finance" },
+  { key: CrmStatus.APPROVED as string, label: "Approved by Finance" }, { key: "Bounced", label: "Bounced" },
+];
 
 const CrmMoneyReceipts: React.FC = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const bookingIdParam = searchParams.get("bookingId") || undefined;
-
-  const [searchInput, setSearchInput] = useState("");
-  const [filters, setFilters] = useState<ReceiptListFilters>(EMPTY_FILTERS);
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [page, setPage] = useState(1);
-  const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
+  const [sp, setSp] = useSearchParams();
+  const bookingIdParam = sp.get("bookingId") || "";
+  const qc = useQueryClient();
+  const { canEdit } = usePageRights("crm-money-receipts");
+  const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
+  const list = useCrmListState({ pageSize, defaultSort: DEFAULT_SORT });
+  const [status, setStatusRaw] = useUrlParam<string>("status", "All");
+  const setStatus = (s: string) => { setStatusRaw(s); list.setPage(1); };
+  const [dates, setDatesRaw] = useState<GridDateRange>(GRID_ANY_DATE);
+  const setDates = (d: GridDateRange) => { setDatesRaw(d); list.setPage(1); };
   const [previewReceipt, setPreviewReceipt] = useState<ReceiptRow | null>(null);
   const [bounceReceipt, setBounceReceipt] = useState<ReceiptRow | null>(null);
   const [sweeping, setSweeping] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const qc = useQueryClient();
-  const { canEdit } = usePageRights("crm-money-receipts");
-  // Approve / Bounce / Sweep: whoever Approval Setup names for crm-money-receipts.
-  // Bounce (before the hand-off to Finance): whoever Approval Setup names for crm-money-receipts.
-  const isReceiptApprover = useCanApprove("crm-money-receipts");
-  const canBounce = canEdit && isReceiptApprover;
 
-  const patchFilters = useCallback((patch: Partial<ReceiptListFilters>) => { setFilters((f) => ({ ...f, ...patch })); setPage(1); }, []);
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => patchFilters({ search: v }));
-  const patchCpb = useCallback((v: CrmCompanyProjectBlockValue) => { setCpb(v); setPage(1); }, []);
+  const range = resolveGridDateRange(dates);
+  const params = useMemo(() => {
+    const p = listParams({ ...list.query, status });
+    if (range.from) p.set("fromDate", range.from);
+    if (range.to) p.set("toDate", range.to);
+    if (bookingIdParam) p.set("bookingId", bookingIdParam);
+    return p;
+  }, [list.query, status, range.from, range.to, bookingIdParam]);
+  const { data, isLoading, error, isFetching, refetch } = useQuery({ queryKey: ["crm-money-receipts", params.toString()], queryFn: () => fetchList(params), staleTime: 30_000 });
+  const result = useSticky(data);
+  const counts = result?.statusCounts ?? {};
+  const c = (k: string) => counts[k] ?? { count: 0, amount: 0 };
+  const invalidateAll = () => qc.invalidateQueries({ queryKey: ["crm-money-receipts"] });
 
-  const listFilters: ReceiptListFilters = useMemo(
-    () => ({ ...filters, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [filters, cpb]
-  );
-  const hasActiveFilters = Boolean(listFilters.search || listFilters.companyId || listFilters.projectId || listFilters.blockId
-    || listFilters.status || listFilters.fromDate || listFilters.toDate);
-  const clearFilters = useCallback(() => {
-    setSearchInput("");
-    setFilters(EMPTY_FILTERS);
-    setCpb({ companyId: "", projectId: "", blockId: "" });
-    setPage(1);
-  }, []);
-
-  // A deep link from a booking (?bookingId) shows just that booking's receipts, unpaged.
-  const { data: listResult, isLoading, isError, error, isFetching, refetch } = useQuery({
-    queryKey: ["crm-money-receipts", bookingIdParam, listFilters, page],
-    queryFn: () => (bookingIdParam
-      ? fetchReceipts(bookingIdParam).then((rows) => ({ rows, total: rows.length, statusCounts: undefined }))
-      : fetchReceiptsList(listFilters, page)),
-    placeholderData: (prev) => prev,
-    staleTime: 30_000,
-  });
-  const rows = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
-  const counts = listResult?.statusCounts;
-
-  const groupedBookings: BookingGroup[] = useMemo(() => {
-    const map = new Map<number, BookingGroup>();
-    for (const r of rows) {
-      let g = map.get(r.BookingId);
-      if (!g) {
-        g = { bookingId: r.BookingId, bookingNo: r.BookingNo, applicantName: r.ApplicantName, mobile: r.Mobile,
-          projectName: r.ProjectName, unitNo: r.UnitNo, totalAmount: 0, receipts: [] };
-        map.set(r.BookingId, g);
-      }
-      g.receipts.push(r);
-      g.totalAmount = round2(g.totalAmount + (Number(r.Amount) || 0));
-    }
-    return [...map.values()];
-  }, [rows]);
-  const selectedBooking = selectedBookingId != null ? groupedBookings.find((g) => g.bookingId === selectedBookingId) || null : null;
-
-  const invalidateAll = useCallback(() => qc.invalidateQueries({ queryKey: ["crm-money-receipts"] }), [qc]);
-
-  const runAction = useCallback(async (row: ReceiptRow, path: string, okMsg: string, body?: object) => {
+  const runAction = async (row: ReceiptRow, path: string, okMsg: string, body?: object) => {
     setBusyId(row.Id);
     try {
       const res = await fetchWithAuth(`${API}/${row.Id}/${path}`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(data.error || "That didn't go through"); return false; }
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(translateError(d.error || "That didn't go through")); return false; }
       toast.success(okMsg);
       invalidateAll();
       return true;
-    } catch {
-      toast.error("Network error — please try again");
-      return false;
-    } finally {
-      setBusyId(null);
-    }
-  }, [invalidateAll]);
-
-  const handleBounceConfirm = useCallback(async (reason: string) => {
-    if (!bounceReceipt) return;
-    if (await runAction(bounceReceipt, "bounce", `${bounceReceipt.ReceiptNo} marked as bounced`, { reason })) setBounceReceipt(null);
-  }, [bounceReceipt, runAction]);
-
-  const sweepPendingMrs = useCallback(async () => {
+    } catch { toast.error("Network error — please try again"); return false; }
+    finally { setBusyId(null); }
+  };
+  const handleBounce = async (reason: string) => {
+    if (bounceReceipt && await runAction(bounceReceipt, "bounce", `${bounceReceipt.ReceiptNo} marked as bounced`, { reason })) setBounceReceipt(null);
+  };
+  const sendStuck = async () => {
     setSweeping(true);
     try {
       const res = await fetchWithAuth(`${API}/sweep-pending`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(data.error || "Sweep failed"); return; }
-      if (data.processed === 0 && data.failed === 0) toast.info("No stuck receipts — every confirmed booking is up to date.");
-      else {
-        toast.success(`Swept ${data.processed} receipt(s) into Finance's queue.${data.failed ? ` ${data.failed} failed.` : ""}`);
-        invalidateAll();
-      }
-    } catch { toast.error("Sweep failed"); } finally { setSweeping(false); }
-  }, [invalidateAll]);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(translateError(d.error || "That didn't go through")); return; }
+      if (d.processed === 0 && d.failed === 0) toast.info("Nothing stuck: every approved booking's receipt is with Finance.");
+      else { toast.success(`Sent ${d.processed} receipt(s) to Finance.${d.failed ? ` ${d.failed} failed.` : ""}`); invalidateAll(); }
+    } catch { toast.error("That didn't go through"); }
+    finally { setSweeping(false); }
+  };
 
-  const allCount = counts ? counts[CrmStatus.PENDING].count + counts[CrmStatus.APPROVED].count + counts.Bounced.count : 0;
-  const allAmount = counts ? counts[CrmStatus.PENDING].amount + counts[CrmStatus.APPROVED].amount + counts.Bounced.amount : 0;
-  const figures = [
-    { label: "All receipts", value: String(allCount), note: fmt(allAmount), status: "" },
-    { label: "Pending approval", value: String(counts?.[CrmStatus.PENDING].count ?? 0), note: fmt(counts?.[CrmStatus.PENDING].amount ?? 0), status: CrmStatus.PENDING },
-    { label: "Approved", value: String(counts?.[CrmStatus.APPROVED].count ?? 0), note: fmt(counts?.[CrmStatus.APPROVED].amount ?? 0), status: CrmStatus.APPROVED },
-    { label: "Bounced", value: String(counts?.Bounced.count ?? 0), note: fmt(counts?.Bounced.amount ?? 0), status: "Bounced", red: (counts?.Bounced.count ?? 0) > 0 },
-  ];
-  const tabCount = (v: string) => (v === "" ? allCount : counts?.[v as ReceiptStatus]?.count ?? 0);
-  const tabClass = (on: boolean) => `inline-flex items-center gap-2 px-3 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`;
-  const th = `!px-4 !py-2.5 text-left ${LBL}`;
-  const td = "!px-4 !py-2.5";
-  const dateInp = "!h-9 !rounded-none !shadow-none border-foreground/40 bg-card !px-2.5 text-xs tabular-nums";
+  const actions = (r: ReceiptRow) => (
+    <span className="inline-flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+      <button type="button" onClick={() => setPreviewReceipt(r)} className={cn(GRID_SHEET_KEYS.KEY_LINE, SMALL)}><FileText size={12} /> PDF</button>
+      {canEdit && r.Status === "Bounced" && r.ReceivedPaymentId == null && (
+        <button type="button" onClick={() => void runAction(r, "resubmit", `${r.ReceiptNo} put back`)} disabled={busyId === r.Id} className={cn(GRID_SHEET_KEYS.KEY_LINE, SMALL)} title="The payment came good: put this receipt back"><RotateCcw size={12} /> Put back</button>
+      )}
+      {canEdit && r.Status === CrmStatus.PENDING && r.ReceivedPaymentId == null && (
+        <button type="button" onClick={() => setBounceReceipt(r)} disabled={busyId === r.Id} className={cn(GRID_SHEET_KEYS.KEY_LINE, SMALL, "!text-destructive")}><Ban size={12} /> Bounce</button>
+      )}
+    </span>
+  );
+  const cols = receiptCols(actions);
+  const [prefs, setPrefs] = useGridPrefs(PREFS_KEY, cols);
+
+  const received = c(CrmStatus.APPROVED).amount + c("WithFinance").amount + c("NotSent").amount;
+  const allCount = c(CrmStatus.APPROVED).count + c("WithFinance").count + c("NotSent").count + c("Bounced").count;
+  const countOf = (k: string) => (k === "All" ? allCount : c(k).count);
+  const hasFilters = list.hasFilters || dates.preset !== GRID_ANY_DATE.preset;
+  const clearFilters = () => { list.reset(); setDatesRaw(GRID_ANY_DATE); };
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const p = new URLSearchParams(params);
+      p.set("page", "1"); p.set("pageSize", "200");
+      const first = await fetchList(p);
+      let rows = first.rows;
+      for (let n = 2; rows.length < first.total; n++) { p.set("page", String(n)); const more = await fetchList(p); if (!more.rows.length) break; rows = rows.concat(more.rows); }
+      exportGrid(rows, cols, `money-receipts-${status}`);
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setExporting(false); }
+  };
 
   return (
-    <>
+    <div className="space-y-4">
       <Breadcrumbs items={["Dashboard", "CRM", "Money Receipts"]} />
-      <SheetShell
-        eyebrow="CivilierERP · CRM · Finance"
-        title="Money Receipts"
-        subtitle="The booking-amount receipt, issued once a booking's data review is done. It goes to Finance when the Director approves the booking, and Finance approves or bounces it there."
-        action={
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
-            {canEdit && (
-              <button onClick={sweepPendingMrs} disabled={sweeping} className={`${KEY_LINE} h-9 px-4`}
-                title="Send pending receipts of confirmed bookings to Finance">
-                {sweeping ? "Sweeping…" : "Sweep stuck receipts"}
-              </button>
-            )}
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          {!bookingIdParam && (
-            <div className="bg-card" style={{ border: RULE }}>
-              <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
-                {figures.map((x) => (
-                  <div key={x.label}>
-                    <button onClick={() => patchFilters({ status: x.status })} className="label link">{x.label}</button>
-                    <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color: x.red ? "var(--red)" : undefined }}>{isLoading && !listResult ? "…" : x.value}</p>
-                    <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }} className="tabular-nums">{x.note}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+      <MoneyBand eyebrow="CRM · Finance" title="Money Receipts" sub="Made automatically for every payment received. A receipt needs no approval."
+        actions={<>
+          {canEdit && <button type="button" onClick={sendStuck} disabled={sweeping} className={BAND_KEY} title="Sends the receipts of approved bookings that did not reach Finance">{sweeping ? "Sending…" : "Send stuck receipts to Finance"}</button>}
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+        </>}
+        lead={fmtShort(c(CrmStatus.APPROVED).amount)} leadNote={result ? `approved by Finance of ${fmtShort(received)} received · ${pct(c(CrmStatus.APPROVED).amount, received)}%` : ""}
+        bar={<CollectionBar onDark due={received} collected={c(CrmStatus.APPROVED).amount} finance={c("WithFinance").amount} recorded={c("NotSent").amount} title={`Received ${fmt(received)}`} />}
+        figures={[
+          { label: "Approved by Finance", dot: BAND_DOT.collected, value: fmtShort(c(CrmStatus.APPROVED).amount), note: `${c(CrmStatus.APPROVED).count} receipt${c(CrmStatus.APPROVED).count === 1 ? "" : "s"}`, exact: fmt(c(CrmStatus.APPROVED).amount) },
+          { label: "Pending with Finance", dot: BAND_DOT.finance, value: fmtShort(c("WithFinance").amount), note: `${c("WithFinance").count} receipt${c("WithFinance").count === 1 ? "" : "s"}`, exact: fmt(c("WithFinance").amount) },
+          { label: "Not sent to Finance", dot: BAND_DOT.recorded, value: fmtShort(c("NotSent").amount), note: "Sent on Director approval", exact: fmt(c("NotSent").amount) },
+          { label: "Bounced", dot: BAND_DOT.overdue, value: fmtShort(c("Bounced").amount), note: `${c("Bounced").count} receipt${c("Bounced").count === 1 ? "" : "s"}, not counted`, exact: fmt(c("Bounced").amount), alert: c("Bounced").count > 0 },
+        ]} />
+      <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
+        <GridTabs<string> label="Money receipts" active={status} onChange={setStatus} tabs={REPORT_TABS.map((t) => ({ ...t, count: result ? countOf(t.key) : null }))} />
+        <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-border">
+          {bookingIdParam ? (
+            <>
+              <span className="text-sm">Receipts of booking <span className="font-semibold tabular-nums">{result?.rows[0]?.BookingNo ?? `#${bookingIdParam}`}</span></span>
+              <button type="button" onClick={() => setSp((p) => { p.delete("bookingId"); return p; })} className={GRID_BTN}><X size={12} /> Show all receipts</button>
+            </>
+          ) : (
+            <>
+              <GridSearch value={list.searchInput} onChange={list.setSearchInput} placeholder="Receipt, booking, customer or mobile" />
+              <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+              <GridDateFilter label="Received on" value={dates} onChange={setDates} />
+              {hasFilters && <button type="button" onClick={clearFilters} className={GRID_BTN}>Clear filters</button>}
+            </>
           )}
-
-          <div className="bg-card" style={{ border: RULE }}>
-            <div className="px-5 py-4 space-y-3" style={{ borderBottom: RULE }}>
-              {bookingIdParam ? (
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-sm">Receipts of booking <span className="font-heading font-semibold tabular-nums">{rows[0]?.BookingNo ?? `#${bookingIdParam}`}</span></span>
-                  <button onClick={() => setSearchParams({})} className={`${KEY_LINE} h-8 px-3`}><X size={12} /> Show all receipts</button>
-                </div>
-              ) : (
-                <>
-                  <div className="inline-flex items-stretch flex-wrap" style={{ border: RULE }}>
-                    {STATUS_TABS.map((t) => (
-                      <button key={t.value || "all"} onClick={() => patchFilters({ status: t.value })} style={{ borderRight: RULE_SOFT }}
-                        className={`${tabClass(filters.status === t.value)} ${t.value === "Bounced" && tabCount("Bounced") > 0 && filters.status !== "Bounced" ? "!text-destructive" : ""}`}>
-                        {t.label} <span className="tabular-nums">{tabCount(t.value)}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-2.5 flex-wrap items-center">
-                    <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") patchFilters({ search: searchInput.trim() }); }}
-                      placeholder="Search receipt no, booking, applicant, mobile…"
-                      className="h-9 flex-1 min-w-48 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
-                    <CrmCompanyProjectBlockFilter value={cpb} onChange={patchCpb} />
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-36"><DateInput value={filters.fromDate} onChange={(e) => patchFilters({ fromDate: e.target.value })} aria-label="Received from" placeholder="Received from" className={dateInp} /></div>
-                      <span className="text-xs text-muted-foreground">–</span>
-                      <div className="w-36"><DateInput value={filters.toDate} onChange={(e) => patchFilters({ toDate: e.target.value })} aria-label="Received to" placeholder="Received to" className={dateInp} /></div>
-                    </div>
-                    {hasActiveFilters && <button onClick={clearFilters} className={`${KEY_LINE} h-9 px-3`} title="Clear filters"><X size={12} /> Clear</button>}
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="overflow-x-auto thin-scroll">
-              <table className="w-full text-sm min-w-[820px]">
-                <thead>
-                  <tr style={{ borderBottom: RULE }}>
-                    <th className={th}>Booking</th><th className={th}>Project · unit</th><th className={th}>Latest receipt</th>
-                    <th className={`${th} !text-right`}>Amount</th><th className={th}>State</th><th className={th} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {isError ? (
-                    <tr><td colSpan={6} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
-                  ) : isLoading && !listResult ? (
-                    <tr><td colSpan={6} className={`${td} text-center text-muted-foreground`}>Loading…</td></tr>
-                  ) : groupedBookings.length === 0 ? (
-                    <tr><td colSpan={6} className={`${td} text-center text-muted-foreground`}>
-                      {hasActiveFilters
-                        ? "No money receipt matches — widen the dates or clear a filter."
-                        : "No money receipts yet — one is issued once a booking's data review is done and it's sent for approval."}
-                    </td></tr>
-                  ) : groupedBookings.map((g) => {
-                    const bounced = g.receipts.some((r) => r.Status === "Bounced");
-                    return (
-                      <tr key={g.bookingId} onClick={() => setSelectedBookingId(g.bookingId)} className="align-top cursor-pointer hover:bg-primary/5 transition-colors"
-                        style={{ borderBottom: RULE_SOFT, boxShadow: bounced ? "inset 3px 0 0 hsl(var(--destructive))" : undefined }}>
-                        <td className={td}>
-                          <div className="font-heading text-xs font-semibold tabular-nums">{g.bookingNo}</div>
-                          {/* Wraps (two lines at most): a one-line name pushed the arrow off a 1366px screen. */}
-                          <div className="mt-1 text-xs line-clamp-2 break-words max-w-[22rem]">
-                            <ApplicantNames name={g.applicantName} bookingId={g.bookingId} />
-                            {g.mobile && <span className="text-muted-foreground tabular-nums"> · {g.mobile}</span>}
-                          </div>
-                        </td>
-                        <td className={`${td} text-xs`}>{g.projectName || "—"} <span className="text-muted-foreground">· {g.unitNo}</span></td>
-                        <td className={td}>
-                          {/* The latest receipt; the rest open with the row. */}
-                          <div className="flex flex-col gap-1">
-                            <span className="font-heading text-xs tabular-nums">{g.receipts[0].ReceiptNo}</span>
-                            <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
-                              {fmtDate(g.receipts[0].ReceivedDate)}{g.receipts.length > 1 ? ` · +${g.receipts.length - 1} more` : ""}
-                            </span>
-                          </div>
-                        </td>
-                        <td className={`${td} text-right font-heading font-semibold tabular-nums`}>{fmt(g.totalAmount)}</td>
-                        <td className={td}><BookingMark receipts={g.receipts} /></td>
-                        <td className={`${td} text-right`}><ChevronRight size={14} className="inline text-muted-foreground" /></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {!bookingIdParam && <div style={{ borderTop: RULE_SOFT }}><CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} /></div>}
+          <div className="ml-auto flex items-center gap-2">
+            <GridSavedViews storageKey={VIEWS_KEY}
+              current={{ status, search: list.searchInput.trim(), cpb: list.cpb, sort: list.sort, pageSize, extra: { dates } }}
+              onApply={(v) => {
+                setPageSize(GRID_PAGE_SIZES.includes(v.pageSize as typeof GRID_PAGE_SIZES[number]) ? v.pageSize : GRID_PAGE_SIZES[0]);
+                list.apply(v);
+                setStatusRaw(v.status || "All");
+                const x = (v.extra ?? {}) as { dates?: GridDateRange };
+                setDatesRaw(x.dates?.preset ? x.dates : GRID_ANY_DATE);
+              }} />
+            <GridColumnChooser cols={cols} prefs={prefs} onChange={setPrefs} />
+            <button type="button" onClick={handleExport} disabled={exporting} className={GRID_BTN} title="Export to Excel"><Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span></button>
           </div>
         </div>
-
-        {selectedBooking && (
-          <BookingDetailDialog
-            group={selectedBooking}
-            canEdit={canEdit}
-            canBounce={canBounce}
-            busyId={busyId}
-            onClose={() => setSelectedBookingId(null)}
-            onPreview={setPreviewReceipt}
-            onResubmit={(r) => void runAction(r, "resubmit", `${r.ReceiptNo} resubmitted for approval`)}
-            onBounce={setBounceReceipt}
-          />
-        )}
-        {previewReceipt && <ReceiptPdfDialog receipt={previewReceipt} onClose={() => setPreviewReceipt(null)} />}
-        {bounceReceipt && (
-          <BounceDialog receipt={bounceReceipt} submitting={busyId === bounceReceipt.Id} onClose={() => setBounceReceipt(null)} onConfirm={handleBounceConfirm} />
-        )}
-      </SheetShell>
-    </>
+        <CrmGrid cols={cols} prefs={prefs} onPrefs={setPrefs} rows={result?.rows ?? []} rowKey={(r) => r.Id} noRowNumbers
+          loading={isLoading} fetching={isFetching} error={error ? translateError((error as Error).message) : null} onRetry={() => refetch()}
+          sort={list.sort} onSort={list.toggleSort} onRowClick={(r) => setPreviewReceipt(r)}
+          empty={hasFilters || status !== "All" ? "No money receipt matches these filters." : "No money receipts yet. One is made automatically for every payment received."}
+          page={list.page} pageSize={pageSize} total={result?.total ?? 0} onPage={list.setPage} onPageSize={(n) => { setPageSize(n); list.setPage(1); }} />
+      </div>
+      {previewReceipt && <ReceiptPdfDialog receipt={previewReceipt} onClose={() => setPreviewReceipt(null)} />}
+      {bounceReceipt && <BounceDialog receipt={bounceReceipt} submitting={busyId === bounceReceipt.Id} onClose={() => setBounceReceipt(null)} onConfirm={handleBounce} />}
+    </div>
   );
 };
 

@@ -27,7 +27,6 @@ const { assertBookingProjectScope } = require("../services/assertBookingProjectS
 const { getMoneyReceiptPdfBuffer, deriveStatus } = require("../services/moneyReceiptPdf");
 const {
   MoneyReceiptError,
-  isMoneyReceiptApprover,
   createMoneyReceiptForBooking,
   updateMoneyReceipt,
   resubmitMoneyReceipt,
@@ -43,8 +42,8 @@ router.use(authMiddleware);
 const RECEIPT_STATUSES = [CrmStatus.PENDING, CrmStatus.APPROVED, "Bounced"];
 // The status a receipt shows (deriveStatus in SQL): Finance's Received Payment decides it once the receipt is
 // still Pending here. Filtering and counting on mr.Status alone put a Finance-approved receipt under "Pending".
-const STATUS_SQL = `CASE WHEN mr.Status = 'Approved' THEN 'Approved' WHEN mr.Status = 'Bounced' THEN 'Bounced'
-  WHEN rp.RPStatus = 'Approved' THEN 'Approved' WHEN rp.RPStatus = 'Rejected' THEN 'Bounced' ELSE 'Pending' END`;
+const STATUS_SQL = `CASE WHEN mr.Status = 'Bounced' OR rp.RPStatus = 'Rejected' THEN 'Bounced'
+  WHEN mr.Status = 'Approved' OR rp.RPStatus = 'Approved' THEN 'Approved' ELSE 'Pending' END`;
 
 function actorEmail(req) {
   return req.user?.email || req.user?.name || null;
@@ -56,12 +55,6 @@ function handleError(res, e, context) {
   }
   console.error(`[crm-money-receipts] ${context} error:`, e.message);
   return res.status(500).json({ error: e.message });
-}
-
-async function requireMoneyReceiptApprover(req, res) {
-  if (await isMoneyReceiptApprover(req.user?.role, Number(req.user?.userId ?? req.user?.id) || null)) return true;
-  res.status(403).json({ error: "You are not a money-receipt approver in Approval Setup" });
-  return false;
 }
 
 // Builds the WHERE clause AND binds params onto whichever `request` object
@@ -79,7 +72,9 @@ function applyReceiptFilters(request, query, projectScope = null) {
     request.input("bid", sql.Int, parseInt(bookingId, 10));
     conds.push("mr.BookingId = @bid");
   }
-  if (status && RECEIPT_STATUSES.includes(status)) {
+  if (status === "NotSent") conds.push(`${STATUS_SQL} = 'Pending' AND mr.ReceivedPaymentId IS NULL`);
+  else if (status === "WithFinance") conds.push(`${STATUS_SQL} = 'Pending' AND mr.ReceivedPaymentId IS NOT NULL`);
+  else if (status && RECEIPT_STATUSES.includes(status)) {
     request.input("st", sql.NVarChar(20), status);
     conds.push(`${STATUS_SQL} = @st`);
   }
@@ -114,6 +109,8 @@ function applyReceiptFilters(request, query, projectScope = null) {
   }
   return conds.length ? `WHERE ${conds.join(" AND ")}` : "";
 }
+
+const RECEIPT_SORT = { ApplicantName: "a.ApplicantName", ReceiptNo: "mr.ReceiptNo", BookingNo: "b.BookingNo", Amount: "mr.Amount", PaymentMode: "mr.PaymentMode", ReceivedDate: "mr.ReceivedDate" };
 
 const BASE_SELECT = `
   SELECT mr.Id, mr.ReceiptNo, mr.BookingId, mr.Amount, mr.BaseAmount, mr.GSTAmount, mr.PaymentMode, mr.ChequeNo, mr.ChequeDate,
@@ -200,12 +197,16 @@ router.get("/", requireAnyPageRight(["crm-money-receipts", "crm-payments"], "vie
     const statusWhere = applyReceiptFilters(statusReq, { ...req.query, status: undefined }, req.projectScope);
 
     const [result, countResult, statusResult] = await Promise.all([
-      dataReq.query(`${BASE_SELECT} ${where} ORDER BY mr.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      dataReq.query(`${BASE_SELECT} ${where} ${Object.hasOwn(RECEIPT_SORT, req.query.sortKey) ? `ORDER BY ${RECEIPT_SORT[req.query.sortKey]} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, mr.Id DESC` : "ORDER BY mr.CreatedAt DESC"} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       countReq.query(`${COUNT_SELECT} ${where}`),
-      statusReq.query(`SELECT ${STATUS_SQL} AS S, COUNT(*) AS n, SUM(mr.Amount) AS amt ${COUNT_SELECT.replace(/^\s*SELECT COUNT\(\*\) AS total/, "")} ${statusWhere} GROUP BY ${STATUS_SQL}`),
+      statusReq.query(`SELECT ${STATUS_SQL} AS S, CASE WHEN mr.ReceivedPaymentId IS NULL THEN 0 ELSE 1 END AS Sent, COUNT(*) AS n, SUM(mr.Amount) AS amt ${COUNT_SELECT.replace(/^\s*SELECT COUNT\(\*\) AS total/, "")} ${statusWhere} GROUP BY ${STATUS_SQL}, CASE WHEN mr.ReceivedPaymentId IS NULL THEN 0 ELSE 1 END`),
     ]);
-    const statusCounts = Object.fromEntries(RECEIPT_STATUSES.map((st) => [st, { count: 0, amount: 0 }]));
-    for (const r of statusResult.recordset) statusCounts[r.S] = { count: r.n, amount: Number(r.amt) || 0 };
+    const statusCounts = Object.fromEntries([...RECEIPT_STATUSES, "NotSent", "WithFinance"].map((st) => [st, { count: 0, amount: 0 }]));
+    const addTo = (k, r) => { statusCounts[k].count += r.n; statusCounts[k].amount += Number(r.amt) || 0; };
+    for (const r of statusResult.recordset) {
+      addTo(r.S, r);
+      if (r.S === CrmStatus.PENDING) addTo(r.Sent ? "WithFinance" : "NotSent", r);
+    }
 
     res.json({ rows: shapeReceipts(result.recordset), total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
@@ -306,7 +307,6 @@ router.put("/:id/resubmit", requirePageRight("crm-money-receipts", "edit"), asyn
 
 router.put("/:id/bounce", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
-    if (!(await requireMoneyReceiptApprover(req, res))) return;
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
@@ -322,7 +322,6 @@ router.put("/:id/bounce", requirePageRight("crm-money-receipts", "edit"), async 
 // them would be a routing change, not a restructure, so left alone.
 router.put("/:id/reject", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
-    if (!(await requireMoneyReceiptApprover(req, res))) return;
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });

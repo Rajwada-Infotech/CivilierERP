@@ -10,7 +10,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
-const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, resolveOcCcGate, refreshPrePossessionStatus } = require("../services/crmWorkflowGuards");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
@@ -184,6 +184,14 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    // The same rule as the list of bookings that can get a notice. Migration 627 backs it up.
+    const active = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 NoticeNo, Status FROM dbo.CrmPossessionNotice WHERE BookingId = @bid AND Status IN (N'Draft', N'Sent')");
+    if (active.recordset.length) {
+      return res.status(409).json({ error: `Possession notice ${active.recordset[0].NoticeNo} is already ${active.recordset[0].Status} for this booking` });
+    }
+
+    await refreshPrePossessionStatus(pool, bookingId);
     const pp = await pool.request().input("bid", sql.Int, bookingId)
       .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
     if (!pp.recordset.length || pp.recordset[0].Status !== "Ready") {
@@ -219,6 +227,7 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id, NoticeNo: noticeNo });
   } catch (e) {
+    if (e.number === 2601 || e.number === 2627) return res.status(409).json({ error: "This booking already has an active possession notice" });
     console.error("[crm-possession-notice] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }

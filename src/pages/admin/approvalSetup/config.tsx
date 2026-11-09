@@ -289,6 +289,18 @@ export const MODULE_OPTIONS = [
     desc: "Cancelling an issued credit note (a GST document)",
   },
   {
+    id: "crm-milestone-waiver",
+    label: "Milestone Waiver",
+    icon: "🏷️",
+    desc: "Waiving what a customer owes on a payment milestone",
+  },
+  {
+    id: "crm-milestone-waiver-reversal",
+    label: "Milestone Waiver — Reversal",
+    icon: "↩️",
+    desc: "Putting a waived milestone back as due",
+  },
+  {
     id: "crm-refunds",
     label: "CRM Refund",
     icon: "💸",
@@ -305,12 +317,6 @@ export const MODULE_OPTIONS = [
     label: "Received Payment",
     icon: "📥",
     desc: "Money received, before it posts to the ledger",
-  },
-  {
-    id: "crm-money-receipts",
-    label: "CRM Money Receipt",
-    icon: "🧾",
-    desc: "Bouncing a customer's money receipt before it goes to Finance (it goes when the Director approves the booking)",
   },
   {
     id: "crm-bank-details-edit",
@@ -406,7 +412,6 @@ export const MODULE_GROUPS = [
       "crm-query-payment-confirm",
       "crm-noc",
       "crm-brokerage",
-      "crm-money-receipts",
       "crm-refunds-finance",
       "crm-bank-details-edit",
       "crm-sales-deed-docs",
@@ -417,6 +422,8 @@ export const MODULE_GROUPS = [
       "crm-ownership-changes",
       "crm-credit-notes",
       "crm-credit-note-cancel",
+      "crm-milestone-waiver",
+      "crm-milestone-waiver-reversal",
       "crm-cancellations",
     ],
   },

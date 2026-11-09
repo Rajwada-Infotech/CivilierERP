@@ -94,7 +94,12 @@ async function getGstSplit(pool, bookingId, amount) {
   const r = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
   const row = r.recordset[0] || {};
-  const ratio = Number(row.GrandTotal) > 0 ? Number(row.TotalGstAmount) / Number(row.GrandTotal) : 0;
+  return gstSplitByRatio(amount, row.TotalGstAmount, row.GrandTotal);
+}
+
+/** An amount's GST at the booking's overall GST share of its grand total. */
+function gstSplitByRatio(amount, totalGst, grandTotal) {
+  const ratio = Number(grandTotal) > 0 ? Number(totalGst || 0) / Number(grandTotal) : 0;
   const gstAmount = Math.round(amount * ratio * 100) / 100;
   return { gstAmount, baseAmount: Math.round((amount - gstAmount) * 100) / 100 };
 }
@@ -1359,7 +1364,7 @@ module.exports = {
   ensureCrmCustomerLedgerHead,
   syncCrmCustomerLedgerHead,
   getGstRateForBooking,
-  getGstSplit,
+  getGstSplit, gstSplitByRatio,
   postCrmReceiptToGL,
   postCrmOnAccountToGL,
   postCrmOnAccountApplied,
