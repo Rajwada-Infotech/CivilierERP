@@ -561,28 +561,36 @@ export default function ActivityReporting() {
   useEffect(() => {
     if (!linkedRung || !rights.canView) return;
     let cancelled = false;
+    // Drop ?rung= / ?chain= from the address with a REPLACE. This must happen BEFORE the popup opens: the popup
+    // pushes its own history entry (useOverlayBackClose), and a replace made after that overwrote the popup's entry
+    // with the page's — so closing the popup stepped back one entry too far and left Reporting for whatever page
+    // came before it (the Civil Work DPR dashboard).
+    const stripLink = () =>
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("rung");
+          next.delete("chain");
+          return next;
+        },
+        { replace: true },
+      );
     getReportedAssignments({ rungId: linkedRung })
       .then((rows) => {
         if (cancelled) return;
+        stripLink();
         if (rows[0]) {
           openedFromLinkRef.current = true;
-          openDetail(rows[0]);
+          // Open on the next tick, once the replace has landed, so the popup's history entry sits on top of it.
+          // (Not gated on `cancelled`: stripping ?rung= is what re-runs this effect and cancels it.)
+          const row = rows[0];
+          setTimeout(() => openDetail(row), 0);
         } else toast.error("That activity is not in Activity Reporting (it may be outside your projects or its chain retired).");
       })
       .catch((e) => {
-        if (!cancelled) toast.error(e instanceof Error ? e.message : "Could not open that activity.");
-      })
-      .finally(() => {
         if (cancelled) return;
-        setSearchParams(
-          (prev) => {
-            const next = new URLSearchParams(prev);
-            next.delete("rung");
-            next.delete("chain");
-            return next;
-          },
-          { replace: true },
-        );
+        stripLink();
+        toast.error(e instanceof Error ? e.message : "Could not open that activity.");
       });
     return () => {
       cancelled = true;
