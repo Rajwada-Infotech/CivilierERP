@@ -251,3 +251,9 @@ export const setMyWhatsApp = async (WhatsAppNo: string) =>
   handle<{ message: string; WhatsAppNo: string }>(await fetchWithAuth(`/api/users/me/whatsapp`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ WhatsAppNo }) }));
 export const setUserWhatsApp = async (userId: number, WhatsAppNo: string) =>
   handle<{ message: string; WhatsAppNo: string }>(await fetchWithAuth(`/api/users/${userId}/whatsapp`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ WhatsAppNo }) }));
+
+// One "Verified" tick per land-page section (all that section's rows at once).
+export interface SectionStatus { label: string; total: number; verified: number; done: boolean; verifiedAt: string | null; verifiedBy: string | null }
+export const getLandSections = async (landId: number) => handle<Record<string, SectionStatus>>(await fetchWithAuth(`${BASE}/${landId}/sections`));
+export const verifyLandSection = async (landId: number, section: string, verified: boolean, remarks?: string) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${landId}/sections/${section}/verify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verified, remarks }) }));

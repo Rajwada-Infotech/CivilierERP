@@ -24,7 +24,7 @@ const express = require("express");
 const { usersHaveWhatsApp } = require("../../services/usersWhatsApp");
 const { getPool, sql } = require("../../db");
 const { requirePageRight, hasAnyPageAction } = require("../../middleware/requirePageRight");
-const { canAct } = require("./approvalAuthority");
+const { canAct, ownWork, isSuperAdmin } = require("./approvalAuthority");
 const apiRateLimit = require("../../middleware/apiRateLimit");
 const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
 const { documentGate } = require("./landDocuments");
@@ -131,8 +131,7 @@ async function gates(conn, land) {
   if (o.eventsOpen) need.OWNERSHIP.push(`${o.eventsOpen} ownership transfer(s) not verified`);
   if (o.inheritOpen) need.OWNERSHIP.push(`${o.inheritOpen} inheritance record(s) not verified`);
   if (o.partitionOpen) need.OWNERSHIP.push(`${o.partitionOpen} partition record(s) not verified`);
-  if (o.checksFailed) need.OWNERSHIP.push(`${o.checksFailed} verification check(s) rejected or needing correction`);
-  else if (o.checksOpen) need.OWNERSHIP.push(`${o.checksOpen} ownership record(s) without all ${CHECKS_PER_RECORD} checks reviewed`);
+  // The seven per-owner checks are no longer required: the verifier ticks the whole Ownership section once (Verified).
 
   // Step 6: required documents from the land's checklist.
   const docs = await documentGate(conn, land.LandId);
@@ -1586,6 +1585,87 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
 });
 
 // ── Land-Wise Verification & Two-Level Approval Endpoints ──────────────────────────────
+
+// ── Section verification: one "Verified" tick at the end of each land-page section ───────────────────────────────
+// The verifier reads the whole section (rows and their documents) and ticks once; every active row of that section's
+// tables is marked Verified (unticking sets them back to Pending). Only a verifier (Setup → Approval Control), and
+// never on rows they entered themselves (super admin excepted).
+const VERIFY_SECTIONS = {
+  ownership: { label: "Ownership History", tables: ["LegalOwnershipEvent", "LegalOwnershipRecord", "LegalInheritance", "LegalPartition"] },
+  records: { label: "Land Records (RS / LR)", tables: ["LegalLandRsRecord", "LegalLandLrRecord"] },
+  legal: { label: "Legal Information", tables: ["LegalCase", "LegalLandLegalRecord", "LegalVerificationCheck"] },
+  loans: { label: "Loan & Mortgage", tables: ["LegalMortgage"] },
+  mutation: { label: "Mutation Records", tables: ["LegalMutationRecord"] },
+  payments: { label: "Payment History", tables: ["LegalPayment"] },
+  tax: { label: "Land Tax (Khajna)", tables: ["LegalLandTax"] },
+  survey: { label: "Survey & Valuation", tables: ["LegalValuation"] },
+};
+VERIFY_SECTIONS.transfers = { label: "Acquisition & Purchase", tables: ["LegalOwnershipEvent"] };
+
+router.get("/:id/sections", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land id" });
+  try {
+    const tables = [...new Set(Object.values(VERIFY_SECTIONS).flatMap((x) => x.tables))];
+    const r = await getPool().request().input("Id", sql.Int, id).query(tables.map((t) => `
+      SELECT '${t}' AS T, COUNT(*) AS Total, SUM(CASE WHEN VerificationStatus = N'Verified' THEN 1 ELSE 0 END) AS Verified,
+             MAX(VerifiedAt) AS VerifiedAt,
+             (SELECT TOP 1 u.name FROM dbo.${t} x JOIN dbo.users u ON u.id = x.VerifiedBy WHERE x.LandId = @Id AND x.IsActive = 1 ORDER BY x.VerifiedAt DESC) AS VerifiedByName
+      FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1`).join(" UNION ALL "));
+    const byT = Object.fromEntries(r.recordset.map((x) => [x.T, x]));
+    res.json(Object.fromEntries(Object.entries(VERIFY_SECTIONS).map(([k, sec]) => {
+      const rows = sec.tables.map((t) => byT[t]);
+      const total = rows.reduce((a, x) => a + (x?.Total ?? 0), 0);
+      const verified = rows.reduce((a, x) => a + (x?.Verified ?? 0), 0);
+      const last = rows.filter((x) => x?.VerifiedAt).sort((a, b) => new Date(b.VerifiedAt) - new Date(a.VerifiedAt))[0];
+      return [k, { label: sec.label, total, verified, done: total > 0 && verified === total, verifiedAt: last?.VerifiedAt ?? null, verifiedBy: last?.VerifiedByName ?? null }];
+    })));
+  } catch (err) {
+    console.error("[legal-land] sections error:", err.message);
+    res.status(500).json({ error: "Could not load the section status" });
+  }
+});
+
+router.post("/:id/sections/:section/verify", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  const sec = VERIFY_SECTIONS[req.params.section];
+  const verified = req.body?.verified !== false;
+  const remarks = text(req.body?.remarks, 1000);
+  if (!id || !sec) return res.status(400).json({ error: "Invalid land or section" });
+  try {
+    if (!(await canAct(req, "Verifier", LAND_PAGE))) return res.status(403).json({ error: "Only a verifier (Setup → Approval Control) can verify a section" });
+    const pool = getPool();
+    if (verified && !isSuperAdmin(req)) {
+      const mine = await pool.request().input("Id", sql.Int, id).input("U", sql.Int, req.user?.userId).query(
+        sec.tables.map((t) => `SELECT COUNT(*) AS n FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1 AND CreatedBy = @U`).join(" UNION ALL "));
+      if (mine.recordset.some((x) => x.n > 0)) return res.status(409).json({ error: ownWork(req, req.user?.userId, `some ${sec.label} entries`) });
+    }
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    let n = 0;
+    try {
+      for (const t of sec.tables) {
+        const r = await new sql.Request(tx).input("Id", sql.Int, id).input("U", sql.Int, req.user?.userId || null).query(verified
+          ? `UPDATE dbo.${t} SET VerificationStatus = N'Verified', VerifiedBy = @U, VerifiedAt = SYSUTCDATETIME() WHERE LandId = @Id AND IsActive = 1 AND ISNULL(VerificationStatus, N'') <> N'Verified'`
+          : `UPDATE dbo.${t} SET VerificationStatus = N'Pending', VerifiedBy = NULL, VerifiedAt = NULL WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus = N'Verified'`);
+        n += r.rowsAffected[0];
+      }
+      await tx.commit();
+    } catch (e) {
+      await tx.rollback().catch(() => {});
+      throw e;
+    }
+    await writeAudit(pool, req, {
+      action: verified ? "Section Verified" : "Section Verification Removed",
+      entityType: "Land Property", entityId: id, landId: id,
+      newValue: { section: sec.label, rows: n }, remarks,
+    });
+    res.json({ message: verified ? `${sec.label} verified` : `${sec.label} set back to pending` });
+  } catch (err) {
+    console.error("[legal-land] section verify error:", err.message);
+    res.status(500).json({ error: "Could not verify this section" });
+  }
+});
 
 router.post("/:id/verify", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
   const id = idParam(req.params.id);

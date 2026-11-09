@@ -24,6 +24,7 @@ import { LegalMasterTable, WhatsAppName } from "../LegalMasterPage";
 import { useAuth } from "@/contexts/AuthContext";
 import { OwnershipStep } from "./steps/OwnershipStep";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
+import { SectionVerify, VERIFY_SECTION_TABS } from "@/components/legal/SectionVerify";
 import { DocumentsStep, RecordDocuments, type DocLink } from "./steps/DocumentsStep";
 import { getLandDocuments } from "@/api/legalDocumentsApi";
 import { getLegalRows, type LegalRow } from "@/api/legalMastersApi";
@@ -160,6 +161,7 @@ export default function LandProfilePage() {
     queryClient.invalidateQueries({ queryKey: ["legal-land-overview", landId] });
     queryClient.invalidateQueries({ queryKey: ["legal-land-audit", landId] });
     queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] });
+    queryClient.invalidateQueries({ queryKey: ["legal-land-sections", landId] });
   };
 
   // Documents filed under a legal record / loan: opened from that row, counted per row.
@@ -295,236 +297,6 @@ export default function LandProfilePage() {
         {isLoading && <p className="text-sm text-muted-foreground">Loading land property profile…</p>}
         {land && c && (
           <div className="space-y-5">
-            {/* ── LAND-WISE VERIFICATION & TWO-LEVEL APPROVAL RAIL ── */}
-            <div className="rounded-xl border border-border/80 bg-card p-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
-                <div>
-                  <h4 className="text-xs font-heading font-bold uppercase tracking-wider text-muted-foreground">
-                    Land Verification & Two-Level Approval Rail
-                  </h4>
-                  <p className="mt-0.5 text-xs text-foreground">
-                    Workflow Status:{" "}
-                    <b className="font-semibold text-primary">{land.WorkflowStatus ?? "Draft"}</b>
-                  </p>
-                </div>
-
-                {/* Quick Action Buttons */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {land.VerificationStatus !== "Verified" && (
-                    <button
-                      onClick={() => {
-                        setActionModal({
-                          type: "verify",
-                          title: "Verify Land Data",
-                          hint: "Confirm that initial land entry and documentation have been reviewed and verified.",
-                        });
-                        setRemarks("");
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm"
-                    >
-                      <CheckCircle2 size={13} /> Verify Land Data
-                    </button>
-                  )}
-
-                  {land.VerificationStatus === "Verified" &&
-                    land.L1Status !== "Approved" &&
-                    land.L1Status !== "Pending" && (
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "submit-l1",
-                            title: "Submit for L1 Review",
-                            hint: "Forward this verified property to the Legal Officer for L1 review.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 shadow-sm"
-                      >
-                        <Send size={13} /> Submit for L1 Review
-                      </button>
-                    )}
-
-                  {land.L1Status === "Pending" && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l1",
-                            action: "Return",
-                            title: "Return from L1 Review",
-                            hint: "Return this land to Draft status for necessary corrections.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
-                      >
-                        <RotateCcw size={13} /> Return to Draft
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l1",
-                            action: "Approve",
-                            title: "L1 Approve Land Record",
-                            hint: "Formally approve Level 1 review and forward to Level 2 Executive Approval.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 shadow-sm"
-                      >
-                        <CheckCircle2 size={13} /> L1 Approve & Forward
-                      </button>
-                    </div>
-                  )}
-
-                  {land.L1Status === "Approved" && land.L2Status === "Pending" && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l2",
-                            action: "Return",
-                            title: "Return from L2 Approval",
-                            hint: "Return this land back to L1 Legal Review.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
-                      >
-                        <RotateCcw size={13} /> Return to L1
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l2",
-                            action: "Reject",
-                            title: "Reject Land Record",
-                            hint: "Reject this property acquisition / entry.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20"
-                      >
-                        <XCircle size={13} /> Reject
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l2",
-                            action: "Approve",
-                            title: "L2 Final Approval",
-                            hint: "Grant executive / partner final sign-off. Property status becomes Active / Owned.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm"
-                      >
-                        <ShieldCheck size={13} /> L2 Final Sign-Off
-                      </button>
-                    </div>
-                  )}
-
-                  {land.L2Status === "Approved" && (
-                    <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                      <CheckCircle2 size={14} /> Fully Approved & Active Land Record
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* 4 Steps Stepper */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-3">
-                {/* Step 1: Data Entry */}
-                <div className="rounded-lg border border-border/60 bg-muted/20 p-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 1</span>
-                    <CheckCircle2 size={14} className="text-emerald-600" />
-                  </div>
-                  <p className="mt-1 font-semibold text-xs text-foreground">Data Entry</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">Initial property record created</p>
-                </div>
-
-                {/* Step 2: Verification */}
-                <div className={`rounded-lg border p-2.5 ${
-                  land.VerificationStatus === "Verified"
-                    ? "border-emerald-500/30 bg-emerald-500/10"
-                    : "border-amber-500/30 bg-amber-500/10"
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 2</span>
-                    {land.VerificationStatus === "Verified" ? (
-                      <CheckCircle2 size={14} className="text-emerald-600" />
-                    ) : (
-                      <Clock size={14} className="text-amber-600" />
-                    )}
-                  </div>
-                  <p className="mt-1 font-semibold text-xs text-foreground">Data Verification</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">
-                    {land.VerificationStatus === "Verified" ? "Verified" : "Draft / Needs Verification"}
-                  </p>
-                </div>
-
-                {/* Step 3: L1 Legal Review */}
-                <div className={`rounded-lg border p-2.5 ${
-                  land.L1Status === "Approved"
-                    ? "border-emerald-500/30 bg-emerald-500/10"
-                    : land.L1Status === "Returned"
-                    ? "border-amber-500/30 bg-amber-500/10"
-                    : "border-blue-500/30 bg-blue-500/10"
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 3</span>
-                    {land.L1Status === "Approved" ? (
-                      <CheckCircle2 size={14} className="text-emerald-600" />
-                    ) : land.L1Status === "Returned" ? (
-                      <RotateCcw size={14} className="text-amber-600" />
-                    ) : (
-                      <Clock size={14} className="text-blue-600" />
-                    )}
-                  </div>
-                  <p className="mt-1 font-semibold text-xs text-foreground">L1 Legal Review</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">
-                    {land.L1Status === "Approved"
-                      ? `Approved by ${land.L1ReviewerName || "Legal Officer"}`
-                      : land.L1Status === "Returned"
-                      ? "Returned for edits"
-                      : "Pending Legal Review"}
-                  </p>
-                </div>
-
-                {/* Step 4: L2 Executive Approval */}
-                <div className={`rounded-lg border p-2.5 ${
-                  land.L2Status === "Approved"
-                    ? "border-emerald-500/30 bg-emerald-500/10"
-                    : land.L2Status === "Returned"
-                    ? "border-amber-500/30 bg-amber-500/10"
-                    : land.L2Status === "Rejected"
-                    ? "border-destructive/30 bg-destructive/10"
-                    : "border-purple-500/30 bg-purple-500/10"
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 4</span>
-                    {land.L2Status === "Approved" ? (
-                      <ShieldCheck size={14} className="text-emerald-600" />
-                    ) : land.L2Status === "Rejected" ? (
-                      <XCircle size={14} className="text-destructive" />
-                    ) : (
-                      <Clock size={14} className="text-purple-600" />
-                    )}
-                  </div>
-                  <p className="mt-1 font-semibold text-xs text-foreground">L2 Executive Approval</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">
-                    {land.L2Status === "Approved"
-                      ? `Signed off by ${land.L2ApproverName || "Executive"}`
-                      : land.L2Status === "Rejected"
-                      ? "Rejected"
-                      : land.L2Status === "Returned"
-                      ? "Returned to L1"
-                      : "Pending Executive Sign-off"}
-                  </p>
-                </div>
-              </div>
-            </div>
 
             {/* Modal: Action confirmation dialog */}
             <Dialog open={!!child} onOpenChange={(o) => { if (!o) setChild(null); }}>
@@ -941,6 +713,240 @@ export default function LandProfilePage() {
                 <Activity landId={landId} />
               </Section>
             )}
+
+            {/* One "Verified" tick at the end of each data section */}
+            {VERIFY_SECTION_TABS.includes(tab) && <SectionVerify landId={landId} section={tab} onSaved={refresh} />}
+
+            {/* ── LAND-WISE VERIFICATION & TWO-LEVEL APPROVAL — at the end of the page, after every section is filled and verified ── */}
+            <div className="rounded-xl border border-border/80 bg-card p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
+                <div>
+                  <h4 className="text-xs font-heading font-bold uppercase tracking-wider text-muted-foreground">
+                    Land Verification & Two-Level Approval Rail
+                  </h4>
+                  <p className="mt-0.5 text-xs text-foreground">
+                    Workflow Status:{" "}
+                    <b className="font-semibold text-primary">{land.WorkflowStatus ?? "Draft"}</b>
+                  </p>
+                </div>
+
+                {/* Quick Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {land.VerificationStatus !== "Verified" && (
+                    <button
+                      onClick={() => {
+                        setActionModal({
+                          type: "verify",
+                          title: "Verify Land Data",
+                          hint: "Confirm that initial land entry and documentation have been reviewed and verified.",
+                        });
+                        setRemarks("");
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm"
+                    >
+                      <CheckCircle2 size={13} /> Verify Land Data
+                    </button>
+                  )}
+
+                  {land.VerificationStatus === "Verified" &&
+                    land.L1Status !== "Approved" &&
+                    land.L1Status !== "Pending" && (
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "submit-l1",
+                            title: "Submit for L1 Review",
+                            hint: "Forward this verified property to the Legal Officer for L1 review.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 shadow-sm"
+                      >
+                        <Send size={13} /> Submit for L1 Review
+                      </button>
+                    )}
+
+                  {land.L1Status === "Pending" && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l1",
+                            action: "Return",
+                            title: "Return from L1 Review",
+                            hint: "Return this land to Draft status for necessary corrections.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
+                      >
+                        <RotateCcw size={13} /> Return to Draft
+                      </button>
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l1",
+                            action: "Approve",
+                            title: "L1 Approve Land Record",
+                            hint: "Formally approve Level 1 review and forward to Level 2 Executive Approval.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 shadow-sm"
+                      >
+                        <CheckCircle2 size={13} /> L1 Approve & Forward
+                      </button>
+                    </div>
+                  )}
+
+                  {land.L1Status === "Approved" && land.L2Status === "Pending" && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l2",
+                            action: "Return",
+                            title: "Return from L2 Approval",
+                            hint: "Return this land back to L1 Legal Review.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
+                      >
+                        <RotateCcw size={13} /> Return to L1
+                      </button>
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l2",
+                            action: "Reject",
+                            title: "Reject Land Record",
+                            hint: "Reject this property acquisition / entry.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20"
+                      >
+                        <XCircle size={13} /> Reject
+                      </button>
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l2",
+                            action: "Approve",
+                            title: "L2 Final Approval",
+                            hint: "Grant executive / partner final sign-off. Property status becomes Active / Owned.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm"
+                      >
+                        <ShieldCheck size={13} /> L2 Final Sign-Off
+                      </button>
+                    </div>
+                  )}
+
+                  {land.L2Status === "Approved" && (
+                    <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                      <CheckCircle2 size={14} /> Fully Approved & Active Land Record
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 4 Steps Stepper */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-3">
+                {/* Step 1: Data Entry */}
+                <div className="rounded-lg border border-border/60 bg-muted/20 p-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 1</span>
+                    <CheckCircle2 size={14} className="text-emerald-600" />
+                  </div>
+                  <p className="mt-1 font-semibold text-xs text-foreground">Data Entry</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">Initial property record created</p>
+                </div>
+
+                {/* Step 2: Verification */}
+                <div className={`rounded-lg border p-2.5 ${
+                  land.VerificationStatus === "Verified"
+                    ? "border-emerald-500/30 bg-emerald-500/10"
+                    : "border-amber-500/30 bg-amber-500/10"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 2</span>
+                    {land.VerificationStatus === "Verified" ? (
+                      <CheckCircle2 size={14} className="text-emerald-600" />
+                    ) : (
+                      <Clock size={14} className="text-amber-600" />
+                    )}
+                  </div>
+                  <p className="mt-1 font-semibold text-xs text-foreground">Data Verification</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">
+                    {land.VerificationStatus === "Verified" ? "Verified" : "Draft / Needs Verification"}
+                  </p>
+                </div>
+
+                {/* Step 3: L1 Legal Review */}
+                <div className={`rounded-lg border p-2.5 ${
+                  land.L1Status === "Approved"
+                    ? "border-emerald-500/30 bg-emerald-500/10"
+                    : land.L1Status === "Returned"
+                    ? "border-amber-500/30 bg-amber-500/10"
+                    : "border-blue-500/30 bg-blue-500/10"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 3</span>
+                    {land.L1Status === "Approved" ? (
+                      <CheckCircle2 size={14} className="text-emerald-600" />
+                    ) : land.L1Status === "Returned" ? (
+                      <RotateCcw size={14} className="text-amber-600" />
+                    ) : (
+                      <Clock size={14} className="text-blue-600" />
+                    )}
+                  </div>
+                  <p className="mt-1 font-semibold text-xs text-foreground">L1 Legal Review</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">
+                    {land.L1Status === "Approved"
+                      ? `Approved by ${land.L1ReviewerName || "Legal Officer"}`
+                      : land.L1Status === "Returned"
+                      ? "Returned for edits"
+                      : "Pending Legal Review"}
+                  </p>
+                </div>
+
+                {/* Step 4: L2 Executive Approval */}
+                <div className={`rounded-lg border p-2.5 ${
+                  land.L2Status === "Approved"
+                    ? "border-emerald-500/30 bg-emerald-500/10"
+                    : land.L2Status === "Returned"
+                    ? "border-amber-500/30 bg-amber-500/10"
+                    : land.L2Status === "Rejected"
+                    ? "border-destructive/30 bg-destructive/10"
+                    : "border-purple-500/30 bg-purple-500/10"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 4</span>
+                    {land.L2Status === "Approved" ? (
+                      <ShieldCheck size={14} className="text-emerald-600" />
+                    ) : land.L2Status === "Rejected" ? (
+                      <XCircle size={14} className="text-destructive" />
+                    ) : (
+                      <Clock size={14} className="text-purple-600" />
+                    )}
+                  </div>
+                  <p className="mt-1 font-semibold text-xs text-foreground">L2 Executive Approval</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">
+                    {land.L2Status === "Approved"
+                      ? `Signed off by ${land.L2ApproverName || "Executive"}`
+                      : land.L2Status === "Rejected"
+                      ? "Rejected"
+                      : land.L2Status === "Returned"
+                      ? "Returned to L1"
+                      : "Pending Executive Sign-off"}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </LegalShell>

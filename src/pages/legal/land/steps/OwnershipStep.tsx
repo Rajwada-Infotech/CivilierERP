@@ -8,7 +8,7 @@ import { recordOwnershipChange, undoOwnershipChange, updateOwnershipChange, type
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { LEGAL_GRADIENT } from "@/components/legal/LegalShell";
-import { StepTabs, stepCard } from "./StepTabs";
+import { stepCard } from "./StepTabs";
 
 // Pipeline step 5 — Ownership History & Verification, read the way a chain of title is read:
 //   1. the first documented owner(s);
@@ -431,29 +431,11 @@ const OwnerNames: React.FC = () => {
   return <datalist id="legal-owner-names">{(data ?? []).map((o) => <option key={String(o.value)} value={o.label.replace(/ \([A-Z]{5}[0-9]{4}[A-Z]\)$/, "")} />)}</datalist>;
 };
 
+// One page: the ownership chain, where every change is added (New) and corrected (edit / undo on its row).
+// Verification is a single "Verified" tick under the section (SectionVerify), not row by row.
 export const OwnershipStep: React.FC<StepProps> = (p) => (
   <>
-  <OwnerNames />
-  <StepTabs {...p} tabs={[
-    { key: "chain", label: "Ownership chain", content: <Chain {...p} /> },
-    {
-      key: "verify", label: "Verification",
-      note: "Reviewer: verify each transfer and ownership record, and give every ownership record its seven checks (Verified or Not Applicable).",
-      tables: [
-        { key: "ownership-event", label: "Transfers to verify", noAdd: true },
-        { key: "ownership-record", label: "Ownership records to verify", noAdd: true },
-        { key: "ownership-check", label: "Seven checks per ownership record" },
-        { key: "inheritance", label: "Inheritances to verify", noAdd: true },
-      ],
-    },
-    {
-      key: "corrections", label: "Corrections",
-      note: "Only to correct a typing mistake. Normal entries are made from Ownership chain, which keeps dates and shares consistent.",
-      tables: [
-        { key: "inheritance-heir", label: "Legal Heirs", noAdd: true },
-        { key: "partition", label: "Partitions", noAdd: true },
-      ],
-    },
-  ]} />
+    <OwnerNames />
+    <Chain {...p} />
   </>
 );
