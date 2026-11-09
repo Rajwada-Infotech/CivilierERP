@@ -41,22 +41,26 @@ function bookingFullyFundedSql(bookingIdExpr) {
         FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = ${bookingIdExpr}), 0) + 0.009`;
 }
 
-// Applied deposits are already represented in milestone AmountPaid, so the
+// What a booking must fund and what has funded it, as APPLY clauses on a dbo.CrmBooking alias (fm.RequiredAmount,
+// fm.MilestonePaid, fo.OnAccountAvailable). Applied deposits are already represented in milestone AmountPaid, so the
 // available side only includes each valid deposit's unapplied remainder.
-async function getBookingFunding(pool, bookingId) {
-  const result = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT
-      CASE WHEN COUNT(m.Id) = 0
-        THEN ISNULL(NULLIF(b.GrandTotal, 0), b.TotalValue)
+function bookingFundingApplySql(alias = "b") {
+  return `OUTER APPLY (SELECT CASE WHEN COUNT(m.Id) = 0
+        THEN ISNULL(NULLIF(${alias}.GrandTotal, 0), ${alias}.TotalValue)
         ELSE ISNULL(SUM(CASE WHEN m.Status = 'Waived' THEN 0 ELSE ISNULL(m.AmountDue, 0) END), 0)
       END AS RequiredAmount,
-      ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) AS MilestonePaid,
-      ISNULL((SELECT SUM(o.AvailableAmount) FROM ${onAccountWithAvailableSql("o")}
-        WHERE o.BookingId = b.Id), 0) AS OnAccountAvailable
+      ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) AS MilestonePaid
+    FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = ${alias}.Id) fm
+    OUTER APPLY (SELECT ISNULL(SUM(o.AvailableAmount), 0) AS OnAccountAvailable
+      FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = ${alias}.Id) fo`;
+}
+
+async function getBookingFunding(pool, bookingId) {
+  const result = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT fm.RequiredAmount, fm.MilestonePaid, fo.OnAccountAvailable
     FROM dbo.CrmBooking b
-    LEFT JOIN dbo.CrmPaymentMilestone m ON m.BookingId = b.Id
+    ${bookingFundingApplySql("b")}
     WHERE b.Id = @bid
-    GROUP BY b.Id, b.GrandTotal, b.TotalValue
   `);
   const row = result.recordset[0] || {};
   const requiredAmount = Math.max(0, Number(row.RequiredAmount) || 0);
@@ -72,4 +76,4 @@ async function getBookingFunding(pool, bookingId) {
   };
 }
 
-module.exports = { getBookingFunding, bookingFullyFundedSql, onAccountAvailableSql, recordedMoneySql, onAccountWithAvailableSql };
+module.exports = { getBookingFunding, bookingFundingApplySql, bookingFullyFundedSql, onAccountAvailableSql, recordedMoneySql, onAccountWithAvailableSql };

@@ -77,7 +77,7 @@ export function CrmCompanyProjectBlockFilter({
         value={value.companyId || "__all__"}
         onValueChange={(v) => onChange({ companyId: v === "__all__" ? "" : v, projectId: "", blockId: "" })}
       >
-        <SelectTrigger className="h-8 text-sm min-w-[130px]">
+        <SelectTrigger className="h-8 text-sm min-w-[150px]">
           <SelectValue placeholder="All Companies" />
         </SelectTrigger>
         <SelectContent>
@@ -90,7 +90,7 @@ export function CrmCompanyProjectBlockFilter({
         value={value.projectId || "__all__"}
         onValueChange={(v) => onChange({ ...value, projectId: v === "__all__" ? "" : v, blockId: "" })}
       >
-        <SelectTrigger className="h-8 text-sm min-w-[130px]">
+        <SelectTrigger className="h-8 text-sm min-w-[150px]">
           <SelectValue placeholder="All Projects" />
         </SelectTrigger>
         <SelectContent>
@@ -104,7 +104,7 @@ export function CrmCompanyProjectBlockFilter({
         onValueChange={(v) => onChange({ ...value, blockId: v === "__all__" ? "" : v })}
         disabled={!value.projectId}
       >
-        <SelectTrigger className="h-8 text-sm min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed">
+        <SelectTrigger className="h-8 text-sm min-w-[175px] disabled:opacity-50 disabled:cursor-not-allowed">
           <SelectValue placeholder={value.projectId ? "All Blocks" : "Select a Project first"} />
         </SelectTrigger>
         <SelectContent>

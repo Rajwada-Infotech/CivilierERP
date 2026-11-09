@@ -1,3 +1,4 @@
+import { CERTIFICATE_TERMS, CERT_STATUS_LABEL } from "@/constants/crmStatuses";
 import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -254,7 +255,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
       stages: [
         {
           key: "ocCc",
-          label: "OC / CC",
+          label: CERTIFICATE_TERMS.ONE,
           sublabel: "Project's Occupancy or Completion Certificate from the authority — a project-level record, not gated on any single booking's progress (the backend has no per-booking gate on this)",
           no: null,
           status: null,
@@ -271,8 +272,8 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
           status: t.PrePossessionStatus || null,
           isDone: done("prePossession"),
           isLocked: locked("prePossession"),
-          unlockedHint: "Unlocks once AFS is registered and OC/CC is received",
-          action: { kind: "navigate", path: "/crm/pre-possession" },
+          unlockedHint: `Unlocks once the agreement is registered and the ${CERTIFICATE_TERMS.ONE} is issued`,
+          action: { kind: "navigate", path: "/crm/possession" },
         },
         {
           key: "possessionNotice",
@@ -283,7 +284,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
           isDone: done("possessionNotice"),
           isLocked: locked("possessionNotice"),
           unlockedHint: "Unlocks once Pre-Possession Inspection is Ready",
-          action: { kind: "navigate", path: "/crm/possession-notice" },
+          action: { kind: "navigate", path: "/crm/possession" },
         },
         {
           key: "handover",
@@ -303,7 +304,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
               : ["Pending", "Approved"].includes(nocStatus)
                 ? `Requires the ${nocType} NOC to be Issued first`
                 : "Requires all payment milestones to be paid or waived first",
-          action: { kind: "navigate", path: "/crm/handover" },
+          action: { kind: "navigate", path: "/crm/possession" },
         },
       ],
     },
@@ -545,7 +546,7 @@ const JourneyRecord: React.FC<{ t: any; model: WorkflowModel; canEdit: boolean; 
           { label: "Phases done", value: `${model.progressChecks.filter((p) => p.done).length} of ${model.progressChecks.length}` },
           { label: "Can be worked now", value: nowOpen.length ? nowOpen.map((x) => x.n.label).join(", ") : "—" },
           { label: "Financing", value: t.NocResolvedType === "Bank" ? "Home loan (bank NOC)" : "Self-funded (developer NOC)" },
-          { label: "OC / CC", value: t.OcCcReceived === 1 ? "Received" : "Not yet" },
+          { label: CERTIFICATE_TERMS.ONE, value: t.OcCcReceived === 1 ? CERT_STATUS_LABEL.Received : "Not yet issued" },
           { label: "Dues", value: t.HasOutstandingDues === 1 ? <span className="text-destructive font-semibold">Outstanding</span> : "Clear" },
         ]} />
 

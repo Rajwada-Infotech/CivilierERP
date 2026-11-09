@@ -359,4 +359,4 @@ async function getMoneyReceiptPdfBuffer(pool, receiptId) {
   return Buffer.from(base64, "base64");
 }
 
-module.exports = { generateMoneyReceiptPdf, getMoneyReceiptPdfBuffer, renderMoneyReceiptPdfBuffer, fetchMoneyReceiptData, getMoneyReceiptByReceivedPaymentId, deriveStatus };
+module.exports = { money, fmtDate, decodeLogo, drawWatermark, generateMoneyReceiptPdf, getMoneyReceiptPdfBuffer, renderMoneyReceiptPdfBuffer, fetchMoneyReceiptData, getMoneyReceiptByReceivedPaymentId, deriveStatus };

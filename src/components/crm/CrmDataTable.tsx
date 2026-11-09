@@ -1,3 +1,5 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -447,6 +449,65 @@ export function GridRelated({ icon: Icon, title, count, action, children }: {
       </header>
       {children}
     </section>
+  );
+}
+
+/** A protected file as a local address, for preview or download. */
+export function useFileUrl(url: string | null) {
+  const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!url) return;
+    let local: string | null = null;
+    let cancelled = false;
+    setFileUrl(null); setFailed(false);
+    fetchWithAuth(url).then((r) => (r.ok ? r.blob() : Promise.reject()))
+      .then((blob) => { if (!cancelled) { local = URL.createObjectURL(blob); setFileUrl(local); } })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; if (local) URL.revokeObjectURL(local); };
+  }, [url]);
+  return { fileUrl, failed };
+}
+
+/** A form or record dialog: icon, title and one line of purpose; the body; the actions in a footer bar. Wide by default. */
+export function GridDialog({ open = true, onClose, icon: Icon, title, description, width = "max-w-3xl", footer, children }: {
+  open?: boolean; onClose: () => void; icon: React.ElementType; title: React.ReactNode; description?: React.ReactNode; width?: string; footer?: React.ReactNode; children: React.ReactNode;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className={cn(width, "p-0 sm:p-0 gap-0 sm:rounded-xl bg-card")}>
+        <DialogHeader className="flex-row items-start gap-3 space-y-0 px-6 py-4 pr-12 border-b border-border text-left">
+          <span className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0"><Icon size={17} /></span>
+          <span className="min-w-0">
+            <DialogTitle className="text-base font-semibold leading-snug">{title}</DialogTitle>
+            {description && <DialogDescription className="mt-0.5 text-[0.8125rem]">{description}</DialogDescription>}
+          </span>
+        </DialogHeader>
+        <div className="px-6 py-5 space-y-5">{children}</div>
+        {footer && <div className="px-6 py-3.5 border-t border-border bg-muted/40 flex flex-wrap justify-end gap-2">{footer}</div>}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** A titled group of fields in a dialog, two to a row. */
+export function GridFormSection({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <section>
+      {title && <h3 className="pb-2 mb-3 text-[0.8125rem] font-semibold border-b border-border">{title}</h3>}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">{children}</div>
+    </section>
+  );
+}
+
+/** One labelled field; `wide` takes the whole row. */
+export function GridFormField({ label, required, hint, wide, children }: { label: string; required?: boolean; hint?: string; wide?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={cn("min-w-0 space-y-1.5", wide && "sm:col-span-2")}>
+      <span className="block text-xs font-medium text-foreground">{label}{required && <span className="text-destructive"> *</span>}</span>
+      {children}
+      {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
+    </div>
   );
 }
 

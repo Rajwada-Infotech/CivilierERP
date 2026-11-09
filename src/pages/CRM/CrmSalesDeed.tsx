@@ -1241,7 +1241,7 @@ const CrmSalesDeed: React.FC = () => {
                       ["Booking", `/crm/bookings?view=${detail.BookingId}`, detail.BookingNo],
                       ["Agreement", `/crm/agreements?bookingId=${detail.BookingId}`, "The registered agreement"],
                       ["Payments", `/crm/payments?bookingId=${detail.BookingId}`, "Milestones and receipts"],
-                      ["Handover", `/crm/handover?bookingId=${detail.BookingId}`, "Keys and possession"],
+                      ["Handover", `/crm/possession?bookingId=${detail.BookingId}`, "Keys and possession"],
                       ["Mutation", `/crm/mutation?bookingId=${detail.BookingId}`, "After registration"],
                       ["Legal milestones", `/crm/legal-milestones?bookingId=${detail.BookingId}`, "The booking's legal path"],
                     ].map(([label, to, note]) => (
@@ -1297,7 +1297,7 @@ const CrmSalesDeed: React.FC = () => {
                           {handoverCleared ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
                           Handover (under-construction project) — {context.handoverStatus || "not started"}
                           {!handoverCleared && (
-                            <button onClick={() => navigate(`/crm/handover?bookingId=${form.BookingId}`)} className="flex items-center gap-1 underline underline-offset-2 ml-1">
+                            <button onClick={() => navigate(`/crm/possession?bookingId=${form.BookingId}`)} className="flex items-center gap-1 underline underline-offset-2 ml-1">
                               Go to handover <ExternalLink size={10} />
                             </button>
                           )}

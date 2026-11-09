@@ -12,7 +12,7 @@ import { FileText, Download, RotateCcw, X, Ban, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import {
-  CrmGrid, GridColumnChooser, GridDateFilter, GridSavedViews, GridSearch, GridTabs, GridToneMark,
+  CrmGrid, useFileUrl, GridColumnChooser, GridDateFilter, GridSavedViews, GridSearch, GridTabs, GridToneMark,
   exportGrid, resolveGridDateRange, useGridPrefs, GRID_ANY_DATE, GRID_BTN, GRID_CARD, GRID_PAGE_SIZES, GRID_SHEET_KEYS, type GridCol, type GridDateRange,
 } from "@/components/crm/CrmDataTable";
 import { useCrmListState, useSticky, listParams, type CrmSort } from "@/hooks/useCrmListState";
@@ -62,21 +62,7 @@ async function fetchList(params: URLSearchParams): Promise<{ rows: ReceiptRow[];
 }
 
 function ReceiptPdfDialog({ receipt, onClose }: { receipt: ReceiptRow; onClose: () => void }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    let objectUrl: string | null = null;
-    let cancelled = false;
-    fetchWithAuth(`${API}/${receipt.Id}/pdf`)
-      .then((r) => (r.ok ? r.blob() : Promise.reject()))
-      .then((blob) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setBlobUrl(objectUrl);
-      })
-      .catch(() => { if (!cancelled) setFailed(true); });
-    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [receipt.Id]);
+  const { fileUrl: blobUrl, failed } = useFileUrl(`${API}/${receipt.Id}/pdf`);
   const st = receiptState(receipt);
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>

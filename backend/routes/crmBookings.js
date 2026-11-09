@@ -2907,7 +2907,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         date: ho ? d(ho.ActualHandoverDate || ho.CreatedAt)
              : pn ? d(pn.OfferedDate || pn.CreatedAt)
              : pp ? d(pp.CreatedAt) : null,
-        link: "/crm/handover",
+        link: "/crm/possession",
         // Say which possession step the handover is waiting on.
         blockedBy: !agRegistered ? "Agreement must be Registered first"
           : possessionDone ? null

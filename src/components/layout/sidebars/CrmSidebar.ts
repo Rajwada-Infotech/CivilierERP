@@ -1,13 +1,13 @@
+import { CERTIFICATE_TERMS, POSSESSION_PAGE } from "@/constants/crmStatuses";
 import { ClipboardList, FileText, IndianRupee, Wrench, LayoutDashboard, Grid3x3, Users, Key, ArrowRightLeft } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Sidebar groups follow the work, not the document type. One group holds the
-// whole legal and possession path in its real order (Transfer of Property Act
-// 1882 s.54 and Sub-Registrar practice):
+// whole legal and possession path in its real order, the same order as the
+// Legal Milestones tracker:
 //
-//   Agreement (AFS registry) -> Legal Milestones -> Sale Deed (QP -> Registry)
-//   -> Mutation -> NOC (bank lien / org no-dues) -> OC/CC -> Pre-Possession
-//   -> Possession Notice -> Handover
+//   Agreement -> NOC (bank lien / org no-dues) -> Occupancy & Completion
+//   -> Possession & Handover -> Sale Deed -> Mutation
 //
 // Every page keeps its own address; only where it sits in the menu changed.
 export const crmNavItems: NavItem[] = [
@@ -52,15 +52,13 @@ export const crmNavItems: NavItem[] = [
     label: "Legal & Possession",
     icon: FileText,
     children: [
-      { label: "Agreement",            path: "/crm/agreements",         pageKey: "crm-agreements"         },
       { label: "Legal Milestones",     path: "/crm/legal-milestones",   pageKey: "crm-legal-milestones"   },
+      { label: "Agreement",            path: "/crm/agreements",         pageKey: "crm-agreements"         },
+      { label: "NOC (Org & Bank)",     path: "/crm/noc",                pageKey: "crm-noc"                },
+      { label: CERTIFICATE_TERMS.MENU, path: "/crm/oc-cc",              pageKey: "crm-oc-cc"              },
+      { label: POSSESSION_PAGE,        path: "/crm/possession",         pageKey: "crm-possession"         },
       { label: "Sale Deed",            path: "/crm/sales-deed",         pageKey: "crm-sales-deed"         },
       { label: "Mutation",             path: "/crm/mutation",           pageKey: "crm-mutation"           },
-      { label: "NOC (Org & Bank)",     path: "/crm/noc",                pageKey: "crm-noc"                },
-      { label: "OC / CC",              path: "/crm/oc-cc",              pageKey: "crm-oc-cc"              },
-      { label: "Pre-Possession Check", path: "/crm/pre-possession",     pageKey: "crm-pre-possession"     },
-      { label: "Possession Notice",    path: "/crm/possession-notice",  pageKey: "crm-possession-notice"  },
-      { label: "Handover",             path: "/crm/handover",           pageKey: "crm-handover"           },
     ],
   },
 

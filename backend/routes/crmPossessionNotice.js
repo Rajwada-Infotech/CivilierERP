@@ -10,9 +10,10 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
-const { requireActiveBooking, resolveOcCcGate, refreshPrePossessionStatus } = require("../services/crmWorkflowGuards");
+const { NOTICE_RESPONSE_OVERDUE_SQL, OC_CC_NOT_ISSUED, requireActiveBooking, resolveOcCcGate, refreshPrePossessionStatus } = require("../services/crmWorkflowGuards");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
+const { getPossessionLetterBuffer } = require("../services/possessionLetterPdf");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -84,7 +85,7 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
 // always show what each status would contain. Without `page` the legacy
 // full-array response is returned so existing callers keep working.
 const PN_STATUSES = [CrmStatus.DRAFT, "Sent", "Acknowledged", "Disputed"];
-const PN_OVERDUE_SQL = "n.Status = 'Sent' AND n.ResponseDeadline < CAST(SYSDATETIME() AS DATE)";
+const PN_OVERDUE_SQL = NOTICE_RESPONSE_OVERDUE_SQL;
 const PN_SORT = {
   NoticeNo: "n.NoticeNo",
   ApplicantName: "a.ApplicantName",
@@ -167,6 +168,22 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
 });
 
 // GET /:id — one notice, for its own page. Registered after the named routes above.
+// GET /:id/pdf - the letter to the customer, always drawn from the current record.
+router.get("/:id/pdf", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const letter = await getPossessionLetterBuffer(getPool(), id);
+    if (!letter) return res.status(404).json({ error: "Possession notice not found" });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${letter.noticeNo}.pdf"`);
+    res.send(letter.buffer);
+  } catch (e) {
+    console.error("[crm-possession-notice] GET /:id/pdf error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/:id", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
   try {
     const id = parseId(req.params.id);
@@ -221,7 +238,7 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     if (bk.recordset[0]?.ProjectId) {
       const gate = await resolveOcCcGate(pool, bookingId);
       if (!gate.received) {
-        return res.status(400).json({ error: "Possession notice requires the project's (or this unit's block's) OC / CC to be received first" });
+        return res.status(400).json({ error: `A possession notice cannot be issued: ${OC_CC_NOT_ISSUED}.` });
       }
     }
 

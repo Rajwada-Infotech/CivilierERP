@@ -1,4 +1,4 @@
-import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, bookingSendBackChoices } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, bookingSendBackChoices, CERTIFICATE_TERMS } from "@/constants/crmStatuses";
 import { round2, sumMoney } from "@/lib/crmPriceQuote";
 import { SendBackChoices } from "@/components/ApprovalActions";
 import { useCanApprove } from "@/hooks/useCanApprove";
@@ -1520,7 +1520,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   {!booking.HsnCode && Number(booking.TotalValue) > 0 && (
                     <div className="flex items-center gap-1.5 text-foreground bg-card border border-foreground/30 px-2.5 py-1.5 mb-1">
                       <Check size={12} className="shrink-0" />
-                      GST Exempt — Schedule III (entire consideration received after OC/CC)
+                      GST exempt under Schedule III: entire consideration received after the {CERTIFICATE_TERMS.ONE}
                     </div>
                   )}
 

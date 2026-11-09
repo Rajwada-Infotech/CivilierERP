@@ -1363,6 +1363,9 @@ async function resolveNocType(pool, bookingId) {
  *
  * Returns { received, source: 'block'|'project'|null, receivedDate, certType, certRow }.
  */
+// A sent possession notice past its response date (a CrmPossessionNotice aliased n).
+const NOTICE_RESPONSE_OVERDUE_SQL = "n.Status = 'Sent' AND n.ResponseDeadline < CAST(SYSDATETIME() AS DATE)";
+const OC_CC_NOT_ISSUED = "the Occupancy or Completion Certificate for this unit's project or block has not been issued yet";
 async function resolveOcCcGate(pool, bookingId, certType = null) {
   // One rule, kept in the database (migration 577, vw_CrmBookingOcCc): the
   // booking's own block(s) - the unit's block and any plot's block - must be
@@ -1413,7 +1416,7 @@ async function refreshPrePossessionStatus(executor, bookingId = null) {
   return r.rowsAffected?.[0] || 0;
 }
 
-module.exports = { prePossessionStatusSql, refreshPrePossessionStatus, requireNotMidApproval, releaseBookingInventoryLines,
+module.exports = { NOTICE_RESPONSE_OVERDUE_SQL, OC_CC_NOT_ISSUED, prePossessionStatusSql, refreshPrePossessionStatus, requireNotMidApproval, releaseBookingInventoryLines,
   assertWelcomeChecklistUnlocked,
   resolveNocType,
   resolveOcCcGate,

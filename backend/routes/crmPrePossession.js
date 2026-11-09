@@ -7,11 +7,11 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { requireActiveBooking, resolveOcCcGate, prePossessionStatusSql } = require("../services/crmWorkflowGuards");
+const { NOTICE_RESPONSE_OVERDUE_SQL, OC_CC_NOT_ISSUED, validateAgreementPreparationPrerequisites, requireActiveBooking, resolveOcCcGate, prePossessionStatusSql } = require("../services/crmWorkflowGuards");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
-const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
+const { bookingFullyFundedSql, bookingFundingApplySql } = require("../services/crmPaymentFunding");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -126,6 +126,19 @@ router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res)
   }
 });
 
+// Where a booking stands against the gates. OC/CC for a booking is one rule everywhere (migration 577).
+const GATEWAY_COLUMNS = `
+  ag_disp.Status AS AgreementStatus, aqp_disp.Status AS AfsQpStatus, areg_disp.Status AS AfsRegStatus,
+  CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status IN ('Executed','Registered')) THEN 1 ELSE 0 END AS Gate0_AgreementExecuted,
+  CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = 'Registered') THEN 1 ELSE 0 END AS Gate1_AfsRegistered,
+  CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmAfsQueryPayment aqp WHERE aqp.BookingId = b.Id AND aqp.Status = 'Confirmed') THEN 1 ELSE 0 END AS Gate1a_AfsQueryPayment,
+  CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmAfsRegistry areg WHERE areg.BookingId = b.Id AND areg.Status = 'Completed') THEN 1 ELSE 0 END AS Gate1b_AfsRegistryCompleted,
+  CASE WHEN b.ProjectId IS NULL OR EXISTS (SELECT 1 FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id AND v.Received = 1) THEN 1 ELSE 0 END AS Gate2_OcCcReceived`;
+const GATEWAY_APPLIES = `
+  OUTER APPLY (SELECT TOP 1 Status FROM dbo.CrmAgreement       WHERE BookingId = b.Id ORDER BY CreatedAt DESC) ag_disp
+  OUTER APPLY (SELECT TOP 1 Status FROM dbo.CrmAfsQueryPayment WHERE BookingId = b.Id ORDER BY CreatedAt DESC) aqp_disp
+  OUTER APPLY (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry     WHERE BookingId = b.Id ORDER BY CreatedAt DESC) areg_disp`;
+
 // GET /gateway-status — all active bookings without a pre-possession record,
 // each annotated with per-sub-gate pass/fail so the UI can show the full
 // Gate-1 chain (AFS Query Payment → AFS Registry → Agreement Registered)
@@ -147,38 +160,12 @@ router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), as
       "  b.Id AS BookingId, b.BookingNo, b.ProjectId,",
       "  COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,",
       "  a.ApplicantName,",
-      "  ag_disp.Status                 AS AgreementStatus,",
-      "  aqp_disp.Status                AS AfsQpStatus,",
-      "  areg_disp.Status               AS AfsRegStatus,",
-      "  CASE WHEN EXISTS (",
-      "    SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status IN ('Executed','Registered')",
-      "  ) THEN 1 ELSE 0 END AS Gate0_AgreementExecuted,",
-      "  CASE WHEN EXISTS (",
-      "    SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = 'Registered'",
-      "  ) THEN 1 ELSE 0 END AS Gate1_AfsRegistered,",
-      "  CASE WHEN EXISTS (",
-      "    SELECT 1 FROM dbo.CrmAfsQueryPayment aqp WHERE aqp.BookingId = b.Id AND aqp.Status = 'Confirmed'",
-      "  ) THEN 1 ELSE 0 END AS Gate1a_AfsQueryPayment,",
-      "  CASE WHEN EXISTS (",
-      "    SELECT 1 FROM dbo.CrmAfsRegistry areg WHERE areg.BookingId = b.Id AND areg.Status = 'Completed'",
-      "  ) THEN 1 ELSE 0 END AS Gate1b_AfsRegistryCompleted,",
-      // Block-level OC/CC (see migration 447) is authoritative when this
-      // booking's own block has a Received cert of its own; otherwise the
-      // project's blanket (BlockId IS NULL) cert still clears the gate —
-      // same fallback resolveOcCcGate (crmWorkflowGuards.js) implements in
-      // JS for single-booking lookups. Kept inline here since this is one
-      // big multi-row query, not a per-booking JS call.
-      // OC/CC for this booking - one rule everywhere (migration 577).
-      "  CASE WHEN b.ProjectId IS NULL OR EXISTS (",
-      "    SELECT 1 FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id AND v.Received = 1",
-      "  ) THEN 1 ELSE 0 END AS Gate2_OcCcReceived",
+      GATEWAY_COLUMNS,
       "FROM dbo.CrmBooking b",
       "JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId",
       "LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id",
       "LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
-      "OUTER APPLY (SELECT TOP 1 Status FROM dbo.CrmAgreement       WHERE BookingId = b.Id ORDER BY CreatedAt DESC) ag_disp",
-      "OUTER APPLY (SELECT TOP 1 Status FROM dbo.CrmAfsQueryPayment WHERE BookingId = b.Id ORDER BY CreatedAt DESC) aqp_disp",
-      "OUTER APPLY (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry     WHERE BookingId = b.Id ORDER BY CreatedAt DESC) areg_disp",
+      GATEWAY_APPLIES,
       "WHERE " + conds.join(" AND "),
     ].join(" ");
 
@@ -222,6 +209,107 @@ router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), as
     res.json({ rows: rowsRes.recordset, total: eligibleOnly ? counts.Eligible : counts.All, counts });
   } catch (e) {
     console.error("[crm-pre-possession] GET /gateway-status error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /board - the Possession page: one row per booking with its checklist, notice, handover, gates and money. Only
+// reads what each step's own route enforces; every change still goes through that step's route and right.
+const POSSESSION_STAGES = ["NotReady", "Checklist", "Notice", "Handover", "Completed", "Closed"];
+const POSSESSION_IN_PROGRESS = "('Checklist','Notice','Handover')";
+const BOARD_SORT = {
+  Priority: "CASE Stage WHEN 'Handover' THEN 0 WHEN 'Notice' THEN 1 WHEN 'Checklist' THEN 2 WHEN 'NotReady' THEN 3 WHEN 'Completed' THEN 4 ELSE 5 END",
+  ApplicantName: "ApplicantName", ProjectName: "ProjectName", BookingNo: "BookingNo", Balance: "Balance",
+};
+function boardCte(conds) {
+  return `WITH y AS (
+    SELECT b.Id AS BookingId, b.BookingNo, b.ProjectId, b.BlockName, b.Status AS BookingStatus, b.WorkflowStage,
+      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmWelcomeCall wc WHERE wc.BookingId = b.Id AND wc.Outcome = 'Welcomed') THEN 1 ELSE 0 END AS WelcomeDone,
+      (SELECT TOP 1 x.Id FROM dbo.CrmAgreement x WHERE x.BookingId = b.Id AND x.Status <> 'Cancelled' ORDER BY x.Id DESC) AS AgreementId,
+      CASE WHEN b.IsActive = 1 AND b.Status NOT IN ${DEAD_BOOKING_SQL} THEN 0 ELSE 1 END AS BookingClosed,
+      COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, a.Mobile,
+      ${GATEWAY_COLUMNS},
+      pp.Id AS CheckId, pp.Status AS CheckStatus, pp.DocumentationCheck, pp.QualityInspectionCheck, pp.UtilityReadinessCheck,
+      n.Id AS NoticeId, n.NoticeNo, n.Status AS NoticeStatus,
+      CASE WHEN ${NOTICE_RESPONSE_OVERDUE_SQL} THEN 1 ELSE 0 END AS NoticeOverdue,
+      h.Id AS HandoverId, h.Status AS HandoverStatus,
+      CASE WHEN h.Status IN ('Completed','Cancelled') THEN 0 ELSE ISNULL((SELECT COUNT(*) FROM dbo.CrmSnagItem s WHERE s.HandoverId = h.Id AND s.Status IN ('Open','InProgress')), 0) END AS OpenSnags,
+      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmNoc nc WHERE nc.BookingId = b.Id AND nc.Status IN ('Pending','Approved')) THEN 1 ELSE 0 END AS NocPending,
+      CASE WHEN ${bookingFullyFundedSql("b.Id")} THEN 1 ELSE 0 END AS FullyFunded,
+      ISNULL(fm.RequiredAmount, 0) AS RequiredAmount, ISNULL(fm.MilestonePaid, 0) + ISNULL(fo.OnAccountAvailable, 0) AS Collected
+    FROM dbo.CrmBooking b
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+    LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+    ${GATEWAY_APPLIES}
+    OUTER APPLY (SELECT TOP 1 * FROM dbo.CrmPrePossession x WHERE x.BookingId = b.Id ORDER BY x.CreatedAt DESC, x.Id DESC) pp
+    OUTER APPLY (SELECT TOP 1 * FROM dbo.CrmPossessionNotice x WHERE x.BookingId = b.Id ORDER BY x.CreatedAt DESC, x.Id DESC) n
+    OUTER APPLY (SELECT TOP 1 * FROM dbo.CrmHandover x WHERE x.BookingId = b.Id ORDER BY CASE WHEN x.Status <> 'Cancelled' THEN 0 ELSE 1 END, x.CreatedAt DESC, x.Id DESC) h
+    ${bookingFundingApplySql("b")}
+    WHERE ((b.IsActive = 1 AND b.Status NOT IN ${DEAD_BOOKING_SQL}) OR pp.Id IS NOT NULL OR n.Id IS NOT NULL OR h.Id IS NOT NULL)
+      ${conds.map((x) => `AND ${x}`).join(" ")}
+  ), z AS (
+    SELECT y.*,
+      CASE WHEN RequiredAmount - Collected > 0 THEN RequiredAmount - Collected ELSE 0 END AS Balance,
+      CASE WHEN BookingClosed = 1 THEN 'Closed'
+           WHEN HandoverStatus = 'Completed' THEN 'Completed'
+           WHEN NoticeStatus = 'Acknowledged' OR (HandoverId IS NOT NULL AND HandoverStatus <> 'Cancelled') THEN 'Handover'
+           WHEN CheckStatus = 'Ready' OR NoticeId IS NOT NULL THEN 'Notice'
+           WHEN CheckId IS NOT NULL OR (Gate1_AfsRegistered = 1 AND Gate2_OcCcReceived = 1) THEN 'Checklist'
+           ELSE 'NotReady' END AS Stage
+    FROM y
+  )`;
+}
+router.get("/board", requireAnyPageRight(["crm-pre-possession", "crm-possession-notice", "crm-handover"], "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.query.bookingId, 10);
+    const bind = (request) => {
+      const conds = bindListFilters(request, req.query);
+      if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+      if (Number.isInteger(bookingId)) { request.input("bookingId", sql.Int, bookingId); conds.push("b.Id = @bookingId"); }
+      return conds;
+    };
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortExpr = Object.hasOwn(BOARD_SORT, req.query.sortKey) ? BOARD_SORT[req.query.sortKey] : BOARD_SORT.Priority;
+    const dir = req.query.sortDir === "desc" ? "DESC" : "ASC";
+    const stage = POSSESSION_STAGES.includes(req.query.status) ? req.query.status : null;
+
+    const countReq = pool.request();
+    const countRes = await countReq.query(`${boardCte(bind(countReq))}
+      SELECT Stage, COUNT(*) AS C,
+        SUM(CASE WHEN Stage NOT IN ('Completed','Closed') THEN Balance ELSE 0 END) AS Balance,
+        SUM(CASE WHEN Stage NOT IN ('Completed','Closed') THEN Collected ELSE 0 END) AS Collected,
+        SUM(CASE WHEN Stage IN ${POSSESSION_IN_PROGRESS} THEN NoticeOverdue ELSE 0 END) AS Overdue,
+        SUM(CASE WHEN Stage IN ${POSSESSION_IN_PROGRESS} AND NoticeStatus = 'Disputed' THEN 1 ELSE 0 END) AS Disputed,
+        SUM(CASE WHEN Stage IN ${POSSESSION_IN_PROGRESS} THEN OpenSnags ELSE 0 END) AS OpenSnags
+      FROM z GROUP BY Stage`);
+    const counts = { All: 0 };
+    const summary = { Balance: 0, Collected: 0, Overdue: 0, Disputed: 0, OpenSnags: 0 };
+    for (const r of countRes.recordset) {
+      counts[r.Stage] = r.C; counts.All += r.C;
+      for (const k of Object.keys(summary)) summary[k] += Number(r[k]) || 0;
+    }
+
+    const pageReq = pool.request();
+    const conds = bind(pageReq);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    if (stage) pageReq.input("stage", sql.NVarChar(20), stage);
+    const rows = await pageReq.query(`${boardCte(conds)}
+      SELECT * FROM z ${stage ? "WHERE Stage = @stage" : ""}
+      ORDER BY ${sortExpr} ${dir}, BookingNo DESC
+      OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`);
+    // What stands between an approved booking and its agreement, from the one rule POST /crm/agreements enforces.
+    for (const r of rows.recordset) {
+      if (r.BookingStatus === "Approved" && !r.AgreementId && !r.BookingClosed) {
+        r.AgreementBlocks = (await validateAgreementPreparationPrerequisites(pool, r.BookingId)).errors;
+      }
+    }
+    res.json({ rows: rows.recordset, total: stage ? (counts[stage] || 0) : counts.All, counts, summary });
+  } catch (e) {
+    console.error("[crm-pre-possession] GET /board error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -307,7 +395,7 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
       // the project's blanket cert — see resolveOcCcGate.
       const gate = await resolveOcCcGate(pool, bookingId);
       if (!gate.received)
-        return res.status(400).json({ error: "Pre-possession inspection requires the project's (or this unit's block's) OC / CC to be received first" });
+        return res.status(400).json({ error: `The pre-possession check cannot start: ${OC_CC_NOT_ISSUED}.` });
     }
 
     const result = await pool.request()

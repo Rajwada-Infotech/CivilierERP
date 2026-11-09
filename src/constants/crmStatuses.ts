@@ -33,6 +33,21 @@ export const CrmStatus = {
 
 export type CrmStatusType = typeof CrmStatus[keyof typeof CrmStatus];
 
+// The statutory names, as RERA 2016 s.11(4)(b) and the competent authorities use them. Stored codes stay OC / CC / OC+CC
+// and Applied / Received; every screen shows these words.
+export const CERTIFICATE_TERMS = {
+  PAGE: 'Occupancy & Completion Certificates',
+  MENU: 'Occupancy & Completion',
+  ONE: 'Occupancy or Completion Certificate',
+} as const;
+export const POSSESSION_PAGE = 'Possession & Handover';
+export const CERT_TYPE_LABEL: Record<string, string> = {
+  OC: 'Occupancy Certificate',
+  CC: 'Completion Certificate',
+  'OC+CC': 'Occupancy and Completion Certificate',
+};
+export const CERT_STATUS_LABEL: Record<string, string> = { Applied: 'Application filed', Received: 'Issued' };
+
 // Booking approval stages (CrmBooking.WorkflowStage) -> what staff read. "Data Review" is
 // the name the booking screen, its checklist and its Verify & Send button use.
 // The booking's first stage: until it leaves Data Review (verified and sent

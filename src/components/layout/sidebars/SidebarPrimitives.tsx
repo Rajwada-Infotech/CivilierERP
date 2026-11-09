@@ -309,7 +309,7 @@ export const NavGroup = ({
                 }`}
               >
                 <SubMark active={childActive} accentColor={accentColor} />
-                <NavLabel label={child.label} active={childActive} accentColor={accentColor} className="flex-1 text-left" />
+                <NavLabel label={child.label} active={childActive} accentColor={accentColor} className="flex-1 text-left" wrap />
                 {child.badge && (
                   <span className="bg-foreground text-card font-heading text-[0.5625rem] font-semibold tabular-nums min-w-[16px] h-[16px] px-0.5 flex items-center justify-center">
                     {child.badge}
@@ -353,7 +353,7 @@ export const NavGroup = ({
                         }`}
                       >
                         <SubMark active={sChildActive} accentColor={accentColor} />
-                        <NavLabel label={child.label} active={sChildActive} accentColor={accentColor} className="flex-1 text-left" />
+                        <NavLabel label={child.label} active={sChildActive} accentColor={accentColor} className="flex-1 text-left" wrap />
                       </button>
                     );
                   })}
