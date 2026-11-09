@@ -1,7 +1,6 @@
 // Parts the Balance Sheet, Profit & Loss and Balance Enquiry pages share, on the drawing sheet as the web draws them:
 // a wrapping row of period keys, the statement's letterhead, ruled statement lines (a group line opens its ledger
 // heads), a negative figure in brackets and red, and the PDF share every report offers in place of the web's print.
-import React from "react";
 import { View, Text, Alert } from "react-native";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";

@@ -18,9 +18,8 @@ import {
   fetchFinYears, fetchCompanyOptionsTB, fetchProjectOptionsTB, fetchCostCenterOptions,
   fetchTrialBalance, fetchTrialBalanceEntityTransactions, fetchCostCentreTransactions,
   toDateStr,
-  type TBNode, type Option, type TBTransaction, type TBTransactionsResponse, type CCTransactionsResponse,
-} from "@/api/trialBalanceApi";
-import { getPaymentById, type PaymentRecord } from "@/api/newPaymentApi";
+  type TBNode, type Option, type TBTransaction, type TBTransactionsResponse } from "@/api/trialBalanceApi";
+import { getPaymentById } from "@/api/newPaymentApi";
 import { colors, sheet as S } from "@/theme/colors";
 import { Body, Field, InfoGrid, Input, Key, Label, Notice, Panel, Press, Seg, SheetShell, Skel, StatRow } from "@/components/sheet/Sheet";
 import { SheetPicker } from "@/components/sheet/FormParts";

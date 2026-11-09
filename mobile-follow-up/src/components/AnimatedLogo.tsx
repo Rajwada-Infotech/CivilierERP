@@ -6,7 +6,7 @@
 // "matrix-scrambles" between "app. vX" and "db. vX" every 5s, each
 // character resolving left-to-right through random glyphs before landing.
 import { useEffect, useRef, useState } from "react";
-import { Animated, Image, Text, View } from "react-native";
+import { Animated, Text, View } from "react-native";
 import MaskedView from "@react-native-masked-view/masked-view";
 import { LinearGradient } from "expo-linear-gradient";
 import { fonts } from "@/theme/fonts";

@@ -2,7 +2,7 @@
 // on the sheet: an eyebrow, the title with the count, a search box and the ruled table. A row opens that record's own
 // view (MR, PO, GRN, issue), the way the web opens the record's page preview.
 import { useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Modal, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Search, X } from "lucide-react-native";

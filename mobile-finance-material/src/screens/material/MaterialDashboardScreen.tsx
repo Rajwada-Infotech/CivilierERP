@@ -4,7 +4,7 @@
 // G latest documents, H go to. Figures count up as on the web (Tick); bars grow; the parts rise in one by one.
 // The web's hover becomes a tap. UOM and T&C masters have no mobile screen and say so.
 import { useState } from "react";
-import { View, Text, ScrollView, Pressable, RefreshControl, Alert } from "react-native";
+import { View, Text, ScrollView, RefreshControl, Alert } from "react-native";
 import Svg, { Defs, G, Line, Pattern, Rect, Text as SvgText } from "react-native-svg";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";

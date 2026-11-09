@@ -6,7 +6,7 @@
 // the web's hover becomes a tap.
 import { istHour } from "@/utils/istTime";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, ScrollView, Pressable, RefreshControl, Alert } from "react-native";
+import { View, Text, ScrollView, RefreshControl, Alert } from "react-native";
 import Svg, { Circle, G, Line, Rect, Text as SvgText } from "react-native-svg";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";

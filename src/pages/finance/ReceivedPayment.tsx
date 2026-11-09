@@ -57,7 +57,9 @@ import {
   Eye,
   Printer,
   BookOpen,
+  FilePenLine,
 } from "lucide-react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import {
   getReceivedPayments,
   getReceivedPayment,
@@ -807,6 +809,7 @@ export default function ReceivedPaymentPage() {
   };
 
   const cancelForm = () => {
+    amend.stop();
     setView("list");
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
@@ -853,6 +856,15 @@ export default function ReceivedPaymentPage() {
   };
 
   // ── Submit ────────────────────────────────────────────────────────────────────
+  // Amend (an approved receipt that isn't CRM-linked): the form opens as for an edit; saving raises an amendment.
+  const amend = useAmendMode("received-payment", "Received Payment", {
+    onRaised: () => {
+      setView("list");
+      setEditingId(null);
+      void loadPayments(currentPage);
+    },
+  });
+
   const handleSubmit = async () => {
     if (!form.companyId) {
       toast.error("Company is required");
@@ -909,6 +921,7 @@ export default function ReceivedPaymentPage() {
 
     try {
       if (editingId) {
+        if (await amend.intercept(editingId, payload)) return;
         await updateReceivedPayment(Number(editingId), payload as any);
         toast.success("Payment updated");
       } else {
@@ -2370,10 +2383,25 @@ export default function ReceivedPaymentPage() {
                   <Pencil size={12} /> Edit
                 </button>
               )}
+              {viewingPayment.status === "Approved" && rights.canEdit && viewingPayment.crmBookingId == null && (
+                <button
+                  onClick={() => {
+                    const p = viewingPayment;
+                    setViewingPayment(null);
+                    amend.start(p.id);
+                    openEdit(p);
+                  }}
+                  title="Amend — change it with a reason; applies once approved"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                >
+                  <FilePenLine size={12} /> Amend
+                </button>
+              )}
             </div>
           </div>
         </div></BodyPortal>
       )}
+      {amend.dialog}
     </>
   );
 }

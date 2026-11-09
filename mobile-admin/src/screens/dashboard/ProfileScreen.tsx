@@ -6,7 +6,8 @@
 //               (password, account status; Edit opens the change-password form with the strength meter and match check)
 //   My access   every page this account may open, with its actions (view / create / edit / delete / export)
 //   Activity    the last 30 things this account did (time, action, module)
-//   Settings    Sign-in (the reminders popup after login, kept on the account) and Animations (menus and panels,
+//   Settings    Appearance (the web's five colour themes, kept on this phone), Sign-in (the reminders popup after
+//               login, kept on the account) and Animations (menus and panels,
 //               pages, numbers counting up — saved on this phone only; the phone's "reduce motion" overrides them)
 // and Sign out at the foot. The photo is picked from the library or taken with the camera, square, and kept under the
 // server's 400 KB.
@@ -14,9 +15,10 @@ import { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, ScrollView, Alert, Switch } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Bell, Camera, Image as ImageIcon, KeyRound, LayoutGrid, Lock, LogOut, Pencil, Sparkles, Trash2, User } from "lucide-react-native";
+import { Activity, Bell, Camera, Check, Image as ImageIcon, KeyRound, LayoutGrid, Lock, LogOut, Palette, Pencil, Sparkles, Trash2, User } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import { sheet as S } from "@/theme/colors";
+import { sheet as S, THEMES } from "@/theme/colors";
+import { useTheme } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
 import { useAuthImageSource } from "@/components/AuthImage";
 import { PasswordStrength } from "@/components/PasswordStrength";
@@ -32,6 +34,8 @@ const MAX_DATA_URI = 550_000; // the server's limit on the photo's data: URI (~4
 const fmtLong = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : "—";
 const humanPage = (key: string) => key.replace(/-/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+
+let lastTab = "profile";
 
 function Toggle({ title, hint, value, onChange, disabled }: { title: string; hint: string; value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
@@ -70,7 +74,13 @@ export default function ProfileScreen() {
   const { currentUser, logout, updateCurrentUser, canDoAction } = useAuth();
   const qc = useQueryClient();
   const userId = currentUser?.id ? parseInt(currentUser.id, 10) : 0;
-  const [tab, setTab] = useState<Tab>("profile");
+  // Kept outside the screen: a theme switch redraws the app, and this reopens on the tab it was on (Settings).
+  const [tab, setTabState] = useState<Tab>(() => lastTab as Tab);
+  const setTab = (t: Tab) => {
+    lastTab = t;
+    setTabState(t);
+  };
+  const { theme, setTheme } = useTheme();
   const [editingName, setEditingName] = useState(false);
   const [nameVal, setNameVal] = useState(currentUser?.name ?? "");
   const [editingPw, setEditingPw] = useState(false);
@@ -362,6 +372,32 @@ export default function ProfileScreen() {
 
           {tab === "settings" && (
             <>
+              {/* The web's ThemeSwitcher: the themes as numbered rows, each with a square swatch; the one in use ticked. */}
+              <Panel title="Appearance" icon={<Palette size={14} color={S.ink} />}>
+                <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+                  {THEMES.map((t, i) => {
+                    const on = theme === t.name;
+                    return (
+                      <Press
+                        key={t.name}
+                        onPress={() => !on && setTheme(t.name)}
+                        style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, backgroundColor: on ? S.blueWash : pressed ? S.blueWash : "transparent" })}
+                      >
+                        <Text style={{ width: 20, fontFamily: fonts.heading.semibold, fontSize: 10, color: S.graphite }}>{String(i + 1).padStart(2, "0")}</Text>
+                        <View style={{ width: 18, height: 18, borderWidth: 1, borderColor: S.ink, backgroundColor: t.swatch }} />
+                        <Text style={{ flex: 1, fontFamily: on ? fonts.body.semibold : fonts.body.medium, fontSize: 13.5, color: S.ink }}>{t.label}</Text>
+                        {on && (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderColor: S.ink, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            <Check size={10} color={S.ink} />
+                            <Label color={S.ink}>In use</Label>
+                          </View>
+                        )}
+                      </Press>
+                    );
+                  })}
+                </View>
+                <Body size={11.5} color={S.graphite}>The same colour themes as the web app. Saved on this phone only.</Body>
+              </Panel>
               <Panel title="Sign-in" icon={<Bell size={14} color={S.ink} />}>
                 <Toggle
                   title="Show reminders popup on login"

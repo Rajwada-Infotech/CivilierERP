@@ -26,7 +26,7 @@ import { MODULE_CONFIG } from "@/screens/admin/approvalInboxConfig";
 type Age = "old" | "week" | "today";
 const DAY = 86_400_000;
 /** How long an approval has waited, from its record date: over a week, within the week, or since today. */
-function ageOf(d: string | null): { age: Age; days: number } {
+export function ageOf(d: string | null): { age: Age; days: number } {
   if (!d) return { age: "week", days: -1 };
   const t = new Date(d);
   if (isNaN(t.getTime())) return { age: "week", days: -1 };
