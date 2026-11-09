@@ -324,7 +324,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   );
   // A pick filtered by the (hidden) parent behaves as if the parent were in the form.
   const formFields = useMemo(
-    () => shownFields.filter((f) => !fixed || !(f.name in fixed)).map((f) => toFieldDef(f.filterBy === parentField ? { ...f, filterBy: undefined } : f, lookups, defaults)),
+    () => shownFields.filter((f) => !f.system && (!fixed || !(f.name in fixed))).map((f) => toFieldDef(f.filterBy === parentField ? { ...f, filterBy: undefined } : f, lookups, defaults)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [shownFields, lookups, parentField, JSON.stringify(defaults), JSON.stringify(fixed)],
   );

@@ -1635,6 +1635,10 @@ router.post("/:id/sections/:section/verify", requirePageRight(LAND_PAGE, "view")
   try {
     if (!(await canAct(req, "Verifier", LAND_PAGE))) return res.status(403).json({ error: "Only a verifier (Setup → Approval Control) can verify a section" });
     const pool = getPool();
+    // Once the whole land is verified (or approved), its sections stay verified until L1 / L2 returns it.
+    const landNow = (await pool.request().input("Id", sql.Int, id).query("SELECT VerificationStatus FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
+    if (!landNow) return res.status(404).json({ error: "Land not found" });
+    if (!verified && landNow.VerificationStatus === "Verified") return res.status(409).json({ error: "The land is already verified — it must be returned by L1 / L2 before a section can be un-verified" });
     if (verified && !isSuperAdmin(req)) {
       const mine = await pool.request().input("Id", sql.Int, id).input("U", sql.Int, req.user?.userId).query(
         sec.tables.map((t) => `SELECT COUNT(*) AS n FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1 AND CreatedBy = @U`).join(" UNION ALL "));
@@ -1667,11 +1671,57 @@ router.post("/:id/sections/:section/verify", requirePageRight(LAND_PAGE, "view")
   }
 });
 
-router.post("/:id/verify", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+// ── Who may move a land through Verify → L1 → L2, and in what order ──────────────────────────────────────────────
+// Verifier / L1 Approver / L2 Approver come from Setup → Approval Control. Nobody acts on land they entered, and the
+// L2 approver is not the user who did L1 (super admin excepted). Each step needs the one before it.
+async function stageGuard(req, id, stage) {
+  const pool = getPool();
+  const land = (await pool.request().input("Id", sql.Int, id).query(`
+    SELECT LandCode, CreatedBy, ISNULL(VerificationStatus, N'Draft') AS VerificationStatus, ISNULL(L1Status, N'Pending') AS L1Status,
+           ISNULL(L2Status, N'Pending') AS L2Status, L1ReviewerId, IsOnHold, IsCancelled
+    FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1`)).recordset[0];
+  if (!land) return { status: 404, error: "Land not found" };
+  const role = { verify: "Verifier", l1: "L1 Approver", l2: "L2 Approver" }[stage];
+  if (!(await canAct(req, role, LAND_PAGE))) return { status: 403, error: `Only a ${role} (Setup → Approval Control) can do this` };
+  const own = ownWork(req, land.CreatedBy, "this land");
+  if (own) return { status: 409, error: own };
+  if (land.IsCancelled) return { status: 409, error: `${land.LandCode} is cancelled` };
+  if (land.IsOnHold) return { status: 409, error: `${land.LandCode} is on hold — resume it first` };
+  if (land.L2Status === "Approved") return { status: 409, error: `${land.LandCode} is already fully approved` };
+  if (stage === "verify") {
+    if (land.VerificationStatus === "Verified") return { status: 409, error: `${land.LandCode} is already verified` };
+    const open = await openSections(pool, id);
+    if (open.length) return { status: 409, error: `Verify these sections first (tick Verified at the end of each): ${open.join(", ")}` };
+  }
+  if (stage === "l1") {
+    if (land.VerificationStatus !== "Verified") return { status: 409, error: "Verify the land data before L1 review" };
+    if (land.L1Status === "Approved") return { status: 409, error: "L1 is already approved — waiting for L2" };
+  }
+  if (stage === "l2") {
+    if (land.L1Status !== "Approved") return { status: 409, error: "L1 approval comes before L2" };
+    if (!isSuperAdmin(req) && land.L1ReviewerId != null && Number(land.L1ReviewerId) === Number(req.user?.userId)) {
+      return { status: 409, error: "You gave the L1 approval — another user must give L2" };
+    }
+  }
+  return { land };
+}
+
+/** Sections that have entries not yet verified (empty sections do not block). */
+async function openSections(pool, id) {
+  const tables = [...new Set(Object.values(VERIFY_SECTIONS).flatMap((x) => x.tables))];
+  const r = await pool.request().input("Id", sql.Int, id).query(tables.map((t) =>
+    `SELECT '${t}' AS T, SUM(CASE WHEN ISNULL(VerificationStatus, N'') <> N'Verified' THEN 1 ELSE 0 END) AS n FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1`).join(" UNION ALL "));
+  const open = new Set(r.recordset.filter((x) => x.n > 0).map((x) => x.T));
+  return [...new Set(Object.values(VERIFY_SECTIONS).filter((sec) => sec.tables.some((t) => open.has(t))).map((sec) => sec.label))];
+}
+
+router.post("/:id/verify", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   const remarks = text(req.body?.remarks, 1000);
   if (!id) return res.status(400).json({ error: "Invalid land id" });
   try {
+    const g = await stageGuard(req, id, "verify");
+    if (g.error) return res.status(g.status).json({ error: g.error });
     const pool = getPool();
     const r = await pool.request()
       .input("Id", sql.Int, id)
@@ -1707,6 +1757,10 @@ router.post("/:id/submit-l1", requirePageRight(LAND_PAGE, "edit"), async (req, r
   if (!id) return res.status(400).json({ error: "Invalid land id" });
   try {
     const pool = getPool();
+    const st = (await pool.request().input("Id", sql.Int, id).query("SELECT VerificationStatus, L2Status FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
+    if (!st) return res.status(404).json({ error: "Land not found" });
+    if (st.VerificationStatus !== "Verified") return res.status(409).json({ error: "Verify the land data before sending it for L1 review" });
+    if (st.L2Status === "Approved") return res.status(409).json({ error: "This land is already fully approved" });
     const r = await pool.request()
       .input("Id", sql.Int, id)
       .input("UserId", sql.Int, req.user?.userId || null)
@@ -1727,7 +1781,7 @@ router.post("/:id/submit-l1", requirePageRight(LAND_PAGE, "edit"), async (req, r
   }
 });
 
-router.post("/:id/action-l1", async (req, res) => {
+router.post("/:id/action-l1", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   const action = req.body?.action;
   const remarks = text(req.body?.remarks, 1000);
@@ -1735,6 +1789,8 @@ router.post("/:id/action-l1", async (req, res) => {
   if (!["Approve", "Return"].includes(action)) return res.status(400).json({ error: "Action must be Approve or Return" });
   if (action === "Return" && !remarks) return res.status(400).json({ error: "Remarks required when returning" });
   try {
+    const g = await stageGuard(req, id, "l1");
+    if (g.error) return res.status(g.status).json({ error: g.error });
     const pool = getPool();
     const isApprove = action === "Approve";
     const r = await pool.request()
@@ -1774,7 +1830,7 @@ router.post("/:id/action-l1", async (req, res) => {
   }
 });
 
-router.post("/:id/action-l2", async (req, res) => {
+router.post("/:id/action-l2", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   const action = req.body?.action;
   const remarks = text(req.body?.remarks, 1000);
@@ -1782,6 +1838,8 @@ router.post("/:id/action-l2", async (req, res) => {
   if (!["Approve", "Return", "Reject"].includes(action)) return res.status(400).json({ error: "Action must be Approve, Return or Reject" });
   if ((action === "Return" || action === "Reject") && !remarks) return res.status(400).json({ error: "Remarks required when returning or rejecting" });
   try {
+    const g = await stageGuard(req, id, "l2");
+    if (g.error) return res.status(g.status).json({ error: g.error });
     const pool = getPool();
     const isApprove = action === "Approve";
     const isReturn = action === "Return";

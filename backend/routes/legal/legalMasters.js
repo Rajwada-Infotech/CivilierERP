@@ -160,6 +160,9 @@ async function validate(pool, cfg, body) {
   const values = {};
   for (const field of cfg.fields) {
     if (field.auto) continue; // generated on add, never edited
+    // Status kept by the workflow (section Verified tick, L1 / L2 approval): never taken from the form. Its default on
+    // add; on edit it is not written at all.
+    if (field.system) { values[field.name] = field.default ?? null; continue; }
     const { value, error } = readValue(field, body?.[field.name]);
     if (error) return { error };
     if (field.required && value === null) return { error: `${field.label} is required` };
@@ -218,7 +221,7 @@ function bindValues(request, cfg, values) {
 }
 
 /** The fields an insert / update writes: all of them, except generated codes and a masked value sent back unchanged. */
-const writtenFields = (cfg, values) => cfg.fields.filter((f) => !f.auto && values[f.name] !== KEEP);
+const writtenFields = (cfg, values, isUpdate = false) => cfg.fields.filter((f) => !f.auto && !(isUpdate && f.system) && values[f.name] !== KEEP);
 
 /** SET / VALUES expressions for `derived` text columns, read from the picked row (Mouza's District name). */
 const derivedSql = (cfg) => (cfg.derived || []).map((d) => {
@@ -236,7 +239,7 @@ const isReviewer = (req, cfg) => canAct(req, "Verifier", cfg.pageKey);
 
 async function reviewCols(req, cfg, values, before) {
   const rv = cfg.review;
-  if (!rv) return { cols: [] };
+  if (!rv || cfg.fields.find((f) => f.name === rv.field)?.system) return { cols: [] };
   const free = rv.free || ["Pending"];
   const next = values[rv.field];
   const prev = before ? before[rv.field] : free[0];
@@ -281,8 +284,8 @@ router.get("/meta", (req, res) => {
   res.json(PAGED.map(([key, m]) => ({
     key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, adminOnly: !!m.adminOnly,
     extras: (m.extras || []).map(({ name, label, whatsapp, after }) => ({ name, label, whatsapp: !!whatsapp, after })),
-    fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden }) =>
-      ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden,
+    fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden, system }) =>
+      ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden, system: !!system,
         creatable: type === "ref" && creatableRef(ref) })),
   })));
 });
@@ -490,6 +493,10 @@ router.post("/:master", withRight("create"), async (req, res) => {
     await resolveNewRefs(pool, cfg, req.body, req.user?.userId, res.locals.added);
     // A refused save (validation, a business rule, a duplicate…) takes back the list entries it just added.
     res.once("finish", () => { if (res.statusCode >= 400 && res.locals.added.length) dropAdded(pool, res.locals.added); });
+    if (cfg.needsWhatsApp && (await usersHaveWhatsApp(pool))) {
+      const me = (await pool.request().input("U", sql.Int, req.user?.userId).query("SELECT WhatsAppNo FROM dbo.users WHERE id = @U")).recordset[0];
+      if (!me?.WhatsAppNo) return res.status(400).json({ error: "Add your WhatsApp number first (box at the top of this page) — others reach you on it about this entry" });
+    }
     // `self` fields are always the user who adds the row.
     for (const f of cfg.fields) if (f.self) req.body[f.name] = req.user?.userId ?? req.user?.id ?? null;
     const { values, error } = await validate(pool, cfg, req.body);
@@ -540,6 +547,8 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
     await resolveNewRefs(pool, cfg, req.body, req.user?.userId, res.locals.added);
     // A refused save (validation, a business rule, a duplicate…) takes back the list entries it just added.
     res.once("finish", () => { if (res.statusCode >= 400 && res.locals.added.length) dropAdded(pool, res.locals.added); });
+    // `self: "always"` fields (Verified by, Approved by) are whoever saves — never picked.
+    for (const f of cfg.fields) if (f.self === "always") req.body[f.name] = req.user?.userId ?? req.user?.id ?? null;
     const { values, error } = await validate(pool, cfg, req.body);
     if (error) return res.status(400).json({ error });
     // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.
@@ -556,7 +565,7 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
     if (!before) return res.status(404).json({ error: `${cfg.title} not found` });
     const review = await reviewCols(req, cfg, values, before);
     if (review.error) return res.status(403).json({ error: review.error });
-    const written = writtenFields(cfg, values);
+    const written = writtenFields(cfg, values, true);
     const request = pool.request();
     bindValues(request, { fields: written }, values);
     request.input("Id", sql.Int, id).input("UserId", sql.Int, req.user?.userId || null);

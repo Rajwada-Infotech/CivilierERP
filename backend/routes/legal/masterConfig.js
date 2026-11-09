@@ -25,6 +25,7 @@
 //   right and stamps who / when; `requiredWhen: { field, values }` makes a field required for those values;
 //   `afterWrite(pool, req, row, before)` runs after a successful add / update (a clearance putting the land on hold).
 //   `where` narrows a master with SQL ({t} = the row's table or alias), e.g. lands already acquired;
+//   `system: true` on a field: a workflow status (verification / L1 / L2) — listed, never in the form, never saved from it;
 //   `extras: [{ name, label, sql, whatsapp? }]` adds read-only computed columns to the list (alias t is the row); `whatsapp` is
 //   SQL for a phone number (users.WhatsAppNo, migration 626) shown as a WhatsApp chat link beside the value;
 //   `check(pool, values, id)` returns a message to refuse an add / update on a business rule (id null on add).
@@ -57,7 +58,8 @@ const lookup = (key, title, group, desc) => ({
   ],
 });
 
-const VERIFICATION = { name: "VerificationStatus", label: "Verification", type: "select", required: true, options: ["Pending", "Verified", "Rejected", "Needs Correction"], default: "Pending" };
+// Set only by the verifier's "Verified" tick under the section — shown in lists, never in the entry form.
+const VERIFICATION = { name: "VerificationStatus", label: "Verification", type: "select", system: true, options: ["Pending", "Verified", "Rejected", "Needs Correction"], default: "Pending" };
 const REVIEW = { field: "VerificationStatus", by: "VerifiedBy", at: "VerifiedAt" };
 const LAND_ID = { name: "LandId", label: "Land property", type: "ref", ref: "land", required: true };
 // A land's own records (opened from the land's page): the parent column, the page right and the group.
@@ -268,9 +270,9 @@ const MASTERS = {
       // Project: not in this form — only approved land is mapped, on Land & Projects (PUT /api/legal/land/:id/project).
       { name: "LandStatus", label: "Land status", type: "select", required: true, options: ["Owned", "Active", "Identified", "Under Negotiation", "Agreement Done", "Registered", "Mutated", "In Dispute", "On Hold", "Disposed / Transferred", "Inactive"], default: "Owned" },
       { name: "PossessionStatus", label: "Possession status", type: "select", options: ["In Possession", "Partly in Possession", "Not in Possession", "Disputed", "Unknown"], default: "In Possession" },
-      { name: "VerificationStatus", label: "Verification status", type: "select", options: ["Draft", "Verified", "Rejected"], default: "Draft" },
-      { name: "L1Status", label: "L1 approval status", type: "select", options: ["Pending", "Approved", "Returned"], default: "Pending" },
-      { name: "L2Status", label: "L2 approval status", type: "select", options: ["Pending", "Approved", "Returned", "Rejected"], default: "Pending" },
+      { name: "VerificationStatus", label: "Verification status", type: "select", system: true, options: ["Draft", "Verified", "Rejected"], default: "Draft" },
+      { name: "L1Status", label: "L1 approval status", type: "select", system: true, options: ["Pending", "Approved", "Returned"], default: "Pending" },
+      { name: "L2Status", label: "L2 approval status", type: "select", system: true, options: ["Pending", "Approved", "Returned", "Rejected"], default: "Pending" },
       { name: "AcquisitionType", label: "Acquisition type", type: "select", options: ["Purchase", "Gift", "Inheritance", "Transfer", "Other"], default: "Purchase" },
       // When it was acquired (history) — the date it was entered here is kept separately (Created).
       { name: "AcquisitionDate", label: "Acquisition date (if known)", type: "date" },
@@ -334,6 +336,8 @@ const MASTERS = {
   }),
   "land-enquiry": {
     title: "Land Enquiry", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalLandEnquiry", pk: "EnquiryId",
+    // The entry user must have a WhatsApp number, so others can reach them about this enquiry.
+    needsWhatsApp: true,
     desc: "A new land opportunity, before the full property record. Convert it to create the Land ID.",
     label: "EnquiryNo + ' - ' + LandLocation", orderBy: "EnquiryDate DESC, EnquiryId DESC",
     unique: [["EnquiryNo"], "This enquiry number already exists"],
@@ -341,7 +345,7 @@ const MASTERS = {
     extras: [
       { name: "LandCode", label: "Converted to land", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" },
       // Who raised the enquiry, with a WhatsApp link so anyone can talk to them about it.
-      { name: "EnquiryBy", label: "Entry by", after: "EnquiryDate", sql: "(SELECT u.name FROM dbo.users u WHERE u.id = t.CreatedBy)",
+      { name: "EnquiryBy", label: "Entry by", after: "EnquiryByName", sql: "(SELECT u.name FROM dbo.users u WHERE u.id = t.CreatedBy)",
         whatsapp: "(SELECT u.WhatsAppNo FROM dbo.users u WHERE u.id = t.CreatedBy)", userId: "t.CreatedBy" },
     ],
     guard: async (pool, id, values) => {
@@ -354,6 +358,8 @@ const MASTERS = {
     fields: [
       { name: "EnquiryNo", label: "Enquiry number", type: "text", max: 30, auto: "ENQ" },
       { name: "EnquiryDate", label: "Enquiry date", type: "date", required: true, default: "today" },
+      // Who brought the enquiry — any name, typed. "Entry by" (the logged-in user who saves it) is recorded by itself.
+      { name: "EnquiryByName", label: "Enquiry by", type: "text", required: true, max: 150 },
       { name: "EnquirySourceId", label: "Enquiry source", type: "ref", ref: "enquiry-source", required: true },
       { name: "LandLocation", label: "Land location", type: "text", required: true, max: 300 },
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
@@ -399,7 +405,7 @@ const MASTERS = {
       { name: "Source", label: "Record source (office / portal)", type: "text", max: 200 },
       { name: "DocFileId", label: "RS record copy (porcha)", type: "file" },
       VERIFICATION,
-      { name: "Remarks", label: "Reviewer remarks", type: "textarea", max: 1000 },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
       ACTIVE,
     ],
   },
@@ -427,7 +433,7 @@ const MASTERS = {
       { name: "Source", label: "Record source (office / portal)", type: "text", max: 200 },
       { name: "DocFileId", label: "LR RoR copy", type: "file" },
       VERIFICATION,
-      { name: "Remarks", label: "Reviewer remarks", type: "textarea", max: 1000 },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
       ACTIVE,
     ],
   },
@@ -498,7 +504,7 @@ const MASTERS = {
         { name: "PreviousOwnerName", label: "Previous owner", type: "text", max: 200, suggest: "owner" },
         { name: "TransferDocFileId", label: "Transfer document", type: "file" },
         VERIFICATION,
-        { name: "VerificationRemarks", label: "Verification remarks", type: "textarea", max: 1000 },
+        { name: "VerificationRemarks", label: "Verification remarks", type: "textarea", max: 1000, system: true },
         ACTIVE,
       ],
     }),
@@ -512,7 +518,7 @@ const MASTERS = {
         { name: "RecordId", label: "Ownership record", type: "ref", ref: "ownership-record", filterBy: "LandId", required: true },
         { name: "CheckItem", label: "Check item", type: "select", required: true, options: OWNERSHIP_CHECKS },
         { name: "Result", label: "Check result", type: "select", required: true, options: ["Pending", "Verified", "Rejected", "Needs Correction", "Reattachment Required", "Not Applicable"], default: "Pending" },
-        { name: "Remarks", label: "Reviewer remarks", type: "textarea", max: 1000 },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
       ],
     }),
@@ -532,7 +538,7 @@ const MASTERS = {
         { name: "SupportingFileId", label: "Supporting record copy", type: "file" },
         { name: "MutationRecordNo", label: "Mutation record number", type: "text", max: 60 },
         VERIFICATION,
-        { name: "Remarks", label: "Verification remarks", type: "textarea", max: 1000 },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
       ],
     }),
@@ -1338,7 +1344,7 @@ const MASTERS = {
       { name: "LinkLabel", label: "Site name (e.g. Banglarbhumi)", type: "text", required: true, max: 150 },
       { name: "Url", label: "Official URL", type: "url", required: true, max: 500 },
       { name: "LastTestedDate", label: "Last tested on", type: "date" },
-      { name: "VerifiedBy", label: "Verified by", type: "ref", ref: "user" },
+      { name: "VerifiedBy", label: "Verified by", type: "ref", ref: "user", hidden: true, self: "always" },
       { name: "FallbackInstructions", label: "If the portal is down", type: "textarea", max: 1000 },
       { name: "OfficeId", label: "Only for this registration office (optional — leave blank for all)", type: "ref", ref: "registration-office" },
       ACTIVE,
@@ -1403,7 +1409,7 @@ const MASTERS = {
       { name: "Jurisdiction", label: "Jurisdiction", type: "text", max: 150 },
       { name: "EffectiveFrom", label: "Effective from", type: "date", required: true },
       { name: "EffectiveTo", label: "Effective to", type: "date", after: "EffectiveFrom" },
-      { name: "ApprovedBy", label: "Approved by (legal / compliance)", type: "ref", ref: "user" },
+      { name: "ApprovedBy", label: "Approved by (legal / compliance)", type: "ref", ref: "user", hidden: true, self: "always" },
       { name: "Remarks", label: "Conditions / remarks", type: "textarea", max: 1000 },
       ACTIVE,
     ],

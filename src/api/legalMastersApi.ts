@@ -32,6 +32,8 @@ export interface LegalFieldMeta {
   party?: string;
   /** Kept by the server (e.g. the matched party's id): not in the form or the table. */
   hidden?: boolean;
+  /** workflow status (verification / L1 / L2): shown in lists, never in the entry form */
+  system?: boolean;
   /** A "ref" whose list takes a plain name: a new name can be typed and is added to that list on save. */
   creatable?: boolean;
 }
