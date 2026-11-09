@@ -79,7 +79,9 @@ import {
   ListChecks,
   IndianRupee,
   MessageSquare,
+  FilePenLine,
 } from "lucide-react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
@@ -1170,6 +1172,7 @@ const Payment: React.FC = () => {
   };
 
   const cancelForm = () => {
+    amend.stop();
     setView("list");
     setEditingId(null);
     setForm(blankForm());
@@ -2036,6 +2039,9 @@ const Payment: React.FC = () => {
 
   // ── Save ───────────────────────────────────────────────────────────────────
 
+  // Amend (an approved payment): the form opens as for an edit; saving raises an amendment for approval instead.
+  const amend = useAmendMode("payment", "Payment", { onRaised: () => cancelForm() });
+
   const handleSave = async () => {
     if (!validate()) return;
 
@@ -2121,6 +2127,7 @@ const Payment: React.FC = () => {
     try {
       setSaving(true);
       if (editingId) {
+        if (await amend.intercept(editingId, payload)) return;
         await updatePayment(editingId, payload);
         toast.success("Payment updated.");
       } else {
@@ -2183,6 +2190,7 @@ const Payment: React.FC = () => {
 
   return (
     <>
+      {amend.dialog}
       <Breadcrumbs items={["Dashboard", "Finance", "Payments"]} />
       <SheetShell
         eyebrow="CivilierERP · Finance"
@@ -4672,6 +4680,16 @@ const Payment: React.FC = () => {
                               <Edit size={12} />
                             </button>
                           )}
+                          {rights.canEdit && rec.status === "Approved" && (
+                            <button
+                              onClick={() => { amend.start(rec.id); openEdit(rec); }}
+                              title="Amend — change it with a reason; applies once approved"
+                              aria-label="Amend"
+                              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            >
+                              <FilePenLine size={12} />
+                            </button>
+                          )}
                           {rights.canDelete && (
                             <button
                               onClick={() => setDeleteId(rec.id)}
@@ -4835,6 +4853,16 @@ const Payment: React.FC = () => {
                                     className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                                   >
                                     <Edit size={12} />
+                                  </button>
+                                )}
+                                {rights.canEdit && rec.status === "Approved" && (
+                                  <button
+                                    onClick={() => { amend.start(rec.id); openEdit(rec); }}
+                                    title="Amend — change it with a reason; applies once approved"
+                                    aria-label="Amend"
+                                    className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+                                  >
+                                    <FilePenLine size={12} />
                                   </button>
                                 )}
                                 {rights.canDelete && (
@@ -5827,6 +5855,22 @@ const Payment: React.FC = () => {
                 >
                   <Edit size={12} />
                   Edit
+                </button>
+              )}
+              {rights.canEdit && viewingRec.status === "Approved" && (
+                <button
+                  onClick={() => {
+                    const rec = viewingRec;
+                    setViewingRec(null);
+                    setViewingChain(null);
+                    amend.start(rec.id);
+                    openEdit(rec);
+                  }}
+                  title="Amend — change it with a reason; applies once approved"
+                  className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors"
+                >
+                  <FilePenLine size={12} />
+                  Amend
                 </button>
               )}
               <button

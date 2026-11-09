@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { Trash2, Edit3, Printer, ArrowLeft, Send } from "lucide-react";
+import { Trash2, Edit3, Printer, ArrowLeft, Send, FilePenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -19,6 +19,8 @@ export interface DetailModalProps {
   uoms: UomOption[];
   onClose: () => void;
   onEdit: () => void;
+  /** Amend an approved BOQ (with a reason; applied once approved — Work Orders still on its old rates follow). */
+  onAmend?: () => void;
   onPrint: () => void;
   onRefresh: () => void;
   canDelete: boolean;
@@ -31,6 +33,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   uoms,
   onClose,
   onEdit,
+  onAmend,
   onPrint,
   onRefresh,
   canDelete,
@@ -307,6 +310,11 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             {canEdit && record.Status === "Approved" && (
               <Button variant="secondary" disabled={acting} onClick={onEdit}>
                 <Edit3 size={14} className="mr-1.5" /> Edit
+              </Button>
+            )}
+            {canEdit && onAmend && record.Status === "Approved" && (
+              <Button variant="secondary" disabled={acting} onClick={onAmend} title="Amend — change it with a reason; applies once approved">
+                <FilePenLine size={14} className="mr-1.5" /> Amend
               </Button>
             )}
           </div>

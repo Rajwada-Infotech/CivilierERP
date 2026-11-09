@@ -1,6 +1,6 @@
 // One Work Done entry opened: what was certified, against which work order, and its approval.
 import React from "react";
-import { ArrowLeft, PenSquare, Printer } from "lucide-react";
+import { ArrowLeft, FilePenLine, PenSquare, Printer } from "lucide-react";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
@@ -19,9 +19,11 @@ export const WorkDoneDetail: React.FC<{
   canPrint: boolean;
   onBack: () => void;
   onEdit: () => void;
+  /** Amend an approved entry (with a reason; applied once approved). */
+  onAmend?: () => void;
   onPrint: () => void;
   onRefresh: () => void;
-}> = ({ record: r, canEdit, canPrint, onBack, onEdit, onPrint, onRefresh }) => (
+}> = ({ record: r, canEdit, canPrint, onBack, onEdit, onAmend, onPrint, onRefresh }) => (
   <div className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <button onClick={onBack} className={`${KEY_LINE} h-9 px-3`}>
@@ -31,6 +33,11 @@ export const WorkDoneDetail: React.FC<{
         {canPrint && (
           <button onClick={onPrint} className={`${KEY_LINE} h-9 px-3`}>
             <Printer size={13} /> Print
+          </button>
+        )}
+        {canEdit && onAmend && r.Status === "Approved" && (
+          <button onClick={onAmend} className={`${KEY_LINE} h-9 px-4`} title="Amend — change it with a reason; applies once approved">
+            <FilePenLine size={13} /> Amend
           </button>
         )}
         {canEdit && canEditWorkDone(r.Status) && (

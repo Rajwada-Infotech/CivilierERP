@@ -1,7 +1,7 @@
 // One work order opened: details, activities, linked documents, approval, print (printWorkOrder).
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2, ChevronDown, ChevronRight, Building2, Calculator, IndianRupee, FileText, Calendar, User, Layers, Package, Hammer, Receipt, AlertCircle, PenSquare, ChevronUp, ClipboardList, ArrowLeft, BadgeCheck, Clock, ShoppingCart, Printer } from "lucide-react";
+import { Trash2, ChevronDown, ChevronRight, Building2, Calculator, IndianRupee, FileText, Calendar, User, Layers, Package, Hammer, Receipt, AlertCircle, PenSquare, ChevronUp, ClipboardList, ArrowLeft, BadgeCheck, Clock, ShoppingCart, Printer, FilePenLine } from "lucide-react";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getWorkOrder, deleteWorkOrder, getMaterialRequestPrefillFromWO, MaterialRequestExistsError } from "@/api/workOrderApi";
@@ -47,7 +47,9 @@ export const WorkOrderDetailPanel: React.FC<{
   onBack: () => void;
   onDelete: (id: number) => void;
   onEdit: (id: number) => void;
-}> = ({ workOrderId, onBack, onDelete, onEdit }) => {
+  /** Amend an approved Work Order (with a reason; applied once approved, its Work Done follows). */
+  onAmend?: (id: number) => void;
+}> = ({ workOrderId, onBack, onDelete, onEdit, onAmend }) => {
   const [detail, setDetail] = useState<WorkOrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -278,6 +280,16 @@ export const WorkOrderDetailPanel: React.FC<{
                 >
                   <PenSquare size={12} />
                   Edit
+                </button>
+              )}
+              {rights.canEdit && onAmend && detail.Status === "Approved" && (
+                <button
+                  onClick={() => onAmend(workOrderId)}
+                  title="Amend — change it with a reason; applies once approved, and its Work Done follows"
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-foreground/40 text-foreground text-xs font-medium hover:bg-primary/5 transition-colors"
+                >
+                  <FilePenLine size={12} />
+                  Amend
                 </button>
               )}
               {detail.Status === "Approved" && (

@@ -226,6 +226,7 @@ module.exports = router;
 const MODULE_TABLE_MAP = {
   GoodsReceiptNotes: { workflowId: "GRN", tableName: "GoodsReceiptNotes" },
   PurchaseOrders: { workflowId: "PurchaseOrders", tableName: "PurchaseOrders" },
+  DocAmendment: { workflowId: "DocAmendment", tableName: "DocAmendment" },
   WorkOrderHeader: { workflowId: "WorkOrderHeader", tableName: "WorkOrderHeader" },
   ExpenseBooking: { workflowId: "Expenses", tableName: "ExpenseBooking" },
   NewPayment: { workflowId: "NewPayment", tableName: "NewPayment" },

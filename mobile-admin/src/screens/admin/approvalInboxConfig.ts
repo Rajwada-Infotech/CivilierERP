@@ -6,6 +6,7 @@
 import {
   ClipboardCheck, ClipboardList, Package, PackageOpen, Hammer, Banknote, Truck, Receipt, ArrowDownCircle, ArrowLeftRight,
   ShoppingCart, Building2, Home, Car, FileText, Undo2, Warehouse, Landmark, UserCheck, XCircle, FileWarning, ShieldCheck,
+  FilePenLine,
 } from "lucide-react-native";
 import type { InboxItem } from "@/api/approvalInboxApi";
 
@@ -17,6 +18,8 @@ export interface ModuleCfg {
 
 export const MODULE_CONFIG: Record<string, ModuleCfg> = {
   "purchase-orders": { icon: Package, apiEndpoint: "/api/purchase-orders", label: "Purchase Orders" },
+  // An approved document amended with a reason (backend/routes/docAmendments.js) — applied once approved.
+  "doc-amendment": { icon: FilePenLine, apiEndpoint: "/api/doc-amendments", label: "Amendments" },
   "work-orders": { icon: Hammer, apiEndpoint: "/api/work-orders", label: "Work Orders" },
   payments: { icon: Banknote, apiEndpoint: "/api/new-payment", label: "Payments" },
   "crm-refund-payment": { icon: Banknote, apiEndpoint: "/api/new-payment", label: "Refund payment" },
@@ -82,7 +85,7 @@ export const CATEGORY_ORDER: CategoryId[] = ["material", "finance", "engineering
 // Declaration order doubles as the module order within a category (Material Requests before Purchase Orders before
 // GRNs …), so each module's rows stay together.
 const MODULE_CATEGORY: Record<string, CategoryId> = {
-  "material-requests": "material", "purchase-orders": "material", "work-orders": "material", "goods-receipt": "material",
+  "material-requests": "material", "purchase-orders": "material", "doc-amendment": "material", "work-orders": "material", "goods-receipt": "material",
   "material-issues": "material", "material-issue-return": "material", "vehicle-in-out": "material", "stock-transfers": "material",
   "inter-company-transfer": "material", "debit-note": "material",
   "expense-booking": "finance", payments: "finance", "crm-refund-payment": "finance", "received-payment": "finance",

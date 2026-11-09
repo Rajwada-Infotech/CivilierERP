@@ -1,5 +1,6 @@
 // BOQ (bill of quantities). Parts under ./boq: config (types, helpers, form state) · LineEditor · FormModal · DetailModal
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import { projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -369,6 +370,21 @@ export default function BOQ() {
     }
   };
 
+  // Amend (an approved BOQ): the form opens as for an edit; saving raises an amendment for approval instead.
+  const amend = useAmendMode("boq", "BOQ", {
+    onRaised: () => {
+      setShowForm(false);
+      setEditRecord(null);
+      loadList();
+    },
+  });
+  const openAmend = (r: BoqRecord) => {
+    amend.start(r.BoqID);
+    setViewRecord(null);
+    setEditRecord(r);
+    setShowForm(true);
+  };
+
   const openEdit = (r: BoqRecord) => {
     if (!canEditBoq(r.Status)) {
       toast.error("Only Draft or Rejected BOQs can be edited.");
@@ -639,7 +655,9 @@ export default function BOQ() {
             activityGroups={activityGroups}
             finYears={finYears}
             activeFinYear={activeFinYear}
+            amend={amend.amending ? amend : undefined}
             onClose={() => {
+              amend.stop();
               setShowForm(false);
               setEditRecord(null);
             }}
@@ -647,12 +665,14 @@ export default function BOQ() {
           />
         )}
 
+        {amend.dialog}
         {!showForm && viewRecord && (
           <DetailModal
             record={viewRecord}
             uoms={uoms}
             onClose={() => setViewRecord(null)}
             onEdit={() => openEdit(viewRecord)}
+            onAmend={() => openAmend(viewRecord)}
             onPrint={() => handlePrint(viewRecord)}
             onRefresh={() => {
               setViewRecord(null);

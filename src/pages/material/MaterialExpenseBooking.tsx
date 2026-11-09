@@ -62,6 +62,7 @@ import {
   ShoppingCart,
   AlertTriangle,
 } from "lucide-react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import { toast } from "sonner";
 import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
@@ -1252,9 +1253,19 @@ export default function MaterialExpenseBooking() {
   };
 
   const cancelForm = () => {
+    amend.stop();
     setView("list");
     resetForm();
   };
+
+  // Amend (an approved, unpaid invoice): the form opens as for an edit; saving raises an amendment for approval.
+  const amend = useAmendMode("expense-booking", "Invoice", {
+    onRaised: () => {
+      setView("list");
+      resetForm();
+      void fetchRecords(page);
+    },
+  });
 
   const disableEmi = async () => {
     if (!editingId) return;
@@ -1436,6 +1447,7 @@ export default function MaterialExpenseBooking() {
     try {
       if (isEditing) {
         if (!editingId) throw new Error("Missing booking id for update.");
+        if (await amend.intercept(editingId, body)) return;
         await apiFetch(
           `${API}/${editingId}`,
           {
@@ -2699,6 +2711,7 @@ export default function MaterialExpenseBooking() {
                           }
                           rec={rec}
                           onEdit={() => openEditForm(rec)}
+                          onAmend={() => { amend.start(rec.id); void openEditForm(rec); }}
                           onPreview={() => openPreview(rec)}
                           onDelete={() => requestDelete(rec.id)}
                           onApprovalSuccess={fetchRecords}
@@ -2919,6 +2932,8 @@ export default function MaterialExpenseBooking() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {amend.dialog}
 
         {/* Preview modal */}
         <ExpenseBookingPreviewModal

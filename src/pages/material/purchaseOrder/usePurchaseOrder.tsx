@@ -43,7 +43,8 @@ import { projectCompanyIds, type ProjectCompanyLike } from "@/lib/projectBelongs
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Trash2, Eye, Check, FileDown, Lock } from "lucide-react";
+import { Trash2, Eye, Check, FileDown, Lock, FilePenLine } from "lucide-react";
+import { previewAmendment, raiseAmendment, type AmendmentPreview } from "@/api/docAmendmentsApi";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { useAuth } from "@/contexts/AuthContext";
@@ -78,6 +79,14 @@ export function usePurchaseOrder() {
   // ── View state ────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Amendment mode: the form is opened on an approved PO to propose a new version of it (services/docAmendment.js on
+  // the server). Saving raises an amendment for approval instead of editing the PO; the PO and its chain update only
+  // once it is approved.
+  const [amending, setAmending] = useState(false);
+  const [amendPreview, setAmendPreview] = useState<AmendmentPreview | null>(null);
+  const [amendChecking, setAmendChecking] = useState(false);
+  const [amendReason, setAmendReason] = useState("");
+  const [amendSubmitting, setAmendSubmitting] = useState(false);
   const [viewingPO, setViewingPO] = useState<any | null>(null);
   const [viewingPOSupplier, setViewingPOSupplier] =
     useState<SupplierDetails | null>(null);
@@ -1490,6 +1499,16 @@ export function usePurchaseOrder() {
             >
               <FileDown size={15} />
             </button>
+            {rights.canEdit && item.status === "Approved" && (
+              <button
+                onClick={() => void goToAmend(item)}
+                className="p-1 text-foreground hover:bg-primary/5 transition-colors"
+                title="Amend this order — any change, with a reason; its GRNs follow once approved"
+                aria-label="Amend this order"
+              >
+                <FilePenLine size={15} />
+              </button>
+            )}
             {rights.canDelete && (
               <button
                 onClick={() => handleDelete(item._id)}
@@ -1857,6 +1876,18 @@ export function usePurchaseOrder() {
     // failed (missing fields vs. over the MR-pending cap) — don't stack a
     // second, generic one on top.
     if (!validate()) return;
+    if (amending && editingId) {
+      // An amendment: show what it would do down the chain (and anything that blocks it), then ask for the reason.
+      setAmendChecking(true);
+      try {
+        setAmendPreview(await previewAmendment("purchase-order", editingId, toPayload()));
+      } catch (err: any) {
+        toast.error(err?.message || "Could not check the amendment.");
+      } finally {
+        setAmendChecking(false);
+      }
+      return;
+    }
     setSaving(true);
     try {
       if (viewMode === "create") {
@@ -1893,6 +1924,34 @@ export function usePurchaseOrder() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const submitAmendment = async () => {
+    if (!editingId) return;
+    if (!amendReason.trim()) {
+      toast.error("Give a reason for the amendment.");
+      return;
+    }
+    setAmendSubmitting(true);
+    try {
+      await raiseAmendment("purchase-order", editingId, toPayload(), amendReason.trim());
+      await queryClient.invalidateQueries({ queryKey: ["doc-amendments"] });
+      toast.success("Amendment raised — the Purchase Order and its GRNs update once it is approved.");
+      setAmendPreview(null);
+      goToList();
+    } catch (err: any) {
+      toast.error(err?.message || "Could not raise the amendment.");
+    } finally {
+      setAmendSubmitting(false);
+    }
+  };
+
+  /** Opens the form on an approved PO in amendment mode. */
+  const goToAmend = async (item: POListItem) => {
+    await goToEdit(item);
+    setAmending(true);
+    setAmendReason("");
+    setAmendPreview(null);
   };
 
   const handleDelete = async (id: string) => {
@@ -2051,6 +2110,9 @@ export function usePurchaseOrder() {
     openedExistingRef.current = false;
     setViewMode("list");
     setEditingId(null);
+    setAmending(false);
+    setAmendPreview(null);
+    setAmendReason("");
     setForm(EMPTY_FORM());
     setLineItems([EMPTY_LINE()]);
     setSelectedTCs([]);
@@ -2541,6 +2603,15 @@ export function usePurchaseOrder() {
     validate,
     toPayload,
     handleSave,
+    amending,
+    amendPreview,
+    setAmendPreview,
+    amendChecking,
+    amendReason,
+    setAmendReason,
+    amendSubmitting,
+    submitAmendment,
+    goToAmend,
     handleDelete,
     confirmDelete,
     handleApprovalSuccess,

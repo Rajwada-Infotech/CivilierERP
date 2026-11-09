@@ -20,6 +20,7 @@ import { ReviewHeader } from "./approvalInbox/review/ReviewHeader";
 import { ReviewSummary } from "./approvalInbox/review/ReviewSummary";
 import { ReviewWorkAllocation } from "./approvalInbox/review/ReviewWorkAllocation";
 import { ReviewBoq } from "./approvalInbox/review/ReviewBoq";
+import { ReviewAmendment } from "./approvalInbox/review/ReviewAmendment";
 import { ReviewLineItems } from "./approvalInbox/review/ReviewLineItems";
 import { ReviewDetails } from "./approvalInbox/review/ReviewDetails";
 import { ReviewFooter } from "./approvalInbox/review/ReviewFooter";
@@ -59,6 +60,8 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = (props) =
             )}
 
             {woActivities.length > 0 && <WoActivities activities={woActivities} />}
+
+            <ReviewAmendment r={r} module={item.Module} />
 
             <ReviewBoq r={r} />
 

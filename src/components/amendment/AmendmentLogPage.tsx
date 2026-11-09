@@ -167,9 +167,11 @@ interface Props {
   module: AmendmentModule;
   title: string;
   Shell: React.ComponentType<ShellProps>;
+  /** Shown above the log — e.g. the module's amendment requests (AmendmentRequests). */
+  before?: React.ReactNode;
 }
 
-export function AmendmentLogPage({ module, title, Shell }: Props) {
+export function AmendmentLogPage({ module, title, Shell, before }: Props) {
   const [rows, setRows] = useState<AmendmentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<AmendmentDetail | null>(null);
@@ -288,6 +290,8 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
       icon={History}
     >
       <Breadcrumbs items={[{ label: title }]} />
+
+      {before}
 
       {!loading && rows.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-y-4">

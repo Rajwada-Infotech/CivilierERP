@@ -23,6 +23,7 @@ import { POLineItems } from "./purchaseOrder/POLineItems";
 import { POTerms } from "./purchaseOrder/POTerms";
 import { POFlowStatus } from "./purchaseOrder/POFlowStatus";
 import { POActionBar } from "./purchaseOrder/POActionBar";
+import { POAmendDialog } from "./purchaseOrder/POAmendDialog";
 
 const PurchaseOrderMaster: React.FC = () => {
   const m = usePurchaseOrder();
@@ -111,7 +112,7 @@ const PurchaseOrderMaster: React.FC = () => {
           "Dashboard",
           "Material",
           "Purchase Order Master",
-          viewMode === "create" ? "New" : viewMode === "edit" ? "Edit" : "View",
+          viewMode === "create" ? "New" : viewMode === "edit" ? (m.amending ? "Amend" : "Edit") : "View",
         ]}
       />
       <SheetShell
@@ -120,6 +121,16 @@ const PurchaseOrderMaster: React.FC = () => {
         subtitle="Orders placed with suppliers — from a material request, a quotation, a work order or direct."
       >
         <POFormHeader m={m} />
+        {m.amending && (
+          <div className="border border-foreground px-4 py-3 text-sm space-y-1">
+            <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-foreground">Amending an approved order</p>
+            <p className="text-xs text-muted-foreground">
+              Change anything — rate, quantity, GST, lines, terms. Review it to see how its GRNs change, give a reason, and it goes for
+              approval. The order and its GRNs update only once the amendment is approved. The supplier can't change once a GRN exists,
+              and an order with an invoice can't be amended.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-5 min-w-0">
           <PODocSource m={m} />
@@ -130,6 +141,7 @@ const PurchaseOrderMaster: React.FC = () => {
           <POFlowStatus m={m} />
           <POActionBar m={m} />
         </div>
+        <POAmendDialog m={m} />
       </SheetShell>
     </>
   );
