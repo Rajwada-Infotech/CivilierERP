@@ -84,6 +84,7 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
 // always show what each status would contain. Without `page` the legacy
 // full-array response is returned so existing callers keep working.
 const PN_STATUSES = [CrmStatus.DRAFT, "Sent", "Acknowledged", "Disputed"];
+const PN_OVERDUE_SQL = "n.Status = 'Sent' AND n.ResponseDeadline < CAST(SYSDATETIME() AS DATE)";
 const PN_SORT = {
   NoticeNo: "n.NoticeNo",
   ApplicantName: "a.ApplicantName",
@@ -115,7 +116,8 @@ function buildPnWhere(request, query, includeStatus, projectScope = null) {
     request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
     conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR n.NoticeNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search OR a.Mobile LIKE @search)");
   }
-  if (includeStatus && PN_STATUSES.includes(query.status)) {
+  if (includeStatus && query.status === "Overdue") conds.push(PN_OVERDUE_SQL);
+  else if (includeStatus && PN_STATUSES.includes(query.status)) {
     request.input("status", sql.NVarChar(30), query.status);
     conds.push("n.Status = @status");
   }
@@ -142,11 +144,11 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
     const countReq = pool.request();
     const countWhere = buildPnWhere(countReq, req.query, false, req.projectScope);
     const countRes = await countReq.query(
-      `SELECT n.Status, COUNT(*) AS C FROM dbo.CrmPossessionNotice n ${PN_JOINS} ${countWhere} GROUP BY n.Status`
+      `SELECT n.Status, COUNT(*) AS C, SUM(CASE WHEN ${PN_OVERDUE_SQL} THEN 1 ELSE 0 END) AS O FROM dbo.CrmPossessionNotice n ${PN_JOINS} ${countWhere} GROUP BY n.Status`
     );
-    const counts = { All: 0 };
-    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
-    const total = PN_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+    const counts = { All: 0, Overdue: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; counts.Overdue += row.O; }
+    const total = req.query.status === "Overdue" || PN_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
 
     const pageReq = pool.request();
     const pageWhere = buildPnWhere(pageReq, req.query, true, req.projectScope);
@@ -160,6 +162,20 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
     res.json({ rows: rowsRes.recordset, total, counts });
   } catch (e) {
     console.error("[crm-possession-notice] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id — one notice, for its own page. Registered after the named routes above.
+router.get("/:id", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const r = await getPool().request().input("id", sql.Int, id).query(`${PN_SELECT} WHERE n.Id = @id`);
+    if (!r.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    res.json(r.recordset[0]);
+  } catch (e) {
+    console.error("[crm-possession-notice] GET /:id error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

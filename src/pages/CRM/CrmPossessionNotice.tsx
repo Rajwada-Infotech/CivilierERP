@@ -5,27 +5,29 @@ import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { cn } from "@/lib/utils";
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, FileText, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Send,
+  AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronRight, Download, ExternalLink, FileText, ListChecks, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Send,
   ShieldAlert, StickyNote, Trash2, UserCircle2,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmDataTable, CrmRowMenu, type CrmColumn, type RowMenuItem } from "@/components/crm/CrmDataTable";
-import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
-import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import {
+  CrmGrid, CrmRowMenu, GridColumnChooser, GridMiniTable, GridRelated, GridSavedViews, GridSearch, GridTabs,
+  exportGrid, useGridPrefs, GRID_BTN, GRID_CARD, GRID_PAGE_SIZES, GRID_SHEET_KEYS, type GridCol, type RowMenuItem,
+} from "@/components/crm/CrmDataTable";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { promptNextStep } from "@/lib/workflowNav";
 import { translateError } from "@/lib/translateError";
+import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, CollectionBar, Initials, MoneyBand, asName } from "./payments/parts";
 import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT } from "./customers/config";
 
 const API = "/api/crm/possession-notice";
@@ -72,6 +74,12 @@ async function fetchPage(q: CrmListQuery): Promise<NoticePage> {
   if (!r.ok) { const d = await r.json().catch(() => null); throw new Error(d?.error || `Could not load the notices (${r.status}).`); }
   const d = await r.json();
   return { rows: d.rows ?? [], total: d.total ?? 0, counts: d.counts ?? {} };
+}
+async function fetchNotice(id: string): Promise<any> {
+  const r = await fetchWithAuth(`${API}/${encodeURIComponent(id)}`);
+  const d = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(d?.error || "Could not load this notice.");
+  return d;
 }
 async function fetchEligible(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
@@ -136,10 +144,10 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: {
           <div className="text-xs px-3 py-2.5 space-y-2" style={{ border: RULE_SOFT }}>
             <p className="font-semibold flex items-center gap-1.5"><ShieldAlert size={13} /> No booking can be sent a notice yet</p>
             <ul className="space-y-1 text-muted-foreground list-disc pl-4">
-              <li><strong className="text-foreground">Pre-Possession Ready:</strong> all four checks passed.</li>
+              <li><strong className="text-foreground">Pre-Possession Ready:</strong> dues cleared and all three checks passed.</li>
               <li><strong className="text-foreground">OC / CC received</strong> for the project or block.</li>
             </ul>
-            <p className="text-muted-foreground">A notice may go out with dues outstanding (it carries a dues statement); every due must be cleared before Handover.</p>
+            <p className="text-muted-foreground">Pre-Possession is Ready only once every due is cleared.</p>
             <div className="flex gap-2 pt-1">
               <button onClick={() => { onClose(); navigate("/crm/pre-possession"); }} className={`${KEY_LINE} h-8 px-3`}>Pre-Possession <ChevronRight size={11} /></button>
               <button onClick={() => { onClose(); navigate("/crm/oc-cc"); }} className={`${KEY_LINE} h-8 px-3`}>OC / CC <ChevronRight size={11} /></button>
@@ -176,6 +184,131 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: {
   );
 }
 
+// A notice's steps. Disputed stops at the customer's reply.
+const STEPS = ["Draft", "Sent", "Acknowledged"];
+const stepOf = (s: string) => (s === "Acknowledged" ? 3 : s === "Sent" || s === "Disputed" ? 2 : 1);
+function StepBar({ status, onDark }: { status: string; onDark?: boolean }) {
+  const done = stepOf(status);
+  const off = onDark ? "bg-white/15" : "bg-slate-200 dark:bg-slate-700";
+  return (
+    <span className="flex gap-0.5 w-full">
+      {STEPS.map((s, i) => (
+        <span key={s} className={cn("flex-1 rounded-full", onDark ? "h-2.5" : "h-1.5",
+          i < done ? (done === STEPS.length ? (onDark ? BAND_DOT.collected : "bg-emerald-500") : (onDark ? BAND_DOT.finance : "bg-amber-400"))
+            : status === "Disputed" && i === done ? "bg-rose-500" : off)} />
+      ))}
+    </span>
+  );
+}
+const noticeDash = <span className="text-muted-foreground">—</span>;
+const modeText = (m?: string | null) => (m ? MODE_LABEL[m] ?? m : "—");
+const duesCell = (n: any) => (n.OutstandingMilestones > 0
+  ? <span className="tabular-nums font-semibold text-destructive" title={`${n.OutstandingMilestones} milestone(s) outstanding: to be cleared before Handover`}>{fmtRupees(n.OutstandingBalance)}</span>
+  : <span className="text-muted-foreground">Clear</span>);
+
+function buildCols(actions: (n: any) => React.ReactNode): GridCol<any>[] {
+  return [
+    { id: "customer", label: "Customer", locked: true, sortKey: "ApplicantName", csv: (n) => n.ApplicantName, cell: (n) => (
+      <span className="flex items-center gap-3 py-1.5 min-w-0">
+        <Initials name={n.ApplicantName} />
+        <span className="min-w-0">
+          <span className="block font-semibold text-foreground capitalize truncate" title={n.ApplicantName}>{asName(n.ApplicantName)}</span>
+          <span className="block text-xs text-muted-foreground tabular-nums truncate">{n.NoticeNo} · {n.BookingNo} · {n.UnitNo}</span>
+        </span>
+      </span>
+    ) },
+    { id: "progress", label: "Progress", sortKey: "Status", csv: (n) => (STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft).label, cell: (n) => (
+      <span className="block min-w-[12rem] py-1.5">
+        <StepBar status={n.Status} />
+        <span className="mt-1.5 flex justify-between gap-3 text-xs">
+          <span className={cn("font-medium", n.Status === "Disputed" ? "text-destructive" : "text-foreground")} title={n.DisputeReason || undefined}>{(STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft).label}</span>
+          <span className="text-muted-foreground">{n.DeliveryMode ? modeText(n.DeliveryMode) : ""}</span>
+        </span>
+      </span>
+    ) },
+    { id: "offered", label: "Offered on", sortKey: "OfferedDate", csv: (n) => n.OfferedDate, cell: (n) => <span className="tabular-nums">{fmtDate(n.OfferedDate)}</span> },
+    { id: "deadline", label: "Respond by", sortKey: "ResponseDeadline", csv: (n) => n.ResponseDeadline, cell: (n) => {
+      const dl = deadlineInfo(n.ResponseDeadline, n.Status);
+      return (
+        <span className="inline-flex flex-col leading-tight">
+          <span className="tabular-nums">{fmtDate(n.ResponseDeadline)}</span>
+          {dl && <span className={cn("mt-0.5 text-xs tabular-nums", dl.late ? "font-semibold text-destructive" : "text-muted-foreground")}>{dl.label}</span>}
+        </span>
+      );
+    } },
+    { id: "dues", label: "Dues", align: "right", csv: (n) => n.OutstandingBalance, cell: duesCell },
+    { id: "act", label: "Actions", locked: true, cell: actions },
+    { id: "no", label: "Notice no", hiddenByDefault: true, sortKey: "NoticeNo", csv: (n) => n.NoticeNo, cell: (n) => <span className="tabular-nums">{n.NoticeNo}</span> },
+    { id: "booking", label: "Booking", hiddenByDefault: true, sortKey: "BookingNo", csv: (n) => n.BookingNo, cell: (n) => <span className="tabular-nums">{n.BookingNo}</span> },
+    { id: "unit", label: "Unit", hiddenByDefault: true, csv: (n) => n.UnitNo, cell: (n) => n.UnitNo },
+    { id: "mobile", label: "Mobile", hiddenByDefault: true, csv: (n) => n.Mobile, cell: (n) => <span className="tabular-nums">{n.Mobile || "—"}</span> },
+    { id: "mode", label: "Sent by", hiddenByDefault: true, csv: (n) => n.DeliveryMode, cell: (n) => modeText(n.DeliveryMode) },
+    { id: "sent", label: "Sent on", hiddenByDefault: true, csv: (n) => n.SentAt, cell: (n) => (n.SentAt ? <span className="tabular-nums">{fmtDate(n.SentAt)}</span> : noticeDash) },
+    { id: "ack", label: "Acknowledged on", hiddenByDefault: true, csv: (n) => n.AcknowledgedAt, cell: (n) => (n.AcknowledgedAt ? <span className="tabular-nums">{fmtDate(n.AcknowledgedAt)}</span> : noticeDash) },
+    { id: "reason", label: "Objection", hiddenByDefault: true, csv: (n) => n.DisputeReason, cell: (n) => n.DisputeReason || "—" },
+    { id: "notes", label: "Notes", hiddenByDefault: true, csv: (n) => n.Notes, cell: (n) => n.Notes || "—" },
+  ];
+}
+
+function nextLine(n: any): string {
+  switch (n.Status) {
+    case "Draft": return "Draft. It has not gone to the customer yet.";
+    case "Sent": return "Waiting for the customer to acknowledge or object.";
+    case "Acknowledged": return "The customer has accepted. Handover can be scheduled once every due is cleared.";
+    case "Disputed": return `The customer objected${n.DisputeReason ? `: ${n.DisputeReason}` : "."} Settle it, then withdraw the dispute to send a revised notice.`;
+    default: return "";
+  }
+}
+
+/** One notice on its own page: where it stands, every step with its date, and its notes. */
+function NoticeRecord({ id, actions, onBack }: { id: string; actions: (n: any) => React.ReactNode; onBack: () => void }) {
+  const { data: n, isLoading, isError, error, isFetching, refetch } = useQuery({ queryKey: ["crm-possession-notice", "record", id], queryFn: () => fetchNotice(id), retry: false });
+  if (isLoading) return <div className="px-4 py-10 text-center text-sm text-muted-foreground">Loading…</div>;
+  if (isError || !n) return (
+    <div className={cn(GRID_CARD, "px-4 py-10 text-center text-sm")}>
+      <p className="text-destructive">{translateError((error as Error)?.message || "Notice not found")}</p>
+      <button type="button" onClick={onBack} className={cn(GRID_BTN, "mt-3")}>All notices</button>
+    </div>
+  );
+  const cfg = STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft;
+  const dl = deadlineInfo(n.ResponseDeadline, n.Status);
+  const steps = [
+    { step: "Created", at: n.CreatedAt }, { step: "Sent", at: n.SentAt, note: n.DeliveryMode ? `By ${modeText(n.DeliveryMode)}` : "" },
+    { step: "Acknowledged", at: n.AcknowledgedAt }, { step: "Disputed", at: n.DisputedAt, note: n.DisputeReason },
+  ].filter((s) => s.at);
+  return (
+    <div className="space-y-4">
+      <MoneyBand eyebrow={`Possession Notice · ${n.NoticeNo}`} title={<span className="capitalize">{asName(n.ApplicantName)}</span>}
+        status={<span className="inline-flex items-center h-5 px-2 rounded-full border border-white/30 text-[0.6875rem] font-semibold text-white">{cfg.label}</span>}
+        sub={[n.BookingNo, n.UnitNo, n.Mobile].filter(Boolean).join(" · ")}
+        actions={<>
+          <button type="button" onClick={onBack} className={BAND_KEY}><ArrowLeft size={13} /> All notices</button>
+          <Link to={`/crm/bookings?view=${n.BookingId}`} className={BAND_KEY}><ExternalLink size={13} /> Open booking</Link>
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+        </>}
+        lead={cfg.label} leadNote={`step ${stepOf(n.Status)} of ${STEPS.length}`}
+        bar={<StepBar status={n.Status} onDark />}
+        figures={[
+          { label: "Offered on", value: fmtDate(n.OfferedDate), note: "Date of the offer" },
+          { label: "Respond by", dot: dl?.late ? BAND_DOT.overdue : undefined, value: fmtDate(n.ResponseDeadline), note: dl ? dl.label : "Customer's deadline", alert: !!dl?.late },
+          { label: "Sent by", value: modeText(n.DeliveryMode), note: n.SentAt ? `On ${fmtDate(n.SentAt)}` : "Not sent yet" },
+          { label: "Dues", dot: n.OutstandingMilestones > 0 ? BAND_DOT.overdue : BAND_DOT.collected, value: n.OutstandingMilestones > 0 ? fmtRupees(n.OutstandingBalance) : "Clear", note: n.OutstandingMilestones > 0 ? "Clear before Handover" : "Nothing outstanding", alert: n.OutstandingMilestones > 0 },
+        ]}
+        footer={nextLine(n)} />
+      <GridRelated icon={ListChecks} title="Actions and steps" action={actions(n)}>
+        <GridMiniTable rows={steps} rowKey={(s) => s.step} empty="No steps recorded." cols={[
+          { header: "Step", cell: (s) => <span className="font-medium">{s.step}</span> },
+          { header: "When", cell: (s) => <span className="tabular-nums">{fmtDate(s.at)}</span> },
+          { header: "Details", cell: (s) => <span className="text-muted-foreground whitespace-normal">{s.note || "—"}</span> },
+        ]} />
+      </GridRelated>
+      <GridRelated icon={StickyNote} title="Notes">
+        <p className="px-4 py-3 text-[0.8125rem] whitespace-pre-wrap">{n.Notes || <span className="text-muted-foreground">No notes.</span>}</p>
+      </GridRelated>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 const CrmPossessionNotice: React.FC = () => {
   const qc = useQueryClient();
@@ -205,14 +338,19 @@ const CrmPossessionNotice: React.FC = () => {
   const [proxyDisputeTarget, setProxyDisputeTarget] = useState<number | null>(null);
   const [proxySaving, setProxySaving] = useState(false);
 
-  const list = useCrmListState({ pageSize: 25, defaultSort: { key: "CreatedAt", dir: "desc" } });
+  const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
+  const [exporting, setExporting] = useState(false);
+  const list = useCrmListState({ pageSize, defaultSort: { key: "CreatedAt", dir: "desc" } });
+  // The open notice lives in the address, so a refresh or a shared link lands on it (?open=1 is the New Notice link).
+  const noticeId = sp.get("notice");
+  const openNotice = (id: number) => setSp((p) => { p.set("notice", String(id)); return p; });
+  const closeNotice = () => setSp((p) => { p.delete("notice"); return p; });
   const { data, isLoading, isError, error, isFetching, refetch } =
     useQuery({ queryKey: ["crm-possession-notice", list.query], queryFn: () => fetchPage(list.query), staleTime: 30_000 });
   const pageData = useSticky(data);
   const rows = pageData?.rows ?? [];
   const total = pageData?.total ?? 0;
   const counts = pageData?.counts ?? {};
-  const showOnboarding = !isLoading && !isError && (counts.All ?? 0) === 0 && !list.hasFilters;
 
   const invalidate = () => ["crm-possession-notice", "crm-possession-notice-eligible", "crm-booking-lifecycle", "crm-dashboard", "crm-legal-milestones", "crm-handover"]
     .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
@@ -324,14 +462,6 @@ const CrmPossessionNotice: React.FC = () => {
     finally { setProxySaving(false); }
   };
 
-  const tabs: CrmStatusTab[] = [
-    { key: "All", label: "All", count: counts.All ?? 0 },
-    { key: CrmStatus.DRAFT, label: "Draft", count: counts[CrmStatus.DRAFT] ?? 0, dot: "bg-foreground/20" },
-    { key: "Sent", label: "Sent", count: counts.Sent ?? 0, dot: "bg-foreground/50" },
-    { key: "Acknowledged", label: "Acknowledged", count: counts.Acknowledged ?? 0, dot: "bg-foreground" },
-    { key: "Disputed", label: "Disputed", count: counts.Disputed ?? 0, dot: "bg-destructive" },
-  ];
-
   // One main action per row; the rest in the ⋯ menu. All need the edit right.
   const renderActions = (n: any) => {
     let primary: React.ReactNode = null;
@@ -356,124 +486,79 @@ const CrmPossessionNotice: React.FC = () => {
       primary = <button onClick={() => navigate(`/crm/handover?bookingId=${n.BookingId}`)} className={`${KEY_LINE} h-7 px-2.5`}>Handover <ArrowRight size={11} /></button>;
     }
     return (
-      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+      <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
         {primary}
         <CrmRowMenu items={items} />
       </div>
     );
   };
 
-  const columns: CrmColumn<any>[] = [
-    { key: "notice", header: "Notice", sortKey: "NoticeNo", cell: (n) => (
-      <span className="inline-flex items-center gap-1.5">
-        <span className="font-heading text-xs font-semibold tabular-nums whitespace-nowrap">{n.NoticeNo}</span>
-        {n.Notes && <span title={n.Notes}><StickyNote size={11} className="text-muted-foreground" /></span>}
-      </span>
-    ) },
-    { key: "applicant", header: "Customer", sortKey: "ApplicantName", cell: (n) => (
-      <span className="font-medium block truncate max-w-[220px]" title={n.ApplicantName}><ApplicantNames name={n.ApplicantName} bookingId={n.BookingId} applicationId={n.ApplicationId} /></span>
-    ) },
-    { key: "booking", header: "Booking", sortKey: "BookingNo", className: "hidden md:table-cell",
-      cell: (n) => <span className="font-heading text-xs tabular-nums text-muted-foreground whitespace-nowrap">{n.BookingNo}</span> },
-    { key: "unit", header: "Unit", className: "hidden md:table-cell", cell: (n) => <span className="text-xs whitespace-nowrap">{n.UnitNo}</span> },
-    { key: "status", header: "Status", sortKey: "Status", cell: (n) => {
-      const cfg = STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft;
-      return <SheetMark text={cfg.label} tone={cfg.tone} />;
-    } },
-    { key: "mode", header: "Sent by", className: "hidden xl:table-cell", cell: (n) => <span className="text-xs text-muted-foreground whitespace-nowrap">{n.DeliveryMode ? MODE_LABEL[n.DeliveryMode] ?? n.DeliveryMode : "—"}</span> },
-    { key: "offered", header: "Offered", sortKey: "OfferedDate", className: "hidden lg:table-cell", cell: (n) => <span className="text-xs whitespace-nowrap tabular-nums">{fmtDate(n.OfferedDate)}</span> },
-    { key: "deadline", header: "Respond by", sortKey: "ResponseDeadline", cell: (n) => {
-      const dl = deadlineInfo(n.ResponseDeadline, n.Status);
-      return (
-        <span className="inline-flex items-center gap-1.5 whitespace-nowrap tabular-nums">
-          <span className="text-xs">{fmtDate(n.ResponseDeadline)}</span>
-          {dl && <span className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em] ${dl.late ? "text-destructive" : "text-muted-foreground"}`}>{dl.label}</span>}
-        </span>
-      );
-    } },
-    { key: "dues", header: "Dues", align: "right", cell: (n) => n.OutstandingMilestones > 0 ? (
-      <span className="font-heading text-xs font-bold text-destructive tabular-nums whitespace-nowrap"
-        title={`${n.OutstandingMilestones} milestone(s) outstanding: to be cleared before Handover`}>{fmtRupees(n.OutstandingBalance)}</span>
-    ) : <span className="text-xs text-muted-foreground" title="All dues cleared">Clear</span> },
-    { key: "actions", header: <span className="sr-only">Actions</span>, align: "right", className: "w-px whitespace-nowrap", cell: renderActions },
-  ];
-
+  const noticeCols = buildCols(renderActions);
+  const [prefs, setPrefs] = useGridPrefs("crm-possession-notice-cols-v1", noticeCols);
+  const all = counts.All ?? 0, ack = counts.Acknowledged ?? 0, sent = counts.Sent ?? 0, draft = counts[CrmStatus.DRAFT] ?? 0, disputed = counts.Disputed ?? 0, late = counts.Overdue ?? 0;
+  const tabs: { key: string; label: string; count: number | null }[] = [
+    { key: "All", label: "All notices", count: all }, { key: CrmStatus.DRAFT, label: "Draft", count: draft }, { key: "Sent", label: "Sent", count: sent },
+    { key: "Overdue", label: "Response overdue", count: late }, { key: "Acknowledged", label: "Acknowledged", count: ack }, { key: "Disputed", label: "Disputed", count: disputed },
+  ].map((t) => ({ ...t, count: pageData ? t.count : null }));
   const openNew = () => { setSp({}, { replace: true }); setCreateOpen(true); };
-  const figures = [
-    { label: "Notices", value: counts.All ?? 0, note: `${counts[CrmStatus.DRAFT] ?? 0} still in draft`, go: "All" },
-    { label: "Sent", value: counts.Sent ?? 0, note: "Waiting for the customer", go: "Sent" },
-    { label: "Acknowledged", value: counts.Acknowledged ?? 0, note: "Handover can be scheduled", go: "Acknowledged" },
-    { label: "Disputed", value: counts.Disputed ?? 0, note: "Objection to settle", go: "Disputed" },
-  ];
+  const refreshBtn = (
+    <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+  );
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const url = (n: number) => ({ ...list.query, page: n, pageSize: 100 });
+      const first = await fetchPage(url(1));
+      let out = first.rows;
+      for (let n = 2; out.length < first.total; n++) { const more = await fetchPage(url(n)); if (!more.rows.length) break; out = out.concat(more.rows); }
+      exportGrid(out, noticeCols, `possession-notices-${list.status}`);
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setExporting(false); }
+  };
 
   return (
-    <>
+    <div className="space-y-4">
       <Breadcrumbs items={["Dashboard", "CRM", "Possession Notice"]} />
-      <SheetShell
-        eyebrow="CivilierERP · CRM · Possession"
-        title="Possession Notice"
-        subtitle="The formal offer of possession to a buyer. It must be acknowledged before Handover is scheduled."
-        action={
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
-            {canCreate && <button onClick={openNew} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> New notice</button>}
+      {noticeId ? <NoticeRecord id={noticeId} actions={renderActions} onBack={closeNotice} /> : (
+      <>
+      <MoneyBand eyebrow="CRM · Possession" title="Possession Notice" sub="The formal offer of possession to a buyer. It must be acknowledged before Handover is scheduled."
+        actions={<>
+          {canCreate && <button type="button" onClick={openNew} className={BAND_KEY_MAIN}><Plus size={13} /> New notice</button>}
+          {refreshBtn}
+        </>}
+        lead={`${ack} of ${all}`} leadNote="notices acknowledged"
+        bar={<CollectionBar onDark due={all} collected={ack} finance={sent} recorded={0} />}
+        figures={[
+          { label: "Acknowledged", dot: BAND_DOT.collected, value: String(ack), note: "Handover can be scheduled" },
+          { label: "Sent", dot: BAND_DOT.finance, value: String(sent), note: late ? `${late} past the response date` : "Waiting for the customer", alert: late > 0 },
+          { label: "Draft", dot: BAND_DOT.notDue, value: String(draft), note: "Not yet sent" },
+          { label: "Disputed", dot: BAND_DOT.overdue, value: String(disputed), note: "Objection to settle", alert: disputed > 0 },
+        ]} />
+      <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
+        <GridTabs<string> label="Possession notices" active={list.status} onChange={list.setStatus} tabs={tabs} />
+        <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-border">
+          <GridSearch value={list.searchInput} onChange={list.setSearchInput} placeholder="Notice, customer, booking or unit" />
+          <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+          {list.hasFilters && <button type="button" onClick={list.reset} className={GRID_BTN}>Clear filters</button>}
+          <div className="ml-auto flex items-center gap-2">
+            <GridSavedViews storageKey="crm-possession-notice-views"
+              current={{ status: list.status, search: list.searchInput.trim(), cpb: list.cpb, sort: list.sort, pageSize }}
+              onApply={(v) => { setPageSize(GRID_PAGE_SIZES.includes(v.pageSize as typeof GRID_PAGE_SIZES[number]) ? v.pageSize : GRID_PAGE_SIZES[0]); list.apply(v); }} />
+            <GridColumnChooser cols={noticeCols} prefs={prefs} onChange={setPrefs} />
+            <button type="button" onClick={handleExport} disabled={exporting} className={GRID_BTN} title="Export to Excel"><Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span></button>
           </div>
-        }
-      >
-        <div className="space-y-5">
-          <div className="bg-card" style={{ border: RULE }}>
-            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
-              {figures.map((x) => (
-                <div key={x.label}>
-                  <button onClick={() => list.setStatus(x.go)} className="label link">{x.label}</button>
-                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
-                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {showOnboarding ? (
-            <div className="bg-card" style={{ border: RULE }}>
-              <div className="py-10 text-center space-y-3 px-4" style={{ borderBottom: RULE }}>
-                <FileText size={22} className="mx-auto text-muted-foreground" />
-                <p className="font-medium text-foreground">No possession notices yet</p>
-                <p className="text-sm text-muted-foreground max-w-sm mx-auto">Issue one once the Pre-Possession check is Ready and the project's OC / CC is received.</p>
-                <div className="flex justify-center gap-2">
-                  <button onClick={() => navigate("/crm/pre-possession")} className={`${KEY_LINE} h-9 px-3`}>Pre-Possession <ChevronRight size={12} /></button>
-                  {canCreate && <button onClick={openNew} className={`${KEY_INK} h-9 px-3`}><Plus size={12} /> New notice</button>}
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-4">
-                {[["Draft", "Dates and delivery"], ["Sent", "Sent by the chosen means"], ["Customer replies", "Acknowledges or objects"], ["Acknowledged", "Handover can be scheduled"]].map(([t, s], i) => (
-                  <div key={t} className="px-4 py-3" style={i < 3 ? { borderRight: RULE_SOFT } : undefined}>
-                    <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em]"><span className="tabular-nums text-muted-foreground mr-1.5">{i + 1}</span>{t}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{s}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <CrmListToolbar tabs={tabs} status={list.status} onStatus={list.setStatus}
-                searchValue={list.searchInput} onSearch={list.setSearchInput} placeholder="Search notice, customer, booking, unit…">
-                <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
-              </CrmListToolbar>
-              <CrmDataTable
-                columns={columns} rows={rows} rowKey={(n) => n.Id}
-                loading={isLoading} fetching={isFetching}
-                error={isError ? (error as Error)?.message : null} onRetry={() => refetch()}
-                sort={list.sort} onSort={list.toggleSort}
-                rowAccent={(n) => (STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft).accent}
-                empty={<>No notice matches these filters. <button onClick={list.reset} className="font-semibold text-foreground hover:underline ml-1">Clear filters</button></>}
-                page={list.page} pageSize={list.pageSize} total={total} onPage={list.setPage}
-              />
-            </div>
-          )}
         </div>
-      </SheetShell>
+        <CrmGrid cols={noticeCols} prefs={prefs} onPrefs={setPrefs} rows={rows} rowKey={(n) => n.Id} noRowNumbers
+          loading={isLoading} fetching={isFetching} error={isError ? translateError((error as Error)?.message) : null} onRetry={() => refetch()}
+          sort={list.sort} onSort={list.toggleSort} onRowClick={(n) => openNotice(n.Id)}
+          empty={list.hasFilters ? "No notice matches these filters." : "No possession notices yet. Issue one once the Pre-Possession check is Ready and the OC / CC is received."}
+          page={list.page} pageSize={pageSize} total={total} onPage={list.setPage} onPageSize={(n) => { setPageSize(n); list.setPage(1); }} />
+      </div>
+      </>
+      )}
 
-      <Dialog open={!!sentTarget} onOpenChange={(o) => { if (!o) { setSentTarget(null); setSentMode(""); } }}>
+      {sentTarget && (
+      <Dialog open onOpenChange={(o) => { if (!o) { setSentTarget(null); setSentMode(""); } }}>
         <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
           <Head icon={<Send size={14} />} title="Mark sent" />
           {sentTarget && <p className="text-xs text-muted-foreground -mt-2 tabular-nums">{sentTarget.NoticeNo} · {sentTarget.ApplicantName}</p>}
@@ -484,8 +569,10 @@ const CrmPossessionNotice: React.FC = () => {
           </Foot>
         </DialogContent>
       </Dialog>
+      )}
 
-      <Dialog open={!!ackTarget} onOpenChange={(o) => { if (!o) setAckTarget(null); }}>
+      {ackTarget && (
+      <Dialog open onOpenChange={(o) => { if (!o) setAckTarget(null); }}>
         <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
           <Head icon={<CheckCircle2 size={14} />} title="Acknowledge notice" />
           {ackTarget && <p className="text-sm">The customer has accepted <span className="font-heading font-bold tabular-nums">{ackTarget.NoticeNo}</span> ({ackTarget.ApplicantName}). Handover can then be scheduled.</p>}
@@ -495,8 +582,10 @@ const CrmPossessionNotice: React.FC = () => {
           </Foot>
         </DialogContent>
       </Dialog>
+      )}
 
-      <Dialog open={!!editTarget} onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
+      {editTarget && (
+      <Dialog open onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
         <DialogContent className="max-w-md p-5 gap-4 rounded-none" style={{ border: RULE }}>
           <Head icon={<Pencil size={14} />} title={`Edit draft · ${editTarget?.NoticeNo ?? ""}`} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -513,8 +602,10 @@ const CrmPossessionNotice: React.FC = () => {
           </Foot>
         </DialogContent>
       </Dialog>
+      )}
 
-      <Dialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+      {deleteTarget && (
+      <Dialog open onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
         <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
           <Head icon={<Trash2 size={14} />} title="Delete notice" destructive />
           <p className="text-sm">Delete <span className="font-heading font-bold tabular-nums">{deleteTarget?.NoticeNo}</span> ({deleteTarget?.ApplicantName}) for good? A new notice can then be issued for the booking. Only drafts can be deleted.</p>
@@ -524,8 +615,10 @@ const CrmPossessionNotice: React.FC = () => {
           </Foot>
         </DialogContent>
       </Dialog>
+      )}
 
-      <Dialog open={!!disputeDialog} onOpenChange={(o) => { if (!o) { setDisputeDialog(null); setDisputeReason(""); } }}>
+      {disputeDialog && (
+      <Dialog open onOpenChange={(o) => { if (!o) { setDisputeDialog(null); setDisputeReason(""); } }}>
         <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
           <Head icon={<AlertTriangle size={14} />} title="Mark disputed" destructive />
           <p className="text-xs text-muted-foreground -mt-2">The notice stays disputed until the objection is settled and it is withdrawn and sent again.</p>
@@ -538,8 +631,10 @@ const CrmPossessionNotice: React.FC = () => {
           </Foot>
         </DialogContent>
       </Dialog>
+      )}
 
-      <Dialog open={!!retractDialog} onOpenChange={(o) => { if (!o) { setRetractDialog(null); setRetractReason(""); } }}>
+      {retractDialog && (
+      <Dialog open onOpenChange={(o) => { if (!o) { setRetractDialog(null); setRetractReason(""); } }}>
         <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
           <Head icon={<RotateCcw size={14} />} title="Withdraw dispute" />
           <p className="text-xs text-muted-foreground -mt-2">The notice goes back to Draft so it can be revised and sent again.</p>
@@ -552,6 +647,7 @@ const CrmPossessionNotice: React.FC = () => {
           </Foot>
         </DialogContent>
       </Dialog>
+      )}
 
       {proxyAckTarget !== null && (
         <ProxyActionDialog title="Record customer's acknowledgement"
@@ -567,7 +663,7 @@ const CrmPossessionNotice: React.FC = () => {
       {createOpen && canCreate && (
         <CreateDialog onClose={() => { setCreateOpen(false); setSp({}, { replace: true }); }} onCreated={invalidate} navigate={navigate} prefillBookingId={prefillBookingId} />
       )}
-    </>
+    </div>
   );
 };
 

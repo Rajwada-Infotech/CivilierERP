@@ -3,19 +3,22 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, CheckSquare, Key, Plus, RefreshCw, Square, User } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Download, ExternalLink, Key, Plus, RefreshCw } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import {
+  CrmGrid, GridColumnChooser, GridFields, GridMiniTable, GridRelated, GridSavedViews, GridSearch, GridTabs, GridToneMark,
+  exportGrid, useGridPrefs, GRID_BTN, GRID_CARD, GRID_PAGE_SIZES, GRID_SHEET_KEYS, type GridCol,
+} from "@/components/crm/CrmDataTable";
+import { useCrmListState, useSticky, listParams } from "@/hooks/useCrmListState";
+import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, CollectionBar, Initials, MoneyBand, asName } from "./payments/parts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableSelect } from "@/components/SearchableSelect";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
-import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { promptNextStep } from "@/lib/workflowNav";
 import { translateError } from "@/lib/translateError";
@@ -35,7 +38,6 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
 const STEPS = ["Scheduled", "SnagInspection", "SnagPending", "Completed"] as const;
 const STATUS_LABEL: Record<string, string> = { Scheduled: "Scheduled", SnagInspection: "Inspecting", SnagPending: "Snags to fix", Completed: "Completed", Cancelled: "Cancelled" };
 const ACTION_LABEL: Record<string, string> = { SnagInspection: "Start inspection", SnagPending: "Inspection done", Completed: "Complete handover", Cancelled: "Cancel handover" };
-const tone = (s: string): "done" | "waiting" | "stopped" => (s === "Completed" ? "done" : s === "Cancelled" ? "stopped" : "waiting");
 
 const SNAG_CATEGORIES = ["Electrical", "Plumbing", "Civil", "Paint", "Carpentry", "Other"];
 const INP = "w-full h-9 border border-foreground/40 focus:border-foreground bg-card px-2.5 text-sm text-foreground outline-none";
@@ -58,16 +60,8 @@ async function fetchHandoverByBooking(bookingId: string): Promise<any | null> {
   } catch { return null; }
 }
 
-const PAGE_SIZE = 20;
-interface HandoverListFilters { search: string; status: string; companyId: string; projectId: string; blockId: string }
 // Throws, so a failed load shows as one instead of an empty list.
-async function fetchHandoversList(filters: HandoverListFilters, page: number) {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.status !== "All") params.set("status", filters.status);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
+async function fetchHandoversList(params: URLSearchParams) {
   const r = await fetchWithAuth(`${API}?${params}`);
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data?.error || `Could not load the handovers (${r.status}).`);
@@ -100,27 +94,52 @@ const Title: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <DialogHeader><DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em] flex items-center gap-2">{children}</DialogTitle></DialogHeader>
 );
 
-/** The four steps as square marks: done solid, current outlined. */
-const StepBar: React.FC<{ status: string }> = ({ status }) => {
-  const at = STEPS.indexOf(status as any);
+/** The four steps as one line: green once complete, amber on the way, red if cancelled. */
+const StepBar: React.FC<{ status: string; onDark?: boolean }> = ({ status, onDark }) => {
+  const at = status === "Completed" ? STEPS.length : STEPS.indexOf(status as any) + 1;
+  const off = onDark ? "bg-white/15" : "bg-slate-200 dark:bg-slate-700";
   return (
-    <div className="flex items-center flex-wrap gap-y-2">
-      {STEPS.map((s, i) => {
-        const done = status === "Completed" || (at > i);
-        const cur = at === i && status !== "Completed";
-        return (
-          <React.Fragment key={s}>
-            <span className="flex items-center gap-1.5">
-              <span className={`w-5 h-5 flex items-center justify-center font-heading text-[0.5625rem] font-bold ${done ? "bg-foreground text-card" : cur ? "border-2 border-foreground" : "border border-foreground/25 text-muted-foreground"}`}>{i + 1}</span>
-              <span className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] ${done || cur ? "" : "text-muted-foreground"}`}>{STATUS_LABEL[s]}</span>
-            </span>
-            {i < STEPS.length - 1 && <span className={`w-6 h-px mx-2 ${done ? "bg-foreground" : "bg-foreground/25"}`} />}
-          </React.Fragment>
-        );
-      })}
-    </div>
+    <span className="flex gap-0.5 w-full">
+      {STEPS.map((s, i) => (
+        <span key={s} title={STATUS_LABEL[s]} className={cn("flex-1 rounded-full", onDark ? "h-2.5" : "h-1.5",
+          status === "Cancelled" ? "bg-rose-500/60" : i < at ? (status === "Completed" ? (onDark ? BAND_DOT.collected : "bg-emerald-500") : (onDark ? BAND_DOT.finance : "bg-amber-400")) : off)} />
+      ))}
+    </span>
   );
 };
+
+const handoverDash = <span className="text-muted-foreground">—</span>;
+const TAB_KEYS = ["All", ...STEPS, "Cancelled"];
+const HO_COLS: GridCol<any>[] = [
+  { id: "customer", label: "Customer", locked: true, sortKey: "ApplicantName", csv: (r) => r.ApplicantName, cell: (r) => (
+    <span className="flex items-center gap-3 py-1.5 min-w-0">
+      <Initials name={r.ApplicantName} />
+      <span className="min-w-0">
+        <span className="block font-semibold text-foreground capitalize truncate" title={r.ApplicantName}>{asName(r.ApplicantName)}</span>
+        <span className="block text-xs text-muted-foreground tabular-nums truncate">{[r.BookingNo, r.UnitNo, r.ProjectName].filter(Boolean).join(" · ")}</span>
+      </span>
+    </span>
+  ) },
+  { id: "progress", label: "Progress", sortKey: "Status", csv: (r) => STATUS_LABEL[r.Status] ?? r.Status, cell: (r) => (
+    <span className="block min-w-[13rem] py-1.5">
+      <StepBar status={r.Status} />
+      <span className="mt-1.5 flex justify-between gap-3 text-xs">
+        <span className={cn("font-medium", r.Status === "Cancelled" ? "text-destructive" : "text-foreground")}>{STATUS_LABEL[r.Status] ?? r.Status}</span>
+        <span className="text-muted-foreground tabular-nums">{r.Status === "Cancelled" ? "" : `${r.Status === "Completed" ? STEPS.length : STEPS.indexOf(r.Status) + 1} of ${STEPS.length}`}</span>
+      </span>
+    </span>
+  ) },
+  { id: "scheduled", label: "Scheduled for", sortKey: "ScheduledDate", csv: (r) => r.ScheduledDate, cell: (r) => <span className="tabular-nums">{fmtDate(r.ScheduledDate)}</span> },
+  { id: "handed", label: "Handed over", sortKey: "ActualHandoverDate", csv: (r) => r.ActualHandoverDate, cell: (r) => <span className="tabular-nums">{fmtDate(r.ActualHandoverDate)}</span> },
+  { id: "snags", label: "Open snags", align: "right", csv: (r) => r.OpenSnagCount, cell: (r) => (r.OpenSnagCount > 0 ? <span className="tabular-nums font-semibold text-destructive">{r.OpenSnagCount}</span> : handoverDash) },
+  { id: "keys", label: "Keys handed by", csv: (r) => r.KeyHandoverByName, cell: (r) => r.KeyHandoverByName || handoverDash },
+  { id: "booking", label: "Booking", hiddenByDefault: true, sortKey: "BookingNo", csv: (r) => r.BookingNo, cell: (r) => <span className="tabular-nums">{r.BookingNo}</span> },
+  { id: "unit", label: "Unit", hiddenByDefault: true, csv: (r) => r.UnitNo, cell: (r) => r.UnitNo },
+  { id: "project", label: "Project", hiddenByDefault: true, csv: (r) => r.ProjectName, cell: (r) => r.ProjectName || "—" },
+  { id: "mobile", label: "Mobile", hiddenByDefault: true, csv: (r) => r.Mobile, cell: (r) => <span className="tabular-nums">{r.Mobile || "—"}</span> },
+  { id: "dues", label: "Final dues", hiddenByDefault: true, csv: (r) => (r.FinalDuesCleared ? "Cleared" : "Not confirmed"), cell: (r) => (r.FinalDuesCleared ? "Cleared" : "Not confirmed") },
+  { id: "notes", label: "Notes", hiddenByDefault: true, csv: (r) => r.Notes, cell: (r) => r.Notes || "—" },
+];
 
 const CrmHandover: React.FC = () => {
   const qc = useQueryClient();
@@ -129,17 +148,16 @@ const CrmHandover: React.FC = () => {
   const deepLinkBookingId = sp.get("bookingId");
   const rights = usePageRights("crm-handover");
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [page, setPage] = useState(1);
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
+  // The open handover lives in the address, so a refresh or a shared link lands on it.
+  const openParam = sp.get("open");
+  const selectedId = openParam ? Number(openParam) : null;
+  const openHandover = (id: number) => setSp((p) => { p.set("open", String(id)); return p; });
+  const closeHandover = () => setSp((p) => { p.delete("open"); return p; });
+
+  const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
+  const [exporting, setExporting] = useState(false);
+  const list = useCrmListState({ pageSize, defaultSort: { key: "", dir: "desc" } });
+  const [prefs, setPrefs] = useGridPrefs("crm-handover-cols-v1", HO_COLS);
   const [newDialog, setNewDialog] = useState(false);
   const [snagDialog, setSnagDialog] = useState(false);
   const [completeDialog, setCompleteDialog] = useState(false);
@@ -149,22 +167,17 @@ const CrmHandover: React.FC = () => {
   const [snagForm, setSnagForm] = useState({ Category: "Electrical", Description: "" });
   const [completeForm, setCompleteForm] = useState({ ActualHandoverDate: "", KeyHandoverBy: "", FinalDuesCleared: false, CustomerAcknowledged: false });
 
-  const listFilters: HandoverListFilters = useMemo(
-    () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, statusFilter, cpb],
-  );
-  const { data: listResult, isLoading, isError, error, isFetching, refetch } = useQuery({
-    queryKey: ["crm-handovers", listFilters, page],
-    queryFn: () => fetchHandoversList(listFilters, page),
-    placeholderData: (prev) => prev,
+  const params = useMemo(() => listParams(list.query), [list.query]);
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
+    queryKey: ["crm-handovers", params.toString()],
+    queryFn: () => fetchHandoversList(params),
     staleTime: 30_000,
   });
-  const handovers = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
+  const listResult = useSticky(data);
   const counts = listResult?.statusCounts ?? {};
   const countOf = (s: string) => (s === "All" ? Object.values(counts).reduce((a, b) => a + b, 0) : counts[s] || 0);
 
-  const { data: detail, isError: detailError } = useQuery({
+  const { data: detail, isError: detailError, isFetching: detailFetching, refetch: refetchDetail } = useQuery({
     queryKey: ["crm-handover-detail", selectedId],
     queryFn: () => fetchDetail(selectedId!),
     enabled: selectedId != null,
@@ -179,10 +192,9 @@ const CrmHandover: React.FC = () => {
   // ?bookingId=X opens that booking's handover, or the Schedule dialog for it.
   useEffect(() => {
     if (!deepLinkBookingId) return;
-    setSp((prev) => { prev.delete("bookingId"); return prev; }, { replace: true });
     fetchHandoverByBooking(deepLinkBookingId).then((existing) => {
-      if (existing) setSelectedId(existing.Id);
-      else if (rights.canCreate) { setNewForm({ ...emptySchedule(), BookingId: deepLinkBookingId }); setNewDialog(true); }
+      setSp((prev) => { prev.delete("bookingId"); if (existing) prev.set("open", String(existing.Id)); return prev; }, { replace: true });
+      if (!existing && rights.canCreate) { setNewForm({ ...emptySchedule(), BookingId: deepLinkBookingId }); setNewDialog(true); }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkBookingId]);
@@ -289,174 +301,121 @@ const CrmHandover: React.FC = () => {
   const snags: any[] = detail?.snags ?? [];
   const openSnags = snags.filter((s) => s.Status !== CrmStatus.RESOLVED).length;
 
-  const figures = [
-    { label: "Handovers", value: countOf("All"), note: `${countOf("Scheduled")} scheduled`, go: "All" },
-    { label: "Inspecting", value: countOf("SnagInspection") + countOf("SnagPending"), note: `${countOf("SnagPending")} with snags to fix`, go: "SnagPending" },
-    { label: "Completed", value: countOf("Completed"), note: "Keys handed over", go: "Completed" },
-    { label: "Cancelled", value: countOf("Cancelled"), note: "Not going ahead", go: "Cancelled" },
-  ];
+  const active = countOf("All") - countOf("Cancelled");
+  const inspecting = countOf("SnagInspection") + countOf("SnagPending");
+  const hasFilters = list.hasFilters;
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const url = (n: number) => { const p = new URLSearchParams(params); p.set("page", String(n)); p.set("pageSize", "100"); return p; };
+      const first = await fetchHandoversList(url(1));
+      let out = first.rows;
+      for (let n = 2; out.length < first.total; n++) { const more = await fetchHandoversList(url(n)); if (!more.rows.length) break; out = out.concat(more.rows); }
+      exportGrid(out, HO_COLS, `handovers-${list.status}`);
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setExporting(false); }
+  };
+  const nextLine = !h ? "" : h.Status === "Completed" ? "Keys handed over. Any later defect goes to Service Tickets."
+    : h.Status === "Cancelled" ? "Cancelled. A new handover can be scheduled."
+    : openSnags > 0 ? `${openSnags} snag${openSnags === 1 ? "" : "s"} still open. They must be resolved before the handover can be completed.`
+    : "Move it on when the step is done. Completing needs the date, who handed the keys, final dues and the customer's acknowledgement.";
 
   return (
-    <>
+    <div className="space-y-4">
       <Breadcrumbs items={["Dashboard", "CRM", "Handover"]} />
-      <SheetShell
-        eyebrow="CivilierERP · CRM · Possession"
-        title="Handover"
-        subtitle="Schedule the key handover, inspect for snags and fix them, then hand over: dues cleared and the customer's acknowledgement on record."
-        action={
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
-            {rights.canCreate && <button onClick={() => { setNewForm(emptySchedule()); setNewDialog(true); }} className={`${KEY_INK} h-9 px-4`}><Key size={13} /> Schedule handover</button>}
+      {selectedId != null ? (
+        detailError ? (
+          <div className={cn(GRID_CARD, "px-4 py-10 text-center text-sm")}>
+            <p className="text-destructive">Could not load this handover.</p>
+            <button type="button" onClick={closeHandover} className={cn(GRID_BTN, "mt-3")}>All handovers</button>
           </div>
-        }
-      >
-        <div className="space-y-5">
-          <div className="bg-card" style={{ border: RULE }}>
-            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
-              {figures.map((x) => (
-                <div key={x.label}>
-                  <button onClick={() => updateFilter(setStatusFilter)(x.go)} className="label link">{x.label}</button>
-                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
-                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
-                </div>
-              ))}
-            </div>
+        ) : !h ? <div className="px-4 py-10 text-center text-sm text-muted-foreground">Loading…</div> : (
+          <div className="space-y-4">
+            <MoneyBand eyebrow="Handover" title={<span className="capitalize">{asName(h.ApplicantName)}</span>}
+              status={<span className="inline-flex items-center h-5 px-2 rounded-full border border-white/30 text-[0.6875rem] font-semibold text-white">{STATUS_LABEL[h.Status] ?? h.Status}</span>}
+              sub={[h.BookingNo, h.UnitNo, h.ProjectName, h.Mobile].filter(Boolean).join(" · ")}
+              actions={<>
+                <button type="button" onClick={closeHandover} className={BAND_KEY}><ArrowLeft size={13} /> All handovers</button>
+                <Link to={`/crm/bookings?view=${h.BookingId}`} className={BAND_KEY}><ExternalLink size={13} /> Open booking</Link>
+                {rights.canEdit && nextSteps.map((s) => (
+                  <button key={s} type="button" onClick={() => moveTo(s)} disabled={s === "Completed" && openSnags > 0} title={s === "Completed" && openSnags > 0 ? "Resolve the open snags first." : undefined}
+                    className={cn(s === "Cancelled" ? `${BAND_KEY} !text-rose-300` : s === "Completed" ? BAND_KEY_MAIN : BAND_KEY, "disabled:opacity-50")}>
+                    {ACTION_LABEL[s] ?? s} {s !== "Cancelled" && <ArrowRight size={12} />}
+                  </button>
+                ))}
+                <button type="button" onClick={() => refetchDetail()} disabled={detailFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={detailFetching ? "animate-spin" : ""} /></button>
+              </>}
+              lead={STATUS_LABEL[h.Status] ?? h.Status} leadNote={h.Status === "Cancelled" ? "not going ahead" : `step ${h.Status === "Completed" ? STEPS.length : STEPS.indexOf(h.Status) + 1} of ${STEPS.length}`}
+              bar={<StepBar status={h.Status} onDark />}
+              figures={[
+                { label: "Scheduled for", value: fmtDate(h.ScheduledDate), note: "Planned date" },
+                { label: "Handed over", dot: h.ActualHandoverDate ? BAND_DOT.collected : undefined, value: fmtDate(h.ActualHandoverDate), note: h.KeyHandoverByName ? `By ${h.KeyHandoverByName}` : "Not yet" },
+                { label: "Final dues", dot: h.FinalDuesCleared ? BAND_DOT.collected : undefined, value: h.FinalDuesCleared ? "Cleared" : "Not confirmed", note: "Confirmed at completion" },
+                { label: "Open snags", dot: openSnags > 0 ? BAND_DOT.overdue : undefined, value: String(openSnags), note: `of ${snags.length} raised`, alert: openSnags > 0 },
+              ]}
+              footer={nextLine} />
+            <GridRelated icon={AlertTriangle} title="Snags and defects" count={snags.length}
+              action={rights.canCreate && !["Completed", "Cancelled"].includes(currentStatus) ? <button type="button" onClick={() => setSnagDialog(true)} className={cn(GRID_SHEET_KEYS.KEY_LINE, "h-7 px-2.5")}><Plus size={12} /> Raise snag</button> : undefined}>
+              <GridMiniTable rows={snags} rowKey={(s: any) => s.Id} empty="No snags raised." cols={[
+                { header: "Category", cell: (s: any) => <span className="font-medium">{s.Category}</span> },
+                { header: "Defect", cell: (s: any) => <span className="block whitespace-normal max-w-[28rem]">{s.Description}</span> },
+                { header: "Raised by", cell: (s: any) => <span className="text-muted-foreground">{s.RaisedByName || "—"}{s.CreatedAt ? ` · ${fmtDate(s.CreatedAt)}` : ""}</span> },
+                { header: "Resolved by", cell: (s: any) => <span className="text-muted-foreground">{s.ResolvedByName ? `${s.ResolvedByName}${s.ResolvedAt ? ` · ${fmtDate(s.ResolvedAt)}` : ""}` : "—"}</span> },
+                { header: "Status", cell: (s: any) => <GridToneMark text={s.Status === CrmStatus.RESOLVED ? "Resolved" : "Open"} tone={s.Status === CrmStatus.RESOLVED ? "done" : "stopped"} /> },
+                { header: "Actions", cell: (s: any) => (s.Status !== CrmStatus.RESOLVED && rights.canEdit ? <button type="button" onClick={() => handleResolveSnag(s.Id)} className={cn(GRID_SHEET_KEYS.KEY_LINE, "h-7 px-2.5")}>Mark resolved</button> : null) },
+              ]} />
+            </GridRelated>
+            <GridRelated icon={Key} title="Handover record">
+              <GridFields fields={[
+                { label: "Keys handed by", value: h.KeyHandoverByName || "—" },
+                { label: "Customer", value: h.CustomerAcknowledged ? "Took possession" : "Not yet" },
+                { label: "Notes", value: h.Notes || "—", wide: true },
+              ]} />
+            </GridRelated>
           </div>
-
-          <div className="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-340px)] md:min-h-[460px]">
-            {/* List */}
-            <div className="w-full md:w-80 shrink-0 flex flex-col bg-card min-h-0" style={{ border: RULE }}>
-              <div className="p-3 space-y-2" style={{ borderBottom: RULE }}>
-                <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-                  placeholder="Search customer or booking…"
-                  className="h-9 w-full border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
-                <select value={statusFilter} onChange={(e) => updateFilter(setStatusFilter)(e.target.value)} className={`${INP} text-xs`}>
-                  {["All", ...STEPS, "Cancelled"].map((s) => <option key={s} value={s}>{s === "All" ? "All statuses" : STATUS_LABEL[s]} ({countOf(s)})</option>)}
-                </select>
-                <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
-              </div>
-              <div className="flex-1 overflow-y-auto max-h-[45vh] md:max-h-none">
-                {isError ? (
-                  <p className="p-4 text-center text-sm text-destructive">{(error as Error)?.message}</p>
-                ) : isLoading ? (
-                  <p className="p-4 text-center text-muted-foreground text-sm">Loading…</p>
-                ) : handovers.length === 0 ? (
-                  <div className="p-5 text-center space-y-2">
-                    <Key size={18} className="mx-auto text-muted-foreground" />
-                    <p className="text-sm font-medium">{search || statusFilter !== "All" || cpb.projectId ? "No handover matches." : "No handover scheduled yet"}</p>
-                    {!(search || statusFilter !== "All" || cpb.projectId) && (
-                      <p className="text-xs text-muted-foreground">A handover can be scheduled once the agreement is registered, the possession notice acknowledged, the NOC issued and no dues are overdue.</p>
-                    )}
-                  </div>
-                ) : handovers.map((r: any) => {
-                  const on = selectedId === r.Id;
-                  return (
-                    <button key={r.Id} onClick={() => setSelectedId(r.Id)}
-                      className={`w-full text-left px-3 py-2.5 transition-colors ${on ? "bg-foreground text-card" : "hover:bg-primary/5"}`} style={{ borderBottom: RULE_SOFT }}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold truncate"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} applicationId={r.ApplicationId} /></span>
-                        <span className={on ? "[&_*]:!text-card" : ""}><SheetMark text={STATUS_LABEL[r.Status] ?? r.Status} tone={tone(r.Status)} /></span>
-                      </div>
-                      <div className={`mt-0.5 text-[0.6875rem] tabular-nums ${on ? "opacity-80" : "text-muted-foreground"}`}>
-                        {[r.BookingNo, r.UnitNo].filter(Boolean).join(" · ")}{r.ScheduledDate ? ` · ${fmtDate(r.ScheduledDate)}` : ""}
-                      </div>
-                      {r.OpenSnagCount > 0 && (
-                        <div className={`mt-0.5 text-[0.6875rem] font-semibold flex items-center gap-1 ${on ? "" : "text-destructive"}`}><AlertTriangle size={10} /> {r.OpenSnagCount} open snag{r.OpenSnagCount === 1 ? "" : "s"}</div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ borderTop: RULE_SOFT }}><CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} /></div>
-            </div>
-
-            {/* Detail */}
-            <div className="flex-1 min-w-0 min-h-[40vh] md:min-h-0 overflow-y-auto space-y-4">
-              {selectedId == null ? (
-                <div className="h-full min-h-[200px] flex items-center justify-center text-muted-foreground text-sm bg-card" style={{ border: RULE_SOFT }}>Pick a handover on the left.</div>
-              ) : detailError ? (
-                <p className="p-6 text-center text-sm text-destructive bg-card" style={{ border: RULE_SOFT }}>Could not load this handover.</p>
-              ) : !h ? (
-                <p className="p-6 text-center text-sm text-muted-foreground">Loading…</p>
-              ) : (
-                <>
-                  <section className="bg-card" style={{ border: RULE }}>
-                    <div className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap" style={{ borderBottom: RULE }}>
-                      <div className="min-w-0">
-                        <span className={`block ${LBL}`}>Handover</span>
-                        <h2 className="font-heading text-lg font-bold truncate"><ApplicantNames name={h.ApplicantName} bookingId={h.BookingId} applicationId={h.ApplicationId} /></h2>
-                        <p className="text-[0.6875rem] text-muted-foreground tabular-nums">{[h.BookingNo, h.UnitNo].filter(Boolean).join(" · ")}</p>
-                      </div>
-                      <SheetMark text={STATUS_LABEL[h.Status] ?? h.Status} tone={tone(h.Status)} />
-                    </div>
-                    {h.Status !== "Cancelled" && <div className="px-4 py-3" style={{ borderBottom: RULE_SOFT }}><StepBar status={h.Status} /></div>}
-                    <dl className="grid grid-cols-2 sm:grid-cols-4 gap-px" style={{ background: "hsl(var(--foreground) / 0.12)" }}>
-                      {[
-                        ["Scheduled for", fmtDate(h.ScheduledDate)],
-                        ["Handed over", fmtDate(h.ActualHandoverDate)],
-                        ["Final dues", h.FinalDuesCleared ? "Cleared" : "Not confirmed"],
-                        ["Customer", h.CustomerAcknowledged ? "Took possession" : "Not yet"],
-                      ].map(([k, v]) => (
-                        <div key={k} className="bg-card px-3 py-2 min-w-0"><dt className={LBL}>{k}</dt><dd className="text-sm font-medium mt-0.5 tabular-nums">{v}</dd></div>
-                      ))}
-                    </dl>
-                    {h.KeyHandoverByName && (
-                      <p className="px-4 py-2 text-xs flex items-center gap-1.5" style={{ borderTop: RULE_SOFT }}><User size={12} /> Keys handed over by <span className="font-semibold">{h.KeyHandoverByName}</span></p>
-                    )}
-                    {rights.canEdit && nextSteps.length > 0 && (
-                      <div className="px-4 py-3 flex flex-wrap gap-2" style={{ borderTop: RULE }}>
-                        {nextSteps.map((s) => (
-                          <button key={s} onClick={() => moveTo(s)}
-                            disabled={s === "Completed" && openSnags > 0}
-                            title={s === "Completed" && openSnags > 0 ? "Resolve the open snags first." : undefined}
-                            className={s === "Cancelled" ? `${KEY_LINE} h-9 px-3 !text-destructive !border-destructive` : s === "Completed" ? `${KEY_INK} h-9 px-4` : `${KEY_LINE} h-9 px-3`}>
-                            {ACTION_LABEL[s] ?? s} {s !== "Cancelled" && <ArrowRight size={12} />}
-                          </button>
-                        ))}
-                        {openSnags > 0 && nextSteps.includes("Completed") && <span className="self-center text-xs text-destructive">{openSnags} snag{openSnags === 1 ? "" : "s"} still open</span>}
-                      </div>
-                    )}
-                  </section>
-
-                  <section className="bg-card" style={{ border: RULE }}>
-                    <div className="px-4 py-2.5 flex items-center justify-between gap-2" style={{ borderBottom: RULE }}>
-                      <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">Snags and defects <span className="tabular-nums text-muted-foreground">{snags.length}</span></span>
-                      {rights.canCreate && !["Completed", "Cancelled"].includes(currentStatus) && (
-                        <button onClick={() => setSnagDialog(true)} className={`${KEY_LINE} h-8 px-2.5`}><Plus size={12} /> Raise snag</button>
-                      )}
-                    </div>
-                    {snags.length === 0 ? (
-                      <p className="p-4 text-center text-sm text-muted-foreground">No snags raised.</p>
-                    ) : snags.map((s: any) => {
-                      const resolved = s.Status === CrmStatus.RESOLVED;
-                      return (
-                        <div key={s.Id} className="px-4 py-3 flex items-center justify-between gap-3" style={{ borderBottom: RULE_SOFT }}>
-                          <div className="min-w-0 flex items-start gap-2.5">
-                            {resolved ? <CheckSquare size={15} className="shrink-0 mt-0.5" /> : <Square size={15} className="shrink-0 mt-0.5 text-destructive" />}
-                            <div className="min-w-0">
-                              <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em]">{s.Category}</p>
-                              <p className="text-sm">{s.Description}</p>
-                              <p className="text-[0.6875rem] text-muted-foreground">{[s.RaisedByName && `Raised by ${s.RaisedByName}`, s.ResolvedByName && `resolved by ${s.ResolvedByName}`].filter(Boolean).join(" · ")}</p>
-                            </div>
-                          </div>
-                          {resolved ? <SheetMark text="Resolved" tone="done" />
-                            : rights.canEdit ? <button onClick={() => handleResolveSnag(s.Id)} className={`${KEY_LINE} h-8 px-2.5 shrink-0`}>Mark resolved</button> : <SheetMark text="Open" tone="stopped" />}
-                        </div>
-                      );
-                    })}
-                  </section>
-                </>
-              )}
-            </div>
+        )
+      ) : (
+      <>
+      <MoneyBand eyebrow="CRM · Possession" title="Handover" sub="Schedule the key handover, inspect for snags and fix them, then hand over."
+        actions={<>
+          {rights.canCreate && <button type="button" onClick={() => { setNewForm(emptySchedule()); setNewDialog(true); }} className={BAND_KEY_MAIN}><Key size={13} /> Schedule handover</button>}
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+        </>}
+        lead={`${countOf("Completed")} of ${active}`} leadNote="handovers completed"
+        bar={<CollectionBar onDark due={active} collected={countOf("Completed")} finance={inspecting} recorded={0} />}
+        figures={[
+          { label: "Completed", dot: BAND_DOT.collected, value: String(countOf("Completed")), note: "Keys handed over" },
+          { label: "Inspecting", dot: BAND_DOT.finance, value: String(inspecting), note: `${countOf("SnagPending")} with snags to fix`, alert: countOf("SnagPending") > 0 },
+          { label: "Scheduled", dot: BAND_DOT.notDue, value: String(countOf("Scheduled")), note: "Inspection not started" },
+          { label: "Cancelled", value: String(countOf("Cancelled")), note: "Not going ahead" },
+        ]} />
+      <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
+        <GridTabs<string> label="Handovers" active={list.status} onChange={list.setStatus} tabs={TAB_KEYS.map((k) => ({ key: k, label: k === "All" ? "All handovers" : STATUS_LABEL[k], count: listResult ? countOf(k) : null }))} />
+        <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-border">
+          <GridSearch value={list.searchInput} onChange={list.setSearchInput} placeholder="Customer, booking or unit" />
+          <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+          {hasFilters && <button type="button" onClick={list.reset} className={GRID_BTN}>Clear filters</button>}
+          <div className="ml-auto flex items-center gap-2">
+            <GridSavedViews storageKey="crm-handover-views"
+              current={{ status: list.status, search: list.searchInput.trim(), cpb: list.cpb, sort: list.sort, pageSize }}
+              onApply={(v) => { setPageSize(GRID_PAGE_SIZES.includes(v.pageSize as typeof GRID_PAGE_SIZES[number]) ? v.pageSize : GRID_PAGE_SIZES[0]); list.apply(v); }} />
+            <GridColumnChooser cols={HO_COLS} prefs={prefs} onChange={setPrefs} />
+            <button type="button" onClick={handleExport} disabled={exporting} className={GRID_BTN} title="Export to Excel"><Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span></button>
           </div>
         </div>
-      </SheetShell>
+        <CrmGrid cols={HO_COLS} prefs={prefs} onPrefs={setPrefs} rows={listResult?.rows ?? []} rowKey={(r) => r.Id} noRowNumbers
+          loading={isLoading} fetching={isFetching} error={isError ? translateError((error as Error)?.message) : null} onRetry={() => refetch()}
+          sort={list.sort} onSort={list.toggleSort} onRowClick={(r) => openHandover(r.Id)}
+          empty={hasFilters ? "No handover matches these filters." : "No handover scheduled yet. One can be scheduled once the agreement is registered, the possession notice acknowledged, any NOC issued and every due cleared."}
+          page={list.page} pageSize={pageSize} total={listResult?.total ?? 0} onPage={list.setPage} onPageSize={(n) => { setPageSize(n); list.setPage(1); }} />
+      </div>
+      </>
+      )}
 
       <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
         <DialogContent className="max-w-md p-5 gap-4 rounded-none" style={{ border: RULE }}>
           <Title><Key size={14} /> Schedule handover</Title>
-          <Field label="Booking *" hint="Only bookings ready for it: agreement registered, possession notice acknowledged, NOC issued, no overdue dues.">
+          <Field label="Booking *" hint="Only bookings ready for it: agreement registered, Pre-Possession Ready, possession notice acknowledged, any NOC issued, every due cleared.">
             <SearchableSelect value={newForm.BookingId} onChange={(v) => setNewForm((f) => ({ ...f, BookingId: v }))}
               placeholder={loadingEligible ? "Loading bookings…" : eligibleBookings.length ? "Select booking" : "No booking is ready for handover"}
               searchPlaceholder="Search booking, customer or unit…"
@@ -528,7 +487,7 @@ const CrmHandover: React.FC = () => {
           </Foot>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 };
 
