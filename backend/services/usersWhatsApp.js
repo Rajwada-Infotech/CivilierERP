@@ -1,4 +1,4 @@
-// dbo.users.WhatsAppNo arrives with migration 624. The users list / create / edit ask first, so they keep working on a server
+// dbo.users.WhatsAppNo arrives with migration 626. The users list / create / edit ask first, so they keep working on a server
 // where it has not run yet. A "yes" is cached for good; a "no" is re-checked after a minute (no restart needed).
 let cached = false;
 let checkedNoAt = 0;

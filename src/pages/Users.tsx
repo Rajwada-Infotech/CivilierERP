@@ -42,7 +42,7 @@ interface User {
   can_accept_tickets?: boolean;
   DepartmentId?: number | null;
   DepartmentName?: string | null;
-  /** for "chat on WhatsApp" links next to records this user created (migration 624) */
+  /** for "chat on WhatsApp" links next to records this user created (migration 626) */
   WhatsAppNo?: string | null;
   /** the list's small thumbnail when there is one, else the full picture (migration 575) */
   avatar_url?: string | null;

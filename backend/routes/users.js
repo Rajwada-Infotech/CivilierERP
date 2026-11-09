@@ -317,7 +317,7 @@ router.get(
 );
 
 // ======================
-// MY WHATSAPP NUMBER — any logged-in user reads / sets their own (migration 624), e.g. from Land Enquiries.
+// MY WHATSAPP NUMBER — any logged-in user reads / sets their own (migration 626), e.g. from Land Enquiries.
 // ======================
 router.get("/me/whatsapp", authMiddleware, async (req, res) => {
   try {
@@ -349,7 +349,7 @@ async function saveWhatsApp(req, res) {
   if (!no || no.replace(/\D/g, "").length < 10) return res.status(400).json({ error: "Enter a valid WhatsApp number (at least 10 digits)" });
   try {
     const pool = getPool();
-    if (!(await usersHaveWhatsApp(pool))) return res.status(503).json({ error: "WhatsApp numbers are not set up yet (migration 624)" });
+    if (!(await usersHaveWhatsApp(pool))) return res.status(503).json({ error: "WhatsApp numbers are not set up yet (migration 626)" });
     const r = await pool.request().input("id", sql.Int, req.targetUserId ?? req.user?.userId).input("no", sql.NVarChar(20), no)
       .query("UPDATE dbo.users SET WhatsAppNo = @no WHERE id = @id");
     if (!r.rowsAffected[0]) return res.status(404).json({ error: "User not found" });

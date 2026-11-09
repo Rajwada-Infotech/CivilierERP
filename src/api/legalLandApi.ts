@@ -244,7 +244,7 @@ export const getLandProjectMap = async () =>
 export const setLandProject = async (landId: number, projectId: number | null) =>
   handle<{ ok: true }>(await fetchWithAuth(`${BASE}/${landId}/project`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) }));
 
-// The logged-in user's own WhatsApp number (Land Enquiries asks for it when missing; migration 624).
+// The logged-in user's own WhatsApp number (Land Enquiries asks for it when missing; migration 626).
 export const getMyWhatsApp = async () =>
   handle<{ available: boolean; WhatsAppNo: string | null }>(await fetchWithAuth(`/api/users/me/whatsapp`));
 export const setMyWhatsApp = async (WhatsAppNo: string) =>

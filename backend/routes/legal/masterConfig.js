@@ -26,7 +26,7 @@
 //   `afterWrite(pool, req, row, before)` runs after a successful add / update (a clearance putting the land on hold).
 //   `where` narrows a master with SQL ({t} = the row's table or alias), e.g. lands already acquired;
 //   `extras: [{ name, label, sql, whatsapp? }]` adds read-only computed columns to the list (alias t is the row); `whatsapp` is
-//   SQL for a phone number (users.WhatsAppNo, migration 624) shown as a WhatsApp chat link beside the value;
+//   SQL for a phone number (users.WhatsAppNo, migration 626) shown as a WhatsApp chat link beside the value;
 //   `check(pool, values, id)` returns a message to refuse an add / update on a business rule (id null on add).
 // A `label` is evaluated with the master's table aliased as r.
 // Decimal fields take `min`, `maxValue` and `signed` (GPS coordinates).
