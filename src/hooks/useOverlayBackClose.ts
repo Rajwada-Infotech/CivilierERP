@@ -56,8 +56,13 @@ export function useOverlayBackClose(onClose: () => void) {
         // history entry we pushed so a later back doesn't land on a dead
         // state that just re-closes something already closed.
         stack.splice(idx, 1);
-        suppressNext += 1;
-        window.history.back();
+        // Step back only while the entry we pushed is still the current one. If something replaced it meanwhile (a
+        // router navigation with { replace: true }, e.g. a page tidying its ?query), going back would leave the page
+        // itself — Reporting's popup used to drop people on the Civil Work DPR dashboard that way.
+        if ((window.history.state as { __overlay?: number } | null)?.__overlay) {
+          suppressNext += 1;
+          window.history.back();
+        }
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
