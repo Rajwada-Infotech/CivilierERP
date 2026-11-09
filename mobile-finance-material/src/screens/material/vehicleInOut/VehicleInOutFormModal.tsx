@@ -1,18 +1,18 @@
 // RN port of VehicleInOut.tsx's create/edit form (Document Details / PO &
-// Supplier / Vehicle Details sections). Web renders this inline in the
-// page; mobile uses a full-screen modal, matching this app's established
-// convention (PaymentFormModal.tsx, ReceivedPaymentFormModal.tsx).
+// Supplier / Vehicle Details sections), on the drawing sheet. Web renders this inline in the page; mobile shows it as a
+// page of the stack (asScreen, from VehicleInOutFormScreen) with Cancel / Save along its foot.
 // Deferred vs. web: CSV import/export, Print — both stay web-only.
 import { istNowInput, istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Pressable, Alert } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import { X, Truck, Camera as CameraIcon, Paperclip, FileText } from "lucide-react-native";
-import { colors } from "@/theme/colors";
-import { fonts } from "@/theme/fonts";
+import { sheet as S } from "@/theme/colors";
+import { Body, Field, Input, Key, Label, Panel, Skel } from "@/components/sheet/Sheet";
+import { TextField } from "@/components/sheet/FormParts";
+import { FormPage, ShownValue } from "@/components/sheet/Register";
 import {
   getVehicleInOut, getPOItemsRemaining, previewNextVEHNumber, createVehicleInOut, updateVehicleInOut,
   uploadVehicleAttachments, deleteVehicleAttachment,
@@ -59,34 +59,6 @@ function blankForm(): FormState {
   };
 }
 
-function FieldLabel({ children, required }: { children: string; required?: boolean }) {
-  return (
-    <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-      {children}{required ? " *" : ""}
-    </Text>
-  );
-}
-
-function TextField({ value, onChangeText, placeholder, keyboardType, disabled }: {
-  value: string; onChangeText: (v: string) => void; placeholder?: string; keyboardType?: "default" | "numeric"; disabled?: boolean;
-}) {
-  return (
-    <TextInput
-      value={value}
-      onChangeText={onChangeText}
-      placeholder={placeholder}
-      placeholderTextColor={`${colors.mutedForeground}99`}
-      keyboardType={keyboardType}
-      editable={!disabled}
-      style={{
-        borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
-        color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, marginBottom: 14,
-        opacity: disabled ? 0.6 : 1,
-      }}
-    />
-  );
-}
-
 function validateForm(f: FormState): string | null {
   if (!f.companyId) return "Company is required.";
   if (!f.projectId) return "Project is required.";
@@ -97,9 +69,8 @@ function validateForm(f: FormState): string | null {
 }
 
 export function VehicleInOutFormModal({
-  visible, editingId, onClose,
-}: { visible: boolean; editingId: number | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
+  visible, editingId, onClose, asScreen,
+}: { visible: boolean; editingId: number | null; onClose: () => void; asScreen?: boolean }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(blankForm());
   const [receivedQtyByItem, setReceivedQtyByItem] = useState<Record<number, string>>({});
@@ -345,184 +316,128 @@ export function VehicleInOutFormModal({
   }));
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#3b82f626" }}>
-              <Truck size={14} color="#3b82f6" />
-            </View>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>
-              {editingId ? "Edit Vehicle Entry" : "New Vehicle Entry"}
-            </Text>
-          </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
+    <FormPage
+      asScreen={asScreen}
+      visible={visible}
+      onClose={onClose}
+      eyebrow="CivilierERP · Material · Vehicle in / out"
+      title={editingId ? "Edit entry" : "New entry"}
+      subtitle={editingId ? existing?.DocNo || undefined : "A vehicle arriving at site against a purchase order, and what it carried."}
+      loading={!!editingId && loadingExisting}
+      saving={saving}
+      onSave={handleSave}
+      saveLabel={editingId ? "Save changes" : "Save entry"}
+      overlays={
+        <>
+          <OptionPickerModal visible={picker === "company"} title="Select company" options={companyOptions} selectedKey={form.companyId} onSelect={onCompanyChange} onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "project"} title="Select project" options={projectOptions} selectedKey={form.projectId} onSelect={onProjectChange} onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "finYear"} title="Select financial year" options={finYearOptions} selectedKey={form.finYear} onSelect={(k) => { set("finYear", k); setPicker(null); }} onClose={() => setPicker(null)} />
+          <OptionPickerModal visible={picker === "supplier"} title="Select supplier" options={supplierOptions} selectedKey={form.supplierId} onSelect={onSupplierChange} onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "po"} title="Select purchase order" options={poOptions} selectedKey={form.poId} onSelect={onPOChange} onClose={() => setPicker(null)} searchable clearable />
+          <ImagePreviewModal visible={!!previewAtt} url={previewAtt?.url} localUri={previewAtt?.localUri} title={previewAtt?.filename} onClose={() => setPreviewAtt(null)} />
+        </>
+      }
+    >
+      <Panel title="Document">
+        <View>
+          <ShownValue label="Doc number" value={editingId ? existing?.DocNo || "—" : docNoPreview?.nextDocNo || "Made on save"} />
+          <PickerRow label="Company *" value={form.companyName} placeholder="Select company…" onPress={() => setPicker("company")} />
+          <PickerRow label="Project *" value={form.projectName} placeholder="Select project…" onPress={() => setPicker("project")} />
+          <PickerRow label={finYearLocked ? "Financial year · locked to current" : "Financial year"} value={form.finYear} onPress={() => setPicker("finYear")} disabled={finYearLocked} />
+          <TextField label="Remarks" value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" />
         </View>
+      </Panel>
 
-        {loadingExisting ? (
-          <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-        ) : (
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
-            <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10 }}>
-              Document Details
-            </Text>
-            <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
-            <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} onPress={() => setPicker("finYear")} disabled={finYearLocked} />
-            <View className="rounded-xl px-3.5 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 10, textTransform: "uppercase" }}>Doc Number</Text>
-              <Text style={{ color: colors.primary, fontSize: 13, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
-                {editingId ? (existing?.DocNo || "—") : (docNoPreview?.nextDocNo || "Auto-generated on save")}
-              </Text>
+      <Panel title="Purchase order & supplier">
+        <View>
+          <PickerRow label="Purchase order" value={form.poNumber} placeholder="Select a PO…" onPress={() => setPicker("po")} />
+          <PickerRow label="Supplier" value={form.supplierName} placeholder="Select supplier…" onPress={() => setPicker("supplier")} disabled={!!form.poId} />
+        </View>
+        {!!form.poId && (
+          <View style={{ borderWidth: 1, borderColor: S.ink }}>
+            <View style={{ paddingHorizontal: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+              <Label color={S.ink}>PO items · qty received (this lot)</Label>
             </View>
-            <FieldLabel>Remarks</FieldLabel>
-            <TextField value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" />
-
-            <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 6, marginBottom: 10 }}>
-              Purchase Order &amp; Supplier
-            </Text>
-            <PickerRow label="Purchase Order" value={form.poNumber} placeholder="Select a PO…" onPress={() => setPicker("po")} />
-            <PickerRow label="Supplier" value={form.supplierName} onPress={() => setPicker("supplier")} disabled={!!form.poId} />
-
-            {!!form.poId && (
-              <View className="rounded-xl overflow-hidden mb-4" style={{ borderWidth: 1, borderColor: colors.border }}>
-                <View className="px-3.5 py-2.5" style={{ backgroundColor: `${colors.muted}30`, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.heading.semibold, textTransform: "uppercase" }}>
-                    PO Items — Qty Received (This Lot)
-                  </Text>
-                </View>
-                {loadingPOItems ? (
-                  <View className="py-6 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-                ) : poItemsRemaining.length === 0 ? (
-                  <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", paddingVertical: 16 }}>No items on this PO.</Text>
-                ) : (
-                  poItemsRemaining.map((it, i) => {
-                    const raw = receivedQtyByItem[it.poItemId] ?? "";
-                    const entered = parseFloat(raw) || 0;
-                    const overLimit = entered > it.remainingQty + 1e-6;
-                    return (
-                      <View key={it.poItemId} className="px-3.5 py-3" style={{ borderTopWidth: i > 0 ? 1 : 0, borderTopColor: `${colors.border}80` }}>
-                        <View className="flex-row items-center justify-between mb-1.5">
-                          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.semibold, flex: 1, marginRight: 8 }}>
-                            {it.itemName || "—"}
-                          </Text>
-                          <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>
-                            Remaining {it.remainingQty} {it.uomName || ""}
-                          </Text>
-                        </View>
-                        <View className="flex-row items-center justify-between">
-                          <Text style={{ color: colors.mutedForeground, fontSize: 10 }}>
-                            Ordered {it.orderedQty} · Received so far {it.receivedSoFar}
-                          </Text>
-                          <TextInput
-                            value={raw}
-                            onChangeText={(v) => handleQtyChange(it, v.replace(/[^0-9.]/g, ""))}
-                            placeholder="0"
-                            keyboardType="numeric"
-                            editable={it.remainingQty > 0}
-                            style={{
-                              width: 80, textAlign: "right", borderWidth: 1, borderColor: overLimit ? "#dc2626" : colors.border,
-                              borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, color: overLimit ? "#dc2626" : colors.foreground, fontSize: 12.5,
-                              opacity: it.remainingQty > 0 ? 1 : 0.5,
-                            }}
-                          />
-                        </View>
-                      </View>
-                    );
-                  })
-                )}
+            {loadingPOItems ? (
+              <View style={{ padding: 10, gap: 8 }}>
+                <Skel h={40} />
+                <Skel h={40} />
               </View>
-            )}
-
-            <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 6, marginBottom: 10 }}>
-              Vehicle Details
-            </Text>
-            <FieldLabel required>Vehicle Number</FieldLabel>
-            <TextField value={form.vehicleNo} onChangeText={(v) => set("vehicleNo", v.toUpperCase())} placeholder="e.g. WB-01-AB-1234" />
-
-            <FieldLabel required>Entry Time</FieldLabel>
-            <DateTimeField value={form.entryTime} onChange={(v) => set("entryTime", v)} title="Entry time" />
-
-            <FieldLabel>Exit Time</FieldLabel>
-            <DateTimeField value={form.exitTime} onChange={(v) => set("exitTime", v)} title="Exit time" placeholder="Leave blank if not yet exited" clearable />
-
-            <FieldLabel>Supplier Ref / Challan No</FieldLabel>
-            <TextField value={form.challanNo} onChangeText={(v) => set("challanNo", v)} placeholder="e.g. CH-20240601-001" />
-
-            <FieldLabel>Attachments</FieldLabel>
-            <View className="flex-row gap-2 mb-3">
-              <Pressable
-                onPress={() => pickAndUpload("library")}
-                disabled={uploading}
-                className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg"
-                style={{ borderWidth: 1, borderColor: colors.border, opacity: uploading ? 0.6 : 1 }}
-              >
-                <Paperclip size={12} color={colors.mutedForeground} />
-                <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.medium }}>{uploading ? "Uploading…" : "Attach Photos"}</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => pickAndUpload("camera")}
-                disabled={uploading}
-                className="flex-row items-center gap-1.5 px-3 py-2 rounded-lg"
-                style={{ borderWidth: 1, borderColor: colors.border, opacity: uploading ? 0.6 : 1 }}
-              >
-                <CameraIcon size={12} color={colors.mutedForeground} />
-                <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.medium }}>Camera</Text>
-              </Pressable>
-            </View>
-
-            {form.attachments.length > 0 && (
-              <View className="flex-row flex-wrap gap-2 mb-2">
-                {form.attachments.map((a) => (
-                  <View key={a.id} className="rounded-lg overflow-hidden" style={{ width: 84, height: 84, borderWidth: 1, borderColor: colors.border }}>
-                    {a.mimeType?.startsWith("image/") ? (
-                      <Pressable onPress={() => setPreviewAtt(a)} style={{ width: "100%", height: "100%" }}>
-                        <AuthImage url={a.url} localUri={a.localUri} style={{ width: "100%", height: "100%" }} />
-                      </Pressable>
-                    ) : (
-                      <View className="flex-1 items-center justify-center" style={{ backgroundColor: `${colors.muted}40` }}>
-                        <FileText size={18} color={colors.mutedForeground} />
-                      </View>
-                    )}
-                    <Pressable
-                      onPress={() => removeAttachment(a.id)}
-                      hitSlop={6}
-                      style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" }}
-                    >
-                      <X size={12} color="#fff" />
-                    </Pressable>
+            ) : poItemsRemaining.length === 0 ? (
+              <Body size={12} color={S.graphite} style={{ textAlign: "center", paddingVertical: 16 }}>No items on this PO.</Body>
+            ) : (
+              poItemsRemaining.map((it, i) => {
+                const raw = receivedQtyByItem[it.poItemId] ?? "";
+                const overLimit = (parseFloat(raw) || 0) > it.remainingQty + 1e-6;
+                return (
+                  <View key={it.poItemId} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft }}>
+                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                      <Body size={12.5} weight="semibold">{it.itemName || "—"}</Body>
+                      <Body size={11} color={S.graphite}>{`Ordered ${it.orderedQty} · received ${it.receivedSoFar} · left ${it.remainingQty} ${it.uomName || ""}`}</Body>
+                    </View>
+                    <View style={{ width: 90 }}>
+                      <Input
+                        value={raw}
+                        onChangeText={(v) => handleQtyChange(it, v.replace(/[^0-9.]/g, ""))}
+                        placeholder="0"
+                        keyboardType="numeric"
+                        editable={it.remainingQty > 0}
+                        style={{ textAlign: "right", color: overLimit ? S.red : S.ink, opacity: it.remainingQty > 0 ? 1 : 0.5 }}
+                      />
+                    </View>
                   </View>
-                ))}
-              </View>
+                );
+              })
             )}
-          </ScrollView>
+          </View>
         )}
+      </Panel>
 
-        <View className="flex-row gap-2.5 px-4" style={{ paddingBottom: insets.bottom + 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <Pressable onPress={onClose} className="px-5 py-3 rounded-xl items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleSave}
-            disabled={saving}
-            className="flex-1 items-center justify-center py-3 rounded-xl"
-            style={{ backgroundColor: colors.primary, opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : (
-              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{editingId ? "Save Changes" : "Save Entry"}</Text>
-            )}
-          </Pressable>
+      <Panel title="Vehicle" icon={<Truck size={14} color={S.ink} />}>
+        <View>
+          <TextField label="Vehicle number *" value={form.vehicleNo} onChangeText={(v) => set("vehicleNo", v.toUpperCase())} placeholder="e.g. WB-01-AB-1234" />
         </View>
-      </View>
+        <Field label="Entry time" required>
+          <DateTimeField value={form.entryTime} onChange={(v) => set("entryTime", v)} title="Entry time" />
+        </Field>
+        <Field label="Exit time">
+          <DateTimeField value={form.exitTime} onChange={(v) => set("exitTime", v)} title="Exit time" placeholder="Leave blank if not yet exited" clearable />
+        </Field>
+        <View>
+          <TextField label="Supplier ref / challan no" value={form.challanNo} onChangeText={(v) => set("challanNo", v)} placeholder="e.g. CH-20240601-001" />
+        </View>
+      </Panel>
 
-      <OptionPickerModal visible={picker === "company"} title="Select Company" options={companyOptions} selectedKey={form.companyId} onSelect={onCompanyChange} onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "project"} title="Select Project" options={projectOptions} selectedKey={form.projectId} onSelect={onProjectChange} onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "finYear"} title="Select Financial Year" options={finYearOptions} selectedKey={form.finYear} onSelect={(k) => { set("finYear", k); setPicker(null); }} onClose={() => setPicker(null)} />
-      <OptionPickerModal visible={picker === "supplier"} title="Select Supplier" options={supplierOptions} selectedKey={form.supplierId} onSelect={onSupplierChange} onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "po"} title="Select Purchase Order" options={poOptions} selectedKey={form.poId} onSelect={onPOChange} onClose={() => setPicker(null)} searchable clearable />
-      <ImagePreviewModal visible={!!previewAtt} url={previewAtt?.url} localUri={previewAtt?.localUri} title={previewAtt?.filename} onClose={() => setPreviewAtt(null)} />
-    </Modal>
+      <Panel title={`Attachments (${form.attachments.length})`} icon={<Paperclip size={14} color={S.ink} />}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          <Key label={uploading ? "Uploading…" : "Attach photos"} icon={<Paperclip size={13} color={S.ink} />} onPress={() => pickAndUpload("library")} disabled={uploading} />
+          <Key label="Camera" icon={<CameraIcon size={13} color={S.ink} />} onPress={() => pickAndUpload("camera")} disabled={uploading} />
+        </View>
+        {form.attachments.length > 0 && (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {form.attachments.map((a) => (
+              <View key={a.id} style={{ width: 84, height: 84, borderWidth: 1, borderColor: S.line40, overflow: "hidden" }}>
+                {a.mimeType?.startsWith("image/") ? (
+                  <Pressable onPress={() => setPreviewAtt(a)} style={{ width: "100%", height: "100%" }}>
+                    <AuthImage url={a.url} localUri={a.localUri} style={{ width: "100%", height: "100%" }} />
+                  </Pressable>
+                ) : (
+                  <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                    <FileText size={18} color={S.graphite} />
+                  </View>
+                )}
+                <Pressable
+                  onPress={() => removeAttachment(a.id)}
+                  hitSlop={6}
+                  style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, backgroundColor: S.ink, alignItems: "center", justifyContent: "center" }}
+                >
+                  <X size={12} color={S.paper} />
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+      </Panel>
+    </FormPage>
   );
 }

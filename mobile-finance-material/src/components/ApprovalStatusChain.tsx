@@ -5,11 +5,10 @@
 // Vehicle-In/Out-specific — reusable by any future Material/Finance mobile
 // screen backed by the approval-workflow system.
 import { useQuery } from "@tanstack/react-query";
-import { View, Text, ActivityIndicator } from "react-native";
-import { CheckCircle2, Clock, XCircle } from "lucide-react-native";
+import { ActivityIndicator } from "react-native";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
-import { fonts } from "@/theme/fonts";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
+import { SheetMark } from "@/components/sheet/Sheet";
 
 export type ApprovalTable =
   | "GoodsReceiptNotes" | "PurchaseOrders" | "WorkOrderHeader" | "ExpenseBooking"
@@ -44,7 +43,7 @@ export function ApprovalStatusChain({
   });
 
   if (isLoading) {
-    return <ActivityIndicator size="small" color={colors.mutedForeground} />;
+    return <ActivityIndicator size="small" color={S.graphite} />;
   }
 
   const steps = (trail?.steps ?? []).filter((s) => s.level > 0);
@@ -54,16 +53,12 @@ export function ApprovalStatusChain({
   const rejectedStep = steps.find((s) => s.status === "Rejected");
   const currentStep = steps.find((s) => s.status !== "Approved") ?? steps[steps.length - 1];
 
-  const [color, Icon, status, step] = fullyApproved
-    ? ["#059669", CheckCircle2, "Approved", steps[steps.length - 1]] as const
+  const [tone, status, step] = fullyApproved
+    ? (["done", "Approved", steps[steps.length - 1]] as const)
     : rejectedStep
-      ? ["#dc2626", XCircle, "Rejected", rejectedStep] as const
-      : ["#d97706", Clock, "Pending", currentStep] as const;
+      ? (["stopped", "Rejected", rejectedStep] as const)
+      : (["waiting", "Pending", currentStep] as const);
 
-  return (
-    <View className="flex-row items-center gap-1 px-2 py-0.5 rounded-md self-start" style={{ backgroundColor: `${color}1a`, borderWidth: 1, borderColor: `${color}40` }}>
-      <Icon size={9} color={color} />
-      <Text style={{ color, fontSize: 9.5, fontFamily: fonts.body.semibold }}>{step.label} · {status}</Text>
-    </View>
-  );
+  // The sheet's status mark: solid square approved, hatched waiting, red rejected.
+  return <SheetMark text={`${step.label} · ${status}`} tone={tone} />;
 }

@@ -15,7 +15,9 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // A tapped notification opens the app's Notifications screen (the app may have been
 // closed, so wait briefly for the navigator to mount).
-function openFromNotification() {
+function openFromNotification(data?: Record<string, unknown>) {
+  // "Update available": opening the app is enough — UpdateGate checks for the new build as the app comes forward.
+  if (data?.type === "app-update") return;
   let tries = 0;
   const go = () => {
     if (navigationRef.isReady()) navigationRef.navigate("Notifications" as never);

@@ -18,6 +18,8 @@ async function parseError(res: Response, fallback: string) {
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface DbPayment {
+  /** The JV(s) this payment settles, as the list sends them. */
+  JVNo?: string | null;
   PPaymentID: number;
   PPaymentName: string | null;
   PMode: string | null;
@@ -53,6 +55,8 @@ export interface DbPayment {
 }
 
 export interface PaymentRecord {
+  /** The JV(s) this payment settles (blank when it settles none). */
+  jvNo: string;
   id: string;
   paymentName: string;
   paidTo: string;
@@ -96,6 +100,7 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
     projectSite: item.PProjectName || item.PProject || "",
     company: item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
+    jvNo: item.JVNo || "",
     expenseId: item.PExpenseId ? String(item.PExpenseId) : "",
     docNo: item.DocNo || "",
     parentDocNo: item.ParentDocNo || "",
@@ -127,6 +132,8 @@ export const PAYMENT_MODES = [
   "RTGS",
   "IMPS",
   "Card",
+  // Charges the bank debited itself: a bank account, no cheque or reference (web: payment/types.ts).
+  "Bank Charges",
 ] as const;
 
 export type DisplayStatus =
@@ -328,6 +335,10 @@ export interface PaymentFormPayload {
   ReplacesPaymentId?: number;
   BounceCharge?: number | null;
   ContractId?: number | null;
+  /** The JV line this payment settles (web: JVLineId). */
+  JVLineId?: number | null;
+  /** On an edit: the invoice / contract / JV link was changed in the form, so the save carries the new one. */
+  tagChange?: boolean;
   oaSkipAutoApply?: boolean;
 }
 
@@ -539,30 +550,30 @@ export const fetchFinYearOptions = async (): Promise<{ id: number; label: string
 // (constants.ts + partialPayment.ts ports)
 
 export const MODE_COLOR: Record<string, string> = {
-  Cash: "#10b981",
-  Cheque: "#3b82f6",
-  "Post-Dated Cheque": "#6366f1",
-  UPI: "#8b5cf6",
-  Card: "#f59e0b",
-  NEFT: "#06b6d4",
-  RTGS: "#f97316",
-  IMPS: "#ec4899",
+  Cash: "#6467f2",
+  Cheque: "#6467f2",
+  "Post-Dated Cheque": "#6467f2",
+  UPI: "#6467f2",
+  Card: "#dcdfe5",
+  NEFT: "#6467f2",
+  RTGS: "#dcdfe5",
+  IMPS: "#6467f2",
 };
 
 export const STATUS_COLOR: Record<string, string> = {
-  Draft: "#64748b",
-  Pending: "#d97706",
-  Approved: "#059669",
-  Rejected: "#dc2626",
+  Draft: "#9ba0ab",
+  Pending: "#dcdfe5",
+  Approved: "#6467f2",
+  Rejected: "#e34545",
 };
 
 export const DISPLAY_STATUS_COLOR: Record<string, string> = {
-  Success: "#059669",
-  "Cheque Cleared": "#059669",
-  Pending: "#d97706",
-  "Cheque Issued": "#2563eb",
-  "Cheque Bounced": "#dc2626",
-  Reissued: "#7c3aed",
+  Success: "#6467f2",
+  "Cheque Cleared": "#6467f2",
+  Pending: "#dcdfe5",
+  "Cheque Issued": "#6467f2",
+  "Cheque Bounced": "#e34545",
+  Reissued: "#6467f2",
 };
 
 export interface ChainPaymentLike {

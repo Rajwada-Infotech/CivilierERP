@@ -1,28 +1,25 @@
-// RN port of src/pages/finance/Payment.tsx (web). Web's mobile-collapsed
-// card list (Payment.tsx, the `sm:hidden divide-y` block) is the direct
-// template for PaymentCard below, since the desktop <table> has no native-
-// screen equivalent. Summary stat tiles (Total Paid / By Cheque / By Cash)
-// mirror web's client-side reduce over the loaded records. List/detail/
-// create/edit/delete/approve/reject, GL-posting, and Print are all
-// supported now — see PaymentDetailModal.tsx's and PaymentFormModal.tsx's
-// header comments for what's still deferred (Contract-linking, on-account
-// auto-apply, GST/partial-payment breakdown preview, and list export).
+// RN port of src/pages/finance/Payment.tsx (web), on the drawing sheet as the web draws it: the sheet's title block
+// with New payment (with the create right) and Refresh, the three figures (total paid, by cheque, by cash — over the
+// loaded records, as the web reduces its loaded records), then the payment register: its heading and count, a doc-no
+// search with the filter key, and one ruled row per payment (name, mode, paid to, doc / expense / bank references,
+// date, amount, status). Rows load on as the list scrolls; a row opens PaymentDetailModal, and New / Edit / Re-issue
+// open the form as its own page (PaymentFormScreen).
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRoute, type RouteProp } from "@react-navigation/native";
+import { View, Text, ScrollView, RefreshControl } from "react-native";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Wallet, SlidersHorizontal, AlertCircle, Search, X, ShieldOff, Plus, Banknote, Clock, CheckCircle2 } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { Plus, RefreshCw, SlidersHorizontal } from "lucide-react-native";
+import { colors, sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getPayments, dbToRecord, type PaymentRecord, type DbPayment } from "@/api/newPaymentApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
+import { Body, IconKey, Key, Label, Notice, Press, RegisterHead, SearchBox, SheetShell, Skel, StatRow } from "@/components/sheet/Sheet";
 import { StatusBadge, ModeBadge } from "./payment/PaymentBadges";
 import { FilterSheet, BLANK_FILTERS, type PaymentFilters } from "./payment/FilterSheet";
 import { PaymentDetailModal } from "./payment/PaymentDetailModal";
-import { PaymentFormModal, type ReissueContext } from "./payment/PaymentFormModal";
 
 const PAGE_SIZE = 20;
 
@@ -30,111 +27,80 @@ function activeFilterCount(f: PaymentFilters) {
   return Object.values(f).filter(Boolean).length;
 }
 
-function StatTile({ label, value, icon: Icon, accent }: {
-  label: string; value: string; icon: React.ComponentType<{ size?: number; color?: string }>; accent: string;
-}) {
+/** The bank reference the payment carries, whichever mode it went by. */
+function refOf(rec: PaymentRecord) {
+  return rec.chequeNo ? `Chq #${rec.chequeNo}` : rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference || null;
+}
+
+/** A reference on a row: a small square, ink-ruled. */
+function RefTag({ children }: { children: string }) {
   return (
-    <View style={{ width: "32%" }} className="rounded-xl overflow-hidden">
-      <View
-        className="items-start gap-1.5 px-3 py-2.5"
-        style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80`, borderLeftWidth: 3, borderLeftColor: accent }}
-      >
-        <View className="w-7 h-7 rounded-lg items-center justify-center" style={{ backgroundColor: `${accent}26`, borderWidth: 1, borderColor: `${accent}4d` }}>
-          <Icon size={13} color={accent} />
-        </View>
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 13, marginTop: 2 }}>{value}</Text>
-        <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.regular }}>{label}</Text>
-      </View>
+    <View style={{ borderWidth: 1, borderColor: S.line40, paddingHorizontal: 6, paddingVertical: 2 }}>
+      <Text numberOfLines={1} style={{ color: S.ink2, fontSize: 10.5, fontFamily: fonts.body.medium, maxWidth: 170 }}>{children}</Text>
     </View>
   );
 }
 
-function refBadge(rec: PaymentRecord) {
-  if (rec.chequeNo) return { label: `Chq #${rec.chequeNo}`, color: "#3b82f6" };
-  if (rec.neftNumber) return { label: rec.neftNumber, color: "#06b6d4" };
-  if (rec.upiTransactionId) return { label: rec.upiTransactionId, color: "#8b5cf6" };
-  if (rec.rtgsReference) return { label: rec.rtgsReference, color: "#f97316" };
-  if (rec.impsReference) return { label: rec.impsReference, color: "#ec4899" };
-  if (rec.cardReference) return { label: rec.cardReference, color: "#f59e0b" };
-  return null;
-}
-
-function PaymentCard({ rec, onPress }: { rec: PaymentRecord; onPress: () => void }) {
-  const ref = refBadge(rec);
+function PaymentRow({ rec, last, onPress }: { rec: PaymentRecord; last: boolean; onPress: () => void }) {
+  const ref = refOf(rec);
   return (
-    <Pressable
+    <Press
       onPress={onPress}
-      className="rounded-2xl p-3.5 mb-2.5"
-      style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}
+      style={(pressed) => ({ paddingVertical: 12, borderBottomWidth: last ? 0 : 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
     >
-      <View className="flex-row items-center justify-between gap-2 mb-1.5">
-        <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold, flex: 1 }}>
-          {rec.paymentName || "—"}
-        </Text>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <Text numberOfLines={1} style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>{rec.paymentName || "—"}</Text>
+          {!!rec.paidTo && (
+            <Text numberOfLines={1} style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite }}>
+              Paid to <Text style={{ color: S.ink, fontFamily: fonts.body.medium }}>{rec.paidTo}</Text>
+            </Text>
+          )}
+        </View>
         <ModeBadge mode={rec.mode} />
       </View>
 
-      {!!rec.paidTo && (
-        <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular, marginBottom: 6 }}>
-          Paid to <Text style={{ color: colors.foreground, fontFamily: fonts.body.medium }}>{rec.paidTo}</Text>
-        </Text>
+      {!!(rec.docNo || rec.expenseRef || rec.jvNo || ref) && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+          {!!rec.docNo && <RefTag>{rec.docNo}</RefTag>}
+          {!!rec.expenseRef && <RefTag>{rec.expenseRef}</RefTag>}
+          {!!rec.jvNo && <RefTag>{rec.jvNo}</RefTag>}
+          {!!ref && <RefTag>{ref}</RefTag>}
+        </View>
       )}
 
-      <View className="flex-row flex-wrap gap-1.5 mb-2">
-        {!!rec.docNo && (
-          <View className="px-2 py-0.5 rounded-md" style={{ backgroundColor: "#05966915", borderWidth: 1, borderColor: "#05966930" }}>
-            <Text style={{ color: "#059669", fontSize: 10, fontFamily: fonts.body.medium }}>{rec.docNo}</Text>
-          </View>
-        )}
-        {!!rec.expenseRef && (
-          <View className="px-2 py-0.5 rounded-md" style={{ backgroundColor: `${colors.primary}15`, borderWidth: 1, borderColor: `${colors.primary}30` }}>
-            <Text style={{ color: colors.primary, fontSize: 10, fontFamily: fonts.body.medium }}>{rec.expenseRef}</Text>
-          </View>
-        )}
-        {ref && (
-          <View className="px-2 py-0.5 rounded-md" style={{ backgroundColor: `${ref.color}15`, borderWidth: 1, borderColor: `${ref.color}30` }}>
-            <Text numberOfLines={1} style={{ color: ref.color, fontSize: 10, fontFamily: fonts.body.medium, maxWidth: 160 }}>{ref.label}</Text>
-          </View>
-        )}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 10 }}>
+        <View style={{ gap: 5 }}>
+          <StatusBadge status={rec.status} />
+          <Body size={11.5} color={S.graphite}>{rec.date || "—"}</Body>
+        </View>
+        <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 16, letterSpacing: -0.3, color: S.ink }}>{formatINR(rec.amount ?? 0)}</Text>
       </View>
-
-      <View className="flex-row items-center justify-between">
-        <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>{rec.date || "—"}</Text>
-        <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.bold }}>{formatINR(rec.amount ?? 0)}</Text>
-      </View>
-
-      <View className="flex-row items-center justify-between mt-2 pt-2" style={{ borderTopWidth: 1, borderTopColor: `${colors.border}80` }}>
-        <StatusBadge status={rec.status} />
-        <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular }}>Tap to view →</Text>
-      </View>
-    </Pressable>
+    </Press>
   );
 }
 
 export default function PaymentListScreen() {
-  const insets = useSafeAreaInsets();
   const rights = usePageRights("new-payment");
   const route = useRoute<RouteProp<MainStackParamList, "Payment">>();
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const [filters, setFilters] = useState<PaymentFilters>(BLANK_FILTERS);
   const [docSearch, setDocSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [viewingRec, setViewingRec] = useState<PaymentRecord | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
-  const [editingRec, setEditingRec] = useState<PaymentRecord | null>(null);
-  const [reissueCtx, setReissueCtx] = useState<ReissueContext | null>(null);
 
   // Lets FinanceDashboardScreen's "New Payment" quick action jump straight
   // into the form instead of just landing on the list.
   useEffect(() => {
-    if (route.params?.openForm && rights.canCreate) setFormOpen(true);
+    if (route.params?.openForm && rights.canCreate) navigation.navigate("PaymentForm");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.openForm]);
 
   // Lets BrsScreen's "Re-issue" action on a bounced entry jump straight
   // into a prefilled New Payment form, mirroring web's location.state flow.
   useEffect(() => {
-    if (route.params?.reissue && rights.canCreate) setReissueCtx(route.params.reissue);
+    if (route.params?.reissue && rights.canCreate) navigation.navigate("PaymentForm", { reissue: route.params.reissue });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.reissue]);
 
@@ -182,121 +148,99 @@ export default function PaymentListScreen() {
 
   if (!rights.canView) {
     return (
-      <View className="flex-1 items-center justify-center px-8" style={{ backgroundColor: colors.background }}>
-        <ShieldOff size={28} color={colors.mutedForeground} />
-        <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold, marginTop: 12 }}>No access</Text>
-        <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 4, textAlign: "center" }}>
-          You don't have permission to view payments.
-        </Text>
-      </View>
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }}>
+        <SheetShell eyebrow="CivilierERP · Finance" title="Payments">
+          <Notice tone="ink">You don't have permission to view payments.</Notice>
+        </SheetShell>
+      </ScrollView>
     );
   }
 
+  const filterCount = activeFilterCount(filters);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View className="px-4 pt-4 pb-2">
-        <View className="flex-row items-center gap-2.5 mb-3">
-          <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: "#3b82f626", borderWidth: 1, borderColor: "#3b82f64d" }}>
-            <Wallet size={16} color="#3b82f6" />
-          </View>
-          <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 19, flex: 1 }}>Payments</Text>
-          {rights.canCreate && (
-            <Pressable
-              onPress={() => setFormOpen(true)}
-              className="flex-row items-center gap-1.5 px-3 py-2 rounded-xl"
-              style={{ backgroundColor: colors.primary }}
-            >
-              <Plus size={14} color="#fff" />
-              <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>New Payment</Text>
-            </Pressable>
-          )}
-        </View>
-
-        <View className="flex-row justify-between mb-3">
-          <StatTile label="Total Paid" value={formatINR(totalAmount)} icon={Banknote} accent={colors.primary} />
-          <StatTile label="By Cheque" value={String(chequeCount)} icon={Clock} accent="#f59e0b" />
-          <StatTile label="By Cash" value={String(cashCount)} icon={CheckCircle2} accent="#10b981" />
-        </View>
-
-        <View className="flex-row items-center gap-2">
-          <View
-            className="flex-1 flex-row items-center gap-2 px-3 rounded-xl"
-            style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}
-          >
-            <Search size={14} color={colors.mutedForeground} />
-            <TextInput
-              value={docSearch}
-              onChangeText={setDocSearch}
-              placeholder="Search doc no…"
-              placeholderTextColor={`${colors.mutedForeground}99`}
-              style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }}
-            />
-            {!!docSearch && (
-              <Pressable onPress={() => setDocSearch("")}>
-                <X size={14} color={colors.mutedForeground} />
-              </Pressable>
-            )}
-          </View>
-          <Pressable
-            onPress={() => setFilterOpen(true)}
-            className="flex-row items-center gap-1.5 px-3 py-2.5 rounded-xl"
-            style={{ borderWidth: 1, borderColor: activeFilterCount(filters) ? colors.primary : colors.border, backgroundColor: activeFilterCount(filters) ? `${colors.primary}1a` : "transparent" }}
-          >
-            <SlidersHorizontal size={14} color={activeFilterCount(filters) ? colors.primary : colors.mutedForeground} />
-            {activeFilterCount(filters) > 0 && (
-              <Text style={{ color: colors.primary, fontSize: 11, fontFamily: fonts.heading.semibold }}>{activeFilterCount(filters)}</Text>
-            )}
-          </Pressable>
-        </View>
-      </View>
-
-      {isLoading ? (
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color={colors.mutedForeground} />
-        </View>
-      ) : isError ? (
-        <View className="flex-1 items-center justify-center px-8">
-          <AlertCircle size={20} color={colors.destructive} />
-          <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.medium, marginTop: 8, textAlign: "center" }}>
-            Failed to load payments. Please try again.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={records}
-          keyExtractor={(r) => r.id}
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          onEndReachedThreshold={0.4}
-          onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
-          renderItem={({ item }) => <PaymentCard rec={item} onPress={() => setViewingRec(item)} />}
-          ListEmptyComponent={
-            <View className="items-center py-16">
-              <AlertCircle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No payments yet.</Text>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 96 }}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={S.ink} />}
+        scrollEventThrottle={200}
+        onScroll={({ nativeEvent: e }) => {
+          // Near the end of what is loaded: fetch the next page, as the list used to on onEndReached.
+          if (e.layoutMeasurement.height + e.contentOffset.y >= e.contentSize.height - 600 && hasNextPage && !isFetchingNextPage) fetchNextPage();
+        }}
+      >
+        <SheetShell
+          eyebrow="CivilierERP · Finance"
+          title="Payments"
+          subtitle="Record and track payments linked to expense bookings"
+          action={
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {rights.canCreate && <Key tone="ink" label="New payment" icon={<Plus size={13} color={S.paper} />} onPress={() => navigation.navigate("PaymentForm")} />}
+              <Key label="Refresh" icon={<RefreshCw size={13} color={S.ink} />} onPress={() => refetch()} />
             </View>
           }
-          ListFooterComponent={
-            isFetchingNextPage ? (
-              <View className="py-4 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-            ) : null
-          }
-        />
-      )}
+        >
+          {!isLoading && (
+            <StatRow
+              items={[
+                { label: "Total paid", value: formatINR(totalAmount), note: "in this list" },
+                { label: "By cheque", value: String(chequeCount), note: "payments" },
+                { label: "By cash", value: String(cashCount), note: "payments" },
+              ]}
+            />
+          )}
+
+          <View style={{ borderWidth: 1, borderColor: S.ink, padding: 12, gap: 12 }}>
+            <RegisterHead title="Payment register" count={records.length} unit={["payment loaded", "payments loaded"]} />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <SearchBox value={docSearch} onChange={setDocSearch} placeholder="Search doc no…" />
+              </View>
+              <IconKey onPress={() => setFilterOpen(true)} size={44}>
+                <SlidersHorizontal size={15} color={filterCount ? S.blue : S.ink} />
+                {filterCount > 0 && (
+                  <View style={{ position: "absolute", top: -6, right: -6, minWidth: 16, height: 16, paddingHorizontal: 3, backgroundColor: S.ink, alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ color: S.paper, fontSize: 9, fontFamily: fonts.heading.bold }}>{filterCount}</Text>
+                  </View>
+                )}
+              </IconKey>
+            </View>
+
+            {isLoading ? (
+              <>
+                <Skel h={80} />
+                <Skel h={80} />
+                <Skel h={80} />
+              </>
+            ) : isError ? (
+              <Notice>Could not load the payments. Pull down to try again.</Notice>
+            ) : records.length === 0 ? (
+              <Body color={S.graphite}>{docSearch || filterCount ? "No payment matches that search." : "No payments yet."}</Body>
+            ) : (
+              <View>
+                {records.map((r, i) => (
+                  <PaymentRow key={r.id} rec={r} last={i === records.length - 1 && !hasNextPage} onPress={() => setViewingRec(r)} />
+                ))}
+                {isFetchingNextPage && (
+                  <View style={{ paddingTop: 10 }}>
+                    <Skel h={60} />
+                  </View>
+                )}
+                {!hasNextPage && records.length > PAGE_SIZE && <Label style={{ textAlign: "center", paddingTop: 12 }}>End of the list</Label>}
+              </View>
+            )}
+          </View>
+        </SheetShell>
+      </ScrollView>
 
       <FilterSheet visible={filterOpen} onClose={() => setFilterOpen(false)} filters={filters} onApply={setFilters} />
       <PaymentDetailModal
         record={viewingRec}
         onClose={() => setViewingRec(null)}
-        onEdit={rights.canEdit ? (rec) => { setViewingRec(null); setEditingRec(rec); } : undefined}
+        onEdit={rights.canEdit ? (rec) => { setViewingRec(null); navigation.navigate("PaymentForm", { record: rec }); } : undefined}
         onDeleted={() => setViewingRec(null)}
         canDelete={rights.canDelete}
-      />
-      <PaymentFormModal
-        visible={formOpen || !!editingRec || !!reissueCtx}
-        onClose={() => { setFormOpen(false); setEditingRec(null); setReissueCtx(null); }}
-        editingRecord={editingRec}
-        reissueContext={reissueCtx}
       />
     </View>
   );

@@ -426,10 +426,10 @@ export function convertItemRate(rate: number, fromFactor: number, toFactor: numb
 
 export const getStatusColor = (status: string): string => {
   const s = (status || "Draft").toLowerCase();
-  if (s === "approved" || s === "received") return "#059669";
-  if (s === "pending" || s === "issued") return "#d97706";
-  if (s === "rejected" || s === "closed") return "#dc2626";
-  if (s === "partially received") return "#059669";
-  if (s === "short closed") return "#64748b";
-  return "#64748b";
+  if (s === "approved" || s === "received") return "#6467f2";
+  if (s === "pending" || s === "issued") return "#dcdfe5";
+  if (s === "rejected" || s === "closed") return "#e34545";
+  if (s === "partially received") return "#6467f2";
+  if (s === "short closed") return "#9ba0ab";
+  return "#9ba0ab";
 };

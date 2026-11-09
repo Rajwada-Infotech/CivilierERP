@@ -24,6 +24,12 @@ export function useAuthImageSource(url: string | null | undefined, localUri?: st
       setSource(null);
       return;
     }
+    // A picture stored in the database itself (profile photos are saved as data:image/...;base64,...) is shown as it is:
+    // putting the server address in front of it, or a login header on it, breaks it.
+    if (/^data:/i.test(url)) {
+      setSource({ uri: url });
+      return;
+    }
     let cancelled = false;
     getToken().then((token) => {
       if (cancelled) return;

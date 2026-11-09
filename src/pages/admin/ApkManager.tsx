@@ -1,18 +1,28 @@
 import React, { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Smartphone, Upload, Download, Loader2, ShieldAlert, Pencil } from "lucide-react";
+import { Smartphone, Upload, Download, Loader2, ShieldAlert, Pencil, BellRing } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   getAppCatalog,
   getAppReleases,
+  notifyOutdatedPhones,
   publishAppRelease,
   updateAppRelease,
   type AppCatalogEntry,
   type AppRelease,
+  type UpdateNotified,
 } from "@/api/appReleasesApi";
+
+/** One line on what the update push reached, for the toast after publishing or re-sending. */
+const notifiedLine = (n: UpdateNotified | null | undefined) =>
+  !n
+    ? ""
+    : n.targeted === 0
+      ? "No phones on an older version to notify."
+      : `Notified ${n.sent} of ${n.targeted} phone${n.targeted === 1 ? "" : "s"} on an older version${n.failed ? ` (${n.failed} could not be reached)` : ""}.`;
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -37,11 +47,12 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
   const [file, setFile] = useState<File | null>(null);
   const [notes, setNotes] = useState("");
   const [mandatory, setMandatory] = useState(false);
+  const [notify, setNotify] = useState(true);
 
   const publish = useMutation({
-    mutationFn: () => publishAppRelease({ appKey: app.appKey, file: file as File, releaseNotes: notes, mandatory }),
+    mutationFn: () => publishAppRelease({ appKey: app.appKey, file: file as File, releaseNotes: notes, mandatory, notify }),
     onSuccess: (r) => {
-      toast.success(`Published ${app.label} ${r.versionName ?? ""} (build ${r.versionCode}).`);
+      toast.success(`Published ${app.label} ${r.versionName ?? ""} (build ${r.versionCode}).`, { description: notifiedLine(r.notified) || undefined });
       qc.invalidateQueries({ queryKey: ["app-catalog"] });
       qc.invalidateQueries({ queryKey: ["app-releases"] });
       onClose();
@@ -51,23 +62,26 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
 
   return (
     <Dialog open onOpenChange={(o) => !o && !publish.isPending && onClose()}>
-      <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
+      <DialogContent className="sheet-frame max-w-lg grid-cols-[minmax(0,1fr)]" style={{ margin: 0 }}>
         <DialogHeader>
           <div className="pb-3" style={{ borderBottom: RULE }}>
             <p className={LBL}>{app.label}</p>
             <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Publish a new build</DialogTitle>
           </div>
         </DialogHeader>
-        <div className="space-y-4">
-          <div>
+        {/* minmax(0,1fr) above and min-w-0 here: a long APK file name is cut off with "…" instead of widening the dialog
+            past the screen and clipping the note and the Publish key. */}
+        <div className="space-y-4 min-w-0">
+          <div className="min-w-0">
             <p className={`${LBL} mb-1.5`}>APK file</p>
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="w-full flex items-center gap-2 px-3 py-2.5 border border-dashed border-foreground/50 hover:border-foreground text-sm text-left transition-colors"
+              className="w-full min-w-0 flex items-center gap-2 px-3 py-2.5 border border-dashed border-foreground/50 hover:border-foreground text-sm text-left transition-colors"
             >
               <Upload size={14} className="text-muted-foreground shrink-0" />
-              <span className="truncate">{file ? `${file.name} (${fmtMB(file.size)})` : "Choose the .apk built for this app"}</span>
+              <span className="truncate min-w-0 flex-1" title={file?.name}>{file ? file.name : "Choose the .apk built for this app"}</span>
+              {file && <span className="shrink-0 text-muted-foreground tabular-nums">{fmtMB(file.size)}</span>}
             </button>
             <input
               ref={fileRef}
@@ -98,6 +112,15 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
               <span className="font-medium">Mandatory update</span>
               <span className="block text-[0.6875rem] text-muted-foreground">
                 Blocks the app until it is updated. Use for changes older versions can't work with.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="mt-0.5 accent-foreground" />
+            <span className="text-sm">
+              <span className="font-medium">Notify phones on older versions</span>
+              <span className="block text-[0.6875rem] text-muted-foreground">
+                Sends an "Update available" notification to everyone with this app on an older build. Tapping it opens the app's update prompt.
               </span>
             </span>
           </label>
@@ -172,6 +195,11 @@ function EditDialog({ release, onClose }: { release: AppRelease; onClose: () => 
 
 export default function ApkManager() {
   const [publishing, setPublishing] = useState<AppCatalogEntry | null>(null);
+  const notifyAgain = useMutation({
+    mutationFn: (rel: AppRelease) => notifyOutdatedPhones(rel.id),
+    onSuccess: (r) => toast.success(notifiedLine(r.notified)),
+    onError: (e: any) => toast.error(e?.message || "Could not send the notification."),
+  });
   const [editing, setEditing] = useState<AppRelease | null>(null);
   const [filter, setFilter] = useState("");
 
@@ -209,10 +237,12 @@ export default function ApkManager() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {catalog.map((a) => (
-              <div key={a.appKey} className={`bg-card p-4 flex flex-col gap-3 border ${a.current ? "border-foreground" : "border-dashed border-foreground/50"}`}>
+              // min-w-0: a grid item is as wide as its content by default, so a long app name widened its column and pushed
+              // the Publish key out of line; with it the name truncates inside the card instead.
+              <div key={a.appKey} className={`min-w-0 bg-card p-4 flex flex-col gap-3 border ${a.current ? "border-foreground" : "border-dashed border-foreground/50"}`}>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-heading text-base font-bold tracking-tight text-foreground truncate">{a.label}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-heading text-base font-bold tracking-tight text-foreground truncate" title={a.label}>{a.label}</p>
                     <p className="text-[0.6875rem] font-heading tabular-nums text-muted-foreground truncate">{a.packageName}</p>
                   </div>
                   {a.current?.mandatory && (
@@ -240,20 +270,30 @@ export default function ApkManager() {
                   <p className="text-xs text-muted-foreground italic">Nothing published yet. Users with no update record see no prompt.</p>
                 )}
 
-                <div className="flex items-center gap-2 mt-auto pt-1">
+                <div className="flex flex-wrap items-center gap-2 mt-auto pt-1">
                   <button
                     onClick={() => setPublishing(a)}
-                    className={`${KEY_INK} h-9 px-4`}
+                    className={`${KEY_INK} h-9 px-4 shrink-0`}
                   >
                     <Upload size={13} /> Publish new build
                   </button>
                   {a.current && (
                     <a
                       href={a.current.downloadPath}
-                      className={`${KEY_LINE} h-9 px-3`}
+                      className={`${KEY_LINE} h-9 px-3 shrink-0`}
                     >
                       <Download size={13} /> Download APK
                     </a>
+                  )}
+                  {a.current && (
+                    <button
+                      onClick={() => notifyAgain.mutate(a.current as AppRelease)}
+                      disabled={notifyAgain.isPending}
+                      title="Send the Update available notification again to phones still on an older build"
+                      className={`${KEY_LINE} h-9 px-3 shrink-0`}
+                    >
+                      {notifyAgain.isPending && notifyAgain.variables?.appKey === a.appKey ? <Loader2 size={13} className="animate-spin" /> : <BellRing size={13} />} Notify outdated phones
+                    </button>
                   )}
                 </div>
               </div>

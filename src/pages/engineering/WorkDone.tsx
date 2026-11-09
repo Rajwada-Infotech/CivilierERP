@@ -19,6 +19,7 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchCompanies, fetchProjects, fetchSuppliers } from "@/api/workOrderApi";
 import { type WorkDoneEntry, type WorkOrderOption, CHIP, KEY_INK, KEY_LINE, RULE, canEditWorkDone, fmt, fmtDate } from "./workDone/config";
 import { WorkDoneForm } from "./workDone/WorkDoneForm";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import { WorkDoneDetail } from "./workDone/WorkDoneDetail";
 import { printWorkDone } from "./workDone/printWorkDone";
 
@@ -98,6 +99,9 @@ export default function WorkDone() {
     setEditRecord(null);
     setView("form");
   };
+  // Amend (an approved entry with no invoice): the form opens as for an edit; saving raises an amendment.
+  const amend = useAmendMode("work-done", "Work Done", { onRaised: () => toList() });
+
   const openEdit = (r: WorkDoneEntry) => {
     setEditRecord(r);
     setView("form");
@@ -107,6 +111,7 @@ export default function WorkDone() {
     setView("detail");
   };
   const toList = () => {
+    amend.stop();
     setView("list");
     setEditRecord(null);
     setOpenId(null);
@@ -282,8 +287,10 @@ export default function WorkDone() {
             finYearOptions={finYearOptions}
             loadingDropdowns={loadingDropdowns}
             activeFinYear={activeFinYear}
+            amend={amend.amending ? amend : undefined}
           />
         )}
+        {amend.dialog}
 
         {view === "detail" &&
           (opened ? (
@@ -293,6 +300,7 @@ export default function WorkDone() {
               canPrint={rights.canPrint}
               onBack={toList}
               onEdit={() => openEdit(opened)}
+              onAmend={() => { amend.start(opened.ID); openEdit(opened); }}
               onPrint={() => printWorkDone(opened)}
               onRefresh={() => refetch()}
             />

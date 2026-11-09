@@ -1,4 +1,5 @@
-// RN port of DebitNoteMaster.tsx's create/edit form (the generic MasterPage
+// RN port of DebitNoteMaster.tsx's create/edit form, on the drawing sheet: a page of the stack (asScreen, from
+// DebitNoteFormScreen) with Cancel / Save along its foot. (The generic MasterPage
 // fields array on web). Picking a bill auto-fills Company/Project/Supplier
 // (matching web's handleBillOptionSelect), but those three stay editable
 // pickers afterward — same as web, they're independently required fields,
@@ -9,12 +10,14 @@
 // dropped since it's never persisted.
 import { istToday } from "@/utils/istTime";
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Switch } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Alert } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, ClipboardMinus, Plus, Trash2 } from "lucide-react-native";
-import { colors } from "@/theme/colors";
-import { fonts } from "@/theme/fonts";
+import { ClipboardMinus } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
+import { formatINR } from "@/utils/formatCurrency";
+import { Body, Field, Input, Label, Panel, Seg } from "@/components/sheet/Sheet";
+import { TextField } from "@/components/sheet/FormParts";
+import { AddLineKey, FormPage, LineBox } from "@/components/sheet/Register";
 import {
   getDebitNoteById, createDebitNote, updateDebitNote,
   getCompanies, getProjects, getSuppliers, fetchFinYearOptions, getBillOptions,
@@ -49,32 +52,9 @@ function blankForm(): FormState {
   };
 }
 
-function FieldLabel({ children, required }: { children: string; required?: boolean }) {
-  return (
-    <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-      {children}{required ? " *" : ""}
-    </Text>
-  );
-}
-
-function TextField({ value, onChangeText, placeholder, multiline }: { value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean }) {
-  return (
-    <TextInput
-      value={value} onChangeText={onChangeText} placeholder={placeholder} multiline={multiline}
-      placeholderTextColor={`${colors.mutedForeground}99`}
-      style={{
-        borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: multiline ? 12 : 10,
-        color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, marginBottom: 14,
-        textAlignVertical: multiline ? "top" : "center", minHeight: multiline ? 70 : undefined,
-      }}
-    />
-  );
-}
-
 export function DebitNoteFormModal({
-  visible, editingId, onClose,
-}: { visible: boolean; editingId: number | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
+  visible, editingId, onClose, asScreen,
+}: { visible: boolean; editingId: number | null; onClose: () => void; asScreen?: boolean }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(blankForm());
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -204,141 +184,90 @@ export function DebitNoteFormModal({
   const supplierOptions: PickerOption[] = suppliers.map((s) => ({ key: s.id, label: s.name }));
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#dc262626" }}>
-              <ClipboardMinus size={14} color="#dc2626" />
+    <FormPage
+      asScreen={asScreen}
+      visible={visible}
+      onClose={onClose}
+      eyebrow="CivilierERP · Material · Debit note"
+      title={editingId ? "Edit debit note" : "New debit note"}
+      subtitle="A value adjustment against a supplier's bill."
+      loading={editingId != null && loadingExisting}
+      saving={saving}
+      onSave={handleSave}
+      saveLabel={editingId ? "Save changes" : "Save debit note"}
+      overlays={
+        <>
+          <OptionPickerModal visible={picker === "finYear"} title="Select financial year" options={finYearOptions} selectedKey={form.finYear}
+            onSelect={(k) => { set("finYear", k); set("billId", ""); set("billLabel", ""); setPicker(null); }} onClose={() => setPicker(null)} clearable />
+          <OptionPickerModal visible={picker === "bill"} title="Select bill" options={billOptions} selectedKey={form.billId}
+            onSelect={pickBill} onClose={() => setPicker(null)} searchable loading={loadingBills} />
+          <OptionPickerModal visible={picker === "company"} title="Select company" options={companyOptions} selectedKey={form.companyId}
+            onSelect={(k) => { const c = companies.find((x) => x.id === k); setForm((f) => ({ ...f, companyId: k, companyName: c?.name ?? "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "project"} title="Select project" options={projectOptions} selectedKey={form.projectId}
+            onSelect={(k) => { const p = projects.find((x) => x.id === k); setForm((f) => ({ ...f, projectId: k, projectName: p?.name ?? "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "supplier"} title="Select supplier" options={supplierOptions} selectedKey={form.supplierId}
+            onSelect={(k) => { const s = suppliers.find((x) => x.id === k); setForm((f) => ({ ...f, supplierId: k, supplierName: s?.name ?? "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+        </>
+      }
+    >
+      <Panel title="Reference">
+        <View>
+          <PickerRow label="Financial year" value={form.finYear} placeholder="Select year to load bills…" onPress={() => setPicker("finYear")} />
+          <PickerRow label="Bill" value={form.billLabel} placeholder={loadingBills ? "Loading…" : !form.finYear ? "Select a financial year first" : "Select a bill…"} onPress={() => setPicker("bill")} disabled={!form.finYear} />
+        </View>
+      </Panel>
+
+      <Panel title="Company, project & supplier">
+        <View>
+          <PickerRow label="Company *" value={form.companyName} placeholder="Select company…" onPress={() => setPicker("company")} />
+          <PickerRow label="Project *" value={form.projectName} placeholder="Select project…" onPress={() => setPicker("project")} />
+          <PickerRow label="Supplier *" value={form.supplierName} placeholder="Select supplier…" onPress={() => setPicker("supplier")} />
+        </View>
+        <Field label="Debit date" required>
+          <Input value={form.debitDate} onChangeText={(v) => set("debitDate", v)} placeholder="YYYY-MM-DD" />
+        </Field>
+        <View>
+          <TextField label="Reason" value={form.reason} onChangeText={(v) => set("reason", v)} placeholder="Why is this being debited?" multiline />
+        </View>
+        <Field label="Status">
+          <Seg options={[{ value: "on", label: "Active" }, { value: "off", label: "Inactive" }]} value={form.isActive ? "on" : "off"} onChange={(v) => set("isActive", v === "on")} />
+        </Field>
+      </Panel>
+
+      <Panel title={`Line items (${cart.length})`} icon={<ClipboardMinus size={14} color={S.ink} />}>
+        {cart.length === 0 && <Body size={12.5} color={S.graphite}>No line items yet. They are optional, but the total is built from them.</Body>}
+        {cart.map((ci, idx) => (
+          <LineBox key={ci.key} index={idx} title={`Line ${idx + 1}`} onRemove={() => removeCartRow(idx)}>
+            <Field label="Description">
+              <Input value={ci.description} onChangeText={(v) => updateCartField(idx, { description: v })} placeholder="Description" />
+            </Field>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Field label="Qty" style={{ flex: 1 }}>
+                <Input value={ci.quantity} onChangeText={(v) => updateCartField(idx, { quantity: v.replace(/[^0-9.]/g, "") })} keyboardType="numeric" />
+              </Field>
+              <Field label="UOM" style={{ flex: 1 }}>
+                <Input value={ci.uom} onChangeText={(v) => updateCartField(idx, { uom: v })} />
+              </Field>
+              <Field label="Rate" style={{ flex: 1 }}>
+                <Input value={ci.rate} onChangeText={(v) => updateCartField(idx, { rate: v.replace(/[^0-9.]/g, "") })} keyboardType="numeric" />
+              </Field>
             </View>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>{editingId ? "Edit Debit Note" : "New Debit Note"}</Text>
+            <Field label="Amount">
+              <Input value={ci.amount} onChangeText={(v) => updateCartField(idx, { amount: v.replace(/[^0-9.]/g, "") })} keyboardType="numeric" />
+            </Field>
+          </LineBox>
+        ))}
+        <AddLineKey label="Add line" onPress={addCartRow} />
+        {cart.length > 0 && (
+          <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", paddingTop: 10, borderTopWidth: 1.5, borderTopColor: S.ink }}>
+            <Label color={S.ink}>Total</Label>
+            <Body size={18} weight="semibold">{formatINR(totalAmount)}</Body>
           </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
-
-        {loadingExisting ? (
-          <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-        ) : (
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
-            <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10 }}>Reference</Text>
-            <PickerRow label="Financial Year" value={form.finYear} placeholder="Select year to load bills" onPress={() => setPicker("finYear")} />
-            <PickerRow
-              label="Bill" value={form.billLabel} placeholder={loadingBills ? "Loading…" : !form.finYear ? "Select a Financial Year first" : "Select a bill"}
-              onPress={() => setPicker("bill")} disabled={!form.finYear}
-            />
-
-            <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 8, marginBottom: 10 }}>Company, Project &amp; Supplier</Text>
-            <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
-            <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label="Supplier" value={form.supplierName} onPress={() => setPicker("supplier")} />
-
-            <FieldLabel required>Debit Date</FieldLabel>
-            <TextField value={form.debitDate} onChangeText={(v) => set("debitDate", v)} placeholder="YYYY-MM-DD" />
-            <FieldLabel>Reason</FieldLabel>
-            <TextField value={form.reason} onChangeText={(v) => set("reason", v)} placeholder="Why is this being debited?" multiline />
-
-            <View className="flex-row items-center justify-between rounded-xl px-3.5 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}>
-              <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium }}>Active</Text>
-              <Switch value={form.isActive} onValueChange={(v) => set("isActive", v)} trackColor={{ true: colors.primary, false: colors.border }} />
-            </View>
-
-            <View className="flex-row items-center justify-between mb-2.5">
-              <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6 }}>
-                Line Items ({cart.length})
-              </Text>
-              {cart.length > 0 && <Text style={{ color: colors.primary, fontSize: 12, fontFamily: fonts.heading.bold }}>Total: {totalAmount.toFixed(2)}</Text>}
-            </View>
-
-            {cart.length === 0 && (
-              <View className="rounded-xl px-3.5 py-4 items-center mb-2" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 11.5, textAlign: "center" }}>No line items yet — optional, but the total is built from these.</Text>
-              </View>
-            )}
-            {cart.map((ci, idx) => (
-              <View key={ci.key} className="rounded-xl p-3 mb-2.5" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}>
-                <View className="flex-row items-center justify-between mb-2">
-                  <TextInput
-                    value={ci.description} onChangeText={(v) => updateCartField(idx, { description: v })}
-                    placeholder="Description" placeholderTextColor={`${colors.mutedForeground}99`}
-                    style={{ flex: 1, marginRight: 8, color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium }}
-                  />
-                  <Pressable onPress={() => removeCartRow(idx)} className="p-1">
-                    <Trash2 size={14} color={colors.destructive} />
-                  </Pressable>
-                </View>
-                <View className="flex-row gap-2 mb-2">
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Qty</Text>
-                    <TextInput
-                      value={ci.quantity} onChangeText={(v) => updateCartField(idx, { quantity: v.replace(/[^0-9.]/g, "") })}
-                      keyboardType="numeric"
-                      style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, color: colors.foreground, fontSize: 12, marginTop: 3 }}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>UOM</Text>
-                    <TextInput
-                      value={ci.uom} onChangeText={(v) => updateCartField(idx, { uom: v })}
-                      style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, color: colors.foreground, fontSize: 12, marginTop: 3 }}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Rate</Text>
-                    <TextInput
-                      value={ci.rate} onChangeText={(v) => updateCartField(idx, { rate: v.replace(/[^0-9.]/g, "") })}
-                      keyboardType="numeric"
-                      style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, color: colors.foreground, fontSize: 12, marginTop: 3 }}
-                    />
-                  </View>
-                </View>
-                <View>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Amount</Text>
-                  <TextInput
-                    value={ci.amount} onChangeText={(v) => updateCartField(idx, { amount: v.replace(/[^0-9.]/g, "") })}
-                    keyboardType="numeric"
-                    style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, color: colors.foreground, fontSize: 12, marginTop: 3, fontFamily: fonts.heading.semibold }}
-                  />
-                </View>
-              </View>
-            ))}
-            <Pressable onPress={addCartRow} className="flex-row items-center justify-center gap-1.5 py-2.5 rounded-xl mb-2" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-              <Plus size={13} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontSize: 12, fontFamily: fonts.heading.medium }}>Add Line Item</Text>
-            </Pressable>
-          </ScrollView>
         )}
-
-        <View className="flex-row gap-2.5 px-4" style={{ paddingBottom: insets.bottom + 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <Pressable onPress={onClose} className="px-5 py-3 rounded-xl items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleSave} disabled={saving}
-            className="flex-1 items-center justify-center py-3 rounded-xl"
-            style={{ backgroundColor: "#dc2626", opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : (
-              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{editingId ? "Save Changes" : "Save Debit Note"}</Text>
-            )}
-          </Pressable>
-        </View>
-      </View>
-
-      <OptionPickerModal visible={picker === "finYear"} title="Select Financial Year" options={finYearOptions} selectedKey={form.finYear}
-        onSelect={(k) => { set("finYear", k); set("billId", ""); set("billLabel", ""); setPicker(null); }} onClose={() => setPicker(null)} clearable />
-      <OptionPickerModal visible={picker === "bill"} title="Select Bill" options={billOptions} selectedKey={form.billId}
-        onSelect={pickBill} onClose={() => setPicker(null)} searchable loading={loadingBills} />
-      <OptionPickerModal visible={picker === "company"} title="Select Company" options={companyOptions} selectedKey={form.companyId}
-        onSelect={(k) => { const c = companies.find((x) => x.id === k); setForm((f) => ({ ...f, companyId: k, companyName: c?.name ?? "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "project"} title="Select Project" options={projectOptions} selectedKey={form.projectId}
-        onSelect={(k) => { const p = projects.find((x) => x.id === k); setForm((f) => ({ ...f, projectId: k, projectName: p?.name ?? "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "supplier"} title="Select Supplier" options={supplierOptions} selectedKey={form.supplierId}
-        onSelect={(k) => { const s = suppliers.find((x) => x.id === k); setForm((f) => ({ ...f, supplierId: k, supplierName: s?.name ?? "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-    </Modal>
+      </Panel>
+    </FormPage>
   );
 }

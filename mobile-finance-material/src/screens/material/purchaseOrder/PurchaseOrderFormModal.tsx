@@ -1,7 +1,8 @@
-// RN port of PurchaseOrderMaster.tsx's create/edit form. Scope (agreed):
+// RN port of PurchaseOrderMaster.tsx's create/edit form, on the drawing sheet: a page of the stack (asScreen, from
+// PurchaseOrderFormScreen) with Cancel / Save along its foot. Scope (agreed):
 // Direct entry + "Load from Material Request" dropdown + L1Chart award
-// prefill (qtPrefill prop, set by PurchaseOrderListScreen from route params
-// when L1ChartScreen navigates here) — Work Order/Work Design prefills
+// prefill (qtPrefill, passed in the PurchaseOrderForm route's params
+// when L1ChartScreen awards a quotation) — Work Order/Work Design prefills
 // still arrive via web-only navigation state from pages that don't exist on
 // mobile yet. The GST-split resolver and the
 // UOM-conversion engine (category-wide + per-item tagged alternates) ARE
@@ -12,12 +13,13 @@
 import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Alert } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, ShoppingCart, ChevronRight, Plus, Trash2, ClipboardList } from "lucide-react-native";
-import { colors } from "@/theme/colors";
-import { fonts } from "@/theme/fonts";
+import { ShoppingCart, ClipboardList } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
+import { Body, Field, Input, Label, Notice, Panel } from "@/components/sheet/Sheet";
+import { TextField } from "@/components/sheet/FormParts";
+import { AddLineKey, FormPage, LineBox, LineList, ShownValue } from "@/components/sheet/Register";
 import { formatINR } from "@/utils/formatCurrency";
 import {
   getPurchaseOrderById, addPurchaseOrder, updatePurchaseOrder,
@@ -26,8 +28,7 @@ import {
   getSupplierDetails, getCompanyDetails, getApprovedMRList, getMRPOPrefill,
   fetchDocTypes, fetchNextDocNumber,
   resolveLineGstSplit, relevantUOMs, convertRate, alternatesForItem, getItemUomFactor, convertItemRate,
-  type CreatePOPayload, type MRPOPrefill, type QTPOPrefill, type ItemUOMAlternate, type UOMOption,
-} from "@/api/purchaseOrdersApi";
+  type CreatePOPayload, type MRPOPrefill, type QTPOPrefill, type UOMOption } from "@/api/purchaseOrdersApi";
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/screens/finance/payment/OptionPicker";
 
 type LineItem = {
@@ -79,43 +80,11 @@ function blankForm(): FormState {
   };
 }
 
-function FieldLabel({ children, required }: { children: string; required?: boolean }) {
-  return (
-    <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-      {children}{required ? " *" : ""}
-    </Text>
-  );
-}
-
-function TextField({ value, onChangeText, placeholder, keyboardType, editable = true }: {
-  value: string; onChangeText: (v: string) => void; placeholder?: string; keyboardType?: "default" | "numeric"; editable?: boolean;
-}) {
-  return (
-    <TextInput
-      value={value} onChangeText={onChangeText} placeholder={placeholder}
-      placeholderTextColor={`${colors.mutedForeground}99`} keyboardType={keyboardType} editable={editable}
-      style={{
-        borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
-        color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, marginBottom: 14, opacity: editable ? 1 : 0.6,
-      }}
-    />
-  );
-}
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 8, marginBottom: 10 }}>
-      {children}
-    </Text>
-  );
-}
-
 function normState(v?: string | null) { return String(v || "").trim().toLowerCase(); }
 
 export function PurchaseOrderFormModal({
-  visible, editingId, qtPrefill, onClose,
-}: { visible: boolean; editingId: number | null; qtPrefill?: QTPOPrefill | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
+  visible, editingId, qtPrefill, onClose, asScreen,
+}: { visible: boolean; editingId: number | null; qtPrefill?: QTPOPrefill | null; onClose: () => void; asScreen?: boolean }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(blankForm());
   const [lineItems, setLineItems] = useState<LineItem[]>([blankLine()]);
@@ -486,222 +455,155 @@ export function PurchaseOrderFormModal({
   }, [activeLine, linePicker, uoms, items, itemUomAlternates]);
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#10b98126" }}>
-              <ShoppingCart size={14} color="#10b981" />
+    <FormPage
+      asScreen={asScreen}
+      visible={visible}
+      onClose={onClose}
+      eyebrow="CivilierERP · Material · Purchase order"
+      title={editingId ? "Edit order" : "New order"}
+      subtitle={editingId ? existing?.PurchaseOrderNo || undefined : "Place an order with a supplier — direct, or from a material request."}
+      loading={editingId != null && loadingExisting}
+      saving={saving}
+      onSave={handleSave}
+      saveLabel={editingId ? "Save changes" : "Save order"}
+      overlays={
+        <>
+          <OptionPickerModal visible={picker === "company"} title="Select company" options={companyOptions} selectedKey={form.companyId}
+            onSelect={(k) => { const c = companies.find((x) => x.id === k); setForm((f) => ({ ...f, companyId: k, companyName: c?.name ?? "", projectId: "", projectName: "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "project"} title="Select project" options={projectOptions} selectedKey={form.projectId}
+            onSelect={(k) => { const p = projects.find((x) => x.id === k); setForm((f) => ({ ...f, projectId: k, projectName: p?.name ?? "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "supplier"} title="Select supplier" options={supplierOptions} selectedKey={form.supplierId}
+            onSelect={(k) => { const s = suppliers.find((x) => x.id === k); setForm((f) => ({ ...f, supplierId: k, supplierName: s?.name ?? "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "costCenter"} title="Select cost centre" options={costCenterOptions} selectedKey={form.costCenterId}
+            onSelect={(k) => { const c = costCenters.find((x) => String(x.id) === k); setForm((f) => ({ ...f, costCenterId: k, costCenterName: c?.label ?? "" })); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "finYear"} title="Select financial year" options={finYearOptions} selectedKey={form.finYear}
+            onSelect={(k) => { set("finYear", k); setPicker(null); }} onClose={() => setPicker(null)} clearable />
+          <OptionPickerModal visible={picker === "mrCompany"} title="Select company" options={companyOptions} selectedKey={mrFilterCompanyId}
+            onSelect={(k) => { setMrFilterCompanyId(k); setMrFilterProjectId(""); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable />
+          <OptionPickerModal visible={picker === "mrProject"} title="Select project" options={mrProjectOptions} selectedKey={mrFilterProjectId}
+            onSelect={(k) => { setMrFilterProjectId(k); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable />
+          <OptionPickerModal visible={picker === "mrList"} title="Select material request" options={mrOptions} selectedKey=""
+            onSelect={handleMRSelect} onClose={() => setPicker(null)} searchable loading={approvedMRsLoading} />
+          <OptionPickerModal
+            visible={linePicker?.kind === "item"} title="Select item" options={itemOptions}
+            selectedKey={activeLine?.itemId ?? ""} onSelect={(k) => linePicker && handleItemSelect(linePicker.idx, k)}
+            onClose={() => setLinePicker(null)} searchable
+          />
+          <OptionPickerModal
+            visible={linePicker?.kind === "uom"} title="Select UOM" options={uomOptionsForLine}
+            selectedKey={activeLine?.uomId ? String(activeLine.uomId) : ""}
+            onSelect={(k) => { const u = uoms.find((x) => String(x.id) === k); if (u && linePicker) handleUomChange(linePicker.idx, u); }}
+            onClose={() => setLinePicker(null)} searchable
+          />
+        </>
+      }
+    >
+      <Panel title="Document">
+        <View>
+          <ShownValue label="Doc number" value={editingId ? existing?.PurchaseOrderNo || "—" : poDocNo || "Made on save"} />
+          <PickerRow label="Company *" value={form.companyName} placeholder="Select company…" onPress={() => setPicker("company")} />
+          <PickerRow label="Project *" value={form.projectName} placeholder="Select project…" onPress={() => setPicker("project")} />
+          <PickerRow label="Supplier *" value={form.supplierName} placeholder="Select supplier…" onPress={() => setPicker("supplier")} />
+          <PickerRow label="Cost centre *" value={form.costCenterName} placeholder="Select cost centre…" onPress={() => setPicker("costCenter")} />
+          <PickerRow label={finYearLocked ? "Financial year · locked to current" : "Financial year"} value={form.finYear} placeholder="Auto" onPress={() => setPicker("finYear")} disabled={finYearLocked} />
+        </View>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Field label="PO date" required style={{ flex: 1 }}>
+            <Input value={form.poDate} onChangeText={(v) => set("poDate", v)} placeholder="YYYY-MM-DD" />
+          </Field>
+          <Field label="Expected delivery" style={{ flex: 1 }}>
+            <Input value={form.expectedDate} onChangeText={(v) => set("expectedDate", v)} placeholder="YYYY-MM-DD" />
+          </Field>
+        </View>
+      </Panel>
+
+      {editingId == null && !sourceMR && !sourceQT && (
+        <Panel title="Load from material request" icon={<ClipboardList size={14} color={S.ink} />}>
+          <View>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <PickerRow label="Company" value={companies.find((c) => c.id === mrFilterCompanyId)?.name || ""} placeholder="Any" onPress={() => setPicker("mrCompany")} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <PickerRow label="Project" value={projects.find((p) => p.id === mrFilterProjectId)?.name || ""} placeholder="Any" onPress={() => setPicker("mrProject")} />
+              </View>
             </View>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>
-              {editingId ? "Edit Purchase Order" : "New Purchase Order"}
-            </Text>
+            <PickerRow
+              label="Approved request"
+              value=""
+              placeholder={approvedMRsLoading || mrDropdownLoading ? "Loading…" : approvedMRs.length === 0 ? "No approved requests" : "Select material request…"}
+              onPress={() => setPicker("mrList")}
+              disabled={approvedMRs.length === 0}
+            />
           </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
+        </Panel>
+      )}
+      {!!sourceMR && <Notice tone="ink">{`Sourced from material request ${sourceMR.docNo}`}</Notice>}
+      {!!sourceQT && <Notice tone="ink">{`Awarded from L1 chart ${sourceQT.docNo}`}</Notice>}
+
+      <Panel title={`Line items (${lineItems.length})`} icon={<ShoppingCart size={14} color={S.ink} />}>
+        {lineItems.map((li, idx) => {
+          const overCap = li.mrPendingQty != null && li.quantity - li.mrPendingQty > 0.0001;
+          return (
+            <LineBox key={li.id} index={idx} title={`Item ${idx + 1}`} onRemove={lineItems.length > 1 ? () => removeLine(idx) : undefined}>
+              <View>
+                <PickerRow label="Item" value={li.itemName} placeholder="Select item…" onPress={() => setLinePicker({ idx, kind: "item" })} />
+              </View>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Field label="Qty" style={{ flex: 1 }}>
+                  <Input
+                    value={String(li.quantity)}
+                    onChangeText={(v) => updateLine(idx, { quantity: parseFloat(v.replace(/[^0-9.]/g, "")) || 0 })}
+                    keyboardType="numeric"
+                    style={overCap ? { color: S.red } : undefined}
+                  />
+                </Field>
+                <View style={{ flex: 1 }}>
+                  <PickerRow label="UOM" value={li.unit} placeholder="—" onPress={() => setLinePicker({ idx, kind: "uom" })} />
+                </View>
+                <Field label="Rate" style={{ flex: 1 }}>
+                  <Input value={String(li.rate)} onChangeText={(v) => updateLine(idx, { rate: parseFloat(v.replace(/[^0-9.]/g, "")) || 0 })} keyboardType="numeric" />
+                </Field>
+              </View>
+              {li.mrPendingQty != null && (
+                <Body size={11} color={overCap ? S.red : S.graphite}>{`${Math.max(0, li.mrPendingQty - li.quantity)} left on the request${overCap ? " · more than the request asks for" : ""}`}</Body>
+              )}
+              <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", paddingTop: 8, borderTopWidth: 1, borderTopColor: S.ruleSoft }}>
+                <Label>{li.gstRate > 0 ? (li.igstRate > 0 ? `IGST ${li.gstRate}%` : `CGST ${li.cgstRate}% + SGST ${li.sgstRate}%`) : "No GST"}</Label>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Body size={14} weight="semibold">{formatINR(li.amount)}</Body>
+                  {li.taxAmount > 0 && <Body size={10.5} color={S.graphite}>{`+${formatINR(li.taxAmount)} GST`}</Body>}
+                </View>
+              </View>
+            </LineBox>
+          );
+        })}
+        <AddLineKey onPress={addLine} />
+      </Panel>
+
+      <Panel title="Totals">
+        <LineList
+          rows={[
+            { key: "sub", title: "Subtotal", right: formatINR(totals.subtotal) },
+            ...(totals.totalCgst > 0 ? [{ key: "cgst", title: "CGST", right: formatINR(totals.totalCgst) }] : []),
+            ...(totals.totalSgst > 0 ? [{ key: "sgst", title: "SGST", right: formatINR(totals.totalSgst) }] : []),
+            ...(totals.totalIgst > 0 ? [{ key: "igst", title: "IGST", right: formatINR(totals.totalIgst) }] : []),
+          ]}
+        />
+        <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", paddingTop: 10, borderTopWidth: 1.5, borderTopColor: S.ink }}>
+          <Label color={S.ink}>Grand total</Label>
+          <Body size={18} weight="semibold">{formatINR(totals.grandTotal)}</Body>
         </View>
+      </Panel>
 
-        {loadingExisting ? (
-          <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-        ) : (
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
-            <SectionHeading>Document Details</SectionHeading>
-            <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
-            <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label="Supplier" value={form.supplierName} onPress={() => setPicker("supplier")} />
-            <PickerRow label="Cost Center" value={form.costCenterName} onPress={() => setPicker("costCenter")} />
-            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} placeholder="Auto" onPress={() => setPicker("finYear")} disabled={finYearLocked} />
-
-            <FieldLabel required>PO Date</FieldLabel>
-            <TextField value={form.poDate} onChangeText={(v) => set("poDate", v)} placeholder="YYYY-MM-DD" />
-            <FieldLabel>Expected Delivery Date</FieldLabel>
-            <TextField value={form.expectedDate} onChangeText={(v) => set("expectedDate", v)} placeholder="YYYY-MM-DD" />
-
-            <View className="rounded-xl px-3.5 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 10, textTransform: "uppercase" }}>Doc Number</Text>
-              <Text style={{ color: colors.primary, fontSize: 13, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
-                {editingId ? (existing?.PurchaseOrderNo || "—") : (poDocNo || "Auto-generated on save")}
-              </Text>
-            </View>
-
-            {editingId == null && !sourceMR && !sourceQT && (
-              <View className="rounded-xl p-3.5 mb-4" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}>
-                <View className="flex-row items-center gap-1.5 mb-2.5">
-                  <ClipboardList size={12} color="#059669" />
-                  <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase" }}>Load from Material Request</Text>
-                </View>
-                <View className="flex-row gap-2 mb-2.5">
-                  <Pressable onPress={() => setPicker("mrCompany")} className="flex-1 px-3 py-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-                    <Text numberOfLines={1} style={{ color: mrFilterCompanyId ? colors.foreground : colors.mutedForeground, fontSize: 11.5 }}>
-                      {companies.find((c) => c.id === mrFilterCompanyId)?.name || "Company —"}
-                    </Text>
-                  </Pressable>
-                  <Pressable onPress={() => setPicker("mrProject")} className="flex-1 px-3 py-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-                    <Text numberOfLines={1} style={{ color: mrFilterProjectId ? colors.foreground : colors.mutedForeground, fontSize: 11.5 }}>
-                      {projects.find((p) => p.id === mrFilterProjectId)?.name || "Project —"}
-                    </Text>
-                  </Pressable>
-                </View>
-                <Pressable onPress={() => setPicker("mrList")} className="flex-row items-center justify-between px-3 py-2.5 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
-                    {approvedMRsLoading || mrDropdownLoading ? "Loading…" : approvedMRs.length === 0 ? "No approved MRs" : "Select Material Request…"}
-                  </Text>
-                  <ChevronRight size={14} color={colors.mutedForeground} />
-                </Pressable>
-              </View>
-            )}
-            {!!sourceMR && (
-              <View className="rounded-lg px-3 py-2 mb-4 self-start" style={{ backgroundColor: "#3b82f615", borderWidth: 1, borderColor: "#3b82f630" }}>
-                <Text style={{ color: "#3b82f6", fontSize: 10.5, fontFamily: fonts.body.semibold }}>Sourced from MR: {sourceMR.docNo}</Text>
-              </View>
-            )}
-            {!!sourceQT && (
-              <View className="rounded-lg px-3 py-2 mb-4 self-start" style={{ backgroundColor: "#8b5cf615", borderWidth: 1, borderColor: "#8b5cf630" }}>
-                <Text style={{ color: "#8b5cf6", fontSize: 10.5, fontFamily: fonts.body.semibold }}>Awarded from L1 Chart: {sourceQT.docNo}</Text>
-              </View>
-            )}
-
-            <SectionHeading>Line Items ({lineItems.length})</SectionHeading>
-            {lineItems.map((li, idx) => {
-              const overCap = li.mrPendingQty != null && li.quantity - li.mrPendingQty > 0.0001;
-              return (
-                <View key={li.id} className="rounded-xl p-3 mb-2.5" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}>
-                  <View className="flex-row items-center justify-between mb-2">
-                    <Pressable onPress={() => setLinePicker({ idx, kind: "item" })} style={{ flex: 1, marginRight: 8 }}>
-                      <Text numberOfLines={1} style={{ color: li.itemName ? colors.foreground : colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.body.medium }}>
-                        {li.itemName || "— Select Item —"}
-                      </Text>
-                    </Pressable>
-                    {lineItems.length > 1 && (
-                      <Pressable onPress={() => removeLine(idx)} className="p-1">
-                        <Trash2 size={14} color={colors.destructive} />
-                      </Pressable>
-                    )}
-                  </View>
-
-                  <View className="flex-row gap-2 mb-2">
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Qty</Text>
-                      <TextInput
-                        value={String(li.quantity)}
-                        onChangeText={(v) => updateLine(idx, { quantity: parseFloat(v.replace(/[^0-9.]/g, "")) || 0 })}
-                        keyboardType="numeric"
-                        style={{ borderWidth: 1, borderColor: overCap ? "#dc2626" : colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, color: overCap ? "#dc2626" : colors.foreground, fontSize: 12, marginTop: 3 }}
-                      />
-                      {li.mrPendingQty != null && (
-                        <Text style={{ color: overCap ? "#dc2626" : colors.mutedForeground, fontSize: 9, marginTop: 2 }}>
-                          {Math.max(0, li.mrPendingQty - li.quantity)} remaining MR
-                        </Text>
-                      )}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>UOM</Text>
-                      <Pressable onPress={() => setLinePicker({ idx, kind: "uom" })} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, marginTop: 3 }}>
-                        <Text numberOfLines={1} style={{ color: li.unit ? colors.foreground : colors.mutedForeground, fontSize: 12 }}>{li.unit || "—"}</Text>
-                      </Pressable>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Rate</Text>
-                      <TextInput
-                        value={String(li.rate)}
-                        onChangeText={(v) => updateLine(idx, { rate: parseFloat(v.replace(/[^0-9.]/g, "")) || 0 })}
-                        keyboardType="numeric"
-                        style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, color: colors.foreground, fontSize: 12, marginTop: 3 }}
-                      />
-                    </View>
-                  </View>
-
-                  <View className="flex-row items-center justify-between pt-2" style={{ borderTopWidth: 1, borderTopColor: `${colors.border}80` }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>
-                      {li.gstRate > 0 ? (li.igstRate > 0 ? `IGST ${li.gstRate}%` : `CGST ${li.cgstRate}% + SGST ${li.sgstRate}%`) : "No GST"}
-                    </Text>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.bold }}>{formatINR(li.amount)}</Text>
-                      {li.taxAmount > 0 && <Text style={{ color: colors.mutedForeground, fontSize: 9.5 }}>+{formatINR(li.taxAmount)} GST</Text>}
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
-            <Pressable onPress={addLine} className="flex-row items-center justify-center gap-1.5 py-2.5 rounded-xl mb-4" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-              <Plus size={13} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontSize: 12, fontFamily: fonts.heading.medium }}>Add Item</Text>
-            </Pressable>
-
-            <View className="rounded-xl overflow-hidden mb-4" style={{ borderWidth: 1, borderColor: colors.border }}>
-              {[
-                ["Subtotal", totals.subtotal],
-                ...(totals.totalCgst > 0 ? [["CGST", totals.totalCgst]] as const : []),
-                ...(totals.totalSgst > 0 ? [["SGST", totals.totalSgst]] as const : []),
-                ...(totals.totalIgst > 0 ? [["IGST", totals.totalIgst]] as const : []),
-              ].map(([label, value], i) => (
-                <View key={label} className="flex-row items-center justify-between px-3.5 py-2" style={{ borderTopWidth: i > 0 ? 1 : 0, borderTopColor: `${colors.border}60` }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 11.5 }}>{label}</Text>
-                  <Text style={{ color: colors.foreground, fontSize: 12 }}>{formatINR(value as number)}</Text>
-                </View>
-              ))}
-              <View className="flex-row items-center justify-between px-3.5 py-2.5" style={{ borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: `${colors.primary}0d` }}>
-                <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Grand Total</Text>
-                <Text style={{ color: colors.primary, fontSize: 14, fontFamily: fonts.heading.bold }}>{formatINR(totals.grandTotal)}</Text>
-              </View>
-            </View>
-
-            <FieldLabel>Payment Terms</FieldLabel>
-            <TextField value={form.paymentTerms} onChangeText={(v) => set("paymentTerms", v)} placeholder="e.g. 30 days from delivery" />
-            <FieldLabel>Remarks</FieldLabel>
-            <TextField value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" />
-          </ScrollView>
-        )}
-
-        <View className="flex-row gap-2.5 px-4" style={{ paddingBottom: insets.bottom + 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <Pressable onPress={onClose} className="px-5 py-3 rounded-xl items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleSave} disabled={saving}
-            className="flex-1 items-center justify-center py-3 rounded-xl"
-            style={{ backgroundColor: colors.primary, opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : (
-              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{editingId ? "Save Changes" : "Save Purchase Order"}</Text>
-            )}
-          </Pressable>
-        </View>
+      <View>
+        <TextField label="Payment terms" value={form.paymentTerms} onChangeText={(v) => set("paymentTerms", v)} placeholder="e.g. 30 days from delivery" />
+        <TextField label="Remarks" value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" />
       </View>
-
-      <OptionPickerModal visible={picker === "company"} title="Select Company" options={companyOptions} selectedKey={form.companyId}
-        onSelect={(k) => { const c = companies.find((x) => x.id === k); setForm((f) => ({ ...f, companyId: k, companyName: c?.name ?? "", projectId: "", projectName: "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "project"} title="Select Project" options={projectOptions} selectedKey={form.projectId}
-        onSelect={(k) => { const p = projects.find((x) => x.id === k); setForm((f) => ({ ...f, projectId: k, projectName: p?.name ?? "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "supplier"} title="Select Supplier" options={supplierOptions} selectedKey={form.supplierId}
-        onSelect={(k) => { const s = suppliers.find((x) => x.id === k); setForm((f) => ({ ...f, supplierId: k, supplierName: s?.name ?? "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "costCenter"} title="Select Cost Center" options={costCenterOptions} selectedKey={form.costCenterId}
-        onSelect={(k) => { const c = costCenters.find((x) => String(x.id) === k); setForm((f) => ({ ...f, costCenterId: k, costCenterName: c?.label ?? "" })); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "finYear"} title="Select Financial Year" options={finYearOptions} selectedKey={form.finYear}
-        onSelect={(k) => { set("finYear", k); setPicker(null); }} onClose={() => setPicker(null)} clearable />
-      <OptionPickerModal visible={picker === "mrCompany"} title="Select Company" options={companyOptions} selectedKey={mrFilterCompanyId}
-        onSelect={(k) => { setMrFilterCompanyId(k); setMrFilterProjectId(""); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable />
-      <OptionPickerModal visible={picker === "mrProject"} title="Select Project" options={mrProjectOptions} selectedKey={mrFilterProjectId}
-        onSelect={(k) => { setMrFilterProjectId(k); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable />
-      <OptionPickerModal visible={picker === "mrList"} title="Select Material Request" options={mrOptions} selectedKey=""
-        onSelect={handleMRSelect} onClose={() => setPicker(null)} searchable loading={approvedMRsLoading} />
-
-      <OptionPickerModal
-        visible={linePicker?.kind === "item"} title="Select Item" options={itemOptions}
-        selectedKey={activeLine?.itemId ?? ""} onSelect={(k) => linePicker && handleItemSelect(linePicker.idx, k)}
-        onClose={() => setLinePicker(null)} searchable
-      />
-      <OptionPickerModal
-        visible={linePicker?.kind === "uom"} title="Select UOM" options={uomOptionsForLine}
-        selectedKey={activeLine?.uomId ? String(activeLine.uomId) : ""}
-        onSelect={(k) => { const u = uoms.find((x) => String(x.id) === k); if (u && linePicker) handleUomChange(linePicker.idx, u); }}
-        onClose={() => setLinePicker(null)} searchable
-      />
-    </Modal>
+    </FormPage>
   );
 }

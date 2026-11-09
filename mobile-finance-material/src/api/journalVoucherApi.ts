@@ -113,3 +113,30 @@ export const rejectJournalVoucher = async (id: number) => {
   });
   return handleResponse(res);
 };
+
+/** A JV's unpaid liability leg a payment can settle (DR that head, CR bank — the same GL posting as any payment).
+ * Eligibility is the backend's: GET /api/journal-voucher/payable-lines. */
+export interface PayableJVLine {
+  LineID: number;
+  JVID: number;
+  JVNo: string | null;
+  JVDate: string;
+  Narration: string | null;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  CompanyName: string | null;
+  ProjectName: string | null;
+  LHeadId: number;
+  LHeadName: string;
+  LHeadType: string;
+  CreditAmount: number;
+  PaidAmount: number;
+  RemainingAmount: number;
+}
+
+export const getPayableJVLines = async (): Promise<PayableJVLine[]> => {
+  const res = await fetchWithAuth(`${BASE}/payable-lines`);
+  if (!res.ok) throw new Error("Could not load the journal vouchers that can be paid.");
+  const j = await res.json().catch(() => []);
+  return Array.isArray(j) ? j : [];
+};

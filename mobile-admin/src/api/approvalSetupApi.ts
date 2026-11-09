@@ -21,6 +21,11 @@ export interface ApprovalLevel {
   id: number;
   label: string;
   userIds: number[];
+  /** Role names (Role.RName) whose holders may approve at this step, besides the people named in userIds. Must be sent
+   * back on save: leaving it out used to drop a step's roles whenever a rule was edited on the phone. */
+  roles?: string[];
+  /** "any" (default): the step is done when one assigned person approves. "all": every assigned person must approve. */
+  mode?: "any" | "all";
 }
 
 export interface ApprovalWorkflow {
@@ -62,4 +67,15 @@ export async function toggleWorkflow(id: number) {
 export async function deleteWorkflow(id: number) {
   const res = await fetchWithAuth(`${APPROVAL_API}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Delete failed");
+}
+
+/** Role Master's role names, for "everyone with these roles" on a step (web: getRolesList). */
+export async function getRoleNames(): Promise<string[]> {
+  const res = await fetchWithAuth("/api/roles/list");
+  if (!res.ok) throw new Error("Failed to fetch roles");
+  const rows = await res.json().catch(() => []);
+  return (Array.isArray(rows) ? rows : [])
+    .map((r: { RName?: string }) => r.RName)
+    .filter((n: unknown): n is string => !!n)
+    .sort((a: string, b: string) => a.localeCompare(b));
 }

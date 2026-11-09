@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
-import * as Notifications from "expo-notifications";
+import type * as NotificationsModule from "expo-notifications";
 import { useAuth } from "@/auth/AuthContext";
-import { registerForPushAsync } from "./pushNotifications";
+import { notifications, registerForPushAsync } from "./pushNotifications";
 
 export type PushPayload = Record<string, unknown>;
 
@@ -19,15 +19,17 @@ export function PushNotificationsGate({
   onOpenRef.current = onOpen;
 
   useEffect(() => {
-    if (!userId) return;
+    const Notifications = notifications();
+    if (!userId || !Notifications) return;
     void registerForPushAsync(appKey);
     const sub = Notifications.addPushTokenListener(() => void registerForPushAsync(appKey));
     return () => sub.remove();
   }, [userId, appKey]);
 
   useEffect(() => {
-    if (!userId) return;
-    const handle = (response: Notifications.NotificationResponse) => {
+    const Notifications = notifications();
+    if (!userId || !Notifications) return;
+    const handle = (response: NotificationsModule.NotificationResponse) => {
       const data = (response.notification.request.content.data ?? {}) as PushPayload;
       onOpenRef.current?.(data);
     };

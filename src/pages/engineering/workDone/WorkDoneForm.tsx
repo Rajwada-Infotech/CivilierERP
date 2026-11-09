@@ -37,7 +37,10 @@ export function WorkDoneForm({
   finYearOptions,
   loadingDropdowns,
   activeFinYear,
+  amend,
 }: {
+  /** Amendment mode (Amend on an approved entry): saving raises an amendment instead of editing. */
+  amend?: { intercept: (id: string | number | null | undefined, payload: unknown) => Promise<boolean> };
   record: WorkDoneEntry | null;
   onClose: () => void;
   companies: DropdownOption[];
@@ -132,29 +135,31 @@ export function WorkDoneForm({
     return Object.keys(e).length === 0;
   };
 
+  const buildPayload = () => ({
+      CompanyId: parseInt(form.companyId) || null,
+      ProjectId: parseInt(form.projectId) || null,
+      FinYear: form.finYear,
+      DocTypeId: form.docTypeId,
+      DocNo: form.docNo,
+      DocDate: form.docDate,
+      SupplierId: parseInt(form.supplierId) || null,
+      WorkOrderID: parseInt(form.workOrderId) || null,
+      Remarks: form.remarks,
+      PeriodFrom: form.PeriodFrom,
+      PeriodTo: form.PeriodTo,
+      DescriptionOfWork: form.DescriptionOfWork,
+      QuantityDone: parseFloat(form.QuantityDone) || 0,
+      Unit: form.Unit,
+      RatePerUnit: parseFloat(form.RatePerUnit) || 0,
+      Deductions: deductions,
+      GrossAmount: gross,
+      CertifiedAmount: certified,
+      Status: form.Status,
+});
+
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const payload = {
-        CompanyId: parseInt(form.companyId) || null,
-        ProjectId: parseInt(form.projectId) || null,
-        FinYear: form.finYear,
-        DocTypeId: form.docTypeId,
-        DocNo: form.docNo,
-        DocDate: form.docDate,
-        SupplierId: parseInt(form.supplierId) || null,
-        WorkOrderID: parseInt(form.workOrderId) || null,
-        Remarks: form.remarks,
-        PeriodFrom: form.PeriodFrom,
-        PeriodTo: form.PeriodTo,
-        DescriptionOfWork: form.DescriptionOfWork,
-        QuantityDone: parseFloat(form.QuantityDone) || 0,
-        Unit: form.Unit,
-        RatePerUnit: parseFloat(form.RatePerUnit) || 0,
-        Deductions: deductions,
-        GrossAmount: gross,
-        CertifiedAmount: certified,
-        Status: form.Status,
-      };
+      const payload = buildPayload();
       const res = await fetchWithAuth(isEdit ? `/api/engineering/work-done/${record!.ID}` : "/api/engineering/work-done", {
         method: isEdit ? "PUT" : "POST",
         body: JSON.stringify(payload),
@@ -391,7 +396,12 @@ export function WorkDoneForm({
         <button onClick={handleReset} disabled={saveMutation.isPending} className={`${KEY_LINE} h-9 px-4`}>
           <RotateCcw size={13} /> Reset
         </button>
-        <button onClick={() => validate() && saveMutation.mutate()} disabled={saveMutation.isPending || loadingDropdowns} className={`${KEY_INK} h-9 px-4`}>
+        <button
+          onClick={async () => {
+            if (!validate()) return;
+            if (amend && record && (await amend.intercept(record.ID, buildPayload()))) return;
+            saveMutation.mutate();
+          }} disabled={saveMutation.isPending || loadingDropdowns} className={`${KEY_INK} h-9 px-4`}>
           <Save size={13} />
           {saveMutation.isPending ? "Saving…" : isEdit ? "Update work done" : "Save work done"}
         </button>

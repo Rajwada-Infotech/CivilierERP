@@ -1,4 +1,5 @@
-// RN port of Payment.tsx's add-payment form (view="form") — covers the
+// RN port of Payment.tsx's add-payment form (view="form"), on the drawing sheet (SheetShell, ruled panels, ink keys for
+// the modes, a fixed Cancel / Save bar) — covers the
 // core flow: purpose/mode/amount/date, company/project, optional invoice
 // link (autofills payee + suggested amount), the mode-specific reference
 // panels (ChequePanel/DigitalRefPanel/CardPanel ports below), edit (pass
@@ -24,11 +25,12 @@
 // applyMultiGrnBreakdown, shown here as a read-only Tax Details card.
 import { istToday } from "@/utils/istTime";
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
+import { View, Text, Modal, ScrollView, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, Wallet, AlertTriangle, Link2, RefreshCw, CheckCircle2 } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { X, Wallet, Link2 } from "lucide-react-native";
+import { colors, sheet as S } from "@/theme/colors";
+import { Body, Field, Input, Key, Label, Notice, Panel, Press, Seg, SheetMark, SheetShell, StatGrid } from "@/components/sheet/Sheet";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import {
@@ -39,8 +41,8 @@ import {
 } from "@/api/newPaymentApi";
 import { getOABalanceByRef, previewOAAdjustment } from "@/api/onAccountApi";
 import { getApprovedContractsForLinking, type ContractLinkOption } from "@/api/contractApi";
+import { getPayableJVLines, type PayableJVLine } from "@/api/journalVoucherApi";
 import { fetchInvoiceById, fetchGrnGstBreakdown, computeBreakdown, type GrnGstBreakdown } from "@/api/invoiceApi";
-import { ModeBadge } from "./PaymentBadges";
 import { PickerRow, OptionPickerModal, type PickerOption } from "./OptionPicker";
 
 type FormState = {
@@ -71,6 +73,7 @@ type FormState = {
   cardReference: string;
   cardId: number | null;
   contractId: string;
+  jvLineId: number | null;
 };
 
 function blankForm(): FormState {
@@ -82,6 +85,7 @@ function blankForm(): FormState {
     chequeDate: "", isPostDated: false,
     neftNumber: "", upiTransactionId: "", rtgsReference: "", impsReference: "", cardReference: "", cardId: null,
     contractId: "",
+    jvLineId: null,
   };
 }
 
@@ -93,32 +97,6 @@ const DIGITAL_FIELD: Record<string, { key: keyof FormState; label: string; place
   Card: { key: "cardReference", label: "Card Transaction / Approval ID", placeholder: "e.g. AUTH123456" },
 };
 
-function FieldLabel({ children, required }: { children: string; required?: boolean }) {
-  return (
-    <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-      {children}{required ? " *" : ""}
-    </Text>
-  );
-}
-
-function TextField({
-  value, onChangeText, placeholder, keyboardType,
-}: { value: string; onChangeText: (v: string) => void; placeholder?: string; keyboardType?: "default" | "numeric" }) {
-  return (
-    <TextInput
-      value={value}
-      onChangeText={onChangeText}
-      placeholder={placeholder}
-      placeholderTextColor={`${colors.mutedForeground}99`}
-      keyboardType={keyboardType}
-      style={{
-        borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
-        color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, marginBottom: 14,
-      }}
-    />
-  );
-}
-
 function validateForm(f: FormState): string | null {
   if (!f.paymentName.trim()) return "Payment purpose is required.";
   if (!f.mode) return "Please select a payment mode.";
@@ -127,6 +105,8 @@ function validateForm(f: FormState): string | null {
 
   const isChequeMode = f.mode === "Cheque" || f.mode === "Post-Dated Cheque";
   const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(f.mode);
+
+  if (f.mode === "Bank Charges" && !f.bankId) return "Select the bank account that charged it.";
 
   if (isChequeMode) {
     if (!f.bankId) return "Please select a bank account.";
@@ -159,9 +139,11 @@ export interface ReissueContext {
 }
 
 export function PaymentFormModal({
-  visible, onClose, editingRecord, reissueContext,
+  visible, onClose, editingRecord, reissueContext, asScreen,
 }: {
   visible: boolean; onClose: () => void;
+  /** Drawn as a page of the stack (PaymentFormScreen), under the app's header, instead of a modal over the list. */
+  asScreen?: boolean;
   /** Present → edit mode: prefill from this record and PUT on save instead of POST. */
   editingRecord?: PaymentRecord | null;
   /** Present → re-issue mode: prefill a fresh payment that replaces a bounced one. */
@@ -174,7 +156,7 @@ export function PaymentFormModal({
   const [form, setForm] = useState<FormState>(blankForm());
   const [bounceCharge, setBounceCharge] = useState("");
   const [saving, setSaving] = useState(false);
-  const [picker, setPicker] = useState<"company" | "project" | "bank" | "invoice" | "contract" | "chequeLot" | "chequeNo" | "card" | null>(null);
+  const [picker, setPicker] = useState<"company" | "project" | "bank" | "invoice" | "contract" | "jv" | "chequeLot" | "chequeNo" | "card" | null>(null);
   const [chequeValidating, setChequeValidating] = useState(false);
 
   useEffect(() => {
@@ -192,6 +174,7 @@ export function PaymentFormModal({
         neftNumber: r.neftNumber, upiTransactionId: r.upiTransactionId, rtgsReference: r.rtgsReference,
         impsReference: r.impsReference, cardReference: r.cardReference, cardId: null,
         contractId: "",
+        jvLineId: null,
       });
       setBounceCharge("");
     } else if (reissueContext) {
@@ -207,15 +190,23 @@ export function PaymentFormModal({
       setBounceCharge("");
     }
     setSelectedContract(null);
+    setSelectedJVLine(null);
+    setTagTouched(false);
   }, [visible, editingRecord, reissueContext]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
 
   const isChequeMode = form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
   const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(form.mode);
-  const needsBank = isChequeMode || isDigitalMode;
+  // A bank account for every mode but cash; Bank Charges needs only the account (web shows it whenever the mode isn't Cash).
+  const needsBank = isChequeMode || isDigitalMode || form.mode === "Bank Charges";
 
   const [selectedContract, setSelectedContract] = useState<ContractLinkOption | null>(null);
+  // Settling a JV's unpaid liability leg (web: selectedJVLine). On an edit, the link only changes when it is changed here
+  // (tagTouched → tagChange on save); otherwise the saved link is left as it is.
+  const [selectedJVLine, setSelectedJVLine] = useState<PayableJVLine | null>(null);
+  const [tagTouched, setTagTouched] = useState(false);
+  const { data: jvLines = [], isLoading: jvLinesLoading } = useQuery({ queryKey: ["payment-payable-jv-lines"], queryFn: getPayableJVLines, enabled: visible, staleTime: 30_000 });
 
   const { data: companies = [] } = useQuery({ queryKey: ["form-companies"], queryFn: fetchCompanyOptions, enabled: visible });
   const { data: projects = [] } = useQuery({ queryKey: ["form-projects"], queryFn: fetchProjectOptions, enabled: visible });
@@ -376,6 +367,7 @@ export function PaymentFormModal({
   const onInvoiceSelect = (key: string) => {
     setPicker(null);
     if (!key) {
+      setTagTouched(true);
       setForm((f) => ({ ...f, expenseId: "", expenseRef: "", parentDocNo: "", paidTo: "", partyId: null }));
       return;
     }
@@ -383,6 +375,8 @@ export function PaymentFormModal({
     if (!o) return;
     const suggestedAmount = o.remainingAmount != null && o.remainingAmount > 0 ? o.remainingAmount : o.amount;
     setSelectedContract(null);
+    setSelectedJVLine(null);
+    setTagTouched(true);
     setForm((f) => ({
       ...f,
       expenseId: o.id,
@@ -394,6 +388,7 @@ export function PaymentFormModal({
       partyId: o.partyId ?? f.partyId,
       amount: suggestedAmount != null ? String(suggestedAmount) : f.amount,
       contractId: "",
+      jvLineId: null,
     }));
   };
 
@@ -411,6 +406,8 @@ export function PaymentFormModal({
     const companyLabel = companyOpt?.label || c.CompanyName || "";
     const projectLabel = projectOpt?.label || c.ProjectName || "";
     setSelectedContract(c);
+    setSelectedJVLine(null);
+    setTagTouched(true);
     setForm((f) => ({
       ...f,
       paymentName: `Payment to ${c.ContactPerson || "Contractor"} for ${c.Reason || c.NatureOfContract || "contract work"}`,
@@ -418,12 +415,53 @@ export function PaymentFormModal({
       expenseId: "",
       parentDocNo: "",
       contractId: String(c.ContractId),
+      jvLineId: null,
       company: companyLabel,
       project: projectLabel,
       partyId: c.ContactPartyId ?? f.partyId,
       paidTo: c.ContactPerson || f.paidTo,
       amount: c.PendingAmount != null ? String(Math.max(Number(c.PendingAmount), 0)) : c.ContractAmount != null ? String(c.ContractAmount) : f.amount,
     }));
+  };
+
+  const onJVLineSelect = (key: string) => {
+    setPicker(null);
+    if (!key) {
+      clearJVLink();
+      return;
+    }
+    const line = jvLines.find((l) => String(l.LineID) === key);
+    if (!line) return;
+    const companyOpt = companies.find((c) => c.id === line.CompanyId);
+    const projectOpt = projects.find((p) => p.id === line.ProjectId);
+    setSelectedContract(null);
+    setSelectedJVLine(line);
+    setTagTouched(true);
+    setForm((f) => ({
+      ...f,
+      paymentName: `Payment against ${line.JVNo || `JV-${line.JVID}`} — ${line.LHeadName}`,
+      expenseId: "",
+      expenseRef: "",
+      parentDocNo: "",
+      contractId: "",
+      jvLineId: line.LineID,
+      company: companyOpt?.label || line.CompanyName || String(line.CompanyId ?? ""),
+      project: projectOpt?.label || line.ProjectName || String(line.ProjectId ?? ""),
+      partyId: line.LHeadId,
+      paidTo: line.LHeadName,
+      amount: String(Math.max(Number(line.RemainingAmount) || 0, 0)),
+    }));
+  };
+
+  const clearJVLink = () => {
+    setTagTouched(true);
+    // Nothing picked here, only the saved link: just drop it.
+    if (!selectedJVLine) {
+      setForm((f) => ({ ...f, jvLineId: null }));
+      return;
+    }
+    setSelectedJVLine(null);
+    setForm((f) => ({ ...f, paymentName: "", jvLineId: null, company: "", project: "", partyId: null, paidTo: "", amount: "" }));
   };
 
   const clearContractLink = () => {
@@ -464,6 +502,8 @@ export function PaymentFormModal({
       cardReference: form.cardReference || null,
       cardId: form.cardId ?? null,
       ContractId: form.contractId ? Number(form.contractId) : null,
+      JVLineId: form.jvLineId ?? null,
+      tagChange: isEditing && tagTouched,
       oaSkipAutoApply: oaBalance > 0.01 ? !useOnAccountBalance : undefined,
       ...(isReissue ? {
         ReplacesPaymentId: reissueContext!.replacesPaymentId,
@@ -504,301 +544,291 @@ export function PaymentFormModal({
   const invoiceOptions: PickerOption[] = useMemo(() => invoices.map((o) => ({
     key: o.id, label: o.label, sublabel: [o.projectName, o.supplierName].filter(Boolean).join(" · "),
   })), [invoices]);
+  const jvOptions: PickerOption[] = useMemo(() => jvLines.map((l) => ({
+    key: String(l.LineID),
+    label: `${l.JVNo || `JV-${l.JVID}`} · ${l.LHeadName}`,
+    sublabel: [`Remaining ${formatINR(Math.max(Number(l.RemainingAmount) || 0, 0))}`, l.ProjectName || l.CompanyName].filter(Boolean).join(" · "),
+  })), [jvLines]);
   const contractOptions: PickerOption[] = useMemo(() => contracts.map((c) => ({
     key: String(c.ContractId), label: c.DocNo || `Contract #${c.ContractId}`,
     sublabel: [c.ContactPerson, c.PendingAmount != null ? `Pending ${formatINR(Math.max(c.PendingAmount, 0))}` : null].filter(Boolean).join(" · "),
   })), [contracts]);
 
-  return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#3b82f626" }}>
-              <Wallet size={14} color="#3b82f6" />
-            </View>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>{isEditing ? "Edit Payment" : isReissue ? "Re-issue Payment" : "New Payment"}</Text>
-          </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
+  // A saved JV link (edit, link not touched) or one picked here.
+  const savedJv = isEditing && !tagTouched ? editingRecord?.jvNo || "" : "";
+  const jvLinked = !!selectedJVLine || !!savedJv;
 
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
-          {isReissue && (
-            <View className="flex-row items-start gap-2.5 rounded-xl px-3.5 py-3 mb-4" style={{ backgroundColor: "#d9770614", borderWidth: 1, borderColor: "#d9770650" }}>
-              <RefreshCw size={14} color="#d97706" style={{ marginTop: 1 }} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: "#d97706", fontSize: 11.5, fontFamily: fonts.heading.semibold }}>Re-issuing bounced payment</Text>
-                <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 2 }}>
-                  Replaces {reissueContext!.replacesDocNo}{reissueContext!.bounceReason ? ` · ${reissueContext!.bounceReason}` : ""}
-                </Text>
+  /** A link to an invoice or a contract: a ruled key with the link mark, the chosen document or a hint. */
+  const LinkKey = ({ label, value, hint, onPress, onClear }: { label: string; value: string | null; hint: string; onPress: () => void; onClear?: () => void }) => (
+    <View style={{ gap: 6 }}>
+      <Label>{label}</Label>
+      <Press
+        onPress={onPress}
+        style={(pressed) => ({ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: value ? S.ink : S.line40, backgroundColor: pressed || value ? S.blueWash : S.paper })}
+      >
+        <Link2 size={14} color={value ? S.ink : S.graphite} />
+        <Text numberOfLines={1} style={{ flex: 1, color: value ? S.ink : S.faint, fontSize: 13.5, fontFamily: value ? fonts.body.semibold : fonts.body.regular }}>{value || hint}</Text>
+        {!!value && onClear && <X size={14} color={S.ink} />}
+      </Press>
+    </View>
+  );
+
+  const content = (
+    <>
+      <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: asScreen ? 0 : insets.top }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+          <SheetShell
+            eyebrow="CivilierERP · Finance · Payment"
+            title={isEditing ? "Edit payment" : isReissue ? "Re-issue payment" : "New payment"}
+            subtitle="Record a payment, optionally against an invoice or a contract"
+            action={<Key label={asScreen ? "Back" : "Close"} icon={<X size={13} color={S.ink} />} onPress={onClose} style={{ alignSelf: "flex-start" }} />}
+          >
+            {isReissue && (
+              <Notice tone="ink">{`Re-issuing a bounced payment. Replaces ${reissueContext!.replacesDocNo}${reissueContext!.bounceReason ? ` · ${reissueContext!.bounceReason}` : ""}`}</Notice>
+            )}
+
+            <Panel title="Party & date">
+              <View>
+                <PickerRow label="Company" value={form.company} onPress={() => setPicker("company")} />
+                <PickerRow label="Project" value={form.project} onPress={() => setPicker("project")} />
+                <Field label="Payment Date" required>
+                  <Input value={form.date} onChangeText={(v) => set("date", v)} placeholder="YYYY-MM-DD" />
+                </Field>
               </View>
-            </View>
-          )}
+            </Panel>
 
-          <PickerRow label="Company" value={form.company} onPress={() => setPicker("company")} />
-          <PickerRow label="Project" value={form.project} onPress={() => setPicker("project")} />
+            <Panel title="Link (optional)">
+              {!selectedContract && !jvLinked && (
+                <LinkKey label="Invoice" value={selectedInvoice ? selectedInvoice.label : null} hint="Autofills payee, company, project and amount" onPress={() => setPicker("invoice")} />
+              )}
+              {!selectedInvoice && !jvLinked && (
+                <LinkKey
+                  label="Contract"
+                  value={selectedContract ? selectedContract.DocNo || `Contract #${selectedContract.ContractId}` : null}
+                  hint="An advance or installment against an approved contract"
+                  onPress={() => (selectedContract ? clearContractLink() : setPicker("contract"))}
+                  onClear={clearContractLink}
+                />
+              )}
+              {!selectedInvoice && !selectedContract && (
+                <LinkKey
+                  label="Journal voucher"
+                  value={selectedJVLine ? `${selectedJVLine.JVNo || `JV-${selectedJVLine.JVID}`} · ${selectedJVLine.LHeadName}` : savedJv ? `${savedJv} (saved)` : null}
+                  hint="Settle a JV's unpaid liability leg"
+                  onPress={() => (jvLinked ? clearJVLink() : setPicker("jv"))}
+                  onClear={clearJVLink}
+                />
+              )}
+              {!!selectedJVLine && (
+                <Body size={12} color={S.graphite}>
+                  {`Remaining on this JV line: ${formatINR(Math.max(Number(selectedJVLine.RemainingAmount) || 0, 0))} of ${formatINR(Number(selectedJVLine.CreditAmount) || 0)}`}
+                </Body>
+              )}
+              {grnBreakdownLoading && <Body size={12} color={S.graphite}>Fetching the GRN tax breakdown…</Body>}
+            </Panel>
 
-          <FieldLabel required>Payment Date</FieldLabel>
-          <TextField value={form.date} onChangeText={(v) => set("date", v)} placeholder="YYYY-MM-DD" />
-
-          {!selectedContract && (
-            <Pressable
-              onPress={() => setPicker("invoice")}
-              className="flex-row items-center gap-2 px-3.5 py-3 rounded-xl mb-3"
-              style={{ borderWidth: 1, borderColor: selectedInvoice ? colors.primary : colors.border, backgroundColor: selectedInvoice ? `${colors.primary}12` : `${colors.card}80` }}
-            >
-              <Link2 size={13} color={selectedInvoice ? colors.primary : colors.mutedForeground} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular }}>Link to Invoice (optional)</Text>
-                <Text numberOfLines={1} style={{ color: selectedInvoice ? colors.primary : `${colors.mutedForeground}99`, fontSize: 12.5, fontFamily: fonts.body.medium, marginTop: 2 }}>
-                  {selectedInvoice ? selectedInvoice.label : "Autofills payee, company, project & amount"}
-                </Text>
-              </View>
-            </Pressable>
-          )}
-
-          {!selectedInvoice && (
-            <Pressable
-              onPress={() => (selectedContract ? clearContractLink() : setPicker("contract"))}
-              className="flex-row items-center gap-2 px-3.5 py-3 rounded-xl mb-3"
-              style={{ borderWidth: 1, borderColor: selectedContract ? "#8b5cf6" : colors.border, backgroundColor: selectedContract ? "#8b5cf612" : `${colors.card}80` }}
-            >
-              <Link2 size={13} color={selectedContract ? "#8b5cf6" : colors.mutedForeground} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular }}>Link to Contract (optional)</Text>
-                <Text numberOfLines={1} style={{ color: selectedContract ? "#8b5cf6" : `${colors.mutedForeground}99`, fontSize: 12.5, fontFamily: fonts.body.medium, marginTop: 2 }}>
-                  {selectedContract ? (selectedContract.DocNo || `Contract #${selectedContract.ContractId}`) : "Advance/installment against an approved contract"}
-                </Text>
-              </View>
-              {selectedContract && <X size={13} color="#8b5cf6" />}
-            </Pressable>
-          )}
-
-          {grnBreakdownLoading && (
-            <View className="flex-row items-center gap-2 mb-3"><ActivityIndicator size="small" color={colors.mutedForeground} /><Text style={{ color: colors.mutedForeground, fontSize: 11.5 }}>Fetching GRN tax breakdown…</Text></View>
-          )}
-
-          {!!grnGstBreakdown && grnGstBreakdown.totals.totalInclGST > 0 && (
-            <View className="rounded-2xl mb-4 px-3.5 py-3" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: colors.border }}>
-              <Text style={{ color: `${colors.mutedForeground}cc`, fontSize: 9.5, fontFamily: fonts.heading.bold, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>
-                Tax Details (from GRN)
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-                <View style={{ width: "50%", marginBottom: 6 }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 10 }}>Taxable Amount</Text>
-                  <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{formatINR(grnGstBreakdown.totals.totalBase)}</Text>
+            {!!grnGstBreakdown && grnGstBreakdown.totals.totalInclGST > 0 && (
+              <Panel title="Tax details (from GRN)">
+                <StatGrid
+                  size={15}
+                  items={[
+                    { label: "Taxable amount", value: formatINR(grnGstBreakdown.totals.totalBase) },
+                    { label: "Total GST", value: formatINR(grnGstBreakdown.totals.totalGST) },
+                    ...(grnGstBreakdown.totals.totalCGST > 0 ? [{ label: "CGST", value: formatINR(grnGstBreakdown.totals.totalCGST) }] : []),
+                    ...(grnGstBreakdown.totals.totalSGST > 0 ? [{ label: "SGST", value: formatINR(grnGstBreakdown.totals.totalSGST) }] : []),
+                  ]}
+                />
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 10, borderTopWidth: 1.5, borderTopColor: S.ink }}>
+                  <Label color={S.ink}>Net payable (incl. billing terms)</Label>
+                  <Text style={{ color: S.ink, fontSize: 16, fontFamily: fonts.heading.semibold }}>{formatINR(Number(form.amount) || grnGstBreakdown.totals.totalInclGST)}</Text>
                 </View>
-                <View style={{ width: "50%", marginBottom: 6 }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 10 }}>Total GST</Text>
-                  <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{formatINR(grnGstBreakdown.totals.totalGST)}</Text>
-                </View>
-                {grnGstBreakdown.totals.totalCGST > 0 && (
-                  <View style={{ width: "50%", marginBottom: 6 }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 10 }}>CGST</Text>
-                    <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{formatINR(grnGstBreakdown.totals.totalCGST)}</Text>
-                  </View>
-                )}
-                {grnGstBreakdown.totals.totalSGST > 0 && (
-                  <View style={{ width: "50%", marginBottom: 6 }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 10 }}>SGST</Text>
-                    <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{formatINR(grnGstBreakdown.totals.totalSGST)}</Text>
-                  </View>
-                )}
-              </View>
-              <View className="flex-row items-center justify-between pt-2 mt-1" style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>Net Payable (incl. billing terms)</Text>
-                <Text style={{ color: colors.primary, fontSize: 14, fontFamily: fonts.heading.bold }}>{formatINR(Number(form.amount) || grnGstBreakdown.totals.totalInclGST)}</Text>
-              </View>
-            </View>
-          )}
+              </Panel>
+            )}
 
-          {!!form.expenseRef && oaBalance > 0.01 && oaPreview && oaPreview.applyAmount > 0 && (
-            <View className="rounded-2xl overflow-hidden mb-4" style={{ borderWidth: 1, borderColor: "#10b98133" }}>
-              <View className="flex-row items-center justify-between gap-3 px-3.5 py-3" style={{ borderBottomWidth: 1, borderBottomColor: "#10b98122", backgroundColor: "#10b9810d" }}>
-                <View className="flex-row items-center gap-2.5">
-                  <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#10b98126" }}>
-                    <Wallet size={14} color="#10b981" />
-                  </View>
+            {!!form.expenseRef && oaBalance > 0.01 && oaPreview && oaPreview.applyAmount > 0 && (
+              <Panel title="On-account balance" icon={<Wallet size={14} color={S.ink} />}>
+                <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+                  <Body size={12} color={S.graphite}>Available for this supplier</Body>
+                  <Text style={{ color: S.ink, fontSize: 18, letterSpacing: -0.3, fontFamily: fonts.heading.semibold }}>{formatINR(oaBalance)}</Text>
+                </View>
+                <Seg
+                  options={[
+                    { value: "use", label: "Use it for this payment" },
+                    { value: "keep", label: "Keep it" },
+                  ]}
+                  value={useOnAccountBalance ? "use" : "keep"}
+                  onChange={(v) => setUseOnAccountBalance(v === "use")}
+                />
+                {useOnAccountBalance ? (
                   <View>
-                    <Text style={{ color: "#10b981", fontSize: 9.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6 }}>On Account Balance</Text>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 9.5, marginTop: 1 }}>Available for this supplier</Text>
-                  </View>
-                </View>
-                <Text style={{ color: "#10b981", fontSize: 15, fontFamily: fonts.heading.bold }}>{formatINR(oaBalance)}</Text>
-              </View>
-              <Pressable onPress={() => setUseOnAccountBalance((v) => !v)} className="flex-row items-start gap-3 px-3.5 py-3">
-                <View style={{ width: 36, height: 20, borderRadius: 10, marginTop: 2, backgroundColor: useOnAccountBalance ? "#10b981" : `${colors.mutedForeground}40`, padding: 2 }}>
-                  <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: "#fff", marginLeft: useOnAccountBalance ? 16 : 0 }} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>Use on-account balance for this payment</Text>
-                  {useOnAccountBalance ? (
-                    <View className="rounded-lg mt-2 overflow-hidden" style={{ borderWidth: 1, borderColor: "#10b98122" }}>
-                      <View className="flex-row items-center justify-between px-3 py-1.5">
-                        <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>Adjusted from balance</Text>
-                        <Text style={{ color: "#10b981", fontSize: 10.5, fontFamily: fonts.heading.semibold }}>{formatINR(oaPreview.applyAmount)}</Text>
-                      </View>
-                      <View className="flex-row items-center justify-between px-3 py-1.5" style={{ borderTopWidth: 1, borderTopColor: "#10b98122" }}>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>{oaPreview.isFullyCovered ? "Invoice status" : "Remaining outstanding"}</Text>
-                        {oaPreview.isFullyCovered ? (
-                          <View className="flex-row items-center gap-1">
-                            <CheckCircle2 size={11} color="#10b981" />
-                            <Text style={{ color: "#10b981", fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Fully settled</Text>
-                          </View>
-                        ) : (
-                          <Text style={{ color: "#d97706", fontSize: 10.5, fontFamily: fonts.heading.semibold }}>{formatINR(oaPreview.invoiceRemainingAfter)}</Text>
-                        )}
-                      </View>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
+                      <Body size={12} color={S.ink2}>Adjusted from balance</Body>
+                      <Text style={{ color: S.ink, fontSize: 13, fontFamily: fonts.heading.semibold }}>{formatINR(oaPreview.applyAmount)}</Text>
                     </View>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8 }}>
+                      <Body size={12} color={S.ink2}>{oaPreview.isFullyCovered ? "Invoice status" : "Remaining outstanding"}</Body>
+                      {oaPreview.isFullyCovered ? (
+                        <SheetMark text="Fully settled" tone="done" />
+                      ) : (
+                        <Text style={{ color: S.ink, fontSize: 13, fontFamily: fonts.heading.semibold }}>{formatINR(oaPreview.invoiceRemainingAfter)}</Text>
+                      )}
+                    </View>
+                  </View>
+                ) : (
+                  <Body size={12} color={S.graphite}>{`The balance stays untouched: ${formatINR(oaBalance)} kept on account.`}</Body>
+                )}
+              </Panel>
+            )}
+
+            <Panel title="Payment">
+              <Field label="Amount" required>
+                <Input value={form.amount} onChangeText={(v) => set("amount", v.replace(/[^0-9.]/g, ""))} placeholder="0.00" keyboardType="numeric" />
+              </Field>
+              <Field label="Payment Purpose" required>
+                <Input value={form.paymentName} onChangeText={(v) => set("paymentName", v)} placeholder="e.g. Cement advance to ABC Traders" />
+              </Field>
+              {isReissue && (
+                <Field label="Bank Bounce Charge (optional)">
+                  <Input value={bounceCharge} onChangeText={(v) => setBounceCharge(v.replace(/[^0-9.]/g, ""))} placeholder="Added on top of the original amount" keyboardType="numeric" />
+                </Field>
+              )}
+
+              <Field label="Payment Mode" required>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {PAYMENT_MODES.filter((m) => !isReissue || m !== "Cash").map((m) => {
+                    const on = form.mode === m;
+                    return (
+                      <Press
+                        key={m}
+                        onPress={() => set("mode", on ? "" : m)}
+                        style={(pressed) => ({ paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: S.ink, backgroundColor: on ? S.ink : pressed ? S.blueWash : "transparent" })}
+                      >
+                        <Text style={{ color: on ? S.paper : S.ink, fontSize: 10, letterSpacing: 1.1, textTransform: "uppercase", fontFamily: fonts.heading.semibold }}>{m}</Text>
+                      </Press>
+                    );
+                  })}
+                </View>
+              </Field>
+
+              {!!form.paidTo && (
+                <View style={{ gap: 4 }}>
+                  <Label>Paid To</Label>
+                  <Body size={13.5} weight="medium">{form.paidTo}</Body>
+                </View>
+              )}
+
+              {needsBank && <PickerRow label="Bank Account" value={form.bankName} onPress={() => setPicker("bank")} />}
+
+              {isChequeMode && form.bankId && (
+                <View>
+                  {lotsLoading ? (
+                    <Body size={12} color={S.graphite}>Loading cheque lots…</Body>
+                  ) : chequeLots.length === 0 ? (
+                    <Notice tone="ink">No active cheque lots for this bank.</Notice>
                   ) : (
-                    <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 4 }}>
-                      Balance stays untouched — {formatINR(oaBalance)} kept on-account.
-                    </Text>
+                    <PickerRow
+                      label="Cheque Lot"
+                      value={activeLot ? `${activeLot.ChequeLotNumber}${activeLot.RemainingCheques != null ? ` (${activeLot.RemainingCheques} left)` : ""}` : ""}
+                      onPress={() => chequeLots.length > 1 && setPicker("chequeLot")}
+                      disabled={chequeLots.length <= 1}
+                    />
+                  )}
+
+                  {form.chequeLotId && (
+                    <>
+                      <PickerRow
+                        label="Cheque Number"
+                        value={form.chequeNo ? `# ${form.chequeNo}` : ""}
+                        placeholder={chequeValidating ? "Reserving…" : numbersLoading ? "Loading…" : "Select a cheque number"}
+                        onPress={() => setPicker("chequeNo")}
+                        disabled={numbersLoading || chequeValidating}
+                      />
+                      {availableCheques.length === 0 && !numbersLoading && (
+                        <Body size={11.5} color={S.red} style={{ marginTop: -6, marginBottom: 10 }}>No available cheques left in this lot.</Body>
+                      )}
+                      <Field label={form.mode === "Post-Dated Cheque" ? "Post-Dated Cheque Date" : "Cheque Date"} required={form.mode === "Post-Dated Cheque"}>
+                        <Input
+                          value={form.chequeDate}
+                          onChangeText={(v) => {
+                            set("chequeDate", v);
+                            set("isPostDated", form.mode === "Post-Dated Cheque");
+                          }}
+                          placeholder="YYYY-MM-DD"
+                        />
+                      </Field>
+                    </>
                   )}
                 </View>
-              </Pressable>
-            </View>
-          )}
-
-          <FieldLabel required>Amount</FieldLabel>
-          <TextField value={form.amount} onChangeText={(v) => set("amount", v.replace(/[^0-9.]/g, ""))} placeholder="0.00" keyboardType="numeric" />
-
-          <FieldLabel required>Payment Purpose</FieldLabel>
-          <TextField value={form.paymentName} onChangeText={(v) => set("paymentName", v)} placeholder="e.g. Cement advance to ABC Traders" />
-
-          {isReissue && (
-            <>
-              <FieldLabel>Bank Bounce Charge (optional)</FieldLabel>
-              <TextField value={bounceCharge} onChangeText={(v) => setBounceCharge(v.replace(/[^0-9.]/g, ""))} placeholder="Added on top of the original amount" keyboardType="numeric" />
-            </>
-          )}
-
-          <FieldLabel required>Payment Mode</FieldLabel>
-          <View className="flex-row flex-wrap gap-2 mb-4">
-            {PAYMENT_MODES.filter((m) => !isReissue || m !== "Cash").map((m) => (
-              <Pressable
-                key={m}
-                onPress={() => set("mode", m === form.mode ? "" : m)}
-                style={{ opacity: form.mode && form.mode !== m ? 0.5 : 1 }}
-              >
-                <ModeBadge mode={m} />
-              </Pressable>
-            ))}
-          </View>
-
-          {!!form.paidTo && (
-            <View className="rounded-xl p-3 mb-3" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: colors.border }}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular }}>Paid To</Text>
-              <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium, marginTop: 2 }}>{form.paidTo}</Text>
-            </View>
-          )}
-
-          {needsBank && (
-            <PickerRow label="Bank Account" value={form.bankName} onPress={() => setPicker("bank")} />
-          )}
-
-          {isChequeMode && form.bankId && (
-            <View className="mb-2">
-              {lotsLoading ? (
-                <View className="flex-row items-center gap-2 mb-3"><ActivityIndicator size="small" color={colors.mutedForeground} /><Text style={{ color: colors.mutedForeground, fontSize: 11.5 }}>Loading cheque lots…</Text></View>
-              ) : chequeLots.length === 0 ? (
-                <View className="flex-row items-center gap-2 px-3 py-2.5 rounded-xl mb-3" style={{ backgroundColor: "#d9770615", borderWidth: 1, borderColor: "#d9770630" }}>
-                  <AlertTriangle size={12} color="#d97706" />
-                  <Text style={{ color: "#d97706", fontSize: 11.5, fontFamily: fonts.body.medium }}>No active cheque lots for this bank.</Text>
-                </View>
-              ) : (
-                <PickerRow label="Cheque Lot" value={activeLot ? `${activeLot.ChequeLotNumber}${activeLot.RemainingCheques != null ? ` (${activeLot.RemainingCheques} left)` : ""}` : ""} onPress={() => chequeLots.length > 1 && setPicker("chequeLot")} disabled={chequeLots.length <= 1} />
               )}
 
-              {form.chequeLotId && (
-                <>
-                  <PickerRow
-                    label="Cheque Number"
-                    value={form.chequeNo ? `# ${form.chequeNo}` : ""}
-                    placeholder={chequeValidating ? "Reserving…" : numbersLoading ? "Loading…" : "Select a cheque number"}
-                    onPress={() => setPicker("chequeNo")}
-                    disabled={numbersLoading || chequeValidating}
-                  />
-                  {availableCheques.length === 0 && !numbersLoading && (
-                    <Text style={{ color: "#d97706", fontSize: 10.5, marginTop: -6, marginBottom: 10 }}>No available cheques left in this lot.</Text>
-                  )}
-                  <FieldLabel required={form.mode === "Post-Dated Cheque"}>
-                    {form.mode === "Post-Dated Cheque" ? "Post-Dated Cheque Date" : "Cheque Date"}
-                  </FieldLabel>
-                  <TextField value={form.chequeDate} onChangeText={(v) => { set("chequeDate", v); set("isPostDated", form.mode === "Post-Dated Cheque"); }} placeholder="YYYY-MM-DD" />
-                </>
+              {isDigitalMode && DIGITAL_FIELD[form.mode] && (
+                <Field label={DIGITAL_FIELD[form.mode].label} required>
+                  <Input value={form[DIGITAL_FIELD[form.mode].key] as string} onChangeText={(v) => set(DIGITAL_FIELD[form.mode].key, v)} placeholder={DIGITAL_FIELD[form.mode].placeholder} />
+                </Field>
               )}
-            </View>
-          )}
 
-          {isDigitalMode && DIGITAL_FIELD[form.mode] && (
-            <>
-              <FieldLabel required>{DIGITAL_FIELD[form.mode].label}</FieldLabel>
-              <TextField
-                value={form[DIGITAL_FIELD[form.mode].key] as string}
-                onChangeText={(v) => set(DIGITAL_FIELD[form.mode].key, v)}
-                placeholder={DIGITAL_FIELD[form.mode].placeholder}
-              />
-            </>
-          )}
-
-          {form.mode === "Card" && form.bankId && cards.length > 0 && (
-            <PickerRow label="Card Used (optional)" value={selectedCard ? [selectedCard.card_network, maskCardNumber(selectedCard.card_number), selectedCard.card_holder_name].filter(Boolean).join(" · ") : ""} onPress={() => setPicker("card")} />
-          )}
+              {form.mode === "Card" && form.bankId && cards.length > 0 && (
+                <PickerRow
+                  label="Card Used (optional)"
+                  value={selectedCard ? [selectedCard.card_network, maskCardNumber(selectedCard.card_number), selectedCard.card_holder_name].filter(Boolean).join(" · ") : ""}
+                  onPress={() => setPicker("card")}
+                />
+              )}
+            </Panel>
+          </SheetShell>
         </ScrollView>
 
-        <View className="flex-row gap-2.5 px-4" style={{ paddingBottom: insets.bottom + 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <Pressable onPress={onClose} className="px-5 py-3 rounded-xl items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleSave}
-            disabled={saving}
-            className="flex-1 items-center justify-center py-3 rounded-xl"
-            style={{ backgroundColor: colors.primary, opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : (
-              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{isEditing ? "Update Payment" : "Save Payment"}</Text>
-            )}
-          </Pressable>
+        <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 12, paddingTop: 10, paddingBottom: insets.bottom + 12, borderTopWidth: 1.5, borderTopColor: S.ink, backgroundColor: colors.background }}>
+          <Key label="Cancel" onPress={onClose} />
+          <Key tone="ink" label={saving ? "Saving…" : isEditing ? "Update payment" : "Save payment"} onPress={handleSave} disabled={saving} style={{ flex: 1 }} />
         </View>
       </View>
 
       <OptionPickerModal
-        visible={picker === "company"} title="Select Company" options={companyOptions}
+        visible={picker === "company"} title="Select company" options={companyOptions}
         selectedKey={form.company} onSelect={(k) => { set("company", k); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable
       />
       <OptionPickerModal
-        visible={picker === "project"} title="Select Project" options={projectOptions}
+        visible={picker === "project"} title="Select project" options={projectOptions}
         selectedKey={form.project} onSelect={(k) => { set("project", k); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable
       />
       <OptionPickerModal
-        visible={picker === "bank"} title="Select Bank Account" options={bankOptions}
+        visible={picker === "bank"} title="Select bank account" options={bankOptions}
         selectedKey={form.bankId ? String(form.bankId) : null} onSelect={onBankSelect} onClose={() => setPicker(null)} searchable
       />
       <OptionPickerModal
-        visible={picker === "chequeLot"} title="Select Cheque Lot" options={lotOptions}
+        visible={picker === "chequeLot"} title="Select cheque lot" options={lotOptions}
         selectedKey={form.chequeLotId ? String(form.chequeLotId) : null} onSelect={onLotSelect} onClose={() => setPicker(null)}
       />
       <OptionPickerModal
-        visible={picker === "chequeNo"} title="Select Cheque Number" options={chequeNoOptions}
+        visible={picker === "chequeNo"} title="Select cheque number" options={chequeNoOptions}
         selectedKey={form.chequeNo} onSelect={onChequeNumberSelect} onClose={() => setPicker(null)} searchable
       />
       <OptionPickerModal
-        visible={picker === "card"} title="Select Card" options={cardOptions}
+        visible={picker === "card"} title="Select card" options={cardOptions}
         selectedKey={form.cardId ? String(form.cardId) : null}
         onSelect={(k) => { set("cardId", k ? Number(k) : null); setPicker(null); }} onClose={() => setPicker(null)} clearable
       />
       <OptionPickerModal
-        visible={picker === "invoice"} title="Link to Invoice" options={invoiceOptions}
+        visible={picker === "invoice"} title="Link to invoice" options={invoiceOptions}
         selectedKey={form.expenseId} onSelect={onInvoiceSelect} onClose={() => setPicker(null)} searchable clearable loading={invoicesLoading}
       />
       <OptionPickerModal
-        visible={picker === "contract"} title="Link to Contract" options={contractOptions}
+        visible={picker === "jv"} title="Settle a journal voucher" options={jvOptions}
+        selectedKey={form.jvLineId ? String(form.jvLineId) : null} onSelect={onJVLineSelect} onClose={() => setPicker(null)} searchable clearable loading={jvLinesLoading}
+      />
+      <OptionPickerModal
+        visible={picker === "contract"} title="Link to contract" options={contractOptions}
         selectedKey={form.contractId} onSelect={onContractSelect} onClose={() => setPicker(null)} searchable clearable loading={contractsLoading}
       />
+    </>
+  );
+
+  return asScreen ? (
+    <View style={{ flex: 1 }}>{content}</View>
+  ) : (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
+      {content}
     </Modal>
   );
 }

@@ -57,7 +57,7 @@ export class ErrorBoundary extends Component<Props, State> {
           style={{ maxHeight: 120, width: "100%", marginBottom: 20 }}
           contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 10 }}
         >
-          <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.card, padding: 12 }}>
+          <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 0, backgroundColor: colors.card, padding: 12 }}>
             <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }} numberOfLines={6}>
               {error.message || String(error)}
             </Text>
@@ -67,7 +67,7 @@ export class ErrorBoundary extends Component<Props, State> {
           onPress={this.reset}
           style={{
             flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 20, paddingVertical: 12,
-            borderRadius: 14, backgroundColor: colors.primary,
+            borderRadius: 0, backgroundColor: colors.primary,
           }}
         >
           <RotateCcw size={14} color="#fff" />

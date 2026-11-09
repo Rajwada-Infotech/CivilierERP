@@ -12,6 +12,7 @@ const ApkReader = require("adbkit-apkreader");
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { sendAppUpdate } = require("../services/pushNotifications");
 
 // The folder nginx serves at /downloads/ (docker-compose mounts the host's
 // ./apk-releases here read-write for this service). Outside Docker it falls
@@ -159,7 +160,9 @@ router.get("/", authenticateToken, requirePageRight("apk-manager", "view"), asyn
 });
 
 // POST / — publish a new build. multipart: file (.apk), appKey, releaseNotes,
-// mandatory. The version comes from the APK itself, never from the form.
+// mandatory, notify. The version comes from the APK itself, never from the form.
+// Unless notify is "false", every phone of that app still on an older build gets
+// an "Update available" push; the response carries how many were reached.
 router.post(
   "/",
   authenticateToken,
@@ -245,7 +248,12 @@ router.post(
             VALUES (@k, @pkg, @vc, @vn, @fn, @sz, @sha, @md5, @notes, @mand, 1, @by)
           `);
         await tx.commit();
-        res.status(201).json(toRelease(ins.recordset[0]));
+        const rel = ins.recordset[0];
+        const wantNotify = !(String(req.body?.notify) === "false" || req.body?.notify === "0");
+        const notified = wantNotify
+          ? await sendAppUpdate({ appKey, appLabel: app.label, versionCode: rel.VersionCode, versionName: rel.VersionName, mandatory: !!rel.IsMandatory, notes: rel.ReleaseNotes })
+          : null;
+        res.status(201).json({ ...toRelease(rel), notified });
       } catch (dbErr) {
         try { await tx.rollback(); } catch (_) { /* already rolled back */ }
         throw dbErr;
@@ -257,6 +265,31 @@ router.post(
     }
   },
 );
+
+// POST /:id/notify — announce a published build again to the phones still on an older one (people who ignored the
+// first push, or phones that registered since). Only the app's current build can be announced.
+router.post("/:id/notify", authenticateToken, requirePageRight("apk-manager", "edit"), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "Unknown build." });
+    const r = await getPool().request().input("id", sql.Int, id).query("SELECT * FROM dbo.AppRelease WHERE AppReleaseId = @id");
+    const rel = r.recordset[0];
+    if (!rel) return res.status(404).json({ error: "That build no longer exists." });
+    if (!rel.IsCurrent) return res.status(400).json({ error: "Only the current build can be announced." });
+    const notified = await sendAppUpdate({
+      appKey: rel.AppKey,
+      appLabel: APP_CATALOG[rel.AppKey]?.label,
+      versionCode: rel.VersionCode,
+      versionName: rel.VersionName,
+      mandatory: !!rel.IsMandatory,
+      notes: rel.ReleaseNotes,
+    });
+    res.json({ notified });
+  } catch (err) {
+    console.error("[app-releases] notify error:", err.message);
+    res.status(500).json({ error: "Could not send the update notification." });
+  }
+});
 
 // PATCH /:id — edit release notes / the mandatory flag of a published build.
 router.patch("/:id", authenticateToken, requirePageRight("apk-manager", "edit"), async (req, res) => {

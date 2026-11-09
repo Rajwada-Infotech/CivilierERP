@@ -171,6 +171,8 @@ const MODULE_MAP = {
   // module" and the entire Senior Approval step was unreachable regardless
   // of who tried it.
   "crm-sales-deed-senior": { table: "dbo.CrmSalesDeed", pk: "Id", status: "SeniorApprovalStatus" },
+  // Amendments to approved documents (services/docAmendment.js). Applied once fully approved — routes/docAmendments.js.
+  "doc-amendment": { table: "dbo.DocAmendment", pk: "Id", status: "Status" },
 };
 
 const MODULE_DOC_LINKS = {
@@ -234,6 +236,7 @@ async function validateApprovalModuleMap(log = console) {
 // Approval Setup UI (src/pages/admin/ApprovalSetup.tsx MODULE_OPTIONS)
 // and read back by the /api/approval-workflows/trail endpoint.
 const WORKFLOW_ID_MAP = {
+  "doc-amendment": "DocAmendment",
   "expense-booking": "Expenses",
   "purchase-orders": "PurchaseOrders",
   "work-orders": "WorkOrderHeader",
