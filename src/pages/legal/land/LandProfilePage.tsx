@@ -20,7 +20,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { LegalMasterTable } from "../LegalMasterPage";
+import { LegalMasterTable, WhatsAppName } from "../LegalMasterPage";
+import { useAuth } from "@/contexts/AuthContext";
 import { OwnershipStep } from "./steps/OwnershipStep";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { DocumentsStep, RecordDocuments, type DocLink } from "./steps/DocumentsStep";
@@ -55,13 +56,14 @@ const TABS: { key: TabKey; label: string; count?: keyof LandOverview["counts"] }
   { key: "ownership", label: "Ownership History", count: "ownershipRecords" },
   { key: "transfers", label: "Acquisition & Purchase", count: "transfers" },
   { key: "records", label: "Land Records (RS / LR)", count: "landRecords" },
-  { key: "documents", label: "Documents", count: "documents" },
   { key: "legal", label: "Legal Information", count: "legalHistory" },
   { key: "loans", label: "Loan & Mortgage", count: "mortgages" },
   { key: "mutation", label: "Mutation Records", count: "mutations" },
   { key: "payments", label: "Payment History", count: "payments" },
   { key: "tax", label: "Land Tax (Khajna)", count: "taxRecords" },
   { key: "survey", label: "Survey & Valuation", count: "valuations" },
+  // Each section uploads its own documents; this tab is for everything else (and lists them all).
+  { key: "documents", label: "Other Documents", count: "documents" },
   { key: "photos", label: "Notes & Attachments" },
   { key: "activity", label: "Activity History" },
 ];
@@ -258,6 +260,8 @@ export default function LandProfilePage() {
     actionL2Mutation.isPending;
 
   const land = data?.land;
+  const { currentUser } = useAuth();
+  const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
   const c = data?.counts;
   const btn = "inline-flex items-center gap-1.5 border border-foreground px-3 py-1.5 text-xs font-heading font-semibold uppercase tracking-[0.08em] hover:bg-primary/10";
 
@@ -621,6 +625,13 @@ export default function LandProfilePage() {
                     }
                   />
                   <Field k="Software entry date" v={fmtDate(land.CreatedAt)} />
+                {land.EnquiryNo && (
+                  <Field k="Entry by" v={<span className="inline-flex flex-wrap items-center gap-1.5">
+                    <WhatsAppName name={land.EnquiryByName} phone={land.EnquiryByWhatsApp} userId={land.EnquiryById ?? null}
+                      canSet={isAdminTier || String(land.EnquiryById ?? "") === String(currentUser?.id ?? "")} onSaved={refresh} />
+                    <span className="text-xs text-muted-foreground">({land.EnquiryNo})</span>
+                  </span>} />
+                )}
                   <Field k="Location" v={land.LocationAddress ?? `${land.MouzaName ?? ""}${land.JLNo ? ` (J.L. ${land.JLNo})` : ""}`} />
                   <Field k="Total area" v={land.Area !== null ? `${land.Area} ${land.UnitName ?? ""}` : null} />
                   <Field k="District" v={land.DistrictName} />
@@ -740,6 +751,13 @@ export default function LandProfilePage() {
                   }
                 />
                 <Field k="Software entry date" v={fmtDate(land.CreatedAt)} />
+                {land.EnquiryNo && (
+                  <Field k="Entry by" v={<span className="inline-flex flex-wrap items-center gap-1.5">
+                    <WhatsAppName name={land.EnquiryByName} phone={land.EnquiryByWhatsApp} userId={land.EnquiryById ?? null}
+                      canSet={isAdminTier || String(land.EnquiryById ?? "") === String(currentUser?.id ?? "")} onSaved={refresh} />
+                    <span className="text-xs text-muted-foreground">({land.EnquiryNo})</span>
+                  </span>} />
+                )}
                 <Field k="North boundary" v={land.NorthBoundary} />
                 <Field k="South boundary" v={land.SouthBoundary} />
                 <Field k="East boundary" v={land.EastBoundary} />

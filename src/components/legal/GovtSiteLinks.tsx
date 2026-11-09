@@ -7,7 +7,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { openLegalLink } from "./LegalDocumentPreview";
 
 /**
- * Quick links to the official sites (Banglarbhumi, WB Registration…) saved in Setup → Official Portal Link, to check
+ * Quick links to the official sites (Banglarbhumi, WB Registration…) saved in Setup → Government Site Links, to check
  * a land's records by hand. A link opens inside the app's side panel, beside the work (that panel offers "Open in new
  * tab" for sites that refuse to be shown inside another page); the ↗ next to it opens a new tab directly.
  * Nothing is sent to or read from those sites.
@@ -36,7 +36,7 @@ export const GovtSiteLinks: React.FC<{ title?: string; hint?: string }> = ({
       ) : !data?.length ? (
         <p className="mt-2 text-xs text-muted-foreground">
           No government site links saved yet.{" "}
-          {canSetup ? <>Add them in <b>Setup → Official Portal Link</b> (e.g. Banglarbhumi for RoR / plot details, WB Registration for deed search).</> : "Ask an administrator to add them in Setup → Official Portal Link."}
+          {canSetup ? <>Add them in <b>Setup → Government Site Links</b> (e.g. Banglarbhumi for RoR / plot details, WB Registration for deed search).</> : "Ask an administrator to add them in Setup → Government Site Links."}
         </p>
       ) : (
         <>

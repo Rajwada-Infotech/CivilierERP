@@ -25,7 +25,8 @@
 //   right and stamps who / when; `requiredWhen: { field, values }` makes a field required for those values;
 //   `afterWrite(pool, req, row, before)` runs after a successful add / update (a clearance putting the land on hold).
 //   `where` narrows a master with SQL ({t} = the row's table or alias), e.g. lands already acquired;
-//   `extras: [{ name, label, sql }]` adds read-only computed columns to the list (alias t is the row);
+//   `extras: [{ name, label, sql, whatsapp? }]` adds read-only computed columns to the list (alias t is the row); `whatsapp` is
+//   SQL for a phone number (users.WhatsAppNo, migration 624) shown as a WhatsApp chat link beside the value;
 //   `check(pool, values, id)` returns a message to refuse an add / update on a business rule (id null on add).
 // A `label` is evaluated with the master's table aliased as r.
 // Decimal fields take `min`, `maxValue` and `signed` (GPS coordinates).
@@ -229,6 +230,10 @@ const MASTERS = {
     noDelete: true,
     extras: [
       { name: "CurrentOwners", label: "Current owner(s)", sql: "(SELECT STRING_AGG(ISNULL(o.OwnerName, p.FullName), ', ') FROM dbo.LegalOwnershipRecord o LEFT JOIN dbo.LegalPerson p ON p.PersonId = o.PersonId WHERE o.LandId = t.LandId AND o.IsActive = 1 AND o.ValidTo IS NULL)" },
+      // The user who raised the enquiry this land came from (New Acquisition land only), with a WhatsApp link.
+      { name: "EnquiryBy", label: "Entry by", sql: "(SELECT u.name FROM dbo.LegalLandEnquiry e JOIN dbo.users u ON u.id = e.CreatedBy WHERE e.EnquiryId = t.EnquiryId)",
+        whatsapp: "(SELECT u.WhatsAppNo FROM dbo.LegalLandEnquiry e JOIN dbo.users u ON u.id = e.CreatedBy WHERE e.EnquiryId = t.EnquiryId)",
+        userId: "(SELECT e.CreatedBy FROM dbo.LegalLandEnquiry e WHERE e.EnquiryId = t.EnquiryId)" },
     ],
     // The same Mouza and Dag number twice is almost always the same land entered twice.
     check: async (pool, values, id) => {
@@ -333,7 +338,12 @@ const MASTERS = {
     label: "EnquiryNo + ' - ' + LandLocation", orderBy: "EnquiryDate DESC, EnquiryId DESC",
     unique: [["EnquiryNo"], "This enquiry number already exists"],
     noDelete: true,
-    extras: [{ name: "LandCode", label: "Converted to land", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" }],
+    extras: [
+      { name: "LandCode", label: "Converted to land", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" },
+      // Who raised the enquiry, with a WhatsApp link so anyone can talk to them about it.
+      { name: "EnquiryBy", label: "Entry by", after: "EnquiryDate", sql: "(SELECT u.name FROM dbo.users u WHERE u.id = t.CreatedBy)",
+        whatsapp: "(SELECT u.WhatsAppNo FROM dbo.users u WHERE u.id = t.CreatedBy)", userId: "t.CreatedBy" },
+    ],
     guard: async (pool, id, values) => {
       const r = await pool.request().input("Id", id).query("SELECT EnquiryStatus, (SELECT LandCode FROM dbo.LegalLand l WHERE l.LandId = e.LandId) AS LandCode FROM dbo.LegalLandEnquiry e WHERE EnquiryId = @Id");
       const row = r.recordset[0];
@@ -356,7 +366,8 @@ const MASTERS = {
       { name: "ContactPerson", label: "Seller / contact person", type: "text", max: 200 },
       { name: "ContactNumber", label: "Contact number", type: "text", max: 15, pattern: "^[+]?[0-9 -]{8,15}$", patternMsg: "Enter a valid phone number" },
       { name: "ExpectedPrice", label: "Expected price (₹)", type: "decimal" },
-      { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user", required: true },
+      // Always the user who raises the enquiry (set on save, not picked); shown as "Enquiry by" with their WhatsApp.
+      { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user", hidden: true, self: true },
       // "Converted to Land Record" is set only by Convert to land (and such an enquiry is read-only), so it is not offered here.
       { name: "EnquiryStatus", label: "Enquiry status", type: "select", required: true, options: ["New", "Under Review", "Interested", "Rejected", "On Hold"], default: "New" },
       { name: "InitialDocFileId", label: "Initial document", type: "file" },
@@ -1319,17 +1330,17 @@ const MASTERS = {
     ],
   },
   "portal-link": {
-    title: "Official Portal Link", group: "Registration", pageKey: "legal-portal-link-master", table: "LegalPortalLink", pk: "LinkId",
-    desc: "Maintained official URLs per office and service. Links not tested for 90 days are flagged.",
+    title: "Government Site Links", group: "Land records", pageKey: "legal-portal-link-master", table: "LegalPortalLink", pk: "LinkId",
+    desc: "Official government sites (Banglarbhumi, WB Registration…) shown on Land Enquiry and Land Profile. Links not tested for 90 days are flagged.",
     label: "LinkLabel", orderBy: "ServiceType, LinkLabel",
     fields: [
-      { name: "OfficeId", label: "Registration office (blank = all)", type: "ref", ref: "registration-office" },
       { name: "ServiceType", label: "Service", type: "select", required: true, options: ["Deed Search", "Certified Copy", "Deed Registration", "Market Value", "Land Record / RoR", "Mutation", "Other"] },
-      { name: "LinkLabel", label: "Link label", type: "text", required: true, max: 150 },
+      { name: "LinkLabel", label: "Site name (e.g. Banglarbhumi)", type: "text", required: true, max: 150 },
       { name: "Url", label: "Official URL", type: "url", required: true, max: 500 },
       { name: "LastTestedDate", label: "Last tested on", type: "date" },
       { name: "VerifiedBy", label: "Verified by", type: "ref", ref: "user" },
       { name: "FallbackInstructions", label: "If the portal is down", type: "textarea", max: 1000 },
+      { name: "OfficeId", label: "Only for this registration office (optional — leave blank for all)", type: "ref", ref: "registration-office" },
       ACTIVE,
     ],
   },

@@ -139,6 +139,7 @@ export interface LandOverview {
     VerificationStatus?: string; L1Status?: string; L1ReviewedAt?: string | null; L1Remarks?: string | null; L1ReviewerName?: string | null;
     L2Status?: string; L2ApprovedAt?: string | null; L2Remarks?: string | null; L2ApproverName?: string | null;
     CreatedAt: string; LastUpdated: string; CreatedByName: string | null;
+    EnquiryNo?: string | null; EnquiryById?: number | null; EnquiryByName?: string | null; EnquiryByWhatsApp?: string | null;
   };
   owners: { OwnerName: string | null; SharePct: number; ValidFrom: string; VerificationStatus: string }[];
   counts: Record<"ownershipRecords" | "transfers" | "documents" | "documentsUnverified" | "activeCases" | "legalRecords" | "legalHistory" | "activeMortgages" | "mortgages"
@@ -242,3 +243,11 @@ export const getLandProjectMap = async () =>
   handle<{ lands: ProjectLand[]; projects: { id: number; name: string }[] }>(await fetchWithAuth(`${BASE}/project-map`));
 export const setLandProject = async (landId: number, projectId: number | null) =>
   handle<{ ok: true }>(await fetchWithAuth(`${BASE}/${landId}/project`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) }));
+
+// The logged-in user's own WhatsApp number (Land Enquiries asks for it when missing; migration 624).
+export const getMyWhatsApp = async () =>
+  handle<{ available: boolean; WhatsAppNo: string | null }>(await fetchWithAuth(`/api/users/me/whatsapp`));
+export const setMyWhatsApp = async (WhatsAppNo: string) =>
+  handle<{ message: string; WhatsAppNo: string }>(await fetchWithAuth(`/api/users/me/whatsapp`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ WhatsAppNo }) }));
+export const setUserWhatsApp = async (userId: number, WhatsAppNo: string) =>
+  handle<{ message: string; WhatsAppNo: string }>(await fetchWithAuth(`/api/users/${userId}/whatsapp`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ WhatsAppNo }) }));

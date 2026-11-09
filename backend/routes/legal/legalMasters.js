@@ -15,6 +15,7 @@
 // Table and column names only ever come from the config, never from the request.
 
 const express = require("express");
+const { usersHaveWhatsApp } = require("../../services/usersWhatsApp");
 const { getPool, sql } = require("../../db");
 const { cache } = require("../../middleware/cache");
 const { requirePageRight, requireAnyPageRight, hasAnyPageAction } = require("../../middleware/requirePageRight");
@@ -279,7 +280,7 @@ function sendDbError(res, cfg, err, where) {
 router.get("/meta", (req, res) => {
   res.json(PAGED.map(([key, m]) => ({
     key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, adminOnly: !!m.adminOnly,
-    extras: (m.extras || []).map(({ name, label }) => ({ name, label })),
+    extras: (m.extras || []).map(({ name, label, whatsapp, after }) => ({ name, label, whatsapp: !!whatsapp, after })),
     fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden }) =>
       ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden,
         creatable: type === "ref" && creatableRef(ref) })),
@@ -321,7 +322,7 @@ router.get("/summary", anyLegalView, listCache, async (req, res) => {
   }
 });
 
-// The official sites (Setup → Official Portal Link) as quick links for anyone in the Legal module — opened in a new
+// The official sites (Setup → Government Site Links) as quick links for anyone in the Legal module — opened in a new
 // tab to check land details by hand. Nothing is sent to or read from those sites.
 router.get("/portal-links", anyLegalView, listCache, async (_req, res) => {
   try {
@@ -417,8 +418,9 @@ router.get("/:master", withRight("view"), listCache, async (req, res) => {
   if (parentId !== null && (!cfg.parent || !Number.isInteger(parentId) || parentId <= 0)) return res.status(400).json({ error: "Invalid parent" });
   try {
     const labels = cfg.fields.filter((f) => f.type === "ref" || f.type === "file").map((f) => `, ${refLabelSql(f, "t")} AS ${f.name}__label`).join("");
+    const withWa = (cfg.extras || []).some((x) => x.whatsapp) && (await usersHaveWhatsApp(getPool()));
     const result = await getPool().request().input("Parent", sql.Int, parentId).query(`
-      SELECT t.*${labels}${(cfg.extras || []).map((x) => `, ${x.sql} AS ${x.name}`).join("")},
+      SELECT t.*${labels}${(cfg.extras || []).map((x) => `, ${x.sql} AS ${x.name}${x.whatsapp && withWa ? `, ${x.whatsapp} AS ${x.name}__wa` : ""}${x.userId ? `, ${x.userId} AS ${x.name}__uid` : ""}`).join("")},
              (SELECT name FROM dbo.users WHERE id = t.CreatedBy) AS CreatedByName,
              (SELECT name FROM dbo.users WHERE id = t.UpdatedBy) AS UpdatedByName
       FROM dbo.${cfg.table} t WHERE 1 = 1${scopeSql(cfg, "t")}${parentId !== null ? ` AND t.${cfg.parent} = @Parent` : ""} ORDER BY ${cfg.orderBy.split(",").map((s) => `t.${s.trim()}`).join(", ")}`);
@@ -488,6 +490,8 @@ router.post("/:master", withRight("create"), async (req, res) => {
     await resolveNewRefs(pool, cfg, req.body, req.user?.userId, res.locals.added);
     // A refused save (validation, a business rule, a duplicate…) takes back the list entries it just added.
     res.once("finish", () => { if (res.statusCode >= 400 && res.locals.added.length) dropAdded(pool, res.locals.added); });
+    // `self` fields are always the user who adds the row.
+    for (const f of cfg.fields) if (f.self) req.body[f.name] = req.user?.userId ?? req.user?.id ?? null;
     const { values, error } = await validate(pool, cfg, req.body);
     if (error) return res.status(400).json({ error });
     // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.

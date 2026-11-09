@@ -42,6 +42,8 @@ interface User {
   can_accept_tickets?: boolean;
   DepartmentId?: number | null;
   DepartmentName?: string | null;
+  /** for "chat on WhatsApp" links next to records this user created (migration 624) */
+  WhatsAppNo?: string | null;
   /** the list's small thumbnail when there is one, else the full picture (migration 575) */
   avatar_url?: string | null;
   /** a picture uploaded before thumbnails existed — made once on this page */
@@ -69,6 +71,7 @@ const addUserApi = async (user: {
   password: string;
   can_accept_tickets?: boolean;
   DepartmentId?: number | null;
+  WhatsAppNo?: string | null;
 }) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
@@ -397,6 +400,7 @@ const Users = () => {
     password: "",
     isActive: true,
     canAcceptTickets: false,
+    whatsApp: "",
   });
 
   const [editUserId, setEditUserId] = useState<number | null>(null);
@@ -422,6 +426,7 @@ const Users = () => {
           password: "",
           isActive: !user.discontinue,
           canAcceptTickets: !!user.can_accept_tickets,
+          whatsApp: user.WhatsAppNo ?? "",
         });
         setDrawerOpen(true);
       }
@@ -458,6 +463,7 @@ const Users = () => {
         email: form.email.trim(),
         RoleId: form.RoleId,
         DepartmentId: form.DepartmentId || null,
+        WhatsAppNo: form.whatsApp.trim() || null,
         discontinue: !form.isActive,
         can_accept_tickets: form.canAcceptTickets,
       };
@@ -474,6 +480,7 @@ const Users = () => {
         email: form.email.trim(),
         RoleId: form.RoleId,
         DepartmentId: form.DepartmentId || null,
+        WhatsAppNo: form.whatsApp.trim() || null,
         password: form.password,
         can_accept_tickets: form.canAcceptTickets,
       });
@@ -489,6 +496,7 @@ const Users = () => {
       password: "",
       isActive: true,
       canAcceptTickets: false,
+      whatsApp: "",
     });
     setEditUserId(null);
     setShowPass(false);
@@ -648,6 +656,23 @@ const Users = () => {
                   required
                   className={INPUT}
                 />
+              </div>
+
+              <div>
+                <label className={`${LBL} mb-1.5 block`}>
+                  WhatsApp Number
+                </label>
+                <input
+                  name="whatsApp"
+                  type="tel"
+                  inputMode="tel"
+                  maxLength={20}
+                  placeholder="e.g. 9876543210 or +91 98765 43210"
+                  value={form.whatsApp}
+                  onChange={handleChange}
+                  className={INPUT}
+                />
+                <p className="mt-1 text-[0.6875rem] text-muted-foreground">Others can chat with this user on WhatsApp from records they created (e.g. land enquiries).</p>
               </div>
 
               <div>

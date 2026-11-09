@@ -1,12 +1,13 @@
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { MessageQuestion } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { usePageRights } from "@/hooks/usePageRights";
-import { convertEnquiry, setEnquiryStatus } from "@/api/legalLandApi";
+import { convertEnquiry, setEnquiryStatus, getMyWhatsApp, setMyWhatsApp } from "@/api/legalLandApi";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { LegalMasterTable } from "../LegalMasterPage";
 import { openLegalMap } from "@/components/legal/LegalDocumentPreview";
@@ -72,6 +73,7 @@ export default function LandEnquiryPage() {
             <span key={l} className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c }} />{l}</span>
           ))}
         </div>
+        <MyWhatsAppPrompt />
         <div className="mb-4"><GovtSiteLinks hint="Before converting an enquiry, check the plot on the official site. A link opens in the side panel; if a site stays blank there (some government sites block this), use ↗ to open it in a new tab." /></div>
         <LegalMasterTable
           entry={entry}
@@ -106,5 +108,43 @@ export default function LandEnquiryPage() {
         />
       </LegalShell>
     </>
+  );
+}
+
+// Enquiries are assigned to whoever raises them, and others reach that person on WhatsApp. When the logged-in user has
+// no WhatsApp number yet, ask for it here (saved on their own user).
+function MyWhatsAppPrompt() {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({ queryKey: ["my-whatsapp"], queryFn: getMyWhatsApp, staleTime: 5 * 60_000 });
+  const [no, setNo] = useState("");
+  const [saving, setSaving] = useState(false);
+  if (!data?.available || data.WhatsAppNo) return null;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      toast.success((await setMyWhatsApp(no)).message);
+      await queryClient.invalidateQueries({ queryKey: ["my-whatsapp"] });
+      queryClient.invalidateQueries({ queryKey: ["legal-master"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 border border-amber-500/40 bg-amber-500/5 px-3 py-2">
+      <span className="text-xs text-foreground">
+        <b>Add your WhatsApp number</b> — enquiries you raise are assigned to you, and others use it to talk to you about them.
+      </span>
+      <input value={no} onChange={(e) => setNo(e.target.value)} type="tel" inputMode="tel" maxLength={20}
+        placeholder="e.g. 9876543210" onKeyDown={(e) => e.key === "Enter" && no.trim() && save()}
+        className="h-8 w-44 rounded-md border border-border bg-background px-2 text-xs" />
+      <button onClick={save} disabled={saving || !no.trim()}
+        className="h-8 rounded-md border border-foreground bg-foreground px-3 text-xs font-medium text-card disabled:opacity-50">
+        {saving ? "Saving…" : "Save"}
+      </button>
+    </div>
   );
 }

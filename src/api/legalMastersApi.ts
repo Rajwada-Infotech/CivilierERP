@@ -50,7 +50,8 @@ export interface LegalMasterMeta {
   /** Approval setup: only an administrator can change it; everyone else sees it read-only. */
   adminOnly?: boolean;
   /** Read-only computed columns shown in the table and details (e.g. "Used by land"). */
-  extras?: { name: string; label: string }[];
+  /** `whatsapp`: the row also carries `<name>__wa`, a WhatsApp number shown as a chat link beside the value */
+  extras?: { name: string; label: string; whatsapp?: boolean; after?: string }[];
   fields: LegalFieldMeta[];
 }
 
@@ -128,7 +129,7 @@ export const openLegalFile = async (id: number | string) => {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 };
 
-/** Official sites saved in Setup → Official Portal Link, for checking land details by hand. */
+/** Official sites saved in Setup → Government Site Links, for checking land details by hand. */
 export interface LegalPortalLink {
   LinkId: number; LinkLabel: string; ServiceType: string; Url: string; FallbackInstructions: string | null; LastTestedDate: string | null; OfficeName: string | null;
 }

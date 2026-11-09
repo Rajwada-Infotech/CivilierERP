@@ -1,3 +1,5 @@
+import { askLegal } from "@/components/legal/LegalAsk";
+import { setUserWhatsApp } from "@/api/legalLandApi";
 import React, { useMemo, useRef, useState } from "react";
 import { FileText, Upload, X } from "lucide-react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -328,7 +330,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   );
   const extras = useMemo(() => master?.extras ?? [], [master]);
   const data = useMemo(
-    () => (rows ?? []).filter((r) => !rowFilter || rowFilter(r)).map((r) => ({ ...mapRow(r, master?.pk ?? "", fields), ...Object.fromEntries(extras.map((x) => [`${x.name}__display`, r[x.name] ?? ""])) })),
+    () => (rows ?? []).filter((r) => !rowFilter || rowFilter(r)).map((r) => ({ ...mapRow(r, master?.pk ?? "", fields), ...Object.fromEntries(extras.flatMap((x) => [[`${x.name}__display`, r[x.name] ?? ""], [`${x.name}__wa`, r[`${x.name}__wa`] ?? ""], [`${x.name}__uid`, r[`${x.name}__uid`] ?? ""]])) })),
     [rows, master, fields, extras, rowFilter],
   );
   const rawById = useMemo(() => new Map((rows ?? []).map((r) => [String(r[master?.pk ?? ""]), r])), [rows, master]);
@@ -338,7 +340,12 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   const columns: ColumnDef[] = useMemo(() => {
     const shown = shownFields.filter((f) => !isStatus(f));
     const cols: ColumnDef[] = shown.map((f, i) => ({ key: displayKey(f), label: f.label, hideOnMobile: i >= 2 }));
-    for (const x of extras) cols.push({ key: `${x.name}__display`, label: x.label, hideOnMobile: true });
+    // Extras go last, unless one names a field to sit right after (e.g. "Enquiry by" next to the enquiry date).
+    for (const x of extras) {
+      const col = { key: `${x.name}__display`, label: x.label, hideOnMobile: true };
+      const at = x.after ? cols.findIndex((c) => c.key === displayKey(shown.find((f) => f.name === x.after) ?? ({ name: "" } as never))) : -1;
+      if (at >= 0) cols.splice(at + 1, 0, col); else cols.push(col);
+    }
     if (fields.some(isStatus)) cols.push({ key: "status", label: "Status" });
     return cols;
   }, [shownFields, fields, extras]);
@@ -346,11 +353,13 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
     () => Object.fromEntries([
       ...fields.filter((f) => f.type === "file").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalFileLink id={row[f.name]} name={String(v || "")} />]),
       ...fields.filter((f) => f.type === "url").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalLinkChip url={v} name={String(row[fields[0]?.name ? displayKey(fields[0]) : ""] ?? "")} />]),
+      ...extras.filter((x) => x.whatsapp).map((x) => [`${x.name}__display`, (v: unknown, row: RecordWithId) => <WhatsAppName name={v} phone={row[`${x.name}__wa`]} userId={Number(row[`${x.name}__uid`]) || null} canSet={isAdminTier || String(row[`${x.name}__uid`]) === String(currentUser?.id ?? "")} onSaved={refresh} />]),
       ...fields.filter((f) => f.type === "textarea").map((f) => [displayKey(f), (v: unknown) => (v
         ? <span className="block max-w-[260px] truncate" title={String(v)}>{String(v)}</span>
         : <span className="text-muted-foreground">—</span>)]),
     ]),
-    [fields],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fields, extras, isAdminTier, currentUser?.id],
   );
   const exportColumns: ExportColumn[] = fields.map((f) => ({ header: f.label, accessor: displayKey(f) }));
 
@@ -371,7 +380,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
         wide: f.type === "textarea" || f.type === "url",
         url: f.type === "url",
       })),
-      ...extras.map((x) => ({ label: x.label, value: String(row[`${x.name}__display`] || "—") })),
+      ...extras.map((x) => ({ label: x.label, value: [row[`${x.name}__display`], x.whatsapp && row[`${x.name}__wa`] ? `WhatsApp ${row[`${x.name}__wa`]}` : ""].filter(Boolean).join(" · ") || "—" })),
       { label: "Created by", value: String(row.createdBy ?? "") },
       { label: "Last updated by", value: String(row.updatedBy ?? "") },
     ]);
@@ -450,5 +459,47 @@ export default function LegalMasterPage({ entry }: { entry: LegalMasterEntry }) 
         <LegalMasterTable entry={entry} />
       </LegalShell>
     </>
+  );
+}
+
+// A person's name with a "WhatsApp" chat link (wa.me) when their number is saved on their user. A plain 10-digit Indian
+// mobile gets the 91 country code. No number yet → "+ Add WhatsApp" (that user themselves, or an administrator).
+export function WhatsAppName({ name, phone, userId, canSet, onSaved }: { name: unknown; phone: unknown; userId: number | null; canSet: boolean; onSaved: () => unknown }) {
+  const n = String(name ?? "").trim();
+  let digits = String(phone ?? "").replace(/\D/g, "");
+  if (digits.length === 10) digits = `91${digits}`;
+  if (!n) return <span className="text-muted-foreground">—</span>;
+
+  const add = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!userId) return;
+    const no = await askLegal({ title: `WhatsApp number of ${n}`, message: "Saved on this user, so anyone can chat with them about the records they raised.", input: { label: "WhatsApp number", placeholder: "e.g. 9876543210", required: true }, confirmText: "Save" });
+    if (!no) return;
+    try {
+      toast.success((await setUserWhatsApp(userId, no)).message);
+      await onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save");
+    }
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      {n}
+      {digits.length >= 10 ? (
+        <a href={`https://wa.me/${digits}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+          title={`Chat with ${n} on WhatsApp (${String(phone)})`}
+          className="rounded border border-emerald-600/40 px-1.5 py-0.5 text-[0.6875rem] font-medium text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400">
+          WhatsApp
+        </a>
+      ) : canSet && userId ? (
+        <button onClick={add} title={`Add the WhatsApp number of ${n}`}
+          className="rounded border border-dashed border-emerald-600/50 px-1.5 py-0.5 text-[0.6875rem] font-medium text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400">
+          + Add WhatsApp
+        </button>
+      ) : (
+        <span className="text-[0.6875rem] text-muted-foreground" title="No WhatsApp number on this user yet">no WhatsApp</span>
+      )}
+    </span>
   );
 }

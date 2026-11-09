@@ -12,6 +12,7 @@ const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
 const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
 const { usersHaveStatusReason } = require("../services/usersStatusReason");
+const { usersHaveWhatsApp, cleanWhatsApp } = require("../services/usersWhatsApp");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 
 // Privileged roles that can always list users (Password Reset, User Management)
@@ -285,6 +286,7 @@ router.get(
     try {
       const pool = getPool();
       const withReason = await usersHaveStatusReason(pool);
+      const withWa = await usersHaveWhatsApp(pool);
       const result = await pool.request().query(`
         SELECT u.id, u.name, u.email, u.RoleId,
                r.RName AS roleName,
@@ -293,7 +295,7 @@ router.get(
                -- lists get the small thumbnail when there is one (migration 575)
                COALESCE(u.avatar_thumb, u.avatar_url) AS avatar_url,
                CAST(CASE WHEN u.avatar_url IS NOT NULL AND u.avatar_thumb IS NULL THEN 1 ELSE 0 END AS BIT) AS avatar_needs_thumb,
-               u.DepartmentId, d.DepartmentName
+               u.DepartmentId, d.DepartmentName${withWa ? ", u.WhatsAppNo" : ""}
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
         LEFT JOIN dbo.DepartmentMaster d ON d.Id = u.DepartmentId
@@ -315,6 +317,49 @@ router.get(
 );
 
 // ======================
+// MY WHATSAPP NUMBER — any logged-in user reads / sets their own (migration 624), e.g. from Land Enquiries.
+// ======================
+router.get("/me/whatsapp", authMiddleware, async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await usersHaveWhatsApp(pool))) return res.json({ available: false, WhatsAppNo: null });
+    const r = await pool.request().input("id", sql.Int, req.user?.userId).query("SELECT WhatsAppNo FROM dbo.users WHERE id = @id");
+    res.json({ available: true, WhatsAppNo: r.recordset[0]?.WhatsAppNo ?? null });
+  } catch (err) {
+    res.status(500).json({ error: "Could not load your WhatsApp number" });
+  }
+});
+
+router.put("/me/whatsapp", authMiddleware, (req, res) => saveWhatsApp(req, res));
+
+// Your own number, or (admins only) another user's — e.g. the "Add WhatsApp" button beside "Enquiry by".
+router.put("/:id/whatsapp", authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid user" });
+  const isSelf = id === Number(req.user?.userId);
+  if (!isSelf && !["super_admin", "admin", "dba"].includes(req.user?.role)) {
+    return res.status(403).json({ error: "Only that user or an administrator can set this WhatsApp number" });
+  }
+  req.targetUserId = id;
+  return saveWhatsApp(req, res);
+});
+
+async function saveWhatsApp(req, res) {
+  const no = cleanWhatsApp(req.body?.WhatsAppNo);
+  if (!no || no.replace(/\D/g, "").length < 10) return res.status(400).json({ error: "Enter a valid WhatsApp number (at least 10 digits)" });
+  try {
+    const pool = getPool();
+    if (!(await usersHaveWhatsApp(pool))) return res.status(503).json({ error: "WhatsApp numbers are not set up yet (migration 624)" });
+    const r = await pool.request().input("id", sql.Int, req.targetUserId ?? req.user?.userId).input("no", sql.NVarChar(20), no)
+      .query("UPDATE dbo.users SET WhatsAppNo = @no WHERE id = @id");
+    if (!r.rowsAffected[0]) return res.status(404).json({ error: "User not found" });
+    res.json({ message: "WhatsApp number saved", WhatsAppNo: no });
+  } catch (err) {
+    res.status(500).json({ error: "Could not save the WhatsApp number" });
+  }
+}
+
+// ======================
 // CREATE USER
 // ======================
 router.post(
@@ -322,7 +367,7 @@ router.post(
   authMiddleware,
   checkPermission("Users", "List", "CanAdd"),
   async (req, res) => {
-    const { name, email, RoleId, roleId, password, can_accept_tickets, DepartmentId } =
+    const { name, email, RoleId, roleId, password, can_accept_tickets, DepartmentId, WhatsAppNo } =
       req.body;
     if (!password) {
       return res.status(400).json({ error: "Password required" });
@@ -332,6 +377,7 @@ router.post(
       const hashed = await bcrypt.hash(password, SALT_ROUNDS);
       const pool = getPool();
       const withCreatedBy = await usersHaveCreatedBy(pool);
+      const withWa = await usersHaveWhatsApp(pool);
       await pool
         .request()
         .input("name", sql.NVarChar, name)
@@ -340,11 +386,12 @@ router.post(
         .input("can_accept_tickets", sql.Bit, can_accept_tickets ? 1 : 0)
         .input("DepartmentId", sql.Int, DepartmentId ? Number(DepartmentId) : null)
         .input("createdBy", sql.Int, req.user?.userId ?? null)
+        .input("WhatsAppNo", sql.NVarChar(20), cleanWhatsApp(WhatsAppNo))
         .input("password", sql.NVarChar, hashed).query(`
-          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets, DepartmentId${withCreatedBy ? ", CreatedBy" : ""})
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets, DepartmentId${withCreatedBy ? ", CreatedBy" : ""}${withWa ? ", WhatsAppNo" : ""})
           VALUES (
             @name, @email, @password, @RoleId,
-            GETDATE(), 0, @can_accept_tickets, @DepartmentId${withCreatedBy ? ", @createdBy" : ""}
+            GETDATE(), 0, @can_accept_tickets, @DepartmentId${withCreatedBy ? ", @createdBy" : ""}${withWa ? ", @WhatsAppNo" : ""}
           )
         `);
       res.json({ message: "User created" });
@@ -373,7 +420,7 @@ router.put(
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
-    const { name, email, RoleId, roleId, discontinue, can_accept_tickets, DepartmentId, reason } =
+    const { name, email, RoleId, roleId, discontinue, can_accept_tickets, DepartmentId, WhatsAppNo, reason } =
       req.body;
     try {
       const pool = getPool();
@@ -411,7 +458,8 @@ router.put(
         RoleId === undefined &&
         roleId === undefined &&
         can_accept_tickets === undefined &&
-        DepartmentId === undefined;
+        DepartmentId === undefined &&
+        WhatsAppNo === undefined;
 
       if (isToggleOnly) {
         await pool
@@ -421,6 +469,8 @@ router.put(
           .query(`UPDATE dbo.users SET discontinue=@discontinue WHERE id=@id`);
       } else {
         const assignedRoleId = Number(RoleId ?? roleId);
+        // WhatsApp number: only written when the form sent it (older callers leave it as it is).
+        const setWa = WhatsAppNo !== undefined && (await usersHaveWhatsApp(pool));
         await pool
           .request()
           .input("id", sql.Int, id)
@@ -437,6 +487,7 @@ router.put(
                 : 0,
           )
           .input("DepartmentId", sql.Int, DepartmentId ? Number(DepartmentId) : null)
+          .input("WhatsAppNo", sql.NVarChar(20), cleanWhatsApp(WhatsAppNo))
           .input("discontinue", sql.Bit, nowInactive ? 1 : 0).query(`
           UPDATE dbo.users
           SET name=@name,
@@ -444,7 +495,7 @@ router.put(
               RoleId=@RoleId,
               discontinue=@discontinue,
               can_accept_tickets=COALESCE(@can_accept_tickets, can_accept_tickets),
-              DepartmentId=@DepartmentId
+              DepartmentId=@DepartmentId${setWa ? ",\n              WhatsAppNo=@WhatsAppNo" : ""}
           WHERE id=@id
         `);
       }

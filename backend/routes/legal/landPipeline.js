@@ -21,6 +21,7 @@
 // it back for re-verification (their history stays).
 
 const express = require("express");
+const { usersHaveWhatsApp } = require("../../services/usersWhatsApp");
 const { getPool, sql } = require("../../db");
 const { requirePageRight, hasAnyPageAction } = require("../../middleware/requirePageRight");
 const { canAct } = require("./approvalAuthority");
@@ -504,6 +505,7 @@ router.get("/:id/overview", requirePageRight(LAND_PAGE, "view"), async (req, res
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid land" });
   try {
+    const withWa = await usersHaveWhatsApp(getPool());
     const r = await getPool().request().input("Id", sql.Int, id).query(`
       SELECT l.LandId, l.LandCode, l.LandName, l.EntryType, l.LandStatus, l.PossessionStatus, l.WorkflowStatus, l.IsOnHold, l.IsActive,
              l.Area, u.UnitName, l.LocationAddress, l.AcquisitionDate, l.AcquisitionDateApprox, l.AcquisitionType,
@@ -516,8 +518,11 @@ router.get("/:id/overview", requirePageRight(LAND_PAGE, "view"), async (req, res
              (SELECT name FROM dbo.users WHERE id = l.L2ApproverId) AS L2ApproverName,
              sd.SubDivisionName, b.BlockName, lt.LandTypeName,
              d.DistrictName, m.MouzaName, m.JLNo, l.CreatedAt, ISNULL(l.UpdatedAt, l.CreatedAt) AS LastUpdated,
-             (SELECT name FROM dbo.users WHERE id = l.CreatedBy) AS CreatedByName
+             (SELECT name FROM dbo.users WHERE id = l.CreatedBy) AS CreatedByName,
+             enq.EnquiryNo, enq.CreatedBy AS EnquiryById, eu.name AS EnquiryByName${withWa ? ", eu.WhatsAppNo AS EnquiryByWhatsApp" : ""}
       FROM dbo.LegalLand l
+      LEFT JOIN dbo.LegalLandEnquiry enq ON enq.EnquiryId = l.EnquiryId
+      LEFT JOIN dbo.users eu ON eu.id = enq.CreatedBy
       LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
       LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
       LEFT JOIN dbo.LegalSubDivision sd ON sd.SubDivisionId = l.SubDivisionId
