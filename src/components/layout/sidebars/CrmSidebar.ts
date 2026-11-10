@@ -58,7 +58,7 @@ export const crmNavItems: NavItem[] = [
       { label: CERTIFICATE_TERMS.MENU, path: "/crm/oc-cc",              pageKey: "crm-oc-cc"              },
       { label: POSSESSION_PAGE,        path: "/crm/possession",         pageKey: "crm-possession"         },
       { label: "Sale Deed",            path: "/crm/sales-deed",         pageKey: "crm-sales-deed"         },
-      { label: "Mutation",             path: "/crm/mutation",           pageKey: "crm-mutation"           },
+      { label: "Property Mutation",    path: "/crm/mutation",           pageKey: "crm-mutation"           },
     ],
   },
 

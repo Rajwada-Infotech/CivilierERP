@@ -15,8 +15,8 @@ import { SearchableSelect } from "@/components/SearchableSelect";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import {
-  CrmGrid, CrmRowMenu, GridDialog, GridFormField, GridFormSection, GridMiniTable, GridRelated, GridSearch, GridSegment, GridTabs, GridToneMark,
-  exportGrid, useFileUrl, useGridPrefs, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_LABEL, GRID_PAGE_SIZES, GRID_SHEET_KEYS, type GridCol, type RowMenuItem,
+  CrmGrid, CrmRowMenu, GridDialog, GridFacts as Facts, GridFormField, GridFormSection, GridMiniTable, GridRelated, GridSearch, GridSegment, GridTabs, GridToneMark,
+  exportGrid, useFileUrl, useGridPrefs, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_PAGE_SIZES, GRID_SHEET_KEYS, type GridCol, type RowMenuItem,
 } from "@/components/crm/CrmDataTable";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
@@ -25,7 +25,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { promptNextStep } from "@/lib/workflowNav";
 import { translateError } from "@/lib/translateError";
 import { CERTIFICATE_TERMS, CrmStatus, POSSESSION_PAGE, bookingWorkflowStageLabel } from "@/constants/crmStatuses";
-import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, CollectionBar, MoneyBand, asName as lowerName } from "./payments/parts";
+import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, BandNext, CollectionBar, MoneyBand, StepBar, personName as asName, type StepState } from "./payments/parts";
 import { fmtShort } from "./payments/config";
 
 const CHECK_API = "/api/crm/pre-possession";
@@ -66,8 +66,6 @@ const localDay = (offset = 0) => {
 };
 const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const dayOf = (d?: string | null) => (d ? String(d).slice(0, 10) : "");
-// asName lower-cases for the CSS to capitalise; dialog subtitles and exports need the capitals in the text itself.
-const asName = (n?: string | null) => String(lowerName(n ?? "") ?? "").replace(/(^|[\s.&-])([a-z])/g, (_, a, b) => a + b.toUpperCase());
 const modeText = (m?: string | null) => (m ? MODE_LABEL[m] ?? m : "—");
 
 async function api(url: string, method = "GET", body?: unknown): Promise<any> {
@@ -168,48 +166,13 @@ export function nextStep(r: any): { text: string; late?: boolean } {
     default: return { text: "" };
   }
 }
-type StepState = "done" | "active" | "stopped" | "off";
 export const stepsOf = (r: any): { label: string; state: StepState }[] => [
   { label: "Eligibility", state: r.Gate1_AfsRegistered && r.Gate2_OcCcReceived ? "done" : r.Stage === "Closed" ? "off" : "active" },
   { label: "Checklist", state: r.CheckStatus === "Ready" ? "done" : r.CheckStatus === "Blocked" ? "stopped" : r.CheckId ? "active" : "off" },
   { label: "Notice", state: r.NoticeStatus === "Acknowledged" ? "done" : r.NoticeStatus === "Disputed" ? "stopped" : r.NoticeId ? "active" : "off" },
   { label: "Handover", state: r.HandoverStatus === "Completed" ? "done" : hasLiveHandover(r) ? "active" : "off" },
 ];
-function Tracker({ r, onDark }: { r: any; onDark?: boolean }) {
-  const fill: Record<StepState, string> = {
-    done: onDark ? BAND_DOT.collected : "bg-emerald-500", active: onDark ? BAND_DOT.finance : "bg-amber-400", stopped: "bg-rose-500",
-    off: onDark ? "bg-white/15" : "bg-slate-200 dark:bg-slate-700",
-  };
-  const ink: Record<StepState, string> = {
-    done: onDark ? "text-slate-200" : "text-foreground", active: onDark ? "text-white font-semibold" : "text-foreground font-semibold",
-    stopped: onDark ? "text-rose-300 font-semibold" : "text-destructive font-semibold", off: onDark ? "text-slate-400" : "text-muted-foreground",
-  };
-  return (
-    <span className="grid grid-cols-4 gap-1 w-full">
-      {stepsOf(r).map((s) => (
-        <span key={s.label} className="min-w-0">
-          <span className={cn("block rounded-full", onDark ? "h-2.5" : "h-1.5", fill[s.state])} />
-          <span className={cn("mt-1 block text-[0.6875rem] truncate", ink[s.state])}>{s.label}</span>
-        </span>
-      ))}
-    </span>
-  );
-}
-
-/** A step's facts, four to a row; anything not yet recorded is left out. */
-function Facts({ items }: { items: { label: string; value: React.ReactNode; wide?: boolean }[] }) {
-  const shown = items.filter((i) => i.value != null && i.value !== "" && i.value !== "—");
-  return (
-    <dl className="px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
-      {shown.map((f) => (
-        <div key={f.label} className={cn("min-w-0", f.wide && "col-span-2 md:col-span-4")}>
-          <dt className={GRID_LABEL}>{f.label}</dt>
-          <dd className="mt-0.5 text-[0.8125rem] font-medium break-words">{f.value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
+const Tracker = ({ r, onDark }: { r: any; onDark?: boolean }) => <StepBar steps={stepsOf(r)} onDark={onDark} />;
 
 const COLS: GridCol<any>[] = [
   { id: "customer", label: "Customer", locked: true, sortKey: "ApplicantName", csv: (r) => asName(r.ApplicantName), cell: (r) => (
@@ -713,13 +676,7 @@ function PossessionRecord({ id, onBack, refresh }: { id: string; onBack: () => v
             { label: "Certificate", dot: r.Gate2_OcCcReceived ? BAND_DOT.collected : BAND_DOT.overdue, value: r.Gate2_OcCcReceived ? "Issued" : "Not issued", note: "Occupancy or Completion" },
           ]),
         ]}
-        footer={(
-          <span className="flex flex-wrap items-center justify-between gap-3">
-            <span>{finished ? next : <>Next step: <strong className="font-semibold text-white">{next}</strong></>}</span>
-            {hold && <button type="button" onClick={() => navigate(hold.path)} className={BAND_KEY_MAIN}>{hold.action} <ArrowRight size={13} /></button>}
-            {!hold && primary && <button type="button" onClick={primary.run} className={BAND_KEY_MAIN}>{primary.label} <ArrowRight size={13} /></button>}
-          </span>
-        )} />
+        footer={<BandNext text={next} finished={finished} action={hold ? { label: hold.action, run: () => navigate(hold.path) } : primary} />} />
       {notReady ? <EligibilityCard r={r} /> : (
         <>
           {step("check", <ChecklistSection r={r} refresh={refresh} focus={focus === "check"} setPrimary={setPrimary} />)}
