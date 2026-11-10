@@ -6,7 +6,7 @@ const { isApproverFor } = require("./approvalService");
 // The "Marketing Head" switch in Approval Setup (decided 2026-11-10): who, besides the full-access roles, sees and
 // manages every Sales Automation record (leads, tasks, commissions, reports, teams) and runs the CRM admin actions
 // (change a booking's unit, escalate overdue milestones, run the SLA engine, see all service tickets). Set on the
-// screen; migration 634 names the marketing_head role on it so the same people keep it.
+// screen; migration 649 names the marketing_head role on it so the same people keep it.
 const MARKETING_HEAD_MODULE = "marketing-head";
 function actorId(req) {
   const id = req.user?.userId ?? req.user?.id;
