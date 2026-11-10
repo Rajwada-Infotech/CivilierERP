@@ -37,6 +37,17 @@ const MODULE_ROUTES: Partial<Record<string, keyof MainStackParamList>> = {
   material: "MaterialDashboard",
 };
 
+/** The module a screen belongs to: its dashboard, or any page in its menu tree (null for neither). */
+function moduleOfRoute(route: string): string | null {
+  for (const [mod, dash] of Object.entries(MODULE_ROUTES)) if (dash === route) return mod;
+  for (const [mod, tree] of Object.entries(MODULE_NAV_TREES)) {
+    for (const item of tree ?? []) {
+      if (item.kind === "leaf" ? item.nav === route : item.children.some((c) => c.nav === route)) return mod;
+    }
+  }
+  return null;
+}
+
 type NavLeaf = { kind: "leaf"; label: string; icon: React.ComponentType<{ size?: number; color?: string }>; nav?: keyof MainStackParamList };
 type NavGroup = {
   kind: "group";
@@ -126,7 +137,16 @@ export function NavSheet() {
 
   useEffect(() => {
     const unsub = navigationRef.addListener?.("state", () => {
-      setActiveRoute(navigationRef.getCurrentRoute()?.name);
+      const name = navigationRef.getCurrentRoute()?.name;
+      setActiveRoute(name);
+      // The selected module follows the screen that is open: the home dashboard clears it (it used to stay on Finance
+      // or Material after going back home), a module's own page selects that module. Screens of neither (Profile,
+      // Notifications) leave it as it was.
+      if (name === "Dashboard") setActiveModuleId(null);
+      else if (name) {
+        const owner = moduleOfRoute(name);
+        if (owner) setActiveModuleId(owner);
+      }
     });
     return unsub;
   }, []);
