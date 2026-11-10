@@ -14,10 +14,7 @@ const {
   isApproverFor,
 } = require("../services/approvalService");
 
-function isSuperAdminRole(role) {
-  const r = String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return r === "super_admin" || r === "superadmin" || r === "sa";
-}
+const { isSuperAdmin: isSuperAdminRole, hasFullAccess } = require("../middleware/role");
 
 // ── Per-record visibility filter ────────────────────────────────────────────
 // Before this, GET / returned every Pending row in the system to anyone
@@ -112,7 +109,7 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   const r = await whoMayAct(item, viewerRole, viewerUserId, workflowCache);
   const role = (viewerRole || "").toLowerCase();
   if (isSuperAdminRole(role)) return { ...r, visible: true, canAct: true };
-  if (!r.visible && role === "admin") return { ...r, visible: true, canAct: false };
+  if (!r.visible && hasFullAccess(role) && !isSuperAdminRole(role)) return { ...r, visible: true, canAct: false };
   return r;
 }
 
@@ -1216,15 +1213,20 @@ function buildInboxQueries(module, projectScope = null) {
       }
     }
 
-    if (!module || module === "crm-sales-deed-director") {
+    // Sale deed approvals: the senior review and the director's sign-off, one query shape (the step's own columns).
+    for (const st of [
+      { key: "crm-sales-deed-senior", label: "CRM Sales Deed (Senior)", status: "SeniorApprovalStatus", remarks: "SeniorApprovalRemarks" },
+      { key: "crm-sales-deed-director", label: "CRM Sales Deed (Director)", status: "DirectorApprovalStatus", remarks: "DirectorApprovalRemarks" },
+    ]) {
+      if (module && module !== st.key) continue;
       queries.push(`
         SELECT
-          'crm-sales-deed-director'             AS Module,
-          'CRM Sales Deed (Director)'           AS ModuleLabel,
+          '${st.key}'                           AS Module,
+          '${st.label}'                         AS ModuleLabel,
           CAST(d.Id AS NVARCHAR)                AS RecordId,
           d.DeedNo                              AS Reference,
           d.CreatedAt                           AS RecordDate,
-          d.DirectorApprovalStatus              AS Status,
+          d.${st.status}                        AS Status,
           CAST(NULL AS NVARCHAR)                AS ContractorName,
           a.ApplicantName                       AS SupplierName,
           d.DeedValue                           AS Amount,
@@ -1233,12 +1235,12 @@ function buildInboxQueries(module, projectScope = null) {
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
           ''                                    AS RejectedBy,
-          ISNULL(CAST(d.DirectorApprovalRemarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(CAST(d.${st.remarks} AS NVARCHAR(MAX)), '') AS RejectionNote,
           ISNULL(d.UpdatedAt, d.CreatedAt)      AS LastModified
         FROM dbo.CrmSalesDeed d
         JOIN dbo.CrmBooking b     ON b.Id = d.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE d.DirectorApprovalStatus = 'Pending'${pp("b.ProjectId")}
+        WHERE d.${st.status} = 'Pending' AND ISNULL(d.Status, '') <> 'Cancelled'${pp("b.ProjectId")}
       `);
     }
 

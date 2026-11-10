@@ -135,3 +135,19 @@ module.exports = (...allowedRoles) => {
 };
 
 module.exports.normalizeRole = normalizeRole;
+
+// The roles with full access to everything, and the super admin (always in parallel on every approval). Decided
+// 2026-11-10: these stay in code, in this ONE place; every other role gets exactly what Role Rights and Approval
+// Setup give it. Spaces and hyphens read as underscores, and the aliases above apply ("sa", "Super Admin").
+const FULL_ACCESS_ROLES = Object.freeze(["super_admin", "admin", "dba"]);
+const canonicalRole = (role) => normalizeRole(String(role || "").trim().replace(/[\s-]+/g, "_")) || "";
+const hasFullAccess = (role) => FULL_ACCESS_ROLES.includes(canonicalRole(role));
+const isSuperAdmin = (role) => canonicalRole(role) === "super_admin";
+module.exports.FULL_ACCESS_ROLES = FULL_ACCESS_ROLES;
+module.exports.hasFullAccess = hasFullAccess;
+module.exports.isSuperAdmin = isSuperAdmin;
+// For the screens that set access itself (Menu, Widget and Project Access rights, Approval Setup, users, system
+// lookups, tenants, the admin ticket desk): only the full-access roles, never a granted right.
+module.exports.fullAccessOnly = module.exports(...FULL_ACCESS_ROLES);
+// The few super-admin-only tools (bulk deletes, channel credentials).
+module.exports.superAdminOnly = module.exports("super_admin");

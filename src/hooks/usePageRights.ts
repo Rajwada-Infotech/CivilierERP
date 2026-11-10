@@ -1,5 +1,6 @@
 import { useAuth } from "@/contexts/AuthContext";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 /**
  * Returns per-action rights for a specific page key.
  *
@@ -24,9 +25,7 @@ export function usePageRights(pageKey: string) {
   const { canDoAction, currentUser } = useAuth();
 
   // Privileged roles bypass all checks
-  const privileged = ["super_admin", "admin", "dba"].includes(
-    currentUser?.role ?? "",
-  );
+  const privileged = isPrivilegedRole(currentUser?.role);
 
   const check = (action: string): boolean => {
     if (privileged) return true;

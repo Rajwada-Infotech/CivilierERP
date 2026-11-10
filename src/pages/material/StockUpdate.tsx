@@ -22,6 +22,7 @@ import {
 } from "@/api/stockUpdateApi";
 import { DateInput } from "@/components/ui/date-input";
 
+import { isSuperAdminRole } from "@/contexts/auth.utils";
 type Line = { key: number; itemId: string; uom: string; qty: string };
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -275,7 +276,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
 export default function StockUpdate() {
   const rights = usePageRights("stock-update");
   const { currentUser } = useAuth();
-  const isSuperAdmin = currentUser?.role === "super_admin";
+  const isSuperAdmin = isSuperAdminRole(currentUser?.role);
   const qc = useQueryClient();
 
   const [updateDate, setUpdateDate] = useState(todayStr());

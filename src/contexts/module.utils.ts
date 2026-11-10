@@ -1,5 +1,6 @@
 import { LEGAL_PAGE_KEYS } from "@/pages/legal/legalMasters";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // Non-component exports for ModuleContext, split out so ModuleContext.tsx
 // only exports the provider/hook — mixing component and non-component
 // exports in one file breaks Vite's Fast Refresh (forces a full page reload
@@ -120,8 +121,7 @@ export const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
 };
 
 /** Admin-tier roles see every module regardless of individual page rights. */
-export const isAdminTierRole = (role: string): boolean =>
-  ["super_admin", "admin", "dba"].includes(role);
+export const isAdminTierRole = (role: string): boolean => isPrivilegedRole(role);
 
 export function userHasModuleAccess(
   moduleId: string,

@@ -24,11 +24,8 @@
 
 const { sql } = require("../db");
 const { projectPredicate, paymentProjectSql } = require("./projectScope");
-const { normalizeRole } = require("../middleware/role");
-const {
-  SUPERUSER_ROLES,
-  getEffectivePagePermissions,
-} = require("../middleware/permissions");
+const { normalizeRole, hasFullAccess } = require("../middleware/role");
+const { getEffectivePagePermissions } = require("../middleware/permissions");
 
 // key = TableName exactly as stored in DocNumberSequence.TableName
 const DOC_FINDER_REGISTRY = {
@@ -132,7 +129,7 @@ function escapeLike(s) {
 async function allowedTables(user) {
   const role = normalizeRole(user?.role);
   const all = Object.keys(DOC_FINDER_REGISTRY);
-  if (SUPERUSER_ROLES.has(role)) return all;
+  if (hasFullAccess(role)) return all;
   const userId = user?.userId ?? user?.id;
   const effective = await getEffectivePagePermissions(userId, user?.roleId);
   const viewable = new Set(

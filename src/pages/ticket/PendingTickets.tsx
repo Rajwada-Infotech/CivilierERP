@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { BodyPortal } from "@/components/ui/body-portal";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface TicketAttachment {
@@ -845,8 +846,7 @@ const PendingTickets: React.FC = () => {
   const { currentUser } = useAuth();
   const queryClient = useQueryClient();
   const rights = usePageRights("tickets");
-  const ADMIN_ROLES = ["super_admin", "admin", "dba"];
-  const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
+  const isAdmin = isPrivilegedRole(currentUser?.role);
   const currentUserName = currentUser?.name ?? "Me";
 
   const [search, setSearch] = useState("");

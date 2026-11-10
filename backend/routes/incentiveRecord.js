@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -37,7 +38,7 @@ router.get("/", cache("incentive-record", 300), async (req, res) => {
   }
 });
 
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("incentive"), async (req, res) => {
   const { EmployeeId, IncentiveType, IncentiveDate, Amount, Remarks, Status, IsActive } = req.body;
   if (!EmployeeId) return res.status(400).json({ error: "Employee is required" });
   if (!INCENTIVE_TYPES.includes(IncentiveType)) return res.status(400).json({ error: `Incentive Type must be one of: ${INCENTIVE_TYPES.join(", ")}` });
@@ -81,7 +82,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   }
 });
 
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("incentive"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { EmployeeId, IncentiveType, IncentiveDate, Amount, Remarks, Status, IsActive } = req.body;
@@ -120,7 +121,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 });
 
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("incentive"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

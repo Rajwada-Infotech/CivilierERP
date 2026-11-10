@@ -1,4 +1,5 @@
 const express = require("express");
+const { fullAccessOnly } = require("../middleware/role");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -7,7 +8,7 @@ const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 const { invalidateProjectScope, getProjectScope } = require("../services/projectScope");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const adminOnly = fullAccessOnly;
 
 // GET /my — the viewer's own scope (null = all projects).
 router.get("/my", authMiddleware, async (req, res) => {
@@ -103,14 +104,12 @@ router.get("/project/:projectId", authMiddleware, adminOnly, async (req, res) =>
     const group = (rows, key) => rows.reduce((m, x) => m.set(Number(x[key]), (m.get(Number(x[key])) || new Set()).add(Number(x.ProjectId))), new Map());
     const ownMap = group(own, "UserId");
     const roleMap = group(byRole, "RoleId");
-    const roleKey = (name) => String(name || "").trim().toLowerCase().replace(/\s+/g, "_");
-    const UNRESTRICTED = new Set(["super_admin", "sa", "dba", "admin"]);
 
     const withAccess = [];
     let without = 0;
     for (const u of users) {
       let via;
-      if (UNRESTRICTED.has(roleKey(u.roleName))) via = "admin";
+      if (allowRoles.hasFullAccess(u.roleName)) via = "admin";
       else if (ownMap.has(Number(u.id))) via = ownMap.get(Number(u.id)).has(projectId) ? "own" : null;
       else if (roleMap.has(Number(u.roleId))) via = roleMap.get(Number(u.roleId)).has(projectId) ? "role" : null;
       else via = "open";

@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -62,7 +63,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST -- create a Draft run for Company + Month + Year
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("payroll-run"), async (req, res) => {
   const { CompanyId, PeriodMonth, PeriodYear } = req.body;
   const month = Number(PeriodMonth);
   const year = Number(PeriodYear);
@@ -96,7 +97,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 // salary for this run's period, using the Salary Structure version whose
 // Effective From/To window covers the period's last day. Idempotent while
 // the run is Draft/Processed; rejected once Locked (spec 15).
-router.post("/:id/process", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/:id/process", pageRightByMethod("payroll-run"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const pool = getPool();
@@ -227,7 +228,7 @@ router.post("/:id/process", allowRoles("admin", "super_admin", "dba"), async (re
 
 // POST /:id/lock -- finalize; once locked, /process is rejected for this
 // run (spec 15) and the frozen payslip lines become immutable.
-router.post("/:id/lock", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/:id/lock", pageRightByMethod("payroll-run"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -305,7 +306,7 @@ router.get("/:id/employee/:employeeId/payslip", async (req, res) => {
 // run is a distinct operation from mutating one: it doesn't touch any
 // other run's frozen data, so it doesn't undermine the immutability
 // guarantee Locked status gives already-issued payslips elsewhere.
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("payroll-run"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

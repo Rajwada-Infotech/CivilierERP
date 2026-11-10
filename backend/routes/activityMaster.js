@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -119,7 +120,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─── POST (Create) ────────────────────────────────────────────────────────────
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("activity-master"), async (req, res) => {
   const {
     activity_name,
     short_description,
@@ -199,7 +200,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // ─── PUT (Update) ─────────────────────────────────────────────────────────────
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("activity-master"), async (req, res) => {
   const {
     activity_name,
     short_description,
@@ -315,7 +316,7 @@ router.patch("/:id/approve", requireApprover("activity-master", "activities"), a
 });
 
 // ─── DELETE ───────────────────────────────────────────────────────────────────
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("activity-master"), async (req, res) => {
   try {
     const pool = getPool();
 

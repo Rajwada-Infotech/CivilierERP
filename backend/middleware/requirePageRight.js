@@ -1,4 +1,5 @@
 const { getEffectivePagePermissions } = require("./permissions");
+const { hasFullAccess } = require("./role");
 
 // Pages the marketing_head role can fully administer.
 // Uses prefix-matching for all SA pages plus explicit CRM and Sales page keys.
@@ -37,8 +38,7 @@ function requirePageRight(pageKey, action) {
   return async (req, res, next) => {
     try {
       const role = (req.user?.role || "").toLowerCase();
-      const SUPERUSER_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
-      if (SUPERUSER_ROLES.has(role)) return next();
+      if (hasFullAccess(role)) return next();
 
       // marketing_head: full admin access scoped to Sales Automation + Sales pages only
       if (role === "marketing_head" && isMarketingHeadAllowed(String(pageKey).toLowerCase())) {
@@ -86,8 +86,7 @@ function requireAnyPageRight(pageKeys, action) {
   return async (req, res, next) => {
     try {
       const role = (req.user?.role || "").toLowerCase();
-      const SUPERUSER_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
-      if (SUPERUSER_ROLES.has(role)) return next();
+      if (hasFullAccess(role)) return next();
 
       if (role === "marketing_head" && pageKeys.some((k) => isMarketingHeadAllowed(String(k).toLowerCase()))) {
         return next();
@@ -131,7 +130,7 @@ function requireAnyPageRight(pageKeys, action) {
  */
 async function hasAnyPageAction(req, pageKey, actions) {
   const role = (req.user?.role || "").toLowerCase();
-  if (["super_admin", "sa", "dba", "admin"].includes(role)) return true;
+  if (hasFullAccess(role)) return true;
   if (role === "marketing_head" && isMarketingHeadAllowed(String(pageKey).toLowerCase())) return true;
   const userId = req.user?.userId ?? req.user?.id;
   if (!userId) return false;
@@ -159,4 +158,11 @@ function requireAnyPageAction(pageKey, actions) {
   };
 }
 
-module.exports = { requirePageRight, requireAnyPageRight, requireAnyPageAction, hasAnyPageAction };
+// The page's right for what the request does: GET reads (view), POST creates, PUT / PATCH edit, DELETE deletes. For
+// routes that belong to one page, so Role Rights decides who may use them (full-access roles always may).
+const ACTION_OF_METHOD = { GET: "view", HEAD: "view", POST: "create", PUT: "edit", PATCH: "edit", DELETE: "delete" };
+function pageRightByMethod(pageKey) {
+  return (req, res, next) => requirePageRight(pageKey, ACTION_OF_METHOD[req.method] || "edit")(req, res, next);
+}
+
+module.exports = { requirePageRight, requireAnyPageRight, requireAnyPageAction, hasAnyPageAction, pageRightByMethod };

@@ -10,6 +10,7 @@
 //   DELETE /api/page-definitions/:id      → soft-delete (sets IsActive = 0)
 
 const express = require("express");
+const { isSuperAdmin } = require("../middleware/role");
 const router  = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -17,7 +18,7 @@ const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const requireSuperAdmin = (req, res, next) => {
   const role = req.user?.role;
-  if (role !== "superadmin" && role !== "super_admin" && role !== "SuperAdmin" && req.user?.isSuperAdmin !== true) {
+  if (!isSuperAdmin(role) && req.user?.isSuperAdmin !== true) {
     return res.status(403).json({ error: "Super admin access required" });
   }
   next();

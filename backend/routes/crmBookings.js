@@ -1262,7 +1262,7 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
 // staff-driven status change (submit for approval, document generation, etc.).
 // Used for: legal disputes, court injunctions, developer-initiated project holds.
 // FreezeExpiresAt is required — freezes must not be open-ended.
-router.post("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) => {
+router.post("/:id/freeze", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { reason, expiresAt } = req.body || {};
@@ -1299,7 +1299,7 @@ router.post("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) 
 });
 
 // DELETE /:id/freeze (unfreeze) — admin-only. Clears the freeze lock.
-router.delete("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) => {
+router.delete("/:id/freeze", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -1548,7 +1548,7 @@ async function softDeleteBooking(pool, id, actor) {
   return { BookingNo: booking.BookingNo };
 }
 
-router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
+router.delete("/:id", requirePageRight("crm-bookings", "delete"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -1566,7 +1566,7 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
 // trail of a sale, even a cancelled one. Cancel or soft-delete instead
 // (DELETE /:id), which keeps every row. Answered explicitly so an old client
 // gets a clear reason rather than a 404.
-router.delete("/:id/permanent", allowRoles("admin", "super_admin"), (_req, res) => {
+router.delete("/:id/permanent", requirePageRight("crm-bookings", "delete"), (_req, res) => {
   res.status(410).json({ error: "Permanent deletion of bookings is disabled — CRM records are kept for the audit trail. Cancel or delete the booking instead; it stays in the deleted list." });
 });
 

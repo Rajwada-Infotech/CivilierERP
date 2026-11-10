@@ -14,6 +14,7 @@ import { TicketShell } from "@/components/ticket/TicketShell";
 import { SheetSection, SheetStats } from "@/components/sheet/sheetParts";
 import { AlertCircle, CheckCircle2, MessageSquare, Plus, RefreshCw } from "lucide-react";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Ticket {
@@ -168,8 +169,7 @@ export default function TicketDashboard() {
   const queryClient = useQueryClient();
   const { currentUser } = useAuth();
   const rights = usePageRights("tickets");
-  const ADMIN_ROLES = ["super_admin", "admin", "dba"];
-  const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
+  const isAdmin = isPrivilegedRole(currentUser?.role);
   const canSeeAllTickets = isAdmin || currentUser?.role === "engineer";
 
   const {

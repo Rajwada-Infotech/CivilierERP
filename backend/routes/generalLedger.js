@@ -1,4 +1,5 @@
 const express = require("express");
+const { isSuperAdmin } = require("../middleware/role");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -406,7 +407,7 @@ router.post("/", requirePageRight("general-ledger", "create"), async (req, res) 
   // Only super_admin can create system-generated ledgers
   if (IsSystemGenerated) {
     const userRole = req.user?.role ?? "";
-    if (userRole !== "super_admin") {
+    if (!isSuperAdmin(userRole)) {
       return res.status(403).json({ error: "Only Super Admin can create system-generated ledger accounts." });
     }
   }
@@ -527,7 +528,7 @@ router.put("/:id", requirePageRight("general-ledger", "edit"), async (req, res) 
 
     // Only super_admin can toggle IsSystemGenerated
     const userRole = req.user?.role ?? "";
-    if (IsSystemGenerated !== undefined && userRole === "super_admin") {
+    if (IsSystemGenerated !== undefined && isSuperAdmin(userRole)) {
       request.input("IsSystemGenerated", sql.Bit, IsSystemGenerated ? 1 : 0);
     }
 
@@ -539,7 +540,7 @@ router.put("/:id", requirePageRight("general-ledger", "edit"), async (req, res) 
       "isEdited    = 1",
     ];
 
-    if (IsSystemGenerated !== undefined && userRole === "super_admin") {
+    if (IsSystemGenerated !== undefined && isSuperAdmin(userRole)) {
       updates.push("IsSystemGenerated = @IsSystemGenerated");
     }
 
@@ -604,7 +605,7 @@ router.delete("/:id", requirePageRight("general-ledger", "delete"), async (req, 
 
     if (isSystemGenerated) {
       const userRole = req.user?.role ?? "";
-      if (userRole !== "super_admin") {
+      if (!isSuperAdmin(userRole)) {
         return res.status(403).json({
           error: "System-generated ledger accounts can only be deleted by a Super Admin.",
         });

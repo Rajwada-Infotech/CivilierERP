@@ -271,7 +271,7 @@ router.put("/:id", authenticateToken, requirePageRight("stock-update", "edit"), 
 // use for their own StockLedger rows. Blocked if any item's godown balance
 // would go negative, i.e. the stock this update added has since been
 // consumed elsewhere (an Issue, another transfer, ...).
-router.delete("/:id", authenticateToken, allowRoles("super_admin"), async (req, res) => {
+router.delete("/:id", authenticateToken, allowRoles.superAdminOnly, async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
 

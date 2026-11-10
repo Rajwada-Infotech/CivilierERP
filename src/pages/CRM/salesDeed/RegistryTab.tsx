@@ -1,11 +1,11 @@
-// The deed's Registry tab: the Sub-Registrar appointment (start → schedule → reschedule → complete / cancel), its
+// The deed's registry section: the Sub-Registrar appointment (start → schedule → reschedule → complete / cancel), its
 // documents, then the deed's registration and Index II. Formerly its own page; now scoped to the deed's booking.
 import React, { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
-import { Upload } from "lucide-react";
+import { Landmark, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
@@ -44,9 +44,9 @@ const EMPTY_COMPLETE = () => ({
   RegistrationDate: localDay(), WitnessNames: "", BuyerAttended: false, SellerAttended: false,
 });
 
-export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canCompleteOrCancel, canEditDeed, onSaveIndex2, savingIndex2, onChanged }: {
+export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComplete, canCancel, canEditDeed, onSaveIndex2, savingIndex2, onChanged }: {
   detail: any; qpConfirmed: boolean;
-  canCreate: boolean; canEdit: boolean; canCompleteOrCancel: boolean; canEditDeed: boolean;
+  canCreate: boolean; canEdit: boolean; canComplete: boolean; canCancel: boolean; canEditDeed: boolean;
   onSaveIndex2: (date: string) => void; savingIndex2: boolean;
   onChanged: () => void;
 }) {
@@ -166,14 +166,14 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
 
   return (
     <div className="space-y-4">
-      <Panel title="Sub-Registrar office registration" right={status ? <SheetMark text={status} tone={deedTone(status)} /> : undefined}>
+      <Panel title="Sub-Registrar Registration" icon={<Landmark size={13} />} right={status ? <SheetMark text={status} tone={deedTone(status)} /> : undefined}>
         <div className="p-4 space-y-3">
           <p className="text-xs text-muted-foreground">Both parties appear at the Sub-Registrar Office to register the Sale Deed — this legally transfers ownership to the buyer.</p>
           <AutoStep n={1} label="Sub-Registrar appointment" done={status === "Completed"}>
             {!registry && (
               <div className="mt-1">
                 {!qpConfirmed ? (
-                  <p className="text-xs text-muted-foreground">Unlocks once the stamp duty payment (Query Payment tab) is confirmed.</p>
+                  <p className="text-xs text-muted-foreground">Unlocks once the stamp duty payment (above) is confirmed.</p>
                 ) : canCreate ? (
                   <button onClick={handleStart} disabled={starting || !startEligible} className={`${KEY_INK} h-8 px-3`}>
                     {starting ? "Starting…" : "Start registry"}
@@ -204,7 +204,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
                         <button onClick={() => { setScheduleOpen("reschedule"); setDate(registry.ScheduledDate ? String(registry.ScheduledDate).slice(0, 10) : ""); setTime(registry.AppointmentTime || ""); setOffice(registry.AppointmentOffice || ""); setReason(""); }}
                           className={`${KEY_LINE} h-8 px-3`}>Reschedule</button>
                       )}
-                      {canCompleteOrCancel ? (
+                      {canComplete ? (
                         <button onClick={() => { setComplete({ ...EMPTY_COMPLETE(), SubRegistrarOffice: registry.AppointmentOffice || registry.SubRegistrarOffice || "" }); setCompleteOpen(true); }}
                           disabled={required.length > 0 && verified < required.length}
                           title={required.length > 0 && verified < required.length ? "Verify every mandatory document first" : undefined}
@@ -229,7 +229,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
                     {registry.CancelledReason && <p className="text-muted-foreground mt-0.5">{registry.CancelledReason}</p>}
                   </div>
                 )}
-                {!locked && canCompleteOrCancel && (
+                {!locked && canCancel && (
                   <button onClick={() => setCancelOpen(true)} className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}>Cancel registry</button>
                 )}
 

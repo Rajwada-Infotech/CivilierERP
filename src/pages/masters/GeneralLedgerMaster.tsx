@@ -21,6 +21,7 @@ import { Pencil, Trash2, X, Check, Plus, Search, BookOpen, Eye, RotateCcw, Lock 
 import { useAuth } from "@/contexts/AuthContext";
 import { BodyPortal } from "@/components/ui/body-portal";
 
+import { isSuperAdminRole } from "@/contexts/auth.utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface AccountGroup {
   _id: string;        // String(AGId)
@@ -190,7 +191,7 @@ const GeneralLedgerMaster: React.FC = () => {
   const qc = useQueryClient();
   const rights = usePageRights("general-ledger");
   const { currentUser } = useAuth();
-  const isSuperAdmin = currentUser?.role === "super_admin";
+  const isSuperAdmin = isSuperAdminRole(currentUser?.role);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useDraftForm<LedgerForm>("general-ledger-master", EMPTY_FORM, {
     skip: editingId !== null,

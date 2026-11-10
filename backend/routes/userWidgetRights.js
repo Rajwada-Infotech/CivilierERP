@@ -21,6 +21,7 @@
  */
 
 const express = require("express");
+const { fullAccessOnly } = require("../middleware/role");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -28,7 +29,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const adminOnly = fullAccessOnly;
 
 // ── All known widget keys — single source of truth ──────────────────────────
 async function getActiveWidgetKeys(pool) {

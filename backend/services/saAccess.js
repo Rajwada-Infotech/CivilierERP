@@ -1,5 +1,6 @@
 const { sql } = require("../db");
 
+const { hasFullAccess, isSuperAdmin } = require("../middleware/role");
 function actorId(req) {
   const id = req.user?.userId ?? req.user?.id;
   const numeric = Number(id);
@@ -13,7 +14,7 @@ function normalizeRole(role) {
 function isSaAdmin(req) {
   const role = normalizeRole(req.user?.role);
   // marketing_head has admin-level access within Sales Automation
-  return ["super_admin", "sa", "dba", "admin", "marketing_head"].includes(role);
+  return hasFullAccess(role) || role === "marketing_head";
 }
 
 // Deliberately narrower than isSaAdmin above — used for identity/contact
@@ -21,7 +22,7 @@ function isSaAdmin(req) {
 // even admin/dba/marketing_head having free rein is the exact security gap
 // being closed. Only the literal "super_admin" role, no aliases.
 function isSuperAdminOnly(req) {
-  return normalizeRole(req.user?.role) === "super_admin";
+  return isSuperAdmin(req.user?.role);
 }
 
 function isSaTeamLead(req) {

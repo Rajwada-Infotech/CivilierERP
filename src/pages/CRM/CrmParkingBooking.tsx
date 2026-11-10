@@ -20,11 +20,11 @@ import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 import { localDay } from "./salesDeed/config";
 
+import { isSuperAdminRole } from "@/contexts/auth.utils";
 const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
 const EMPTY_FORM = { ApplicationId: "", BlockId: "", ParkingMasterId: "", ParkingSlotId: "", Notes: "", RateOverride: "" };
 const PAYMENT_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Bank Transfer", "DD"];
-const RELEASE_ROLES = ["super_admin"];
 const DIALOG = "rounded-none p-5 gap-4";
 const SEL = `${INP} text-sm`;
 
@@ -211,7 +211,7 @@ const CrmParkingBooking: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const canRelease = RELEASE_ROLES.includes(currentUser?.role ?? "");
+  const canRelease = isSuperAdminRole(currentUser?.role);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "Pending" | "Paid">("");

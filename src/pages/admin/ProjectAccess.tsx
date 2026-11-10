@@ -8,6 +8,7 @@ import { getUsersForRights } from "@/api/userApi";
 import { getRolesList } from "@/api/roleApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 interface ProjectOpt {
   id: number;
   label: string;
@@ -25,8 +26,6 @@ const VIA: { key: Via; title: string; note: string }[] = [
 ];
 
 // Admin-tier roles are never restricted (see backend/services/projectScope.js).
-const UNRESTRICTED_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
-const roleKey = (name: string) => name.trim().toLowerCase().replace(/\s+/g, "_");
 
 interface Inherited {
   roleName: string | null;
@@ -146,7 +145,7 @@ export default function ProjectAccess() {
 
   const selectedUser = users.find((u) => u.id === userId);
   const selectedRole = roles.find((r) => r.RId === roleId);
-  const roleIsAdminTier = mode === "role" && !!selectedRole && UNRESTRICTED_ROLES.has(roleKey(selectedRole.RName));
+  const roleIsAdminTier = mode === "role" && !!selectedRole && isPrivilegedRole(selectedRole.RName);
   const canEditList = rights.canEdit && !roleIsAdminTier;
 
   const save = async () => {

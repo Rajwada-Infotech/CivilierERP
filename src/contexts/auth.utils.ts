@@ -11,9 +11,19 @@ import type {
 } from "./types";
 
 // ======================
-// CENTRALIZED PRIVILEGED ROLES (Fix 3)
+// FULL ACCESS: the one place on the page side (the server's is backend/middleware/role.js). Decided 2026-11-10:
+// super_admin, admin and dba keep full access in code; every other role gets what Role Rights and Approval Setup give.
 // ======================
 export const PRIVILEGED_ROLES: UserRole[] = ["super_admin", "admin", "dba"];
+/** A role name as one slug: "Super Admin" / "super-admin" -> "super_admin" (and "sa" / "superadmin"). */
+const roleSlug = (role: unknown): string => {
+  const r = String(role ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return r === "sa" || r === "superadmin" ? "super_admin" : r;
+};
+/** Full access to every page (super_admin, admin, dba). */
+export const isPrivilegedRole = (role: unknown): boolean => (PRIVILEGED_ROLES as string[]).includes(roleSlug(role));
+/** The super admin: in parallel on every approval, and the few super-admin-only tools. */
+export const isSuperAdminRole = (role: unknown): boolean => roleSlug(role) === "super_admin";
 
 // Pages the marketing_head role controls as an admin (full CRUD, no restrictions).
 // Backend mirrors this in requirePageRight.js → isMarketingHeadAllowed(), which
@@ -256,9 +266,6 @@ export const ADMIN_ONLY_PAGES: PageKey[] = [
   "dba-gl-posting-failures",
 ];
 
-// Updated to use centralized PRIVILEGED_ROLES
-export const isPrivilegedRole = (role: UserRole): boolean =>
-  PRIVILEGED_ROLES.includes(role);
 
 // A page made of several steps: open to anyone with a right on any one of them. Each step keeps its own right.
 const PAGE_GROUPS: Record<string, PageKey[]> = { "crm-possession": ["crm-pre-possession", "crm-possession-notice", "crm-handover"] };

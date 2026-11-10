@@ -29,6 +29,7 @@ import {
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
+import { isSuperAdminRole } from "@/contexts/auth.utils";
 const API = "/api/room-master";
 
 const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
@@ -669,7 +670,7 @@ const roomViewFields: {
 const RoomMaster: React.FC = () => {
   const rights = usePageRights("civilworkdpr-room-master");
   const { currentUser } = useAuth();
-  const canBulkDelete = currentUser?.role === "super_admin";
+  const canBulkDelete = isSuperAdminRole(currentUser?.role);
   const queryClient = useQueryClient();
 
   const {

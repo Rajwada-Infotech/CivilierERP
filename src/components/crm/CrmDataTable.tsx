@@ -511,6 +511,21 @@ export function GridFormField({ label, required, hint, wide, children }: { label
   );
 }
 
+/** A record's facts, four to a row; anything not yet recorded is left out. */
+export function GridFacts({ items }: { items: { label: string; value: React.ReactNode; wide?: boolean }[] }) {
+  const shown = items.filter((i) => i.value != null && i.value !== "" && i.value !== "—");
+  return (
+    <dl className="px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+      {shown.map((f) => (
+        <div key={f.label} className={cn("min-w-0", f.wide && "col-span-2 md:col-span-4")}>
+          <dt className={GRID_LABEL}>{f.label}</dt>
+          <dd className="mt-0.5 text-[0.8125rem] font-medium break-words">{f.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 /** Label / value pairs in two columns: a record's details section. */
 export function GridFields({ fields }: { fields: { label: string; value: React.ReactNode; wide?: boolean }[] }) {
   return (

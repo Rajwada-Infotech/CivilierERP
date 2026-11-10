@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { fullAccessOnly } = require("../middleware/role");
 const express = require("express");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -77,7 +78,7 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/tenant-reminders  — create a new reminder
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", fullAccessOnly, async (req, res) => {
   const { title, message, module, refId, dueDate, createdBy } = req.body;
   if (!title) return res.status(400).json({ error: "title is required" });
   try {
@@ -102,7 +103,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 
 // POST /api/reminders/send/:id  (also reachable as /api/tenant-reminders/send/:id)
 // Marks reminder as sent + records timestamp
-router.post("/send/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/send/:id", fullAccessOnly, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -129,7 +130,7 @@ router.post("/send/:id", allowRoles("admin", "super_admin", "dba"), async (req, 
 });
 
 // DELETE /api/tenant-reminders/:id
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", fullAccessOnly, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {

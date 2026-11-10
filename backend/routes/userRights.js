@@ -1,4 +1,5 @@
 const express = require("express");
+const { fullAccessOnly } = require("../middleware/role");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -10,7 +11,7 @@ const {
   getEffectivePagePermissions,
 } = require("../middleware/permissions");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const adminOnly = fullAccessOnly;
 
 // GET non-admin users for dropdown
 // NOTE: role column was dropped in migration 006; now derived via RoleId → dbo.Role join

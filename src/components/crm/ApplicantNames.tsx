@@ -24,8 +24,8 @@ export function useCoApplicantNames(enabled = true) {
 /** The co-applicants of a booking / application (Applicant 2, 3 …), main applicant excluded. */
 export function coApplicantsOf(map: NamesMap | undefined, ids: { bookingId?: number | null; applicationId?: number | null }, mainName?: string | null): string[] {
   if (!map) return [];
-  const list = (ids.bookingId != null && map.byBooking[String(ids.bookingId)])
-    || (ids.applicationId != null && map.byApplication[String(ids.applicationId)]) || [];
+  const list = (ids.bookingId != null && map.byBooking?.[String(ids.bookingId)])
+    || (ids.applicationId != null && map.byApplication?.[String(ids.applicationId)]) || [];
   const main = String(mainName || "").trim().toLowerCase();
   return list.filter((n) => n.trim().toLowerCase() !== main);
 }

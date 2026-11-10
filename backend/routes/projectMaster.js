@@ -1,4 +1,5 @@
 const express = require("express");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -14,7 +15,7 @@ const { deleteProjectCascade } = require("../services/projectCascadeDelete");
 const { getProjectLockReason } = require("../services/crmHierarchyLocks");
 const { recordAmendment } = require("../services/amendmentLog");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const adminOnly = pageRightByMethod("project-master");
 
 let _acctHeadHasLGSTType = null;
 async function acctHeadHasLGSTType(pool) {
@@ -805,7 +806,7 @@ router.delete("/:id", adminOnly, async (req, res) => {
 // The caller must re-type the exact project name as `confirmName` to guard
 // against a stray click on something this irreversible.
 router.delete("/:id/cascade", async (req, res) => {
-  if ((req.user?.role || "").toLowerCase() !== "super_admin") {
+  if (!allowRoles.isSuperAdmin(req.user?.role)) {
     return res.status(403).json({
       error: "Only Super Admin can delete a project and its transactions.",
     });

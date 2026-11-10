@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { BodyPortal } from "@/components/ui/body-portal";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type TicketChatUser = {
@@ -342,14 +343,13 @@ function MessageContent({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const ADMIN_ROLES = new Set(["admin", "super_admin", "dba"]);
 
 function normalizeRole(role: string | null | undefined) {
   return String(role ?? "").trim().toLowerCase();
 }
 
 function isAdminRole(role: string | null | undefined) {
-  return ADMIN_ROLES.has(normalizeRole(role));
+  return isPrivilegedRole(role);
 }
 
 function formatMessageDate(dateString: string) {
@@ -391,7 +391,7 @@ function getInitials(name: string) {
 
 function roleTone(role: string | null | undefined) {
   const normalized = normalizeRole(role);
-  if (["admin", "super_admin", "dba"].includes(normalized)) return "bg-primary text-primary-foreground";
+  if (isPrivilegedRole(normalized)) return "bg-primary text-primary-foreground";
   if (normalized === "engineer") return "bg-foreground text-card";
   if (["customer", "user"].includes(normalized)) return "bg-primary text-primary-foreground";
   return "bg-muted-foreground text-card";

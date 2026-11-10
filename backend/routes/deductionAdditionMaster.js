@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -36,7 +37,7 @@ router.get("/", cache("deduction-addition-master", 300), async (req, res) => {
 });
 
 // POST — add deduction/addition
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("deduction-addition-master"), async (req, res) => {
   const { Name, Code, Type, LedgerId, IsActive } = req.body;
   if (!Name?.trim()) return res.status(400).json({ error: "Name is required" });
   if (!Code?.trim()) return res.status(400).json({ error: "Code is required" });
@@ -70,7 +71,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update deduction/addition
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("deduction-addition-master"), async (req, res) => {
   const { id } = req.params;
   const { Name, Code, Type, LedgerId, IsActive } = req.body;
   if (!Name?.trim()) return res.status(400).json({ error: "Name is required" });
@@ -108,7 +109,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // DELETE
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("deduction-addition-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

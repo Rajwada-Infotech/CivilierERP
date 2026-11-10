@@ -1,4 +1,4 @@
-// The deed's Query Payment tab: the stamp duty and registration fee sent to the customer, then confirmed paid.
+// The deed's stamp duty payment section: the stamp duty and registration fee sent to the customer, then confirmed paid.
 // Formerly its own page; now scoped to the deed's booking.
 import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { CrmStatus } from "@/constants/crmStatuses";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
-import { FileText, Pencil, Send, Upload, X } from "lucide-react";
+import { FileText, Pencil, ReceiptIndianRupee, Send, Upload, X } from "lucide-react";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { GRID_SHEET_KEYS, GridToneMark as SheetMark } from "@/components/crm/CrmDataTable";
@@ -192,14 +192,14 @@ export function QueryPaymentTab({ detail, canCreate, canEdit, canConfirm, onChan
   );
 
   return (
-    <Panel title="Stamp duty & registration fee" right={qp?.Status ? <SheetMark text={qp.Status} tone={deedTone(qp.Status)} /> : undefined}>
+    <Panel title="Stamp Duty and Registration Fee" icon={<ReceiptIndianRupee size={13} />} right={qp?.Status ? <SheetMark text={qp.Status} tone={deedTone(qp.Status)} /> : undefined}>
       <div className="p-4 space-y-3">
         <p className="text-xs text-muted-foreground">Communicate the government fee to the customer, then confirm once it's paid at the Sub-Registrar.</p>
         <AutoStep n={1} label="Stamp duty payment" done={confirmed} isLast>
           {!qp && (
             <div className="mt-1">
               {detail.DirectorApprovalStatus !== CrmStatus.APPROVED ? (
-                <p className="text-xs text-muted-foreground">Unlocks once Director approval (on the Legal & Approval tab) is complete.</p>
+                <p className="text-xs text-muted-foreground">Unlocks once the director approves the deed (Legal Work and Approvals, above).</p>
               ) : canCreate ? (
                 <button onClick={handleStart} disabled={starting || !startEligible} className={`${KEY_INK} h-8 px-3`}>
                   {starting ? "Starting…" : "Start query payment"}

@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const authMiddleware = require("../middleware/auth");
 const express = require("express");
 const { cache } = require("../middleware/cache");
@@ -66,7 +67,7 @@ router.get(
 bumpCacheVersion("enterprises").catch(() => {});
 
 // ADD
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("business-unit-master"), async (req, res) => {
   const {
     name,
     short_name,
@@ -191,7 +192,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // UPDATE
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("business-unit-master"), async (req, res) => {
   const { id } = req.params;
   const {
     name,
@@ -311,7 +312,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // DELETE — blocked if enterprise has linked companies or projects
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("business-unit-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id))
     return res.status(400).json({ error: "Invalid enterprise ID" });

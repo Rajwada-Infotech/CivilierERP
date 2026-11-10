@@ -8,6 +8,7 @@ import { MAINTENANCE_EVENT, MAINTENANCE_STORAGE_KEY } from "@/lib/maintenanceRed
 import { formatCountdown, formatIst } from "@/lib/maintenanceTime";
 import Maintenance from "@/pages/Maintenance";
 
+import { isSuperAdminRole } from "@/contexts/auth.utils";
 const POLL_MS = 15_000;
 const LOGOUT_WAIT_MS = 4000;
 /** Remembers, across reloads of the tab, that this person was held by maintenance - only they are signed out at the end. */
@@ -24,7 +25,7 @@ const HELD_KEY = "maintenance:held";
  */
 export function MaintenanceWatcher() {
   const { currentUser, logout } = useAuth();
-  const isSuperAdmin = currentUser?.role === "super_admin";
+  const isSuperAdmin = isSuperAdminRole(currentUser?.role);
   const navigate = useNavigate();
   const location = useLocation();
 

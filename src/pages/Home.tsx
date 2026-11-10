@@ -40,6 +40,7 @@ import {
   type HomeTileData,
 } from "@/pages/home/homeTiles";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // ─── Role helpers ─────────────────────────────────────────────────────────────
 // These mirror the logic in TopNavbar / auth.utils so the home page
 // shows exactly the same modules a user can actually navigate to.
@@ -47,7 +48,7 @@ import {
 type UserRoleStr = string;
 
 function isPrivileged(role: UserRoleStr) {
-  return ["super_admin", "admin", "dba"].includes(role);
+  return isPrivilegedRole(role);
 }
 
 // ─── Universal activity feed ──────────────────────────────────────────────────

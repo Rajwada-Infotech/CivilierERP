@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { CrmStatus } from "@/constants/crmStatuses";
 import { translateError } from "@/lib/translateError";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertTriangle, CheckCircle2, Clock, Hourglass, MessageSquare, Percent, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Clock, Hourglass, MessageSquare, Percent, Undo2 } from "lucide-react";
 import { GRID_CARD, GRID_SHEET_KEYS, GridMiniTable, GridRelated, GridStatusPill, GridToneMark, type GridCol } from "@/components/crm/CrmDataTable";
 import { cn } from "@/lib/utils";
 import { fmt, fmtDate, fmtShort, isOverdue, milestoneFill, nextOpenMilestone, pct, MONEY_STAGE, RIBBON, TRAIL_STAGE, type LedgerRow, type LedgerSummary } from "./config";
@@ -135,6 +135,45 @@ export function Initials({ name, small }: { name: string | null; small?: boolean
 }
 /** Names come in as typed, often all capitals: on the list they read as names. */
 export const asName = (s: string | null) => String(s || "").toLowerCase();
+/** asName lower-cases for the CSS to capitalise; text that is not styled (dialog subtitles, exports) needs the capitals itself. */
+export const personName = (s?: string | null) => asName(s ?? null).replace(/(^|[\s.&-])([a-z])/g, (_, a, b) => a + b.toUpperCase());
+
+export type StepState = "done" | "active" | "stopped" | "off";
+/** A record's steps as one bar: green when done, amber in hand, red when stopped. Labelled under each step, or, for
+ *  many steps, one caption naming where it stands. */
+export function StepBar({ steps, onDark, caption }: { steps: { label: string; state: StepState }[]; onDark?: boolean; caption?: React.ReactNode }) {
+  const fill: Record<StepState, string> = {
+    done: onDark ? BAND_DOT.collected : "bg-emerald-500", active: onDark ? BAND_DOT.finance : "bg-amber-400", stopped: "bg-rose-500",
+    off: onDark ? "bg-white/15" : "bg-slate-200 dark:bg-slate-700",
+  };
+  const ink: Record<StepState, string> = {
+    done: onDark ? "text-slate-200" : "text-foreground", active: onDark ? "text-white font-semibold" : "text-foreground font-semibold",
+    stopped: onDark ? "text-rose-300 font-semibold" : "text-destructive font-semibold", off: onDark ? "text-slate-400" : "text-muted-foreground",
+  };
+  return (
+    <span className="block w-full">
+      <span className="grid gap-1 w-full" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
+        {steps.map((s) => (
+          <span key={s.label} className="min-w-0" title={`${s.label}: ${s.state === "off" ? "not started" : s.state}`}>
+            <span className={cn("block rounded-full", onDark ? "h-2.5" : "h-1.5", fill[s.state])} />
+            {caption === undefined && <span className={cn("mt-1 block text-[0.6875rem] truncate", ink[s.state])}>{s.label}</span>}
+          </span>
+        ))}
+      </span>
+      {caption !== undefined && <span className={cn("mt-1.5 block text-[0.6875rem] truncate", onDark ? "text-slate-200" : "text-muted-foreground")}>{caption}</span>}
+    </span>
+  );
+}
+
+/** The band's last line: what happens next, and the one button that does it. */
+export function BandNext({ text, finished, action }: { text: string; finished?: boolean; action?: { label: string; run: () => void } | null }) {
+  return (
+    <span className="flex flex-wrap items-center justify-between gap-3">
+      <span>{finished ? text : <>Next step: <strong className="font-semibold text-white">{text}</strong></>}</span>
+      {action && <button type="button" onClick={action.run} className={BAND_KEY_MAIN}>{action.label} <ArrowRight size={13} /></button>}
+    </span>
+  );
+}
 
 /** The next step on a booking, in words, from its plan. */
 function nextStep(r: LedgerRow) {
