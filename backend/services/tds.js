@@ -184,7 +184,7 @@ async function resolveInvoiceLinkedTds(pool, sql, { expenseRef, companyId, finYe
 
   const ebRes = await pool.request().input("EDocNo", sql.NVarChar(100), lookupRef).query(`
     SELECT TOP 1 eb.Eid, eb.EAmount, eb.ECompanyId,
-           eb.TDSId, eb.TDSNature, eb.TDSName, eb.TDSPercentage,
+           eb.TDSId, eb.TDSNature, eb.TDSName, eb.TDSPercentage, ISNULL(eb.TDSAdvanceCovered, 0) AS TDSAdvanceCovered,
            (${ebSup.idExpr}) AS ResolvedSupplierId,
            ISNULL(sup.IsTdsApplicable, 0) AS IsTdsApplicable,
            ISNULL(sup.TdsLimitApplicable, 1) AS TdsLimitApplicable
@@ -206,6 +206,10 @@ async function resolveInvoiceLinkedTds(pool, sql, { expenseRef, companyId, finYe
   });
   if (!thresholdMet) return { ...empty, eligible: true, thresholdMet: false };
 
+  // TDS was already deducted on advances covering this whole invoice: nothing left to deduct (computeAdvanceTdsCover).
+  const tdsBase = Math.max(0, (Number(eb.EAmount) || 0) - (Number(eb.TDSAdvanceCovered) || 0));
+  if (tdsBase <= 0) return { ...empty, eligible: true, thresholdMet: true };
+
   if (!eb.TDSId) {
     const err = new Error("TDS is due on this invoice but none was selected — please correct the invoice before paying it.");
     err.status = 400;
@@ -216,15 +220,129 @@ async function resolveInvoiceLinkedTds(pool, sql, { expenseRef, companyId, finYe
     eligible: true,
     thresholdMet: true,
     tdsId: eb.TDSId,
-    tdsAmount: calculateTds(eb.EAmount, eb.TDSPercentage),
+    tdsAmount: calculateTds(tdsBase, eb.TDSPercentage),
     tdsNature: eb.TDSNature,
     tdsName: eb.TDSName,
     tdsPercentage: Number(eb.TDSPercentage) || 0,
   };
 }
 
+/**
+ * The ledger a payment's own TDS is credited to: the GL head of the TDS picked on the payment (TDSMaster.GLHeadId,
+ * e.g. "TDS 194C A/c"), or the common "TDS Payable A/c" when that TDS has no head set.
+ */
+async function getPaymentTdsHeadId(pool, sql, tdsId) {
+  if (tdsId) {
+    const r = await pool.request().input("TDSId", sql.Int, tdsId).query(`
+      SELECT TOP 1 tm.GLHeadId FROM dbo.TDSMaster tm
+      JOIN dbo.AccountHeadMaster h ON h.LHeadId = tm.GLHeadId
+      WHERE tm.TDSId = @TDSId`);
+    if (r.recordset[0]?.GLHeadId) return r.recordset[0].GLHeadId;
+  }
+  const { getGLHeadId } = require("./generalLedger");
+  return getGLHeadId(pool, GL_ACCOUNTS.TDS_PAYABLE).catch(() => null);
+}
+
+/**
+ * Advance payments that already had TDS deducted, not yet used up by an invoice.
+ *
+ * An advance (a payment to the party with no invoice and no JV line) with TDS on it already withheld tax on its gross
+ * amount (PAmount is gross on such a payment). When an invoice for that party is booked later, TDS must only be
+ * deducted on the part of the invoice the advance doesn't cover. Each invoice records how much of these advances it
+ * used (ExpenseBooking.TDSAdvanceCovered), so one advance is never counted against two invoices.
+ * Same company, same financial year (the year the given date falls in).
+ */
+async function getAdvanceTdsAvailable(newRequest, sql, { partyHeadId, companyId, date, excludeEid }) {
+  if (!partyHeadId || !companyId || !date) return 0;
+  const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
+  const ebSup = expenseBookingSupplierSql("eb", "tdsadv");
+  const r = await newRequest()
+    .input("PartyHeadId", sql.Int, partyHeadId)
+    .input("CompanyId", sql.Int, companyId)
+    .input("Date", sql.Date, date)
+    .input("ExcludeEid", sql.Int, excludeEid || 0).query(`
+      DECLARE @FStart DATE, @FEnd DATE;
+      SELECT TOP 1 @FStart = FStartDate, @FEnd = FEndDate FROM dbo.FinYear
+      WHERE @Date >= FStartDate AND @Date <= FEndDate ORDER BY FStartDate DESC;
+      SELECT
+        ISNULL((
+          SELECT SUM(np.PAmount)
+          FROM dbo.NewPayment np
+          WHERE np.PPartyId = @PartyHeadId
+            AND (TRY_CAST(np.PCompany AS INT) = @CompanyId
+                 OR np.PCompany = (SELECT TOP 1 name FROM dbo.enterprise WHERE id = @CompanyId))
+            AND np.PDate BETWEEN @FStart AND @FEnd
+            AND ISNULL(np.PExpenseRef, '') = '' AND np.JVLineId IS NULL
+            AND ISNULL(np.TDSAmount, 0) > 0
+            AND ISNULL(np.Status, '') NOT IN ('Rejected', 'Deleted', 'Cancelled')
+            AND ISNULL(np.PIsChequeCancelled, 0) = 0
+        ), 0)
+        -
+        ISNULL((
+          SELECT SUM(eb.TDSAdvanceCovered)
+          FROM dbo.ExpenseBooking eb
+          ${ebSup.joins}
+          WHERE eb.ECompanyId = @CompanyId
+            AND eb.EDocDate BETWEEN @FStart AND @FEnd
+            AND eb.Eid <> @ExcludeEid
+            AND ISNULL(eb.TDSAdvanceCovered, 0) > 0
+            AND ISNULL(eb.EStatus, '') NOT IN ('Rejected', 'Deleted')
+            AND (${ebSup.idExpr}) = @PartyHeadId
+        ), 0) AS Available`);
+  return Math.max(0, Number(r.recordset[0]?.Available) || 0);
+}
+
+/**
+ * How much of an invoice is covered by TDS-deducted advances, and the TDS left to deduct on the rest.
+ * Reads the invoice's party (and, unless overridden, its amount / company / date / TDS rate) from the saved row, so it
+ * works both right after an insert (inside its transaction) and before an edit is written (with the edit's values as
+ * overrides). `blocked` = a TDS was picked but the advances cover the whole invoice: there is nothing left to deduct on.
+ *
+ * @returns {{ covered: number, base: number, tdsAmount: number, blocked: boolean }}
+ */
+async function computeAdvanceTdsCover(newRequest, sql, eid, overrides = {}) {
+  const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
+  const ebSup = expenseBookingSupplierSql("eb", "tdscov");
+  const row = (await newRequest().input("Eid", sql.Int, eid).query(`
+    SELECT eb.EAmount, eb.ECompanyId, eb.EDocDate, eb.ESourceType, eb.TDSId, eb.TDSPercentage,
+           (${ebSup.idExpr}) AS SupplierId
+    FROM dbo.ExpenseBooking eb ${ebSup.joins}
+    WHERE eb.Eid = @Eid`)).recordset[0];
+  if (!row) return { covered: 0, base: 0, tdsAmount: 0, blocked: false };
+
+  const has = (k) => overrides[k] !== undefined && overrides[k] !== null && overrides[k] !== "";
+  const amount = Number(has("amount") ? overrides.amount : row.EAmount) || 0;
+  const companyId = has("companyId") ? parseInt(overrides.companyId, 10) : row.ECompanyId;
+  const date = has("date") ? overrides.date : row.EDocDate;
+  const tdsId = "tdsId" in overrides ? overrides.tdsId : row.TDSId;
+  const pct = "tdsPercentage" in overrides ? overrides.tdsPercentage : row.TDSPercentage;
+  // A direct booking's party is the one picked on the form, which an edit may change.
+  const isDirect = !["GRN", "PO", "WO_PO", "WORK_DONE", "WO"].includes(row.ESourceType);
+  const supplierId = isDirect && has("lHeadId") ? parseInt(overrides.lHeadId, 10) : row.SupplierId;
+
+  let covered = 0;
+  if (supplierId) {
+    const sup = (await newRequest().input("Id", sql.Int, supplierId)
+      .query("SELECT ISNULL(IsTdsApplicable, 0) AS IsTdsApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")).recordset[0];
+    if (sup?.IsTdsApplicable) {
+      const available = await getAdvanceTdsAvailable(newRequest, sql, { partyHeadId: supplierId, companyId, date, excludeEid: eid });
+      covered = Math.round(Math.min(amount, available) * 100) / 100;
+    }
+  }
+  const base = Math.max(0, Math.round((amount - covered) * 100) / 100);
+  return {
+    covered,
+    base,
+    tdsAmount: tdsId ? calculateTds(base, pct) : 0,
+    blocked: !!tdsId && covered > 0 && base <= 0,
+  };
+}
+
 module.exports = {
   GL_ACCOUNTS,
+  getPaymentTdsHeadId,
+  getAdvanceTdsAvailable,
+  computeAdvanceTdsCover,
   SINGLE_BILL_THRESHOLD,
   YEARLY_CUMULATIVE_THRESHOLD,
   calculateTds,

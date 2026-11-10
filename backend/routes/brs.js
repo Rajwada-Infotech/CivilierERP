@@ -221,7 +221,12 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ent.id                   AS CompanyID,
           np.PBankID               AS BankID,
           np.PBankName             AS BankName,
-          np.PAmount               AS Amount,
+          -- What actually left the bank. A payment with its own TDS (no invoice / JV line behind it) holds the GROSS
+          -- amount in PAmount and posts Bank = PAmount - TDS, TDS head = TDS (postPaymentApproval). An invoice- or
+          -- JV-linked payment is already net (TDS was withheld on the invoice / JV), so its TDSAmount is not subtracted.
+          CASE WHEN ISNULL(np.PExpenseRef, '') = '' AND np.JVLineId IS NULL
+               THEN np.PAmount - ISNULL(np.TDSAmount, 0)
+               ELSE np.PAmount END AS Amount,
           np.PDate                 AS PayDate,
           np.PMode                 AS Mode,
           np.DocNo                 AS DocNo,
