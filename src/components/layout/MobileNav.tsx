@@ -68,6 +68,7 @@ import type {
   SubItem as DesktopSubItem,
 } from "./sidebars/SidebarPrimitives";
 
+import { isSuperAdminRole, isPrivilegedRole } from "@/contexts/auth.utils";
 interface NavItemChild {
   label: string;
   path: string;
@@ -141,10 +142,9 @@ export const MobileNav: React.FC = () => {
     location.pathname.startsWith("/dba") ||
     location.pathname.startsWith("/superadmin") ||
     ADMIN_PATHS.some((p) => location.pathname.startsWith(p));
-  const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
+  const isSuperAdmin = isSuperAdminRole(currentUser?.role);
   const isDba = currentUser?.role?.toLowerCase() === "dba";
-  const isAdmin =
-    currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || isDba;
+  const isAdmin = isPrivilegedRole(currentUser?.role);
   const isSuperAdminPage =
     isSuperAdmin && location.pathname.startsWith("/superadmin");
   const isDbaPage = isAdmin && location.pathname.startsWith("/dba");

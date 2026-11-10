@@ -31,6 +31,7 @@ import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { type SetupItem, financeSetupItems, salesSetupItems, maintenanceSetupItems, hrPayrollSetupItems, materialSetupItems, fixedAssetSetupItems, followupSetupItems, engineeringSetupItems, civilWorkDprSetupItems, salesAutomationSetupItems, crmSetupItems, legalSetupItems, adminSetupItems } from "./setupMenus";
 
+import { isPrivilegedRole, isSuperAdminRole } from "@/contexts/auth.utils";
 // ─── useClickOutside ──────────────────────────────────────────────────────────
 
 function useClickOutside(
@@ -369,10 +370,10 @@ export const TopNavbar = () => {
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 
-  const isSuperAdmin = currentUser?.role === "super_admin";
+  const isSuperAdmin = isSuperAdminRole(currentUser?.role);
   const isDba = currentUser?.role === "dba";
   const isMarketingHead = currentUser?.role === "marketing_head";
-  const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
+  const isAdmin = isPrivilegedRole(currentUser?.role);
   const isAdminPage =
     isAdmin &&
     (location.pathname.startsWith("/admin") ||
@@ -400,7 +401,7 @@ export const TopNavbar = () => {
         ? "bg-orange-500"
         : "bg-blue-600";
 
-  const isPrivilegedUser = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
+  const isPrivilegedUser = isPrivilegedRole(currentUser?.role);
 
   // Filter setup items by page rights for non-privileged users.
   // marketing_head is privileged within their module scope.

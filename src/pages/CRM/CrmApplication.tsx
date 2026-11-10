@@ -29,7 +29,7 @@ import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
-import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, fetchProjectBanks, fetchAllBanks, PAGE_SIZE, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchAppDetail, STAGES, type Stage, stageLabel, stageIcon, normalizeRole, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, inputCls, labelCls } from "./applications/config";
+import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, fetchProjectBanks, fetchAllBanks, PAGE_SIZE, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchAppDetail, STAGES, type Stage, stageLabel, stageIcon, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, inputCls, labelCls } from "./applications/config";
 import { GstBreakdownBox, QuoteSchedule, gstReason } from "./applications/GstBreakdown";
 import { CoApplicantStep } from "./applications/CoApplicantStep";
 import { ApplicationFormPdfDialog } from "./applications/ApplicationFormPdfDialog";
@@ -40,6 +40,7 @@ import { AttachmentsStep } from "./applications/AttachmentsStep";
 
 import { useUrlParam } from "@/hooks/useUrlParam";
 import { readCrmDraft, writeCrmDraft, clearCrmDraft } from "@/lib/crmDraftStore";
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // The status filter's choices: the application's own statuses, then its booking sent back / resubmitted.
 const SENT_BACK_FILTERS = ["SentBack", "Resubmitted"] as const;
 const STATUS_FILTERS: readonly string[] = ["All", ...STATUSES, ...SENT_BACK_FILTERS];
@@ -49,7 +50,7 @@ const CrmApplication: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { currentUser, canDoAction } = useAuth();
-  const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
+  const isAdmin = isPrivilegedRole(currentUser?.role);
   const canEditApplications = canDoAction("crm-applications", "edit");
   const canCreateApplications = canDoAction("crm-applications", "create");
   const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");

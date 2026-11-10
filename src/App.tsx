@@ -34,6 +34,7 @@ const AppLayout = lazy(() =>
 
 // Contexts
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { PRIVILEGED_ROLES, isPrivilegedRole } from "@/contexts/auth.utils";
 import { ModuleProvider } from "./contexts/ModuleContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { TaskProvider } from "./contexts/TaskContext";
@@ -576,7 +577,7 @@ function ProtectedProviders({ children }: { children: React.ReactNode }) {
   );
 }
 
-const ADMIN_ROLES = ["super_admin", "admin", "dba"] as const;
+const ADMIN_ROLES = PRIVILEGED_ROLES;
 
 // Admin pages are for admin-tier roles. Any other role can open an Admin page too when that page is ticked for it in
 // Menu Rights - give the route its `pageKey` for that. A route with no pageKey stays admin-tier only.
@@ -656,7 +657,7 @@ function PageGuard({
 }) {
   const { currentUser, canAccessPage } = useAuth();
   const role = currentUser?.role ?? "";
-  const privileged = ["super_admin", "admin", "dba"].includes(role);
+  const privileged = isPrivilegedRole(role);
   if (!privileged && !canAccessPage(pageKey as any)) {
     return <Navigate to="/home" replace state={{ denied: pageKey }} />;
   }
@@ -2621,7 +2622,7 @@ function AppRoutes() {
         path="/supplier-portal/:userId?"
         element={
           <RequireAuth>
-            <RequireRole allowed={["admin", "super_admin", "dba"]}>
+            <RequireRole allowed={[...PRIVILEGED_ROLES]}>
               <SupplierLayout>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageSkeleton />}>
@@ -2637,7 +2638,7 @@ function AppRoutes() {
         path="/supplier-portal/:userId/quotation/:qtId"
         element={
           <RequireAuth>
-            <RequireRole allowed={["admin", "super_admin", "dba"]}>
+            <RequireRole allowed={[...PRIVILEGED_ROLES]}>
               <SupplierLayout>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageSkeleton />}>
@@ -2653,7 +2654,7 @@ function AppRoutes() {
         path="/supplier-portal/:userId/catalog"
         element={
           <RequireAuth>
-            <RequireRole allowed={["admin", "super_admin", "dba"]}>
+            <RequireRole allowed={[...PRIVILEGED_ROLES]}>
               <SupplierLayout>
                 <RouteErrorBoundary>
                   <Suspense fallback={<PageSkeleton />}>

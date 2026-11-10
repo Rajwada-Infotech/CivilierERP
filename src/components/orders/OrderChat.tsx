@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Message, MessageAvatar, MessageContent } from "@/components/ui/message";
 import { cn } from "@/lib/utils";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 // Generic PO<->supplier chat thread, modeled on src/pages/ticket/TicketChat.tsx
 // but pointed at whichever comment API base the caller supplies — so it works
@@ -48,7 +49,7 @@ function normalizeRole(role: string | null | undefined) {
 function roleTone(role: string | null | undefined) {
   const normalized = normalizeRole(role);
   if (normalized === "supplier") return "bg-emerald-500 text-white";
-  if (["admin", "super_admin", "dba"].includes(normalized)) return "bg-indigo-500 text-white";
+  if (isPrivilegedRole(normalized)) return "bg-indigo-500 text-white";
   if (normalized === "engineer") return "bg-sky-500 text-white";
   return "bg-slate-500 text-white";
 }

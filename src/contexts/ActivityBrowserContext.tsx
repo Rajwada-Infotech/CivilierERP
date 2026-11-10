@@ -23,15 +23,15 @@ import {
   generateUUID,
 } from "@/utils/deviceFingerprint";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // ── ROLE GUARD ────────────────────────────────────────────────────────────────
 // Only these roles may read or write activity logs. Customers and any other
 // non-privileged roles must be kept entirely out of the activity API.
-const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"] as const;
 
 function isPrivilegedUser(): boolean {
   try {
     const user = JSON.parse(sessionStorage.getItem("user") || "{}");
-    return PRIVILEGED_ROLES.includes(user?.role);
+    return isPrivilegedRole(user?.role);
   } catch {
     return false;
   }

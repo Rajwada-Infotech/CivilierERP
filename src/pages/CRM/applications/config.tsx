@@ -129,7 +129,6 @@ export const STAGES = ["InProcess", "Converted", "NotConverted"] as const;
 export type Stage = typeof STAGES[number];
 export const stageLabel: Record<Stage, string> = { InProcess: "In Process", Converted: "Converted", NotConverted: "Not Converted" };
 export const stageIcon: Record<Stage, any> = { InProcess: Clock, Converted: CheckCircle2, NotConverted: XCircle };
-export const normalizeRole = (role?: string) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 export async function fetchCustomers(): Promise<any[]> {
   try {
     const res = await fetchWithAuth(CUSTOMER_API);

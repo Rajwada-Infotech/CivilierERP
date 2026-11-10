@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 export type ReminderType =
   | "purchase_order"
   | "work_order"
@@ -224,7 +225,6 @@ export async function fetchCustomerReminders(): Promise<ReminderItem[]> {
 
 // Roles that bypass page-level gating entirely (mirrors backend
 // SUPERUSER_ROLES in middleware/permissions.js).
-const PRIVILEGED_REMINDER_ROLES = new Set(["super_admin", "admin", "dba"]);
 
 // Page keys (as stored in pagePermissions / RoleRights-derived rights) that
 // gate each reminder source. Kept in sync with the candidate page keys
@@ -248,7 +248,7 @@ function hasReminderAccess(
   pagePermissions: { page: string; actions: string[] }[] | undefined,
   reminderType: keyof typeof REMINDER_PAGE_KEYS,
 ): boolean {
-  if (role && PRIVILEGED_REMINDER_ROLES.has(role)) return true;
+  if (role && isPrivilegedRole(role)) return true;
   if (!Array.isArray(pagePermissions)) return false;
   const candidates = REMINDER_PAGE_KEYS[reminderType];
   return pagePermissions.some(

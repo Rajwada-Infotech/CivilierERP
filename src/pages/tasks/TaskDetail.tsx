@@ -24,6 +24,7 @@ import {
 import { AnimatePresence } from "framer-motion";
 import TaskFormModal from "./TaskFormModal";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 const formatDate = (date: string) =>
   new Date(date).toLocaleDateString("en-IN", {
     day: "numeric",
@@ -154,7 +155,7 @@ export default function TaskDetail() {
   const isAssignee = currentUser?.id === task.assignedTo;
   const isCreator = currentUser?.id === task.createdBy;
   const isAdminOrAbove =
-    currentUser?.role === "admin" || currentUser?.role === "super_admin";
+    isPrivilegedRole(currentUser?.role);
   const overdue =
     (task.status === "open" || task.status === "in_progress") &&
     new Date(task.dueDate) < new Date();

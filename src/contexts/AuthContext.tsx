@@ -120,8 +120,7 @@ export const AuthProvider = ({
   // Fetch users from backend — only for privileged roles that have CanView on Users
   useEffect(() => {
     if (!currentUser) return;
-    const privilegedRoles = ["super_admin", "admin", "dba"];
-    if (!privilegedRoles.includes(currentUser.role)) return;
+    if (!AuthUtils.isPrivilegedRole(currentUser.role)) return;
 
     const token = sessionStorage.getItem("token");
     if (!token) return;
@@ -210,8 +209,7 @@ export const AuthProvider = ({
   // down, so rights sync eventually even then, without ever requiring a
   // forced re-login.
   useEffect(() => {
-    const PRIVILEGED = ["super_admin", "admin", "dba"];
-    if (!currentUser?.id || PRIVILEGED.includes(currentUser.role)) return;
+    if (!currentUser?.id || AuthUtils.isPrivilegedRole(currentUser.role)) return;
 
     const fetchRights = () => {
       const token = sessionStorage.getItem("token");
@@ -264,7 +262,7 @@ export const AuthProvider = ({
         // Use DB-stored permissions for 'user' role; fall back to role-based defaults
         // for privileged roles (super_admin / admin / dba) which always get FULL_ACCESS.
         pagePermissions:
-          !["super_admin", "admin", "dba"].includes(data.user.role) &&
+          !AuthUtils.isPrivilegedRole(data.user.role) &&
           Array.isArray(data.user.pagePermissions) &&
           data.user.pagePermissions.length > 0
             ? data.user.pagePermissions
@@ -292,7 +290,7 @@ export const AuthProvider = ({
 
       // Fetch fresh permissions from DB for non-privileged roles.
       // Awaited so the user session has correct rights before the redirect.
-      if (!["super_admin", "admin", "dba"].includes(data.user.role)) {
+      if (!AuthUtils.isPrivilegedRole(data.user.role)) {
         try {
           const rightsRes = await fetch("/api/user-rights/my", {
             headers: { Authorization: `Bearer ${data.token}` },

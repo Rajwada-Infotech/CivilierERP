@@ -29,12 +29,13 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
 import { CrmBookingDetail } from "./CrmBookingDetail";
 import {
-  API, KEY_INK, KEY_LINE, PAGE_SIZE, RULE, RULE_SOFT, STATUSES, bookingTone, fetchBookings, fetchBookingsList, fmt, getNextStep, normalizeRole,
+  API, KEY_INK, KEY_LINE, PAGE_SIZE, RULE, RULE_SOFT, STATUSES, bookingTone, fetchBookings, fetchBookingsList, fmt, getNextStep,
   workflowStageLabel, type BookingList, type BookingListFilters,
 } from "./bookings/config";
 import { NewBookingDialog } from "./bookings/NewBookingDialog";
 import { ChangeUnitDialog } from "./bookings/ChangeUnitDialog";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 const CrmBooking: React.FC = () => {
   const ask = useSheetAsk();
   const qc = useQueryClient();
@@ -44,7 +45,7 @@ const CrmBooking: React.FC = () => {
   const canCreate = canDoAction("crm-bookings", "create");
   const canEdit = canDoAction("crm-bookings", "edit");
   const canRequestCancellation = canDoAction("crm-cancellations", "create");
-  const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
+  const isAdmin = isPrivilegedRole(currentUser?.role);
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
