@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FolderOpen, Loader2, Lock, Pencil, ScanLine, Upload } from "lucide-react";
+import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FolderOpen, Loader2, Lock, Pencil, ScanLine, ScrollText, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createPortal } from "react-dom";
 import { GRID_BTN, GRID_BTN_BRAND, GRID_INPUT, GRID_LABEL, GridProgress, GridStatusPill } from "@/components/crm/CrmDataTable";
@@ -21,7 +21,7 @@ export function Panel({ title, icon, right, children, className = "" }: { title:
   return (
     <div className={`bg-card rounded-lg border border-border shadow-[0_2px_3px_0_hsl(var(--foreground)/0.07)] overflow-hidden ${className}`}>
       <div className="px-4 h-11 flex items-center justify-between gap-3 flex-wrap border-b border-border">
-        <h3 className="text-[0.8125rem] font-bold text-foreground flex items-center gap-1.5">{icon}{title}</h3>
+        <h3 className="text-[0.8125rem] font-bold text-foreground flex items-center gap-2">{icon && <span className="w-6 h-6 rounded bg-primary/10 text-primary flex items-center justify-center shrink-0">{icon}</span>}{title}</h3>
         {right}
       </div>
       {children}
@@ -130,7 +130,7 @@ export function DeedDetailsSection({ detail, onSave, saving, canEdit }: {
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <Panel title="Deed details"
+    <Panel title="Deed Details" icon={<ScrollText size={13} />}
       right={canEdit && !locked && !editing ? <button onClick={() => { setForm(initial()); setEditing(true); }} className={`${KEY_LINE} h-7 px-2`}><Pencil size={10} /> Edit</button> : undefined}>
       <div className="px-4 py-3 space-y-3">
         {locked && (
@@ -170,24 +170,26 @@ export function DeedDetailsSection({ detail, onSave, saving, canEdit }: {
             </div>
           </>
         ) : (
-          <div className="text-sm">
-            {[
-              ["Deed value", detail.DeedValue ? fmtRupees(detail.DeedValue) : "—"],
-              ["Stamp duty", detail.StampDuty ? fmtRupees(detail.StampDuty) : "—"],
-              ["Registration fee", detail.RegistrationFee ? fmtRupees(detail.RegistrationFee) : "—"],
-              ["AFS credit", detail.StampDutyCredit != null ? "− " + fmtRupees(detail.StampDutyCredit) : "—"],
-              ["Deed date", fmtDate(detail.DeedDate)],
-              ["Reg. deadline", fmtDate(detail.RegistrationDeadline)],
-              ["Sub-Registrar office", detail.SubRegistrarOffice || "—"],
-              ["Witness names", detail.WitnessNames || "—"],
-            ].map(([lbl, val]) => (
-              <div key={lbl} className="flex justify-between gap-3 py-1.5 last:border-0" style={{ borderBottom: RULE_SOFT }}>
-                <span className={`${LBL} shrink-0`}>{lbl}</span>
-                <span className="text-right text-xs font-heading tabular-nums">{val}</span>
-              </div>
-            ))}
-            {detail.Notes && <p className="text-xs text-muted-foreground pt-2 italic">{detail.Notes}</p>}
-          </div>
+          <>
+            <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+              {([
+                ["Deed value", detail.DeedValue ? fmtRupees(detail.DeedValue) : null],
+                ["Stamp duty", detail.StampDuty ? fmtRupees(detail.StampDuty) : null],
+                ["Registration fee", detail.RegistrationFee ? fmtRupees(detail.RegistrationFee) : null],
+                ["AFS stamp duty credit", detail.StampDutyCredit != null ? "− " + fmtRupees(detail.StampDutyCredit) : null],
+                ["Deed date", detail.DeedDate ? fmtDate(detail.DeedDate) : null],
+                ["Registration deadline", detail.RegistrationDeadline ? fmtDate(detail.RegistrationDeadline) : null],
+                ["Sub-Registrar office", detail.SubRegistrarOffice || null],
+                ["Witness names", detail.WitnessNames || null],
+              ] as [string, string | null][]).map(([lbl, val]) => (
+                <div key={lbl} className="min-w-0">
+                  <dt className={LBL}>{lbl}</dt>
+                  <dd className={cn("mt-0.5 text-[0.8125rem] tabular-nums break-words", val ? "font-medium" : "text-muted-foreground italic")}>{val ?? "Not set"}</dd>
+                </div>
+              ))}
+            </dl>
+            {detail.Notes && <p className="text-xs text-muted-foreground pt-1"><span className="font-medium text-foreground">Notes:</span> {detail.Notes}</p>}
+          </>
         )}
       </div>
     </Panel>

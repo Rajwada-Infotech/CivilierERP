@@ -1,11 +1,11 @@
-// The deed's Registry tab: the Sub-Registrar appointment (start → schedule → reschedule → complete / cancel), its
+// The deed's registry section: the Sub-Registrar appointment (start → schedule → reschedule → complete / cancel), its
 // documents, then the deed's registration and Index II. Formerly its own page; now scoped to the deed's booking.
 import React, { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
-import { Upload } from "lucide-react";
+import { Landmark, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
@@ -166,14 +166,14 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
 
   return (
     <div className="space-y-4">
-      <Panel title="Sub-Registrar office registration" right={status ? <SheetMark text={status} tone={deedTone(status)} /> : undefined}>
+      <Panel title="Sub-Registrar Registration" icon={<Landmark size={13} />} right={status ? <SheetMark text={status} tone={deedTone(status)} /> : undefined}>
         <div className="p-4 space-y-3">
           <p className="text-xs text-muted-foreground">Both parties appear at the Sub-Registrar Office to register the Sale Deed — this legally transfers ownership to the buyer.</p>
           <AutoStep n={1} label="Sub-Registrar appointment" done={status === "Completed"}>
             {!registry && (
               <div className="mt-1">
                 {!qpConfirmed ? (
-                  <p className="text-xs text-muted-foreground">Unlocks once the stamp duty payment (Query Payment tab) is confirmed.</p>
+                  <p className="text-xs text-muted-foreground">Unlocks once the stamp duty payment (above) is confirmed.</p>
                 ) : canCreate ? (
                   <button onClick={handleStart} disabled={starting || !startEligible} className={`${KEY_INK} h-8 px-3`}>
                     {starting ? "Starting…" : "Start registry"}

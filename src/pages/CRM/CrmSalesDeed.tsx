@@ -10,7 +10,6 @@ import {
   RefreshCw, ScrollText, Send, ShieldAlert, UserCircle2, X, XCircle,
 } from "lucide-react";
 import { CrmStatus } from "@/constants/crmStatuses";
-import { fmtIstIso } from "@/lib/istTime";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useAuth } from "@/contexts/AuthContext";
 import { translateError } from "@/lib/translateError";
@@ -286,7 +285,7 @@ const CrmSalesDeed: React.FC = () => {
       PossessionDate: detail?.PossessionDate ? String(detail.PossessionDate).slice(0, 10) : "",
     });
     setExecEditing(true);
-    document.getElementById("deed-legal")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("deed-legal")?.scrollIntoView({ block: "start" });
   };
   const saveFields = (fields: Record<string, any>) => send(`${API}/${detailId}`, "PUT", fields);
   const handleSaveDeedDetails = async (fields: Record<string, string>) => {
@@ -387,6 +386,7 @@ const CrmSalesDeed: React.FC = () => {
     const papers = deedDocumentProgress(documents);
     const pendingDocs = documents.filter((doc) => doc.IsMandatory && doc.Status !== "Verified");
     const bar = deedBar(d);
+    const payable = Math.max(0, Number(d.StampDuty || 0) + Number(d.RegistrationFee || 0) - Number(d.StampDutyCredit || 0));
     const focus = d.Status === CrmStatus.CANCELLED || d.Status === CrmStatus.REGISTERED ? null : SECTION_OF[deedStepStates(d).find((x) => x.state === "current")?.tab ?? "Overview"];
     const step = (key: string, node: React.ReactNode) => <div id={`deed-${key}`} className={cn("rounded-lg scroll-mt-4", focus === key && "ring-2 ring-primary/50")}>{node}</div>;
 
@@ -411,6 +411,9 @@ const CrmSalesDeed: React.FC = () => {
     else if (pendingDocs.length) next = `${pendingDocs.length} mandatory document${pendingDocs.length > 1 ? "s" : ""} still to verify: ${pendingDocs.map((doc) => doc.Label || doc.DocumentType).join(", ")}`;
     else { next = "Every check has passed: record the execution"; action = { label: "Record Execution", run: startExec }; }
     if (!canWork) action = null;
+    // When the next step is worked inside a section (stamp duty, registry, documents), the band takes you to it.
+    const SECTION_TITLE: Record<string, string> = { details: "Deed Details", legal: "Legal Work", documents: "Documents", stampDuty: "Stamp Duty", registry: "Registry" };
+    if (!action && focus && SECTION_TITLE[focus]) action = { label: `Go to ${SECTION_TITLE[focus]}`, run: () => document.getElementById(`deed-${focus}`)?.scrollIntoView({ block: "start" }) };
 
     const history = [
       ...((deedDetail?.approvalLog || []) as any[]).map((l) => ({ id: `a${l.Id}`, at: l.CreatedAt, title: LOG_ACTION_LABEL[l.Action] || l.Action, by: l.ActorName, type: l.ActorType, note: l.Remarks, bad: /Reject|Recheck/.test(l.Action) })),
@@ -443,7 +446,7 @@ const CrmSalesDeed: React.FC = () => {
             { label: "Stamp duty", value: d.StampDuty ? fmtShort(d.StampDuty) : "—", exact: d.StampDuty ? fmtRupees(d.StampDuty) : undefined, note: d.RegistrationFee ? `Fee ${fmtShort(d.RegistrationFee)}` : "Fee not set" },
             { label: "Register by", dot: d.Status === "Overdue" ? BAND_DOT.overdue : undefined, value: fmtDate(d.RegistrationDeadline), note: d.Status === "Overdue" ? "Overdue" : "RERA deadline", alert: d.Status === "Overdue" },
             { label: "Papers", dot: papers.required && papers.uploaded === papers.required ? BAND_DOT.collected : BAND_DOT.finance, value: `${papers.uploaded} of ${papers.required}`, note: "Mandatory uploaded" },
-            { label: "Legal executive", dot: d.LegalExecutiveId ? BAND_DOT.collected : BAND_DOT.finance, value: d.LegalExecutiveName || "Not assigned", note: "Prepares the paperwork" },
+            { label: "Payable to government", value: payable > 0 ? fmtShort(payable) : "—", exact: payable > 0 ? fmtRupees(payable) : undefined, note: "Less AFS credit" },
           ]}
           footer={<BandNext text={next} finished={d.Status === CrmStatus.REGISTERED || d.Status === CrmStatus.CANCELLED} action={action} />} />
 
@@ -492,7 +495,7 @@ const CrmSalesDeed: React.FC = () => {
                     )}
                     {a.n === 1 && s1 === "Pending" && !bookingCancelled && <div className="flex items-center gap-2 flex-wrap pt-0.5"><ApprovalActions status={s1} recordId={d.Id} endpoint={API} actionPathSuffix="" module="crm-sales-deed-senior" submitOnly={false} onSuccess={invalidate} /></div>}
                     {a.n === 1 && s1 === "Rejected" && canWork && <button onClick={handleResubmit} className={`${KEY_INK} h-8 px-3 mt-1`}>Resubmit for Approval</button>}
-                    {a.n === 2 && d.SentToCustomerAt && <p className="text-xs flex items-center gap-1 tabular-nums"><Send size={11} /> Sent {fmtIstIso(d.SentToCustomerAt)}</p>}
+                    {a.n === 2 && d.SentToCustomerAt && <p className="text-xs flex items-center gap-1 tabular-nums"><Send size={11} /> Sent {fmtDate(d.SentToCustomerAt)}</p>}
                     {a.n === 2 && d.SeniorApprovalStatus === "Approved" && canWork && d.CustomerApprovalStatus !== "Approved" && <button onClick={handleSendToCustomer} disabled={sendingToCustomer} className={`${KEY_INK} h-8 px-3 mt-0.5`}>{sendingToCustomer ? "Sending…" : d.SentToCustomerAt ? "Resend to Customer" : "Send to Customer Portal"}</button>}
                     {a.n === 3 && done && d.CustomerApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} /> Approved {fmtDate(d.CustomerApprovedAt)}</p>}
                     {a.n === 3 && s1 === "RecheckRequested" && d.CustomerRecheckRemarks && <p className="text-xs text-destructive rounded-md px-2 py-1.5 border border-destructive/40"><strong>Recheck reason:</strong> {d.CustomerRecheckRemarks}</p>}
@@ -548,7 +551,7 @@ const CrmSalesDeed: React.FC = () => {
         {step("documents", (() => {
           const canDocs = canWork && !progressLocked;
           return (
-            <GridRelated icon={FolderCheck} title="Documents" count={documents.length} action={<span className="text-xs text-muted-foreground tabular-nums">{papers.uploaded} of {papers.required} mandatory uploaded</span>}>
+            <GridRelated icon={FolderCheck} title="Documents" count={documents.length}>
               <div className="p-4">
                 <DocumentCentre documents={documents} hasFile={(doc) => !!doc.HasFile} fileUrl={(doc) => `${API}/documents/file/${doc.Id}`} onChanged={invalidateDetail}
                   requiredTitle="Required for senior approval" review={docReview} attach={docAttach} history={docHistory}
