@@ -12,14 +12,22 @@ describe("Sales Automation (SA) Lead Security & Access Guards", () => {
       };
     };
 
-    test("admin-tier roles (super_admin, sa, dba, admin, marketing_head) see all leads (1=1)", () => {
-      const adminRoles = ["super_admin", "sa", "dba", "admin", "marketing_head"];
-      for (const role of adminRoles) {
+    test("full-access roles (super_admin, sa, dba, admin) see all leads (1=1)", () => {
+      for (const role of ["super_admin", "sa", "dba", "admin"]) {
         const req = { user: { userId: 5, role } };
         const req0 = mockRequest();
         expect(applyLeadScope(req0, req, "l")).toBe("1=1");
         expect(isSaAdmin(req)).toBe(true);
       }
+    });
+
+    test("whoever the Marketing Head switch (Approval Setup) names sees all leads; the role name alone does not", () => {
+      // attachMarketingHead sets req.marketingHead from Approval Setup once per request.
+      const named = { user: { userId: 5, role: "marketing_head" }, marketingHead: true };
+      expect(applyLeadScope(mockRequest(), named, "l")).toBe("1=1");
+      expect(isSaAdmin(named)).toBe(true);
+      const notNamed = { user: { userId: 5, role: "marketing_head" }, marketingHead: false };
+      expect(isSaAdmin(notNamed)).toBe(false);
     });
 
     test("sales_team_lead sees leads assigned to them or their team members", () => {

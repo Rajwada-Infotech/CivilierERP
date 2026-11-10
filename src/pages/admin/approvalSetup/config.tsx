@@ -331,6 +331,12 @@ export const MODULE_OPTIONS = [
     desc: "Who besides the assigned salesperson may change a customer's saved bank and KYC details",
   },
   {
+    id: "marketing-head",
+    label: "Marketing Head",
+    icon: "📣",
+    desc: "Sees and manages every Sales Automation record (leads, tasks, commissions, reports, teams); changes a booking's unit, escalates overdue milestones, runs the SLA engine and sees all service tickets; told when a booking is ready and when a milestone is overdue",
+  },
+  {
     id: "crm-sales-deed-docs",
     label: "Upload sale deed documents",
     icon: "📎",
@@ -398,7 +404,7 @@ export const MODULE_GROUPS = [
     id: "sales",
     label: "Sales",
     icon: "🛍️",
-    modules: ["SaleOrder", "sa-lead-transfers"],
+    modules: ["SaleOrder", "sa-lead-transfers", "marketing-head"],
   },
   {
     id: "crm",

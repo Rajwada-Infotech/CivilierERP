@@ -1,6 +1,13 @@
 const { sql } = require("../db");
 
 const { hasFullAccess, isSuperAdmin } = require("../middleware/role");
+const { isApproverFor } = require("./approvalService");
+
+// The "Marketing Head" switch in Approval Setup (decided 2026-11-10): who, besides the full-access roles, sees and
+// manages every Sales Automation record (leads, tasks, commissions, reports, teams) and runs the CRM admin actions
+// (change a booking's unit, escalate overdue milestones, run the SLA engine, see all service tickets). Set on the
+// screen; migration 634 names the marketing_head role on it so the same people keep it.
+const MARKETING_HEAD_MODULE = "marketing-head";
 function actorId(req) {
   const id = req.user?.userId ?? req.user?.id;
   const numeric = Number(id);
@@ -11,10 +18,19 @@ function normalizeRole(role) {
   return String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
+// Worked out once per request (server.js, after sign-in), so every caller below stays a plain check.
+async function attachMarketingHead(req, _res, next) {
+  try {
+    req.marketingHead = !!req.user && !hasFullAccess(req.user.role) && (await isApproverFor(MARKETING_HEAD_MODULE, actorId(req), req.user.role));
+  } catch (e) {
+    console.error("[saAccess] Marketing Head switch check failed:", e.message);
+    req.marketingHead = false;
+  }
+  next();
+}
+
 function isSaAdmin(req) {
-  const role = normalizeRole(req.user?.role);
-  // marketing_head has admin-level access within Sales Automation
-  return hasFullAccess(role) || role === "marketing_head";
+  return hasFullAccess(req.user?.role) || req.marketingHead === true;
 }
 
 // Deliberately narrower than isSaAdmin above — used for identity/contact
@@ -58,4 +74,4 @@ function requireUserEmail(req, res) {
   return email;
 }
 
-module.exports = { actorId, isSaAdmin, isSuperAdminOnly, isSaTeamLead, isSalesPerson, applyLeadScope, requireUserEmail };
+module.exports = { MARKETING_HEAD_MODULE, attachMarketingHead, actorId, isSaAdmin, isSuperAdminOnly, isSaTeamLead, isSalesPerson, applyLeadScope, requireUserEmail };
