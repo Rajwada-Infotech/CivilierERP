@@ -1,4 +1,5 @@
 const express = require("express");
+const { isSaAdmin } = require("../services/saAccess");
 
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -92,7 +93,7 @@ function getRolePresentation(role) {
   }
 }
 
-function getPermissions(role) {
+function getPermissions(role, canViewCrm) {
   const isPrivileged = hasFullAccess(role);
 
   return {
@@ -102,7 +103,7 @@ function getPermissions(role) {
     canViewProcurement: isPrivileged,
     canViewTasks: true,
     canViewAdminTools: isPrivileged,
-    canViewCrm: isPrivileged || role === "marketing_head",
+    canViewCrm,
   };
 }
 
@@ -601,7 +602,7 @@ router.get("/", async (req, res) => {
   const role = req.user?.role || "user";
   const userId = Number(req.user?.userId || 0);
   const isPrivileged = hasFullAccess(role);
-  const isCrmVisible = isPrivileged || role === "marketing_head";
+  const isCrmVisible = isSaAdmin(req); // full access or the Marketing Head switch (Approval Setup)
   const cacheKey = `widgets:${role}:${userId || "session"}`;
 
   try {
@@ -1053,7 +1054,7 @@ router.get("/", async (req, res) => {
       ),
     };
 
-    const permissions = getPermissions(role);
+    const permissions = getPermissions(role, isCrmVisible);
     const alerts = buildAlerts({ role, isPrivileged, summary });
     const insights = buildInsights({ role, isPrivileged, summary, trends });
     const experience = getRolePresentation(role);

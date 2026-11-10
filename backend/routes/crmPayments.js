@@ -1354,16 +1354,10 @@ router.post("/escalate-overdue", requirePageRight("crm-payments", "edit"), async
         AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
     `);
 
-    const { normalizeRole } = require("../middleware/role");
-    const allActive = await pool.request().query(`
-      SELECT u.id, r.RName AS roleName
-      FROM dbo.Users u
-      LEFT JOIN dbo.Role r ON u.RoleId = r.RId
-      WHERE u.discontinue = 0
-    `);
-    const mktHeadIds = allActive.recordset
-      .filter((u) => normalizeRole(u.roleName) === "marketing_head")
-      .map((u) => u.id);
+    // The people the Marketing Head switch names in Approval Setup (not a role name).
+    const { usersNamedInStep } = require("../services/approvalService");
+    const { MARKETING_HEAD_MODULE } = require("../services/saAccess");
+    const mktHeadIds = [...(await usersNamedInStep(pool, MARKETING_HEAD_MODULE, 0))];
 
     let notified = 0;
     let skipped = 0;
