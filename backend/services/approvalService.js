@@ -32,13 +32,7 @@ const GL_POSTERS = {
  * Super Admin check: Super Admin has approval rights for every approval in parallel.
  * Matches super_admin, superadmin, sa.
  */
-function isSuperAdmin(role) {
-  const r = String(role || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-  return r === "super_admin" || r === "superadmin" || r === "sa";
-}
+const { isSuperAdmin } = require("../middleware/role");
 
 // Map module slug → { table, pkCol, statusCol }
 const MODULE_MAP = {

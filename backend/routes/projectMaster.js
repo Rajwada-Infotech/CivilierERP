@@ -805,7 +805,7 @@ router.delete("/:id", adminOnly, async (req, res) => {
 // The caller must re-type the exact project name as `confirmName` to guard
 // against a stray click on something this irreversible.
 router.delete("/:id/cascade", async (req, res) => {
-  if ((req.user?.role || "").toLowerCase() !== "super_admin") {
+  if (!allowRoles.isSuperAdmin(req.user?.role)) {
     return res.status(403).json({
       error: "Only Super Admin can delete a project and its transactions.",
     });

@@ -10,16 +10,15 @@
 const { getPool, sql } = require("../../db");
 const { hasAnyPageAction } = require("../../middleware/requirePageRight");
 
-const ADMIN_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
-const SUPER_ROLES = new Set(["super_admin", "sa"]);
+const role = require("../../middleware/role");
 
 const roleOf = (req) => String(req.user?.role || "").toLowerCase();
 const userOf = (req) => req.user?.userId ?? req.user?.id ?? null;
 
 /** Administrators: the only users who change the approval setup. */
-const isAdmin = (req) => ADMIN_ROLES.has(roleOf(req));
+const isAdmin = (req) => role.hasFullAccess(roleOf(req));
 /** The super admin is the one exception to maker-checker. */
-const isSuperAdmin = (req) => SUPER_ROLES.has(roleOf(req));
+const isSuperAdmin = (req) => role.isSuperAdmin(roleOf(req));
 
 /**
  * Can this user act at `stage`? `fallbackPage` is the page whose approve right counted before Approval
@@ -43,4 +42,4 @@ const ownWork = (req, enteredBy, what = "this record") =>
     ? `You entered ${what} — another user must verify or approve it`
     : null;
 
-module.exports = { canAct, ownWork, isAdmin, isSuperAdmin, userOf, ADMIN_ROLES };
+module.exports = { canAct, ownWork, isAdmin, isSuperAdmin, userOf };

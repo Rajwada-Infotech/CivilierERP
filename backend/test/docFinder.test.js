@@ -3,7 +3,6 @@ process.env.NODE_ENV = "test";
 jest.mock("../db", () => ({ getPool: jest.fn(), sql: require("mssql") }));
 
 jest.mock("../middleware/permissions", () => ({
-  SUPERUSER_ROLES: new Set(["super_admin", "sa", "dba", "admin"]),
   getEffectivePagePermissions: jest.fn(),
 }));
 

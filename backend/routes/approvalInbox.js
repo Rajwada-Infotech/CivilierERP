@@ -14,10 +14,7 @@ const {
   isApproverFor,
 } = require("../services/approvalService");
 
-function isSuperAdminRole(role) {
-  const r = String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return r === "super_admin" || r === "superadmin" || r === "sa";
-}
+const { isSuperAdmin: isSuperAdminRole, hasFullAccess } = require("../middleware/role");
 
 // ── Per-record visibility filter ────────────────────────────────────────────
 // Before this, GET / returned every Pending row in the system to anyone
@@ -112,7 +109,7 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   const r = await whoMayAct(item, viewerRole, viewerUserId, workflowCache);
   const role = (viewerRole || "").toLowerCase();
   if (isSuperAdminRole(role)) return { ...r, visible: true, canAct: true };
-  if (!r.visible && role === "admin") return { ...r, visible: true, canAct: false };
+  if (!r.visible && hasFullAccess(role) && !isSuperAdminRole(role)) return { ...r, visible: true, canAct: false };
   return r;
 }
 

@@ -8,7 +8,7 @@ const { getPool, sql } = require("../db");
 const { redisGet, redisSet } = require("../redis");
 
 const CACHE_TTL_SECONDS = 15;
-const PRIVILEGED_ROLES = new Set(["admin", "super_admin", "dba"]);
+const { hasFullAccess } = require("../middleware/role");
 
 const toNumber = (value) => Number(value || 0);
 const emptyResult = (row = {}) => Promise.resolve({ recordset: [row] });
@@ -93,7 +93,7 @@ function getRolePresentation(role) {
 }
 
 function getPermissions(role) {
-  const isPrivileged = PRIVILEGED_ROLES.has(role);
+  const isPrivileged = hasFullAccess(role);
 
   return {
     canViewUsers: isPrivileged,
@@ -600,7 +600,7 @@ router.get("/catalog", async (_req, res) => {
 router.get("/", async (req, res) => {
   const role = req.user?.role || "user";
   const userId = Number(req.user?.userId || 0);
-  const isPrivileged = PRIVILEGED_ROLES.has(role);
+  const isPrivileged = hasFullAccess(role);
   const isCrmVisible = isPrivileged || role === "marketing_head";
   const cacheKey = `widgets:${role}:${userId || "session"}`;
 

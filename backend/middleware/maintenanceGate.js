@@ -14,7 +14,7 @@ const OPEN_PATHS = [
   /^\/users\/login\/?$/,
 ];
 
-const isSuperAdmin = (role) => String(role || "").toLowerCase().replace(/[\s-]+/g, "_") === "super_admin";
+const { isSuperAdmin } = require("./role");
 
 /** The body every blocked call (and a blocked login) gets. The web app recognises `code`. */
 function maintenanceBody(state) {

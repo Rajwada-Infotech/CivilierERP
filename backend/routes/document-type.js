@@ -12,7 +12,7 @@ const { cache, localVersionCache } = require("../middleware/cache");
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
-const BYPASS_ROLES = ["admin", "super_admin", "dba", "sa"];
+const { hasFullAccess } = require("../middleware/role");
 
 // NOTE: authMiddleware is intentionally NOT included here.
 // It is already applied globally via app.use("/api", authMiddleware) in server.js.
@@ -20,8 +20,7 @@ const BYPASS_ROLES = ["admin", "super_admin", "dba", "sa"];
 // (two auth.redis_blacklist + auth.jwt_verify blocks per request on this router).
 const bypassOrCheck = (module, subModule, action = "CanView") => [
   (req, res, next) => {
-    const role = (req.user?.role || "").toLowerCase().replace(/\s+/g, "_");
-    if (BYPASS_ROLES.includes(role)) return next();
+    if (hasFullAccess(req.user?.role)) return next();
     return checkPermission(module, subModule, action)(req, res, next);
   },
 ];

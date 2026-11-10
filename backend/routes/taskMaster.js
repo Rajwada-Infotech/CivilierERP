@@ -141,12 +141,11 @@ router.get("/assignable-users", async (req, res) => {
 // the logged-in session (req.user), never a client-supplied filter. Admin
 // roles keep full visibility since they're the ones who assign tasks in the
 // first place and need to see the whole board to manage it.
-const FOLLOWUP_BOARD_PRIVILEGED_ROLES = new Set(["admin", "super_admin", "dba"]);
 
 router.get("/followup-board", cache("task-master-followup-board", 30), async (req, res) => {
   try {
     const pool = getPool();
-    const scopeToSelf = !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const scopeToSelf = !allowRoles.hasFullAccess(req.user?.role);
     const request = pool.request();
     if (scopeToSelf) request.input("UserId", sql.Int, req.user?.userId || null);
     const result = await request.query(`
@@ -224,7 +223,7 @@ router.get("/followup-board", cache("task-master-followup-board", 30), async (re
 router.get("/closed-board", cache("task-master-closed-board", 30), async (req, res) => {
   try {
     const pool = getPool();
-    const scopeToSelf = !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const scopeToSelf = !allowRoles.hasFullAccess(req.user?.role);
     const request = pool.request();
     if (scopeToSelf) request.input("UserId", sql.Int, req.user?.userId || null);
     const result = await request.query(`
@@ -286,7 +285,7 @@ router.get("/closed-board", cache("task-master-closed-board", 30), async (req, r
 router.get("/cancelled-board", cache("task-master-cancelled-board", 30), async (req, res) => {
   try {
     const pool = getPool();
-    const scopeToSelf = !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const scopeToSelf = !allowRoles.hasFullAccess(req.user?.role);
     const request = pool.request();
     if (scopeToSelf) request.input("UserId", sql.Int, req.user?.userId || null);
     const result = await request.query(`
@@ -386,7 +385,7 @@ router.get("/:id", async (req, res) => {
     // (and by extension its follow-ups/chat/files via the drawer) assigned
     // to someone else, even by guessing/typing the id directly.
     if (
-      !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role) &&
+      !allowRoles.hasFullAccess(req.user?.role) &&
       task.AssignedTo !== (req.user?.userId ?? null)
     ) {
       return res.status(403).json({ error: "Not authorized to view this task" });
@@ -1133,7 +1132,7 @@ router.delete("/attachment/:attachmentId", async (req, res) => {
     const attachment = existing.recordset[0];
 
     const isOwner = attachment.UploadedBy != null && attachment.UploadedBy === (req.user?.userId ?? null);
-    const isPrivileged = FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const isPrivileged = allowRoles.hasFullAccess(req.user?.role);
     if (!isOwner && !isPrivileged) {
       return res.status(403).json({ error: "Only the uploader or an admin can delete this attachment" });
     }

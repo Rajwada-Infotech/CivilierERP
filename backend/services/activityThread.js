@@ -8,6 +8,7 @@
 
 const { getPool, sql } = require("../db");
 
+const { isSuperAdmin } = require("../middleware/role");
 const TTL_MS = 30_000;
 const cache = new Map(); // rungId -> { ids:Set<number>, at:number }
 
@@ -43,7 +44,7 @@ async function getParticipantIds(rungId) {
 
 async function canUseThread(user, rungId) {
   if (!user) return false;
-  if (String(user.role || "").toLowerCase() === "super_admin") return true;
+  if (isSuperAdmin(user.role)) return true;
   const userId = Number(user.userId ?? user.id);
   if (!Number.isFinite(userId)) return false;
   return (await getParticipantIds(rungId)).has(userId);

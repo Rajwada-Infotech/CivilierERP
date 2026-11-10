@@ -1,4 +1,5 @@
 const express = require("express");
+const { isSuperAdmin: isSuperAdminRole } = require("../middleware/role");
 const router = express.Router();
 
 // ── "Auto Name" search ───────────────────────────────────────────────────────
@@ -1049,7 +1050,7 @@ router.post(
       const qcNamed = await pool.request().input("aid", sql.Int, assignmentId).query(
         "SELECT QcUserId FROM dbo.DependencyActivityQcAssignee WHERE AssignmentId = @aid",
       );
-      if (qcNamed.recordset.length && req.user?.role !== "super_admin") {
+      if (qcNamed.recordset.length && !isSuperAdminRole(req.user?.role)) {
         const viewerId = Number(req.user?.userId ?? req.user?.id);
         if (!qcNamed.recordset.some((r) => Number(r.QcUserId) === viewerId)) {
           return res.status(403).json({ error: "You're not named as a QC reviewer for this activity." });
@@ -1215,7 +1216,7 @@ router.get(
       const currentLevel = currentLevelIndex != null ? levels[currentLevelIndex] : null;
 
       const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
-      const isSuperAdmin = req.user?.role === "super_admin";
+      const isSuperAdmin = isSuperAdminRole(req.user?.role);
       const alreadyActed = currentLevel
         ? approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId))
         : false;
@@ -1256,7 +1257,7 @@ async function handleApproveLevel(req, res) {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
   const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
-  const isSuperAdmin = req.user?.role === "super_admin";
+  const isSuperAdmin = isSuperAdminRole(req.user?.role);
   if (!viewerUserId) return res.status(401).json({ error: "Not authenticated" });
 
   try {
@@ -1386,7 +1387,7 @@ async function handleRejectLevel(req, res) {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
   const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
-  const isSuperAdmin = req.user?.role === "super_admin";
+  const isSuperAdmin = isSuperAdminRole(req.user?.role);
   if (!viewerUserId) return res.status(401).json({ error: "Not authenticated" });
   const remarks = String(req.body?.remarks || req.body?.Remarks || req.body?.note || "").trim().slice(0, 1000);
   if (remarks.length < 3) {
@@ -1486,7 +1487,7 @@ router.get(
   requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
   async (req, res) => {
     const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
-    const isSuperAdmin = req.user?.role === "super_admin";
+    const isSuperAdmin = isSuperAdminRole(req.user?.role);
     if (!viewerUserId) return res.json({ count: 0 });
     try {
       const pool = await getPool();
@@ -1951,7 +1952,7 @@ router.delete(
 // so it is reported again from zero and goes through QC/Approval afresh,
 // rather than resuming with the old Work Done (and any old QC pass) still on it.
 router.post("/:rungId/restore", authMiddleware, async (req, res) => {
-  if (req.user?.role !== "super_admin") {
+  if (!isSuperAdminRole(req.user?.role)) {
     return res.status(403).json({ error: "Only a super admin can restore a Cancelled activity." });
   }
   const rungId = parseInt(req.params.rungId, 10);
