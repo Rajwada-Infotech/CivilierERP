@@ -127,7 +127,8 @@ const CrmSalesDeed: React.FC = () => {
   const clearFilters = () => { s.reset(); setDeedDatesRaw(GRID_ANY_DATE); setAlertKeyRaw(""); };
   const [exporting, setExporting] = useState(false);
 
-  const [dialog, setDialog] = useState<"new" | "cancel" | "proxyApprove" | "proxyRecheck" | null>(null);
+  const [dialog, setDialog] = useState<"new" | "cancel" | "proxyApprove" | "proxyRecheck" | "rework" | null>(null);
+  const [reworkReason, setReworkReason] = useState("");
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [stepSaving, setStepSaving] = useState(false);
@@ -183,8 +184,15 @@ const CrmSalesDeed: React.FC = () => {
     queryFn: () => fetchBookingContext(String(detail?.BookingId ?? "")),
     enabled: detail?.BookingId != null,
   });
-  const { data: qpDetail } = useDeedQueryPayment(detail?.BookingId);
-  const { registry, history: registryHistory } = useDeedRegistry(detail?.BookingId);
+  const deedCancelled = detail?.Status === CrmStatus.CANCELLED;
+  // Stamp duty and registry belong to the booking: a cancelled deed shows them only as the current deed's.
+  const { registry, history: bookingRegistryHistory } = useDeedRegistry(deedCancelled ? null : detail?.BookingId);
+  const registryHistory = deedCancelled ? [] : bookingRegistryHistory;
+  const { data: currentDeed } = useQuery({
+    queryKey: ["crm-sales-deed-current", detail?.BookingId],
+    queryFn: () => getJson(`${API}/booking/${detail?.BookingId}/deed`),
+    enabled: deedCancelled && detail?.BookingId != null,
+  });
 
   const role = roleKey(currentUser?.role);
   const legalOrInbox = CRM_REGISTRY_APPROVER_ROLES.includes(role) || canDoAction("approval-inbox" as any, "edit");
@@ -200,9 +208,11 @@ const CrmSalesDeed: React.FC = () => {
   const canCreate = !!form.BookingId && agreementRegistered && loanCleared && handoverCleared && !contextLoading;
 
   const bookingCancelled = detail?.BookingStatus === "Cancelled";
+  // A cancelled deed is closed (the server refuses every change): the booking's work goes on in a new deed.
+  const closed = bookingCancelled || deedCancelled;
   const progressLocked = detail?.Status === CrmStatus.REGISTERED || detail?.Status === CrmStatus.CANCELLED;
   // Every change to the deed needs the edit right (the server refuses otherwise).
-  const canWork = rights.canEdit && !bookingCancelled;
+  const canWork = rights.canEdit && !closed;
   // Mirrors the server's requireAssignedLegalOrApprover: the deed's documents are worked by its assigned Legal
   // Executive (or Legal / admin), not anyone with page rights.
   const canActAsLegal = !detail?.LegalExecutiveId ? false : CRM_REGISTRY_APPROVER_ROLES.includes(role) || String(detail.LegalExecutiveId) === String(currentUser?.id ?? "");
@@ -355,6 +365,13 @@ const CrmSalesDeed: React.FC = () => {
     catch (e: any) { toast.error(translateError(e.message)); }
     finally { setRequestingDoc(false); }
   };
+  const openRework = () => { setReworkReason(detail?.CustomerApprovalStatus === "RecheckRequested" ? detail?.CustomerRecheckRemarks || "" : ""); setDialog("rework"); };
+  const handleRework = async () => {
+    setSaving(true);
+    try { await send(`${API}/${detailId}/rework`, "PUT", { Remarks: reworkReason.trim() }); toast.success("Sent back to legal to correct"); setDialog(null); invalidate(); }
+    catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
+  };
   const handleResubmit = async () => {
     try { await send(`${API}/${detailId}/submit`, "PUT"); toast.success("Submitted for senior approval"); invalidate(); }
     catch (e: any) { toast.error(translateError(e.message)); }
@@ -399,14 +416,18 @@ const CrmSalesDeed: React.FC = () => {
     else if (!d.LegalExecutiveId) next = "Assign the legal executive who prepares the paperwork";
     else if (d.SeniorApprovalStatus == null) {
       const ready = papers.required > 0 && pendingDocs.length === 0;
-      next = ready ? "Papers verified: submit for senior approval" : papers.required ? `Verify the mandatory papers (${papers.required - pendingDocs.length} of ${papers.required})` : "Request the deed draft";
+      // Sent back (director's rejection, or the customer's recheck): say why, from the latest history entry.
+      const last = ((deedDetail?.approvalLog || []) as any[]).reduce((m: any, l: any) => (!m || new Date(l.CreatedAt) > new Date(m.CreatedAt) ? l : m), null);
+      const back = last && ["DirectorReject", "SentBackToLegal"].includes(last.Action) ? `${LOG_ACTION_LABEL[last.Action]}${last.Remarks ? `: ${last.Remarks}` : ""}. ` : "";
+      next = back + (ready ? "Papers verified: submit for senior approval" : papers.required ? `Rework and verify the mandatory papers (${papers.required - pendingDocs.length} of ${papers.required})` : "Request the deed draft");
       if (ready && canActAsLegal) action = { label: "Submit for Senior Approval", run: handleResubmit };
     } else if (d.SeniorApprovalStatus === "Rejected") { next = `Senior approval rejected${d.SeniorApprovalRemarks ? `: ${d.SeniorApprovalRemarks}` : ""}`; action = { label: "Resubmit for Approval", run: handleResubmit }; }
     else if (d.SeniorApprovalStatus !== "Approved") next = "Waiting for senior approval";
     else if (!d.SentToCustomerAt) { next = "Senior-approved: share with the customer"; action = { label: "Send to Customer Portal", run: handleSendToCustomer }; }
-    else if (d.CustomerApprovalStatus === "RecheckRequested") { next = `The customer asked for a recheck${d.CustomerRecheckRemarks ? `: "${d.CustomerRecheckRemarks}"` : ""}`; action = { label: "Resend to Customer", run: handleSendToCustomer }; }
+    else if (d.CustomerApprovalStatus === "RecheckRequested") { next = `The customer asked for a recheck${d.CustomerRecheckRemarks ? `: "${d.CustomerRecheckRemarks}"` : ""}. Resend it as it is, or send it back to legal to correct it (Legal Work and Approvals).`; action = { label: "Resend to Customer", run: handleSendToCustomer }; }
     else if (d.CustomerApprovalStatus !== "Approved") next = `Sent to the customer${d.SentToCustomerAt ? ` on ${fmtDate(d.SentToCustomerAt)}` : ""}: waiting for their review`;
-    else if (d.DirectorApprovalStatus && d.DirectorApprovalStatus !== "NotRequired" && d.DirectorApprovalStatus !== "Approved") next = "The customer approved: waiting for the director's sign-off";
+    else if (d.DirectorApprovalStatus !== "Approved") next = "The customer approved: waiting for the director's sign-off";
+    else if (detailContext?.queryPaymentStatus !== "Confirmed" && payable <= 0 && !Number(d.StampDuty) && !Number(d.RegistrationFee)) { next = "The deed has no stamp duty or registration fee, so the payment can't start: send it back to legal to enter them"; action = { label: "Send Back to Legal", run: openRework }; }
     else if (detailContext?.queryPaymentStatus !== "Confirmed") next = "Confirm the customer's stamp duty payment";
     else if (pendingDocs.length) next = `${pendingDocs.length} mandatory document${pendingDocs.length > 1 ? "s" : ""} still to verify: ${pendingDocs.map((doc) => doc.Label || doc.DocumentType).join(", ")}`;
     else { next = "Every check has passed: record the execution"; action = { label: "Record Execution", run: startExec }; }
@@ -416,18 +437,24 @@ const CrmSalesDeed: React.FC = () => {
     if (!action && focus && SECTION_TITLE[focus]) action = { label: `Go to ${SECTION_TITLE[focus]}`, run: () => document.getElementById(`deed-${focus}`)?.scrollIntoView({ block: "start" }) };
 
     const history = [
-      ...((deedDetail?.approvalLog || []) as any[]).map((l) => ({ id: `a${l.Id}`, at: l.CreatedAt, title: LOG_ACTION_LABEL[l.Action] || l.Action, by: l.ActorName, type: l.ActorType, note: l.Remarks, bad: /Reject|Recheck/.test(l.Action) })),
+      ...((deedDetail?.approvalLog || []) as any[]).map((l) => ({ id: `a${l.Id}`, at: l.CreatedAt, title: LOG_ACTION_LABEL[l.Action] || l.Action, by: l.ActorName, type: l.ActorType, note: l.Remarks, bad: /Reject|Recheck|Cancel|SentBack/.test(l.Action) })),
       ...(registryHistory as any[]).map((l) => ({ id: `r${l.Id}`, at: l.CreatedAt, title: `Registry: ${l.Action}`, by: l.ActorName, type: l.ActorType, note: l.Remarks, bad: false })),
       ...(d.CreatedAt ? [{ id: "made", at: d.CreatedAt, title: "Deed made", by: null, type: null, note: null, bad: false }] : []),
     ].sort((p, q) => new Date(q.at).getTime() - new Date(p.at).getTime());
+    // The column's starting value ("NotRequired") means the director hasn't been asked yet.
+    const directorStatus = d.DirectorApprovalStatus === "NotRequired" ? null : d.DirectorApprovalStatus;
     const approvals = [
       { n: 1, title: "Senior review", text: "An admin or super-admin approves this deed before it's shared with the customer.", status: d.SeniorApprovalStatus },
       { n: 2, title: "Shared with customer", text: "The customer can view this deed in their portal and approve it or request a recheck.", status: d.SentToCustomerAt ? "Sent" : null },
       { n: 3, title: "Customer review", text: "The customer's response from the portal: approve, or request changes.", status: d.CustomerApprovalStatus },
-      { n: 4, title: "Director review", text: "Final internal sign-off by the director before execution.", status: d.DirectorApprovalStatus },
+      { n: 4, title: "Director review", text: "Final internal sign-off by the director before execution.", status: directorStatus },
     ];
     const executed = !!d.ExecutedBy;
-    const readyToExecute = d.SeniorApprovalStatus === "Approved" && d.CustomerApprovalStatus === "Approved" && d.DirectorApprovalStatus === "Approved";
+    // Send back to legal: after senior approval, until execution, while the stamp duty payment isn't confirmed.
+    const canSendBack = canWork && d.SeniorApprovalStatus === "Approved" && !executed && !d.RegistrationNo && detailContext?.queryPaymentStatus !== "Confirmed";
+    // The server's rule: every approval, and the stamp duty payment confirmed (the deed is signed on paid stamp paper).
+    const stampPaid = detailContext?.queryPaymentStatus === "Confirmed";
+    const readyToExecute = d.SeniorApprovalStatus === "Approved" && d.CustomerApprovalStatus === "Approved" && d.DirectorApprovalStatus === "Approved" && stampPaid;
 
     return (
       <div className="space-y-4">
@@ -478,12 +505,12 @@ const CrmSalesDeed: React.FC = () => {
               const done = a.n === 2 ? !!d.SentToCustomerAt : s1 === "Approved";
               const stopped = s1 === "Rejected" || s1 === "RecheckRequested";
               const active = a.n === 1 ? s1 === "Pending" : a.n === 2 ? d.SeniorApprovalStatus === "Approved" : a.n === 3 ? !!d.SentToCustomerAt : d.CustomerApprovalStatus === "Approved";
-              const label = a.n === 1 && s1 == null ? "Not submitted" : a.n === 2 ? (s1 ? "Sent" : "Not sent") : s1 === "RecheckRequested" ? "Recheck requested" : s1 || "Pending";
+              const label = a.n === 1 && s1 == null ? "Not submitted" : a.n === 4 && s1 == null ? "Not requested" : a.n === 2 ? (s1 ? "Sent" : "Not sent") : s1 === "RecheckRequested" ? "Recheck requested" : s1 || "Pending";
               return (
                 <div key={a.n} className="px-4 py-4 flex items-start gap-3" style={{ borderBottom: RULE_SOFT }}>
                   <StepBox n={a.n} done={done} active={active} stopped={stopped} />
                   <div className="flex-1 min-w-0 space-y-1.5">
-                    <div className="flex items-center justify-between gap-2 flex-wrap"><span className="text-[0.8125rem] font-semibold">{a.title}</span><GridToneMark text={label} tone={stopped ? "stopped" : done ? "done" : (a.n === 1 && s1 == null) ? "waiting" : deedTone(label)} /></div>
+                    <div className="flex items-center justify-between gap-2 flex-wrap"><span className="text-[0.8125rem] font-semibold">{a.title}</span><GridToneMark text={label} tone={stopped ? "stopped" : done ? "done" : ((a.n === 1 || a.n === 4) && s1 == null) ? "waiting" : deedTone(label)} /></div>
                     <p className="text-xs text-muted-foreground">{a.text}</p>
                     {a.n === 1 && done && d.SeniorApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} /> Approved {fmtDate(d.SeniorApprovedAt)}{d.SeniorApprovalRemarks && <span className="text-muted-foreground ml-1">· {d.SeniorApprovalRemarks}</span>}</p>}
                     {a.n === 1 && s1 === "Rejected" && d.SeniorApprovalRemarks && <p className="text-xs text-destructive rounded-md px-2 py-1.5 border border-destructive/40"><strong>Rejection reason:</strong> {d.SeniorApprovalRemarks}</p>}
@@ -493,12 +520,18 @@ const CrmSalesDeed: React.FC = () => {
                         {(pendingDocs.length > 0 || !papers.required) && <p className="text-xs text-muted-foreground mt-1 tabular-nums">{papers.required === 0 ? "Request a mandatory document in Documents first." : `${papers.required - pendingDocs.length}/${papers.required} mandatory documents verified.`}</p>}
                       </div>
                     )}
-                    {a.n === 1 && s1 === "Pending" && !bookingCancelled && <div className="flex items-center gap-2 flex-wrap pt-0.5"><ApprovalActions status={s1} recordId={d.Id} endpoint={API} actionPathSuffix="" module="crm-sales-deed-senior" submitOnly={false} onSuccess={invalidate} /></div>}
+                    {a.n === 1 && s1 === "Pending" && !closed && <div className="flex items-center gap-2 flex-wrap pt-0.5"><ApprovalActions status={s1} recordId={d.Id} endpoint={API} actionPathSuffix="" module="crm-sales-deed-senior" submitOnly={false} onSuccess={invalidate} /></div>}
                     {a.n === 1 && s1 === "Rejected" && canWork && <button onClick={handleResubmit} className={`${KEY_INK} h-8 px-3 mt-1`}>Resubmit for Approval</button>}
                     {a.n === 2 && d.SentToCustomerAt && <p className="text-xs flex items-center gap-1 tabular-nums"><Send size={11} /> Sent {fmtDate(d.SentToCustomerAt)}</p>}
                     {a.n === 2 && d.SeniorApprovalStatus === "Approved" && canWork && d.CustomerApprovalStatus !== "Approved" && <button onClick={handleSendToCustomer} disabled={sendingToCustomer} className={`${KEY_INK} h-8 px-3 mt-0.5`}>{sendingToCustomer ? "Sending…" : d.SentToCustomerAt ? "Resend to Customer" : "Send to Customer Portal"}</button>}
                     {a.n === 3 && done && d.CustomerApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} /> Approved {fmtDate(d.CustomerApprovedAt)}</p>}
                     {a.n === 3 && s1 === "RecheckRequested" && d.CustomerRecheckRemarks && <p className="text-xs text-destructive rounded-md px-2 py-1.5 border border-destructive/40"><strong>Recheck reason:</strong> {d.CustomerRecheckRemarks}</p>}
+                    {a.n === 3 && s1 === "RecheckRequested" && canWork && (
+                      <div className="pt-0.5">
+                        <button onClick={openRework} className={`${KEY_LINE} h-8 px-3`}>Send Back to Legal</button>
+                        <p className="text-xs text-muted-foreground mt-1">When the deed itself must change: new version, papers reworked, then senior, customer and director again.</p>
+                      </div>
+                    )}
                     {a.n === 3 && d.SentToCustomerAt && !done && canWork && (
                       <div className="flex gap-2 flex-wrap mt-2">
                         <button onClick={() => setDialog("proxyApprove")} className={`${KEY_LINE} h-8 px-3`}><UserCircle2 size={11} /> Record Approval (offline)</button>
@@ -507,16 +540,22 @@ const CrmSalesDeed: React.FC = () => {
                     )}
                     {a.n === 4 && done && d.DirectorApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} /> Approved {fmtDate(d.DirectorApprovedAt)}</p>}
                     {a.n === 4 && s1 === "Rejected" && d.DirectorApprovalRemarks && <p className="text-xs text-destructive rounded-md px-2 py-1.5 border border-destructive/40"><strong>Rejection reason:</strong> {d.DirectorApprovalRemarks}</p>}
-                    {a.n === 4 && !bookingCancelled && s1 === "Pending" && <div className="flex items-center gap-2 flex-wrap pt-0.5"><ApprovalActions status={s1} recordId={d.Id} endpoint={API} actionPathSuffix="director" module="crm-sales-deed-director" onSuccess={invalidate} /></div>}
+                    {a.n === 4 && !closed && s1 === "Pending" && <div className="flex items-center gap-2 flex-wrap pt-0.5"><ApprovalActions status={s1} recordId={d.Id} endpoint={API} actionPathSuffix="director" module="crm-sales-deed-director" onSuccess={invalidate} /></div>}
                   </div>
                 </div>
               );
             })}
+            {canSendBack && d.CustomerApprovalStatus !== "RecheckRequested" && (
+              <div className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap" style={{ borderBottom: RULE_SOFT }}>
+                <p className="text-xs text-muted-foreground">Found a mistake after approval (figures, names, the draft)? Send it back to legal: a new version, then senior, customer and director again.</p>
+                <button onClick={openRework} className={`${KEY_LINE} h-8 px-3 shrink-0`}>Send Back to Legal</button>
+              </div>
+            )}
             {/* Execution: the end of the senior → customer → director chain (and, on the server, every mandatory document verified). */}
             <div className="px-4 py-4 space-y-2">
               <div className="flex items-center justify-between gap-2"><span className="text-[0.8125rem] font-semibold">Deed execution</span><GridToneMark text={executed ? "Executed" : "Not executed"} tone={executed ? "done" : "waiting"} /></div>
               {!progressLocked && !execEditing && (
-                !executed && !readyToExecute ? <p className="text-xs text-muted-foreground">Needs senior, customer and director approval first. Now senior: {d.SeniorApprovalStatus || "not requested"}, customer: {d.CustomerApprovalStatus || "not sent"}, director: {d.DirectorApprovalStatus || "not requested"}.</p>
+                !executed && !readyToExecute ? <p className="text-xs text-muted-foreground">Needs senior, customer and director approval and the stamp duty payment confirmed first. Now senior: {d.SeniorApprovalStatus || "not requested"}, customer: {d.CustomerApprovalStatus || "not sent"}, director: {directorStatus || "not requested"}, stamp duty: {stampPaid ? "confirmed" : (detailContext?.queryPaymentStatus || "not started")}.</p>
                 : !executed ? (canWork ? <button onClick={startExec} className={`${KEY_INK} h-8 px-3`}>Record Execution</button> : <p className="text-xs text-muted-foreground">Not executed yet.</p>)
                 : <div className="flex items-center gap-3"><p className="text-xs text-muted-foreground">Executed by <span className="font-medium text-foreground">{d.ExecutedBy}</span></p>{canWork && <button onClick={startExec} className={`${KEY_LINE} h-7 px-2`}><Pencil size={10} /> Edit</button>}</div>
               )}
@@ -569,10 +608,17 @@ const CrmSalesDeed: React.FC = () => {
           );
         })())}
 
-        {step("stampDuty", <QueryPaymentTab key={d.Id} detail={d} canCreate={qpCanCreate && !bookingCancelled} canEdit={qpCanEdit && !bookingCancelled} canConfirm={qpCanEdit && !bookingCancelled && legalOrInbox} onChanged={invalidate} />)}
+        {deedCancelled ? (
+          <div className={cn(GRID_CARD, "px-4 py-3 flex items-center justify-between gap-3 flex-wrap text-sm")}>
+            <span className="text-muted-foreground">Stamp duty and registry belong to the booking, not to this cancelled deed{currentDeed?.Id && currentDeed.Id !== d.Id ? "; they are worked on the booking's current deed." : "."}</span>
+            {currentDeed?.Id && currentDeed.Id !== d.Id && <button type="button" onClick={() => selectDetail(currentDeed.Id)} className={GRID_BTN}>Open Current Deed <ArrowRight size={13} /></button>}
+          </div>
+        ) : <>
+        {step("stampDuty", <QueryPaymentTab key={d.Id} detail={d} canCreate={qpCanCreate && !closed} canEdit={qpCanEdit && !closed} canConfirm={qpCanEdit && !closed && legalOrInbox} onChanged={invalidate} />)}
 
-        {step("registry", <RegistryTab key={d.Id} detail={d} qpConfirmed={detailContext?.queryPaymentStatus === "Confirmed"} canCreate={regCanCreate && !bookingCancelled} canEdit={regCanEdit && !bookingCancelled}
-          canCompleteOrCancel={regCanEdit && !bookingCancelled && legalOrInbox} canEditDeed={canWork} onSaveIndex2={handleSaveIndex2} savingIndex2={stepSaving} onChanged={invalidate} />)}
+        {step("registry", <RegistryTab key={d.Id} detail={d} qpConfirmed={detailContext?.queryPaymentStatus === "Confirmed"} canCreate={regCanCreate && !closed} canEdit={regCanEdit && !closed}
+          canCompleteOrCancel={regCanEdit && !closed && legalOrInbox} canEditDeed={canWork} onSaveIndex2={handleSaveIndex2} savingIndex2={stepSaving} onChanged={invalidate} />)}
+        </>}
 
         {step("history", (
           <GridRelated icon={History} title="History" count={history.length}>
@@ -701,6 +747,15 @@ const CrmSalesDeed: React.FC = () => {
         <GridDialog onClose={() => setDialog(null)} icon={XCircle} width="max-w-xl" title="Cancel Sale Deed" description={`${detail.DeedNo} · ${personName(detail.ApplicantName)}`}
           footer={<><button onClick={() => setDialog(null)} className={GRID_BTN}>Keep It</button><button onClick={handleCancelDeed} disabled={saving} className={cn(GRID_SHEET_KEYS.KEY_RED, "h-9 px-3")}>{saving ? "Cancelling…" : "Cancel Deed"}</button></>}>
           <p className="text-sm">Cancel this sale deed? A new one can then be made for the booking.</p>
+        </GridDialog>
+      )}
+      {dialog === "rework" && detail && (
+        <GridDialog onClose={() => setDialog(null)} icon={ArrowLeft} width="max-w-xl" title="Send Back to Legal" description={`${detail.DeedNo} · ${personName(detail.ApplicantName)}`}
+          footer={<><button onClick={() => setDialog(null)} className={GRID_BTN}>Keep It</button><button onClick={handleRework} disabled={saving || !reworkReason.trim()} className={cn(GRID_SHEET_KEYS.KEY_INK, "h-9 px-3")}>{saving ? "Sending…" : "Send Back"}</button></>}>
+          <div className="space-y-3 text-sm">
+            <p>The deed goes back to the legal executive to correct: a new version (the current figures are kept as a revision), the mandatory papers reworked, then senior, customer and director approval again. A stamp duty payment not yet confirmed starts again.</p>
+            <GridFormField label="What must be corrected" required><textarea className={cn(GRID_INPUT, "min-h-[5rem]")} value={reworkReason} onChange={(e) => setReworkReason(e.target.value)} placeholder="e.g. Stamp duty and registration fee missing" /></GridFormField>
+          </div>
         </GridDialog>
       )}
       {dialog === "proxyApprove" && <ProxyActionDialog title="Record Customer Approval" description="The customer reviewed and approved the sale deed without using the portal." confirmLabel="Record Approval" saving={proxySaving} onClose={() => setDialog(null)} onConfirm={(m, r) => handleProxy("proxy-customer-approve", m, r)} />}

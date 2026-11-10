@@ -37,7 +37,12 @@ async function openHarness({ mounts, count }) {
     const name = `e2e${++savepoints}`;
     return { begin: () => request().query(`SAVE TRANSACTION ${name}`), commit: async () => {}, rollback: () => request().query(`ROLLBACK TRANSACTION ${name}`), request };
   };
-  db.getPool = () => ({ request, transaction, connected: true });
+  const fakePool = { request, transaction, connected: true };
+  db.getPool = () => fakePool;
+  // Code that opens its own transaction on the pool (new sql.Transaction(pool), as the approval engine does) gets a
+  // savepoint too.
+  const RealTransaction = db.sql.Transaction;
+  db.sql.Transaction = function (pool) { return pool === fakePool ? transaction() : new RealTransaction(pool); };
 
   let actor = { userId: 1, id: 1, role: "super_admin", email: "e2e" };
   let portal = {};

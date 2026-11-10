@@ -40,12 +40,16 @@ export function docNextStep(doc: any): string {
 export const LOG_ACTION_LABEL: Record<string, string> = {
   SeniorApprove: "Senior approved",
   SeniorReject: "Senior rejected",
-  Submitted: "Resubmitted",
+  Submitted: "Submitted for senior approval",
+  LegalAssigned: "Legal executive assigned",
   SendToCustomer: "Sent to customer",
   CustomerApprove: "Customer approved",
   CustomerRecheck: "Recheck requested",
   DirectorApprove: "Director approved",
-  DirectorReject: "Director rejected",
+  DirectorReject: "Director rejected: back to legal",
+  SentBackToLegal: "Sent back to legal after the customer's recheck",
+  Executed: "Executed",
+  Cancelled: "Cancelled",
 };
 
 export function fmtDate(d?: string | null) {
