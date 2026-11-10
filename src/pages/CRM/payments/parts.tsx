@@ -139,8 +139,9 @@ export const asName = (s: string | null) => String(s || "").toLowerCase();
 export const personName = (s?: string | null) => asName(s ?? null).replace(/(^|[\s.&-])([a-z])/g, (_, a, b) => a + b.toUpperCase());
 
 export type StepState = "done" | "active" | "stopped" | "off";
-/** A record's steps as one labelled bar: green when done, amber in hand, red when stopped. */
-export function StepBar({ steps, onDark }: { steps: { label: string; state: StepState }[]; onDark?: boolean }) {
+/** A record's steps as one bar: green when done, amber in hand, red when stopped. Labelled under each step, or, for
+ *  many steps, one caption naming where it stands. */
+export function StepBar({ steps, onDark, caption }: { steps: { label: string; state: StepState }[]; onDark?: boolean; caption?: React.ReactNode }) {
   const fill: Record<StepState, string> = {
     done: onDark ? BAND_DOT.collected : "bg-emerald-500", active: onDark ? BAND_DOT.finance : "bg-amber-400", stopped: "bg-rose-500",
     off: onDark ? "bg-white/15" : "bg-slate-200 dark:bg-slate-700",
@@ -150,13 +151,16 @@ export function StepBar({ steps, onDark }: { steps: { label: string; state: Step
     stopped: onDark ? "text-rose-300 font-semibold" : "text-destructive font-semibold", off: onDark ? "text-slate-400" : "text-muted-foreground",
   };
   return (
-    <span className="grid gap-1 w-full" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
-      {steps.map((s) => (
-        <span key={s.label} className="min-w-0" title={`${s.label}: ${s.state === "off" ? "not started" : s.state}`}>
-          <span className={cn("block rounded-full", onDark ? "h-2.5" : "h-1.5", fill[s.state])} />
-          <span className={cn("mt-1 block text-[0.6875rem] truncate", ink[s.state])}>{s.label}</span>
-        </span>
-      ))}
+    <span className="block w-full">
+      <span className="grid gap-1 w-full" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
+        {steps.map((s) => (
+          <span key={s.label} className="min-w-0" title={`${s.label}: ${s.state === "off" ? "not started" : s.state}`}>
+            <span className={cn("block rounded-full", onDark ? "h-2.5" : "h-1.5", fill[s.state])} />
+            {caption === undefined && <span className={cn("mt-1 block text-[0.6875rem] truncate", ink[s.state])}>{s.label}</span>}
+          </span>
+        ))}
+      </span>
+      {caption !== undefined && <span className={cn("mt-1.5 block text-[0.6875rem] truncate", onDark ? "text-slate-200" : "text-muted-foreground")}>{caption}</span>}
     </span>
   );
 }
