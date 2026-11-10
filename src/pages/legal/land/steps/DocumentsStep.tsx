@@ -62,10 +62,7 @@ const Versions: React.FC<{ doc: LandDocument }> = ({ doc }) => {
         <div key={v.VersionId} className="flex flex-wrap items-center gap-2 text-xs">
           <span className="w-8 font-mono text-muted-foreground">v{v.VersionNo}</span>
           <LegalFileLink id={v.FileId} name={v.FileName} />
-          <Chip s={v.ReviewStatus} />
           <span className="text-muted-foreground">uploaded {fmt(v.UploadedAt)}{v.UploadedByName ? ` by ${v.UploadedByName}` : ""}</span>
-          {v.ReviewedAt && <span className="text-muted-foreground">· reviewed {fmt(v.ReviewedAt)}{v.ReviewedByName ? ` by ${v.ReviewedByName}` : ""}</span>}
-          {v.ReviewRemarks && <span className="text-foreground">· {v.ReviewRemarks}</span>}
           {v.UploadRemarks && <span className="text-muted-foreground">· {v.UploadRemarks}</span>}
         </div>
       ))}
@@ -238,7 +235,7 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
             <table className="w-full text-sm">
               <thead><tr className="text-left text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
                 <th className="pb-2 pr-2 font-medium" /><th className="pb-2 pr-3 font-medium">Document</th><th className="pb-2 pr-3 font-medium">Type / section</th>
-                <th className="pb-2 pr-3 font-medium">Current version</th><th className="pb-2 pr-3 font-medium">Uploaded</th><th className="pb-2 pr-3 font-medium">Review</th>
+                <th className="pb-2 pr-3 font-medium">Current version</th><th className="pb-2 pr-3 font-medium">Uploaded</th>
                 <th className="pb-2 text-right font-medium">Action</th>
               </tr></thead>
               <tbody>
@@ -257,12 +254,8 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
                       <td className="py-2 pr-3">{d.DocTypeName}<div className="text-xs text-muted-foreground">{d.RelatedSection}{d.RelatedOwner ? ` · ${d.RelatedOwner}` : ""}{d.RelatedLegalRecord ? ` · ${d.RelatedLegalRecord}` : ""}{d.RelatedMortgage ? ` · ${d.RelatedMortgage}` : ""}</div></td>
                       <td className="py-2 pr-3"><div className="flex items-center gap-1.5"><span className="font-mono text-xs text-muted-foreground">v{d.CurrentVersionNo}</span><LegalFileLink id={d.FileId} name={d.FileName} /></div></td>
                       <td className="py-2 pr-3 whitespace-nowrap text-xs text-muted-foreground">{fmt(d.UploadedAt)}<div>{d.UploadedByName ?? ""}</div></td>
-                      <td className="py-2 pr-3"><Chip s={d.ReviewStatus} />{d.ReviewRemarks && <div className="mt-1 max-w-[220px] text-xs text-muted-foreground">{d.ReviewRemarks}</div>}</td>
                       <td className="py-2 text-right">
                         <div className="flex flex-wrap justify-end gap-1.5">
-                          {rights.canApprove && d.ReviewStatus !== "Verified" && <button className={btn} disabled={busy} onClick={() => review(d, "Verified")}>Verify</button>}
-                          {rights.canApprove && d.ReviewStatus !== "Rejected" && <button className={btn} disabled={busy} onClick={() => review(d, "Rejected")}>Reject</button>}
-                          {rights.canApprove && d.ReviewStatus !== "Reattachment Required" && d.ReviewStatus !== "Verified" && <button className={btn} disabled={busy} onClick={() => review(d, "Reattachment Required")}>Ask re-attach</button>}
                           {rights.canEdit && <button className={btn} disabled={busy || up.busy} onClick={() => reattach(d)}><Upload size={12} /> New version</button>}
                         </div>
                       </td>
@@ -295,7 +288,6 @@ export const RecordDocuments: React.FC<{ landId: number; link: DocLink; onSaved?
               <span className="font-medium text-foreground">{d.Title}</span>
               <span className="text-xs text-muted-foreground">{d.DocTypeName}{d.DocumentNo ? ` · ${d.DocumentNo}` : ""}</span>
               <LegalFileLink id={d.FileId} name={d.FileName} />
-              <Chip s={d.ReviewStatus} />
             </li>
           ))}
         </ul>

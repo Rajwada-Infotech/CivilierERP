@@ -182,6 +182,7 @@ const ALL_ROUTES = [
   { path: "/api/legal/land", file: "./routes/legal/landPipeline" },
   { path: "/api/legal/land-docs", file: "./routes/legal/landDocuments" },
   { path: "/api/legal/land-reports", file: "./routes/legal/landReports" },
+  { path: "/api/legal/portal-api", file: "./routes/legal/portalApi" },
   { path: "/api/legal", file: "./routes/legal/legalOperations" },
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
   { path: "/api/holiday-master", file: "./routes/holidayMaster" },

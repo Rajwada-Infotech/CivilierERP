@@ -110,6 +110,25 @@ export default function LegalDashboard() {
             </div>
           </div>
 
+          {/* ── Deed Process past its timeline: highlighted at the top ── */}
+          {!!land?.deedOverdue?.length && (
+            <div className="border-2 border-destructive bg-destructive/10 p-4 sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-heading font-bold uppercase tracking-[0.12em] text-destructive">Deed overdue · {land.deedOverdue.length}</p>
+                <button onClick={() => navigate("/legal/land/deed-process")} className="inline-flex items-center gap-1 text-xs font-semibold text-destructive hover:underline">Open Deed Process <ChevronRight size={13} /></button>
+              </div>
+              <ul className="mt-2 space-y-1 text-sm">
+                {land.deedOverdue.map((d) => (
+                  <li key={d.LandId}>
+                    <button className="text-left hover:underline" onClick={() => navigate(`/legal/land/deed-process/${d.LandId}`)}>
+                      <b className="font-mono">{d.LandCode}</b> · {d.LandName} — timeline {fmtDate(d.DeedTargetDate)}, <b className="text-destructive">{d.DaysOver} day{d.DaysOver > 1 ? "s" : ""} overdue</b>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* ── Land Portfolio Quick Access ── */}
           {land && (
             <div className={`${card} p-4 sm:p-5`}>

@@ -407,7 +407,15 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
       WHERE l.IsActive = 1
       ORDER BY l.LandId DESC;`);
     const [counts, recent, approvals, awaitingApproval, payments, cases, transfers, more, allLands] = r.recordsets;
-    res.json({ ...counts[0], ...more[0], recent, approvals, awaitingApproval, payments, cases, transfers, allLands });
+    // Deed Process: lands whose timeline has passed (highlighted on the dashboard).
+    let deedOverdue = [];
+    if (await deedReady(getPool())) {
+      deedOverdue = (await getPool().request().query(`
+        SELECT LandId, LandCode, LandName, CONVERT(char(10), DeedTargetDate, 23) AS DeedTargetDate, DATEDIFF(day, DeedTargetDate, CAST(GETDATE() AS DATE)) AS DaysOver
+        FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND DeedTargetDate < CAST(GETDATE() AS DATE)
+        ORDER BY DeedTargetDate`)).recordset;
+    }
+    res.json({ ...counts[0], ...more[0], recent, approvals, awaitingApproval, payments, cases, transfers, allLands, deedOverdue });
   } catch (err) {
     console.error("[legal-land] stats:", err.message);
     res.status(500).json({ error: "Could not load land statistics" });
@@ -423,14 +431,15 @@ router.get("/project-map", requirePageRight(LAND_PAGE, "view"), async (_req, res
       SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, p.name AS ProjectName, m.MouzaName, d.DistrictName,
              CAST(l.Area AS DECIMAL(18,4)) AS Area, u.UnitName, l.EntryType, l.LandStatus, l.WorkflowStatus,
              l.VerificationStatus, l.L1Status, l.L2Status, l.IsOnHold,
-             CAST(CASE WHEN l.L2Status = 'Approved' THEN 1 ELSE 0 END AS BIT) AS IsComplete,
+             CAST(1 AS BIT) AS IsComplete,
              (SELECT COUNT(*) FROM dbo.LegalLandDocument x WHERE x.LandId = l.LandId AND x.IsActive = 1) AS Documents,
              (SELECT STRING_AGG(r.OwnerName, ', ') FROM dbo.LegalOwnershipRecord r WHERE r.LandId = l.LandId AND r.IsActive = 1 AND r.ValidTo IS NULL) AS CurrentOwners
       FROM dbo.LegalLand l
       LEFT JOIN dbo.enterprise p ON p.id = l.ProjectId
       LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
       LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
-      WHERE l.IsActive = 1 AND ISNULL(l.IsCancelled, 0) = 0
+      -- Only land whose deed is registered (Deed Registration → Submit) shows in Land & Projects.
+      WHERE l.IsActive = 1 AND ISNULL(l.IsCancelled, 0) = 0 AND l.WorkflowStatus = N'Registered'
       ORDER BY p.name, l.LandCode`)).recordset;
     const projects = (await pool.request().query("SELECT id, name FROM dbo.enterprise WHERE business_type = 'P' ORDER BY name")).recordset;
     res.json({ lands, projects });
@@ -451,10 +460,10 @@ router.put("/:id/project", requirePageRight(LAND_PAGE, "edit"), async (req, res)
       const ok = await pool.request().input("p", sql.Int, projectId).query("SELECT 1 AS x FROM dbo.enterprise WHERE id = @p AND business_type = 'P'");
       if (!ok.recordset.length) return res.status(400).json({ error: "Project not found" });
     }
-    const old = (await pool.request().input("id", sql.Int, id).query("SELECT ProjectId, L2Status FROM dbo.LegalLand WHERE LandId = @id AND IsActive = 1")).recordset[0];
+    const old = (await pool.request().input("id", sql.Int, id).query("SELECT ProjectId, L2Status, WorkflowStatus FROM dbo.LegalLand WHERE LandId = @id AND IsActive = 1")).recordset[0];
     if (!old) return res.status(404).json({ error: "Land not found" });
     // Only fully approved land (L2) goes under a project; taking a land off its project is always allowed.
-    if (projectId && old.L2Status !== "Approved") return res.status(400).json({ error: "Only approved land (L2 approved) can be mapped to a project" });
+    if (projectId && old.WorkflowStatus !== "Registered") return res.status(400).json({ error: "Only land with a registered deed can be mapped to a project" });
     await pool.request().input("id", sql.Int, id).input("p", sql.Int, projectId).input("u", sql.Int, req.user?.userId || null)
       .query("UPDATE dbo.LegalLand SET ProjectId = @p, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @u WHERE LandId = @id");
     await writeAudit(pool, req, { action: projectId ? "Land mapped to project" : "Land removed from project", entityType: "Land Property", entityId: id, landId: id, oldValue: { projectId: old.ProjectId }, newValue: { projectId } });
@@ -475,12 +484,7 @@ router.get("/pending-queue", requirePageRight(LAND_PAGE, "view"), async (_req, r
              ISNULL(l.L2Status, N'Pending') AS L2Status,
              l.WorkflowStatus,
              CAST(l.Area AS FLOAT) AS Area, u.UnitName, d.DistrictName, m.MouzaName, m.JLNo,
-             CASE
-               WHEN ISNULL(l.VerificationStatus, 'Draft') <> 'Verified' THEN 'Verification Pending'
-               WHEN ISNULL(l.L1Status, 'Pending') = 'Pending' THEN 'L1 Legal Review'
-               WHEN ISNULL(l.L2Status, 'Pending') = 'Pending' THEN 'L2 Executive Approval'
-               ELSE 'Approved'
-             END AS Stage,
+             N'Final Verification Pending' AS Stage,
              DATEDIFF(day, ISNULL(l.UpdatedAt, l.CreatedAt), SYSUTCDATETIME()) AS WaitingDays,
              l.CreatedAt, ISNULL(l.UpdatedAt, l.CreatedAt) AS LastUpdated,
              (SELECT name FROM dbo.users WHERE id = l.CreatedBy) AS CreatedByName
@@ -489,7 +493,7 @@ router.get("/pending-queue", requirePageRight(LAND_PAGE, "view"), async (_req, r
       LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
       LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
       WHERE l.IsActive = 1
-        AND (ISNULL(l.VerificationStatus, 'Draft') <> 'Verified' OR ISNULL(l.L1Status, 'Pending') = 'Pending' OR ISNULL(l.L2Status, 'Pending') = 'Pending')
+        AND ISNULL(l.WorkflowStatus, N'') NOT IN (N'Deed Process', N'Deed Completed', N'Deed Registration', N'Registered') AND ISNULL(l.IsCancelled, 0) = 0
       ORDER BY l.UpdatedAt DESC, l.LandId DESC;
     `);
     res.json(r.recordset);
@@ -773,12 +777,12 @@ router.get("/:id/finance", requirePageRight(LAND_PAGE, "view"), async (req, res)
   try {
     const r = await getPool().request().input("Id", sql.Int, id).query(`
       SELECT t.TransactionId, t.TransactionNo, t.TxnType, t.BuyerName, t.SellerNames, t.TotalValue, t.AdvanceAmount, t.TxnStatus,
-             ISNULL((SELECT SUM(Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0) AS Verified,
-             ISNULL((SELECT SUM(Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1 AND p.VerificationStatus <> N'Verified'), 0) AS Unverified
+             ISNULL((SELECT SUM(Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1), 0) AS Verified,
+             CAST(0 AS DECIMAL(18,2)) AS Unverified
       FROM dbo.LegalLandTransaction t WHERE t.LandId = @Id AND t.IsActive = 1 ORDER BY t.TransactionId;
       SELECT x.Name AS ExpenseType, SUM(e.Amount) AS Amount FROM dbo.LegalExpense e JOIN dbo.LegalLookupValue x ON x.LookupId = e.ExpenseTypeId
       WHERE e.LandId = @Id AND e.IsActive = 1 GROUP BY x.Name ORDER BY x.Name;
-      SELECT ISNULL(SUM(Amount), 0) AS Fees FROM dbo.LegalRegPayment WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus = N'Verified';`);
+      SELECT ISNULL(SUM(Amount), 0) AS Fees FROM dbo.LegalRegPayment WHERE LandId = @Id AND IsActive = 1;`);
     const [txns, expenses, fees] = r.recordsets;
     res.json({ transactions: txns.map((t) => ({ ...t, Balance: Number(t.TotalValue) - Number(t.Verified) })), expenses, registrationFees: fees[0].Fees });
   } catch (err) {
@@ -890,7 +894,7 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
       .input("Mut", sql.NVarChar(60), c.inheritance.mutationRecordNo || c.doc.documentNo).input("UserId", sql.Int, userId)
       .query(`INSERT INTO dbo.LegalInheritance (LandId, DeceasedName, DeceasedGuardian, DeceasedPersonId, DateOfDeath, DeathCertFileId, HeirCertFileId, SupportingType, SupportingFileId, MutationRecordNo, VerificationStatus, CreatedBy)
               OUTPUT INSERTED.InheritanceId AS id
-              VALUES (@Land, @Name, @G, @Person, @Death, @DC, @HC, @ST, @SF, @Mut, N'Pending', @UserId)`);
+              VALUES (@Land, @Name, @G, @Person, @Death, @DC, @HC, @ST, @SF, @Mut, N'Verified', @UserId)`);
     inheritanceId = ins.recordset[0].id;
   }
   if (isPartition) {
@@ -899,7 +903,7 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
       .input("Shares", sql.NVarChar(1000), c.to.map((x) => `${x.name} ${x.share}%`).join(", ").slice(0, 1000))
       .input("Refs", sql.NVarChar(300), c.partitionNewReferences).input("File", sql.Int, c.doc.fileId)
       .query(`INSERT INTO dbo.LegalPartition (LandId, PartitionType, PartitionDate, PartiesInvolved, ShareDetails, NewReferences, DeedFileId, VerificationStatus, CreatedBy)
-              VALUES (@Land, N'Mutual / Amicable', @Date, @Parties, @Shares, @Refs, @File, N'Pending', @UserId)`);
+              VALUES (@Land, N'Mutual / Amicable', @Date, @Parties, @Shares, @Refs, @File, N'Verified', @UserId)`);
   }
 
   for (const n of c.to) {
@@ -919,7 +923,7 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
           INSERT INTO dbo.LegalOwnershipEvent (LandId, TransferTypeId, EventDate, PreviousOwnerName, PreviousOwnerGuardian, NewOwnerName, NewOwnerGuardian, DocTypeId, DocumentNo, DeedNo,
             RegistrationOfficeId, RegistrationDate, TransferSharePct, TransferValue, DocFileId, RegisteredDeedId, VerificationStatus, Remarks, CreatedBy, NewOwnerId)
           OUTPUT INSERTED.EventId AS id
-          VALUES (@Land, @Type, @Date, @Prev, @PrevG, @New, @NewG, @DocType, @DocNo, @DeedNo, @Office, @RegDate, @Share, @Value, @File, @Deed, N'Pending', @Remarks, @UserId, @Person)`);
+          VALUES (@Land, @Type, @Date, @Prev, @PrevG, @New, @NewG, @DocType, @DocNo, @DeedNo, @Office, @RegDate, @Share, @Value, @File, @Deed, N'Verified', @Remarks, @UserId, @Person)`);
       eventId = ev.recordset[0].id;
     }
     await tx.request().input("Land", sql.Int, landId).input("Name", sql.NVarChar(200), n.name).input("G", sql.NVarChar(200), n.guardian)
@@ -927,7 +931,7 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
       .input("Date", sql.Date, c.date).input("Event", sql.Int, eventId).input("Prev", sql.NVarChar(200), fromNames)
       .input("File", sql.Int, c.doc.fileId).input("UserId", sql.Int, userId).input("Person", sql.Int, personId)
       .query(`INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, OwnershipTypeId, RelationshipTypeId, SharePct, ValidFrom, EventId, PreviousOwnerName, TransferDocFileId, VerificationStatus, CreatedBy, PersonId)
-              VALUES (@Land, @Name, @G, @Type, @Rel, @Share, @Date, @Event, @Prev, @File, N'Pending', @UserId, @Person)`);
+              VALUES (@Land, @Name, @G, @Type, @Rel, @Share, @Date, @Event, @Prev, @File, N'Verified', @UserId, @Person)`);
     if (inheritanceId) {
       await tx.request().input("Land", sql.Int, landId).input("Inh", sql.Int, inheritanceId).input("Name", sql.NVarChar(200), n.name).input("G", sql.NVarChar(200), n.guardian)
         .input("Rel", sql.Int, n.relationshipTypeId).input("Share", sql.Decimal(7, 4), n.share).input("UserId", sql.Int, userId)
@@ -947,7 +951,7 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
         .input("Share", sql.Decimal(7, 4), rest).input("Date", sql.Date, c.date).input("UserId", sql.Int, userId)
         .input("Note", sql.NVarChar(1000), `Keeps ${Number(rest.toFixed(4))}% after giving ${g.share}% (${typeName}, ${c.date})`)
         .query(`INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, PersonId, OwnershipTypeId, RelationshipTypeId, SharePct, ValidFrom, VerificationStatus, VerificationRemarks, CreatedBy)
-                VALUES (@Land, @Name, @G, @Person, @Type, @Rel, @Share, @Date, N'Pending', @Note, @UserId)`);
+                VALUES (@Land, @Name, @G, @Person, @Type, @Rel, @Share, @Date, N'Verified', @Note, @UserId)`);
     }
   }
 
@@ -1015,22 +1019,21 @@ router.post("/:id/ownership/undo", requirePageRight(LAND_PAGE, "edit"), async (r
     if (!last) return refuse(404, "No ownership recorded yet");
     const d = last.d;
     const rows = (await tx.request().input("Land", sql.Int, id).input("D", sql.Date, d).query(`
-      SELECT (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord WHERE LandId = @Land AND IsActive = 1 AND ValidFrom = @D AND VerificationStatus = N'Verified')
-           + (SELECT COUNT(*) FROM dbo.LegalOwnershipEvent WHERE LandId = @Land AND IsActive = 1 AND EventDate = @D AND VerificationStatus = N'Verified') AS verified,
+      SELECT (SELECT COUNT(*) FROM dbo.LegalLand WHERE LandId = @Land AND WorkflowStatus IN (N'Deed Process', N'Deed Completed', N'Deed Registration', N'Registered')) AS verified,
              (SELECT COUNT(*) FROM dbo.LegalOwnershipEvent WHERE LandId = @Land AND IsActive = 1 AND EventDate = @D AND RegisteredDeedId IS NOT NULL) AS fromDeed`)).recordset[0];
-    if (rows.verified) return refuse(409, "The latest change is already verified — ask a reviewer to set it back to Pending first");
+    if (rows.verified) return refuse(409, "This land is verified and in Deed Process — its ownership can no longer be undone");
     if (rows.fromDeed) return refuse(409, "The latest change came from the registered deed (step 23) and cannot be undone here");
     const userId = req.user?.userId || null;
     await tx.request().input("Land", sql.Int, id).input("D", sql.Date, d).input("UserId", sql.Int, userId).query(`
       UPDATE dbo.LegalOwnershipRecord SET IsActive = 0, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Land AND IsActive = 1 AND ValidFrom = @D;
       UPDATE dbo.LegalOwnershipEvent SET IsActive = 0, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Land AND IsActive = 1 AND EventDate = @D;
       UPDATE h SET IsActive = 0, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() FROM dbo.LegalInheritanceHeir h JOIN dbo.LegalInheritance i ON i.InheritanceId = h.InheritanceId
-        WHERE i.LandId = @Land AND i.IsActive = 1 AND i.CreatedAt >= DATEADD(day, -1, CAST(@D AS DATETIME2)) AND i.VerificationStatus = N'Pending'
+        WHERE i.LandId = @Land AND i.IsActive = 1 AND i.CreatedAt >= DATEADD(day, -1, CAST(@D AS DATETIME2))
           AND EXISTS (SELECT 1 FROM dbo.LegalOwnershipRecord r WHERE r.LandId = @Land AND r.ValidTo = DATEADD(day, -1, @D) AND r.OwnerName = i.DeceasedName);
       UPDATE i SET IsActive = 0, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() FROM dbo.LegalInheritance i
-        WHERE i.LandId = @Land AND i.IsActive = 1 AND i.VerificationStatus = N'Pending'
+        WHERE i.LandId = @Land AND i.IsActive = 1
           AND EXISTS (SELECT 1 FROM dbo.LegalOwnershipRecord r WHERE r.LandId = @Land AND r.ValidTo = DATEADD(day, -1, @D) AND r.OwnerName = i.DeceasedName);
-      UPDATE dbo.LegalPartition SET IsActive = 0, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Land AND IsActive = 1 AND PartitionDate = @D AND VerificationStatus = N'Pending';
+      UPDATE dbo.LegalPartition SET IsActive = 0, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Land AND IsActive = 1 AND PartitionDate = @D;
       UPDATE dbo.LegalOwnershipRecord SET ValidTo = NULL, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Land AND IsActive = 1 AND ValidTo = DATEADD(day, -1, @D);`);
     await writeAudit(tx, req, { action: "Ownership change undone", entityType: "Land Property", entityId: id, landId: id, oldValue: { date: d } });
     await tx.commit();
@@ -1068,8 +1071,8 @@ router.put("/:id/ownership/change/:date", requirePageRight(LAND_PAGE, "edit"), a
       WHERE LandId = @Land AND IsActive = 1 AND (ValidFrom = @D OR ValidTo = DATEADD(day, -1, @D))`)).recordset;
     const starting = recs.filter((r) => String(r.ValidFrom.toISOString().slice(0, 10)) === date);
     const givers = recs.filter((r) => r.ValidTo && String(r.ValidTo.toISOString().slice(0, 10)) === new Date(new Date(date).getTime() - 86400000).toISOString().slice(0, 10));
-    const verified = evs.some((e) => e.VerificationStatus === "Verified") || starting.some((r) => r.VerificationStatus === "Verified");
-    if (verified && !(await canAct(req, "Verifier", LAND_PAGE))) return refuse(409, "This change is verified — only a verifier can edit it");
+    const inDeed = (await tx.request().input("Land", sql.Int, id).query("SELECT WorkflowStatus FROM dbo.LegalLand WHERE LandId = @Land")).recordset[0];
+    if (["Deed Process", "Deed Completed", "Deed Registration", "Registered"].includes(inDeed?.WorkflowStatus) && !(await canAct(req, "Verifier", LAND_PAGE))) return refuse(409, "This land is verified and in Deed Process — only a verifier can edit it");
     if (newDate !== date) {
       const giverStart = givers.map((r) => r.ValidFrom.toISOString().slice(0, 10)).sort().pop();
       if (giverStart && newDate <= giverStart) return refuse(409, `The date must be after ${giverStart}, when the previous owner's ownership started`);
@@ -1086,12 +1089,12 @@ router.put("/:id/ownership/change/:date", requirePageRight(LAND_PAGE, "edit"), a
       .input("Remarks", sql.NVarChar(1000), text(b.remarks, 1000));
     await r0.query(`
       UPDATE dbo.LegalOwnershipEvent SET EventDate = @N, DocTypeId = @DocType, DocumentNo = @DocNo, DeedNo = @DeedNo, DocFileId = @File, TransferValue = @Value, Remarks = @Remarks,
-             VerificationStatus = N'Pending', VerifiedBy = NULL, VerifiedAt = NULL, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
+             UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
       WHERE LandId = @Land AND IsActive = 1 AND EventDate = @D;
       UPDATE dbo.LegalOwnershipRecord SET ValidTo = DATEADD(day, -1, @N), UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
       WHERE LandId = @Land AND IsActive = 1 AND ValidTo = DATEADD(day, -1, @D);
       UPDATE dbo.LegalOwnershipRecord SET ValidFrom = @N, TransferDocFileId = ISNULL(@File, TransferDocFileId),
-             VerificationStatus = N'Pending', VerifiedBy = NULL, VerifiedAt = NULL, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
+             UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
       WHERE LandId = @Land AND IsActive = 1 AND ValidFrom = @D;
       UPDATE dbo.LegalPartition SET PartitionDate = @N WHERE LandId = @Land AND IsActive = 1 AND PartitionDate = @D;`);
     for (const o of owners) {
@@ -1483,7 +1486,7 @@ router.get("/:id/dossier", requirePageRight(LAND_PAGE, "view"), async (req, res)
       UNION ALL SELECT 'Legal opinion', OpinionNo + ' — ' + FinalOpinion, OpinionStatus FROM dbo.LegalOpinion WHERE LandId = @Id AND IsActive = 1
       UNION ALL SELECT 'Legal clearance', ClearanceNo, Decision FROM dbo.LegalClearance WHERE LandId = @Id AND IsActive = 1;
       SELECT t.TransactionNo, t.TxnType, t.BuyerName, t.SellerNames, CAST(t.TxnArea AS FLOAT) AS Area, au.UnitName, t.TotalValue, t.TxnStatus,
-             ISNULL((SELECT SUM(Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0) AS Paid
+             ISNULL((SELECT SUM(Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1), 0) AS Paid
         FROM dbo.LegalLandTransaction t LEFT JOIN dbo.LegalAreaUnit au ON au.AreaUnitId = t.AreaUnitId WHERE t.LandId = @Id AND t.IsActive = 1 ORDER BY t.TransactionId;
       SELECT d.DeedCode, dt.DeedTypeName, d.ConsiderationAmount, o.OfficeName, d.RegistrationStatus, d.RegisteredDeedNo,
              (SELECT TOP 1 RegistrationDate FROM dbo.LegalRegisteredDeed r WHERE r.DeedId = d.DeedId AND r.IsActive = 1) AS RegistrationDate
@@ -1556,8 +1559,18 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
     if (e.LandId || e.EnquiryStatus === "Converted to Land Record") return refuse(409, "This enquiry is already converted");
     if (e.EnquiryStatus === "Rejected" || e.EnquiryStatus === "On Hold") return refuse(409, `This enquiry is ${e.EnquiryStatus.toLowerCase()}; resume it before converting.`);
 
+    // Land ID = <address prefix>/<running no>/<financial year>, e.g. KOL/00001/2026-27. The prefix is the land's
+    // district code (Setup → District), else the first letters of the district name; the number runs per prefix and year.
+    // The year is the enquiry's (set when it was saved); older enquiries without one use the current year.
+    const pre = (await tx.request().input("D", sql.Int, e.DistrictId).query(
+      "SELECT COALESCE(NULLIF(LTRIM(RTRIM(DistrictCode)), N''), LEFT(DistrictName, 3)) AS prefix FROM dbo.LegalDistrict WHERE DistrictId = @D")).recordset[0];
+    const clean = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    const addrPrefix = clean(pre?.prefix).slice(0, 10) || "LND";
+    const now = new Date(); const fyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const fy = clean(e.FinYear).slice(0, 12) || `${fyStart}-${String(fyStart + 1).slice(2)}`;
+
     const ins = await tx.request()
-      .input("Prefix", sql.NVarChar(20), codePrefix("LND"))
+      .input("Prefix", sql.NVarChar(20), `${addrPrefix}/`).input("Fy", sql.NVarChar(20), `/${fy}`)
       .input("Name", sql.NVarChar(200), text(req.body?.landName, 200) || e.LandLocation.slice(0, 200))
       .input("DistrictId", sql.Int, e.DistrictId).input("MouzaId", sql.Int, e.MouzaId)
       .input("Area", sql.Decimal(18, 6), e.ApproxArea).input("AreaUnitId", sql.Int, e.AreaUnitId)
@@ -1568,7 +1581,9 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
         INSERT INTO dbo.LegalLand (LandCode, LandName, DistrictId, MouzaId, Area, AreaUnitId, LocationAddress, GpsLatitude, GpsLongitude, EnquiryId, LandStatus, IsOnHold, IsActive, CreatedBy, CreatedAt,
                                      EntryType, VerificationStatus, L1Status, L2Status, WorkflowStatus)
         OUTPUT INSERTED.LandId AS id, INSERTED.LandCode AS code
-        SELECT ${nextCodeSql("LegalLand", "LandCode", "@Prefix")}, @Name, @DistrictId, @MouzaId, @Area, @AreaUnitId, @Address, @Lat, @Lng, @EnquiryId, N'Identified', 0, 1, @UserId, SYSUTCDATETIME(),
+        SELECT @Prefix + RIGHT('00000' + CAST(ISNULL((
+                 SELECT MAX(TRY_CAST(SUBSTRING(LandCode, LEN(@Prefix) + 1, LEN(LandCode) - LEN(@Prefix) - LEN(@Fy)) AS INT))
+                 FROM dbo.LegalLand WITH (UPDLOCK, HOLDLOCK) WHERE LandCode LIKE @Prefix + '%' AND RIGHT(LandCode, LEN(@Fy)) = @Fy), 0) + 1 AS VARCHAR(10)), 5) + @Fy, @Name, @DistrictId, @MouzaId, @Area, @AreaUnitId, @Address, @Lat, @Lng, @EnquiryId, N'Identified', 0, 1, @UserId, SYSUTCDATETIME(),
                N'New Acquisition', N'Draft', N'Pending', N'Pending', N'Draft (Verification Pending)'`);
     const land = ins.recordset[0];
     await tx.request().input("Id", sql.Int, id).input("LandId", sql.Int, land.id).input("UserId", sql.Int, req.user?.userId || null)
@@ -1584,320 +1599,424 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
   }
 });
 
-// ── Land-Wise Verification & Two-Level Approval Endpoints ──────────────────────────────
+// ── Final verification → Deed Process ───────────────────────────────────────────────────────────────────────────
+// No per-section ticks and no L1/L2 approval. When the land's data entry is complete, a verifier (Setup → Approval
+// Control; never the user who entered the land) opens one page with every detail and document, sets the timeline
+// (deed to be done by) and clicks "Deed Process". The land then shows on the Deed Process page for the deed department.
 
-// ── Section verification: one "Verified" tick at the end of each land-page section ───────────────────────────────
-// The verifier reads the whole section (rows and their documents) and ticks once; every active row of that section's
-// tables is marked Verified (unticking sets them back to Pending). Only a verifier (Setup → Approval Control), and
-// never on rows they entered themselves (super admin excepted).
-const VERIFY_SECTIONS = {
-  ownership: { label: "Ownership History", tables: ["LegalOwnershipEvent", "LegalOwnershipRecord", "LegalInheritance", "LegalPartition"] },
-  records: { label: "Land Records (RS / LR)", tables: ["LegalLandRsRecord", "LegalLandLrRecord"] },
-  legal: { label: "Legal Information", tables: ["LegalCase", "LegalLandLegalRecord", "LegalVerificationCheck"] },
-  loans: { label: "Loan & Mortgage", tables: ["LegalMortgage"] },
-  mutation: { label: "Mutation Records", tables: ["LegalMutationRecord"] },
-  payments: { label: "Payment History", tables: ["LegalPayment"] },
-  tax: { label: "Land Tax (Khajna)", tables: ["LegalLandTax"] },
-  survey: { label: "Survey & Valuation", tables: ["LegalValuation"] },
-};
-VERIFY_SECTIONS.transfers = { label: "Acquisition & Purchase", tables: ["LegalOwnershipEvent"] };
+const isoDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null);
 
-router.get("/:id/sections", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+/** What is still missing before final verification (empty list = data entry complete). */
+async function missingForFinal(pool, id) {
+  const r = (await pool.request().input("Id", sql.Int, id).query(`
+    SELECT l.DistrictId, l.MouzaId, l.Area,
+      (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1 AND ValidTo IS NULL) AS owners,
+      (SELECT COUNT(*) FROM dbo.LegalLandRsRecord WHERE LandId = @Id AND IsActive = 1)
+        + (SELECT COUNT(*) FROM dbo.LegalLandLrRecord WHERE LandId = @Id AND IsActive = 1) AS records,
+      (SELECT COUNT(*) FROM dbo.LegalLandDocument WHERE LandId = @Id AND IsActive = 1) AS documents
+    FROM dbo.LegalLand l WHERE l.LandId = @Id AND l.IsActive = 1`)).recordset[0];
+  if (!r) return null;
+  const miss = [];
+  if (!r.DistrictId || !r.MouzaId || !r.Area) miss.push("Basic Information (district, mouza and area)");
+  if (!r.owners) miss.push("Ownership History (current owners)");
+  if (!r.records) miss.push("Land Records (an RS or LR record)");
+  if (!r.documents) miss.push("Documents (at least one)");
+  return miss;
+}
+
+const deedReady = async (pool) => !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedTargetDate') AS c")).recordset[0].c;
+const IN_DEED = (w) => ["Deed Process", "Deed Completed", "Deed Registration", "Registered"].includes(w);
+
+// GET /:id/final-status — readiness, and the deed process if already sent.
+router.get("/:id/final-status", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid land id" });
   try {
-    const tables = [...new Set(Object.values(VERIFY_SECTIONS).flatMap((x) => x.tables))];
-    const r = await getPool().request().input("Id", sql.Int, id).query(tables.map((t) => `
-      SELECT '${t}' AS T, COUNT(*) AS Total, SUM(CASE WHEN VerificationStatus = N'Verified' THEN 1 ELSE 0 END) AS Verified,
-             MAX(VerifiedAt) AS VerifiedAt,
-             (SELECT TOP 1 u.name FROM dbo.${t} x JOIN dbo.users u ON u.id = x.VerifiedBy WHERE x.LandId = @Id AND x.IsActive = 1 ORDER BY x.VerifiedAt DESC) AS VerifiedByName
-      FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1`).join(" UNION ALL "));
-    const byT = Object.fromEntries(r.recordset.map((x) => [x.T, x]));
-    res.json(Object.fromEntries(Object.entries(VERIFY_SECTIONS).map(([k, sec]) => {
-      const rows = sec.tables.map((t) => byT[t]);
-      const total = rows.reduce((a, x) => a + (x?.Total ?? 0), 0);
-      const verified = rows.reduce((a, x) => a + (x?.Verified ?? 0), 0);
-      const last = rows.filter((x) => x?.VerifiedAt).sort((a, b) => new Date(b.VerifiedAt) - new Date(a.VerifiedAt))[0];
-      return [k, { label: sec.label, total, verified, done: total > 0 && verified === total, verifiedAt: last?.VerifiedAt ?? null, verifiedBy: last?.VerifiedByName ?? null }];
-    })));
-  } catch (err) {
-    console.error("[legal-land] sections error:", err.message);
-    res.status(500).json({ error: "Could not load the section status" });
-  }
-});
-
-router.post("/:id/sections/:section/verify", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
-  const id = idParam(req.params.id);
-  const sec = VERIFY_SECTIONS[req.params.section];
-  const verified = req.body?.verified !== false;
-  const remarks = text(req.body?.remarks, 1000);
-  if (!id || !sec) return res.status(400).json({ error: "Invalid land or section" });
-  try {
-    if (!(await canAct(req, "Verifier", LAND_PAGE))) return res.status(403).json({ error: "Only a verifier (Setup → Approval Control) can verify a section" });
     const pool = getPool();
-    // Once the whole land is verified (or approved), its sections stay verified until L1 / L2 returns it.
-    const landNow = (await pool.request().input("Id", sql.Int, id).query("SELECT VerificationStatus FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
-    if (!landNow) return res.status(404).json({ error: "Land not found" });
-    if (!verified && landNow.VerificationStatus === "Verified") return res.status(409).json({ error: "The land is already verified — it must be returned by L1 / L2 before a section can be un-verified" });
-    if (verified && !isSuperAdmin(req)) {
-      const mine = await pool.request().input("Id", sql.Int, id).input("U", sql.Int, req.user?.userId).query(
-        sec.tables.map((t) => `SELECT COUNT(*) AS n FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1 AND CreatedBy = @U`).join(" UNION ALL "));
-      if (mine.recordset.some((x) => x.n > 0)) return res.status(409).json({ error: ownWork(req, req.user?.userId, `some ${sec.label} entries`) });
+    const missing = await missingForFinal(pool, id);
+    if (!missing) return res.status(404).json({ error: "Land not found" });
+    const ready = await deedReady(pool);
+    const l = (await pool.request().input("Id", sql.Int, id).query(`
+      SELECT LandCode, CreatedBy, IsOnHold, IsCancelled, WorkflowStatus
+             ${ready ? ", FinalVerifiedAt, CONVERT(char(10), DeedTargetDate, 23) AS DeedTargetDate, (SELECT name FROM dbo.users WHERE id = l.FinalVerifiedBy) AS FinalVerifiedByName" : ""}
+      FROM dbo.LegalLand l WHERE LandId = @Id`)).recordset[0];
+    const canVerify = await canAct(req, "Verifier", LAND_PAGE);
+    const own = ownWork(req, l.CreatedBy, "this land");
+    // Changes made after verification (shown to the verifier for re-verification).
+    let changed = null;
+    if ((await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') AS c")).recordset[0].c) {
+      const c = (await pool.request().input("Id", sql.Int, id).query(`
+        SELECT DeedChangedAt, DeedChangedBy, (SELECT name FROM dbo.users WHERE id = l.DeedChangedBy) AS ByName FROM dbo.LegalLand l WHERE LandId = @Id;
+        SELECT TOP 50 a.CreatedAt, a.Action, a.EntityType, u.name AS UserName
+        FROM dbo.LegalRecordAudit a LEFT JOIN dbo.users u ON u.id = a.UserId
+        WHERE a.LandId = @Id AND a.CreatedAt > ISNULL((SELECT ISNULL(DeedReverifiedAt, FinalVerifiedAt) FROM dbo.LegalLand WHERE LandId = @Id), '1900-01-01')
+          AND a.Action NOT IN (N'Land verified — sent to Deed Process', N'Deed timeline changed', N'Deed completed', N'Deed reopened', N'Deed copy uploaded', N'Deed copy removed', N'Deed changes re-verified')
+        ORDER BY a.CreatedAt DESC`)).recordsets;
+      if (c[0][0]?.DeedChangedAt) changed = { at: c[0][0].DeedChangedAt, by: c[0][0].ByName, items: c[1] };
     }
-    const tx = new sql.Transaction(pool);
-    await tx.begin();
-    let n = 0;
-    try {
-      for (const t of sec.tables) {
-        const r = await new sql.Request(tx).input("Id", sql.Int, id).input("U", sql.Int, req.user?.userId || null).query(verified
-          ? `UPDATE dbo.${t} SET VerificationStatus = N'Verified', VerifiedBy = @U, VerifiedAt = SYSUTCDATETIME() WHERE LandId = @Id AND IsActive = 1 AND ISNULL(VerificationStatus, N'') <> N'Verified'`
-          : `UPDATE dbo.${t} SET VerificationStatus = N'Pending', VerifiedBy = NULL, VerifiedAt = NULL WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus = N'Verified'`);
-        n += r.rowsAffected[0];
-      }
-      await tx.commit();
-    } catch (e) {
-      await tx.rollback().catch(() => {});
-      throw e;
-    }
-    await writeAudit(pool, req, {
-      action: verified ? "Section Verified" : "Section Verification Removed",
-      entityType: "Land Property", entityId: id, landId: id,
-      newValue: { section: sec.label, rows: n }, remarks,
+    res.json({ changed,
+      missing, ready: missing.length === 0, inDeedProcess: IN_DEED(l.WorkflowStatus), workflowStatus: l.WorkflowStatus,
+      verifiedAt: l.FinalVerifiedAt ?? null, verifiedBy: l.FinalVerifiedByName ?? null, targetDate: l.DeedTargetDate ?? null,
+      canVerify: canVerify && !own,
+      blockedReason: !canVerify ? "Only a Verifier (Setup → Approval Control) can do the final verification" : own || (l.IsCancelled ? "This land is cancelled" : l.IsOnHold ? "This land is on hold" : null),
     });
-    res.json({ message: verified ? `${sec.label} verified` : `${sec.label} set back to pending` });
   } catch (err) {
-    console.error("[legal-land] section verify error:", err.message);
-    res.status(500).json({ error: "Could not verify this section" });
+    console.error("[legal-land] final-status:", err.message);
+    res.status(500).json({ error: "Could not load the verification status" });
   }
 });
 
-// ── Who may move a land through Verify → L1 → L2, and in what order ──────────────────────────────────────────────
-// Verifier / L1 Approver / L2 Approver come from Setup → Approval Control. Nobody acts on land they entered, and the
-// L2 approver is not the user who did L1 (super admin excepted). Each step needs the one before it.
-async function stageGuard(req, id, stage) {
+// POST /:id/final-verify { targetDate } — verified, sent to the deed department with its timeline.
+router.post("/:id/final-verify", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land id" });
+  const target = isoDate(req.body?.targetDate);
+  if (!target) return res.status(400).json({ error: "Set the timeline (deed to be done by)" });
   const pool = getPool();
-  const land = (await pool.request().input("Id", sql.Int, id).query(`
-    SELECT LandCode, CreatedBy, ISNULL(VerificationStatus, N'Draft') AS VerificationStatus, ISNULL(L1Status, N'Pending') AS L1Status,
-           ISNULL(L2Status, N'Pending') AS L2Status, L1ReviewerId, IsOnHold, IsCancelled
-    FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1`)).recordset[0];
-  if (!land) return { status: 404, error: "Land not found" };
-  const role = { verify: "Verifier", l1: "L1 Approver", l2: "L2 Approver" }[stage];
-  if (!(await canAct(req, role, LAND_PAGE))) return { status: 403, error: `Only a ${role} (Setup → Approval Control) can do this` };
-  const own = ownWork(req, land.CreatedBy, "this land");
-  if (own) return { status: 409, error: own };
-  if (land.IsCancelled) return { status: 409, error: `${land.LandCode} is cancelled` };
-  if (land.IsOnHold) return { status: 409, error: `${land.LandCode} is on hold — resume it first` };
-  if (land.L2Status === "Approved") return { status: 409, error: `${land.LandCode} is already fully approved` };
-  if (stage === "verify") {
-    if (land.VerificationStatus === "Verified") return { status: 409, error: `${land.LandCode} is already verified` };
-    const open = await openSections(pool, id);
-    if (open.length) return { status: 409, error: `Verify these sections first (tick Verified at the end of each): ${open.join(", ")}` };
+  try {
+    if (!(await deedReady(pool))) return res.status(503).json({ error: "Deed Process is not set up yet (migration 631)" });
+    const l = (await pool.request().input("Id", sql.Int, id).query(
+      "SELECT LandCode, CreatedBy, IsOnHold, IsCancelled, WorkflowStatus FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1")).recordset[0];
+    if (!l) return res.status(404).json({ error: "Land not found" });
+    if (!(await canAct(req, "Verifier", LAND_PAGE))) return res.status(403).json({ error: "Only a Verifier (Setup → Approval Control) can do the final verification" });
+    const own = ownWork(req, l.CreatedBy, "this land");
+    if (own) return res.status(409).json({ error: own });
+    if (l.IsCancelled) return res.status(409).json({ error: `${l.LandCode} is cancelled` });
+    if (l.IsOnHold) return res.status(409).json({ error: `${l.LandCode} is on hold — resume it first` });
+    if (IN_DEED(l.WorkflowStatus)) return res.status(409).json({ error: `${l.LandCode} is already in Deed Process` });
+    const missing = await missingForFinal(pool, id);
+    if (missing.length) return res.status(409).json({ error: `Complete the data entry first: ${missing.join(", ")}` });
+    await pool.request().input("Id", sql.Int, id).input("U", sql.Int, req.user?.userId || null).input("T", sql.Date, target).query(`
+      UPDATE dbo.LegalLand SET VerificationStatus = N'Verified', WorkflowStatus = N'Deed Process', DeedTargetDate = @T,
+             L1Status = N'Pending', L1ReviewerId = NULL, L1ReviewedAt = NULL, L1Remarks = NULL,
+             L2Status = N'Pending', L2ApproverId = NULL, L2ApprovedAt = NULL, L2Remarks = NULL,
+             FinalVerifiedBy = @U, FinalVerifiedAt = SYSUTCDATETIME(), UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME()
+      WHERE LandId = @Id`);
+    await writeAudit(pool, req, { action: "Land verified — sent to Deed Process", entityType: "Land Property", entityId: id, landId: id, newValue: { targetDate: target } });
+    res.json({ message: `${l.LandCode} verified and sent to Deed Process` });
+  } catch (err) {
+    console.error("[legal-land] final-verify:", err.message);
+    res.status(500).json({ error: "Could not verify the land" });
   }
-  if (stage === "l1") {
-    if (land.VerificationStatus !== "Verified") return { status: 409, error: "Verify the land data before L1 review" };
-    if (land.L1Status === "Approved") return { status: 409, error: "L1 is already approved — waiting for L2" };
+});
+
+// GET /deed-process/list — lands sent to the deed department.
+router.get("/deed-process/list", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await deedReady(pool))) return res.json({ lands: [], canEditTimeline: false });
+    const copy = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedFileId') AS c")).recordset[0].c;
+    const chg = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') AS c")).recordset[0].c;
+    const appr = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedApprovalStatus') AS c")).recordset[0].c;
+    const r = await pool.request().query(`
+      SELECT l.LandId, l.LandCode, l.LandName, l.WorkflowStatus, d.DistrictName, m.MouzaName, l.FinalVerifiedAt,
+             CONVERT(char(10), l.DeedTargetDate, 23) AS DeedTargetDate, l.DeedCompletedAt,
+             ISNULL(l.L1Status, N'Pending') AS L1Status, (SELECT name FROM dbo.users WHERE id = l.L1ReviewerId) AS L1By,
+             ISNULL(l.L2Status, N'Pending') AS L2Status,
+             ${appr ? "l.DeedApprovalNote," : ""}
+             ${chg ? "l.DeedChangedAt, (SELECT name FROM dbo.users WHERE id = l.DeedChangedBy) AS DeedChangedByName," : ""}
+             ${copy ? "l.DeedFileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = l.DeedFileId) AS DeedFileName," : ""}
+             (SELECT name FROM dbo.users WHERE id = l.FinalVerifiedBy) AS VerifiedBy
+      FROM dbo.LegalLand l
+      LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
+      LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      WHERE l.IsActive = 1 AND l.WorkflowStatus IN (N'Deed Process', N'Deed Completed')
+      ORDER BY CASE WHEN l.WorkflowStatus = N'Deed Process' THEN 0 ELSE 1 END, l.DeedTargetDate`);
+    res.json({ lands: r.recordset, canEditTimeline: await canAct(req, "Verifier", LAND_PAGE),
+      canL1: await canAct(req, "L1 Approver", LAND_PAGE), canL2: await canAct(req, "L2 Approver", LAND_PAGE) });
+  } catch (err) {
+    console.error("[legal-land] deed-process list:", err.message);
+    res.status(500).json({ error: "Could not load the Deed Process list" });
   }
-  if (stage === "l2") {
-    if (land.L1Status !== "Approved") return { status: 409, error: "L1 approval comes before L2" };
-    if (!isSuperAdmin(req) && land.L1ReviewerId != null && Number(land.L1ReviewerId) === Number(req.user?.userId)) {
-      return { status: 409, error: "You gave the L1 approval — another user must give L2" };
+});
+
+// PUT /:id/deed-process { targetDate?, completed? } — the verifier changes the timeline; the deed department
+// (land edit right) marks the deed done.
+router.put("/:id/deed-process", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land id" });
+  const pool = getPool();
+  try {
+    const l = (await pool.request().input("Id", sql.Int, id).query("SELECT LandCode, WorkflowStatus FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1")).recordset[0];
+    if (!l) return res.status(404).json({ error: "Land not found" });
+    if (!IN_DEED(l.WorkflowStatus)) return res.status(409).json({ error: `${l.LandCode} is not in Deed Process` });
+    if (req.body?.targetDate !== undefined) {
+      const target = isoDate(req.body.targetDate);
+      if (!target) return res.status(400).json({ error: "Give a valid timeline date" });
+      if (!(await canAct(req, "Verifier", LAND_PAGE))) return res.status(403).json({ error: "Only a Verifier can change the timeline" });
+      await pool.request().input("Id", sql.Int, id).input("T", sql.Date, target).input("U", sql.Int, req.user?.userId || null)
+        .query("UPDATE dbo.LegalLand SET DeedTargetDate = @T, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id");
+      await writeAudit(pool, req, { action: "Deed timeline changed", entityType: "Land Property", entityId: id, landId: id, newValue: { targetDate: target } });
+      return res.json({ message: "Timeline saved" });
     }
-  }
-  return { land };
-}
-
-/** Sections that have entries not yet verified (empty sections do not block). */
-async function openSections(pool, id) {
-  const tables = [...new Set(Object.values(VERIFY_SECTIONS).flatMap((x) => x.tables))];
-  const r = await pool.request().input("Id", sql.Int, id).query(tables.map((t) =>
-    `SELECT '${t}' AS T, SUM(CASE WHEN ISNULL(VerificationStatus, N'') <> N'Verified' THEN 1 ELSE 0 END) AS n FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1`).join(" UNION ALL "));
-  const open = new Set(r.recordset.filter((x) => x.n > 0).map((x) => x.T));
-  return [...new Set(Object.values(VERIFY_SECTIONS).filter((sec) => sec.tables.some((t) => open.has(t))).map((sec) => sec.label))];
-}
-
-router.post("/:id/verify", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
-  const id = idParam(req.params.id);
-  const remarks = text(req.body?.remarks, 1000);
-  if (!id) return res.status(400).json({ error: "Invalid land id" });
-  try {
-    const g = await stageGuard(req, id, "verify");
-    if (g.error) return res.status(g.status).json({ error: g.error });
-    const pool = getPool();
-    const r = await pool.request()
-      .input("Id", sql.Int, id)
-      .input("UserId", sql.Int, req.user?.userId || null)
-      .input("Remarks", sql.NVarChar(1000), remarks)
-      .query(`
-        UPDATE dbo.LegalLand
-        SET VerificationStatus = N'Verified',
-            WorkflowStatus = N'Verified (Pending L1)',
-            L1Status = N'Pending',
-            UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
-        OUTPUT INSERTED.LandCode, INSERTED.LandName
-        WHERE LandId = @Id AND IsActive = 1
-      `);
-    if (!r.recordset.length) return res.status(404).json({ error: "Land not found" });
-    await writeAudit(pool, req, {
-      action: "Land Data Verified",
-      entityType: "Land Property",
-      entityId: id,
-      landId: id,
-      newValue: { VerificationStatus: "Verified", WorkflowStatus: "Verified (Pending L1)" },
-      remarks
-    });
-    res.json({ message: `Land ${r.recordset[0].LandCode} verified. Forwarded for L1 Legal Review.` });
+    if (req.body?.deedFileId !== undefined) {
+      if (!(await hasAnyPageAction(req, LAND_PAGE, ["edit"]))) return res.status(403).json({ error: "You cannot upload the deed copy" });
+      if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedFileId') AS c")).recordset[0].c) return res.status(503).json({ error: "Deed copy is not set up yet (migration 634)" });
+      const fileId = req.body.deedFileId === null ? null : idParam(req.body.deedFileId);
+      if (req.body.deedFileId !== null && !fileId) return res.status(400).json({ error: "Invalid file" });
+      if (fileId && !(await pool.request().input("F", sql.Int, fileId).query("SELECT 1 AS x FROM dbo.LegalMasterFile WHERE FileId = @F")).recordset[0]) return res.status(400).json({ error: "File not found" });
+      await pool.request().input("Id", sql.Int, id).input("F", sql.Int, fileId).input("U", sql.Int, req.user?.userId || null)
+        .query("UPDATE dbo.LegalLand SET DeedFileId = @F, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id");
+      await writeAudit(pool, req, { action: fileId ? "Deed copy uploaded" : "Deed copy removed", entityType: "Land Property", entityId: id, landId: id, newValue: { fileId } });
+      return res.json({ message: fileId ? `${l.LandCode}: deed copy saved` : `${l.LandCode}: deed copy removed` });
+    }
+    if (typeof req.body?.completed === "boolean") {
+      if (!(await hasAnyPageAction(req, LAND_PAGE, ["edit"]))) return res.status(403).json({ error: "You cannot update the deed status" });
+      const done = req.body.completed;
+      if (done) {
+        const c = (await pool.request().input("Id", sql.Int, id).query(
+          "IF COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') IS NOT NULL EXEC sp_executesql N'SELECT DeedChangedAt AS c FROM dbo.LegalLand WHERE LandId = @I', N'@I INT', @I = @Id; ELSE SELECT NULL AS c")).recordset[0];
+        if (c?.c) return res.status(409).json({ error: `${l.LandCode} was changed after verification — a verifier must re-verify it first` });
+      }
+      await pool.request().input("Id", sql.Int, id).input("W", sql.NVarChar(60), done ? "Deed Completed" : "Deed Process").input("U", sql.Int, req.user?.userId || null)
+        .query(`UPDATE dbo.LegalLand SET WorkflowStatus = @W, DeedCompletedAt = ${done ? "SYSUTCDATETIME()" : "NULL"}, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
+      await writeAudit(pool, req, { action: done ? "Deed completed" : "Deed reopened", entityType: "Land Property", entityId: id, landId: id });
+      return res.json({ message: done ? `${l.LandCode}: deed completed` : `${l.LandCode}: back in Deed Process` });
+    }
+    res.status(400).json({ error: "Nothing to change" });
   } catch (err) {
-    console.error("[legal-land] verify error:", err.message);
-    res.status(500).json({ error: "Could not verify land record" });
+    console.error("[legal-land] deed-process save:", err.message);
+    res.status(500).json({ error: "Could not save" });
   }
 });
 
-router.post("/:id/submit-l1", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+// POST /:id/deed-process/reverify — the verifier has checked the changes made after verification; clears the flag.
+router.post("/:id/deed-process/reverify", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid land id" });
+  const pool = getPool();
   try {
-    const pool = getPool();
-    const st = (await pool.request().input("Id", sql.Int, id).query("SELECT VerificationStatus, L2Status FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
-    if (!st) return res.status(404).json({ error: "Land not found" });
-    if (st.VerificationStatus !== "Verified") return res.status(409).json({ error: "Verify the land data before sending it for L1 review" });
-    if (st.L2Status === "Approved") return res.status(409).json({ error: "This land is already fully approved" });
-    const r = await pool.request()
-      .input("Id", sql.Int, id)
-      .input("UserId", sql.Int, req.user?.userId || null)
-      .query(`
-        UPDATE dbo.LegalLand
-        SET L1Status = N'Pending',
-            WorkflowStatus = N'L1 Pending',
-            UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
-        OUTPUT INSERTED.LandCode
-        WHERE LandId = @Id AND IsActive = 1
-      `);
-    if (!r.recordset.length) return res.status(404).json({ error: "Land not found" });
-    await writeAudit(pool, req, { action: "Submitted for L1 Review", entityType: "Land Property", entityId: id, landId: id });
-    res.json({ message: `Land ${r.recordset[0].LandCode} submitted for L1 Legal Review.` });
+    if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') AS c")).recordset[0].c) return res.status(503).json({ error: "Re-verification is not set up yet (migration 635)" });
+    if (!(await canAct(req, "Verifier", LAND_PAGE))) return res.status(403).json({ error: "Only a Verifier (Setup → Approval Control) can re-verify" });
+    const l = (await pool.request().input("Id", sql.Int, id).query("SELECT LandCode, DeedChangedAt, DeedChangedBy FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1")).recordset[0];
+    if (!l) return res.status(404).json({ error: "Land not found" });
+    if (!l.DeedChangedAt) return res.status(409).json({ error: "Nothing changed since verification" });
+    const own = ownWork(req, l.DeedChangedBy, "these changes");
+    if (own) return res.status(409).json({ error: own });
+    await pool.request().input("Id", sql.Int, id).input("U", sql.Int, req.user?.userId || null).query(
+      "UPDATE dbo.LegalLand SET DeedChangedAt = NULL, DeedChangedBy = NULL, DeedReverifiedAt = SYSUTCDATETIME(), DeedReverifiedBy = @U WHERE LandId = @Id");
+    await writeAudit(pool, req, { action: "Deed changes re-verified", entityType: "Land Property", entityId: id, landId: id });
+    res.json({ message: `${l.LandCode}: changes verified` });
   } catch (err) {
-    console.error("[legal-land] submit-l1 error:", err.message);
-    res.status(500).json({ error: "Could not submit for L1 review" });
+    console.error("[legal-land] reverify:", err.message);
+    res.status(500).json({ error: "Could not re-verify" });
   }
 });
 
-router.post("/:id/action-l1", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+// POST /:id/deed-process/approve { level: 1|2, action: "Approve"|"Reject"|"Hold", remarks }
+// Two-level approval on the Deed Process page. L1 (L1 Approver) needs the deed copy and no unverified change;
+// L2 (L2 Approver, not the L1 approver) moves the land to Deed Registration. Reject sends it back to L1;
+// Hold parks it at that level (it can be approved later). Reject and Hold need a reason.
+router.post("/:id/deed-process/approve", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
+  const level = Number(req.body?.level);
   const action = req.body?.action;
   const remarks = text(req.body?.remarks, 1000);
-  if (!id) return res.status(400).json({ error: "Invalid land id" });
-  if (!["Approve", "Return"].includes(action)) return res.status(400).json({ error: "Action must be Approve or Return" });
-  if (action === "Return" && !remarks) return res.status(400).json({ error: "Remarks required when returning" });
+  if (!id || ![1, 2].includes(level) || !["Approve", "Reject", "Hold"].includes(action)) return res.status(400).json({ error: "Invalid request" });
+  if (action !== "Approve" && !remarks) return res.status(400).json({ error: "Give the reason" });
+  const pool = getPool();
   try {
-    const g = await stageGuard(req, id, "l1");
-    if (g.error) return res.status(g.status).json({ error: g.error });
-    const pool = getPool();
-    const isApprove = action === "Approve";
-    const r = await pool.request()
-      .input("Id", sql.Int, id)
-      .input("UserId", sql.Int, req.user?.userId || null)
-      .input("Remarks", sql.NVarChar(1000), remarks)
-      .input("L1Status", sql.NVarChar(30), isApprove ? "Approved" : "Returned")
-      .input("L2Status", sql.NVarChar(30), isApprove ? "Pending" : "Pending")
-      .input("VerificationStatus", sql.NVarChar(30), isApprove ? "Verified" : "Draft")
-      .input("WorkflowStatus", sql.NVarChar(60), isApprove ? "L2 Pending" : "L1 Returned (Draft)")
-      .query(`
-        UPDATE dbo.LegalLand
-        SET L1Status = @L1Status,
-            L1ReviewerId = @UserId,
-            L1ReviewedAt = SYSUTCDATETIME(),
-            L1Remarks = @Remarks,
-            L2Status = @L2Status,
-            VerificationStatus = @VerificationStatus,
-            WorkflowStatus = @WorkflowStatus,
-            UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
-        OUTPUT INSERTED.LandCode
-        WHERE LandId = @Id AND IsActive = 1
-      `);
-    if (!r.recordset.length) return res.status(404).json({ error: "Land not found" });
-    await writeAudit(pool, req, {
-      action: isApprove ? "Land L1 Approved" : "Land L1 Returned",
-      entityType: "Land Property",
-      entityId: id,
-      landId: id,
-      newValue: { L1Status: isApprove ? "Approved" : "Returned", remarks },
-      remarks
-    });
-    res.json({ message: isApprove ? `Land ${r.recordset[0].LandCode} L1 approved; forwarded to L2 Executive Approval.` : `Land ${r.recordset[0].LandCode} returned for correction.` });
+    const role = level === 1 ? "L1 Approver" : "L2 Approver";
+    if (!(await canAct(req, role, LAND_PAGE))) return res.status(403).json({ error: `Only an ${role} (Setup → Approval Control) can do this` });
+    const cols = (await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedFileId') AS a, COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') AS b, COL_LENGTH('dbo.LegalLand', 'DeedApprovalNote') AS c")).recordset[0];
+    const l = (await pool.request().input("Id", sql.Int, id).query(`
+      SELECT LandCode, CreatedBy, WorkflowStatus, ISNULL(L1Status, N'Pending') AS L1Status, L1ReviewerId
+             ${cols.a ? ", DeedFileId" : ""} ${cols.b ? ", DeedChangedAt" : ""}
+      FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1`)).recordset[0];
+    if (!l) return res.status(404).json({ error: "Land not found" });
+    if (l.WorkflowStatus !== "Deed Process") return res.status(409).json({ error: `${l.LandCode} is not in Deed Process` });
+    const own = ownWork(req, l.CreatedBy, "this land");
+    if (own) return res.status(409).json({ error: own });
+    if (action === "Approve" && l.DeedChangedAt) return res.status(409).json({ error: `${l.LandCode} was changed after verification — a verifier must re-verify it first` });
+    const userId = req.user?.userId || null;
+    const note = cols.c ? ", DeedApprovalNote = @R" : "";
+    const q = pool.request().input("Id", sql.Int, id).input("U", sql.Int, userId).input("R", sql.NVarChar(1000), remarks);
+    let message;
+    if (level === 1) {
+      if (l.L1Status === "Approved") return res.status(409).json({ error: "L1 is already approved — waiting for L2" });
+      if (action === "Approve" && cols.a && !l.DeedFileId) return res.status(409).json({ error: "Upload the deed copy before approval" });
+      const st = { Approve: "Approved", Reject: "Rejected", Hold: "On Hold" }[action];
+      await q.input("S", sql.NVarChar(30), st).query(
+        `UPDATE dbo.LegalLand SET L1Status = @S, L1ReviewerId = @U, L1ReviewedAt = SYSUTCDATETIME(), L1Remarks = @R, L2Status = N'Pending'${note}, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
+      message = { Approve: `${l.LandCode}: L1 approved — waiting for L2`, Reject: `${l.LandCode}: rejected at L1`, Hold: `${l.LandCode}: on hold at L1` }[action];
+    } else {
+      if (l.L1Status !== "Approved") return res.status(409).json({ error: "L1 approval comes before L2" });
+      if (!isSuperAdmin(req) && l.L1ReviewerId != null && Number(l.L1ReviewerId) === Number(userId)) return res.status(409).json({ error: "You gave the L1 approval — another user must give L2" });
+      if (action === "Approve") {
+        await q.query(`UPDATE dbo.LegalLand SET L2Status = N'Approved', L2ApproverId = @U, L2ApprovedAt = SYSUTCDATETIME(), L2Remarks = @R,
+                       WorkflowStatus = N'Deed Registration', UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
+        message = `${l.LandCode}: L2 approved — moved to Deed Registration`;
+      } else if (action === "Hold") {
+        await q.query(`UPDATE dbo.LegalLand SET L2Status = N'On Hold', L2ApproverId = @U, L2ApprovedAt = SYSUTCDATETIME(), L2Remarks = @R${note}, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
+        message = `${l.LandCode}: on hold at L2`;
+      } else {
+        await q.query(`UPDATE dbo.LegalLand SET L2Status = N'Rejected', L2ApproverId = @U, L2ApprovedAt = SYSUTCDATETIME(), L2Remarks = @R,
+                       L1Status = N'Pending'${note}, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
+        message = `${l.LandCode}: rejected at L2 — back to L1`;
+      }
+    }
+    await writeAudit(pool, req, { action: `Deed L${level} ${action === "Approve" ? "approved" : action === "Reject" ? "rejected" : "on hold"}`, entityType: "Land Property", entityId: id, landId: id, remarks });
+    res.json({ message });
   } catch (err) {
-    console.error("[legal-land] action-l1 error:", err.message);
-    res.status(500).json({ error: "Could not record L1 action" });
+    console.error("[legal-land] deed approve:", err.message);
+    res.status(500).json({ error: "Could not save" });
   }
 });
 
-router.post("/:id/action-l2", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+// GET /deed-registration/list — lands approved (L1 + L2) on the Deed Process page, ready for deed registration.
+router.get("/deed-registration/list", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await deedReady(pool))) return res.json([]);
+    const copy = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedFileId') AS c")).recordset[0].c;
+    const reg = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'RegAppliedAt') AS c")).recordset[0].c;
+    const r = await pool.request().query(`
+      SELECT l.LandId, l.LandCode, l.LandName, d.DistrictName, m.MouzaName, m.JLNo, l.L2ApprovedAt,
+             (SELECT name FROM dbo.users WHERE id = l.L1ReviewerId) AS L1By, (SELECT name FROM dbo.users WHERE id = l.L2ApproverId) AS L2By,
+             -- What the registration application needs: plot references, area, the sellers (current owners), value, timeline.
+             l.RsDagNo, l.RsKhatianNo, l.LrDagNo, l.LrKhatianNo, CAST(l.Area AS FLOAT) AS Area, u.UnitName,
+             (SELECT STRING_AGG(o.OwnerName + N' (' + CAST(CAST(o.SharePct AS DECIMAL(7,2)) AS NVARCHAR(10)) + N'%)', N', ')
+                FROM dbo.LegalOwnershipRecord o WHERE o.LandId = l.LandId AND o.IsActive = 1 AND o.ValidTo IS NULL) AS Owners,
+             (SELECT TOP 1 v.GovernmentValuation FROM dbo.LegalValuation v WHERE v.LandId = l.LandId AND v.IsActive = 1 ORDER BY v.ValuationDate DESC) AS GovtValue,
+             (SELECT TOP 1 v.EstimatedMarketValue FROM dbo.LegalValuation v WHERE v.LandId = l.LandId AND v.IsActive = 1 ORDER BY v.ValuationDate DESC) AS MarketValue,
+             CONVERT(char(10), l.DeedTargetDate, 23) AS DeedTargetDate
+             ${reg ? `, l.RegAppliedAt, (SELECT name FROM dbo.users WHERE id = l.RegAppliedBy) AS RegAppliedByName, DATEDIFF(day, l.RegAppliedAt, SYSUTCDATETIME()) AS RegDaysOpen,
+                       l.RegDeedFileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = l.RegDeedFileId) AS RegDeedFileName` : ""}
+             ${copy ? ", l.DeedFileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = l.DeedFileId) AS DeedFileName" : ""}
+      FROM dbo.LegalLand l
+      LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
+      LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
+      WHERE l.IsActive = 1 AND l.WorkflowStatus = N'Deed Registration'
+      ORDER BY l.L2ApprovedAt DESC`);
+    res.json({ lands: r.recordset, canApply: (await canAct(req, "L1 Approver", LAND_PAGE)) || (await canAct(req, "L2 Approver", LAND_PAGE)) });
+  } catch (err) {
+    console.error("[legal-land] deed-registration list:", err.message);
+    res.status(500).json({ error: "Could not load the Deed Registration list" });
+  }
+});
+
+// ── Registry search (Deed Registration page) ──────────────────────────────────────────────────────────────────────
+const SEARCH_RESULTS = ["Clear — no other deed", "Deed found", "Encumbrance / charge found", "Record not found", "Mismatch in records", "Other"];
+const searchReady = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalRegistrySearch', 'U') AS t")).recordset[0].t;
+
+// GET /registry-search/lookup?q= — a land by Land ID or enquiry number, with what the search needs.
+router.get("/registry-search/lookup", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const q = text(req.query.q, 60);
+  if (!q) return res.status(400).json({ error: "Enter a Land ID or enquiry number" });
+  try {
+    const pool = getPool();
+    const l = (await pool.request().input("Q", sql.NVarChar(60), q).query(`
+      SELECT TOP 1 l.LandId, l.LandCode, l.LandName, e.EnquiryNo, d.DistrictName, m.MouzaName, m.JLNo, l.WorkflowStatus,
+             l.RsDagNo, l.RsKhatianNo, l.LrDagNo, l.LrKhatianNo, CAST(l.Area AS FLOAT) AS Area, u.UnitName, l.LocationAddress,
+             (SELECT STRING_AGG(o.OwnerName, N', ') FROM dbo.LegalOwnershipRecord o WHERE o.LandId = l.LandId AND o.IsActive = 1 AND o.ValidTo IS NULL) AS Owners
+      FROM dbo.LegalLand l
+      LEFT JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = l.EnquiryId
+      LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
+      LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
+      WHERE l.IsActive = 1 AND (l.LandCode = @Q OR e.EnquiryNo = @Q)`)).recordset[0];
+    if (!l) return res.status(404).json({ error: `No land found for "${q}". An enquiry must be converted to a land first.` });
+    // Every RS / LR record of the land (a land can have several plots).
+    const recs = (await pool.request().input("Id", sql.Int, l.LandId).query(`
+      SELECT N'RS' AS Kind, RsDagNo AS Dag, RsKhatianNo AS Khatian FROM dbo.LegalLandRsRecord WHERE LandId = @Id AND IsActive = 1
+      UNION ALL SELECT N'LR', LrDagNo, LrKhatianNo FROM dbo.LegalLandLrRecord WHERE LandId = @Id AND IsActive = 1`)).recordset;
+    res.json({ land: l, records: recs, results: SEARCH_RESULTS });
+  } catch (err) {
+    console.error("[legal-land] registry lookup:", err.message);
+    res.status(500).json({ error: "Could not find the land" });
+  }
+});
+
+// GET /:id/registry-search — saved searches of a land.
+router.get("/:id/registry-search", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land id" });
+  try {
+    const pool = getPool();
+    if (!(await searchReady(pool))) return res.json([]);
+    const r = await pool.request().input("Id", sql.Int, id).query(`
+      SELECT s.SearchId, s.FinYear, o.OfficeName, s.RsDagNo, s.RsKhatianNo, s.LrDagNo, s.LrKhatianNo, s.SiteName, s.Result, s.DeedNoFound, s.Details,
+             s.FileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = s.FileId) AS FileName, s.CreatedAt,
+             (SELECT name FROM dbo.users WHERE id = s.CreatedBy) AS CreatedByName
+      FROM dbo.LegalRegistrySearch s LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = s.OfficeId
+      WHERE s.LandId = @Id ORDER BY s.CreatedAt DESC`);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[legal-land] registry list:", err.message);
+    res.status(500).json({ error: "Could not load the searches" });
+  }
+});
+
+// POST /:id/registry-search — store what was found on the government site.
+router.post("/:id/registry-search", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land id" });
+  const b = req.body || {};
+  const result = SEARCH_RESULTS.includes(b.result) ? b.result : null;
+  if (!result) return res.status(400).json({ error: "Choose what was found" });
+  const officeId = b.officeId ? idParam(b.officeId) : null;
+  if (!officeId) return res.status(400).json({ error: "Choose the registration office" });
+  const fy = text(b.finYear, 20);
+  if (!fy || !/^\d{4}-\d{2}$/.test(fy)) return res.status(400).json({ error: "Choose the financial year" });
+  if (result !== "Clear — no other deed" && result !== "Record not found" && !text(b.details, 2000)) return res.status(400).json({ error: "Write the details found" });
+  const pool = getPool();
+  try {
+    if (!(await searchReady(pool))) return res.status(503).json({ error: "Registry search is not set up yet (migration 637)" });
+    if (!(await pool.request().input("O", sql.Int, officeId).query("SELECT 1 AS x FROM dbo.LegalRegistrationOffice WHERE OfficeId = @O")).recordset[0]) return res.status(400).json({ error: "Registration office not found" });
+    const r = await pool.request().input("Id", sql.Int, id).input("O", sql.Int, officeId).input("Fy", sql.NVarChar(20), fy)
+      .input("RsD", sql.NVarChar(30), text(b.rsDagNo, 30)).input("RsK", sql.NVarChar(30), text(b.rsKhatianNo, 30))
+      .input("LrD", sql.NVarChar(30), text(b.lrDagNo, 30)).input("LrK", sql.NVarChar(30), text(b.lrKhatianNo, 30))
+      .input("Site", sql.NVarChar(200), text(b.siteName, 200)).input("Res", sql.NVarChar(40), result)
+      .input("Deed", sql.NVarChar(100), text(b.deedNoFound, 100)).input("Det", sql.NVarChar(2000), text(b.details, 2000))
+      .input("File", sql.Int, b.fileId ? idParam(b.fileId) : null).input("U", sql.Int, req.user?.userId || null).query(`
+        INSERT INTO dbo.LegalRegistrySearch (LandId, OfficeId, FinYear, RsDagNo, RsKhatianNo, LrDagNo, LrKhatianNo, SiteName, Result, DeedNoFound, Details, FileId, CreatedBy)
+        OUTPUT INSERTED.SearchId
+        SELECT @Id, @O, @Fy, @RsD, @RsK, @LrD, @LrK, @Site, @Res, @Deed, @Det, @File, @U WHERE EXISTS (SELECT 1 FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1)`);
+    if (!r.recordset.length) return res.status(404).json({ error: "Land not found" });
+    await writeAudit(pool, req, { action: "Registry search recorded", entityType: "Land Property", entityId: id, landId: id, newValue: { result, finYear: fy } });
+    res.status(201).json({ message: "Search result saved" });
+  } catch (err) {
+    console.error("[legal-land] registry save:", err.message);
+    res.status(500).json({ error: "Could not save" });
+  }
+});
+
+// POST /:id/deed-registration { action: "apply" } — an approver (L1 / L2 Approver) applies for registration; who and
+// when are kept and the days open are counted from then. { action: "submit", fileId } — after registration, the
+// registered deed copy is uploaded and submitted: the land becomes "Registered" and shows in Land & Projects.
+router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   const action = req.body?.action;
-  const remarks = text(req.body?.remarks, 1000);
-  if (!id) return res.status(400).json({ error: "Invalid land id" });
-  if (!["Approve", "Return", "Reject"].includes(action)) return res.status(400).json({ error: "Action must be Approve, Return or Reject" });
-  if ((action === "Return" || action === "Reject") && !remarks) return res.status(400).json({ error: "Remarks required when returning or rejecting" });
+  if (!id || !["apply", "submit"].includes(action)) return res.status(400).json({ error: "Invalid request" });
+  const pool = getPool();
   try {
-    const g = await stageGuard(req, id, "l2");
-    if (g.error) return res.status(g.status).json({ error: g.error });
-    const pool = getPool();
-    const isApprove = action === "Approve";
-    const isReturn = action === "Return";
-    const l2Status = isApprove ? "Approved" : isReturn ? "Returned" : "Rejected";
-    const l1Status = isReturn ? "Pending" : undefined;
-    const landStatus = isApprove ? "Owned" : action === "Reject" ? "In Dispute" : undefined;
-    const workflowStatus = isApprove ? "Approved" : isReturn ? "L2 Returned to L1" : "Rejected";
-
-    const request = pool.request()
-      .input("Id", sql.Int, id)
-      .input("UserId", sql.Int, req.user?.userId || null)
-      .input("Remarks", sql.NVarChar(1000), remarks)
-      .input("L2Status", sql.NVarChar(30), l2Status)
-      .input("WorkflowStatus", sql.NVarChar(60), workflowStatus);
-
-    let extraUpdates = "";
-    if (l1Status) {
-      request.input("L1Status", sql.NVarChar(30), l1Status);
-      extraUpdates += ", L1Status = @L1Status";
+    if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'RegAppliedAt') AS c")).recordset[0].c) return res.status(503).json({ error: "Deed registration is not set up yet (migration 638)" });
+    if (!(await canAct(req, "L1 Approver", LAND_PAGE)) && !(await canAct(req, "L2 Approver", LAND_PAGE))) return res.status(403).json({ error: "Only an approver (Setup → Approval Control) can do this" });
+    const l = (await pool.request().input("Id", sql.Int, id).query("SELECT LandCode, WorkflowStatus, RegAppliedAt FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1")).recordset[0];
+    if (!l) return res.status(404).json({ error: "Land not found" });
+    if (l.WorkflowStatus !== "Deed Registration") return res.status(409).json({ error: `${l.LandCode} is not waiting for deed registration` });
+    const userId = req.user?.userId || null;
+    if (action === "apply") {
+      if (l.RegAppliedAt) return res.status(409).json({ error: `${l.LandCode} is already applied for registration` });
+      await pool.request().input("Id", sql.Int, id).input("U", sql.Int, userId).query(
+        "UPDATE dbo.LegalLand SET RegAppliedBy = @U, RegAppliedAt = SYSUTCDATETIME(), UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id");
+      await writeAudit(pool, req, { action: "Applied for deed registration", entityType: "Land Property", entityId: id, landId: id });
+      return res.json({ message: `${l.LandCode}: applied for deed registration` });
     }
-    if (landStatus) {
-      request.input("LandStatus", sql.NVarChar(40), landStatus);
-      extraUpdates += ", LandStatus = @LandStatus";
-    }
-
-    const r = await request.query(`
-      UPDATE dbo.LegalLand
-      SET L2Status = @L2Status,
-          L2ApproverId = @UserId,
-          L2ApprovedAt = SYSUTCDATETIME(),
-          L2Remarks = @Remarks,
-          WorkflowStatus = @WorkflowStatus
-          ${extraUpdates},
-          UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
-      OUTPUT INSERTED.LandCode
-      WHERE LandId = @Id AND IsActive = 1
-    `);
-    if (!r.recordset.length) return res.status(404).json({ error: "Land not found" });
-    await writeAudit(pool, req, {
-      action: isApprove ? "Land L2 Final Approved" : isReturn ? "Land L2 Returned" : "Land L2 Rejected",
-      entityType: "Land Property",
-      entityId: id,
-      landId: id,
-      newValue: { L2Status: l2Status, workflowStatus },
-      remarks
-    });
-    res.json({
-      message: isApprove
-        ? `Land ${r.recordset[0].LandCode} formally approved at Level 2 (Final). Property status is Active / Owned.`
-        : isReturn
-        ? `Land ${r.recordset[0].LandCode} returned to L1 Legal Review.`
-        : `Land ${r.recordset[0].LandCode} has been rejected.`
-    });
+    if (!l.RegAppliedAt) return res.status(409).json({ error: "Apply for registration first" });
+    const fileId = idParam(req.body?.fileId);
+    if (!fileId) return res.status(400).json({ error: "Upload the registered deed copy" });
+    if (!(await pool.request().input("F", sql.Int, fileId).query("SELECT 1 AS x FROM dbo.LegalMasterFile WHERE FileId = @F")).recordset[0]) return res.status(400).json({ error: "File not found" });
+    await pool.request().input("Id", sql.Int, id).input("U", sql.Int, userId).input("F", sql.Int, fileId).query(`
+      UPDATE dbo.LegalLand SET RegDeedFileId = @F, RegCompletedBy = @U, RegCompletedAt = SYSUTCDATETIME(), WorkflowStatus = N'Registered',
+             UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
+    await writeAudit(pool, req, { action: "Deed registered", entityType: "Land Property", entityId: id, landId: id, newValue: { fileId } });
+    res.json({ message: `${l.LandCode}: deed registered — now in Land & Projects` });
   } catch (err) {
-    console.error("[legal-land] action-l2 error:", err.message);
-    res.status(500).json({ error: "Could not record L2 action" });
+    console.error("[legal-land] deed registration:", err.message);
+    res.status(500).json({ error: "Could not save" });
   }
 });
-
 
 module.exports = router;

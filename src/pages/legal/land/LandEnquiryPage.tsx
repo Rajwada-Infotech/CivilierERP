@@ -6,6 +6,7 @@ import { MessageQuestion } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
+import { PortalFetchButtons } from "@/components/legal/PortalFetch";
 import { usePageRights } from "@/hooks/usePageRights";
 import { convertEnquiry, setEnquiryStatus, getMyWhatsApp, setMyWhatsApp } from "@/api/legalLandApi";
 import { askLegal } from "@/components/legal/LegalAsk";
@@ -23,7 +24,7 @@ export default function LandEnquiryPage() {
   const rights = usePageRights(entry.pageKey);
 
   const convert = async (id: number, no: string) => {
-    if (!(await askLegal({ title: `Convert enquiry ${no}?`, message: "A new Land ID is created and its Land Profile opens. The enquiry becomes read-only.", confirmText: "Convert to land" }))) return;
+    if (!(await askLegal({ title: `Convert enquiry ${no}?`, message: "A new Land ID is created and its Land Profile opens. The enquiry becomes read-only.", confirmText: "Land Conversion" }))) return;
     try {
       const r = await convertEnquiry(id);
       toast.success(r.message);
@@ -74,7 +75,7 @@ export default function LandEnquiryPage() {
           ))}
         </div>
         <MyWhatsAppPrompt />
-        <div className="mb-4"><GovtSiteLinks hint="Before converting an enquiry, check the plot on the official site. A link opens in the side panel; if a site stays blank there (some government sites block this), use ↗ to open it in a new tab." /></div>
+        <div className="mb-4"><GovtSiteLinks hint="Before converting an enquiry, check the plot on the official site (opens in a new tab)." /></div>
         <LegalMasterTable
           entry={entry}
           rowClassName={(raw) => STATUS_ROW[String(raw.EnquiryStatus)]}
@@ -85,21 +86,27 @@ export default function LandEnquiryPage() {
             const no = String(raw.EnquiryNo);
             const st = String(raw.EnquiryStatus);
             // Latitude / longitude entered → open the plot on Google Maps.
+            // Sites with an API switched on (Admin → API Integration): fetch this plot's details.
+            const portal = <PortalFetchButtons title={no} values={{
+              district: String(raw.DistrictId__label ?? ""), mouza: String(raw.MouzaId__label ?? "").replace(/\s*\(J\.L\..*\)$/, ""),
+              jlNo: raw.JLNo as string, location: raw.LandLocation as string, lat: raw.GpsLatitude as number, lng: raw.GpsLongitude as number, enquiryNo: no,
+            }} />;
             const map = raw.GpsLatitude != null && raw.GpsLongitude != null && (
               <button onClick={() => openLegalMap(raw.GpsLatitude, raw.GpsLongitude, `${no} · map`)} className={small} title="Show this plot on Google Maps in the side panel">Map</button>
             );
             if (raw.LandId) {
-              return <span className="inline-flex gap-1.5">{map}<button onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)} className={small}>Open land</button></span>;
+              return <span className="inline-flex gap-1.5">{map}{portal}<button onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)} className={small}>Open land</button></span>;
             }
-            if (!rights.canEdit) return map || null;
+            if (!rights.canEdit) return <span className="inline-flex flex-wrap gap-1.5">{map}{portal}</span>;
             // Rejected / on hold: only Resume. Otherwise: Convert, Hold, Reject.
             if (st === "Rejected" || st === "On Hold") {
-              return <span className="inline-flex gap-1.5">{map}<button onClick={() => changeStatus(id, no, "Under Review")} className={small}>Resume</button></span>;
+              return <span className="inline-flex gap-1.5">{map}{portal}<button onClick={() => changeStatus(id, no, "Under Review")} className={small}>Resume</button></span>;
             }
             return (
               <span className="inline-flex flex-wrap justify-end gap-1.5">
                 {map}
-                {landRights.canCreate && <button onClick={() => convert(id, no)} className={small}>Convert to land</button>}
+                {portal}
+                {landRights.canCreate && <button onClick={() => convert(id, no)} className={small}>Land Conversion</button>}
                 <button onClick={() => changeStatus(id, no, "On Hold")} className={small}>Hold</button>
                 <button onClick={() => changeStatus(id, no, "Rejected")} className={`${small} text-rose-600`}>Reject</button>
               </span>

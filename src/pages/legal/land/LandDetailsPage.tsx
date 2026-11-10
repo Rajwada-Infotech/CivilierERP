@@ -1,12 +1,13 @@
-import React from "react";
+import React, { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { DocumentText } from "iconsax-react";
 import { ArrowLeft, Download } from "lucide-react";
 import { printLegalSheet } from "@/lib/legalPrint";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell, LEGAL_ACCENT } from "@/components/legal/LegalShell";
-import { getLandDossier } from "@/api/legalLandApi";
+import { getLandDossier, getFinalStatus, finalVerifyLand, reverifyDeedChanges } from "@/api/legalLandApi";
 import { LegalFileLink, openLegalMap } from "@/components/legal/LegalDocumentPreview";
 
 // Everything recorded on one land property, section by section, on one page. "Download PDF" prints just this
@@ -56,7 +57,105 @@ const Table: React.FC<{ rows: Row[]; cols: [string, string][]; empty?: string }>
     </div>
   );
 
-export default function LandDetailsPage() {
+/**
+ * Final verification (end of the full-details page): the verifier has read every detail and document above,
+ * sets the timeline (deed to be done by) and sends the land to the deed department.
+ */
+function FinalVerifyPanel({ landId }: { landId: number }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { data: st } = useQuery({ queryKey: ["legal-land-final", landId], queryFn: () => getFinalStatus(landId) });
+  const [target, setTarget] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!st) return null;
+  if (st.inDeedProcess && st.changed) return <ReverifyPanel landId={landId} st={st} />;
+  if (st.inDeedProcess) return (
+    <section className="flex flex-wrap items-center justify-between gap-3 border-2 border-emerald-600 bg-emerald-500/5 p-4 print:hidden">
+      <div>
+        <p className="text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-emerald-700">Verified · {st.workflowStatus}</p>
+        <p className="mt-1 text-sm text-foreground">
+          Verified{st.verifiedBy ? ` by ${st.verifiedBy}` : ""}{st.verifiedAt ? ` on ${fmtDate(st.verifiedAt)}` : ""}{st.targetDate ? ` · deed timeline ${fmtDate(st.targetDate)}` : ""}. No changes since verification.
+        </p>
+      </div>
+      <button onClick={() => navigate("/legal/land/deed-process")} className="border border-foreground px-3 py-1.5 text-xs font-heading font-semibold uppercase tracking-[0.08em] hover:bg-primary/10">Open Deed Process</button>
+    </section>
+  );
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      toast.success((await finalVerifyLand(landId, target)).message);
+      qc.invalidateQueries({ queryKey: ["legal-land-final", landId] });
+      qc.invalidateQueries({ queryKey: ["legal-land-overview", landId] });
+      qc.invalidateQueries({ queryKey: ["legal-deed-process"] });
+      navigate("/legal/land/deed-process");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not verify");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <section className="border-2 border-foreground p-4 print:hidden">
+      <p className="text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">Final verification</p>
+      {!st.ready ? <p className="mt-1 text-sm text-destructive">Data entry is not complete: {st.missing.join(", ")}.</p>
+        : !st.canVerify ? <p className="mt-1 text-sm text-muted-foreground">{st.blockedReason}</p>
+        : (
+          <div className="mt-2 flex flex-wrap items-end gap-3">
+            <label className="text-xs text-muted-foreground">Timeline — deed to be done by *
+              <input type="date" min={new Date().toISOString().slice(0, 10)} value={target} onChange={(e) => setTarget(e.target.value)}
+                className="mt-1 block border border-border bg-background px-2 py-1.5 text-sm text-foreground" />
+            </label>
+            <button disabled={!target || busy} onClick={submit}
+              className="bg-foreground px-4 py-2 text-xs font-heading font-semibold uppercase tracking-[0.08em] text-card disabled:cursor-not-allowed disabled:opacity-40">
+              {busy ? "Saving…" : "Deed Process"}
+            </button>
+          </div>
+        )}
+    </section>
+  );
+}
+
+/** Land in Deed Process changed after verification: the verifier checks the changes and ticks Verified. */
+function ReverifyPanel({ landId, st }: { landId: number; st: NonNullable<Awaited<ReturnType<typeof getFinalStatus>>> }) {
+  const qc = useQueryClient();
+  const [checked, setChecked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const ch = st.changed!;
+  const submit = async () => {
+    setBusy(true);
+    try {
+      toast.success((await reverifyDeedChanges(landId)).message);
+      qc.invalidateQueries({ queryKey: ["legal-land-final", landId] });
+      qc.invalidateQueries({ queryKey: ["legal-deed-process"] });
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not verify"); } finally { setBusy(false); }
+  };
+  return (
+    <section className="border-2 border-amber-500 bg-amber-500/5 p-4 print:hidden">
+      <p className="text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-amber-700">Changed after verification</p>
+      <p className="mt-1 text-sm">This land was changed after it went to Deed Process{ch.by ? ` (last by ${ch.by})` : ""}. Check the changes above, then verify.</p>
+      {ch.items.length > 0 && (
+        <ul className="mt-2 max-h-48 overflow-auto text-xs text-muted-foreground">
+          {ch.items.map((x, i) => <li key={i}>{fmtDate(x.CreatedAt)} · {x.UserName ?? "—"} · {x.Action} — {x.EntityType}</li>)}
+        </ul>
+      )}
+      {st.canVerify || st.blockedReason?.includes("entered") ? null : <p className="mt-2 text-sm text-muted-foreground">{st.blockedReason}</p>}
+      <label className="mt-3 flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /> Verified — I have checked these changes
+      </label>
+      <button disabled={!checked || busy} onClick={submit} className="mt-3 bg-foreground px-4 py-2 text-xs font-heading font-semibold uppercase tracking-[0.08em] text-card disabled:cursor-not-allowed disabled:opacity-40">
+        {busy ? "Saving…" : "Save verification"}
+      </button>
+    </section>
+  );
+}
+
+// Where the page was opened from: its breadcrumb, back button and sidebar item stay in that section.
+const FROM = {
+  "deed-process": { label: "Deed Process", path: "/legal/land/deed-process" },
+  "deed-registration": { label: "Deed Registration", path: "/legal/deed-registration" },
+} as const;
+
+export default function LandDetailsPage({ verify = false, from }: { verify?: boolean; from?: keyof typeof FROM }) {
   const id = Number(useParams().id);
   const navigate = useNavigate();
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-land-dossier", id], queryFn: () => getLandDossier(id), enabled: id > 0 });
@@ -72,14 +171,16 @@ export default function LandDetailsPage() {
 
   return (
     <>
-      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Land Register", path: "/legal/land/properties" }, { label: String(L.LandCode ?? "…"), path: home }, { label: "Full details" }]} />
+      <Breadcrumbs items={from
+        ? [{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: FROM[from].label, path: FROM[from].path }, { label: String(L.LandCode ?? "…") }]
+        : [{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Land Register", path: "/legal/land/properties" }, { label: String(L.LandCode ?? "…"), path: home }, { label: verify ? "Final verification" : "Full details" }]} />
       <LegalShell
         title={`${String(L.LandCode ?? "")} · ${String(L.LandName ?? "")}`}
-        subtitle="Everything recorded on this land"
+        subtitle={verify ? "Check every detail and document, set the timeline and send to Deed Process" : "Everything recorded on this land"}
         icon={DocumentText}
         action={
           <div className="flex gap-2 print:hidden">
-            <button className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted" onClick={() => navigate(home)}><ArrowLeft size={13} /><span className="hidden sm:inline">Land Profile</span></button>
+            <button className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted" onClick={() => navigate(from ? FROM[from].path : home)}><ArrowLeft size={13} /><span className="hidden sm:inline">{from ? FROM[from].label : "Land Profile"}</span></button>
             <button className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-card" style={{ background: LEGAL_ACCENT }} disabled={!data} onClick={print}><Download size={13} /> Download PDF</button>
           </div>
         }
@@ -117,34 +218,34 @@ export default function LandDetailsPage() {
             </Section>
 
             <Section title="Current owners" {...at("ownership")}>
-              <Table rows={current} cols={[["OwnerName", "Owner"], ["OwnerGuardian", "Father / husband"], ["SharePct", "Share %"], ["ValidFrom", "Since"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={current} cols={[["OwnerName", "Owner"], ["OwnerGuardian", "Father / husband"], ["SharePct", "Share %"], ["ValidFrom", "Since"]]} />
             </Section>
             <Section title="Ownership chain" {...at("ownership")}>
-              <Table rows={data.chain} cols={[["EventDate", "Transfer date"], ["TransferType", "Transfer type"], ["PreviousOwnerName", "From (previous owner)"], ["NewOwnerName", "To (new owner)"], ["SharePct", "Share %"], ["DocumentNo", "Deed / document no."], ["DocFileId", "Deed copy"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.chain} cols={[["EventDate", "Transfer date"], ["TransferType", "Transfer type"], ["PreviousOwnerName", "From (previous owner)"], ["NewOwnerName", "To (new owner)"], ["SharePct", "Share %"], ["DocumentNo", "Deed / document no."], ["DocFileId", "Deed copy"]]} />
             </Section>
             <Section title="RS / LR records" {...at("records")}>
-              <Table rows={data.records} cols={[["Kind", "Record (RS / LR)"], ["Khatian", "Khatian no."], ["Dag", "Dag no."], ["RecordedHolder", "Recorded holder"], ["Area", "Area"], ["Share", "Share"], ["DocFileId", "Record copy"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.records} cols={[["Kind", "Record (RS / LR)"], ["Khatian", "Khatian no."], ["Dag", "Dag no."], ["RecordedHolder", "Recorded holder"], ["Area", "Area"], ["Share", "Share"], ["DocFileId", "Record copy"]]} />
             </Section>
             <Section title="Documents" {...at("documents")}>
-              <Table rows={data.documents} cols={[["DocumentCode", "Document ID"], ["Title", "Title"], ["DocTypeName", "Document type"], ["DocumentNo", "Document no."], ["CurrentVersionNo", "Version"], ["DocFileId", "Copy"], ["ReviewStatus", "Review"]]} />
+              <Table rows={data.documents} cols={[["DocumentCode", "Document ID"], ["Title", "Title"], ["DocTypeName", "Document type"], ["DocumentNo", "Document no."], ["CurrentVersionNo", "Version"], ["DocFileId", "Copy"]]} />
             </Section>
             <Section title="Legal checks" {...at("legal")}>
               <Table rows={data.legal} cols={[["Kind", "Legal item"], ["Detail", "Case / lender / reference"], ["Status", "Result / status"]]} />
             </Section>
             <Section title="Legal records" {...at("legal")}>
-              <Table rows={data.legalRecords ?? []} cols={[["RecordType", "Record type"], ["CaseNumber", "Case / ref no."], ["CourtAuthority", "Court / authority"], ["FilingDate", "Filed"], ["OrderDate", "Order"], ["RecordStatus", "Status"], ["DocFileId", "Order / notice copy"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.legalRecords ?? []} cols={[["RecordType", "Record type"], ["CaseNumber", "Case / ref no."], ["CourtAuthority", "Court / authority"], ["FilingDate", "Filed"], ["OrderDate", "Order"], ["RecordStatus", "Status"], ["DocFileId", "Order / notice copy"]]} />
             </Section>
             <Section title="Loans & mortgages" {...at("loans")}>
-              <Table rows={data.loans ?? []} cols={[["LenderName", "Lender"], ["LoanType", "Loan type"], ["LoanAmount", "Amount ₹"], ["OutstandingAmount", "Outstanding ₹"], ["LoanStartDate", "Start"], ["LoanClosureDate", "Closed"], ["LoanStatus", "Status"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.loans ?? []} cols={[["LenderName", "Lender"], ["LoanType", "Loan type"], ["LoanAmount", "Amount ₹"], ["OutstandingAmount", "Outstanding ₹"], ["LoanStartDate", "Start"], ["LoanClosureDate", "Closed"], ["LoanStatus", "Status"]]} />
             </Section>
             <Section title="Payments" {...at("payments")}>
-              <Table rows={data.payments ?? []} cols={[["PaymentDate", "Payment date"], ["TxnType", "Payment purpose"], ["Amount", "Amount ₹"], ["Payer", "Paid by"], ["Payee", "Paid to"], ["PaymentMode", "Mode"], ["Ref", "Reference"], ["DocFileId", "Receipt"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.payments ?? []} cols={[["PaymentDate", "Payment date"], ["TxnType", "Payment purpose"], ["Amount", "Amount ₹"], ["Payer", "Paid by"], ["Payee", "Paid to"], ["PaymentMode", "Mode"], ["Ref", "Reference"], ["DocFileId", "Receipt"]]} />
             </Section>
             <Section title="Land tax (Khajna)" {...at("tax")}>
-              <Table rows={data.taxes ?? []} cols={[["TaxYear", "Year"], ["PaymentDate", "Paid on"], ["Amount", "Amount ₹"], ["ReceiptNo", "Receipt no."], ["RelatedOwner", "Owner"], ["DocFileId", "Receipt"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.taxes ?? []} cols={[["TaxYear", "Year"], ["PaymentDate", "Paid on"], ["Amount", "Amount ₹"], ["ReceiptNo", "Receipt no."], ["RelatedOwner", "Owner"], ["DocFileId", "Receipt"]]} />
             </Section>
             <Section title="Survey & valuation" {...at("survey")}>
-              <Table rows={data.valuations ?? []} cols={[["ValuationDate", "Valuation date"], ["EstimatedMarketValue", "Market value ₹"], ["GovernmentValuation", "Govt. value ₹"], ["ValuationSource", "Source"], ["Surveyor", "Surveyor"], ["SurveyDate", "Survey date"], ["DocFileId", "Valuation report"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.valuations ?? []} cols={[["ValuationDate", "Valuation date"], ["EstimatedMarketValue", "Market value ₹"], ["GovernmentValuation", "Govt. value ₹"], ["ValuationSource", "Source"], ["Surveyor", "Surveyor"], ["SurveyDate", "Survey date"], ["DocFileId", "Valuation report"]]} />
             </Section>
             {(!backlog || data.transactions.length > 0) && <Section title="Purchase & sale" {...at("transfers")}>
               <Table rows={data.transactions} cols={[["TransactionNo", "Transaction no."], ["TxnType", "Purchase / sale"], ["BuyerName", "Buyer"], ["SellerNames", "Seller(s)"], ["Area", "Area"], ["TotalValue", "Value ₹"], ["Paid", "Verified paid ₹"], ["TxnStatus", "Status"]]} />
@@ -155,6 +256,7 @@ export default function LandDetailsPage() {
             <Section title="Mutation" {...at("mutation")}>
               <Table rows={data.mutations} cols={[["ApplicationNo", "Mutation application no."], ["OfficeName", "BL&LRO office"], ["ApplicationStatus", "Application status"], ["OrderNo", "Mutation order no."], ["OrderDate", "Order date"]]} />
             </Section>
+            <FinalVerifyPanel landId={id} />
           </div>
         )}
       </LegalShell>

@@ -189,7 +189,7 @@ router.post("/:landId", requirePageRight(PAGE, "edit"), async (req, res) => {
                @RegDate, @Owner, @Legal, @Mort, @Desc, @UserId`);
     const doc = ins.recordset[0];
     await tx.request().input("Doc", sql.Int, doc.id).input("File", sql.Int, fileId).input("UserId", sql.Int, req.user?.userId || null)
-      .query("INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy) VALUES (@Doc, 1, @File, @UserId)");
+      .query("INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@Doc, 1, @File, @UserId, N'Verified')");
     await writeAudit(tx, req, { action: "Document uploaded", entityType: "Land Document", entityId: doc.id, landId, newValue: { code: doc.code, title, version: 1 } });
     await tx.commit();
     res.status(201).json({ id: doc.id, message: `Document ${doc.code} added` });
@@ -217,7 +217,7 @@ router.post("/doc/:docId/versions", requirePageRight(PAGE, "edit"), async (req, 
     await tx.request().input("Doc", sql.Int, docId).input("No", sql.Int, next).input("File", sql.Int, fileId)
       .input("Remarks", sql.NVarChar(500), text(req.body?.remarks, 500)).input("UserId", sql.Int, req.user?.userId || null)
       .query(`
-        INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadRemarks, UploadedBy) VALUES (@Doc, @No, @File, @Remarks, @UserId);
+        INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadRemarks, UploadedBy, ReviewStatus) VALUES (@Doc, @No, @File, @Remarks, @UserId, N'Verified');
         UPDATE dbo.LegalLandDocument SET CurrentVersionNo = @No, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE DocumentId = @Doc;`);
     await writeAudit(tx, req, { action: "Document version added", entityType: "Land Document", entityId: docId, landId: d.LandId, oldValue: { version: d.CurrentVersionNo }, newValue: { version: next }, remarks: text(req.body?.remarks, 500) });
     await tx.commit();

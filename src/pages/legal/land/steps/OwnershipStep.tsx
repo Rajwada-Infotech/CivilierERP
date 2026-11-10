@@ -26,16 +26,6 @@ const fmt = (d: unknown) => (d ? new Date(String(d).slice(0, 10)).toLocaleDateSt
 const pct = (v: unknown) => `${Number(v ?? 0).toFixed(2).replace(/\.00$/, "")}%`;
 const dayBefore = (d: string) => (d ? new Date(new Date(d).getTime() - 86400000).toISOString().slice(0, 10) : "");
 
-const VERIFY_STYLE: Record<string, string> = {
-  Verified: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600",
-  Pending: "border-amber-500/40 bg-amber-500/10 text-amber-600",
-  Rejected: "border-rose-500/40 bg-rose-500/10 text-rose-600",
-  "Needs Correction": "border-rose-500/40 bg-rose-500/10 text-rose-600",
-};
-const Chip: React.FC<{ s: unknown }> = ({ s }) => (
-  <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[0.6875rem] ${VERIFY_STYLE[String(s)] ?? "border-border text-muted-foreground"}`}>{String(s ?? "—")}</span>
-);
-
 /** Upload one file at once; shows its name, lets you replace or remove it. */
 const FilePick: React.FC<{ value: { id: number; name: string } | null; onChange: (v: { id: number; name: string } | null) => void; placeholder: string }> = ({ value, onChange, placeholder }) => {
   const ref = useRef<HTMLInputElement>(null);
@@ -345,7 +335,6 @@ const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
               <div key={String(r.RecordId)} className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
                 <div className="font-medium text-foreground">{String(r.OwnerName)} · {pct(r.SharePct)}</div>
                 <div className="text-xs text-muted-foreground">{r.OwnerGuardian ? `c/o ${String(r.OwnerGuardian)} · ` : ""}since {fmt(r.ValidFrom)}</div>
-                <div className="mt-1"><Chip s={r.VerificationStatus} /></div>
               </div>
             ))}
           </div>
@@ -402,7 +391,6 @@ const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
                         <div className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">To</div>
                         <div className="flex flex-wrap items-center gap-2 text-foreground">{String(e.NewOwnerName ?? "")}
                           {e.TransferSharePct != null && <span className="text-xs text-muted-foreground">{pct(e.TransferSharePct)}</span>}
-                          <Chip s={e.VerificationStatus} />
                         </div>
                         {e.NewOwnerGuardian ? <div className="text-xs text-muted-foreground">c/o {String(e.NewOwnerGuardian)}</div> : null}
                       </div>

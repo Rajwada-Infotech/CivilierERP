@@ -8,35 +8,30 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getLegalPendingQueue, actionDeedL1, actionDeedL2 } from "@/api/legalOperationsApi";
+import { getDeedRegistrationLands, deedRegistrationAction, type DeedRegistrationLand } from "@/api/legalLandApi";
+import { uploadLegalFile } from "@/api/legalMastersApi";
+import { askLegal } from "@/components/legal/LegalAsk";
+import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
+import { RegistrySearchPanel, LandRegistrySearches } from "@/components/legal/RegistrySearchPanel";
 import {
   getLandPendingQueue,
-  verifyLand,
-  actionLandL1,
-  actionLandL2,
-  type LandPendingQueueItem,
 } from "@/api/legalLandApi";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-export default function LegalApprovalsInboxPage() {
+export default function LegalApprovalsInboxPage({ view = "land" }: { view?: "land" | "deed" }) {
   const rights = usePageRights("legal-approvals");
   const landRights = usePageRights("legal-land-master");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"land" | "deed">("land");
+  // One page, two sidebar items: Pending Verification (lands) and Deed Registration (after Deed Process).
+  const activeTab: "land" | "deed" = view;
 
   // Deed Modal Action State
   const [activeDeedItem, setActiveDeedItem] = useState<{ id: number; stage: "L1" | "L2"; fileNo: string } | null>(null);
-
-  // Land Modal Action State
-  const [activeLandItem, setActiveLandItem] = useState<{
-    land: LandPendingQueueItem;
-    action: "Verify" | "L1-Approve" | "L1-Return" | "L2-Approve" | "L2-Return" | "L2-Reject";
-    title: string;
-  } | null>(null);
 
   const [modalAction, setModalAction] = useState<"Approve" | "Return" | "Reject" | null>(null);
   const [remarks, setRemarks] = useState("");
@@ -77,45 +72,34 @@ export default function LegalApprovalsInboxPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  // Land Mutations
-  const verifyLandMutation = useMutation({
-    mutationFn: (p: { id: number; remarks: string }) => verifyLand(p.id, p.remarks),
-    onSuccess: (res) => {
-      toast.success(res.message);
-      queryClient.invalidateQueries({ queryKey: ["legal-land-pending-queue"] });
-      queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] });
-      setActiveLandItem(null);
-      setRemarks("");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const l1LandMutation = useMutation({
-    mutationFn: (p: { id: number; action: "Approve" | "Return"; remarks: string }) =>
-      actionLandL1(p.id, p.action, p.remarks),
-    onSuccess: (res) => {
-      toast.success(res.message);
-      queryClient.invalidateQueries({ queryKey: ["legal-land-pending-queue"] });
-      queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] });
-      setActiveLandItem(null);
-      setRemarks("");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const l2LandMutation = useMutation({
-    mutationFn: (p: { id: number; action: "Approve" | "Return" | "Reject"; remarks: string }) =>
-      actionLandL2(p.id, p.action, p.remarks),
-    onSuccess: (res) => {
-      toast.success(res.message);
-      queryClient.invalidateQueries({ queryKey: ["legal-land-pending-queue"] });
-      queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] });
-      setActiveLandItem(null);
-      setRemarks("");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
+  const { data: regData } = useQuery({ queryKey: ["legal-deed-registration"], queryFn: getDeedRegistrationLands, enabled: activeTab === "deed" });
+  // An older backend answered with the plain list; accept both.
+  const regLands = (Array.isArray(regData) ? regData : regData?.lands) ?? [];
+  const [regBusy, setRegBusy] = useState<number | null>(null);
+  // Apply (approvers only; who / when kept) → registered deed copy uploaded → Submit (land moves to Land & Projects).
+  const regApply = async (l: DeedRegistrationLand) => {
+    if (!(await askLegal({ title: `Apply ${l.LandCode} for deed registration?`, message: "Your name and today's date are recorded; the days open are counted from now.", confirmText: "Apply" }))) return;
+    setRegBusy(l.LandId);
+    try { toast.success((await deedRegistrationAction(l.LandId, "apply")).message); queryClient.invalidateQueries({ queryKey: ["legal-deed-registration"] }); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Could not apply"); } finally { setRegBusy(null); }
+  };
+  const regSubmit = (l: DeedRegistrationLand) => {
+    const el = document.createElement("input");
+    el.type = "file"; el.accept = "application/pdf,image/*";
+    el.onchange = async () => {
+      const f = el.files?.[0];
+      if (!f) return;
+      if (f.size > 15 * 1024 * 1024) { toast.error("File is larger than 15 MB"); return; }
+      if (!(await askLegal({ title: `Submit ${l.LandCode} as registered?`, message: `Registered deed copy: ${f.name}. The land then moves to Land & Projects.`, confirmText: "Submit" }))) return;
+      setRegBusy(l.LandId);
+      try {
+        const up = await uploadLegalFile(f);
+        toast.success((await deedRegistrationAction(l.LandId, "submit", up.id)).message);
+        queryClient.invalidateQueries({ queryKey: ["legal-deed-registration"] });
+      } catch (e) { toast.error(e instanceof Error ? e.message : "Could not submit"); } finally { setRegBusy(null); }
+    };
+    el.click();
+  };
   const deedQueue = deedData?.approvalQueue || [];
 
   const handleDeedActionSubmit = (e: React.FormEvent) => {
@@ -129,72 +113,15 @@ export default function LegalApprovalsInboxPage() {
     }
   };
 
-  const handleLandActionSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeLandItem) return;
-    const { land, action } = activeLandItem;
-
-    if (action === "Verify") {
-      verifyLandMutation.mutate({ id: land.LandId, remarks });
-    } else if (action === "L1-Approve") {
-      l1LandMutation.mutate({ id: land.LandId, action: "Approve", remarks });
-    } else if (action === "L1-Return") {
-      l1LandMutation.mutate({ id: land.LandId, action: "Return", remarks });
-    } else if (action === "L2-Approve") {
-      l2LandMutation.mutate({ id: land.LandId, action: "Approve", remarks });
-    } else if (action === "L2-Return") {
-      l2LandMutation.mutate({ id: land.LandId, action: "Return", remarks });
-    } else if (action === "L2-Reject") {
-      l2LandMutation.mutate({ id: land.LandId, action: "Reject", remarks });
-    }
-  };
-
-  const isLandPending =
-    verifyLandMutation.isPending || l1LandMutation.isPending || l2LandMutation.isPending;
-
   return (
     <>
-      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Approval Inbox" }]} />
+      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: activeTab === "deed" ? "Deed Registration" : "Pending Verification" }]} />
       <LegalShell
-        title="Two-Level Approval Inbox"
-        subtitle="Review, return, or formally approve land property records and deed registrations across L1 (Legal Officer) and L2 (Executive / Partner)."
+        title={activeTab === "deed" ? "Deed Registration" : "Pending Verification"}
+        subtitle={activeTab === "deed" ? "Deed registrations after Deed Process, awaiting L1 / L2 review." : "Lands waiting for final verification (Final Verify opens every detail and document; verified land goes to Deed Process)."}
         icon={ClipboardTick}
       >
         <div className="space-y-6">
-          {/* Dual Tabs */}
-          <div className="flex items-center gap-2 border-b border-border/60 pb-2">
-            <button
-              onClick={() => setActiveTab("land")}
-              className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-heading font-semibold uppercase tracking-wider rounded-lg transition-colors ${
-                activeTab === "land"
-                  ? "bg-foreground text-card shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              }`}
-            >
-              <Building2 size={14} /> Land Records Queue
-              <span className={`px-1.5 py-0.2 rounded-full text-[0.625rem] ${
-                activeTab === "land" ? "bg-card text-foreground" : "bg-muted text-muted-foreground"
-              }`}>
-                {landQueue.length}
-              </span>
-            </button>
-            <button
-              onClick={() => setActiveTab("deed")}
-              className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-heading font-semibold uppercase tracking-wider rounded-lg transition-colors ${
-                activeTab === "deed"
-                  ? "bg-foreground text-card shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              }`}
-            >
-              <FileText size={14} /> Deed Registrations Queue
-              <span className={`px-1.5 py-0.2 rounded-full text-[0.625rem] ${
-                activeTab === "deed" ? "bg-card text-foreground" : "bg-muted text-muted-foreground"
-              }`}>
-                {deedQueue.length}
-              </span>
-            </button>
-          </div>
-
           {/* TAB 1: LAND RECORDS APPROVAL QUEUE */}
           {activeTab === "land" && (
             <div className="rounded-xl border border-border/80 bg-card overflow-hidden shadow-sm">
@@ -204,7 +131,7 @@ export default function LegalApprovalsInboxPage() {
                 <div className="p-12 text-center">
                   <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600/60 mb-3" />
                   <h3 className="text-base font-semibold text-foreground">Land Approval Inbox is clear</h3>
-                  <p className="text-xs text-muted-foreground mt-1">There are no company land records awaiting verification or approvals at this time.</p>
+                  <p className="text-xs text-muted-foreground mt-1">No land is waiting for final verification.</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -222,9 +149,6 @@ export default function LegalApprovalsInboxPage() {
                     </thead>
                     <tbody className="divide-y divide-border/60">
                       {landQueue.map((item) => {
-                        const isVerify = item.Stage === "Verification Pending";
-                        const isL1 = item.Stage === "L1 Legal Review";
-                        const isL2 = item.Stage === "L2 Executive Approval";
 
                         return (
                           <tr key={item.LandId} className="hover:bg-muted/30 transition-colors">
@@ -241,13 +165,7 @@ export default function LegalApprovalsInboxPage() {
                             </td>
                             <td className="px-4 py-3">
                               <span
-                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${
-                                  isVerify
-                                    ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
-                                    : isL1
-                                    ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
-                                    : "bg-purple-500/10 text-purple-600 border-purple-500/20"
-                                }`}
+                                className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border bg-amber-500/10 text-amber-600 border-amber-500/20"
                               >
                                 {item.Stage}
                               </span>
@@ -274,88 +192,82 @@ export default function LegalApprovalsInboxPage() {
                                 <Eye size={12} className="mr-1" /> View
                               </Button>
 
-                              {/* Stage 1: Verification Pending */}
-                              {isVerify && (landRights.canEdit || rights.canApprove) && (
+                              {/* No L1/L2: the verifier checks everything on one page, then sends it to Deed Process. */}
+                              {landRights.canView && (
                                 <Button
                                   size="sm"
                                   className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-                                  onClick={() => {
-                                    setActiveLandItem({ land: item, action: "Verify", title: `Verify Land — ${item.LandCode}` });
-                                    setRemarks("");
-                                  }}
+                                  onClick={() => navigate(`/legal/land/properties/${item.LandId}/final-verify`)}
                                 >
-                                  Verify Data
+                                  Final Verify
                                 </Button>
-                              )}
-
-                              {/* Stage 2: L1 Legal Review */}
-                              {isL1 && rights.canApprove && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-amber-600 text-xs"
-                                    onClick={() => {
-                                      setActiveLandItem({ land: item, action: "L1-Return", title: `Return L1 Review — ${item.LandCode}` });
-                                      setRemarks("");
-                                    }}
-                                  >
-                                    Return
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs"
-                                    onClick={() => {
-                                      setActiveLandItem({ land: item, action: "L1-Approve", title: `L1 Approve — ${item.LandCode}` });
-                                      setRemarks("");
-                                    }}
-                                  >
-                                    L1 Approve
-                                  </Button>
-                                </>
-                              )}
-
-                              {/* Stage 3: L2 Executive Approval */}
-                              {isL2 && rights.canApprove && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-amber-600 text-xs"
-                                    onClick={() => {
-                                      setActiveLandItem({ land: item, action: "L2-Return", title: `Return to L1 — ${item.LandCode}` });
-                                      setRemarks("");
-                                    }}
-                                  >
-                                    Return
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-destructive text-xs"
-                                    onClick={() => {
-                                      setActiveLandItem({ land: item, action: "L2-Reject", title: `Reject Property — ${item.LandCode}` });
-                                      setRemarks("");
-                                    }}
-                                  >
-                                    Reject
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-                                    onClick={() => {
-                                      setActiveLandItem({ land: item, action: "L2-Approve", title: `L2 Final Sign-Off — ${item.LandCode}` });
-                                      setRemarks("");
-                                    }}
-                                  >
-                                    L2 Approve
-                                  </Button>
-                                </>
                               )}
                             </td>
                           </tr>
                         );
                       })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Search records: look a land up, check it on the government site, store the finding */}
+          {activeTab === "deed" && <RegistrySearchPanel />}
+
+          {/* Lands approved (L1 + L2) at the end of Deed Process, ready for registration */}
+          {activeTab === "deed" && (
+            <div className="border border-border bg-card">
+              <p className="border-b border-border px-4 py-3 text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">Lands approved for deed registration · {regLands.length}</p>
+              {!regLands.length ? <p className="p-4 text-sm text-muted-foreground">No land yet. A land comes here after L1 and L2 approval on the Deed Process page.</p> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-muted/50 text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
+                      <tr><th className="px-3 py-2">Land ID</th><th className="px-3 py-2">Land</th><th className="px-3 py-2">Mouza (J.L.) · District</th><th className="px-3 py-2">Dag / Khatian</th><th className="px-3 py-2">Area</th><th className="px-3 py-2">Seller(s) — current owners</th><th className="px-3 py-2">Value ₹</th><th className="px-3 py-2">Timeline</th><th className="px-3 py-2">Deed copy</th><th className="px-3 py-2">Approved</th></tr>
+                    </thead>
+                    <tbody>
+                      {regLands.map((l) => (
+                        <React.Fragment key={l.LandId}>
+                        <tr className="cursor-pointer border-t border-border align-top hover:bg-muted/40" onClick={(e) => { if (!(e.target as HTMLElement).closest("button")) navigate(`/legal/deed-registration/${l.LandId}`); }}>
+                          <td className="px-3 py-2 font-mono font-semibold">{l.LandCode}</td>
+                          <td className="px-3 py-2">{l.LandName}</td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{[l.MouzaName ? `${l.MouzaName}${l.JLNo ? ` (${l.JLNo})` : ""}` : null, l.DistrictName].filter(Boolean).join(" · ") || "—"}</td>
+                          <td className="px-3 py-2 text-xs whitespace-nowrap">
+                            <span className="block">RS {l.RsDagNo ?? "—"} / {l.RsKhatianNo ?? "—"}</span>
+                            <span className="block">LR {l.LrDagNo ?? "—"} / {l.LrKhatianNo ?? "—"}</span>
+                          </td>
+                          <td className="px-3 py-2 text-xs whitespace-nowrap">{l.Area != null ? `${l.Area} ${l.UnitName ?? ""}` : "—"}</td>
+                          <td className="px-3 py-2 text-xs">{l.Owners ?? "—"}</td>
+                          <td className="px-3 py-2 text-xs whitespace-nowrap">
+                            <span className="block">Govt {l.GovtValue != null ? Number(l.GovtValue).toLocaleString("en-IN") : "—"}</span>
+                            <span className="block text-muted-foreground">Market {l.MarketValue != null ? Number(l.MarketValue).toLocaleString("en-IN") : "—"}</span>
+                          </td>
+                          <td className="px-3 py-2 text-xs whitespace-nowrap">{l.DeedTargetDate ? new Date(l.DeedTargetDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
+                          <td className="px-3 py-2 text-xs">{l.DeedFileId ? <LegalFileLink id={l.DeedFileId} name={l.DeedFileName ?? "Deed copy"} /> : "—"}</td>
+                          <td className="px-3 py-2 text-xs">{l.L2ApprovedAt ? new Date(l.L2ApprovedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}<span className="block text-muted-foreground">L1 {l.L1By ?? "—"} · L2 {l.L2By ?? "—"}</span></td>
+                        </tr>
+                        {/* Record searches saved for this land (Search records panel above) */}
+                        <tr className="bg-muted/20">
+                          <td colSpan={11} className="px-6 pb-3 pt-1">
+                            {/* Registration: apply (approvers) → days open → upload the registered deed and submit */}
+                            <div className="mb-2 flex flex-wrap items-center gap-3 border-b border-border/60 pb-2 text-xs">
+                              <span className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">Registration</span>
+                              {l.RegAppliedAt ? (
+                                <>
+                                  <span>Applied {new Date(l.RegAppliedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}{l.RegAppliedByName ? ` by ${l.RegAppliedByName}` : ""}</span>
+                                  <b className={(l.RegDaysOpen ?? 0) > 30 ? "text-destructive" : "text-amber-600"}>{l.RegDaysOpen ?? 0} day{l.RegDaysOpen === 1 ? "" : "s"} open</b>
+                                  {regData && !Array.isArray(regData) && regData.canApply && <button className="border border-foreground bg-foreground px-3 py-1.5 text-xs font-semibold text-card disabled:opacity-40" disabled={regBusy === l.LandId} onClick={() => regSubmit(l)}>Upload registered deed & submit</button>}
+                                </>
+                              ) : regData && !Array.isArray(regData) && regData.canApply ? (
+                                <button className="border border-foreground bg-foreground px-3 py-1.5 text-xs font-semibold text-card disabled:opacity-40" disabled={regBusy === l.LandId} onClick={() => regApply(l)}>Apply to deed register</button>
+                              ) : <span className="text-muted-foreground">Not applied yet — an approver applies</span>}
+                            </div>
+                            <LandRegistrySearches landId={l.LandId} />
+                          </td>
+                        </tr>
+                        </React.Fragment>
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -487,37 +399,6 @@ export default function LegalApprovalsInboxPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Modal: Land Approval Confirmation */}
-        <Dialog open={!!activeLandItem} onOpenChange={() => setActiveLandItem(null)}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>{activeLandItem?.title}</DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
-                Property: {activeLandItem?.land.LandCode} · {activeLandItem?.land.LandName}
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleLandActionSubmit} className="space-y-4 py-2">
-              <div>
-                <Label>Comments / Instructions {activeLandItem?.action.includes("Return") || activeLandItem?.action.includes("Reject") ? "*" : "(Optional)"}</Label>
-                <Textarea
-                  value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
-                  placeholder="Provide instructions or remarks for this action..."
-                  required={activeLandItem?.action.includes("Return") || activeLandItem?.action.includes("Reject")}
-                  rows={3}
-                />
-              </div>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button type="button" variant="outline" onClick={() => setActiveLandItem(null)} disabled={isLandPending}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={isLandPending}>
-                  {isLandPending ? "Processing..." : "Confirm Action"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
       </LegalShell>
     </>
   );

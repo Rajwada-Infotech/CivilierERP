@@ -9,6 +9,7 @@ import { getMessagingStatus, sendMessagingTest, type MessagingChannel, type Mess
 import { FIELD, HEAD, KEY_INK, KEY_LINE, LBL, RULE, TAG } from "./integrations/styles";
 import { ConnectionsSection } from "./integrations/ConnectionsSection";
 import { PartnerKeysSection } from "./integrations/PartnerKeysSection";
+import { LandPortalApiSection } from "./integrations/LandPortalApiSection";
 
 const CHANNELS: Record<MessagingChannel, { label: string; Icon: LucideIcon; setup: string; fromLabel: string; testLabel: string; placeholder: string }> = {
   email: { label: "Email", Icon: Mail, setup: "/admin/communicator/email-setup", fromLabel: "Sends from", testLabel: "Test to email", placeholder: "you@company.com" },
@@ -148,6 +149,7 @@ export default function ApiIntegrationPage() {
 
         <ConnectionsSection />
         <PartnerKeysSection canEdit={rights.canEdit} />
+        <LandPortalApiSection canEdit={rights.canEdit} />
       </SheetShell>
     </>
   );

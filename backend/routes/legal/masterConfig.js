@@ -59,8 +59,9 @@ const lookup = (key, title, group, desc) => ({
 });
 
 // Set only by the verifier's "Verified" tick under the section — shown in lists, never in the entry form.
-const VERIFICATION = { name: "VerificationStatus", label: "Verification", type: "select", system: true, options: ["Pending", "Verified", "Rejected", "Needs Correction"], default: "Pending" };
-const REVIEW = { field: "VerificationStatus", by: "VerifiedBy", at: "VerifiedAt" };
+const VERIFICATION = { name: "VerificationStatus", label: "Verification", type: "select", system: true, hidden: true, options: ["Pending", "Verified", "Rejected", "Needs Correction"], default: "Verified" };
+// Rows are no longer verified one by one (the whole land is verified once, at Final verification), so no row review.
+const REVIEW = undefined;
 const LAND_ID = { name: "LandId", label: "Land property", type: "ref", ref: "land", required: true };
 // A land's own records (opened from the land's page): the parent column, the page right and the group.
 const landChild = (title, table, pk, desc, rest) => ({
@@ -317,7 +318,7 @@ const MASTERS = {
                 L1Status = N'Pending',
                 L2Status = N'Pending',
                 WorkflowStatus = N'Draft (Re-Verification Required)'
-            WHERE LandId = @Id
+            WHERE LandId = @Id AND ISNULL(WorkflowStatus, N'') NOT IN (N'Deed Process', N'Deed Completed', N'Deed Registration', N'Registered')
           `);
         }
       }
@@ -343,23 +344,26 @@ const MASTERS = {
     unique: [["EnquiryNo"], "This enquiry number already exists"],
     noDelete: true,
     extras: [
-      { name: "LandCode", label: "Converted to land", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" },
+      { name: "LandCode", label: "Land conversion", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" },
       // Who raised the enquiry, with a WhatsApp link so anyone can talk to them about it.
-      { name: "EnquiryBy", label: "Entry by", after: "EnquiryByName", sql: "(SELECT u.name FROM dbo.users u WHERE u.id = t.CreatedBy)",
+      { name: "EnquiryBy", label: "Entry by", after: "EnquiryNo", sql: "(SELECT u.name FROM dbo.users u WHERE u.id = t.CreatedBy)",
         whatsapp: "(SELECT u.WhatsAppNo FROM dbo.users u WHERE u.id = t.CreatedBy)", userId: "t.CreatedBy" },
     ],
     guard: async (pool, id, values) => {
       const r = await pool.request().input("Id", id).query("SELECT EnquiryStatus, (SELECT LandCode FROM dbo.LegalLand l WHERE l.LandId = e.LandId) AS LandCode FROM dbo.LegalLandEnquiry e WHERE EnquiryId = @Id");
       const row = r.recordset[0];
       if (row?.EnquiryStatus === "Converted to Land Record") return `This enquiry is already converted to ${row.LandCode || "a land record"}; update the land property instead`;
-      if (values.EnquiryStatus === "Converted to Land Record") return "Use Convert to land record to convert an enquiry";
+      if (values.EnquiryStatus === "Converted to Land Record") return "Use Land Conversion to convert an enquiry";
       return null;
     },
     fields: [
       { name: "EnquiryNo", label: "Enquiry number", type: "text", max: 30, auto: "ENQ" },
-      { name: "EnquiryDate", label: "Enquiry date", type: "date", required: true, default: "today" },
-      // Who brought the enquiry — any name, typed. "Entry by" (the logged-in user who saves it) is recorded by itself.
-      { name: "EnquiryByName", label: "Enquiry by", type: "text", required: true, max: 150 },
+      // Recorded as the save date by itself (not in the form).
+      { name: "EnquiryDate", label: "Enquiry date", type: "date", system: true, default: "today" },
+      // April–March, picked by the user (back years allowed). Land Conversion numbers the Land ID with it: <district code>/<no>/<financial year>.
+      { name: "FinYear", label: "Financial year", type: "select", required: true,
+        // Current year first, then back years (old enquiries are entered late). Worked out on each request.
+        get options() { return finYears(); }, get default() { return finYears()[0]; } },
       { name: "EnquirySourceId", label: "Enquiry source", type: "ref", ref: "enquiry-source", required: true },
       { name: "LandLocation", label: "Land location", type: "text", required: true, max: 300 },
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
@@ -367,11 +371,11 @@ const MASTERS = {
       { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
       { name: "GpsLatitude", label: "GPS latitude", type: "decimal", signed: true, min: -90, maxValue: 90 },
       { name: "GpsLongitude", label: "GPS longitude", type: "decimal", signed: true, min: -180, maxValue: 180 },
-      { name: "ApproxArea", label: "Approximate area", type: "decimal" },
+      { name: "ApproxArea", label: "Area", type: "decimal" },
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "ApproxArea" },
       { name: "ContactPerson", label: "Seller / contact person", type: "text", max: 200 },
       { name: "ContactNumber", label: "Contact number", type: "text", max: 15, pattern: "^[+]?[0-9 -]{8,15}$", patternMsg: "Enter a valid phone number" },
-      { name: "ExpectedPrice", label: "Expected price (₹)", type: "decimal" },
+      { name: "ExpectedPrice", label: "Price (₹)", type: "decimal" },
       // Always the user who raises the enquiry (set on save, not picked); shown as "Enquiry by" with their WhatsApp.
       { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user", hidden: true, self: true },
       // "Converted to Land Record" is set only by Convert to land (and such an enquiry is read-only), so it is not offered here.
@@ -504,7 +508,7 @@ const MASTERS = {
         { name: "PreviousOwnerName", label: "Previous owner", type: "text", max: 200, suggest: "owner" },
         { name: "TransferDocFileId", label: "Transfer document", type: "file" },
         VERIFICATION,
-        { name: "VerificationRemarks", label: "Verification remarks", type: "textarea", max: 1000, system: true },
+        { name: "VerificationRemarks", label: "Verification remarks", type: "textarea", max: 1000, system: true, hidden: true },
         ACTIVE,
       ],
     }),
@@ -1561,8 +1565,8 @@ const MASTERS = {
     desc: "The company selling land it owns, in full or in part. The same area cannot be sold twice.",
     // Money received (verified payments against this sale) and what is still due.
     extras: [
-      { name: "Received", label: "Received ₹ (verified)", sql: "ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0)" },
-      { name: "BalanceDue", label: "Balance due ₹", sql: "t.TotalValue - ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0)" },
+      { name: "Received", label: "Received ₹", sql: "ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1), 0)" },
+      { name: "BalanceDue", label: "Balance due ₹", sql: "t.TotalValue - ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1), 0)" },
     ],
     // Once the sold area (registered / completed sales) covers the whole land, the land is marked disposed;
     // cancelling such a sale puts it back to Owned.
@@ -1602,10 +1606,18 @@ const MASTERS = {
 }
 
 // Pickers backed by core ERP tables rather than a Legal master.
+// Financial years (April–March) as "2026-27": the current one and the ten before it.
+function finYears() {
+  const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return Array.from({ length: 11 }, (_, i) => `${y - i}-${String(y - i + 1).slice(2)}`);
+}
+
 const EXTERNAL_REFS = {
   project: { sql: "SELECT id AS value, name AS label FROM dbo.enterprise WHERE business_type = 'P' ORDER BY name", exists: "SELECT 1 FROM dbo.enterprise WHERE id = @v AND business_type = 'P'" },
   role: { sql: "SELECT RId AS value, RName AS label FROM dbo.Role ORDER BY RName", exists: "SELECT 1 FROM dbo.Role WHERE RId = @v" },
   user: { sql: "SELECT id AS value, name AS label FROM dbo.users ORDER BY name", exists: "SELECT 1 FROM dbo.users WHERE id = @v" },
+  // The ERP's Financial Year master (open years only).
+  "fin-year": { sql: "SELECT FId AS value, FName AS label FROM dbo.FinYear WHERE FStatus = 1 ORDER BY FStartDate DESC", exists: "SELECT 1 FROM dbo.FinYear WHERE FId = @v" },
   // Our own companies: the buyer when we buy land, the seller when we sell it.
   company: { sql: "SELECT id AS value, name AS label FROM dbo.enterprise WHERE business_type = 'C' AND (discontinue IS NULL OR discontinue = 0) ORDER BY name", exists: "SELECT 1 FROM dbo.enterprise WHERE id = @v AND business_type = 'C'" },
 };

@@ -21,10 +21,22 @@ async function writeAudit(conn, req, { action, entityType, entityId, landId = nu
       .input("IpAddress", sql.NVarChar(64), String(req.ip || "").slice(0, 64) || null)
       .query(`INSERT INTO dbo.LegalRecordAudit (UserId, Action, EntityType, EntityId, LandId, OldValue, NewValue, Remarks, IpAddress)
               VALUES (@UserId, @Action, @EntityType, @EntityId, @LandId, @OldValue, @NewValue, @Remarks, @IpAddress)`);
+    // A change to a land that is already verified (in Deed Process) flags it for re-verification (migration 635).
+    if (landId && !DEED_ACTIONS.has(action)) {
+      await conn.request().input("LandId", sql.Int, landId).input("UserId", sql.Int, req.user?.userId || null).query(`
+        IF COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') IS NOT NULL
+          EXEC sp_executesql N'UPDATE dbo.LegalLand SET DeedChangedAt = SYSUTCDATETIME(), DeedChangedBy = @U WHERE LandId = @L AND WorkflowStatus = N''Deed Process''',
+            N'@L INT, @U INT', @L = @LandId, @U = @UserId;`);
+    }
   } catch (e) {
     console.error("[legal-audit]", action, entityType, entityId, e.message);
   }
 }
+
+// Deed Process's own actions do not count as a change to the land's data.
+const DEED_ACTIONS = new Set(["Land verified — sent to Deed Process", "Deed timeline changed", "Deed completed", "Deed reopened",
+  "Deed copy uploaded", "Deed copy removed", "Deed changes re-verified",
+  "Deed L1 approved", "Deed L1 rejected", "Deed L1 on hold", "Deed L2 approved", "Deed L2 rejected", "Deed L2 on hold", "Registry search recorded", "Applied for deed registration", "Deed registered"]);
 
 /**
  * SQL for the next running number of a table's code column: PREFIX-YYYY-00001.

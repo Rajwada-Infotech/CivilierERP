@@ -97,7 +97,7 @@ const anyLegalView = requireAnyPageRight(PAGE_KEYS, "view");
 function refLabelSql(field, alias) {
   if (field.type === "file") return `(SELECT FileName FROM dbo.LegalMasterFile WHERE FileId = ${alias}.${field.name})`;
   if (EXTERNAL_REFS[field.ref]) {
-    const t = { project: ["dbo.enterprise", "id", "name"], role: ["dbo.Role", "RId", "RName"], user: ["dbo.users", "id", "name"] }[field.ref];
+    const t = { project: ["dbo.enterprise", "id", "name"], role: ["dbo.Role", "RId", "RName"], user: ["dbo.users", "id", "name"], company: ["dbo.enterprise", "id", "name"], "fin-year": ["dbo.FinYear", "FId", "FName"] }[field.ref];
     return `(SELECT ${t[2]} FROM ${t[0]} WHERE ${t[1]} = ${alias}.${field.name})`;
   }
   const target = MASTERS[field.ref];
@@ -162,7 +162,7 @@ async function validate(pool, cfg, body) {
     if (field.auto) continue; // generated on add, never edited
     // Status kept by the workflow (section Verified tick, L1 / L2 approval): never taken from the form. Its default on
     // add; on edit it is not written at all.
-    if (field.system) { values[field.name] = field.default ?? null; continue; }
+    if (field.system) { values[field.name] = field.default === "today" ? new Date().toISOString().slice(0, 10) : field.default === "fy" ? finYearOf() : field.default ?? null; continue; }
     const { value, error } = readValue(field, body?.[field.name]);
     if (error) return { error };
     if (field.required && value === null) return { error: `${field.label} is required` };
@@ -221,6 +221,8 @@ function bindValues(request, cfg, values) {
 }
 
 /** The fields an insert / update writes: all of them, except generated codes and a masked value sent back unchanged. */
+// Indian financial year of a date (April–March), e.g. "2026-27".
+const finYearOf = (d = new Date()) => { const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return `${y}-${String(y + 1).slice(2)}`; };
 const writtenFields = (cfg, values, isUpdate = false) => cfg.fields.filter((f) => !f.auto && !(isUpdate && f.system) && values[f.name] !== KEEP);
 
 /** SET / VALUES expressions for `derived` text columns, read from the picked row (Mouza's District name). */

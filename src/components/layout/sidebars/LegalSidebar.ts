@@ -5,7 +5,8 @@ import { NavItem } from "./SidebarPrimitives";
 // - Dashboard
 // - Land Enquiries (prospects & leads)
 // - Land Register (all company properties)
-// - Pending Approvals (Land Verification & Two-Level L1/L2 Approvals)
+// - Pending Verification (lands waiting for final verification)
+// - Deed Process (verified lands, with the verifier's deed timeline)
 // - Register Existing / Backlog Land
 // - Land & Projects (which land serves which project; complete vs under process)
 // - Land Sales (sale/disposal transactions)
@@ -18,7 +19,9 @@ export const legalNavItems: NavItem[] = [
   // ── Company Land Records & Verification / Approvals ───────────────────────
   { label: "Land Enquiries", icon: MessageQuestion, path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
   { label: "Land Register", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
-  { label: "Pending Approvals", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
+  { label: "Pending Verification", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
+  { label: "Deed Process", icon: Note1, path: "/legal/land/deed-process", pageKey: "legal-land-master" },
+  { label: "Deed Registration", icon: DocumentText, path: "/legal/deed-registration", pageKey: "legal-approvals" },
   { label: "Land & Projects", icon: Building, path: "/legal/land/projects", pageKey: "legal-land-master" },
   { label: "Land Sales", icon: MoneySend, path: "/legal/land/sales", pageKey: "legal-land-master" },
   { label: "RS Record Register", icon: Note1, path: "/legal/land/rs-register", pageKey: "legal-land-master" },
