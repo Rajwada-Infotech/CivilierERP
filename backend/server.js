@@ -633,6 +633,8 @@ async function createApp() {
 
   // Per-user project scoping (req.projectScope: null = unrestricted).
   app.use("/api", attachProjectScope);
+  // The Marketing Head switch (Approval Setup), read once per request: req.marketingHead.
+  app.use("/api", require("./services/saAccess").attachMarketingHead);
 
   // CRM paged lists: served from Redis on repeat (per user + scope), dropped on any successful write.
   {

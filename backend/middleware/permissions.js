@@ -1,5 +1,5 @@
 const { getPool, sql } = require("../db");
-const { normalizeRole } = require("./role");
+const { normalizeRole, hasFullAccess } = require("./role");
 
 // ─── IN-PROCESS PERMISSION CACHE ─────────────────────────────────────────────
 const PERMISSION_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -49,8 +49,6 @@ const permissionCache = (() => {
   return { get, invalidateRole, invalidateAll };
 })();
 
-// Roles that always have full access — no RoleRights row needed.
-const SUPERUSER_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
 
 const userPermissionCache = (() => {
   const store = new Map();
@@ -107,7 +105,7 @@ const ACTION_TO_PAGE_ACTION = {
 // unrecognized action string used to silently resolve to `undefined` in both
 // `permission[action]` and `ACTION_TO_PAGE_ACTION[action]`, which always
 // evaluates false — meaning those routes could NEVER be granted to anyone
-// except SUPERUSER_ROLES, no matter what an admin set in Role Rights or the
+// except the full-access roles (role.js hasFullAccess), no matter what an admin set in Role Rights or the
 // Permission Editor. This map normalizes known shorthand to the canonical
 // names so that bug class can't silently recur. Prefer fixing call sites to
 // use the canonical names directly; this is a safety net, not a license to
@@ -358,7 +356,7 @@ const checkPermission = (module, subModule, action = "CanView") => {
       }
 
       // Super users bypass permission checks
-      if (SUPERUSER_ROLES.has(role)) return next();
+      if (hasFullAccess(role)) return next();
 
       const permission = await permissionCache.get(roleId, module, subModule);
 
@@ -380,14 +378,14 @@ const checkPermission = (module, subModule, action = "CanView") => {
 
 /**
  * Convenience wrapper for the 7 guardEdit()-gated routes: "can this request's
- * user edit an already-Approved record on pageKey?" SUPERUSER_ROLES always
+ * user edit an already-Approved record on pageKey?" Full-access roles always
  * can (consistent with them bypassing requirePageRight entirely); everyone
  * else needs the "post-approval" action granted via Menu Rights / Post
  * Approval Rights (role baseline merged with their own overrides).
  */
 async function resolveAllowPostApproval(req, pageKey) {
   const role = (req.user?.role || "").toLowerCase();
-  if (SUPERUSER_ROLES.has(role)) return true;
+  if (hasFullAccess(role)) return true;
   const userId = req.user?.userId ?? req.user?.id;
   return userHasEffectivePageRight(userId, req.user?.roleId, pageKey, "post-approval");
 }
@@ -402,5 +400,5 @@ module.exports = {
   userHasPermissionByPage,
   userHasEffectivePageRight,
   resolveAllowPostApproval,
-  SUPERUSER_ROLES,
+  hasFullAccess,
 };

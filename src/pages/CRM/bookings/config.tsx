@@ -91,7 +91,6 @@ export async function fetchBookingsList(filters: BookingListFilters, page: numbe
 }
 
 export const fmt = (n: number | null | undefined) => (n != null ? `₹${(n / 1e5).toFixed(2)}L` : "—");
-export const normalizeRole = (role?: string) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 
 // The real workflow gate: Welcome Call -> Booking Amount paid -> Agreement (both approvals, date, date approval) ->
 // Payments -> Registration -> NOC -> Handover -> Sale Deed -> Registry -> Mutation. Only the ONE step the booking is

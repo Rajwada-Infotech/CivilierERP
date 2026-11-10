@@ -85,6 +85,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { DateInput } from "@/components/ui/date-input";
 import { fmtIstDateTime, fmtIstIso } from "@/lib/istTime";
 
+import { isSuperAdminRole } from "@/contexts/auth.utils";
 type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "daily-log" | "comments" | "history";
 
 function addDays(dateStr: string, days: number): string {
@@ -1585,7 +1586,7 @@ export default function ActivityDetailModal({
   const backdropDown = useRef(false);
   const [tab, setTab] = useState<DetailTab>(initialTab);
   const { currentUser } = useAuth();
-  const canRestore = currentUser?.role === "super_admin" && row.status === "CANCELLED";
+  const canRestore = isSuperAdminRole(currentUser?.role) && row.status === "CANCELLED";
 
   const { data: annotation } = useQuery({
     queryKey: ["blueprint-annotation", row.rungId, row.roomId, "allocation"],

@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -68,7 +69,7 @@ router.get("/template", async (req, res) => {
 });
 
 // PUT -- update the offer-letter body template
-router.put("/template", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/template", pageRightByMethod("offer-letter-joining"), async (req, res) => {
   const { Body } = req.body;
   if (!Body?.trim()) return res.status(400).json({ error: "Body is required" });
   const updatedBy = req.user?.userId || null;
@@ -142,7 +143,7 @@ router.get("/unlinked-employees", async (req, res) => {
 });
 
 // POST — add offer letter
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("offer-letter-joining"), async (req, res) => {
   const { CandidateId, CompanyId, FinYearId, DesignationId, Salary, CandidateAddress, DateOfJoin, DocumentDate, Remarks } = req.body;
   if (!CandidateId) return res.status(400).json({ error: "CandidateId is required" });
   if (!DocumentDate) return res.status(400).json({ error: "DocumentDate is required" });
@@ -196,7 +197,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update offer letter (not DocNo, not joining fields — those go through PATCH /joining)
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("offer-letter-joining"), async (req, res) => {
   const { id } = req.params;
   const { CandidateId, CompanyId, FinYearId, DesignationId, Salary, CandidateAddress, DateOfJoin, DocumentDate, Remarks } = req.body;
   if (!CandidateId) return res.status(400).json({ error: "CandidateId is required" });
@@ -316,7 +317,7 @@ async function autoCreateEmployeeFromOffer(pool, sql, offerId, createdBy) {
 // PATCH — confirm/record the actual joining date + remarks (Joining tab).
 // Also auto-creates the Employee Master record for this candidate, so
 // there's no separate manual "add to Employee Master" step afterwards.
-router.patch("/:id/joining", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/joining", pageRightByMethod("offer-letter-joining"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { ActualDateOfJoining, JoiningRemarks } = req.body;
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
@@ -368,7 +369,7 @@ router.patch("/:id/joining", allowRoles("admin", "super_admin", "dba"), async (r
 });
 
 // DELETE
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("offer-letter-joining"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

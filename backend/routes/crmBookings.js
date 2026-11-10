@@ -17,7 +17,9 @@ const { triggerBookingConfirmed } = require("../services/communicationTriggers")
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const allowRoles = require("../middleware/role");
-const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
+const { actorId, requireUserEmail, isSaAdmin, MARKETING_HEAD_MODULE } = require("../services/saAccess");
+const { usersNamedInStep } = require("../services/approvalService");
+const { FULL_ACCESS_ROLES } = require("../middleware/role");
 const { applyPagination } = require("../services/crmListPagination");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
@@ -754,7 +756,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
 // CrmUnitChangeLog — nothing here is ever silently overwritten.
 router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
-    if (!isSaAdmin(req)) return res.status(403).json({ error: "Only admin/super_admin/marketing_head can change a booking's unit" });
+    if (!isSaAdmin(req)) return res.status(403).json({ error: "Changing a booking's unit needs full access or the Marketing Head switch in Approval Setup" });
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
@@ -880,18 +882,7 @@ async function checkBookingApprovalReadiness(pool, id) {
 
 // Who Approval Setup names for one step of a workflow (its roles and named
 // people), each once — the people told when a booking reaches that step.
-async function usersForApprovalStep(pool, module, stepIndex) {
-  const step = (await getWorkflow(module))?.LevelDefs?.[stepIndex];
-  const ids = new Set((step?.userIds || []).map(Number).filter(Boolean));
-  const roles = (step?.roles || []).map((r) => String(r).toLowerCase());
-  if (roles.length) {
-    const req0 = pool.request();
-    const names = roles.map((r, i) => { req0.input(`r${i}`, sql.NVarChar(100), r); return `@r${i}`; });
-    (await req0.query(`SELECT u.id FROM dbo.Users u JOIN dbo.Role r ON r.RId = u.RoleId
-      WHERE LOWER(r.RName) IN (${names.join(", ")}) AND u.discontinue = 0`)).recordset.forEach((u) => ids.add(u.id));
-  }
-  return ids;
-}
+const usersForApprovalStep = usersNamedInStep;
 
 // Tells whoever a booking now waits on — never the person who just acted.
 async function notifyBookingTurn(pool, bookingId, userIds, actor, type, title, body) {
@@ -954,20 +945,16 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
 
     const booking = await pool.request().input("id", sql.Int, id).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @id");
     const bookingNo = booking.recordset[0]?.BookingNo;
-    // dbo.Users has no plain-text "role" column — role is a RoleId FK into
-    // dbo.Role (RId / RName / RCode). RName is the machine-readable value
-    // ('admin', 'super_admin', 'marketing_head', ...) that matches every
-    // other role check in this codebase (e.g. CRM_APPROVER_ROLES in
-    // approvalService.js, req.user.role); RCode is a short display code
-    // (SA/ADM/MAR/...) and isn't what's compared elsewhere. The previous
-    // `WHERE LOWER(role) IN (...)` referenced a column that doesn't exist
-    // at all and 500'd this entire endpoint (surfaced in the CRM UI as
-    // "Invalid column name 'role'." on Confirm & Book).
-    const admins = await pool.request().query(`
+    // Told: the full-access users and the Marketing Head switch's people (Approval Setup), plus below whoever the
+    // booking's first approval step names. No role names here.
+    const fullReq = pool.request();
+    const fullNames = FULL_ACCESS_ROLES.map((r, i) => { fullReq.input(`f${i}`, sql.NVarChar(100), r); return `@f${i}`; });
+    const admins = await fullReq.query(`
       SELECT u.id FROM dbo.Users u
       JOIN dbo.Role r ON r.RId = u.RoleId
-      WHERE LOWER(r.RName) IN ('admin', 'super_admin', 'marketing_head') AND u.discontinue = 0
+      WHERE LOWER(r.RName) IN (${fullNames.join(", ")}) AND u.discontinue = 0
     `);
+    admins.recordset.push(...[...(await usersNamedInStep(pool, MARKETING_HEAD_MODULE, 0))].map((uid) => ({ id: uid })));
     // In parallel: whoever Approval Setup names for the booking's first approval step
     // (its roles or named people) is told too — each person once.
     const notify = new Set([...admins.recordset.map((a) => a.id), ...(await usersForApprovalStep(pool, "crm-bookings", 0))]);
@@ -1262,7 +1249,7 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
 // staff-driven status change (submit for approval, document generation, etc.).
 // Used for: legal disputes, court injunctions, developer-initiated project holds.
 // FreezeExpiresAt is required — freezes must not be open-ended.
-router.post("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) => {
+router.post("/:id/freeze", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { reason, expiresAt } = req.body || {};
@@ -1299,7 +1286,7 @@ router.post("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) 
 });
 
 // DELETE /:id/freeze (unfreeze) — admin-only. Clears the freeze lock.
-router.delete("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) => {
+router.delete("/:id/freeze", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -1548,7 +1535,7 @@ async function softDeleteBooking(pool, id, actor) {
   return { BookingNo: booking.BookingNo };
 }
 
-router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
+router.delete("/:id", requirePageRight("crm-bookings", "delete"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -1566,7 +1553,7 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
 // trail of a sale, even a cancelled one. Cancel or soft-delete instead
 // (DELETE /:id), which keeps every row. Answered explicitly so an old client
 // gets a clear reason rather than a 404.
-router.delete("/:id/permanent", allowRoles("admin", "super_admin"), (_req, res) => {
+router.delete("/:id/permanent", requirePageRight("crm-bookings", "delete"), (_req, res) => {
   res.status(410).json({ error: "Permanent deletion of bookings is disabled — CRM records are kept for the audit trail. Cancel or delete the booking instead; it stays in the deleted list." });
 });
 

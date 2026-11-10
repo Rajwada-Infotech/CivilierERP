@@ -24,8 +24,10 @@ const ownUrl = (value) => {
 
 
 router.use(authMiddleware);
-const adminOnly = allowRoles("admin", "super_admin", "dba");
-const superAdminOnly = allowRoles("super_admin");
+// The messaging settings hold provider secrets (SMTP password, API keys, access tokens) and are returned as stored:
+// full-access roles only, never a granted page right (fixed 2026-11-10 after phase 2 opened them to the page right).
+const adminOnly = allowRoles.fullAccessOnly;
+const { superAdminOnly } = allowRoles;
 
 // ─── Channel management CRUD (super_admin only) ──────────────────────────────
 

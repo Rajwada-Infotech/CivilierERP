@@ -13,7 +13,7 @@
 
 const { getPool, sql } = require("../db");
 
-const UNRESTRICTED_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
+const { hasFullAccess } = require("../middleware/role");
 const TTL_MS = 30_000;
 const cache = new Map(); // userId -> { ids, at }
 
@@ -25,7 +25,7 @@ function invalidateProjectScope(userId) {
 async function getProjectScope(user) {
   if (!user) return null;
   const role = String(user.role || "").toLowerCase();
-  if (UNRESTRICTED_ROLES.has(role)) return null;
+  if (hasFullAccess(role)) return null;
   const userId = Number(user.userId ?? user.id);
   if (!Number.isFinite(userId)) return null;
 

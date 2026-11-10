@@ -1360,7 +1360,7 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
 // DELETE /:id - admin cleanup only. Applications that already have a live
 // booking must be handled from the booking side; this endpoint is only for
 // pre-booking mistakes/noise that should disappear from the active lists.
-router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
+router.delete("/:id", requirePageRight("crm-applications", "delete"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {

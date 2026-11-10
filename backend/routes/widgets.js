@@ -1,4 +1,5 @@
 const express = require("express");
+const { isSaAdmin } = require("../services/saAccess");
 
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -8,7 +9,7 @@ const { getPool, sql } = require("../db");
 const { redisGet, redisSet } = require("../redis");
 
 const CACHE_TTL_SECONDS = 15;
-const PRIVILEGED_ROLES = new Set(["admin", "super_admin", "dba"]);
+const { hasFullAccess } = require("../middleware/role");
 
 const toNumber = (value) => Number(value || 0);
 const emptyResult = (row = {}) => Promise.resolve({ recordset: [row] });
@@ -92,8 +93,8 @@ function getRolePresentation(role) {
   }
 }
 
-function getPermissions(role) {
-  const isPrivileged = PRIVILEGED_ROLES.has(role);
+function getPermissions(role, canViewCrm) {
+  const isPrivileged = hasFullAccess(role);
 
   return {
     canViewUsers: isPrivileged,
@@ -102,7 +103,7 @@ function getPermissions(role) {
     canViewProcurement: isPrivileged,
     canViewTasks: true,
     canViewAdminTools: isPrivileged,
-    canViewCrm: isPrivileged || role === "marketing_head",
+    canViewCrm,
   };
 }
 
@@ -600,8 +601,8 @@ router.get("/catalog", async (_req, res) => {
 router.get("/", async (req, res) => {
   const role = req.user?.role || "user";
   const userId = Number(req.user?.userId || 0);
-  const isPrivileged = PRIVILEGED_ROLES.has(role);
-  const isCrmVisible = isPrivileged || role === "marketing_head";
+  const isPrivileged = hasFullAccess(role);
+  const isCrmVisible = isSaAdmin(req); // full access or the Marketing Head switch (Approval Setup)
   const cacheKey = `widgets:${role}:${userId || "session"}`;
 
   try {
@@ -1053,7 +1054,7 @@ router.get("/", async (req, res) => {
       ),
     };
 
-    const permissions = getPermissions(role);
+    const permissions = getPermissions(role, isCrmVisible);
     const alerts = buildAlerts({ role, isPrivileged, summary });
     const insights = buildInsights({ role, isPrivileged, summary, trends });
     const experience = getRolePresentation(role);

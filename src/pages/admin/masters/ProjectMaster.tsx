@@ -48,6 +48,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
 
+import { isSuperAdminRole } from "@/contexts/auth.utils";
 /** A row of dbo.ProjectTypeMaster (migration 502). The flags are what code
  *  should branch on — never Code or Name. */
 interface ProjectTypeOption {
@@ -720,7 +721,7 @@ export default function ProjectMaster() {
   const [cascadeConfirmText, setCascadeConfirmText] = useState("");
   const [imagePreview, setImagePreview] = useState<string>("");
   const { currentUser } = useAuth();
-  const isSuperAdmin = currentUser?.role === "super_admin";
+  const isSuperAdmin = isSuperAdminRole(currentUser?.role);
   const [complianceLoading, setComplianceLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 

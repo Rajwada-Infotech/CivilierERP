@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -141,12 +142,11 @@ router.get("/assignable-users", async (req, res) => {
 // the logged-in session (req.user), never a client-supplied filter. Admin
 // roles keep full visibility since they're the ones who assign tasks in the
 // first place and need to see the whole board to manage it.
-const FOLLOWUP_BOARD_PRIVILEGED_ROLES = new Set(["admin", "super_admin", "dba"]);
 
 router.get("/followup-board", cache("task-master-followup-board", 30), async (req, res) => {
   try {
     const pool = getPool();
-    const scopeToSelf = !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const scopeToSelf = !allowRoles.hasFullAccess(req.user?.role);
     const request = pool.request();
     if (scopeToSelf) request.input("UserId", sql.Int, req.user?.userId || null);
     const result = await request.query(`
@@ -224,7 +224,7 @@ router.get("/followup-board", cache("task-master-followup-board", 30), async (re
 router.get("/closed-board", cache("task-master-closed-board", 30), async (req, res) => {
   try {
     const pool = getPool();
-    const scopeToSelf = !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const scopeToSelf = !allowRoles.hasFullAccess(req.user?.role);
     const request = pool.request();
     if (scopeToSelf) request.input("UserId", sql.Int, req.user?.userId || null);
     const result = await request.query(`
@@ -286,7 +286,7 @@ router.get("/closed-board", cache("task-master-closed-board", 30), async (req, r
 router.get("/cancelled-board", cache("task-master-cancelled-board", 30), async (req, res) => {
   try {
     const pool = getPool();
-    const scopeToSelf = !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const scopeToSelf = !allowRoles.hasFullAccess(req.user?.role);
     const request = pool.request();
     if (scopeToSelf) request.input("UserId", sql.Int, req.user?.userId || null);
     const result = await request.query(`
@@ -386,7 +386,7 @@ router.get("/:id", async (req, res) => {
     // (and by extension its follow-ups/chat/files via the drawer) assigned
     // to someone else, even by guessing/typing the id directly.
     if (
-      !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role) &&
+      !allowRoles.hasFullAccess(req.user?.role) &&
       task.AssignedTo !== (req.user?.userId ?? null)
     ) {
       return res.status(403).json({ error: "Not authorized to view this task" });
@@ -400,7 +400,7 @@ router.get("/:id", async (req, res) => {
 
 // POST — create a task. TaskNo is filled in by trg_TaskMaster_TaskNo right
 // after the insert, so it's read back in the same round trip.
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("task-master"), async (req, res) => {
   const {
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
     CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber,
@@ -505,7 +505,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update a task
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("task-master"), async (req, res) => {
   const { id } = req.params;
   const {
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
@@ -592,7 +592,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 
 // PATCH /:id/status — quick lifecycle transition (Active/Hold/Cancel) from
 // the grid's row actions, independent of the Add/Edit form's Active toggle.
-router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/status", pageRightByMethod("task-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { Status, CancelReasonId } = req.body;
@@ -647,7 +647,7 @@ router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (re
   }
 });
 
-router.patch("/:id/priority", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/priority", pageRightByMethod("task-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { Priority } = req.body;
@@ -1133,7 +1133,7 @@ router.delete("/attachment/:attachmentId", async (req, res) => {
     const attachment = existing.recordset[0];
 
     const isOwner = attachment.UploadedBy != null && attachment.UploadedBy === (req.user?.userId ?? null);
-    const isPrivileged = FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const isPrivileged = allowRoles.hasFullAccess(req.user?.role);
     if (!isOwner && !isPrivileged) {
       return res.status(403).json({ error: "Only the uploader or an admin can delete this attachment" });
     }
@@ -1148,7 +1148,7 @@ router.delete("/attachment/:attachmentId", async (req, res) => {
 });
 
 // DELETE — soft delete, consistent with the rest of the platform.
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("task-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const updatedBy = req.user?.userId || null;

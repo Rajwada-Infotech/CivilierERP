@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -54,7 +55,7 @@ router.get("/", cache("interview", 60), async (req, res) => {
 });
 
 // POST — add interview
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("interview"), async (req, res) => {
   const { CandidateId, CompanyId, ProjectId, InterviewDate, Remarks } = req.body;
   if (!CandidateId) return res.status(400).json({ error: "CandidateId is required" });
   if (!InterviewDate) return res.status(400).json({ error: "InterviewDate is required" });
@@ -98,7 +99,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update interview (candidate/company/project/date/remarks — not Status or DocNo)
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("interview"), async (req, res) => {
   const { id } = req.params;
   const { CandidateId, CompanyId, ProjectId, InterviewDate, Remarks } = req.body;
   if (!CandidateId) return res.status(400).json({ error: "CandidateId is required" });
@@ -134,7 +135,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 
 // PATCH — update status only (Selected / Rejected / Hold), keeps the
 // candidate's own InterviewStatus field in sync with the outcome.
-router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/status", pageRightByMethod("interview"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { Status } = req.body;
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
@@ -180,7 +181,7 @@ router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (re
 });
 
 // DELETE
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("interview"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

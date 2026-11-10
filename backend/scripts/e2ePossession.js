@@ -1,97 +1,30 @@
-// End-to-end test of Possession & Handover: the real routes and real SQL on the DEVELOPMENT database, on a ZZTEST
-// booking, all inside one transaction that is rolled back. Nothing stays behind. Refuses to run on production.
+// End-to-end test of Possession & Handover on the ZZTEST booking BKG-2026-00133, through scripts/e2eHarness.js (real
+// routes, real SQL, the DEVELOPMENT database, one transaction rolled back at the end).
 //   node scripts/e2ePossession.js
-const path = require("path");
-process.chdir(path.join(__dirname, ".."));
-require("dotenv").config({ path: ".env" });
-if (process.env.NODE_ENV === "production") { console.error("Refusing to run on production."); process.exit(1); }
-const http = require("http");
-const express = require("express");
-const db = require("../db");
+const { openHarness } = require("./e2eHarness");
 
 const BOOKING = 213; // BKG-2026-00133, ZZTEST
-const results = [];
-let actor = { userId: 1, id: 1, role: "super_admin", email: "e2e" };
-let portal = {};
-
-const pass = (req, _r, n) => { req.user = actor; n(); };
-const stub = (rel, exportsValue) => { const f = require.resolve(rel); require.cache[f] = { id: f, filename: f, loaded: true, exports: exportsValue }; };
+const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmPrePossession) P, (SELECT COUNT(*) FROM dbo.CrmPossessionNotice) N, (SELECT COUNT(*) FROM dbo.CrmHandover) H,
+  (SELECT COUNT(*) FROM dbo.CrmOccupancyCertificate) C, (SELECT COUNT(*) FROM dbo.CrmSnagItem) S, (SELECT COUNT(*) FROM dbo.CrmBookingDocument) D,
+  (SELECT Status FROM dbo.CrmAgreement WHERE BookingId = ${BOOKING} AND Status <> 'Cancelled') A`;
 
 (async () => {
-  await db.connectDB();
-  const realPool = db.getPool();
-  const { sql } = db;
-  const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmPrePossession) P, (SELECT COUNT(*) FROM dbo.CrmPossessionNotice) N, (SELECT COUNT(*) FROM dbo.CrmHandover) H,
-    (SELECT COUNT(*) FROM dbo.CrmOccupancyCertificate) C, (SELECT COUNT(*) FROM dbo.CrmSnagItem) S, (SELECT COUNT(*) FROM dbo.CrmBookingDocument) D,
-    (SELECT Status FROM dbo.CrmAgreement WHERE BookingId = ${BOOKING} AND Status <> 'Cancelled') A`;
-  const before = (await realPool.request().query(COUNT)).recordset[0];
-
-  const tx = new sql.Transaction(realPool);
-  await tx.begin();
-  // Every query from every route runs on this one transaction.
-  // One connection runs one query at a time, so the queries of routes that use Promise.all take turns here.
-  let turn = Promise.resolve();
-  const request = () => {
-    const req = tx.request();
-    for (const m of ["query", "execute", "batch"]) {
-      const run = req[m].bind(req);
-      req[m] = (text) => { const p = turn.then(() => run(text)); turn = p.catch(() => {}); return p; };
-    }
-    return req;
-  };
-  // A route's own transaction becomes a savepoint, so its rollback really undoes its work, as it would in production.
-  let savepoints = 0;
-  const transaction = () => {
-    const name = `e2e${++savepoints}`;
-    return {
-      begin: () => request().query(`SAVE TRANSACTION ${name}`),
-      commit: async () => {},
-      rollback: () => request().query(`ROLLBACK TRANSACTION ${name}`),
-      request,
-    };
-  };
-  const pool = { request, transaction, connected: true };
-  db.getPool = () => pool;
-
-  stub("../middleware/auth", pass);
-  stub("../middleware/apiRateLimit", (_q, _r, n) => n());
-  stub("../middleware/crmPortalAuth", (req, _r, n) => { req.portalUser = portal; n(); });
-  stub("../services/notify", new Proxy({}, { get: () => async () => {} })); // no bell, socket or phone push from a test
-  const rights = require("../middleware/requirePageRight");
-  for (const k of Object.keys(rights)) if (/^require/.test(k)) rights[k] = () => pass;
-
-  const app = express();
-  app.use(express.json());
-  const mount = { "/c": "crmPrePossession", "/n": "crmPossessionNotice", "/h": "crmHandover", "/oc": "crmOcCc", "/ag": "crmAgreements", "/d": "crmBookingDocuments", "/p": "crmPortal" };
-  for (const [at, file] of Object.entries(mount)) app.use(at, require(`../routes/${file}`));
-  const srv = http.createServer(app);
-  await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));
-  const base = `http://127.0.0.1:${srv.address().port}`;
-
-  const call = async (method, url, body) => {
-    const res = await fetch(base + url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
-    const type = res.headers.get("content-type") || "";
-    return { status: res.status, type, json: type.includes("json") ? await res.json() : null };
-  };
-  const q = async (text) => (await request().query(text)).recordset;
+  const h = await openHarness({
+    mounts: { "/c": "crmPrePossession", "/n": "crmPossessionNotice", "/h": "crmHandover", "/oc": "crmOcCc", "/ag": "crmAgreements", "/d": "crmBookingDocuments", "/p": "crmPortal" },
+    count: COUNT,
+  });
+  const { base, call, q, request, check, expectCall, section } = h;
   const row = async (id = BOOKING) => (await call("GET", `/c/board?page=1&pageSize=1&bookingId=${id}`)).json.rows[0];
-  const check = (name, ok, detail = "") => { results.push({ name, ok: !!ok, detail }); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && detail ? `  -> ${detail}` : ""}`); };
-  const expectCall = (name, r, status, text) => {
-    const msg = r.json?.error || "";
-    check(name, r.status === status && (!text || msg.toLowerCase().includes(text.toLowerCase())), `got ${r.status} ${msg}`);
-    return r;
-  };
-  const section = (t) => console.log(`\n-- ${t}`);
 
   try {
     const user = (await q("SELECT TOP 1 id FROM dbo.Users WHERE id IS NOT NULL ORDER BY id"))[0].id;
-    actor = { ...actor, userId: user, id: user };
+    h.setActor({ userId: user, id: user });
     const b = (await q(`SELECT b.ApplicationId, b.ProjectId, a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = ${BOOKING}`))[0];
     const pu = (await q("SELECT TOP 1 Id FROM dbo.CrmCustomerPortalUser WHERE IsActive = 1 AND ISNULL(MustChangePassword, 0) = 0 ORDER BY Id"))[0];
     const stranger = (await q(`SELECT TOP 1 Id FROM dbo.CrmCustomer WHERE Id <> ${b.CustomerId} ORDER BY Id`))[0];
-    portal = { portalUserId: pu.Id, customerId: b.CustomerId };
+    h.setPortal({ portalUserId: pu.Id, customerId: b.CustomerId });
     const P = `applicationId=${b.ApplicationId}`;
-    const asStranger = async (fn) => { portal = { portalUserId: pu.Id, customerId: stranger.Id }; try { return await fn(); } finally { portal = { portalUserId: pu.Id, customerId: b.CustomerId }; } };
+    const asStranger = async (fn) => { h.setPortal({ portalUserId: pu.Id, customerId: stranger.Id }); try { return await fn(); } finally { h.setPortal({ portalUserId: pu.Id, customerId: b.CustomerId }); } };
 
     section("Board: what each kind of booking shows");
     const pending = await row(217);
@@ -269,14 +202,6 @@ const stub = (rel, exportsValue) => { const f = require.resolve(rel); require.ca
     expectCall("No second handover after completion", await call("POST", "/h", { BookingId: BOOKING }), 409);
   } catch (e) {
     check("Script ran to the end", false, e.stack);
-  } finally {
-    try { await turn; await new Promise((ok) => setTimeout(ok, 800)); await turn; await tx.rollback(); } catch (e) { console.error("ROLLBACK FAILED", e.message); }
   }
-  const after = (await realPool.request().query(COUNT)).recordset[0];
-  check("Rolled back: the database is exactly as it was", JSON.stringify(before) === JSON.stringify(after), `${JSON.stringify(before)} vs ${JSON.stringify(after)}`);
-  srv.close();
-  const failed = results.filter((x) => !x.ok);
-  console.log(`\nRESULT: ${results.length - failed.length} of ${results.length} passed`);
-  await db.closeDB();
-  process.exit(failed.length ? 1 : 0);
+  await h.finish();
 })().catch((e) => { console.error("Stopped:", e.stack); process.exit(1); });

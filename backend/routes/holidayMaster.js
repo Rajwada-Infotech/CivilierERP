@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -29,7 +30,7 @@ router.get("/", cache("holiday-master", 300), async (req, res) => {
 });
 
 // POST — add holiday
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("holiday-master"), async (req, res) => {
   const { HolidayName, HolidayDate, FinYearId, IsActive } = req.body;
   if (!HolidayName?.trim()) return res.status(400).json({ error: "HolidayName is required" });
   if (!HolidayDate) return res.status(400).json({ error: "HolidayDate is required" });
@@ -59,7 +60,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update holiday
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("holiday-master"), async (req, res) => {
   const { id } = req.params;
   const { HolidayName, HolidayDate, FinYearId, IsActive } = req.body;
   if (!HolidayName?.trim()) return res.status(400).json({ error: "HolidayName is required" });
@@ -93,7 +94,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // DELETE
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("holiday-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

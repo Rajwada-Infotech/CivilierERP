@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -38,7 +39,7 @@ router.get("/", cache("candidate-master", 300), async (req, res) => {
 });
 
 // POST — add candidate (CandidateCode is always server-generated: CAND-00001)
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("candidate-master"), async (req, res) => {
   const {
     CandidateName, Contact, Email, Qualification, Experience,
     ExpectedSalary, CurrentSalary, NoticePeriod, ResumeFileName, ResumeBase64,
@@ -96,7 +97,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update candidate
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("candidate-master"), async (req, res) => {
   const { id } = req.params;
   const {
     CandidateCode, CandidateName, Contact, Email, Qualification, Experience,
@@ -151,7 +152,7 @@ const INTERVIEW_RESULT_VALUES = ["Selected", "Rejected", "On Hold"];
 // PATCH -- set the interview result directly from Candidate Master
 // (Selected / Rejected / On Hold), independent of the Interview page's
 // own status sync -- both write the same column.
-router.patch("/:id/interview-status", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/interview-status", pageRightByMethod("candidate-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { InterviewStatus } = req.body;
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
@@ -183,7 +184,7 @@ router.patch("/:id/interview-status", allowRoles("admin", "super_admin", "dba"),
 });
 
 // DELETE
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("candidate-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

@@ -25,6 +25,7 @@ import { UserStatusDialog } from "@/components/UserStatusDialog";
 import { fmtIstDateTime } from "@/lib/istTime";
 import { deactivateHeldUntil, fmtHeldUntil } from "@/lib/userStatusHold";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface User {
   id: number;
@@ -242,8 +243,8 @@ function buildUserColumns(
         const user = row.original;
         const canAccept =
           !!user.can_accept_tickets ||
-          ["admin", "super_admin", "dba"].includes(user.role);
-        const lockedByRole = ["admin", "super_admin", "dba"].includes(user.role);
+          isPrivilegedRole(user.role);
+        const lockedByRole = isPrivilegedRole(user.role);
         return (
           <button
             type="button"
@@ -908,7 +909,7 @@ const Users = () => {
                 <span className={LBL}>Ticket Accept</span>
                 <span className="font-medium text-foreground">
                   {viewedUser.can_accept_tickets ||
-                  ["admin", "super_admin", "dba"].includes(viewedUser.role)
+                  isPrivilegedRole(viewedUser.role)
                     ? "Allowed"
                     : "Not allowed"}
                 </span>

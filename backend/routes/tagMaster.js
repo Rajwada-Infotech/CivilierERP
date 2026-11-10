@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -52,7 +53,7 @@ function bumpTagCaches() {
 }
 
 // POST — add tag
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("followup-tag-master"), async (req, res) => {
   const { Name, IsActive } = req.body;
   if (!Name?.trim()) return res.status(400).json({ error: "Name is required" });
   const createdBy = req.user?.userId || null;
@@ -79,7 +80,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update tag (name and/or active status)
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("followup-tag-master"), async (req, res) => {
   const { id } = req.params;
   const { Name, IsActive } = req.body;
   if (!Name?.trim()) return res.status(400).json({ error: "Name is required" });
@@ -113,7 +114,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 // automatically (ON DELETE CASCADE) — Activate/Deactivate is the
 // non-destructive alternative for retiring a tag without wiping its
 // history off existing tasks.
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("followup-tag-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

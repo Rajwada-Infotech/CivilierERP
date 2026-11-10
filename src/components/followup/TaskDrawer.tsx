@@ -18,6 +18,7 @@ import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/contexts/AuthContext";
 import { DateTimeInput } from "@/components/ui/date-input";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 const API = "/api/task-master";
 const INK = "hsl(var(--foreground))";
 
@@ -105,7 +106,6 @@ function formatFileSize(bytes: number | null): string {
 }
 
 const ACCEPTED_FILE_TYPES = ".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.zip";
-const PRIVILEGED_ROLES = new Set(["admin", "super_admin", "dba"]);
 
 // Attachments are behind JWT auth, so a plain <a href> navigation can't carry
 // the Authorization header (that's why it 404s/401s with "No token
@@ -537,7 +537,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
   };
 
   const canDeleteAttachment = (uploadedBy: number | null) =>
-    (uploadedBy != null && uploadedBy === currentUserId) || PRIVILEGED_ROLES.has(currentUser?.role || "");
+    (uploadedBy != null && uploadedBy === currentUserId) || isPrivilegedRole(currentUser?.role);
 
   const handleDeleteAttachment = async (attachmentId: number, fileName: string) => {
     if (!window.confirm(`Delete "${fileName}"? This can't be undone.`)) return;

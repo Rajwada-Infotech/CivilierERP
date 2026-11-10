@@ -55,6 +55,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { DateInput } from "@/components/ui/date-input";
 import { chequeLotRange } from "./payment/chequeLotRange";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 const PAYMENT_MODES: FundTransferMode[] = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
 const CHEQUE_MODES: FundTransferMode[] = ["Cheque", "Post-Dated Cheque"];
 const DIGITAL_MODES: FundTransferMode[] = ["NEFT", "UPI", "RTGS", "IMPS", "Card"];
@@ -244,7 +245,7 @@ function TransferDetailDialog({
   // server enforces); admin-tier roles always have it.
   const { canDoAction, currentUser } = useAuth();
   const hasPostApproval =
-    ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "") || canDoAction("fund-transfer", "post-approval");
+    isPrivilegedRole(currentUser?.role) || canDoAction("fund-transfer", "post-approval");
   // Full edit: any field, any stage (an Approved one needs the post-approval right). A legacy
   // Inter-company transfer isn't editable here — that kind now lives in Loan Sanction.
   const canEditAll = (d: { Status: string; TransferType: string }) =>
@@ -595,7 +596,7 @@ export default function FundTransfer() {
   const [heldCheque, setHeldCheque] = useState<{ lotId: number | null; no: string } | null>(null);
   const { canDoAction: pageCanDoAction, currentUser: pageUser } = useAuth();
   const pageHasPostApproval =
-    ["super_admin", "admin", "dba"].includes(pageUser?.role ?? "") || pageCanDoAction("fund-transfer", "post-approval");
+    isPrivilegedRole(pageUser?.role) || pageCanDoAction("fund-transfer", "post-approval");
   const canEditRow = (t: { Status: string; TransferType: string }) =>
     rights.canEdit && t.TransferType === "Intra" && (t.Status !== "Approved" || pageHasPostApproval);
   const startEditById = async (id: number) => {

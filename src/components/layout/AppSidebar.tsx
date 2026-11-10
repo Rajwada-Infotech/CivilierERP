@@ -54,6 +54,7 @@ import { hrPayrollNavItems } from "./sidebars/HrPayrollSidebar";
 import { legalNavItems } from "./sidebars/LegalSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
+import { isPrivilegedRole, isSuperAdminRole } from "@/contexts/auth.utils";
 // ── User sidebar ──────────────────────────────────────────────────────────────
 const userNavItems: NavItem[] = [
   { label: "My Profile", icon: User, path: "/user/profile" },
@@ -283,7 +284,7 @@ export const AppSidebar = () => {
   const { canAccessPage } = useAuth();
 
   const role = currentUser?.role ?? "";
-  const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
+  const isAdminTier = isPrivilegedRole(role);
   // marketing_head acts as admin within Sales + SA modules
   const isMarketingHead = role === "marketing_head";
   const isAdminTierForModule = (mod: string | null) =>
@@ -322,7 +323,7 @@ export const AppSidebar = () => {
   ];
 
   const isSuperAdminPage =
-    role === "super_admin" && location.pathname.startsWith("/superadmin");
+    isSuperAdminRole(role) && location.pathname.startsWith("/superadmin");
   // marketing_head cannot access DBA or system admin panels
   const isDbaPage = isAdminTier && location.pathname.startsWith("/dba");
   // Anyone with at least one Admin page ticked in Menu Rights can be on the Admin pages (they see only those).
@@ -346,9 +347,9 @@ export const AppSidebar = () => {
     if (isUserProfilePage) return userNavItems;
     if (isAdminPage && !isAdminTier) {
       // Not admin-tier: only the Admin pages ticked for this role / user in Menu Rights.
-      return filterAdminNavItems(buildAdminNavItems(pendingApprovalCount, role === "super_admin"), (pk) => canAccessPage(pk as any));
+      return filterAdminNavItems(buildAdminNavItems(pendingApprovalCount, isSuperAdminRole(role)), (pk) => canAccessPage(pk as any));
     }
-    if (isAdminPage) return buildAdminNavItems(pendingApprovalCount, role === "super_admin");
+    if (isAdminPage) return buildAdminNavItems(pendingApprovalCount, isSuperAdminRole(role));
 
     let raw: NavItem[] = [];
     switch (activeModule) {
@@ -398,7 +399,7 @@ export const AppSidebar = () => {
         raw = legalNavItems;
         break;
       case "admin":
-        raw = buildAdminNavItems(pendingApprovalCount, role === "super_admin");
+        raw = buildAdminNavItems(pendingApprovalCount, isSuperAdminRole(role));
         break;
       default:
         raw = [];

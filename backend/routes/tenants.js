@@ -1,4 +1,5 @@
 const express = require("express");
+const { fullAccessOnly } = require("../middleware/role");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -45,7 +46,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // CREATE tenant
-router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(tenantCreateSchema), async (req, res) => {
+router.post("/", fullAccessOnly, validateBody(tenantCreateSchema), async (req, res) => {
   const {
     tenant_id,
     name,
@@ -82,7 +83,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(tenantC
 });
 
 // UPDATE tenant (including tenant_id rename)
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(tenantUpdateSchema), async (req, res) => {
+router.put("/:id", fullAccessOnly, validateBody(tenantUpdateSchema), async (req, res) => {
   const { id } = req.params;
   const {
     tenant_id,
@@ -125,7 +126,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(tenan
 // PATCH tenant status (suspend / activate)
 router.patch(
   "/:id/status",
-  allowRoles("admin", "super_admin", "dba"),
+  fullAccessOnly,
   validateBody(tenantPatchStatusSchema),
   async (req, res) => {
     const { status } = req.body;
@@ -145,7 +146,7 @@ router.patch(
 );
 
 // DELETE tenant
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", fullAccessOnly, async (req, res) => {
   try {
     const pool = getPool();
     await pool

@@ -17,6 +17,7 @@ import {
 import type { LegalMasterEntry } from "./legalMasters";
 import { LegalFileLink, LegalLinkChip, previewLegalFile, showLegalDetails } from "@/components/legal/LegalDocumentPreview";
 
+import { isPrivilegedRole } from "@/contexts/auth.utils";
 // One page for every Legal Setup master: the form, table, export and detail view are all built from the
 // master's field definitions (GET /api/legal/masters/meta), so a new column only needs the backend config.
 // LegalMasterTable is the same thing without the page frame, for a land property's own records
@@ -284,7 +285,7 @@ interface TableProps {
 export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName, rowFilter, onCreated, fixed, rowLock }: TableProps) {
   const rights = usePageRights(entry.pageKey);
   const { currentUser } = useAuth();
-  const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
+  const isAdminTier = isPrivilegedRole(currentUser?.role);
   const queryClient = useQueryClient();
 
   const { data: meta } = useQuery({ queryKey: ["legal-meta"], queryFn: getLegalMeta, staleTime: Infinity });

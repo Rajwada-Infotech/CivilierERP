@@ -36,6 +36,7 @@ import {
   salesSetupItems,
 } from "@/components/layout/setupMenus";
 
+import { isPrivilegedRole, isSuperAdminRole } from "@/contexts/auth.utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface CompassEntry {
@@ -139,7 +140,6 @@ const SOURCES: ModuleSource[] = [
   { id: "super_admin", label: "Super Admin", nav: () => superAdminNavItems },
 ];
 
-const ADMIN_TIER = new Set(["super_admin", "admin", "dba"]);
 // Mirrors AppSidebar: marketing_head acts as admin inside these two modules.
 const MARKETING_HEAD_MODULES = new Set(["sales", "sales-automation"]);
 const ADMIN_INBOX_ROUTE = "/admin/approval/inbox";
@@ -197,15 +197,15 @@ function collect(src: ModuleSource, isAdminTier: boolean, isSuperAdmin: boolean)
  */
 export function buildCompassEntries(access: CompassAccess): CompassEntry[] {
   const role = (access.role ?? "").toLowerCase();
-  const isAdminTier = ADMIN_TIER.has(role);
+  const isAdminTier = isPrivilegedRole(role);
   const seen = new Set<string>();
   const result: CompassEntry[] = [];
 
   for (const src of SOURCES) {
-    if (src.id === "super_admin" && role !== "super_admin") continue;
+    if (src.id === "super_admin" && !isSuperAdminRole(role)) continue;
     if (src.id === "dba" && !isAdminTier) continue;
 
-    const raw = collect(src, isAdminTier, role === "super_admin");
+    const raw = collect(src, isAdminTier, isSuperAdminRole(role));
     let allowed: CompassEntry[];
 
     if (src.id === "admin" && !isAdminTier) {

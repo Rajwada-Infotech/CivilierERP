@@ -32,13 +32,7 @@ const GL_POSTERS = {
  * Super Admin check: Super Admin has approval rights for every approval in parallel.
  * Matches super_admin, superadmin, sa.
  */
-function isSuperAdmin(role) {
-  const r = String(role || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-  return r === "super_admin" || r === "superadmin" || r === "sa";
-}
+const { isSuperAdmin } = require("../middleware/role");
 
 // Map module slug → { table, pkCol, statusCol }
 const MODULE_MAP = {
@@ -983,6 +977,20 @@ async function canUserAct(module, recordId, userRole, userId) {
 }
 
 const canPerformCrmGatedAction = (module, userId, userRole) => isApproverFor(module, userId, userRole);
+
+/** The active users one step of an Approval Setup workflow names: its named people and everyone in its roles. */
+async function usersNamedInStep(pool, module, stepIndex = 0) {
+  const step = (await getWorkflow(module))?.LevelDefs?.[stepIndex];
+  const ids = new Set((step?.userIds || []).map(Number).filter(Boolean));
+  const roles = (step?.roles || []).map((r) => String(r).toLowerCase());
+  if (roles.length) {
+    const req0 = pool.request();
+    const names = roles.map((r, i) => { req0.input(`r${i}`, sql.NVarChar(100), r); return `@r${i}`; });
+    (await req0.query(`SELECT u.id FROM dbo.Users u JOIN dbo.Role r ON r.RId = u.RoleId
+      WHERE LOWER(r.RName) IN (${names.join(", ")}) AND u.discontinue = 0`)).recordset.forEach((u) => ids.add(u.id));
+  }
+  return ids;
+}
 const canApproveBookingAmendment = (userId, userRole) => isApproverFor("crm-booking-amendment", userId, userRole);
 
 module.exports = {
@@ -1004,6 +1012,7 @@ module.exports = {
   isApproverFor,
   canUserAct,
   canPerformCrmGatedAction,
+  usersNamedInStep,
   // Canonical module → {table, pk, status} / GL poster maps — the single
   // source of truth for what each module's identity/status column is.
   MODULE_MAP,

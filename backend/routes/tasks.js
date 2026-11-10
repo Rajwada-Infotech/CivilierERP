@@ -7,6 +7,7 @@
  */
 
 const express = require("express");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const logger = require("../logger");
 const { bumpCacheVersion } = require("../redis");
 const { cache } = require("../middleware/cache");
@@ -16,7 +17,8 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 
-const adminOnly = allowRoles("admin", "super_admin");
+// Who may change this is set in Role Rights on the page (tasks); full-access roles always may.
+const adminOnly = pageRightByMethod("tasks");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -86,7 +88,7 @@ router.get("/", cache("tasks", 60), async (req, res) => {
     userId = req.user.userId ?? req.user.id;
     const { role } = req.user;
     const isAdmin =
-      role === "admin" || role === "super_admin" || role === "dba";
+      allowRoles.hasFullAccess(role);
     const moduleFilter =
       typeof req.query.module === "string" && req.query.module.trim()
         ? req.query.module.trim().toLowerCase()
@@ -169,7 +171,7 @@ router.get("/reminders", async (req, res) => {
     const userId = req.user.userId ?? req.user.id;
     const { role } = req.user;
     const isAdmin =
-      role === "admin" || role === "super_admin" || role === "dba";
+      allowRoles.hasFullAccess(role);
 
     const request = pool.request();
     request.input("today", sql.Date, new Date());
@@ -231,7 +233,7 @@ router.get("/:id", async (req, res) => {
     userId = req.user.userId ?? req.user.id;
     const { role } = req.user;
     const isAdmin =
-      role === "admin" || role === "super_admin" || role === "dba";
+      allowRoles.hasFullAccess(role);
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid task id" });
 
@@ -352,7 +354,7 @@ router.put("/:id", async (req, res) => {
     userId = req.user.userId ?? req.user.id;
     const { role } = req.user;
     const isAdmin =
-      role === "admin" || role === "super_admin" || role === "dba";
+      allowRoles.hasFullAccess(role);
     id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid task id" });
 

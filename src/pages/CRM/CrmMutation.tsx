@@ -1,50 +1,47 @@
-import { useSheetAsk } from "@/components/sheet/SheetAsk";
+// CRM Property Mutation: the khata transfer that puts the buyer's name on the municipal land records once the sale deed
+// is registered. One list; one page per mutation with its application, documents, history and sale deed together, and
+// the one next action in the band. The server decides every rule.
 import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Download, ExternalLink, FileText, FolderCheck, History, Landmark, Link2, Plus, RefreshCw, ScrollText } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { cn } from "@/lib/utils";
+import { DateInput } from "@/components/ui/date-input";
+import { SearchableSelect } from "@/components/SearchableSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import {
-  Plus, CheckCircle2, AlertTriangle, History, Link2, Landmark, RefreshCw, ScrollText, ArrowLeft, Download, Copy,
-  RotateCcw, FileText, Home, FolderCheck, Send,
-
-} from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+  CrmGrid, GridDateFilter, GridDialog, GridFacts, GridFormField, GridFormSection, GridRelated, GridSearch, GridTabs, GridToneMark,
+  exportGrid, resolveGridDateRange, useGridPrefs, GRID_ANY_DATE, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_PAGE_SIZES, GRID_SHEET_KEYS,
+  type GridCol, type GridDateRange,
+} from "@/components/crm/CrmDataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useUrlParam } from "@/hooks/useUrlParam";
-import { useCrmListState, useSticky, listParams, type CrmListQuery, type CrmSort } from "@/hooks/useCrmListState";
-import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import {
-  CrmAppPage, CrmGrid, GridBulkBar, GridColumnChooser, GridDateFilter, GridFields, GridGuidance, GridHighlights, GridMetric, GridPath, GridProgress, GridRelated,
-
-  GridSavedViews, GridSearch, GridStatusPill, GridTabs, exportGrid, gridListMeta, gridVisibleCols, resolveGridDateRange, useGridPrefs,
-  GRID_ANY_DATE, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_LABEL, GRID_PAGE_SIZES,
-  type GridCol, type GridDateRange, type GridPathState,
-} from "@/components/crm/CrmDataTable";
-import { DateInput } from "@/components/ui/date-input";
-import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
-import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { useCanApprove } from "@/hooks/useCanApprove";
+import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
+import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, BandNext, CollectionBar, MoneyBand, StepBar, personName, type StepState } from "./payments/parts";
+import { fmtShort } from "./payments/config";
 import { fmtDate, localDay } from "./salesDeed/config";
 import { DocumentCentre } from "./salesDeed/parts";
-import { useCanApprove } from "@/hooks/useCanApprove";
 
 const API = "/api/crm/mutation";
-const PREFS_KEY = "crm-mutation-grid";
-const VIEWS_KEY = "crm-mutation-saved-views";
+const KEY = "crm-mutation";
+const OTHER_KEYS = ["crm-booking-lifecycle", "crm-legal-milestones"];
 const ALL = "All";
-const DEFAULT_SORT: CrmSort = { key: "CreatedAt", dir: "desc" };
 const STATUS_LABEL: Record<string, string> = { Applied: "With the authority", QueryRaised: "Query raised", Approved: "Approved" };
 const statusText = (s: string) => STATUS_LABEL[s] || s;
-const DETAIL_TABS = ["Overview", "Documents", "History"] as const;
-type DetailTab = typeof DETAIL_TABS[number];
-
-const isSynced = (doc: any): boolean => !!doc.Remarks?.startsWith("Synced automatically");
-const fmt = (n: number | null | undefined) => (n != null ? fmtRupees(Number(n)) : "—");
+const statusTone = (s: string): "done" | "waiting" | "stopped" => (s === "Approved" ? "done" : s === "QueryRaised" ? "stopped" : "waiting");
+const APPLICATION_FORM = { type: "MutationApplicationForm", label: "Mutation Application Form" };
+const UPLOAD_TYPES = [{ value: "IdentityProof", label: "Identity proof" }, { value: "Other", label: "Other" }];
 const DAY_MS = 86_400_000;
+const isSynced = (doc: any): boolean => !!doc.Remarks?.startsWith("Synced automatically");
+const money = (n: unknown) => (n != null && n !== "" ? fmtRupees(Number(n)) : "—");
+
 /** Days the application has been with the authority (still open), or took (approved). */
 const daysOpen = (m: any): number | null => {
   if (!m.ApplicationDate) return null;
@@ -52,7 +49,26 @@ const daysOpen = (m: any): number | null => {
   return Math.max(0, Math.floor((end.getTime() - new Date(m.ApplicationDate).getTime()) / DAY_MS));
 };
 
-/** This page's own filter beyond the common list ones: when it was applied. */
+/** Where a mutation stands, from its status and its mandatory documents. One rule for the list and the record. */
+export function mutationSteps(m: any, required: number, verified: number): { label: string; state: StepState }[] {
+  const ready = required > 0 && verified >= required;
+  const approved = m.Status === "Approved", query = m.Status === "QueryRaised";
+  return [
+    { label: "Sale deed registered", state: "done" },
+    { label: "Applied", state: "done" },
+    { label: query ? "Query raised" : "Documents verified", state: query ? "stopped" : ready || approved ? "done" : "active" },
+    { label: "New khata issued", state: approved ? "done" : ready && !query ? "active" : "off" },
+  ];
+}
+export function mutationNext(m: any, required: number, verified: number): { text: string; late?: boolean } {
+  if (m.Status === "Approved") return { text: `New khata ${m.NewKhataNo || ""} issued${m.ApprovedDate ? ` on ${fmtDate(m.ApprovedDate)}` : ""}`.replace("  ", " ") };
+  const ready = required > 0 && verified >= required;
+  if (m.Status === "QueryRaised") return ready ? { text: "Documents corrected: resubmit to the authority" } : { text: `Authority raised a query: correct the documents (${verified} of ${required} verified)`, late: true };
+  if (!required) return { text: "Request the mutation application form" };
+  if (!ready) return { text: `Verify the documents (${verified} of ${required} verified)` };
+  return { text: "Waiting for the authority to issue the new khata" };
+}
+
 interface ExtraFilters { applied: GridDateRange }
 const NO_EXTRA: ExtraFilters = { applied: GRID_ANY_DATE };
 function queryString(q: CrmListQuery, x: ExtraFilters): URLSearchParams {
@@ -62,619 +78,331 @@ function queryString(q: CrmListQuery, x: ExtraFilters): URLSearchParams {
   if (to) p.set("dateTo", to);
   return p;
 }
-interface MutationList { rows: any[]; total: number; statusCounts: Record<string, number>; summary: { feeTotal: number } }
-async function fetchMutationList(q: CrmListQuery, x: ExtraFilters): Promise<MutationList> {
-  const r = await fetchWithAuth(`${API}?${queryString(q, x)}`);
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data?.error || `Could not load the mutations (${r.status}).`);
-  return { rows: data.rows || [], total: data.total || 0, statusCounts: data.statusCounts || {}, summary: data.summary || { feeTotal: 0 } };
+async function send(url: string, method = "GET", body?: unknown): Promise<any> {
+  const res = await fetchWithAuth(url, body instanceof FormData ? { method, body } : { method, headers: body !== undefined ? { "Content-Type": "application/json" } : undefined, body: body !== undefined ? JSON.stringify(body) : undefined });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d?.error || `The request could not be completed (${res.status}).`);
+  return d;
 }
-async function fetchAllMutations(q: CrmListQuery, x: ExtraFilters): Promise<any[]> {
-  const p = queryString(q, x);
-  p.delete("page"); p.delete("pageSize");
-  const r = await fetchWithAuth(`${API}?${p}`);
-  const data = await r.json().catch(() => []);
-  if (!r.ok) throw new Error((data as any)?.error || `Could not export the mutations (${r.status}).`);
-  return data;
-}
-async function fetchEligible(): Promise<any[]> {
-  const r = await fetchWithAuth(`${API}/eligible-bookings`);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load eligible bookings");
-  return r.json();
-}
+const fetchList = async (q: CrmListQuery, x: ExtraFilters) => {
+  const d = await send(`${API}?${queryString(q, x)}`);
+  return { rows: (d.rows ?? []) as any[], total: Number(d.total ?? 0), counts: (d.statusCounts ?? {}) as Record<string, number>, feeTotal: Number(d.summary?.feeTotal ?? 0) };
+};
 
-const emptyStart = () => ({ ApplicationNo: "", ApplicationDate: localDay(), Authority: "", OldKhataNo: "", MutationFee: "" });
-
-/** The documents as a bar: verified of the mandatory ones. */
-const DocsProgress = ({ verified, required }: { verified: number; required: number }) => (
-  <GridProgress done={verified} total={required} title={`${verified} of ${required} mandatory documents verified`} />
-);
-
-const MUTATION_COLS: GridCol<any>[] = [
-  { id: "no", label: "Mutation", sortKey: "MutationNo", locked: true, cell: (m) => <span className="font-semibold text-primary hover:underline tabular-nums">{m.MutationNo}</span>, csv: (m) => m.MutationNo },
-  {
-    id: "customer", label: "Customer", sortKey: "ApplicantName",
-    cell: (m) => <span className="truncate block max-w-[16rem]" onClick={(e) => e.stopPropagation()}><ApplicantNames name={m.ApplicantName} bookingId={m.BookingId} applicationId={m.ApplicationId} /></span>,
-    csv: (m) => m.ApplicantName,
-  },
-  { id: "booking", label: "Booking", sortKey: "BookingNo", cell: (m) => <span className="tabular-nums">{m.BookingNo}</span>, csv: (m) => m.BookingNo },
-  {
-    id: "unit", label: "Project · unit", sortKey: "ProjectName",
-    cell: (m) => <span className="truncate block max-w-[14rem]">{[m.ProjectName, m.UnitNo].filter(Boolean).join(" · ") || "—"}</span>,
-    csv: (m) => [m.ProjectName, m.UnitNo].filter(Boolean).join(" · "),
-  },
-  { id: "authority", label: "Authority", sortKey: "Authority", cell: (m) => m.Authority || "—", csv: (m) => m.Authority },
-  { id: "applied", label: "Applied on", sortKey: "ApplicationDate", cell: (m) => <span className="tabular-nums">{fmtDate(m.ApplicationDate)}</span>, csv: (m) => fmtDate(m.ApplicationDate) },
-  {
-    id: "days", label: "Days", align: "right",
-    cell: (m) => { const d = daysOpen(m); return <span className="tabular-nums" title={m.Status === "Approved" ? "Days the authority took" : "Days with the authority so far"}>{d ?? "—"}</span>; },
-    csv: (m) => daysOpen(m),
-  },
-  { id: "docs", label: "Documents", cell: (m) => <DocsProgress verified={m.DocsVerified ?? 0} required={m.DocsRequired ?? 0} />, csv: (m) => `${m.DocsVerified ?? 0}/${m.DocsRequired ?? 0}` },
-  { id: "status", label: "Status", sortKey: "Status", cell: (m) => <GridStatusPill status={m.Status} label={statusText(m.Status)} />, csv: (m) => statusText(m.Status) },
-  { id: "oldKhata", label: "Old khata", hiddenByDefault: true, cell: (m) => <span className="tabular-nums">{m.OldKhataNo || "—"}</span>, csv: (m) => m.OldKhataNo },
-  { id: "newKhata", label: "New khata", cell: (m) => <span className="tabular-nums">{m.NewKhataNo || "—"}</span>, csv: (m) => m.NewKhataNo },
-  { id: "approvedNo", label: "Authority's mutation no.", hiddenByDefault: true, cell: (m) => <span className="tabular-nums">{m.ApprovedNo || "—"}</span>, csv: (m) => m.ApprovedNo },
-  { id: "approvedOn", label: "Approved on", sortKey: "ApprovedDate", hiddenByDefault: true, cell: (m) => <span className="tabular-nums">{fmtDate(m.ApprovedDate)}</span>, csv: (m) => fmtDate(m.ApprovedDate) },
-  { id: "deed", label: "Sale deed", hiddenByDefault: true, cell: (m) => <span className="tabular-nums">{m.DeedNo || "—"}</span>, csv: (m) => m.DeedNo },
-  { id: "fee", label: "Fee", sortKey: "MutationFee", align: "right", cell: (m) => <span className="tabular-nums">{fmt(m.MutationFee)}</span>, csv: (m) => m.MutationFee },
+const COLS: GridCol<any>[] = [
+  { id: "customer", label: "Customer", locked: true, sortKey: "ApplicantName", csv: (m) => personName(m.ApplicantName), cell: (m) => (
+    <span className="block py-1.5 min-w-0">
+      <span className="block font-semibold text-foreground capitalize truncate" title={m.ApplicantName}>{personName(m.ApplicantName)}</span>
+      <span className="block text-xs text-muted-foreground tabular-nums">{m.MutationNo} · {m.BookingNo}</span>
+    </span>
+  ) },
+  { id: "unit", label: "Project and unit", sortKey: "ProjectName", csv: (m) => [m.ProjectName, m.UnitNo].filter(Boolean).join(" / "), cell: (m) => (
+    <span className="block py-1.5 min-w-0">
+      <span className="block font-medium truncate">{m.ProjectName || "—"}</span>
+      <span className="block text-xs text-muted-foreground truncate">{[m.UnitNo && `Unit ${m.UnitNo}`, m.Authority].filter(Boolean).join(" · ")}</span>
+    </span>
+  ) },
+  { id: "progress", label: "Progress", sortKey: "Status", csv: (m) => statusText(m.Status), cell: (m) => <span className="block min-w-[16rem] py-1.5"><StepBar steps={mutationSteps(m, m.DocsRequired ?? 0, m.DocsVerified ?? 0)} /></span> },
+  { id: "next", label: "Next step", csv: (m) => mutationNext(m, m.DocsRequired ?? 0, m.DocsVerified ?? 0).text, cell: (m) => {
+    const n = mutationNext(m, m.DocsRequired ?? 0, m.DocsVerified ?? 0);
+    return <span className={cn("block whitespace-normal text-[0.8125rem] leading-snug", n.late && "font-semibold text-destructive")}>{n.text}</span>;
+  } },
+  { id: "days", label: "Days", align: "right", csv: (m) => daysOpen(m), cell: (m) => <span className="tabular-nums" title={m.Status === "Approved" ? "Days the authority took" : "Days with the authority so far"}>{daysOpen(m) ?? "—"}</span> },
+  { id: "fee", label: "Fee", align: "right", sortKey: "MutationFee", csv: (m) => m.MutationFee, cell: (m) => <span className="tabular-nums">{m.MutationFee ? fmtShort(m.MutationFee) : "—"}</span> },
+  // In the export only.
+  { id: "applied", label: "Applied on", hiddenByDefault: true, csv: (m) => fmtDate(m.ApplicationDate), cell: () => null },
+  { id: "oldKhata", label: "Old khata", hiddenByDefault: true, csv: (m) => m.OldKhataNo, cell: () => null },
+  { id: "newKhata", label: "New khata", hiddenByDefault: true, csv: (m) => m.NewKhataNo, cell: () => null },
+  { id: "approvedNo", label: "Authority's mutation no.", hiddenByDefault: true, csv: (m) => m.ApprovedNo, cell: () => null },
+  { id: "approvedOn", label: "Approved on", hiddenByDefault: true, csv: (m) => fmtDate(m.ApprovedDate), cell: () => null },
+  { id: "deed", label: "Sale deed", hiddenByDefault: true, csv: (m) => m.DeedNo, cell: () => null },
+  { id: "docs", label: "Documents verified", hiddenByDefault: true, csv: (m) => `${m.DocsVerified ?? 0}/${m.DocsRequired ?? 0}`, cell: () => null },
 ];
 
-/** The mutation's stages, read from what is recorded. */
-function mutationPath(m: any, docsReady: boolean, required: number, verified: number): { label: string; state: GridPathState; note?: string }[] {
-  const approved = m.Status === "Approved";
-  const query = m.Status === "QueryRaised";
-  return [
-    { label: "Sale deed registered", state: "done", note: m.DeedNo ? `Deed ${m.DeedNo}${m.RegistrationNo ? `, registration ${m.RegistrationNo}` : ""}` : undefined },
-    { label: "Applied to authority", state: "done", note: `Applied ${fmtDate(m.ApplicationDate)}${m.Authority ? ` to ${m.Authority}` : ""}` },
-    {
-      label: query ? "Query raised" : "Documents verified", state: query ? "failed" : docsReady || approved ? "done" : "current",
-      note: query ? (m.QueryRemarks ? `The authority asked: "${m.QueryRemarks}"` : "The authority raised a query.")
-        : required ? `${verified} of ${required} mandatory documents verified.` : "No mandatory document requested yet.",
-    },
-    { label: "New khata issued", state: approved ? "done" : docsReady && !query ? "current" : "todo", note: approved ? `New khata ${m.NewKhataNo}` : "Approve once the authority issues the new khata." },
-  ];
-}
+const emptyStart = () => ({ BookingId: "", ApplicationNo: "", ApplicationDate: localDay(), Authority: "", OldKhataNo: "", MutationFee: "" });
 
-const CrmMutation: React.FC = () => {
-  const ask = useSheetAsk();
-  const qc = useQueryClient();
+// ── One mutation ────────────────────────────────────────────────────────────────
+function MutationRecord({ id, onBack, refreshAll }: { id: number; onBack: () => void; refreshAll: () => void }) {
   const navigate = useNavigate();
   const rights = usePageRights("crm-mutation");
   // Approval Setup ("CRM Mutation Approve") names who approves; a super admin always can. The server says.
-  const canApproveMutation = useCanApprove("crm-mutation-approve") && rights.canEdit;
-  const [sp] = useSearchParams();
-  const deepLinkBookingId = sp.get("bookingId");
-  // The open mutation and its tab live in the address, so a refresh or a shared link keeps them.
-  const [idParam, setIdParam] = useUrlParam("mutationId");
-  const detailId = /^\d+$/.test(idParam) ? Number(idParam) : null;
-  const [activeTab, setActiveTab] = useUrlParam<DetailTab>("tab", "Overview", DETAIL_TABS);
-
-  const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
-  const s = useCrmListState({ pageSize, defaultSort: DEFAULT_SORT, defaultStatus: ALL });
-  const [extra, setExtraRaw] = useState<ExtraFilters>(NO_EXTRA);
-  const setExtra = (x: Partial<ExtraFilters>) => { setExtraRaw((cur) => ({ ...cur, ...x })); s.setPage(1); };
-  const filtered = s.hasFilters || extra.applied.preset !== "any";
-  const clearFilters = () => { s.reset(); setExtraRaw(NO_EXTRA); };
-  const [selected, setSelected] = useState<Map<string | number, any>>(new Map());
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [bookingId, setBookingId] = useState("");
-  const [startForm, setStartForm] = useState(emptyStart);
-  const [saving, setSaving] = useState(false);
-  const [deepLinkDone, setDeepLinkDone] = useState(false);
-  const [queryOpen, setQueryOpen] = useState(false);
-  const [queryRemarks, setQueryRemarks] = useState("");
-  const [approveOpen, setApproveOpen] = useState(false);
-  const [approveForm, setApproveForm] = useState({ ApprovedNo: "", ApprovedDate: localDay(), NewKhataNo: "" });
+  const canApprove = useCanApprove("crm-mutation-approve") && rights.canEdit;
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({ queryKey: [KEY, "record", id], queryFn: () => send(`${API}/${id}`), retry: false });
+  const [dialog, setDialog] = useState<"query" | "approve" | null>(null);
+  const [remarks, setRemarks] = useState("");
+  const [approve, setApprove] = useState({ NewKhataNo: "", ApprovedNo: "", ApprovedDate: localDay() });
   const [busy, setBusy] = useState(false);
-  const [requestingDoc, setRequestingDoc] = useState(false);
+  if (isLoading) return <div className="px-4 py-10 text-center text-sm text-muted-foreground">Loading…</div>;
+  if (isError || !data?.mutation) return (
+    <div className={cn(GRID_CARD, "px-4 py-10 text-center text-sm")}>
+      <p className="text-destructive">{isError ? translateError((error as Error)?.message) : "Mutation not found."}</p>
+      <button type="button" onClick={onBack} className={cn(GRID_BTN, "mt-3")}>All mutations</button>
+    </div>
+  );
+  const m = data.mutation;
+  const documents: any[] = data.documents ?? [];
+  const history: any[] = data.history ?? [];
+  const required = documents.filter((d) => d.IsMandatory);
+  const verified = required.filter((d) => d.Status === "Verified").length;
+  const ready = required.length > 0 && verified === required.length;
+  const locked = m.Status === "Approved";
+  const canDocs = rights.canEdit && !locked;
+  const days = daysOpen(m);
+  const next = mutationNext(m, required.length, verified);
 
-  const { data, isLoading, isFetching, error, refetch } = useQuery({
-    queryKey: ["crm-mutation", s.query, extra],
-    queryFn: () => fetchMutationList(s.query, extra),
-    staleTime: 30_000,
-  });
-  const result = useSticky(data);
-  const rows = result?.rows ?? [];
-  const total = result?.total ?? 0;
-  const counts = result?.statusCounts ?? {};
-  const allCount = Object.values(counts).reduce((n, x) => n + x, 0);
-  const { data: startableBookings = [] } = useQuery({ queryKey: ["crm-mutation-eligible"], queryFn: fetchEligible, staleTime: 60_000, enabled: rights.canCreate });
-  const [prefs, setPrefs] = useGridPrefs(PREFS_KEY, MUTATION_COLS);
-
-  const { data: detailData, isError: detailIsError, error: detailError } = useQuery({
-    queryKey: ["crm-mutation-detail", detailId],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${API}/${detailId}`);
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d?.error || `Could not load the mutation (${r.status}).`);
-      return d;
-    },
-    enabled: detailId != null,
-    staleTime: 15_000,
-    retry: false,
-  });
-  const detail = detailData?.mutation ?? (detailId != null ? rows.find((r: any) => r.Id === detailId) : null);
-  const documents: any[] = detailData?.documents || [];
-  const history: any[] = detailData?.history || [];
-
-  const selectDetail = (id: number) => { setIdParam(String(id)); setActiveTab("Overview"); };
-  const backToList = () => { setIdParam(""); setActiveTab("Overview"); };
-
-  // ?bookingId opens the booking's mutation (found on the server), or the Start dialog when it has none and is eligible.
-  useEffect(() => {
-    if (deepLinkDone || !deepLinkBookingId || detailId != null) return;
-    let stop = false;
-    (async () => {
-      const r = await fetchWithAuth(`${API}/booking/${deepLinkBookingId}`).catch(() => null);
-      const row = r?.ok ? await r.json().catch(() => null) : null;
-      if (stop) return;
-      if (row?.Id) { setDeepLinkDone(true); selectDetail(row.Id); return; }
-      if (rights.canCreate && startableBookings.some((b: any) => String(b.Id) === deepLinkBookingId)) {
-        setDeepLinkDone(true);
-        setBookingId(deepLinkBookingId);
-        setDialogOpen(true);
-      }
-    })();
-    return () => { stop = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, detailId, deepLinkDone, startableBookings.length, rights.canCreate]);
-
-  const invalidateDetail = () => qc.invalidateQueries({ queryKey: ["crm-mutation-detail", detailId] });
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["crm-mutation"] });
-    qc.invalidateQueries({ queryKey: ["crm-mutation-eligible"] });
-    qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
-    qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
-    if (detailId) invalidateDetail();
-  };
-
-  const send = async (url: string, method: string, body?: any) => {
-    const res = await fetchWithAuth(url, body instanceof FormData ? { method, body } : {
-      method, headers: { "Content-Type": "application/json" }, body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
-    return d;
-  };
-
-  const handleStart = async () => {
-    if (!bookingId) { toast.error("Booking is required"); return; }
-    setSaving(true);
-    try {
-      const d = await send(API, "POST", { BookingId: parseInt(bookingId), ...startForm });
-      toast.success(`${d.MutationNo} started`);
-      setDialogOpen(false);
-      setBookingId("");
-      setStartForm(emptyStart());
-      invalidate();
-      selectDetail(d.id);
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setSaving(false); }
-  };
-  const handleQuery = async () => {
-    if (detailId == null || !queryRemarks.trim()) { toast.error("Remarks are required"); return; }
+  const run = async (work: () => Promise<unknown>, done: string) => {
     setBusy(true);
-    try {
-      await send(`${API}/${detailId}/query`, "PUT", { Remarks: queryRemarks.trim() });
-      toast.success("Query recorded — documents reset for correction");
-      setQueryOpen(false); setQueryRemarks("");
-      invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); }
+    try { await work(); toast.success(done); setDialog(null); refreshAll(); return true; }
+    catch (e: any) { toast.error(translateError(e.message)); return false; }
     finally { setBusy(false); }
   };
-  const handleResubmit = async () => {
-    if (detailId == null) return;
-    setBusy(true);
-    try { await send(`${API}/${detailId}/resubmit`, "PUT"); toast.success("Resubmitted to the authority"); invalidate(); }
-    catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setBusy(false); }
-  };
-  const handleApprove = async () => {
-    if (detailId == null) return;
-    if (!approveForm.NewKhataNo.trim()) { toast.error("New Khata No. is required"); return; }
-    setBusy(true);
-    try {
-      await send(`${API}/${detailId}/approve`, "PUT", approveForm);
-      toast.success("Mutation approved — municipal records updated");
-      setApproveOpen(false);
-      invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setBusy(false); }
-  };
-  // The document centre's calls (the server's own rules decide who may do each).
-  const docUpload = (files: File[], documentType: string, label?: string) => {
+  const requestForm = () => run(() => send(`${API}/${id}/documents/request`, "POST", { DocumentType: APPLICATION_FORM.type, Label: APPLICATION_FORM.label, IsMandatory: true }), "Application form requested");
+  const resubmit = () => run(() => send(`${API}/${id}/resubmit`, "PUT"), "Resubmitted to the authority");
+  const openApprove = () => { setApprove({ NewKhataNo: "", ApprovedNo: "", ApprovedDate: localDay() }); setDialog("approve"); };
+  const upload = (files: File[], documentType: string, label?: string) => {
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f));
     fd.append("DocumentType", documentType);
     if (label) fd.append("Label", label);
-    return send(`${API}/${detailId}/documents/upload`, "POST", fd);
+    return send(`${API}/${id}/documents/upload`, "POST", fd);
   };
-  const docReview = (doc: any, verify: boolean, remarks?: string) =>
-    send(`${API}/${detailId}/documents/${doc.Id}`, "PUT", verify ? { Status: "Verified" } : { Status: "Rejected", Remarks: remarks });
-  const handleRequestDoc = async (documentType: string, label?: string) => {
-    if (detailId == null) return;
-    setRequestingDoc(true);
-    try {
-      await send(`${API}/${detailId}/documents/request`, "POST", { DocumentType: documentType, Label: label, IsMandatory: true });
-      toast.success("Document requested");
-      invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setRequestingDoc(false); }
-  };
-  const fileUrl = (doc: any) => `${API}/documents/file/${doc.Id}`;
+  const review = (doc: any, ok: boolean, why?: string) => send(`${API}/${id}/documents/${doc.Id}`, "PUT", ok ? { Status: "Verified" } : { Status: "Rejected", Remarks: why });
 
-  const runExport = async () => {
-    setExporting(true); setExportError(null);
-    try { exportGrid(await fetchAllMutations(s.query, extra), gridVisibleCols(MUTATION_COLS, prefs), `mutations-${s.status.toLowerCase()}`); }
-    catch (e) { setExportError((e as Error).message); } finally { setExporting(false); }
-  };
-  const exportSelected = () => exportGrid([...selected.values()], gridVisibleCols(MUTATION_COLS, prefs), `mutations-selected-${selected.size}`);
-  const copySelected = async () => {
-    try { await navigator.clipboard.writeText([...selected.values()].map((m) => m.MutationNo).join("\n")); toast.success(`Copied ${selected.size} mutation number${selected.size === 1 ? "" : "s"}`); }
-    catch { toast.error("Could not copy. Your browser blocked the clipboard."); }
-  };
-
-  const required = documents.filter((d) => d.IsMandatory);
-  const supporting = documents.filter((d) => !d.IsMandatory);
-  const verifiedCount = required.filter((d) => d.Status === "Verified").length;
-  const docsReady = required.length > 0 && verifiedCount === required.length;
-  const locked = detail?.Status === "Approved";
-  const canDocs = rights.canEdit && !locked;
-
-
-  const tabs = [ALL, "Applied", "QueryRaised", "Approved"].map((k) => ({ key: k, label: k === ALL ? "All" : statusText(k), count: result ? (k === ALL ? allCount : counts[k] ?? 0) : null }));
-
-  // What the open mutation is waiting on, and the one action that moves it on.
-  const guidance = !detail ? null : detail.Status === "Approved" ? {
-    tone: "done" as const, title: `Approved ${fmtDate(detail.ApprovedDate)}`, text: `New khata ${detail.NewKhataNo}${detail.ApprovedNo ? ` · authority's mutation no. ${detail.ApprovedNo}` : ""}. The municipal records now carry the buyer's name.`,
-  } : detail.Status === "QueryRaised" ? {
-    tone: "stopped" as const, title: "The authority raised a query", text: `${detail.QueryRemarks ? `"${detail.QueryRemarks}". ` : ""}Correct and re-verify the flagged documents (${verifiedCount}/${required.length} verified), then resubmit.`,
-  } : !required.length ? {
-    tone: "waiting" as const, title: "Ask for the application form", text: "No mandatory document has been requested yet, so the mutation can't be approved. Request the application form on the Documents tab.",
-  } : !docsReady ? {
-    tone: "waiting" as const, title: "Verify the documents", text: `${verifiedCount} of ${required.length} mandatory documents verified. Attach and verify the rest on the Documents tab.`,
-  } : {
-    tone: "moving" as const, title: "Waiting for the authority", text: "Every mandatory document is verified. When the authority issues the new khata, approve the mutation; if they raise a query, record it.",
-  };
-
-  const actions = detail && (
-    <>
-      {detail.Status === "Applied" && rights.canEdit && (
-        <button type="button" onClick={() => setQueryOpen(true)} className={cn(GRID_BTN, "text-destructive hover:bg-destructive/5")}><AlertTriangle size={13} /> Raise query</button>
-      )}
-      {detail.Status === "QueryRaised" && rights.canEdit && (
-        <button type="button" onClick={handleResubmit} disabled={!docsReady || busy} title={!docsReady ? "Fix and verify the flagged documents first" : undefined} className={GRID_BTN_BRAND}>
-          <Send size={13} /> Resubmit to authority
-        </button>
-      )}
-      {detail.Status === "Applied" && (canApproveMutation ? (
-        <button type="button" onClick={() => { setApproveForm({ ApprovedNo: "", ApprovedDate: localDay(), NewKhataNo: "" }); setApproveOpen(true); }}
-          disabled={!docsReady} title={!docsReady ? "Verify the mandatory documents first" : undefined} className={GRID_BTN_BRAND}>
-          <CheckCircle2 size={13} /> Approve
-        </button>
-      ) : rights.canEdit ? <span className="text-xs text-muted-foreground">Approving needs the Legal head or an admin</span> : null)}
-      <button type="button" className={GRID_BTN} onClick={() => navigate(`/crm/bookings?view=${detail.BookingId}`)}><Home size={13} /> Open booking</button>
-    </>
-  );
+  // The one action that moves it on, when there is one this user may take.
+  const action = locked ? null
+    : !required.length ? (canDocs ? { label: "Request Application Form", run: requestForm } : null)
+    : m.Status === "QueryRaised" ? (ready && rights.canEdit ? { label: "Resubmit to Authority", run: resubmit } : null)
+    : ready && canApprove ? { label: "Approve Mutation", run: openApprove } : null;
+  const waitingOnApprover = !locked && m.Status === "Applied" && ready && !canApprove && rights.canEdit;
+  const sub = `${personName(m.ApplicantName)} · ${m.MutationNo}`;
 
   return (
-    <>
-      <Breadcrumbs items={detailId != null ? ["Dashboard", "CRM", "Property Mutation", "Record"] : ["Dashboard", "CRM", "Property Mutation"]} />
-      {ask.node}
-      <CrmAppPage icon={Landmark} section="CRM · Legal & Possession" title="Property Mutation"
-        subtitle={detailId != null ? undefined : "Khata transfer: the application that puts the buyer's name on the municipal land records, once the sale deed is registered."}
+    <div className="space-y-4">
+      <MoneyBand eyebrow={`Property Mutation · ${m.MutationNo}`} title={<span className="capitalize">{personName(m.ApplicantName)}</span>}
+        status={<span className="inline-flex items-center h-5 px-2 rounded-full border border-white/30 text-[0.6875rem] font-semibold text-white">{statusText(m.Status)}</span>}
+        sub={[m.ProjectName, m.UnitNo && `Unit ${m.UnitNo}`, m.BookingNo, m.Mobile].filter(Boolean).join(" · ")}
         actions={<>
-          {detailId != null && <button type="button" onClick={backToList} className={GRID_BTN}><ArrowLeft size={13} /> All mutations</button>}
-          {/* The server starts a mutation under the create right. */}
-          {rights.canCreate && <button type="button" onClick={() => setDialogOpen(true)} className={GRID_BTN_BRAND}><Plus size={13} /> Start mutation</button>}
-        </>}>
+          <button type="button" onClick={onBack} className={BAND_KEY}><ArrowLeft size={13} /> All mutations</button>
+          <button type="button" onClick={() => navigate(`/crm/bookings?view=${m.BookingId}`)} className={BAND_KEY}><ExternalLink size={13} /> Open Booking</button>
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+        </>}
+        lead={days != null ? `${days} day${days === 1 ? "" : "s"}` : "—"} leadNote={locked ? "taken by the authority" : `with ${m.Authority || "the authority"}${m.ApplicationDate ? ` since ${fmtDate(m.ApplicationDate)}` : ""}`}
+        bar={<StepBar steps={mutationSteps(m, required.length, verified)} onDark />}
+        figures={[
+          { label: "Documents", dot: ready ? BAND_DOT.collected : BAND_DOT.finance, value: `${verified} of ${required.length}`, note: "Mandatory verified" },
+          { label: "Khata", value: m.NewKhataNo || m.OldKhataNo || "—", note: m.NewKhataNo ? `New, was ${m.OldKhataNo || "not recorded"}` : "Old khata, new pending" },
+          { label: "Mutation fee", value: m.MutationFee ? fmtShort(m.MutationFee) : "—", exact: m.MutationFee ? money(m.MutationFee) : undefined, note: "Paid to the authority" },
+          { label: "Applied on", value: fmtDate(m.ApplicationDate), note: m.ApplicationNo ? `Application ${m.ApplicationNo}` : "Application no. not recorded" },
+        ]}
+        footer={<BandNext text={waitingOnApprover ? "Documents verified: waiting for the Legal head or an admin to approve" : next.text} finished={locked} action={action} />} />
 
-        {/* The list stays mounted while a record is open, so its tab, search, filters, sort and page survive the round trip. */}
-        <div hidden={detailId != null} className={cn(GRID_CARD, "overflow-hidden")}>
-          <div className="px-4 pt-3 pb-2">
-            <h2 className="text-base font-bold leading-tight">{s.status === ALL ? "All mutations" : statusText(s.status)}</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{gridListMeta(total, MUTATION_COLS, s.sort, filtered)}</p>
-          </div>
-          <GridTabs label="Status" tabs={tabs} active={s.status} onChange={s.setStatus} />
-          <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border border-b border-border">
-            <GridMetric label="Mutations" value={total.toLocaleString("en-IN")} />
-            <GridMetric label="With the authority" value={(counts.Applied ?? 0).toLocaleString("en-IN")} />
-            <GridMetric label="Query raised" value={<span className={(counts.QueryRaised ?? 0) > 0 ? "text-destructive" : ""}>{(counts.QueryRaised ?? 0).toLocaleString("en-IN")}</span>} />
-            <GridMetric label="Mutation fees" value={fmt(result?.summary.feeTotal ?? 0)} strong />
-          </div>
+      <GridRelated icon={Landmark} title="Application" action={m.Status === "Applied" && rights.canEdit ? <button type="button" onClick={() => { setRemarks(""); setDialog("query"); }} className={cn(GRID_SHEET_KEYS.KEY_LINE, "h-8 px-3 text-destructive")}><AlertTriangle size={12} /> Raise Query</button> : <GridToneMark text={statusText(m.Status)} tone={statusTone(m.Status)} />}>
+        <GridFacts items={[
+          { label: "Application no.", value: m.ApplicationNo },
+          { label: "Applied on", value: fmtDate(m.ApplicationDate) },
+          { label: "Authority", value: m.Authority },
+          { label: "Mutation fee", value: m.MutationFee ? money(m.MutationFee) : null },
+          { label: "Old khata no.", value: m.OldKhataNo },
+          { label: "New khata no.", value: m.NewKhataNo },
+          { label: "Authority's mutation no.", value: m.ApprovedNo },
+          { label: "Approved on", value: m.ApprovedDate ? fmtDate(m.ApprovedDate) : null },
+          { label: "Last query from the authority", value: m.QueryRemarks ? <span className={cn("whitespace-pre-line", m.Status === "QueryRaised" && "text-destructive")}>{m.QueryRemarks}</span> : null, wide: true },
+        ]} />
+      </GridRelated>
 
-          {selected.size > 0 && (
-            <GridBulkBar count={selected.size} onClear={() => setSelected(new Map())}>
-              <button type="button" className={GRID_BTN} onClick={exportSelected}><Download size={13} /> Export selected</button>
-              <button type="button" className={GRID_BTN} onClick={copySelected}><Copy size={13} /> Copy numbers</button>
-            </GridBulkBar>
-          )}
-
-          <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
-            <GridSearch value={s.searchInput} onChange={s.setSearchInput} placeholder="Search customer, booking, unit, mutation no." />
-            <CrmCompanyProjectBlockFilter value={s.cpb} onChange={s.setCpb} />
-            <GridDateFilter label="Applied" value={extra.applied} onChange={(v) => setExtra({ applied: v })} />
-            {filtered && (
-              <button type="button" onClick={clearFilters} className="inline-flex items-center gap-1 h-8 px-2 text-xs text-primary hover:underline">
-                <RotateCcw size={12} /> Clear filters
-              </button>
-            )}
-            <div className="ml-auto flex items-center gap-2 flex-wrap">
-              {exportError && <span className="text-xs text-destructive">{exportError}</span>}
-              <button type="button" className={cn(GRID_BTN, "w-9 px-0")} onClick={() => refetch()} aria-label="Refresh" title="Refresh">
-                <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-              </button>
-              <GridSavedViews storageKey={VIEWS_KEY}
-                current={{ status: s.status, search: s.searchInput.trim(), cpb: s.cpb, sort: s.sort, pageSize, extra: { ...extra } }}
-                onApply={(v) => {
-                  setPageSize(GRID_PAGE_SIZES.includes(v.pageSize as typeof GRID_PAGE_SIZES[number]) ? v.pageSize : GRID_PAGE_SIZES[0]);
-                  s.apply(v);
-                  const x = (v.extra ?? {}) as Partial<ExtraFilters>;
-                  setExtraRaw({ applied: x.applied?.preset ? x.applied : GRID_ANY_DATE });
-                }} />
-              <GridColumnChooser cols={MUTATION_COLS} prefs={prefs} onChange={setPrefs} />
-              <button type="button" className={GRID_BTN} onClick={runExport} disabled={exporting || total === 0} title="Export to Excel">
-                <Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span>
-              </button>
-            </div>
-          </div>
-
-          <CrmGrid cols={MUTATION_COLS} prefs={prefs} onPrefs={setPrefs} rows={rows} rowKey={(m) => m.Id}
-            loading={isLoading} fetching={isFetching} error={error ? (error as Error).message : null} onRetry={() => refetch()}
-            sort={s.sort} onSort={s.toggleSort} onRowClick={(m) => selectDetail(m.Id)} activeKey={detailId}
-            selected={selected} onSelect={setSelected}
-            empty={filtered ? "No mutation matches these filters." : "No mutation yet. Start one once a booking's sale deed is registered."}
-            page={s.page} pageSize={pageSize} total={total} onPage={s.setPage} onPageSize={(n) => { setPageSize(n); s.setPage(1); }} />
+      <GridRelated icon={FolderCheck} title="Documents" count={documents.length} action={<span className="text-xs text-muted-foreground tabular-nums">{verified} of {required.length} mandatory verified</span>}>
+        <div className="p-4">
+          <DocumentCentre documents={documents} hasFile={(d) => !!d.HasFile} fileUrl={(d) => `${API}/documents/file/${d.Id}`} onChanged={refreshAll}
+            review={review} attach={(d, f) => upload([f], d.DocumentType, d.Label)} upload={{ types: UPLOAD_TYPES, run: upload }}
+            canAttach={{ ok: canDocs, reason: locked ? "Approved: the papers are closed." : "Changing papers needs the edit right." }}
+            canReview={{ ok: canDocs, reason: locked ? "Approved: the papers are closed." : "Reviewing papers needs the edit right." }}
+            nextStep={(d) => (isSynced(d) ? "Pulled from the Registry's own verified copy, nothing to do here." : undefined)}
+            extraTag={(d) => (isSynced(d) ? <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-dashed border-border text-[0.6875rem] text-muted-foreground"><Link2 size={10} /> Synced from registry</span> : null)}
+            emptyRequired={<p className="text-xs text-muted-foreground">No mandatory document requested yet. Approval waits until one is requested and verified.</p>} />
         </div>
+      </GridRelated>
 
-        {detailId != null && (
-          detailIsError && !detail ? (
-            <div className={cn(GRID_CARD, "py-16 text-center text-sm text-destructive")}>{(detailError as Error)?.message}</div>
-          ) : !detail ? (
-            <div className={cn(GRID_CARD, "py-16 text-center text-sm text-muted-foreground")}>Loading…</div>
-          ) : (
-            <div className="space-y-4">
-              <GridHighlights icon={Landmark} object={`Mutation · ${detail.MutationNo}`}
-                title={<ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} />}
-                status={<GridStatusPill status={detail.Status} label={statusText(detail.Status)} />}
-                sub={[detail.BookingNo, [detail.ProjectName, detail.UnitNo].filter(Boolean).join(" · ")].filter(Boolean).join(" · ")}
-                actions={actions}
-                fields={[
-                  { label: "Authority", value: detail.Authority || "—" },
-                  { label: "Applied on", value: fmtDate(detail.ApplicationDate) },
-                  { label: detail.Status === "Approved" ? "Days taken" : "Days with authority", value: daysOpen(detail) ?? "—" },
-                  { label: "Documents", value: <DocsProgress verified={verifiedCount} required={required.length} /> },
-                  { label: "Khata", value: `${detail.OldKhataNo || "—"} → ${detail.NewKhataNo || "pending"}` },
-                  { label: "Mutation fee", value: fmt(detail.MutationFee) },
-                ]} />
+      <GridRelated icon={FileText} title="Property and Sale Deed">
+        <GridFacts items={[
+          { label: "Buyer", value: <ApplicantNames name={m.ApplicantName} bookingId={m.BookingId} applicationId={m.ApplicationId} /> },
+          { label: "Mobile", value: m.Mobile },
+          { label: "Booking", value: m.BookingNo },
+          { label: "Project and unit", value: [m.ProjectName, m.UnitNo].filter(Boolean).join(" · ") },
+          { label: "Sale deed no.", value: m.DeedNo },
+          { label: "Registration no.", value: m.RegistrationNo || m.RegNo },
+          { label: "Sub-registrar office", value: m.SubRegistrarOffice },
+        ]} />
+      </GridRelated>
 
-              <GridPath steps={mutationPath(detail, docsReady, required.length, verifiedCount)} />
+      <GridRelated icon={History} title="History" count={history.length}>
+        {history.length ? (
+          <ol className="px-4 py-4 relative ml-3 border-l border-border space-y-4">
+            {history.map((log: any) => (
+              <li key={log.Id} className="relative pl-5">
+                <span className="absolute -left-[9px] top-0.5 w-[18px] h-[18px] rounded-full border border-border bg-card flex items-center justify-center text-muted-foreground"><ScrollText size={10} /></span>
+                <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                  <span className="text-[0.8125rem] font-semibold">{log.Action}</span>
+                  <span className="text-xs text-muted-foreground tabular-nums">{log.CreatedAt ? new Date(log.CreatedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—"}</span>
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">By {log.ActorName || "System"}{log.ActorType ? ` · ${log.ActorType}` : ""}</div>
+                {log.Remarks && <p className="mt-1 text-xs rounded-md bg-muted/60 px-2 py-1.5 whitespace-pre-line">{log.Remarks}</p>}
+              </li>
+            ))}
+          </ol>
+        ) : <p className="px-4 py-4 text-xs text-muted-foreground">No history recorded yet.</p>}
+      </GridRelated>
 
-              {guidance && (
-                <GridGuidance tone={guidance.tone} title={guidance.title} text={guidance.text}
-                  action={!locked && required.length > 0 && !docsReady && activeTab !== "Documents" ? (
-                    <button type="button" className={GRID_BTN} onClick={() => setActiveTab("Documents")}>Go to documents</button>
-                  ) : !locked && !required.length && canDocs ? (
-                    <button type="button" className={GRID_BTN_BRAND} disabled={requestingDoc}
-                      onClick={() => handleRequestDoc("MutationApplicationForm", "Mutation Application Form")}>
-                      {requestingDoc ? "Requesting…" : "Request application form"}
-                    </button>
-                  ) : undefined} />
-              )}
+      {dialog === "query" && (
+        <GridDialog onClose={() => setDialog(null)} icon={AlertTriangle} width="max-w-2xl" title="Raise Query" description={sub}
+          footer={<><button onClick={() => setDialog(null)} className={GRID_BTN}>Cancel</button>
+            <button disabled={busy || !remarks.trim()} onClick={() => run(() => send(`${API}/${id}/query`, "PUT", { Remarks: remarks.trim() }), "Query recorded: the documents are reset for correction")} className={cn(GRID_SHEET_KEYS.KEY_RED, "h-9 px-3")}>{busy ? "Saving…" : "Record Query"}</button></>}>
+          <GridFormField label="What did the authority flag?" required hint="The mandatory documents are reset, so staff correct and reattach them before resubmitting.">
+            <textarea value={remarks} rows={4} onChange={(e) => setRemarks(e.target.value)} className={cn(GRID_INPUT, "h-auto py-2 resize-none")} />
+          </GridFormField>
+        </GridDialog>
+      )}
+      {dialog === "approve" && (
+        <GridDialog onClose={() => setDialog(null)} icon={CheckCircle2} width="max-w-2xl" title="Approve Mutation" description={`${sub} · the authority has issued the new khata`}
+          footer={<><button onClick={() => setDialog(null)} className={GRID_BTN}>Cancel</button>
+            <button disabled={busy || !approve.NewKhataNo.trim()} onClick={() => run(() => send(`${API}/${id}/approve`, "PUT", approve), "Mutation approved: municipal records updated")} className={GRID_BTN_BRAND}>{busy ? "Saving…" : "Approve Mutation"}</button></>}>
+          <GridFormSection>
+            <GridFormField label="New khata no." required><input value={approve.NewKhataNo} placeholder="As issued by the authority" onChange={(e) => setApprove((f) => ({ ...f, NewKhataNo: e.target.value }))} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
+            <GridFormField label="Authority's mutation no."><input value={approve.ApprovedNo} onChange={(e) => setApprove((f) => ({ ...f, ApprovedNo: e.target.value }))} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
+            <GridFormField label="Approved on"><DateInput value={approve.ApprovedDate} max={localDay()} onChange={(e) => setApprove((f) => ({ ...f, ApprovedDate: e.target.value }))} className={GRID_INPUT} /></GridFormField>
+          </GridFormSection>
+        </GridDialog>
+      )}
+    </div>
+  );
+}
 
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem] items-start">
-                <section className={cn(GRID_CARD, "overflow-hidden min-w-0")}>
-                  <GridTabs label="Mutation record" active={activeTab} onChange={setActiveTab} tabs={[
-                    { key: "Overview", label: "Overview" },
-                    { key: "Documents", label: "Documents", count: documents.length },
-                    { key: "History", label: "History", count: history.length },
-                  ]} />
+// ── The page ────────────────────────────────────────────────────────────────────
+const CrmMutation: React.FC = () => {
+  const qc = useQueryClient();
+  const rights = usePageRights("crm-mutation");
+  const [sp] = useSearchParams();
+  const linkedBooking = sp.get("bookingId");
+  // The open mutation lives in the address, so a refresh or a shared link keeps it.
+  const [idParam, setIdParam] = useUrlParam("mutationId");
+  const openId = /^\d+$/.test(idParam) ? Number(idParam) : null;
+  const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
+  const list = useCrmListState({ pageSize, defaultSort: { key: "CreatedAt", dir: "desc" }, defaultStatus: ALL });
+  const [extra, setExtraRaw] = useState<ExtraFilters>(NO_EXTRA);
+  const setApplied = (applied: GridDateRange) => { setExtraRaw({ applied }); list.setPage(1); };
+  const filtered = list.hasFilters || extra.applied.preset !== "any";
+  const [prefs, setPrefs] = useGridPrefs("crm-mutation-cols-v2", COLS);
+  const [exporting, setExporting] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
+  const [start, setStart] = useState(emptyStart);
+  const [saving, setSaving] = useState(false);
+  const [linkDone, setLinkDone] = useState(false);
 
-                  {activeTab === "Overview" && (
-                    <>
-                      <h3 className="px-4 pt-3 text-xs font-semibold text-muted-foreground">Application</h3>
-                      <GridFields fields={[
-                        { label: "Application no.", value: <span className="tabular-nums">{detail.ApplicationNo || "—"}</span> },
-                        { label: "Applied on", value: <span className="tabular-nums">{fmtDate(detail.ApplicationDate)}</span> },
-                        { label: "Authority", value: detail.Authority || "—" },
-                        { label: "Mutation fee", value: <span className="tabular-nums">{fmt(detail.MutationFee)}</span> },
-                        { label: "Old khata no.", value: <span className="tabular-nums">{detail.OldKhataNo || "—"}</span> },
-                        { label: "New khata no.", value: <span className="tabular-nums">{detail.NewKhataNo || "Issued on approval"}</span> },
-                        ...(detail.Status === "Approved" ? [
-                          { label: "Authority's mutation no.", value: <span className="tabular-nums">{detail.ApprovedNo || "—"}</span> },
-                          { label: "Approved on", value: <span className="tabular-nums">{fmtDate(detail.ApprovedDate)}</span> },
-                        ] : []),
-                        ...(detail.QueryRemarks ? [{ label: "Last query from the authority", value: <span className="whitespace-pre-line">{detail.QueryRemarks}</span>, wide: true }] : []),
-                      ]} />
-                      <h3 className="px-4 pt-3 text-xs font-semibold text-muted-foreground">Property and sale deed</h3>
-                      <GridFields fields={[
-                        { label: "Buyer", value: <ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /> },
-                        { label: "Mobile", value: <span className="tabular-nums">{detail.Mobile || "—"}</span> },
-                        { label: "Booking", value: <span className="tabular-nums">{detail.BookingNo}</span> },
-                        { label: "Project · unit", value: [detail.ProjectName, detail.UnitNo].filter(Boolean).join(" · ") || "—" },
-                        { label: "Sale deed", value: <span className="tabular-nums">{detail.DeedNo || "—"}{detail.RegistrationNo ? ` · reg. ${detail.RegistrationNo}` : ""}</span> },
-                        { label: "Sub-registrar office", value: detail.SubRegistrarOffice || "—" },
-                      ]} />
-                    </>
-                  )}
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({ queryKey: [KEY, "list", list.query, extra], queryFn: () => fetchList(list.query, extra), staleTime: 0, enabled: openId == null });
+  const board = useSticky(data);
+  const counts = board?.counts ?? {};
+  const all = Object.values(counts).reduce((n, x) => n + x, 0);
+  const { data: startable = [] } = useQuery({ queryKey: [KEY, "eligible"], queryFn: () => send(`${API}/eligible-bookings`), staleTime: 60_000, enabled: rights.canCreate });
+  const refreshAll = () => [KEY, ...OTHER_KEYS].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
-                  {activeTab === "Documents" && (
-                    <div className="p-4">
-                      <DocumentCentre documents={documents} hasFile={(d) => !!d.HasFile} fileUrl={fileUrl} onChanged={invalidate}
-                        review={docReview}
-                        attach={(d, f) => docUpload([f], d.DocumentType, d.Label)}
-                        upload={{ types: [{ value: "IdentityProof", label: "Identity proof" }, { value: "Other", label: "Other" }], run: docUpload }}
-                        canAttach={{ ok: canDocs, reason: locked ? "Approved: the papers are closed." : "Changing papers needs the edit right." }}
-                        canReview={{ ok: canDocs, reason: locked ? "Approved: the papers are closed." : "Reviewing papers needs the edit right." }}
-                        nextStep={(d) => (isSynced(d) ? "Pulled from the Registry's own verified copy — nothing to do here." : undefined)}
-                        extraTag={(d) => (isSynced(d) ? <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-dashed border-border text-[0.6875rem] text-muted-foreground"><Link2 size={10} /> Synced from registry</span> : null)}
-                        emptyRequired={(
-                          <div className="flex items-center justify-between gap-3 flex-wrap">
-                            <p className="text-xs text-muted-foreground">No mandatory paper asked for yet. Approval waits until one is requested and verified.</p>
-                            {canDocs && (
-                              <button type="button" onClick={() => handleRequestDoc("MutationApplicationForm", "Mutation Application Form")} disabled={requestingDoc} className={GRID_BTN_BRAND}>
-                                {requestingDoc ? "Requesting…" : "Request application form"}
-                              </button>
-                            )}
-                          </div>
-                        )} />
-                    </div>
-                  )}
+  // ?bookingId opens the booking's mutation, or Start Mutation for it when it has none and is eligible.
+  useEffect(() => {
+    if (linkDone || !linkedBooking || openId != null) return;
+    let stop = false;
+    (async () => {
+      const row = await send(`${API}/booking/${linkedBooking}`).catch(() => null);
+      if (stop) return;
+      if (row?.Id) { setLinkDone(true); setIdParam(String(row.Id)); return; }
+      if (rights.canCreate && (startable as any[]).some((b) => String(b.Id) === linkedBooking)) {
+        setLinkDone(true);
+        setStart({ ...emptyStart(), BookingId: linkedBooking });
+        setStartOpen(true);
+      }
+    })();
+    return () => { stop = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedBooking, openId, linkDone, (startable as any[]).length, rights.canCreate]);
 
-                  {activeTab === "History" && (
-                    history.length > 0 ? (
-                      <ol className="px-4 py-4 relative ml-3 border-l border-border space-y-4">
-                        {history.map((log: any) => (
-                          <li key={log.Id} className="relative pl-5">
-                            <span className="absolute -left-[9px] top-0.5 w-[18px] h-[18px] rounded-full border border-border bg-card flex items-center justify-center text-muted-foreground"><ScrollText size={10} /></span>
-                            <div className="flex items-baseline justify-between gap-2 flex-wrap">
-                              <span className="text-[0.8125rem] font-semibold">{log.Action}</span>
-                              <span className="text-xs text-muted-foreground tabular-nums">{log.CreatedAt ? new Date(log.CreatedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—"}</span>
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-0.5">By {log.ActorName || "System"}{log.ActorType ? ` · ${log.ActorType}` : ""}</div>
-                            {log.Remarks && <p className="mt-1 text-xs rounded-md bg-muted/60 px-2 py-1.5 whitespace-pre-line">{log.Remarks}</p>}
-                          </li>
-                        ))}
-                      </ol>
-                    ) : <p className="px-4 py-8 text-center text-xs text-muted-foreground">No history recorded yet.</p>
-                  )}
-                </section>
+  const handleStart = async () => {
+    if (!start.BookingId) return void toast.error("Select a booking.");
+    setSaving(true);
+    try {
+      const d = await send(API, "POST", { ...start, BookingId: parseInt(start.BookingId) });
+      toast.success(`${d.MutationNo} started`);
+      setStartOpen(false);
+      setStart(emptyStart());
+      refreshAll();
+      setIdParam(String(d.id));
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
+  };
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const p = queryString(list.query, extra);
+      p.delete("page"); p.delete("pageSize");
+      exportGrid(await send(`${API}?${p}`), COLS, `property-mutations-${list.status.toLowerCase()}`);
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setExporting(false); }
+  };
+  const approved = counts.Approved ?? 0, applied = counts.Applied ?? 0, query = counts.QueryRaised ?? 0;
+  const set = (k: keyof ReturnType<typeof emptyStart>, v: string) => setStart((f) => ({ ...f, [k]: v }));
 
-                <aside className="space-y-4 min-w-0 xl:sticky xl:top-4">
-                  <GridRelated icon={FolderCheck} title="Documents" count={required.length}
-                    action={activeTab !== "Documents" ? <button type="button" className={cn(GRID_BTN, "h-7")} onClick={() => setActiveTab("Documents")}>Open</button> : undefined}>
-                    {required.length === 0 ? <p className="px-4 py-4 text-xs text-muted-foreground">None requested yet.</p> : (
-                      <ul>
-                        {required.map((d) => (
-                          <li key={d.Id} className="px-4 py-2 flex items-center justify-between gap-2 border-b border-border/70 last:border-0">
-                            <span className="text-xs truncate">{d.Label || d.DocumentType}</span>
-                            <GridStatusPill status={d.Status} />
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </GridRelated>
-                  <GridRelated icon={History} title="Latest activity" count={history.length}
-                    action={history.length > 3 && activeTab !== "History" ? <button type="button" className={cn(GRID_BTN, "h-7")} onClick={() => setActiveTab("History")}>View all</button> : undefined}>
-                    {history.length === 0 ? <p className="px-4 py-4 text-xs text-muted-foreground">Nothing yet.</p> : (
-                      <ul>
-                        {history.slice(0, 3).map((log: any) => (
-                          <li key={log.Id} className="px-4 py-2 border-b border-border/70 last:border-0">
-                            <div className="text-xs font-semibold">{log.Action}</div>
-                            <div className="text-[0.6875rem] text-muted-foreground">{log.ActorName || "System"} · {fmtDate(log.CreatedAt)}</div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </GridRelated>
-                  <GridRelated icon={FileText} title="Sale deed">
-                    <GridFields fields={[
-                      { label: "Deed no.", value: <span className="tabular-nums">{detail.DeedNo || "—"}</span> },
-                      { label: "Registration", value: <span className="tabular-nums">{detail.RegNo || detail.RegistrationNo || "—"}</span> },
-                    ]} />
-                  </GridRelated>
-                </aside>
-              </div>
+  return (
+    <div className="space-y-4">
+      <Breadcrumbs items={["Dashboard", "CRM", "Property Mutation"]} />
+      {openId != null ? <MutationRecord key={openId} id={openId} onBack={() => setIdParam("")} refreshAll={refreshAll} /> : (
+        <>
+          <MoneyBand eyebrow="CRM" title="Property Mutation" sub="The khata transfer that puts the buyer's name on the municipal land records, once the sale deed is registered."
+            actions={<>
+              {rights.canCreate && <button type="button" onClick={() => { setStart(emptyStart()); setStartOpen(true); }} className={BAND_KEY_MAIN}><Plus size={13} /> Start Mutation</button>}
+              <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            </>}
+            lead={`${approved} of ${all}`} leadNote="mutations approved"
+            bar={<CollectionBar onDark due={all} collected={approved} finance={applied} recorded={0} />}
+            figures={[
+              { label: "With the authority", dot: BAND_DOT.finance, value: String(applied), note: "Awaiting the new khata" },
+              { label: "Query raised", dot: query > 0 ? BAND_DOT.overdue : undefined, value: String(query), note: "Documents to correct", alert: query > 0 },
+              { label: "Ready to start", value: String((startable as any[]).length), note: "Sale deed registered, no mutation yet" },
+              { label: "Mutation fees", value: fmtShort(board?.feeTotal ?? 0), exact: money(board?.feeTotal ?? 0), note: "On these mutations" },
+            ]} />
+          <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
+            <GridTabs<string> label="Property Mutation" active={list.status} onChange={list.setStatus}
+              tabs={[ALL, "Applied", "QueryRaised", "Approved"].map((k) => ({ key: k, label: k === ALL ? "All mutations" : statusText(k), count: board ? (k === ALL ? all : counts[k] ?? 0) : null }))} />
+            <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-border">
+              <GridSearch value={list.searchInput} onChange={list.setSearchInput} placeholder="Customer, booking, unit or mutation no." />
+              <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+              <GridDateFilter label="Applied" value={extra.applied} onChange={setApplied} />
+              {filtered && <button type="button" onClick={() => { list.reset(); setExtraRaw(NO_EXTRA); }} className={GRID_BTN}>Clear filters</button>}
+              <button type="button" onClick={handleExport} disabled={exporting || !all} className={cn(GRID_BTN, "ml-auto")} title="Export to Excel"><Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span></button>
             </div>
-          )
-        )}
-      </CrmAppPage>
-
-      {/* Start mutation */}
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setBookingId(""); } }}>
-        <DialogContent className="max-w-md p-5 gap-4">
-          <DialogHeader><DialogTitle>Start mutation</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <label className="block space-y-1">
-              <span className={cn("block font-medium", GRID_LABEL)}>Booking <span className="text-destructive">*</span></span>
-              <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)} className={cn(GRID_INPUT, "text-sm")}>
-                <option value="">Select booking</option>
-                {startableBookings.map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>{`${b.BookingNo} — ${b.ApplicantName}`}</option>
-                ))}
-              </SearchableNativeSelect>
-              <span className="block text-[0.6875rem] text-muted-foreground">{startableBookings.length ? "Only bookings whose sale deed registry is complete are listed." : "No booking is eligible yet: the sale deed registry must be completed first."}</span>
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="block space-y-1">
-                <span className={cn("block font-medium", GRID_LABEL)}>Application no.</span>
-                <input className={cn(GRID_INPUT, "text-sm")} value={startForm.ApplicationNo} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationNo: e.target.value }))} placeholder="Optional" />
-              </label>
-              <label className="block space-y-1">
-                <span className={cn("block font-medium", GRID_LABEL)}>Application date</span>
-                <DateInput value={startForm.ApplicationDate} max={localDay()} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationDate: e.target.value }))} className={cn(GRID_INPUT, "text-sm")} />
-              </label>
-            </div>
-            <label className="block space-y-1">
-              <span className={cn("block font-medium", GRID_LABEL)}>Authority</span>
-              <input className={cn(GRID_INPUT, "text-sm")} value={startForm.Authority} onChange={(e) => setStartForm((f) => ({ ...f, Authority: e.target.value }))} placeholder="e.g. GHMC, MCGM, BDA" />
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="block space-y-1">
-                <span className={cn("block font-medium", GRID_LABEL)}>Old khata no.</span>
-                <input className={cn(GRID_INPUT, "text-sm")} value={startForm.OldKhataNo} onChange={(e) => setStartForm((f) => ({ ...f, OldKhataNo: e.target.value }))} />
-              </label>
-              <label className="block space-y-1">
-                <span className={cn("block font-medium", GRID_LABEL)}>Mutation fee</span>
-                <input type="number" className={cn(GRID_INPUT, "text-sm tabular-nums")} value={startForm.MutationFee} onChange={(e) => setStartForm((f) => ({ ...f, MutationFee: e.target.value }))} />
-              </label>
-            </div>
+            <CrmGrid cols={COLS} prefs={prefs} onPrefs={setPrefs} rows={board?.rows ?? []} rowKey={(m) => m.Id} noRowNumbers
+              loading={isLoading} fetching={isFetching} error={isError ? translateError((error as Error)?.message) : null} onRetry={() => refetch()}
+              sort={list.sort} onSort={list.toggleSort} onRowClick={(m) => setIdParam(String(m.Id))}
+              empty={filtered ? "No mutation matches these filters." : "No mutation yet. Start one once a booking's sale deed is registered."}
+              page={list.page} pageSize={pageSize} total={board?.total ?? 0} onPage={list.setPage} onPageSize={(n) => { setPageSize(n); list.setPage(1); }} />
           </div>
-          <DialogFooter className="gap-2">
-            <button type="button" onClick={() => { setDialogOpen(false); setBookingId(""); }} className={GRID_BTN}>Cancel</button>
-            <button type="button" onClick={handleStart} disabled={saving || !bookingId} className={GRID_BTN_BRAND}>{saving ? "Starting…" : "Start mutation"}</button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </>
+      )}
 
-      {/* Raise query */}
-      <Dialog open={queryOpen} onOpenChange={(o) => !o && setQueryOpen(false)}>
-        <DialogContent className="max-w-sm p-5 gap-4">
-          <DialogHeader><DialogTitle>Raise query</DialogTitle></DialogHeader>
-          <label className="block space-y-1">
-            <span className={cn("block font-medium", GRID_LABEL)}>What did the authority flag? <span className="text-destructive">*</span></span>
-            <textarea value={queryRemarks} onChange={(e) => setQueryRemarks(e.target.value)} rows={4} className={cn(GRID_INPUT, "h-auto py-2 text-sm resize-none")} />
-            <span className="block text-[0.6875rem] text-muted-foreground">The mandatory documents are reset, so staff correct and reattach them before resubmitting.</span>
-          </label>
-          <DialogFooter className="gap-2">
-            <button type="button" onClick={() => setQueryOpen(false)} className={GRID_BTN}>Cancel</button>
-            <button type="button" onClick={handleQuery} disabled={busy || !queryRemarks.trim()} className={cn(GRID_BTN_BRAND, "bg-destructive border-destructive hover:bg-destructive/90")}>{busy ? "Saving…" : "Record query"}</button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Approve */}
-      <Dialog open={approveOpen} onOpenChange={(o) => !o && setApproveOpen(false)}>
-        <DialogContent className="max-w-sm p-5 gap-4">
-          <DialogHeader><DialogTitle>Approve mutation</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <label className="block space-y-1">
-              <span className={cn("block font-medium", GRID_LABEL)}>New khata no. <span className="text-destructive">*</span></span>
-              <input className={cn(GRID_INPUT, "text-sm tabular-nums")} value={approveForm.NewKhataNo} onChange={(e) => setApproveForm((f) => ({ ...f, NewKhataNo: e.target.value }))} placeholder="e.g. 456/2026" />
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label className="block space-y-1">
-                <span className={cn("block font-medium", GRID_LABEL)}>Authority's mutation no.</span>
-                <input className={cn(GRID_INPUT, "text-sm tabular-nums")} value={approveForm.ApprovedNo} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedNo: e.target.value }))} />
-              </label>
-              <label className="block space-y-1">
-                <span className={cn("block font-medium", GRID_LABEL)}>Approved date</span>
-                <DateInput value={approveForm.ApprovedDate} max={localDay()} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedDate: e.target.value }))} className={cn(GRID_INPUT, "text-sm")} />
-              </label>
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <button type="button" onClick={() => setApproveOpen(false)} className={GRID_BTN}>Cancel</button>
-            <button type="button" onClick={handleApprove} disabled={busy || !approveForm.NewKhataNo.trim()} className={GRID_BTN_BRAND}>{busy ? "Saving…" : "Confirm approval"}</button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-    </>
+      {startOpen && (
+        <GridDialog onClose={() => setStartOpen(false)} icon={Landmark} title="Start Mutation" description="Record the application filed with the municipal authority for the khata transfer."
+          footer={<><button onClick={() => setStartOpen(false)} className={GRID_BTN}>Cancel</button><button onClick={handleStart} disabled={saving || !start.BookingId} className={GRID_BTN_BRAND}>{saving ? "Starting…" : "Start Mutation"}</button></>}>
+          <GridFormSection title="Booking">
+            <GridFormField label="Booking" required wide hint={(startable as any[]).length ? "Only bookings whose sale deed registry is complete, and with no mutation yet, are listed." : "No booking is eligible yet: the sale deed registry must be completed first."}>
+              <SearchableSelect value={start.BookingId} onChange={(v) => set("BookingId", v)} placeholder="Select booking" searchPlaceholder="Search booking or customer…"
+                options={(startable as any[]).map((b) => ({ value: String(b.Id), label: [b.BookingNo, personName(b.ApplicantName)].filter(Boolean).join(" · ") }))} />
+            </GridFormField>
+          </GridFormSection>
+          <GridFormSection title="Application">
+            <GridFormField label="Application no."><input value={start.ApplicationNo} placeholder="As given by the authority" onChange={(e) => set("ApplicationNo", e.target.value)} className={GRID_INPUT} /></GridFormField>
+            <GridFormField label="Application date"><DateInput value={start.ApplicationDate} max={localDay()} onChange={(e) => set("ApplicationDate", e.target.value)} className={GRID_INPUT} /></GridFormField>
+            <GridFormField label="Authority"><input value={start.Authority} placeholder="e.g. Municipal Corporation" onChange={(e) => set("Authority", e.target.value)} className={GRID_INPUT} /></GridFormField>
+            <GridFormField label="Old khata no."><input value={start.OldKhataNo} onChange={(e) => set("OldKhataNo", e.target.value)} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
+            <GridFormField label="Mutation fee"><input type="number" min="0" value={start.MutationFee} onChange={(e) => set("MutationFee", e.target.value)} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
+          </GridFormSection>
+        </GridDialog>
+      )}
+    </div>
   );
 };
 

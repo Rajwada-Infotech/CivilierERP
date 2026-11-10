@@ -1,4 +1,5 @@
 const express = require("express");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -7,7 +8,7 @@ const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 
 router.use(authMiddleware);
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const adminOnly = pageRightByMethod("signature");
 
 // GET all signatures
 router.get("/", async (req, res) => {

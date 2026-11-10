@@ -1,16 +1,8 @@
 const { getEffectivePagePermissions } = require("./permissions");
+const { hasFullAccess } = require("./role");
 
-// Pages the marketing_head role can fully administer.
-// Uses prefix-matching for all SA pages plus explicit CRM and Sales page keys.
-const MARKETING_HEAD_SA_PREFIX   = "sa-";
-const MARKETING_HEAD_CRM_PAGES   = new Set(["crm-leads", "crm-dashboard"]);
-const MARKETING_HEAD_SALES_PAGES = new Set(["sale-order", "sale-invoice", "sales-payment"]);
-
-function isMarketingHeadAllowed(pageKey) {
-  return pageKey.startsWith(MARKETING_HEAD_SA_PREFIX)
-    || MARKETING_HEAD_CRM_PAGES.has(pageKey)
-    || MARKETING_HEAD_SALES_PAGES.has(pageKey);
-}
+// Who may use a page is set in Role Rights (decided 2026-11-10): no role has pages written in code. Only the
+// full-access roles (role.js) pass without a right.
 
 /**
  * Authorization middleware keyed directly on the `page` slug stored in
@@ -37,13 +29,8 @@ function requirePageRight(pageKey, action) {
   return async (req, res, next) => {
     try {
       const role = (req.user?.role || "").toLowerCase();
-      const SUPERUSER_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
-      if (SUPERUSER_ROLES.has(role)) return next();
+      if (hasFullAccess(role)) return next();
 
-      // marketing_head: full admin access scoped to Sales Automation + Sales pages only
-      if (role === "marketing_head" && isMarketingHeadAllowed(String(pageKey).toLowerCase())) {
-        return next();
-      }
 
       const userId = req.user?.userId ?? req.user?.id;
       const roleId = req.user?.roleId;
@@ -86,12 +73,8 @@ function requireAnyPageRight(pageKeys, action) {
   return async (req, res, next) => {
     try {
       const role = (req.user?.role || "").toLowerCase();
-      const SUPERUSER_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
-      if (SUPERUSER_ROLES.has(role)) return next();
+      if (hasFullAccess(role)) return next();
 
-      if (role === "marketing_head" && pageKeys.some((k) => isMarketingHeadAllowed(String(k).toLowerCase()))) {
-        return next();
-      }
 
       const userId = req.user?.userId ?? req.user?.id;
       const roleId = req.user?.roleId;
@@ -131,8 +114,7 @@ function requireAnyPageRight(pageKeys, action) {
  */
 async function hasAnyPageAction(req, pageKey, actions) {
   const role = (req.user?.role || "").toLowerCase();
-  if (["super_admin", "sa", "dba", "admin"].includes(role)) return true;
-  if (role === "marketing_head" && isMarketingHeadAllowed(String(pageKey).toLowerCase())) return true;
+  if (hasFullAccess(role)) return true;
   const userId = req.user?.userId ?? req.user?.id;
   if (!userId) return false;
   const target = String(pageKey).toLowerCase();
@@ -159,4 +141,11 @@ function requireAnyPageAction(pageKey, actions) {
   };
 }
 
-module.exports = { requirePageRight, requireAnyPageRight, requireAnyPageAction, hasAnyPageAction };
+// The page's right for what the request does: GET reads (view), POST creates, PUT / PATCH edit, DELETE deletes. For
+// routes that belong to one page, so Role Rights decides who may use them (full-access roles always may).
+const ACTION_OF_METHOD = { GET: "view", HEAD: "view", POST: "create", PUT: "edit", PATCH: "edit", DELETE: "delete" };
+function pageRightByMethod(pageKey) {
+  return (req, res, next) => requirePageRight(pageKey, ACTION_OF_METHOD[req.method] || "edit")(req, res, next);
+}
+
+module.exports = { requirePageRight, requireAnyPageRight, requireAnyPageAction, hasAnyPageAction, pageRightByMethod };

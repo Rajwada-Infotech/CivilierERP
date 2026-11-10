@@ -16,7 +16,6 @@ const { usersHaveWhatsApp, cleanWhatsApp } = require("../services/usersWhatsApp"
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 
 // Privileged roles that can always list users (Password Reset, User Management)
-const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
 
 // Roles allowed to be assigned as an Agreement's Legal Executive. Filtered by
 // RName (the stable, human-assigned role code), not RId — role IDs are
@@ -281,7 +280,7 @@ router.get(
 router.get(
   "/",
   authMiddleware,
-  allowRoles(...PRIVILEGED_ROLES),
+  allowRoles.fullAccessOnly,
   async (req, res) => {
     try {
       const pool = getPool();

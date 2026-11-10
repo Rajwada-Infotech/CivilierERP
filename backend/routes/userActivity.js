@@ -1,4 +1,5 @@
 const express = require("express");
+const { isSuperAdmin } = require("../middleware/role");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -398,7 +399,7 @@ router.delete(
       const pool = getPool();
 
       const isSuperAdmin =
-        req.user?.role === "super_admin" || req.user?.isSuperAdmin === true;
+        isSuperAdmin(req.user?.role) || req.user?.isSuperAdmin === true;
 
       const userId = normalizeNullableString(
         req.user?.userId ?? req.user?.id,
