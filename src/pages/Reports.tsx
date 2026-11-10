@@ -15,9 +15,8 @@ import type { ActiveFilter, CompanyOption, FilterState, FinYearOption, ReportDef
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-// marketing_head is scoped to Sales Automation + CRM only (see auth.utils.ts
-// isMarketingHeadPage) — showing Finance/Material/Admin tiles they can't
-// actually open would just be a dead end (backend 403s on click).
+// Still in code (open decision): marketing_head sees only the Sales Automation and CRM report sections. Their
+// page access itself now comes from Role Rights.
 const MARKETING_HEAD_SECTION_IDS = new Set(["sales-automation", "crm"]);
 
 const Reports: React.FC = () => {

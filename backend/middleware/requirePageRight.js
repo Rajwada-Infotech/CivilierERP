@@ -1,17 +1,8 @@
 const { getEffectivePagePermissions } = require("./permissions");
 const { hasFullAccess } = require("./role");
 
-// Pages the marketing_head role can fully administer.
-// Uses prefix-matching for all SA pages plus explicit CRM and Sales page keys.
-const MARKETING_HEAD_SA_PREFIX   = "sa-";
-const MARKETING_HEAD_CRM_PAGES   = new Set(["crm-leads", "crm-dashboard"]);
-const MARKETING_HEAD_SALES_PAGES = new Set(["sale-order", "sale-invoice", "sales-payment"]);
-
-function isMarketingHeadAllowed(pageKey) {
-  return pageKey.startsWith(MARKETING_HEAD_SA_PREFIX)
-    || MARKETING_HEAD_CRM_PAGES.has(pageKey)
-    || MARKETING_HEAD_SALES_PAGES.has(pageKey);
-}
+// Who may use a page is set in Role Rights (decided 2026-11-10): no role has pages written in code. Only the
+// full-access roles (role.js) pass without a right.
 
 /**
  * Authorization middleware keyed directly on the `page` slug stored in
@@ -40,10 +31,6 @@ function requirePageRight(pageKey, action) {
       const role = (req.user?.role || "").toLowerCase();
       if (hasFullAccess(role)) return next();
 
-      // marketing_head: full admin access scoped to Sales Automation + Sales pages only
-      if (role === "marketing_head" && isMarketingHeadAllowed(String(pageKey).toLowerCase())) {
-        return next();
-      }
 
       const userId = req.user?.userId ?? req.user?.id;
       const roleId = req.user?.roleId;
@@ -88,9 +75,6 @@ function requireAnyPageRight(pageKeys, action) {
       const role = (req.user?.role || "").toLowerCase();
       if (hasFullAccess(role)) return next();
 
-      if (role === "marketing_head" && pageKeys.some((k) => isMarketingHeadAllowed(String(k).toLowerCase()))) {
-        return next();
-      }
 
       const userId = req.user?.userId ?? req.user?.id;
       const roleId = req.user?.roleId;
@@ -131,7 +115,6 @@ function requireAnyPageRight(pageKeys, action) {
 async function hasAnyPageAction(req, pageKey, actions) {
   const role = (req.user?.role || "").toLowerCase();
   if (hasFullAccess(role)) return true;
-  if (role === "marketing_head" && isMarketingHeadAllowed(String(pageKey).toLowerCase())) return true;
   const userId = req.user?.userId ?? req.user?.id;
   if (!userId) return false;
   const target = String(pageKey).toLowerCase();

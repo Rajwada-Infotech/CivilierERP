@@ -1,6 +1,5 @@
 export type { PageKey, PageAction, PagePermission } from "./types";
 
-import { LEGAL_PAGE_KEYS } from "@/pages/legal/legalMasters";
 import type {
   UserRole,
   PageKey,
@@ -24,22 +23,6 @@ const roleSlug = (role: unknown): string => {
 export const isPrivilegedRole = (role: unknown): boolean => (PRIVILEGED_ROLES as string[]).includes(roleSlug(role));
 /** The super admin: in parallel on every approval, and the few super-admin-only tools. */
 export const isSuperAdminRole = (role: unknown): boolean => roleSlug(role) === "super_admin";
-
-// Pages the marketing_head role controls as an admin (full CRUD, no restrictions).
-// Backend mirrors this in requirePageRight.js → isMarketingHeadAllowed(), which
-// matches by "sa-"/"crm-" PREFIX rather than an explicit list — this Set used
-// to be a hand-maintained explicit list too and silently drifted out of sync
-// every time a new crm-* page was added (e.g. crm-communication, crm-noc,
-// crm-unit-matrix were all missing, blocking marketing_head from pages the
-// backend already allowed). isMarketingHeadPage() below now mirrors the
-// backend's prefix logic so no page can ever be missed here again; this Set
-// only needs to keep the non-prefixed Sales-module page keys.
-export const MARKETING_HEAD_SALES_PAGES = new Set<string>([
-  "sale-order", "sale-invoice", "sales-payment",
-]);
-
-export const isMarketingHeadPage = (page: string): boolean =>
-  page.startsWith("sa-") || page.startsWith("crm-") || MARKETING_HEAD_SALES_PAGES.has(page);
 
 // ======================
 // PAGE DEFINITIONS
@@ -80,174 +63,9 @@ export const FULL_ACCESS: PagePermission[] = PAGE_DEFINITIONS.map((p) => ({
   actions: [...p.availableActions] as PageAction[],
 }));
 
-export const ENGINEER_ACCESS: PagePermission[] = [
-  { page: "dashboard", actions: ["view"] },
-  { page: "reports", actions: ["view", "print", "export"] },
-  { page: "widgets", actions: ["view"] },
-  { page: "tasks", actions: ["view", "create", "edit"] },
-  { page: "transactions", actions: ["view", "create"] },
-  { page: "payments", actions: ["view"] },
-  // Masters — DB-style keys
-  { page: "contractor-master", actions: ["view"] },
-  { page: "supplier-master", actions: ["view"] },
-  { page: "item-master", actions: ["view"] },
-  { page: "item-group", actions: ["view"] },
-  // Engineering
-  { page: "engineering-dashboard", actions: ["view"] },
-  { page: "engineering-work-order", actions: ["view", "create", "edit"] },
-  { page: "boq", actions: ["view"] },
-  { page: "dpr", actions: ["view", "create"] },
-  { page: "work-done", actions: ["view", "create"] },
-  { page: "tickets", actions: ["view", "create", "edit"] },
-  { page: "ticket-dashboard", actions: ["view"] },
-];
-
-export const DEFAULT_USER_ACCESS: PagePermission[] = [
-  { page: "dashboard", actions: ["view"] },
-  { page: "reports", actions: ["view"] },
-];
-
-// Customer portal: can only access the ticket system
-export const CUSTOMER_ACCESS: PagePermission[] = [
-  { page: "dashboard", actions: ["view"] },
-];
-
-// Supplier portal: can only submit quotation prices and manage their rate catalog
-export const SUPPLIER_ACCESS: PagePermission[] = [
-  { page: "supplier-quotations", actions: ["view", "create", "edit"] },
-  { page: "supplier-catalog", actions: ["view", "create", "edit"] },
-];
-
-// Sales Team Lead: view+edit leads/visits/inquiry, view-only marketing, view+create distribution/transfers
-export const SALES_TEAM_LEAD_ACCESS: PagePermission[] = [
-  { page: "dashboard", actions: ["view"] },
-  { page: "sa-leads", actions: ["view", "edit"] },
-  { page: "sa-inquiry", actions: ["view", "create", "edit"] },
-  { page: "sa-site-visits", actions: ["view", "create", "edit"] },
-  { page: "sa-campaigns", actions: ["view"] },
-  { page: "sa-ads", actions: ["view"] },
-  { page: "sa-marketing-invoices", actions: ["view"] },
-  { page: "sa-social-media", actions: ["view"] },
-  { page: "sa-teams", actions: ["view"] },
-  { page: "sa-lead-distribution", actions: ["view", "create"] },
-  { page: "sa-lead-transfers", actions: ["view", "create"] },
-  { page: "sa-distribution-rules", actions: ["view"] },
-];
-
-// Sales Person: view+edit own leads, log calls, schedule site visits
-export const SALES_PERSON_ACCESS: PagePermission[] = [
-  { page: "dashboard", actions: ["view"] },
-  { page: "sa-leads", actions: ["view", "edit"] },
-  { page: "sa-inquiry", actions: ["view", "create", "edit"] },
-  { page: "sa-site-visits", actions: ["view", "create", "edit"] },
-];
-
-// Legal Head: oversees the full legal pipeline on an Agreement — drafting,
-// senior approval (see approvalService.js CRM_APPROVER_ROLES override for
-// crm-agreements), NOC, and Sale Deed. Scoped strictly to CRM's legal-facing
-// pages, not the whole CRM module (unlike marketing_head's full CRM prefix).
-export const LEGAL_HEAD_ACCESS: PagePermission[] = [
-  { page: "dashboard", actions: ["view"] },
-  { page: "crm-dashboard", actions: ["view"] },
-  { page: "crm-bookings", actions: ["view"] },
-  { page: "crm-agreements", actions: ["view", "create", "edit"] },
-  { page: "crm-documents", actions: ["view", "create", "edit", "delete"] },
-  { page: "crm-legal-milestones", actions: ["view", "create", "edit"] },
-  { page: "crm-noc", actions: ["view", "create", "edit"] },
-  { page: "crm-sales-deed", actions: ["view", "create", "edit"] },
-  // Legal module: the head maintains every master.
-  { page: "legal-dashboard", actions: ["view"] },
-  { page: "legal-land-reports", actions: ["view", "export"] },
-  ...LEGAL_PAGE_KEYS.map((page) => ({
-    page,
-    actions: (page === "legal-land-master" ? ["view", "create", "edit", "delete", "approve", "print", "export"] : ["view", "create", "edit", "delete", "print", "export"]) as PageAction[],
-  })),
-];
-
-// Legal Person: the drafter/preparer — "arranges/prepares the papers work"
-// per the workflow spec. Can create and edit agreements/documents but has no
-// approve rights (approvalService.js's role check on crm-agreements only
-// allows legal_head, not legal_person) and no NOC/Sale Deed access (that's
-// the head's closure-stage oversight).
-// Masters the legal person keeps up to date: land records, locations and people.
-const LEGAL_PERSON_EDITABLE = [
-  "legal-mouza-master", "legal-rs-khatian-master", "legal-rs-plot-master", "legal-lr-ror-master", "legal-land-master",
-  "legal-district-master", "legal-municipality-master", "legal-police-station-master", "legal-village-master",
-  "legal-party-master", "legal-buyer-master", "legal-seller-master", "legal-owner-master", "legal-customer-master",
-  "legal-witness-master", "legal-advocate-master", "legal-land-enquiry", "legal-sub-division-master", "legal-block-master",
-];
-
-export const LEGAL_PERSON_ACCESS: PagePermission[] = [
-  { page: "dashboard", actions: ["view"] },
-  { page: "crm-dashboard", actions: ["view"] },
-  { page: "crm-bookings", actions: ["view"] },
-  { page: "crm-agreements", actions: ["view", "create", "edit"] },
-  { page: "crm-documents", actions: ["view", "create", "edit"] },
-  { page: "crm-legal-milestones", actions: ["view", "create", "edit"] },
-  // Legal module: the drafter keeps land records and parties up to date; the rules (checklists,
-  // workflows, SLAs) stay with the head.
-  { page: "legal-dashboard", actions: ["view"] },
-  { page: "legal-land-reports", actions: ["view", "export"] },
-  ...LEGAL_PAGE_KEYS.map((page) => ({
-    page,
-    actions: (LEGAL_PERSON_EDITABLE.includes(page)
-      ? ["view", "create", "edit", "export"]
-      : ["view"]) as PageAction[],
-  })),
-];
-
-// marketing_head: full CRUD on all SA + Sales pages, plus dashboard access.
-// This populates currentUser.pagePermissions for any code that reads that
-// array directly instead of going through canAccessPage/canDoAction (which
-// gate marketing_head via isMarketingHeadPage()'s prefix match and don't
-// depend on this list being exhaustive). Kept as an explicit enumeration
-// only because pagePermissions needs concrete {page, actions} entries, not
-// a predicate — every sa-/crm- page key actually routed in App.tsx should
-// appear here.
-const MARKETING_HEAD_KNOWN_PAGES = [
-  // Sales Automation
-  "sa-leads", "sa-inquiry", "sa-campaigns", "sa-ads", "sa-marketing-invoices",
-  "sa-site-visits", "sa-social-media", "sa-teams", "sa-lead-distribution",
-  "sa-distribution-rules", "sa-lead-transfers",
-  "sa-channel-partners", "sa-lead-activities", "sa-lead-tasks", "sa-commissions",
-  // SA Role Master was retired (it duplicated the generic Menu Rights page) —
-  // marketing_head now manages SA role-level permissions through menu-rights
-  // instead; see the explicit canAccessPage/canDoAction carve-out below,
-  // since menu-rights is otherwise an ADMIN_ONLY_PAGES entry.
-  "menu-rights",
-  // CRM module
-  "crm-dashboard", "crm-applications", "crm-bookings", "crm-welcome-calls",
-  "crm-communication", "crm-customer-bank-details", "crm-agreements", "crm-documents",
-  "crm-unit-matrix", "crm-parking-matrix",
-  "crm-legal-milestones", "crm-noc", "crm-sales-deed",
-  "crm-pre-possession", "crm-possession-notice", "crm-construction-updates",
-  "crm-payments", "crm-payment-plans", "crm-brokerage", "crm-parking-booking",
-  "crm-handover", "crm-service-tickets", "crm-cancellations", "crm-customer-360", "crm-loan-details",
-  // Sales module
-  "sale-order", "sale-invoice", "sales-payment",
-] as const;
-
-export const MARKETING_HEAD_ACCESS: PagePermission[] = [
-  { page: "dashboard", actions: ["view"] },
-  ...MARKETING_HEAD_KNOWN_PAGES.map((page) => ({
-    page,
-    actions: ["view", "create", "edit", "delete", "print", "export"] as PageAction[],
-  })),
-];
-
-// Updated to use centralized PRIVILEGED_ROLES
-export const getPermissionsByRole = (role: UserRole): PagePermission[] => {
-  if (PRIVILEGED_ROLES.includes(role)) return FULL_ACCESS;
-  if (role === "engineer") return ENGINEER_ACCESS;
-  if (role === "customer") return CUSTOMER_ACCESS;
-  if (role === "supplier") return SUPPLIER_ACCESS;
-  if (role === "marketing_head") return MARKETING_HEAD_ACCESS;
-  if (role === "sales_team_lead") return SALES_TEAM_LEAD_ACCESS;
-  if (role === "sales_person") return SALES_PERSON_ACCESS;
-  if (role === "legal_head") return LEGAL_HEAD_ACCESS;
-  if (role === "legal_person") return LEGAL_PERSON_ACCESS;
-  return DEFAULT_USER_ACCESS;
-};
+// Every role other than the full-access ones gets exactly what Role Rights (and the user's own rights) give it,
+// from the server (decided 2026-11-10): no role has pages written in code, and a role with no rights sees nothing.
+export const getPermissionsByRole = (role: UserRole): PagePermission[] => (isPrivilegedRole(role) ? FULL_ACCESS : []);
 
 export const getInitials = (name: string) =>
   name
@@ -275,17 +93,8 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
     if (!currentUser) return false;
     if (PAGE_GROUPS[page]) return PAGE_GROUPS[page].some(canAccessPage);
     if (isPrivilegedRole(currentUser.role)) return true;
-    // marketing_head: full access within their scope, no access outside it.
-    // menu-rights is the one ADMIN_ONLY_PAGES entry marketing_head can reach
-    // — it's where they now manage SA role-level permissions (the page
-    // itself further restricts them to the Role-wise tab; the per-user
-    // override endpoints stay admin/super_admin/dba-only on the backend
-    // regardless of this check — see MenuRights.tsx).
-    if (currentUser.role === "marketing_head") {
-      if (page === "menu-rights") return true;
-      if (ADMIN_ONLY_PAGES.includes(page)) return false;
-      return isMarketingHeadPage(page) || page === "dashboard" || page === "reports" || page === "widgets";
-    }
+    // Still in code (open decision): Marketing Head reaches the Role-wise tab of Menu Rights (MenuRights.tsx limits it).
+    if (page === "menu-rights" && currentUser.role === "marketing_head") return true;
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
       (p) => p.page === page && p.actions.includes("view"),
@@ -295,13 +104,7 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
   const canDoAction = (page: PageKey, action: PageAction): boolean => {
     if (!currentUser) return false;
     if (isPrivilegedRole(currentUser.role)) return true;
-    // marketing_head: all actions on their scoped pages — menu-rights is
-    // limited to view/edit (the Role-wise tab), same reasoning as above.
-    if (currentUser.role === "marketing_head") {
-      if (page === "menu-rights") return action === "view" || action === "edit";
-      if (ADMIN_ONLY_PAGES.includes(page)) return false;
-      return isMarketingHeadPage(page) || page === "dashboard" || page === "reports" || page === "widgets";
-    }
+    if (page === "menu-rights" && currentUser.role === "marketing_head") return action === "view" || action === "edit";
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
       (p) => p.page === page && p.actions.includes(action),
