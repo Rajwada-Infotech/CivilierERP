@@ -2150,7 +2150,7 @@ router.put("/:id/director/reject", requirePageRight("crm-sales-deed", "edit"), a
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const remarks = req.body?.Remarks || null;
-    const result = await approvalTransition("crm-sales-deed-director", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
+    const result = await approvalTransition("crm-sales-deed-director", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks, req.user?.userId ?? null);
     const pool = getPool();
     await pool.request()
       .input("id", sql.Int, id)

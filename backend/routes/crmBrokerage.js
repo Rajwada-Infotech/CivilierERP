@@ -725,7 +725,7 @@ router.put("/:id/reject", requirePageRight("crm-brokerage", "edit"), async (req,
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-brokerage", id, CrmStatus.REJECTED, userEmail, req.user?.role, req.body?.note || null);
+    const result = await approvalTransition("crm-brokerage", id, CrmStatus.REJECTED, userEmail, req.user?.role, req.body?.note || null, req.user?.userId ?? null);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-brokerage] reject error:", e.message);

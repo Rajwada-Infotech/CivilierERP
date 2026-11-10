@@ -33,7 +33,7 @@ export const SaNotificationBell: React.FC = () => {
       else if (n.refType === "crm_cancellation") navigate("/crm/cancellations");
       else if (n.refType === "crm_booking_amendment") navigate("/crm/booking-amendments");
       else if (n.refType === "crm_service_ticket") navigate("/crm/service-tickets");
-      else if (n.refType === "crm_handover") navigate("/crm/handover");
+      else if (n.refType === "crm_handover") navigate("/crm/possession");
       else if (n.refType === "crm_payment") navigate(`/crm/payments?bookingId=${n.refId}`);
       else if (n.refType === "crm_booking") navigate(`/crm/bookings?view=${n.refId}`);
       else if (n.refType?.startsWith("crm_")) navigate("/crm/dashboard");

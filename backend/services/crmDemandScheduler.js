@@ -48,6 +48,9 @@ async function runDueDemandCheck() {
     }
   }
   for (const bookingId of bookings) await autoApplyOnAccountIfFullyFunded(pool, bookingId, null, "system");
+  // Same hourly pass: Pre-Possession follows the money, for the pages that show its saved status.
+  try { await require("./crmWorkflowGuards").refreshPrePossessionStatus(pool); }
+  catch (e) { logger.error({ event: "CRM_PRE_POSSESSION_REFRESH_FAILED", err: e.message }, "Pre-Possession refresh failed"); }
   return { raised };
 }
 

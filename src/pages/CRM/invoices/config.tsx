@@ -5,7 +5,8 @@ import { Link } from "react-router-dom";
 import type { useQueryClient } from "@tanstack/react-query";
 import { CrmStatus } from "@/constants/crmStatuses";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { SheetMark } from "@/components/sheet/Sheet";
+import { GridToneMark } from "@/components/crm/CrmDataTable";
+import { cn } from "@/lib/utils";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 
 // Same approver set the backend's INVOICE_VOID_ROLES enforces
@@ -16,9 +17,9 @@ export const INVOICE_VOID_ROLES = ["admin", "super_admin", "dba", "accounts_head
 export const API = "/api/crm/invoices";
 export const BKG_API = "/api/crm/bookings";
 export const PAY_API = "/api/crm/payments";
-export const TYPES = ["Milestone", "Maintenance", "Other", "OnAccount", "Agreement", "Possession"];
-export const PAGE_SIZE = 20;
-export const DIALOG = "rounded-none p-5 gap-4";
+export const DIALOG = "p-5 gap-4";
+/** An invoice type as words: TransferFee reads "Transfer fee". */
+export const typeLabel = (t?: string | null) => String(t || "").replace(/([a-z])([A-Z])/g, (_m, a, b) => `${a} ${String(b).toLowerCase()}`);
 
 export interface InvoiceRow {
   Id: number;
@@ -26,6 +27,7 @@ export interface InvoiceRow {
   InvoiceType: string;
   Amount: number;
   InvoiceDate: string;
+  Description?: string | null;
   Status: string;
   VoidReason: string | null;
   CreatedAt: string;
@@ -33,6 +35,11 @@ export interface InvoiceRow {
   CreditedAmount?: number;
   CreditNoteId?: number | null;
   CreditNoteNos?: string | null;
+  // The GST split its PDF prints; what came in against it (booking page only).
+  TaxableValue?: number;
+  GstAmount?: number;
+  Received?: number | null;
+  Balance?: number | null;
   BookingId: number;
   MilestoneId?: number | null;
   BookingNo: string;
@@ -42,21 +49,22 @@ export interface InvoiceRow {
   Mobile: string | null;
   CreatedByName: string | null;
 }
-export interface BookingGroup {
-  BookingId: number;
-  BookingNo: string;
-  ProjectName: string | null;
-  UnitNo: string;
-  ApplicantName: string;
-  Mobile: string | null;
-  MilestoneTotal: number;
-  MilestoneInvoiced: number;
-  Invoices: InvoiceRow[];
+/** One booking's billing, as the server works it out (crmInvoices.js ledgerSelect). */
+export interface LedgerRow {
+  BookingId: number; ApplicationId: number; BookingNo: string; BookingStatus: string; Closed: number; NonInvoice: number; FinalDue: number; StatementDue: number; Waived: number; GrandTotal: number; ExcessOnAccount: number; ReadyMilestoneIds?: number[];
+  ProjectName: string | null; UnitNo: string; ApplicantName: string; Mobile: string | null; AssignedToName: string | null;
+  PlanDue: number; PlanInvoiced: number; OtherInvoiced: number; Invoiced: number; Credited: number; NetInvoiced: number;
+  MilestoneTotal: number; MilestoneInvoiced: number; ReadyAmount: number; ReadyCount: number; NotInvoiced: number;
+  Approved: number; ReceivedNotInvoiced: number; LiveCount: number; VoidCount: number; HasFinal: number; LastInvoiceDate: string | null;
 }
-export interface InvoiceSummary {
-  liveCount: number; liveAmount: number; voidCount: number; credited: number;
-  bookings?: { all: number; full: number; partial: number; none: number };
+export interface InvoiceSummary { liveCount: number; liveAmount: number; voidCount: number; credited: number }
+export interface LedgerSummary {
+  counts: Record<"everything" | "ready" | "final" | "uninvoiced" | "none" | "partial" | "full" | "closed", number>;
+  planDue: number; planInvoiced: number; otherInvoiced: number; invoiced: number; credited: number; netInvoiced: number;
+  ready: number; readyCount: number; notInvoiced: number; receivedNotInvoiced: number;
+  invoices: InvoiceSummary; types: string[];
 }
+export interface BookingBilling { booking: LedgerRow; invoices: InvoiceRow[]; milestones: any[]; creditNotes: any[]; waivers: any[] }
 
 export const fmtMoney = (v?: number | null) => (v == null ? "—" : fmtRupees(Number(v)));
 export function fmtDate(v?: string | null) {
@@ -68,38 +76,61 @@ export function fmtDate(v?: string | null) {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-// Shared filter shape for the main list — both the grouped and flat views
-// read off the same committed filter set + page, so switching between them
-// never shows disagreeing data.
-export interface ListFilters {
-  type: string; search: string; companyId: string; projectId: string; blockId: string;
-  invoicedStatus: string; dateFrom: string; dateTo: string;
-}
-
-export async function fetchInvoiceList(view: "grouped" | "flat", filters: ListFilters, page: number, sortKey = "CreatedAt", sortDir: "asc" | "desc" = "desc"): Promise<any> {
-  const q = new URLSearchParams();
-  q.set("view", view);
-  q.set("page", String(page));
-  q.set("pageSize", String(PAGE_SIZE));
-  for (const k of ["type", "search", "companyId", "projectId", "blockId", "dateFrom", "dateTo"] as const) if (filters[k]) q.set(k, filters[k]);
-  if (view === "grouped" && filters.invoicedStatus) q.set("invoicedStatus", filters.invoicedStatus);
-  if (view === "flat") { q.set("sortKey", sortKey); q.set("sortDir", sortDir); }
-  const res = await fetchWithAuth(`${API}?${q}`);
+async function getJson(url: string, failure: string) {
+  const res = await fetchWithAuth(url);
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.error || "Failed to load invoices");
+  if (!res.ok) throw new Error(data?.error || failure);
   return data;
 }
+export const fetchLedger = (p: URLSearchParams): Promise<{ rows: LedgerRow[]; total: number }> => getJson(`${API}/ledger?${p}`, "Failed to load the bookings");
+export const fetchLedgerExport = (p: URLSearchParams): Promise<LedgerRow[]> => getJson(`${API}/ledger?${p}`, "Failed to export the bookings");
+export const fetchLedgerSummary = (p: URLSearchParams): Promise<LedgerSummary> => getJson(`${API}/ledger/summary?${p}`, "Failed to load the figures");
+export const fetchInvoiceRows = (p: URLSearchParams): Promise<{ rows: InvoiceRow[]; total: number }> => getJson(`${API}?${p}`, "Failed to load invoices");
+export const fetchInvoiceExport = (p: URLSearchParams): Promise<InvoiceRow[]> => getJson(`${API}?${p}`, "Failed to export invoices");
+async function postJson(url: string, body?: unknown) {
+  const res = await fetchWithAuth(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+/** Generates milestone invoices through the one bulk route: each is checked on its own, and what could not be is reported. */
+export const generateMilestoneInvoices = (items: { bookingId: number; milestoneId: number }[]): Promise<{ succeeded: any[]; skipped: { reason: string }[] }> => postJson(`${BKG_API}/invoices/bulk-generate`, { items });
+export const generateFinalInvoice = (bookingId: number) => postJson(`${BKG_API}/${bookingId}/invoices/final`);
+export const raiseDemand = (milestoneId: number) => postJson(`${PAY_API}/${milestoneId}/demand`, {});
+export async function downloadFinalStatement(r: { BookingId: number; BookingNo: string }) {
+  const res = await fetchWithAuth(`${API}/booking/${r.BookingId}/statement`);
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || "Could not download the final statement.");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = `Final-Statement-${r.BookingNo}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+export async function downloadInvoicePdf(inv: Pick<InvoiceRow, "BookingId" | "Id" | "InvoiceNo">) {
+  const res = await fetchWithAuth(`${BKG_API}/${inv.BookingId}/invoices/${inv.Id}/pdf`);
+  if (!res.ok) throw new Error("Could not download the invoice PDF.");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = `${inv.InvoiceNo}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+export const fetchBookingBilling = (id: string): Promise<BookingBilling> => getJson(`${API}/booking/${encodeURIComponent(id)}`, "Failed to load the booking");
+
 export async function fetchInvoice(id: string): Promise<InvoiceRow> {
   const res = await fetchWithAuth(`${API}/${encodeURIComponent(id)}`);
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(data?.error || "Invoice not found");
   return data;
 }
-export async function fetchBookingsForPicker(): Promise<any[]> {
-  const res = await fetchWithAuth(BKG_API);
+/** The newest 25 live bookings under the search and filters: the server finds them, however many there are. */
+export async function fetchBookingsForPicker(f: { search: string; companyId: string; projectId: string; blockId: string }): Promise<any[]> {
+  const p = new URLSearchParams({ page: "1", pageSize: "25" });
+  for (const k of ["search", "companyId", "projectId", "blockId"] as const) if (f[k]) p.set(k, f[k]);
+  const res = await fetchWithAuth(`${BKG_API}?${p}`);
   if (!res.ok) return [];
   const data = await res.json();
-  return Array.isArray(data) ? data : data.bookings || [];
+  return data.rows || [];
 }
 export async function fetchBookingDetail(id: number): Promise<any> {
   const res = await fetchWithAuth(`${BKG_API}/${id}`);
@@ -131,12 +162,44 @@ export function getMilestoneInsight(m: any, existingInvoices: any[]): { tone: Mi
   if (existingInv) return { tone: "invoiced", message: `Already invoiced — ${existingInv.InvoiceNo}` };
   // Invoice is generated from the demand (billing doc for AmountDue), before On Account Adjustment settles
   // the milestone. Only gate: the demand must exist — the Booking Amount (Milestone #1) included.
-  if (m.DemandStatus === CrmStatus.PENDING) return { tone: "demand", message: "Raise a demand (Demands page) to unlock invoicing" };
-  return { tone: "ready", message: "Ready to invoice" };
+  if (m.DemandStatus === CrmStatus.PENDING) return { tone: "demand", message: "Raise the demand first" };
+  return { tone: "ready", message: "Due for invoicing" };
+}
+
+/** A milestone's billing state: the one rule above, with what only the whole booking knows (a Final invoice, a waiver). */
+export const BILLING_MARK = {
+  invoiced: { label: "Invoiced", tone: "done" },
+  final: { label: "On final invoice", tone: "done" },
+  ready: { label: "Due for invoicing", tone: "waiting" },
+  demand: { label: "Awaiting demand", tone: "draft" },
+  later: { label: "Final invoice on full payment", tone: "draft" },
+  finalDue: { label: "Final invoice due", tone: "waiting" },
+  waived: { label: "Waived", tone: "draft" },
+  waiverPending: { label: "Waiver awaiting approval", tone: "waiting" },
+} as const;
+export function billingStateOf(m: any, invoices: InvoiceRow[], nonInvoice = false, finalDue = false): keyof typeof BILLING_MARK {
+  if (m.Status === "Waived") return "waived";
+  if (finalDue) return "finalDue";
+  if (nonInvoice && !invoices.some((i) => i.InvoiceType === "Final" && i.Status !== "Void")) return "later";
+  const insight = getMilestoneInsight(m, invoices).tone;
+  if (insight === "invoiced") return "invoiced";
+  if (invoices.some((i) => i.InvoiceType === "Final" && i.Status !== "Void")) return "final";
+  return insight;
+}
+
+/** What is invoiced against all that is billable, then what is ready to invoice; the rest of the line awaits a demand. */
+export function InvoiceBar({ due, invoiced, ready, onDark, title }: { due: number; invoiced: number; ready: number; onDark?: boolean; title?: string }) {
+  const w = (n: number) => `${due > 0 ? Math.min(100, (n / due) * 100) : 0}%`;
+  return (
+    <span className={cn("flex w-full gap-px rounded-full overflow-hidden", onDark ? "h-2.5 bg-white/15" : "h-1.5 bg-slate-200 dark:bg-slate-700")} title={title}>
+      {invoiced > 0 && <span className={onDark ? "bg-emerald-400" : "bg-emerald-500"} style={{ width: w(invoiced), minWidth: 3 }} />}
+      {ready > 0 && <span className={onDark ? "bg-amber-300" : "bg-amber-400"} style={{ width: w(ready), minWidth: 3 }} />}
+    </span>
+  );
 }
 
 export function InvoiceMark({ inv }: { inv: { Status: string } }) {
-  return inv.Status === "Void" ? <SheetMark text="Void" tone="stopped" /> : <SheetMark text="Issued" tone="done" />;
+  return inv.Status === "Void" ? <GridToneMark text="Void" tone="stopped" /> : <GridToneMark text="Issued" tone="done" />;
 }
 
 /** "−₹x credited · CRN-…" under an invoice's amount, opening its credit note. */
@@ -144,7 +207,7 @@ export function CreditedNote({ inv }: { inv: { CreditedAmount?: number; CreditNo
   if (!(Number(inv.CreditedAmount) > 0)) return null;
   return (
     <Link to={`/crm/credit-notes?id=${inv.CreditNoteId}`} onClick={(e) => e.stopPropagation()}
-      className="block mt-1 text-[0.6875rem] font-normal underline underline-offset-2 tabular-nums" title="Credit notes against this invoice">
+      className="block text-xs text-primary hover:underline tabular-nums" title="Credit notes against this invoice">
       −{fmtMoney(inv.CreditedAmount)} credited{inv.CreditNoteNos ? ` · ${inv.CreditNoteNos}` : ""}
     </Link>
   );

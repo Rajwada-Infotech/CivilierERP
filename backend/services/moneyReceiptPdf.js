@@ -70,10 +70,10 @@ function decodeLogo(dataUrl) {
 //                                            bounce reason shown on the doc)
 //   otherwise               -> "Pending"
 function deriveStatus(moneyReceiptStatus, rpStatus) {
-  if (moneyReceiptStatus === "Approved") return "Approved";
-  if (moneyReceiptStatus === "Bounced") return "Bounced";
-  if (rpStatus === "Approved") return "Approved";
-  if (rpStatus === "Rejected") return "Bounced";
+  // A bounce recorded here stands even after Finance approved (the cheque failed later). Finance rejecting the money
+  // outranks an older Approved: that money never came in.
+  if (moneyReceiptStatus === "Bounced" || rpStatus === "Rejected") return "Bounced";
+  if (moneyReceiptStatus === "Approved" || rpStatus === "Approved") return "Approved";
   return "Pending";
 }
 
@@ -359,4 +359,4 @@ async function getMoneyReceiptPdfBuffer(pool, receiptId) {
   return Buffer.from(base64, "base64");
 }
 
-module.exports = { generateMoneyReceiptPdf, getMoneyReceiptPdfBuffer, renderMoneyReceiptPdfBuffer, fetchMoneyReceiptData, getMoneyReceiptByReceivedPaymentId, deriveStatus };
+module.exports = { money, fmtDate, decodeLogo, drawWatermark, generateMoneyReceiptPdf, getMoneyReceiptPdfBuffer, renderMoneyReceiptPdfBuffer, fetchMoneyReceiptData, getMoneyReceiptByReceivedPaymentId, deriveStatus };

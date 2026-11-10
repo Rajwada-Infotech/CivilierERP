@@ -1,6 +1,7 @@
 // The "price + GST" box shown wherever a unit, parking or extra charge is picked
 // on an application. Every figure is the server's quote (usePriceQuote), worked
 // out by the same functions that price the booking — this box only lays it out.
+import { CERTIFICATE_TERMS } from "@/constants/crmStatuses";
 import React from "react";
 import { inr, type PriceQuote } from "@/lib/crmPriceQuote";
 
@@ -13,7 +14,7 @@ const Line: React.FC<{ label: React.ReactNode; value: number; strong?: boolean; 
 
 // Why this sale carries the GST it does, in words.
 export function gstReason(q: PriceQuote): string {
-  if (q.isGstExempt) return "No GST — the building's OC / CC is received and nothing has been paid before it.";
+  if (q.isGstExempt) return `No GST: the building's ${CERTIFICATE_TERMS.ONE} has been issued and nothing was paid before it.`;
   if (q.isLandSale) return "No GST — land is outside GST.";
   return `${q.gstRate}% from the GST rules for a sale of this value${q.landValue > 0 ? " (on the construction part only — land is outside GST)" : ""}. Changes by itself if parking moves the value across a band.`;
 }

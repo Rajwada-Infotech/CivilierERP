@@ -280,6 +280,15 @@ async function settlePaidRefunds(pool, userEmail) {
   } catch (e) { console.error("[crm-refunds] settlePaidRefunds:", e.message); }
 }
 
+// Open refunds first unless someone picks a sort.
+const REFUND_SORT = {
+  CustomerName: "cu.CustomerName", RefundNo: "r.RefundNo", BookingNo: "b.BookingNo", Status: "r.Status", NetAmount: "r.NetAmount", GrossAmount: "r.GrossAmount",
+  SourceType: "r.SourceType", RefundDueDate: "r.RefundDueDate", CreatedAt: "r.CreatedAt", PaidAt: "r.PaidAt",
+};
+// The tabs that cover more than one status.
+const REFUND_QUEUES = { CRM: ["Draft", "Pending"], Voucher: ["Approved", "FinancePending"] };
+const REFUND_OVERDUE_SQL = "r.RefundDueDate IS NOT NULL AND r.Status <> 'Paid' AND CAST(SYSDATETIME() AS DATE) > r.RefundDueDate";
+
 router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -293,22 +302,29 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
     const buildWhere = (rq, withStatus) => {
       const conds = [];
       if (req.projectScope) conds.push(projectPredicate(req.projectScope, "COALESCE(r.ProjectId, b.ProjectId)", "").trim());
-      if (withStatus && status) { rq.input("st", sql.NVarChar(20), status); conds.push("r.Status = @st"); }
+      if (withStatus && status === "Overdue") conds.push(REFUND_OVERDUE_SQL);
+      else if (withStatus && Object.hasOwn(REFUND_QUEUES, status)) conds.push(`r.Status IN (${REFUND_QUEUES[status].map((x) => `'${x}'`).join(", ")})`);
+      else if (withStatus && status) { rq.input("st", sql.NVarChar(20), status); conds.push("r.Status = @st"); }
+      if (req.query.dateFrom) { rq.input("dateFrom", sql.Date, req.query.dateFrom); conds.push("CAST(r.CreatedAt AS DATE) >= @dateFrom"); }
+      if (req.query.dateTo) { rq.input("dateTo", sql.Date, req.query.dateTo); conds.push("CAST(r.CreatedAt AS DATE) <= @dateTo"); }
       if (companyId) { rq.input("companyId", sql.Int, companyId); conds.push("r.CompanyId = @companyId"); }
       if (projectId) { rq.input("projectId", sql.Int, projectId); conds.push("r.ProjectId = @projectId"); }
       if (blockId) { rq.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
       if (search) {
         rq.input("search", sql.NVarChar(200), `%${search}%`);
-        conds.push("(cu.CustomerName LIKE @search OR r.RefundNo LIKE @search OR b.BookingNo LIKE @search OR cxl.CancellationNo LIKE @search)");
+        conds.push("(cu.CustomerName LIKE @search OR cu.Mobile LIKE @search OR r.RefundNo LIKE @search OR b.BookingNo LIKE @search OR cxl.CancellationNo LIKE @search)");
       }
       return conds.length ? "WHERE " + conds.join(" AND ") : "";
     };
     const req0 = pool.request();
     const where = buildWhere(req0, true);
     const SELECT_WITH_BLOCK = `${REFUND_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const ORDER = Object.hasOwn(REFUND_SORT, req.query.sortKey)
+      ? `ORDER BY ${REFUND_SORT[req.query.sortKey]} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, r.Id DESC`
+      : "ORDER BY CASE WHEN r.Status IN ('Paid', 'Rejected') THEN 1 ELSE 0 END, r.CreatedAt DESC, r.Id DESC";
 
     if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY r.CreatedAt DESC`);
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
       return res.json(result.recordset);
     }
     const { page, pageSize, offset } = applyPagination(req);
@@ -324,14 +340,14 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
     const statusReq = pool.request();
     const statusWhere = buildWhere(statusReq, false);
     const [result, countResult, statusResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY r.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       countReq.query(`SELECT COUNT(*) AS total ${FROM} ${countWhere}`),
-      statusReq.query(`SELECT r.Status, COUNT(*) AS n, SUM(r.NetAmount) AS net,
-        SUM(CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status <> 'Paid' AND CAST(SYSDATETIME() AS DATE) > r.RefundDueDate THEN 1 ELSE 0 END) AS overdue
+      statusReq.query(`SELECT r.Status, COUNT(*) AS n, SUM(r.NetAmount) AS net, SUM(r.GrossAmount) AS gross, SUM(r.DeductionAmount) AS deduction,
+        SUM(CASE WHEN ${REFUND_OVERDUE_SQL} THEN 1 ELSE 0 END) AS overdue
         ${FROM} ${statusWhere} GROUP BY r.Status`),
     ]);
     const statusCounts = {};
-    for (const s of statusResult.recordset) statusCounts[s.Status] = { count: s.n, net: Number(s.net) || 0, overdue: s.overdue };
+    for (const s of statusResult.recordset) statusCounts[s.Status] = { count: s.n, net: Number(s.net) || 0, gross: Number(s.gross) || 0, deduction: Number(s.deduction) || 0, overdue: s.overdue };
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
     console.error("[crm-refunds] GET error:", e.message);
@@ -421,6 +437,8 @@ router.get("/gst-notes", requirePageRight("crm-refunds", "view"), async (req, re
       page: pag?.page,
       pageSize: pag?.pageSize,
       offset: pag?.offset,
+      sortKey: req.query.sortKey || null,
+      sortDir: req.query.sortDir || null,
     });
     res.json(result);
   } catch (e) {
@@ -913,7 +931,7 @@ router.put("/:id/reject", requirePageRight("crm-refunds", "edit"), async (req, r
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const pool = getPool();
-    const result = await approvalTransition("crm-refunds", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
+    const result = await approvalTransition("crm-refunds", id, "Rejected", userEmail, req.user?.role, req.body?.note || null, req.user?.userId ?? null);
     await pool.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), req.body?.note || "Rejected")
       .query("UPDATE dbo.CrmRefund SET RejectionNote = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
     await bumpCacheVersion("crm-refunds");
@@ -1082,7 +1100,7 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
         UPDATE dbo.CrmRefund SET
           Status = 'FinanceApproved', FinanceNewPaymentId = @np, RefundBankLHeadId = @bank,
           FinanceClearedBy = @fc, FinanceClearedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
-        WHERE Id = @id AND Status = 'FinancePending' AND FinanceNewPaymentId IS NULL
+        WHERE Id = @id AND Status IN ('FinancePending', 'Approved') AND FinanceNewPaymentId IS NULL
       `);
     if (upd.rowsAffected[0] !== 1) {
       throw new Error("Refund status changed under us — another approval was already in progress");

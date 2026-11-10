@@ -34,13 +34,26 @@ const DEMAND_BOOKING_LIVE_SQL = `
 // dues up to and including it fit inside the booking's verified money held On
 // Account, what is entered and waiting for Finance, and what is entered but not yet with Finance. The payment page's
 // per-row stage (crmPayments.js GET /booking/:id) is the same rule.
-const MILESTONE_OVERDUE_SQL = `m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
-  AND (SELECT ISNULL(SUM(CASE WHEN p.Status = 'Waived' OR p.AmountDue <= ISNULL(p.AmountPaid, 0) THEN 0 ELSE p.AmountDue - ISNULL(p.AmountPaid, 0) END), 0)
+const MILESTONE_DUES_UPTO_SQL = `(SELECT ISNULL(SUM(CASE WHEN p.Status = 'Waived' OR p.AmountDue <= ISNULL(p.AmountPaid, 0) THEN 0 ELSE p.AmountDue - ISNULL(p.AmountPaid, 0) END), 0)
        FROM dbo.CrmPaymentMilestone p
-       WHERE p.BookingId = m.BookingId AND (p.MilestoneNo < m.MilestoneNo OR (p.MilestoneNo = m.MilestoneNo AND p.Id <= m.Id)))
-    > ISNULL((SELECT SUM(o.AvailableAmount) FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = m.BookingId), 0)
+       WHERE p.BookingId = m.BookingId AND (p.MilestoneNo < m.MilestoneNo OR (p.MilestoneNo = m.MilestoneNo AND p.Id <= m.Id)))`;
+const BOOKING_MONEY_IN_SQL = `ISNULL((SELECT SUM(o.AvailableAmount) FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = m.BookingId), 0)
       + ISNULL((SELECT SUM(rp.RPAmount) FROM dbo.ReceivedPayment rp WHERE rp.CrmBookingId = m.BookingId AND rp.RPStatus = N'Pending'), 0)
-      + ${recordedMoneySql("m.BookingId")} + 0.009`;
+      + ${recordedMoneySql("m.BookingId")}`;
+const MILESTONE_DUE_DATE_PASSED_SQL = `m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE)`;
+const MILESTONE_OVERDUE_SQL = `${MILESTONE_DUE_DATE_PASSED_SQL}
+  AND ${MILESTONE_DUES_UPTO_SQL}
+    > ${BOOKING_MONEY_IN_SQL} + 0.009`;
+
+// The same rule for a list of milestones: one CROSS APPLY, then whether each is overdue and how much of it is missing.
+const MILESTONE_COVER_APPLY = `CROSS APPLY (SELECT ${MILESTONE_DUES_UPTO_SQL} AS Upto, ${BOOKING_MONEY_IN_SQL} AS MoneyIn) cov`;
+const COVER_OVERDUE_TEST = `${MILESTONE_DUE_DATE_PASSED_SQL} AND cov.Upto > cov.MoneyIn + 0.009`;
+const COVER_IS_OVERDUE_SQL = `CASE WHEN ${COVER_OVERDUE_TEST} THEN 1 ELSE 0 END`;
+// How much of a milestone is still to come, overdue or not: the Balance to collect on Payment Milestones, line by line.
+const COVER_MISSING_SQL = `CASE WHEN m.Status <> '${CrmStatus.PENDING}' OR cov.Upto - cov.MoneyIn <= 0.009 THEN 0
+  WHEN cov.Upto - cov.MoneyIn >= m.AmountDue - ISNULL(m.AmountPaid, 0) THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE cov.Upto - cov.MoneyIn END`;
+const COVER_OVERDUE_SHORT_SQL = `CASE WHEN NOT (${COVER_OVERDUE_TEST}) THEN 0
+  WHEN cov.Upto - cov.MoneyIn >= m.AmountDue - ISNULL(m.AmountPaid, 0) THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE cov.Upto - cov.MoneyIn END`;
 
 // ── Sent back / resubmitted ─────────────────────────────────────────────────
 // Read-only. Finds, from what each flow already records, the entries a checker
@@ -65,6 +78,7 @@ const ENGINE_SENT_BACK = {
   "crm-credit-note-cancel":  { area: "Credit note cancellation", path: "/crm/credit-notes",      no: "DocNo",          booking: "BookingId",     link: "/crm/credit-notes?id={id}" },
   "crm-transfer-deeds":      { area: "Transfer deed",            path: "/crm/transfer-deeds",    no: "DeedNo",         booking: "BookingId",     link: "/crm/transfer-deeds?id={id}" },
   "crm-transfer-deed-date":  { area: "Transfer deed date",       path: "/crm/transfer-deeds",    no: "DeedNo",         booking: "BookingId",     link: "/crm/transfer-deeds?id={id}" },
+  "crm-milestone-waiver":    { area: "Milestone waiver",         path: "/crm/payments",          no: null,             booking: "BookingId",     link: "/crm/payments?bookingId={bookingId}" },
   "crm-noc":                 { area: "NOC",                      path: "/crm/noc",               no: "NocNo",          booking: "BookingId",     link: "/crm/noc?bookingId={bookingId}" },
   "crm-sales-deed-senior":   { area: "Sale deed",                path: "/crm/sales-deed",        no: "DeedNo",         booking: "BookingId",     link: "/crm/sales-deed?deedId={id}" },
   "crm-sales-deed-director": { area: "Sale deed (Director)",     path: "/crm/sales-deed",        no: "DeedNo",         booking: "BookingId",     link: "/crm/sales-deed?deedId={id}" },
@@ -182,4 +196,8 @@ module.exports = {
   AGREEMENT_NEEDS_ACTION_SQL,
   DEMAND_BOOKING_LIVE_SQL,
   MILESTONE_OVERDUE_SQL,
+  MILESTONE_COVER_APPLY,
+  COVER_IS_OVERDUE_SQL,
+  COVER_OVERDUE_SHORT_SQL,
+  COVER_MISSING_SQL,
 };

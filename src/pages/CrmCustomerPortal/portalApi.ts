@@ -77,6 +77,14 @@ export async function uploadAgreementDoc(docId: number, file: File, applicationI
   return res.json();
 }
 
+export async function openPossessionLetter(noticeId: number, applicationId: number) {
+  const res = await fetch(`${API}/possession-notice/${noticeId}/pdf?applicationId=${applicationId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error("Could not open the letter");
+  const url = URL.createObjectURL(await res.blob());
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 export async function respondPossessionNotice(decision: "Acknowledge" | "Dispute", applicationId: number, reason?: string) {
   const res = await fetch(`${API}/possession-notice/respond?applicationId=${applicationId}`, {
     method: "POST",

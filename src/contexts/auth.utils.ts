@@ -260,9 +260,13 @@ export const ADMIN_ONLY_PAGES: PageKey[] = [
 export const isPrivilegedRole = (role: UserRole): boolean =>
   PRIVILEGED_ROLES.includes(role);
 
+// A page made of several steps: open to anyone with a right on any one of them. Each step keeps its own right.
+const PAGE_GROUPS: Record<string, PageKey[]> = { "crm-possession": ["crm-pre-possession", "crm-possession-notice", "crm-handover"] };
+
 export const createPermissionCheckers = (currentUser: AppUser | null) => {
   const canAccessPage = (page: PageKey): boolean => {
     if (!currentUser) return false;
+    if (PAGE_GROUPS[page]) return PAGE_GROUPS[page].some(canAccessPage);
     if (isPrivilegedRole(currentUser.role)) return true;
     // marketing_head: full access within their scope, no access outside it.
     // menu-rights is the one ADMIN_ONLY_PAGES entry marketing_head can reach

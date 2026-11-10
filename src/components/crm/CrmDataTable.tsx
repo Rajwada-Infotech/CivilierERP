@@ -1,3 +1,5 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -450,6 +452,65 @@ export function GridRelated({ icon: Icon, title, count, action, children }: {
   );
 }
 
+/** A protected file as a local address, for preview or download. */
+export function useFileUrl(url: string | null) {
+  const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!url) return;
+    let local: string | null = null;
+    let cancelled = false;
+    setFileUrl(null); setFailed(false);
+    fetchWithAuth(url).then((r) => (r.ok ? r.blob() : Promise.reject()))
+      .then((blob) => { if (!cancelled) { local = URL.createObjectURL(blob); setFileUrl(local); } })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; if (local) URL.revokeObjectURL(local); };
+  }, [url]);
+  return { fileUrl, failed };
+}
+
+/** A form or record dialog: icon, title and one line of purpose; the body; the actions in a footer bar. Wide by default. */
+export function GridDialog({ open = true, onClose, icon: Icon, title, description, width = "max-w-3xl", footer, children }: {
+  open?: boolean; onClose: () => void; icon: React.ElementType; title: React.ReactNode; description?: React.ReactNode; width?: string; footer?: React.ReactNode; children: React.ReactNode;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className={cn(width, "p-0 sm:p-0 gap-0 sm:rounded-xl bg-card")}>
+        <DialogHeader className="flex-row items-start gap-3 space-y-0 px-6 py-4 pr-12 border-b border-border text-left">
+          <span className="w-9 h-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0"><Icon size={17} /></span>
+          <span className="min-w-0">
+            <DialogTitle className="text-base font-semibold leading-snug">{title}</DialogTitle>
+            {description && <DialogDescription className="mt-0.5 text-[0.8125rem]">{description}</DialogDescription>}
+          </span>
+        </DialogHeader>
+        <div className="px-6 py-5 space-y-5">{children}</div>
+        {footer && <div className="px-6 py-3.5 border-t border-border bg-muted/40 flex flex-wrap justify-end gap-2">{footer}</div>}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** A titled group of fields in a dialog, two to a row. */
+export function GridFormSection({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <section>
+      {title && <h3 className="pb-2 mb-3 text-[0.8125rem] font-semibold border-b border-border">{title}</h3>}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">{children}</div>
+    </section>
+  );
+}
+
+/** One labelled field; `wide` takes the whole row. */
+export function GridFormField({ label, required, hint, wide, children }: { label: string; required?: boolean; hint?: string; wide?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={cn("min-w-0 space-y-1.5", wide && "sm:col-span-2")}>
+      <span className="block text-xs font-medium text-foreground">{label}{required && <span className="text-destructive"> *</span>}</span>
+      {children}
+      {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
+    </div>
+  );
+}
+
 /** Label / value pairs in two columns: a record's details section. */
 export function GridFields({ fields }: { fields: { label: string; value: React.ReactNode; wide?: boolean }[] }) {
   return (
@@ -875,7 +936,7 @@ export function GridBulkBar({ count, onClear, children }: { count: number; onCle
 }
 
 // ── Date range filter ────────────────────────────────────────────────────────
-export type GridDatePreset = "any" | "7d" | "30d" | "month" | "fy" | "custom";
+export type GridDatePreset = "any" | "7d" | "30d" | "month" | "lastMonth" | "fy" | "lastFy" | "custom";
 export interface GridDateRange { preset: GridDatePreset; from: string; to: string }
 export const GRID_ANY_DATE: GridDateRange = { preset: "any", from: "", to: "" };
 const DATE_PRESETS: { key: GridDatePreset; label: string }[] = [
@@ -883,7 +944,9 @@ const DATE_PRESETS: { key: GridDatePreset; label: string }[] = [
   { key: "7d", label: "Last 7 days" },
   { key: "30d", label: "Last 30 days" },
   { key: "month", label: "This month" },
+  { key: "lastMonth", label: "Last month" },
   { key: "fy", label: "This financial year" },
+  { key: "lastFy", label: "Last financial year" },
   { key: "custom", label: "Custom range" },
 ];
 const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -895,6 +958,11 @@ export function resolveGridDateRange(r: GridDateRange, today = new Date()): { fr
     case "7d": return { from: back(6), to: isoDay(today) };
     case "30d": return { from: back(29), to: isoDay(today) };
     case "month": return { from: isoDay(new Date(today.getFullYear(), today.getMonth(), 1)), to: isoDay(today) };
+    case "lastMonth": return { from: isoDay(new Date(today.getFullYear(), today.getMonth() - 1, 1)), to: isoDay(new Date(today.getFullYear(), today.getMonth(), 0)) };
+    case "lastFy": {
+      const startYear = (today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1) - 1;
+      return { from: isoDay(new Date(startYear, 3, 1)), to: isoDay(new Date(startYear + 1, 2, 31)) };
+    }
     case "fy": {
       const startYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
       return { from: isoDay(new Date(startYear, 3, 1)), to: isoDay(today) };

@@ -11,6 +11,7 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 const { actorId } = require("../services/saAccess");
 const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -18,6 +19,9 @@ router.use(authMiddleware);
 // Standard checklist shown even before any row exists, so staff see what's
 // expected to be collected — not just what's already been uploaded.
 const STANDARD_DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
+// The Possession & Handover page reaches these two types only, so its users never get at a customer's KYC files.
+const POSSESSION_PAGES = ["crm-pre-possession", "crm-possession-notice", "crm-handover"];
+const POSSESSION_DOC_TYPES = ["Signed Possession Notice", "Signed Handover Note"];
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -110,15 +114,22 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
 
 // POST /booking/:bookingId/upload — actual multi-file upload (up to 10 files
 // in one request). One row per file, all sharing the same DocumentType.
-router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", "edit"), (req, res) => {
+router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", "edit"), (req, res) => uploadToBooking(req, res));
+
+// Possession & Handover: the signed copies only.
+router.post("/booking/:bookingId/possession-upload", requireAnyPageRight(POSSESSION_PAGES, "edit"), (req, res) => uploadToBooking(req, res, POSSESSION_DOC_TYPES));
+
+function uploadToBooking(req, res, onlyTypes = null) {
   upload.array("files", 10)(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     try {
       const pool = getPool();
       const bookingId = parseId(req.params.bookingId);
       if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
+      if (onlyTypes && (await assertBookingProjectScope(req, res, bookingId)) === false) return;
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
+      if (onlyTypes && !onlyTypes.includes(docType)) return res.status(400).json({ error: "This document type can't be uploaded here." });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
       for (const file of req.files) {
         const sigErr = verifyFileMatchesDeclaredType(file);
@@ -168,7 +179,7 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
       res.status(500).json({ error: e.message });
     }
   });
-});
+}
 
 // GET /application/:applicationId — documents captured at Application stage
 // (Phase 1 of the Application/Booking redesign) — same table, same file
@@ -248,6 +259,44 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
       res.status(500).json({ error: e.message });
     }
   });
+});
+
+// GET /booking/:bookingId/possession - the signed copies on a booking.
+router.get("/booking/:bookingId/possession", requireAnyPageRight(POSSESSION_PAGES, "view"), async (req, res) => {
+  try {
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
+    if ((await assertBookingProjectScope(req, res, bookingId)) === false) return;
+    const request = getPool().request().input("bid", sql.Int, bookingId);
+    POSSESSION_DOC_TYPES.forEach((t, i) => request.input(`t${i}`, sql.NVarChar(100), t));
+    const r = await request.query(`
+      SELECT d.Id, d.DocumentType, d.FileName, d.FileSize, d.MimeType, d.CreatedAt, u.name AS UploadedByName
+      FROM dbo.CrmBookingDocument d LEFT JOIN dbo.Users u ON u.id = d.CreatedBy
+      WHERE d.BookingId = @bid AND d.FileBase64 IS NOT NULL AND d.DocumentType IN (${POSSESSION_DOC_TYPES.map((_, i) => `@t${i}`).join(", ")})
+      ORDER BY d.CreatedAt DESC, d.Id DESC`);
+    res.json({ documents: r.recordset, types: POSSESSION_DOC_TYPES });
+  } catch (e) {
+    console.error("[crm-booking-documents] GET possession error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /possession-file/:id - one signed copy; any other document type is refused.
+router.get("/possession-file/:id", requireAnyPageRight(POSSESSION_PAGES, "view"), async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const r = await getPool().request().input("id", sql.Int, id).query("SELECT BookingId, DocumentType, FileName, FileBase64, MimeType FROM dbo.CrmBookingDocument WHERE Id = @id");
+    const doc = r.recordset[0];
+    if (!doc?.FileBase64 || !POSSESSION_DOC_TYPES.includes(doc.DocumentType)) return res.status(404).json({ error: "File not found" });
+    if ((await assertBookingProjectScope(req, res, doc.BookingId)) === false) return;
+    res.setHeader("Content-Type", doc.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${doc.FileName || "document"}"`);
+    res.send(Buffer.from(doc.FileBase64, "base64"));
+  } catch (e) {
+    console.error("[crm-booking-documents] possession file error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /file/:id — stream a document's file for inline preview/download

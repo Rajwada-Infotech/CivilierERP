@@ -10,6 +10,9 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { rollupBookingTotals } = require("./crmParking");
+const { bookingFundingApplySql } = require("../services/crmPaymentFunding");
+
+const LIVE_BOOKING_SQL = "b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')";
 
 router.use(authMiddleware);
 
@@ -36,14 +39,13 @@ router.get("/board", requirePageRight("crm-oc-cc", "view"), async (req, res) => 
     const pool = getPool();
     const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "pv.ProjectId", "AND") : "";
     const scopeB = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "v.ProjectId", "AND") : "";
-    const [projects, blocks] = await Promise.all([
+    const scopeH = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "AND") : "";
+    const [projects, blocks, held] = await Promise.all([
       pool.request().query(`
         SELECT pv.*, e.name AS ProjectName,
-          (SELECT COUNT(*) FROM dbo.CrmBooking b WHERE b.ProjectId = pv.ProjectId AND b.IsActive = 1
-             AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')) AS LiveBookings,
+          (SELECT COUNT(*) FROM dbo.CrmBooking b WHERE b.ProjectId = pv.ProjectId AND ${LIVE_BOOKING_SQL}) AS LiveBookings,
           (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.vw_CrmBookingOcCc bv ON bv.BookingId = b.Id
-            WHERE b.ProjectId = pv.ProjectId AND b.IsActive = 1 AND bv.Received = 0
-              AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')) AS WaitingBookings
+            WHERE b.ProjectId = pv.ProjectId AND bv.Received = 0 AND ${LIVE_BOOKING_SQL}) AS WaitingBookings
         FROM dbo.vw_CrmProjectOcCc pv
         JOIN dbo.enterprise e ON e.id = pv.ProjectId
         WHERE (pv.ActiveBlocks > 0 OR EXISTS (SELECT 1 FROM dbo.CrmOccupancyCertificate oc WHERE oc.ProjectId = pv.ProjectId)) ${scope}
@@ -51,13 +53,31 @@ router.get("/board", requirePageRight("crm-oc-cc", "view"), async (req, res) => 
       pool.request().query(`
         SELECT v.*, oc.CertType, oc.CertificateNo,
           (SELECT COUNT(*) FROM dbo.CrmBooking b LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-            WHERE um.BlockId = v.BlockId AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')) AS LiveBookings
+            WHERE um.BlockId = v.BlockId AND ${LIVE_BOOKING_SQL}) AS LiveBookings
         FROM dbo.vw_CrmBlockOcCc v
         LEFT JOIN dbo.CrmOccupancyCertificate oc ON oc.Id = v.CertificateId
         WHERE v.IsActive = 1 ${scopeB}
         ORDER BY v.ProjectId, v.BlockName`),
+      // Every live booking held for want of a certificate, with its money (the same funding figures as Payment Milestones).
+      pool.request().query(`
+        SELECT b.Id AS BookingId, b.BookingNo, b.ProjectId, b.BlockName, a.ApplicantName, a.Mobile,
+               COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+               ag.Status AS AgreementStatus, ISNULL(fm.RequiredAmount, 0) AS RequiredAmount,
+               ISNULL(fm.MilestonePaid, 0) + ISNULL(fo.OnAccountAvailable, 0) AS Collected
+        FROM dbo.CrmBooking b
+        JOIN dbo.vw_CrmBookingOcCc bv ON bv.BookingId = b.Id
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+        OUTER APPLY (SELECT TOP 1 g.Status FROM dbo.CrmAgreement g WHERE g.BookingId = b.Id
+                     ORDER BY CASE WHEN g.Status = 'Registered' THEN 0 ELSE 1 END, g.Id DESC) ag
+        ${bookingFundingApplySql("b")}
+        WHERE bv.Received = 0 AND ${LIVE_BOOKING_SQL} ${scopeH}
+        ORDER BY b.ProjectId, b.BookingNo`),
     ]);
-    res.json({ projects: projects.recordset, blocks: blocks.recordset });
+    res.json({
+      projects: projects.recordset, blocks: blocks.recordset,
+      held: held.recordset.map((r) => ({ ...r, Balance: Math.max(0, Math.round((r.RequiredAmount - r.Collected) * 100) / 100) })),
+    });
   } catch (e) {
     console.error("[crm-oc-cc] GET /board error:", e.message);
     res.status(500).json({ error: e.message });
@@ -150,6 +170,7 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
     if (!require("../services/projectScope").assertProjectAllowed(req, res, parseInt(b.ProjectId, 10))) return;
     if (!b.CertType)   return res.status(400).json({ error: "CertType is required (OC / CC / OC+CC)" });
     if (!["OC", "CC", "OC+CC"].includes(b.CertType)) return res.status(400).json({ error: "CertType must be OC, CC, or OC+CC" });
+    if (b.Status && !["Applied", "Received"].includes(b.Status)) return res.status(400).json({ error: "Status must be Applied or Received" });
 
     const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
       .query("SELECT name FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
@@ -244,7 +265,7 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
     // DB-level unique constraint violation (migration 412) — belt-and-suspenders.
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique") ||
         e.number === 2627 || e.number === 2601) {
-      return res.status(409).json({ error: "An OC/CC record for this project and certificate type already exists." });
+      return res.status(409).json({ error: "A certificate of this type is already recorded for this project." });
     }
     console.error("[crm-oc-cc] POST error:", e.message);
     res.status(500).json({ error: e.message });
@@ -259,7 +280,7 @@ router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Id, ProjectId, BlockId, Status FROM dbo.CrmOccupancyCertificate WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "OC/CC record not found" });
+    if (!cur.recordset.length) return res.status(404).json({ error: "Certificate record not found." });
     const wasReceived = cur.recordset[0].Status === "Received";
 
     if (b.CertType && !["OC", "CC", "OC+CC"].includes(b.CertType))

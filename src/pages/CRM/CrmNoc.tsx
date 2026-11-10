@@ -1,7 +1,7 @@
 // CRM NOC: one No Objection Certificate per booking, once the Agreement for Sale is registered: from the bank when the
 // booking is loan-financed (the lender releases its charge), from the developer otherwise (no dues outstanding).
 // Requested, approved, then issued; Handover waits for it.
-import { CrmStatus } from "@/constants/crmStatuses";
+import { CrmStatus, POSSESSION_PAGE } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -196,7 +196,7 @@ const NocRecord: React.FC<{ id: number; canEdit: boolean; onChanged: () => void 
       toast.success("NOC issued");
       changed();
       // The issued NOC is what Handover waits for.
-      promptNextStep(navigate, "NOC issued: the handover can be scheduled once the possession notice is acknowledged.", "/crm/handover", "Go to Handover");
+      promptNextStep(navigate, "NOC issued: the handover can be scheduled once the possession notice is acknowledged.", "/crm/possession", `Go to ${POSSESSION_PAGE}`);
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setMarkingIssued(false); }
   };
@@ -205,7 +205,7 @@ const NocRecord: React.FC<{ id: number; canEdit: boolean; onChanged: () => void 
   const guidance: { tone: GridGuidanceTone; title: string; text: string; action?: React.ReactNode } =
     n.Status === "Issued" ? {
       tone: "done", title: `Issued ${fmtDate(n.IssuedDate)}`, text: "Nothing more to do here. The handover can be scheduled once the possession notice is acknowledged.",
-      action: <button type="button" className={GRID_BTN} onClick={() => navigate("/crm/handover")}>Go to Handover</button>,
+      action: <button type="button" className={GRID_BTN} onClick={() => navigate("/crm/possession")}>Go to {POSSESSION_PAGE}</button>,
     } : n.Status === CrmStatus.APPROVED ? {
       tone: "moving", title: "Approved: ready to issue", text: `Hand the certificate over${bank ? ` (the lender, ${n.BankName || "the bank"}, releases its charge)` : ""}, then mark it issued. Handover waits for this.`,
       action: canEdit ? <button type="button" className={GRID_BTN_BRAND} onClick={markIssued} disabled={markingIssued}><CheckCircle2 size={13} /> {markingIssued ? "Marking…" : "Mark issued"}</button> : undefined,

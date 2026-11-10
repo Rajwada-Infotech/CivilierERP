@@ -35,6 +35,12 @@ export const fmtDate = (s: string | null | undefined) => {
 
 export const pct = (paid: number, due: number) => (due > 0 ? Math.min(100, Math.round((paid / due) * 100)) : 0);
 
+/** Across many bookings, money above what a booking owes doesn't cover anyone else's plan: split it out of what was received. */
+export function planCoverage(received: number, totalDue: number, toCollect: number) {
+  const excess = Math.max(0, Math.round((received + toCollect - totalDue) * 100) / 100);
+  return { excess, covered: Math.round((received - excess) * 100) / 100 };
+}
+
 /** Today in local time (toISOString gave yesterday before 05:30 IST). */
 export const todayStr = () => localDay();
 
@@ -94,6 +100,23 @@ export const TRAIL_STAGE: Record<string, { label: string; tone: "done" | "waitin
   returned: { label: "Rejected by Finance", tone: "stopped", hint: "Rejected by Finance. It is not counted as received" },
   bounced: { label: "Bounced", tone: "stopped", hint: "This payment bounced. It is not counted as received" },
 };
+
+/** Where a waiver stands. Only an approved one, with no reversal under way, can be reversed. */
+export function waiverState(w: { Status: string; ReversalStatus?: string | null }): { label: string; tone: "done" | "waiting" | "stopped" | "draft"; reversible: boolean } {
+  if (w.Status === "Pending") return { label: "Awaiting approval", tone: "waiting", reversible: false };
+  if (w.Status === "Rejected") return { label: "Rejected", tone: "stopped", reversible: false };
+  if (w.ReversalStatus === "Approved") return { label: "Reversed", tone: "draft", reversible: false };
+  if (w.ReversalStatus === "Pending") return { label: "Reversal awaiting approval", tone: "waiting", reversible: false };
+  return { label: "Waived", tone: "done", reversible: true };
+}
+/** The milestones with a waiver waiting for approval. */
+export const pendingWaiverIds = (waivers?: { Status: string; MilestoneId: number }[]) => new Set((waivers || []).filter((w) => w.Status === "Pending").map((w) => w.MilestoneId));
+export async function reverseWaiver(id: number, reason: string) {
+  const r = await fetchWithAuth(`${API}/waivers/${id}/reverse`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Reason: reason }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Could not send the reversal");
+  return d;
+}
 
 /** The first milestone money is still missing on, in plan order. */
 export const nextOpenMilestone = (plan: any[]) => plan.find((m) => m.Status !== "Waived" && m.Status !== "Paid" && milestoneFill(m).missing > 0) ?? null;

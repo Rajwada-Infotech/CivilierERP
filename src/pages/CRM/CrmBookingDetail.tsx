@@ -1,4 +1,4 @@
-import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, bookingSendBackChoices } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, bookingSendBackChoices, CERTIFICATE_TERMS } from "@/constants/crmStatuses";
 import { round2, sumMoney } from "@/lib/crmPriceQuote";
 import { SendBackChoices } from "@/components/ApprovalActions";
 import { useCanApprove } from "@/hooks/useCanApprove";
@@ -966,7 +966,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       });
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Submission failed");
-      toast.success(`Money Receipt ${resData.ReceiptNo || ""} created — Pending approval.`);
+      toast.success(`Money Receipt ${resData.ReceiptNo || ""} created.`);
       setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
@@ -1520,7 +1520,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   {!booking.HsnCode && Number(booking.TotalValue) > 0 && (
                     <div className="flex items-center gap-1.5 text-foreground bg-card border border-foreground/30 px-2.5 py-1.5 mb-1">
                       <Check size={12} className="shrink-0" />
-                      GST Exempt — Schedule III (entire consideration received after OC/CC)
+                      GST exempt under Schedule III: entire consideration received after the {CERTIFICATE_TERMS.ONE}
                     </div>
                   )}
 

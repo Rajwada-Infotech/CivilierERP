@@ -11,6 +11,7 @@ const { getPool, sql } = require("../db");
 const portalAuth = require("../middleware/crmPortalAuth");
 const { getNextDocNumber } = require("../services/docNumber");
 const { emitNotification } = require("../services/notify");
+const { getPossessionLetterBuffer } = require("../services/possessionLetterPdf");
 const { proposeAgreementDate, acceptAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { getInvoicePdfBuffer } = require("../services/invoicePdf");
@@ -1268,6 +1269,28 @@ router.post("/sales-deed/respond", async (req, res) => {
 
   } catch (e) {
     console.error("[crm-portal] POST /sales-deed/respond error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /possession-notice/:noticeId/pdf - the letter, once sent, for THIS customer's own booking only.
+router.get("/possession-notice/:noticeId/pdf", pdfRateLimiter, async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const noticeId = parseId(req.params.noticeId);
+    if (noticeId === null) return res.status(400).json({ error: "Invalid noticeId" });
+    const row = await pool.request().input("nid", sql.Int, noticeId).input("aid", sql.Int, appId).query(`
+      SELECT n.Id FROM dbo.CrmPossessionNotice n JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+      WHERE n.Id = @nid AND b.ApplicationId = @aid AND n.Status <> 'Draft'`);
+    if (!row.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    const letter = await getPossessionLetterBuffer(pool, noticeId);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${letter.noticeNo}.pdf"`);
+    res.send(letter.buffer);
+  } catch (e) {
+    console.error("[crm-portal] GET /possession-notice/:noticeId/pdf error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });

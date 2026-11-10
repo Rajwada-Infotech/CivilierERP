@@ -149,6 +149,9 @@ const MODULE_MAP = {
   // cancellation of any credit note — two gates on the same row.
   "crm-credit-notes": { table: "dbo.CrmGstNote", pk: "Id", status: "ApprovalStatus" },
   "crm-credit-note-cancel": { table: "dbo.CrmGstNote", pk: "Id", status: "CancelApprovalStatus" },
+  // Waiving a payment milestone (migration 624), and reversing a waiver: two gates on the same row.
+  "crm-milestone-waiver": { table: "dbo.CrmMilestoneWaiver", pk: "Id", status: "Status" },
+  "crm-milestone-waiver-reversal": { table: "dbo.CrmMilestoneWaiver", pk: "Id", status: "ReversalStatus" },
   // A resale / buy-back's transfer deed (migration 560): the Legal Head's
   // sign-off on its papers, and — a second gate on the same row, same
   // single-level ApprovalAuditLog caveat as crm-agreement-date — the
@@ -666,6 +669,7 @@ async function transition(
   note = null,
   userId = null,
   beforeApprove = null,
+  onFullyApproved = null,
 ) {
   const map = MODULE_MAP[module];
   if (!map) throw new Error(`Unknown module: ${module}`);
@@ -834,6 +838,8 @@ async function transition(
         };
       } else if (nextLevel >= totalLevels) {
         await setRecordStatus(module, id, "Approved", tx);
+        // What the last approval does, in the same transaction: both happen or neither does.
+        if (onFullyApproved) await onFullyApproved(tx);
         fullyApproved = true;
         result = { newStatus: "Approved", level: nextLevel, totalLevels };
       } else {

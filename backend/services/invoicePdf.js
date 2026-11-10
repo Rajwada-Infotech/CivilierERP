@@ -2,7 +2,7 @@ const PDFDocument = require("pdfkit");
 const { sql } = require("../db");
 const { drawFinancialBreakdown } = require("./pdfFinancials");
 const { dmSansFonts } = require("./pdfFonts");
-const { getGstSplit } = require("./crmLedger");
+const { getGstSplit, gstSplitByRatio } = require("./crmLedger");
 
 function money(n) {
   const num = Number(n || 0);
@@ -134,6 +134,46 @@ async function fetchInvoiceData(pool, invoiceId) {
 // Renders the invoice to an in-memory PDF buffer — nothing touches disk.
 // The caller is responsible for persisting the buffer (as base64) onto the
 // CrmInvoice row; this function only knows how to draw the document.
+// The band at the top of a CRM document: logo and company on the left, the document's title and references on the right.
+// Drawn at fixed, explicitly-tracked coordinates rather than chained off doc.y: .rect().fill() is a vector op that does
+// NOT advance the text flow cursor, so text placed relative to doc.y would land where the cursor was before the rect.
+function drawDocumentHeader(doc, F, d, title, refs, tag) {
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const left = doc.page.margins.left;
+  const logoBuf = decodeLogo(d.CompanyLogo);
+  const headerTop = doc.y;
+  const headerHeight = 82;
+  doc.rect(left, headerTop, pageWidth, headerHeight).fill("#0f172a");
+  let textStartX = left + 14;
+  if (logoBuf) {
+    try {
+      // White backing chip so dark/transparent-background logos stay legible against the dark band.
+      doc.roundedRect(left + 12, headerTop + 12, 58, 58, 6).fill("#ffffff");
+      doc.image(logoBuf, left + 16, headerTop + 16, { fit: [50, 50], align: "center", valign: "center" });
+      textStartX = left + 82;
+    } catch {
+      // Corrupt/unsupported image data: a text-only header rather than failing the document over a logo.
+      textStartX = left + 14;
+    }
+  }
+  const leftColWidth = pageWidth * 0.62 - (textStartX - left);
+  doc.fillColor("#ffffff").fontSize(17).font(F.bold)
+    .text(d.CompanyName || "Company Name Not Set", textStartX, headerTop + 12, { width: leftColWidth, lineBreak: false });
+  doc.fontSize(8).font(F.regular)
+    .text([d.CompanyAddress, d.CompanyAddress2].filter(Boolean).join(", "), textStartX, headerTop + 33, { width: leftColWidth, lineBreak: false })
+    .text([d.CompanyCity, d.CompanyState, d.CompanyPincode].filter(Boolean).join(", "), textStartX, headerTop + 44, { width: leftColWidth, lineBreak: false });
+  const gstPanLine = [d.CompanyGst ? `GSTIN: ${d.CompanyGst}` : null, d.CompanyPan ? `PAN: ${d.CompanyPan}` : null].filter(Boolean).join("   ");
+  if (gstPanLine) doc.text(gstPanLine, textStartX, headerTop + 55, { width: leftColWidth, lineBreak: false });
+  const contactLine = [d.CompanyPhone, d.CompanyEmail].filter(Boolean).join("   ");
+  if (contactLine) doc.text(contactLine, textStartX, headerTop + 66, { width: leftColWidth, lineBreak: false });
+  const rightColX = left + pageWidth * 0.62;
+  const rightColWidth = pageWidth * 0.38 - 14;
+  doc.fillColor("#ffffff").fontSize(19).font(F.bold).text(title, rightColX, headerTop + 14, { width: rightColWidth, align: "right", lineBreak: false });
+  doc.fontSize(9).font(F.regular);
+  refs.forEach((line, i) => doc.text(line, rightColX, headerTop + 39 + i * 13, { width: rightColWidth, align: "right", lineBreak: false }));
+  if (tag) doc.fontSize(7.5).font(F.bold).fillColor("#94a3b8").text(tag, rightColX, headerTop + 66, { width: rightColWidth, align: "right", lineBreak: false });
+}
+
 function renderInvoicePdfBuffer(d) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: "A4", margin: 40 });
@@ -145,56 +185,10 @@ function renderInvoicePdfBuffer(d) {
 
     const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const left = doc.page.margins.left;
-    const logoBuf = decodeLogo(d.CompanyLogo);
 
-    // ── Header band: logo + company identity + document title ────────────
-    // Drawn at fixed, explicitly-tracked coordinates rather than chained off
-    // doc.y — .rect().fill() is a vector op that does NOT advance the text
-    // flow cursor, so any text positioned via doc.y-relative arithmetic after
-    // it silently lands wherever the cursor was BEFORE the rect, not inside
-    // the band that was just drawn.
     const headerTop = doc.y;
     const headerHeight = 82;
-    doc.rect(left, headerTop, pageWidth, headerHeight).fill("#0f172a");
-
-    let textStartX = left + 14;
-    if (logoBuf) {
-      try {
-        // White backing chip so dark/transparent-background logos stay legible
-        // against the dark header band.
-        doc.roundedRect(left + 12, headerTop + 12, 58, 58, 6).fill("#ffffff");
-        doc.image(logoBuf, left + 16, headerTop + 16, { fit: [50, 50], align: "center", valign: "center" });
-        textStartX = left + 82;
-      } catch {
-        // Corrupt/unsupported image data — fall back to text-only header
-        // rather than failing invoice generation over a logo.
-        textStartX = left + 14;
-      }
-    }
-
-    const leftColWidth = pageWidth * 0.62 - (textStartX - left);
-    doc.fillColor("#ffffff").fontSize(17).font(F.bold)
-      .text(d.CompanyName || "Company Name Not Set", textStartX, headerTop + 12, { width: leftColWidth, lineBreak: false });
-    doc.fontSize(8).font(F.regular)
-      .text([d.CompanyAddress, d.CompanyAddress2].filter(Boolean).join(", "), textStartX, headerTop + 33, { width: leftColWidth, lineBreak: false })
-      .text([d.CompanyCity, d.CompanyState, d.CompanyPincode].filter(Boolean).join(", "), textStartX, headerTop + 44, { width: leftColWidth, lineBreak: false });
-    const gstPanLine = [d.CompanyGst ? `GSTIN: ${d.CompanyGst}` : null, d.CompanyPan ? `PAN: ${d.CompanyPan}` : null].filter(Boolean).join("   ");
-    if (gstPanLine) doc.text(gstPanLine, textStartX, headerTop + 55, { width: leftColWidth, lineBreak: false });
-    const contactLine = [d.CompanyPhone, d.CompanyEmail].filter(Boolean).join("   ");
-    if (contactLine) doc.text(contactLine, textStartX, headerTop + 66, { width: leftColWidth, lineBreak: false });
-
-    const rightColX = left + pageWidth * 0.62;
-    const rightColWidth = pageWidth * 0.38 - 14;
-    doc.fillColor("#ffffff").fontSize(19).font(F.bold)
-      .text("TAX INVOICE", rightColX, headerTop + 14, { width: rightColWidth, align: "right", lineBreak: false });
-    doc.fontSize(9).font(F.regular)
-      .text(`No: ${d.InvoiceNo}`, rightColX, headerTop + 39, { width: rightColWidth, align: "right", lineBreak: false })
-      .text(`Date: ${fmtDate(d.InvoiceDate || d.CreatedAt)}`, rightColX, headerTop + 52, { width: rightColWidth, align: "right", lineBreak: false });
-    // Status pill, top-right of the header — quick visual read without
-    // opening the record (Generated / Paid / Cancelled etc.).
-    const statusText = (d.Status || "Generated").toUpperCase();
-    doc.fontSize(7.5).font(F.bold)
-      .fillColor("#94a3b8").text(statusText, rightColX, headerTop + 66, { width: rightColWidth, align: "right", lineBreak: false });
+    drawDocumentHeader(doc, F, d, "TAX INVOICE", [`No: ${d.InvoiceNo}`, `Date: ${fmtDate(d.InvoiceDate || d.CreatedAt)}`], (d.Status || "Generated").toUpperCase());
 
     doc.fillColor("#000000");
     doc.y = headerTop + headerHeight + 20;
@@ -350,4 +344,89 @@ async function getInvoicePdfBuffer(pool, invoiceId) {
   return Buffer.from(base64, "base64");
 }
 
-module.exports = { generateInvoicePdf, getInvoicePdfBuffer, renderInvoicePdfBuffer };
+// A booking's Final Statement: every live invoice with its GST and credit notes, on one page for the customer. It only
+// reads what is already invoiced: not a tax invoice, no number from any series, nothing written and nothing in the books.
+async function getFinalStatementPdfBuffer(pool, bookingId) {
+  const head = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT b.BookingNo, b.UnitNo, b.TotalGstAmount, b.GrandTotal, a.ApplicantName, a.Mobile,
+           comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2, comp.city AS CompanyCity, comp.state AS CompanyState,
+           comp.pincode AS CompanyPincode, comp.gst_no AS CompanyGst, comp.pan_no AS CompanyPan, comp.phone AS CompanyPhone, comp.email AS CompanyEmail, comp.logo AS CompanyLogo,
+           COALESCE(proj.name, b.ProjectName) AS ProjectName
+    FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    LEFT JOIN dbo.enterprise comp ON comp.id = b.CompanyId AND comp.business_type = 'C'
+    LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+    WHERE b.Id = @bid`)).recordset[0];
+  if (!head) return null;
+  const invoices = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT i.InvoiceNo, i.InvoiceDate, i.InvoiceType, i.Amount, i.Description, m.MilestoneName,
+           (SELECT ISNULL(SUM(n.TotalAmount), 0) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Status IN (N'Issued', N'TimeBarred')) AS Credited
+    FROM dbo.CrmInvoice i LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = i.MilestoneId
+    WHERE i.BookingId = @bid AND i.Status <> 'Void' ORDER BY i.InvoiceDate, i.Id`)).recordset;
+  const waived = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT m.MilestoneName, m.AmountDue - ISNULL(m.AmountPaid, 0) AS Amount FROM dbo.CrmPaymentMilestone m
+    WHERE m.BookingId = @bid AND m.Status = 'Waived' ORDER BY m.MilestoneNo, m.Id`)).recordset;
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 40 });
+    const F = dmSansFonts(doc);
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    const left = doc.page.margins.left;
+    const width = doc.page.width - left - doc.page.margins.right;
+    const top = doc.y;
+    drawDocumentHeader(doc, F, head, "FINAL STATEMENT", [`Booking: ${head.BookingNo}`, `Date: ${fmtDate(new Date())}`]);
+    let y = top + 98;
+    doc.fillColor("#0f172a").fontSize(11).font(F.bold).text(head.ApplicantName || "", left, y, { width });
+    doc.fillColor("#475569").fontSize(9).font(F.regular).text([head.ProjectName, head.UnitNo, head.Mobile].filter(Boolean).join("  ·  "), left, y + 15, { width });
+    y += 40;
+    const cols = [
+      { t: "Invoice", x: 0, w: 95 }, { t: "Date", x: 95, w: 62 }, { t: "For", x: 157, w: 128 },
+      { t: "Taxable value", x: 285, w: 78, r: true }, { t: "GST", x: 363, w: 64, r: true }, { t: "Amount", x: 427, w: width - 427, r: true },
+    ];
+    const cell = (c, text, yy) => doc.text(text, left + c.x + 4, yy, { width: c.w - 8, align: c.r ? "right" : "left" });
+    const headRow = () => {
+      doc.rect(left, y, width, 20).fill("#f1f5f9");
+      doc.fillColor("#334155").fontSize(8).font(F.bold);
+      cols.forEach((c) => cell(c, c.t, y + 6));
+      y += 20;
+    };
+    headRow();
+    let tAmount = 0; let tGst = 0; let tBase = 0; let tCredit = 0;
+    for (const inv of invoices) {
+      if (y > doc.page.height - 180) { doc.addPage(); y = doc.page.margins.top; headRow(); }
+      const amount = Number(inv.Amount) || 0;
+      const { gstAmount, baseAmount } = gstSplitByRatio(amount, head.TotalGstAmount, head.GrandTotal);
+      tAmount += amount; tGst += gstAmount; tBase += baseAmount; tCredit += Number(inv.Credited) || 0;
+      doc.fillColor("#0f172a").fontSize(8.5).font(F.regular);
+      const forText = String(inv.MilestoneName || inv.Description || inv.InvoiceType);
+      // A long description wraps, and its row grows to hold it.
+      const rowHeight = Math.max(19, doc.heightOfString(forText, { width: cols[2].w - 8 }) + 10);
+      [inv.InvoiceNo, fmtDate(inv.InvoiceDate), forText, money(baseAmount), money(gstAmount), money(amount)].forEach((v, i) => cell(cols[i], String(v), y + 5));
+      y += rowHeight;
+      doc.moveTo(left, y).lineTo(left + width, y).lineWidth(0.5).strokeColor("#e2e8f0").stroke();
+    }
+    const round = (n) => Math.round(n * 100) / 100;
+    y += 8;
+    doc.fillColor("#0f172a").fontSize(9).font(F.bold);
+    cell(cols[2], "Total invoiced", y); cell(cols[3], money(round(tBase)), y); cell(cols[4], money(round(tGst)), y); cell(cols[5], money(round(tAmount)), y);
+    if (tCredit > 0) {
+      y += 16;
+      doc.font(F.regular); cell(cols[2], "Less credit notes", y); cell(cols[5], `-${money(round(tCredit))}`, y);
+      y += 16;
+      doc.font(F.bold); cell(cols[2], "Net invoiced", y); cell(cols[5], money(round(tAmount - tCredit)), y);
+    }
+    if (waived.length) {
+      y += 16;
+      doc.font(F.regular); cell(cols[2], "Discount given", y); cell(cols[5], money(round(waived.reduce((n, w) => n + Number(w.Amount), 0))), y);
+      y += 13;
+      doc.fillColor("#475569").fontSize(8).text(`Waived before invoicing, not part of the invoices above: ${waived.map((w) => w.MilestoneName).join(", ")}.`, left + cols[2].x + 4, y, { width: width - cols[2].x - 8 });
+      y = doc.y;
+    }
+    y += 34;
+    doc.fillColor("#475569").fontSize(8.5).font(F.regular).text("This statement totals the tax invoices listed above. It is not a tax invoice and creates no new charge. All amounts are in INR.", left, y, { width });
+    doc.end();
+  });
+}
+
+module.exports = { generateInvoicePdf, getInvoicePdfBuffer, renderInvoicePdfBuffer, getFinalStatementPdfBuffer };

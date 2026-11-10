@@ -77,7 +77,7 @@ test("the default queue is what needs action, the most money late the longest fi
   expect(q).toContain("dbo.CrmMoneyReceipt x");
   expect(q).toMatch(/ORDER BY m\.MilestoneNo, m\.Id ROWS UNBOUNDED PRECEDING/);
   expect(q).toContain("y.Closed = 0 AND (y.OverdueAmount > 0 OR y.A_soon > 0)");
-  expect(q).toMatch(/ORDER BY y\.OverdueAmount \* y\.DaysLate DESC, y\.A_soon DESC, y\.BookingId DESC/);
+  expect(q).toMatch(/ORDER BY y\.Closed ASC, y\.OverdueAmount \* y\.DaysLate DESC, y\.A_soon DESC, y\.BookingId DESC/);
   expect(q).toContain("b.IsActive = 1");
 });
 

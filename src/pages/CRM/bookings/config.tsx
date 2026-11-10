@@ -115,7 +115,7 @@ export function getNextStep(b: any): NextStep {
   // Post-agreement lifecycle, in GET /:id/lifecycle's own order.
   if (!b.AgreementRegistered) return { label: "Agreement registration", path: `/crm/agreements?bookingId=${b.Id}` };
   if (!b.NocIssued) return { label: "NOC", path: `/crm/noc?bookingId=${b.Id}` };
-  if (!b.HandoverDone) return { label: "Handover", path: `/crm/handover` };
+  if (!b.HandoverDone) return { label: "Handover", path: `/crm/possession` };
   if (!b.SalesDeedDone) return { label: "Sale deed", path: `/crm/sales-deed?bookingId=${b.Id}` };
   if (!b.RegistryDone) return { label: "Registry", path: `/crm/sales-deed?bookingId=${b.Id}&tab=Registry` };
   if (!b.MutationDone) return { label: "Mutation", path: `/crm/mutation?bookingId=${b.Id}` };

@@ -222,6 +222,7 @@ const PortalLayout: React.FC = () => {
     if (timeline?.agreement?.CustomerApprovalStatus === "Pending" && timeline?.agreement?.SentToCustomerAt) b.agreement = (b.agreement || 0) + 1;
     if (timeline?.salesDeed?.CustomerApprovalStatus === "Pending" && timeline?.salesDeed?.SentToCustomerAt) b.agreement = (b.agreement || 0) + 1;
     if (timeline?.queryPayment?.Status === "InfoSent") b.agreement = (b.agreement || 0) + 1;
+    if (timeline?.possessionNotice?.Status === "Sent") b.construction = 1;
     const pendingMilestones = (timeline?.paymentMilestones || []).filter((m: any) => m.Status === "Pending").length;
     if (pendingMilestones) b.payments = pendingMilestones;
     // Transfer deeds belong to the customer, not one application.
@@ -237,6 +238,7 @@ const PortalLayout: React.FC = () => {
   const badgeKeyFor = (to: string) => {
     if (to.endsWith("/agreement")) return "agreement";
     if (to.endsWith("/payments")) return "payments";
+    if (to.endsWith("/construction")) return "construction";
     if (to.endsWith("/transfer-deed")) return "deeds";
     return null;
   };
