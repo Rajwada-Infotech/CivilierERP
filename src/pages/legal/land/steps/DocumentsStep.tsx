@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Plus, Upload } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
-import { uploadLegalFile, getLegalLookup, getLegalRows } from "@/api/legalMastersApi";
+import { uploadLegalFile, getLegalLookup } from "@/api/legalMastersApi";
 import {
   getLandDocuments, getDocumentVersions, addLandDocument, addDocumentVersion, reviewDocumentVersion, markDocumentNA, undoDocumentNA,
   type LandDocument, type RequiredDocument, type ReviewStatus,
@@ -12,7 +12,7 @@ import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { LEGAL_GRADIENT } from "@/components/legal/LegalShell";
 
-// Pipeline step 6 — Document Collection & Upload. Required documents come from the land's checklist;
+// A land's documents (Land Profile → Documents). Required documents come from the land's checklist;
 // every upload is a version, a re-upload never replaces the earlier one, and each review belongs to
 // one version. Reviews and Not Applicable need the approve right (the server checks it too).
 
@@ -73,15 +73,16 @@ const Versions: React.FC<{ doc: LandDocument }> = ({ doc }) => {
   );
 };
 
+/** The record a document is filed under: one of the land's legal records or loans (attached from that record's row). */
+export type DocLink = { kind: "legal" | "loan"; id: number; label: string };
+
 const AddDocument: React.FC<{
-  landId: number; sections: string[]; preset?: RequiredDocument | null; onDone: () => void; onCancel: () => void;
-}> = ({ landId, sections, preset, onDone, onCancel }) => {
+  landId: number; sections: string[]; preset?: RequiredDocument | null; link?: DocLink; onDone: () => void; onCancel: () => void;
+}> = ({ landId, sections, preset, link, onDone, onCancel }) => {
   const { data: types } = useQuery({ queryKey: ["legal-lookup", "document-type"], queryFn: () => getLegalLookup("document-type") });
-  const [f, setF] = useState({ docTypeId: preset ? String(preset.docTypeId) : "", relatedSection: "Property", title: preset?.docTypeName ?? "", documentNo: "", documentDate: "", issuingAuthority: "", remarks: "",
-    registrationDate: "", relatedOwner: "", relatedLegalRecordId: "", relatedMortgageId: "", description: "" });
-  // This land's own legal records and loans, so a document can be filed against one of them.
-  const { data: legalRecords } = useQuery({ queryKey: ["legal-master", "land-legal-record", landId], queryFn: () => getLegalRows("land-legal-record", landId) });
-  const { data: loans } = useQuery({ queryKey: ["legal-master", "mortgage", landId], queryFn: () => getLegalRows("mortgage", landId) });
+  const [f, setF] = useState({ docTypeId: preset ? String(preset.docTypeId) : "", relatedSection: link ? (link.kind === "legal" ? "Legal" : "Loan & Mortgage") : "Property",
+    title: preset?.docTypeName ?? "", documentNo: "", documentDate: "", issuingAuthority: "", remarks: "",
+    registrationDate: "", relatedOwner: "", relatedLegalRecordId: link?.kind === "legal" ? String(link.id) : "", relatedMortgageId: link?.kind === "loan" ? String(link.id) : "", description: "" });
   const [file, setFile] = useState<{ id: number; fileName: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const up = useUpload();
@@ -122,18 +123,7 @@ const AddDocument: React.FC<{
         <label className="text-xs text-muted-foreground">Issuing authority<input className={`${input} mt-1`} value={f.issuingAuthority} onChange={set("issuingAuthority")} /></label>
         <label className="text-xs text-muted-foreground">Registration date<input type="date" className={`${input} mt-1`} value={f.registrationDate} onChange={set("registrationDate")} /></label>
         <label className="text-xs text-muted-foreground">Related owner<input className={`${input} mt-1`} value={f.relatedOwner} onChange={set("relatedOwner")} /></label>
-        <label className="text-xs text-muted-foreground">Related legal record
-          <select className={`${input} mt-1`} value={f.relatedLegalRecordId} onChange={set("relatedLegalRecordId")}>
-            <option value="">None</option>
-            {(legalRecords ?? []).map((r) => <option key={String(r.LegalRecordId)} value={String(r.LegalRecordId)}>{String(r.RecordType)}{r.CaseNumber ? ` ${String(r.CaseNumber)}` : ""}</option>)}
-          </select>
-        </label>
-        <label className="text-xs text-muted-foreground">Related loan / mortgage
-          <select className={`${input} mt-1`} value={f.relatedMortgageId} onChange={set("relatedMortgageId")}>
-            <option value="">None</option>
-            {(loans ?? []).map((r) => <option key={String(r.MortgageId)} value={String(r.MortgageId)}>{String(r.LenderName)}{r.LoanAccountRef ? ` · ${String(r.LoanAccountRef)}` : ""}</option>)}
-          </select>
-        </label>
+        {link && <p className="text-xs text-muted-foreground sm:col-span-3">Attached to <b className="text-foreground">{link.label}</b></p>}
         <label className="text-xs text-muted-foreground sm:col-span-2">Description<input className={`${input} mt-1`} value={f.description} onChange={set("description")} /></label>
         <label className="text-xs text-muted-foreground sm:col-span-2">Remarks<input className={`${input} mt-1`} value={f.remarks} onChange={set("remarks")} /></label>
         <div className="text-xs text-muted-foreground">File *
@@ -285,6 +275,37 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+/** The documents filed under one legal record or loan, with "Attach document" (opened from that record's row). */
+export const RecordDocuments: React.FC<{ landId: number; link: DocLink; onSaved?: () => void }> = ({ landId, link, onSaved }) => {
+  const rights = usePageRights("legal-land-master");
+  const queryClient = useQueryClient();
+  const { data } = useQuery({ queryKey: ["legal-land-docs", landId], queryFn: () => getLandDocuments(landId) });
+  const [adding, setAdding] = useState(false);
+  const docs = (data?.documents ?? []).filter((d) => (link.kind === "legal" ? d.RelatedLegalRecordId : d.RelatedMortgageId) === link.id);
+  return (
+    <div className="space-y-3">
+      {!docs.length ? <p className="text-sm text-muted-foreground">No documents attached yet.</p> : (
+        <ul className="divide-y divide-border/60 text-sm">
+          {docs.map((d) => (
+            <li key={d.DocumentId} className="flex flex-wrap items-center gap-2 py-2">
+              <span className="font-medium text-foreground">{d.Title}</span>
+              <span className="text-xs text-muted-foreground">{d.DocTypeName}{d.DocumentNo ? ` · ${d.DocumentNo}` : ""}</span>
+              <LegalFileLink id={d.FileId} name={d.FileName} />
+              <Chip s={d.ReviewStatus} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {adding && data ? (
+        <AddDocument landId={landId} sections={data.sections} link={link} onCancel={() => setAdding(false)}
+          onDone={async () => { setAdding(false); await queryClient.invalidateQueries({ queryKey: ["legal-land-docs", landId] }); onSaved?.(); }} />
+      ) : rights.canCreate && (
+        <button className={btn} onClick={() => setAdding(true)}><Plus size={13} /> Attach document</button>
+      )}
     </div>
   );
 };

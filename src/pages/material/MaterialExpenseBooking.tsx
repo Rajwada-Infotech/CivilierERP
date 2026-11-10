@@ -62,6 +62,7 @@ import {
   ShoppingCart,
   AlertTriangle,
 } from "lucide-react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import { toast } from "sonner";
 import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
@@ -117,7 +118,7 @@ import { PayablePartyCombobox, type PayablePartyGroup } from "./ExpenseBooking/P
 import { StatusBadge } from "@/components/StatusBadge";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
-import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
+import { aggregateGRNsForInvoice, mergedGrnReference } from "./ExpenseBooking/invoiceLinking";
 import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
 import { ExpenseHeadAllocationEditor } from "./ExpenseBooking/ExpenseHeadAllocationEditor";
 import type {
@@ -474,19 +475,15 @@ export default function MaterialExpenseBooking() {
     }) as unknown as Record<string, unknown>[];
   }, [statusFilter, finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter]);
 
-  // Deep-link support — Linked Documents panels and Trial Balance's ledger
-  // drill-down navigate here as /material/expense-booking?view=<Eid> to open
-  // this exact Invoice/booking. View-only users get the read-only preview
-  // instead of the editable form — openEditForm had no permission check at
-  // all here, letting a deep link bypass rights.canEdit entirely.
+  // Deep-link support — Linked Documents panels, Trial Balance's ledger drill-down and reminders
+  // navigate here with ?view=<Eid> to open this exact Invoice in the read-only preview. The preview
+  // has its own Edit button for those allowed to edit.
   useEffect(() => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
-    if (rights.canEdit) {
-      openEditForm({ id: viewId } as unknown as ExpenseRecord);
-    } else {
-      openPreview({ id: viewId } as unknown as ExpenseRecord);
-    }
+    apiFetch(`${API}/${viewId}`)
+      .then((row: any) => setPreviewRecord(dbToRecord(row)))
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to open this invoice."));
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1092,7 +1089,7 @@ export default function MaterialExpenseBooking() {
 
     applyDoc({
       kind: "GRN",
-      docNo: agg.grnDocNos.join(" + "),
+      docNo: mergedGrnReference(agg.grnDocNos),
       sourceId: agg.grnIds[0],
       vendorLabel: agg.supplierLabel ?? primary.SupplierName,
       status: "Approved",
@@ -1256,9 +1253,19 @@ export default function MaterialExpenseBooking() {
   };
 
   const cancelForm = () => {
+    amend.stop();
     setView("list");
     resetForm();
   };
+
+  // Amend (an approved, unpaid invoice): the form opens as for an edit; saving raises an amendment for approval.
+  const amend = useAmendMode("expense-booking", "Invoice", {
+    onRaised: () => {
+      setView("list");
+      resetForm();
+      void fetchRecords(page);
+    },
+  });
 
   const disableEmi = async () => {
     if (!editingId) return;
@@ -1440,6 +1447,7 @@ export default function MaterialExpenseBooking() {
     try {
       if (isEditing) {
         if (!editingId) throw new Error("Missing booking id for update.");
+        if (await amend.intercept(editingId, body)) return;
         await apiFetch(
           `${API}/${editingId}`,
           {
@@ -2703,6 +2711,7 @@ export default function MaterialExpenseBooking() {
                           }
                           rec={rec}
                           onEdit={() => openEditForm(rec)}
+                          onAmend={() => { amend.start(rec.id); void openEditForm(rec); }}
                           onPreview={() => openPreview(rec)}
                           onDelete={() => requestDelete(rec.id)}
                           onApprovalSuccess={fetchRecords}
@@ -2923,6 +2932,8 @@ export default function MaterialExpenseBooking() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {amend.dialog}
 
         {/* Preview modal */}
         <ExpenseBookingPreviewModal

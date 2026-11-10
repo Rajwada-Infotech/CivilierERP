@@ -1,19 +1,18 @@
-// RN port of src/pages/finance/OnAccountAdjustment.tsx (web). Web's own
-// mobile-collapsed card list (`md:hidden` block) is the direct template for
-// CreditCard below, since the desktop <table> has no native-screen
-// equivalent. The "Adjust" action dialog is ported as AdjustModal.tsx (a
-// bottom sheet here, matching web's centered dialog) rather than a separate
-// route — there's no add/edit document on this page, just an apply action.
+// RN port of src/pages/finance/OnAccountAdjustment.tsx (web), on the drawing sheet as the web draws it: the sheet's
+// title block with Refresh, the three figures (on-account balance, parties with a balance, credit entries), the party
+// balances panel (a bar per party, measured against the largest; tap one to narrow the entries to it) and the credit
+// entries as ruled rows with an Adjust key. The "Adjust" action is AdjustModal.tsx — the sheet's list-picker frame,
+// matching web's small dialog — rather than a separate route: there's no add/edit document here, just an apply action.
 import { useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wallet, Users, BadgeDollarSign, RefreshCw, ArrowRight, ShieldOff, AlertCircle } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { View, Text, ScrollView, RefreshControl } from "react-native";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
+import { ArrowRight, RefreshCw } from "lucide-react-native";
+import { colors, sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getOAPartySummary, getAdjustableCredits, type OAPartySummary, type CreditEntry } from "@/api/onAccountApi";
+import { Body, Grow, Hatch, Key, Label, LinkLabel, Notice, Panel, Press, RegisterHead, SheetShell, Skel, StatRow } from "@/components/sheet/Sheet";
 import { AdjustModal } from "./onAccountAdjustment/AdjustModal";
 
 function fmtDate(d: string | null | undefined) {
@@ -22,103 +21,60 @@ function fmtDate(d: string | null | undefined) {
   return isNaN(dt.getTime()) ? "—" : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function PartyTypePill({ code }: { code: string }) {
-  const label = code === "S" ? "Supplier" : code === "C" ? "Contractor" : code;
-  const color = code === "S" ? "#3b82f6" : "#8b5cf6";
-  return (
-    <View className="px-2 py-0.5 rounded-full" style={{ backgroundColor: `${color}1a`, borderWidth: 1, borderColor: `${color}40` }}>
-      <Text style={{ color, fontSize: 9.5, fontFamily: fonts.heading.semibold }}>{label}</Text>
-    </View>
-  );
-}
+const partyTypeOf = (code: string) => (code === "S" ? "Supplier" : code === "C" ? "Contractor" : code);
 
-function StatTile({ label, value, icon: Icon, accent, wide }: {
-  label: string; value: string; icon: React.ComponentType<{ size?: number; color?: string }>; accent: string; wide?: boolean;
-}) {
-  return (
-    <View style={{ width: wide ? "100%" : "48%", marginBottom: 10 }} className="rounded-xl overflow-hidden">
-      <View
-        className="flex-row items-center gap-2.5 px-3.5 py-3"
-        style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80`, borderLeftWidth: 3, borderLeftColor: accent }}
-      >
-        <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: `${accent}26`, borderWidth: 1, borderColor: `${accent}4d` }}>
-          <Icon size={14} color={accent} />
-        </View>
-        <View className="flex-1 min-w-0">
-          <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular }}>{label}</Text>
-          <Text numberOfLines={1} style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 15, marginTop: 1 }}>{value}</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
+/** A party's balance as a bar measured against the largest: solid to the balance, hatched beyond. */
 function BalanceBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <View className="flex-1 rounded-full overflow-hidden" style={{ height: 5, backgroundColor: `${colors.muted}` }}>
-      <View style={{ width: `${pct}%`, height: "100%", borderRadius: 3, backgroundColor: "#10b981" }} />
+    <View style={{ flex: 1, height: 8, borderWidth: 1, borderColor: S.ink, overflow: "hidden" }}>
+      <Hatch id={`oa-${value}-${max}`} />
+      <Grow style={{ width: `${pct}%`, height: "100%", backgroundColor: S.blue }} />
     </View>
   );
 }
 
-function CreditCard({ entry, live, onAdjust }: { entry: CreditEntry; live: number; onAdjust: () => void }) {
+function CreditRow({ entry, live, last, onAdjust }: { entry: CreditEntry; live: number; last: boolean; onAdjust: () => void }) {
   return (
-    <View className="rounded-2xl p-3.5 mb-2.5" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-      <View className="flex-row items-start justify-between gap-2 mb-2">
-        <View className="flex-1 min-w-0">
-          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold }}>{entry.PartyName}</Text>
-          <View className="flex-row items-center gap-1.5 mt-1">
-            <PartyTypePill code={entry.PartyTypeCode} />
-            <Text style={{ color: "#3b82f6", fontSize: 10, fontFamily: fonts.body.medium }}>{entry.PaymentDocNo || "—"}</Text>
-          </View>
+    <View style={{ paddingVertical: 12, borderBottomWidth: last ? 0 : 1, borderBottomColor: S.ruleSoft, gap: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <Text numberOfLines={1} style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink }}>{entry.PartyName}</Text>
+          <Text numberOfLines={1} style={{ fontFamily: fonts.body.regular, fontSize: 11.5, color: S.graphite }}>
+            {partyTypeOf(entry.PartyTypeCode)} · {entry.PaymentDocNo || "—"}
+          </Text>
         </View>
-        <Pressable
-          onPress={onAdjust}
-          className="flex-row items-center gap-1 px-2.5 py-1.5 rounded-lg"
-          style={{ borderWidth: 1, borderColor: "#10b98166" }}
-        >
-          <Text style={{ color: "#10b981", fontSize: 11, fontFamily: fonts.heading.semibold }}>Adjust</Text>
-          <ArrowRight size={11} color="#10b981" />
-        </Pressable>
+        <Key label="Adjust" icon={<ArrowRight size={12} color={S.ink} />} onPress={onAdjust} style={{ minHeight: 34, paddingHorizontal: 12 }} />
       </View>
 
-      <View className="flex-row justify-between mb-2">
-        <View>
-          <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>Date</Text>
-          <Text style={{ color: colors.foreground, fontSize: 11, marginTop: 1 }}>{fmtDate(entry.PaymentDate)}</Text>
-        </View>
-        <View style={{ alignItems: "flex-end" }}>
-          <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>Invoice Ref</Text>
-          <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 1 }}>{entry.InvoiceDocNo || entry.InvoiceRef || "—"}</Text>
-        </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 14, rowGap: 2 }}>
+        <Body size={11.5} color={S.graphite}>{fmtDate(entry.PaymentDate)}</Body>
+        <Body size={11.5} color={S.graphite}>{`Invoice ${entry.InvoiceDocNo || entry.InvoiceRef || "—"}`}</Body>
       </View>
 
       {entry.InvoiceAmount != null && (
-        <View className="rounded-xl overflow-hidden mb-2" style={{ borderWidth: 1, borderColor: colors.border }}>
-          <View className="flex-row items-center justify-between px-3 py-2" style={{ backgroundColor: `${colors.muted}30` }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>Net Payable</Text>
-            <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold }}>{formatINR(entry.InvoiceAmount)}</Text>
+        <View style={{ borderTopWidth: 1, borderTopColor: S.ruleSoft }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", paddingTop: 7 }}>
+            <Body size={12} color={S.ink2}>Net payable</Body>
+            <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 12.5, color: S.ink }}>{formatINR(entry.InvoiceAmount)}</Text>
           </View>
           {(entry.InvoiceTotalPaid ?? entry.PaymentAmount) != null && (
-            <View className="flex-row items-center justify-between px-3 py-2" style={{ borderTopWidth: 1, borderTopColor: `${colors.border}60` }}>
-              <Text style={{ color: "#10b981", fontSize: 10.5 }}>Total Paid</Text>
-              <Text style={{ color: "#10b981", fontSize: 11.5, fontFamily: fonts.heading.semibold }}>
-                {formatINR(entry.InvoiceTotalPaid ?? entry.PaymentAmount ?? 0)}
-              </Text>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", paddingTop: 4 }}>
+              <Body size={12} color={S.ink2}>Total paid</Body>
+              <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 12.5, color: S.ink }}>{formatINR(entry.InvoiceTotalPaid ?? entry.PaymentAmount ?? 0)}</Text>
             </View>
           )}
         </View>
       )}
 
-      <View className="flex-row items-center justify-between pt-2" style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", paddingTop: 8, borderTopWidth: 1, borderTopColor: S.ink }}>
         <View>
-          <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>On A/C Amt</Text>
-          <Text style={{ color: "#d97706", fontSize: 13, fontFamily: fonts.heading.bold, marginTop: 1 }}>{formatINR(entry.ExcessAmount)}</Text>
+          <Label>On A/C amount</Label>
+          <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 15, color: S.ink, marginTop: 3 }}>{formatINR(entry.ExcessAmount)}</Text>
         </View>
         <View style={{ alignItems: "flex-end" }}>
-          <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.body.regular, textTransform: "uppercase" }}>Party Balance</Text>
-          <Text style={{ color: "#10b981", fontSize: 13, fontFamily: fonts.heading.bold, marginTop: 1 }}>{formatINR(live)}</Text>
+          <Label>Party balance</Label>
+          <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 15, color: S.blue, marginTop: 3 }}>{formatINR(live)}</Text>
         </View>
       </View>
     </View>
@@ -126,7 +82,6 @@ function CreditCard({ entry, live, onAdjust }: { entry: CreditEntry; live: numbe
 }
 
 export default function OnAccountAdjustmentScreen() {
-  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const rights = usePageRights("on-account-adjustment");
   const [selectedPartyId, setSelectedPartyId] = useState<string>("all");
@@ -177,115 +132,101 @@ export default function OnAccountAdjustmentScreen() {
 
   if (!rights.canView) {
     return (
-      <View className="flex-1 items-center justify-center px-8" style={{ backgroundColor: colors.background }}>
-        <ShieldOff size={28} color={colors.mutedForeground} />
-        <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold, marginTop: 12 }}>No access</Text>
-        <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 4, textAlign: "center" }}>
-          You don't have permission to view On A/C adjustments.
-        </Text>
-      </View>
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }}>
+        <SheetShell eyebrow="CivilierERP · Finance" title="On A/C adjustment">
+          <Notice tone="ink">You don't have permission to view On A/C adjustments.</Notice>
+        </SheetShell>
+      </ScrollView>
     );
   }
 
-  const ListHeader = (
-    <View>
-      <View className="flex-row items-center gap-2.5 mb-4">
-        <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: "#10b98126", borderWidth: 1, borderColor: "#10b9814d" }}>
-          <Wallet size={16} color="#10b981" />
-        </View>
-        <View className="flex-1">
-          <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 18 }}>On A/C Adjustment</Text>
-          <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>Excess payments available to adjust</Text>
-        </View>
-        <Pressable
-          onPress={onRefresh}
-          disabled={isLoading}
-          className="w-8 h-8 rounded-lg items-center justify-center"
-          style={{ borderWidth: 1, borderColor: colors.border }}
-        >
-          {isLoading ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <RefreshCw size={14} color={colors.mutedForeground} />}
-        </Pressable>
-      </View>
-
-      <View className="flex-row flex-wrap justify-between mb-2">
-        <StatTile label="Total On A/C Balance" value={formatINR(totalBalance)} icon={Wallet} accent="#10b981" wide />
-        <StatTile label="Parties with Balance" value={String(parties.length)} icon={Users} accent="#6366f1" />
-        <StatTile label="Credit Entries" value={String(credits.length)} icon={BadgeDollarSign} accent="#f59e0b" />
-      </View>
-
-      <View className="rounded-2xl overflow-hidden mb-4" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80` }}>
-        <View className="flex-row items-center justify-between px-4 py-3" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
-          <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Party Balances</Text>
-          {selectedPartyId !== "all" && (
-            <Pressable onPress={() => setSelectedPartyId("all")}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.medium, textDecorationLine: "underline" }}>Show all</Text>
-            </Pressable>
-          )}
-        </View>
-        {partiesLoading ? (
-          <View className="py-8 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-        ) : parties.length === 0 ? (
-          <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", paddingVertical: 24 }}>No On A/C balances found.</Text>
-        ) : (
-          parties.map((p, i) => {
-            const live = balanceMap.get(p.PartyId) ?? p.Balance;
-            const isSelected = selectedPartyId === String(p.PartyId);
-            return (
-              <Pressable
-                key={p.PartyId}
-                onPress={() => setSelectedPartyId(isSelected ? "all" : String(p.PartyId))}
-                className="flex-row items-center gap-3 px-4 py-3"
-                style={{
-                  borderTopWidth: i > 0 ? 1 : 0, borderTopColor: `${colors.border}80`,
-                  backgroundColor: isSelected ? "#10b9810d" : "transparent",
-                  borderLeftWidth: isSelected ? 2 : 0, borderLeftColor: "#10b981",
-                }}
-              >
-                <View style={{ width: 110 }}>
-                  <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.body.medium }}>{p.PartyName}</Text>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 9.5, marginTop: 1 }}>{p.PartyType}</Text>
-                </View>
-                <BalanceBar value={live} max={maxBalance} />
-                <Text style={{ color: "#10b981", fontSize: 11, fontFamily: fonts.heading.bold }}>{formatINR(live)}</Text>
-              </Pressable>
-            );
-          })
-        )}
-      </View>
-
-      <View className="flex-row items-center justify-between mb-2.5">
-        <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Credit Entries</Text>
-        <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>
-          {selectedPartyId === "all" ? "All parties" : selectedParty?.PartyName ?? ""}
-        </Text>
-      </View>
-    </View>
-  );
+  const suppliers = parties.filter((p) => p.PartyType === "Supplier" || p.PartyType === "S").length;
+  const contractors = parties.filter((p) => p.PartyType === "Contractor" || p.PartyType === "C").length;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <FlatList
-        data={credits}
-        keyExtractor={(c) => String(c.OAId)}
-        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-        ListHeaderComponent={ListHeader}
-        renderItem={({ item }) => (
-          <CreditCard entry={item} live={balanceMap.get(item.PartyId) ?? item.AvailableBalance} onAdjust={() => setAdjustingEntry(item)} />
-        )}
-        ListEmptyComponent={
-          !isLoading ? (
-            <View className="items-center py-16">
-              <AlertCircle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>
-                No On Account balances available for adjustment.
-              </Text>
-            </View>
-          ) : (
-            <View className="py-16 items-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-          )
-        }
-      />
+      <ScrollView contentContainerStyle={{ paddingBottom: 96 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={S.ink} />}>
+        <SheetShell
+          eyebrow="CivilierERP · Finance"
+          title="On A/C adjustment"
+          subtitle="Excess payments available for adjustment against future invoices"
+          action={<Key label={isLoading ? "Reading…" : "Refresh"} icon={<RefreshCw size={13} color={S.ink} />} onPress={onRefresh} disabled={isLoading} style={{ alignSelf: "flex-start" }} />}
+        >
+          <StatRow
+            items={[
+              { label: "On A/C balance", value: partiesLoading ? "…" : formatINR(totalBalance), note: `across ${parties.length} ${parties.length === 1 ? "party" : "parties"}` },
+              { label: "Parties with a balance", value: partiesLoading ? "…" : String(parties.length), note: `${suppliers} suppliers · ${contractors} contractors` },
+              { label: "Credit entries", value: creditsLoading ? "…" : String(credits.length), note: selectedPartyId === "all" ? "all parties" : `filtered · ${selectedParty?.PartyName ?? ""}` },
+            ]}
+          />
+
+          <Panel title="Party balances">
+            {selectedPartyId !== "all" && (
+              <View style={{ marginTop: -4 }}>
+                <LinkLabel onPress={() => setSelectedPartyId("all")} color={S.blue}>Show all parties</LinkLabel>
+              </View>
+            )}
+            {partiesLoading ? (
+              <>
+                <Skel h={26} />
+                <Skel h={26} />
+              </>
+            ) : parties.length === 0 ? (
+              <Body size={12.5} color={S.graphite}>No On A/C balances found.</Body>
+            ) : (
+              <View>
+                {parties.map((pt, i) => {
+                  const live = balanceMap.get(pt.PartyId) ?? pt.Balance;
+                  const isSelected = selectedPartyId === String(pt.PartyId);
+                  return (
+                    <Press
+                      key={pt.PartyId}
+                      onPress={() => setSelectedPartyId(isSelected ? "all" : String(pt.PartyId))}
+                      style={(pressed) => ({
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 10,
+                        paddingVertical: 10,
+                        paddingHorizontal: 6,
+                        borderTopWidth: i ? 1 : 0,
+                        borderTopColor: S.ruleSoft,
+                        backgroundColor: isSelected || pressed ? S.blueWash : "transparent",
+                        borderLeftWidth: isSelected ? 2 : 0,
+                        borderLeftColor: S.ink,
+                      })}
+                    >
+                      <View style={{ width: 108 }}>
+                        <Text numberOfLines={1} style={{ color: S.ink, fontSize: 12, fontFamily: fonts.body.medium }}>{pt.PartyName}</Text>
+                        <Text style={{ color: S.graphite, fontSize: 10.5, marginTop: 1, fontFamily: fonts.body.regular }}>{partyTypeOf(pt.PartyType)}</Text>
+                      </View>
+                      <BalanceBar value={live} max={maxBalance} />
+                      <Text style={{ color: S.ink, fontSize: 12, fontFamily: fonts.heading.semibold, minWidth: 74, textAlign: "right" }}>{formatINR(live)}</Text>
+                    </Press>
+                  );
+                })}
+              </View>
+            )}
+          </Panel>
+
+          <View style={{ borderWidth: 1, borderColor: S.ink, padding: 12, gap: 12 }}>
+            <RegisterHead title={selectedPartyId === "all" ? "Credit entries · all parties" : `Credit entries · ${selectedParty?.PartyName ?? ""}`} count={credits.length} unit={["entry", "entries"]} />
+            {isLoading ? (
+              <>
+                <Skel h={90} />
+                <Skel h={90} />
+              </>
+            ) : credits.length === 0 ? (
+              <Body color={S.graphite}>No On Account balances available for adjustment.</Body>
+            ) : (
+              <View>
+                {credits.map((c, i) => (
+                  <CreditRow key={c.OAId} entry={c} live={balanceMap.get(c.PartyId) ?? c.AvailableBalance} last={i === credits.length - 1} onAdjust={() => setAdjustingEntry(c)} />
+                ))}
+              </View>
+            )}
+          </View>
+        </SheetShell>
+      </ScrollView>
 
       <AdjustModal
         entry={adjustingEntry}

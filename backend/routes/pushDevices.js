@@ -1,7 +1,7 @@
 /**
  * pushDevices.js — phone push-notification registration.
  *
- *   POST /api/push-devices/register    { token, appKey?, platform? }
+ *   POST /api/push-devices/register    { token, appKey?, platform?, versionCode? }
  *   POST /api/push-devices/unregister  { token }          (call on logout)
  *
  * authMiddleware is applied globally on /api in server.js; the token is always
@@ -22,6 +22,8 @@ router.post("/register", async (req, res) => {
     await registerToken(callerId(req), String(req.body?.token ?? ""), {
       appKey: req.body?.appKey,
       platform: req.body?.platform,
+      // The installed build (Android version code), so a newly published build is announced only to older phones.
+      versionCode: req.body?.versionCode,
     });
     res.json({ success: true });
   } catch (err) {

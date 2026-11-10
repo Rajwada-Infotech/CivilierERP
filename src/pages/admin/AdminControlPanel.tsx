@@ -1,3 +1,4 @@
+import { deactivateHeldUntil, fmtHeldUntil } from "@/lib/userStatusHold";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getUsers, addUser, updateUser, deleteUser } from "@/api/userApi";
@@ -314,6 +315,8 @@ export default function AdminControlPanel() {
                             size="icon"
                             className={`h-6 w-6 ${!user.discontinue ? "text-orange-500" : "text-green-500"}`}
                             onClick={() => setStatusTarget(user)}
+                            disabled={!!deactivateHeldUntil(user)}
+                            title={deactivateHeldUntil(user) ? `Activated less than 90 days ago. Can be made inactive from ${fmtHeldUntil(deactivateHeldUntil(user)!)}.` : undefined}
                           >
                             {!user.discontinue ? (
                               <Lock size={12} />

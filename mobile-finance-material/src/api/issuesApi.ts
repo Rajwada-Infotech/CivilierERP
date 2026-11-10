@@ -202,8 +202,8 @@ export async function fetchNextDocNumber(docTypeId: number, finYear?: string | n
 // ─── UI constants ───────────────────────────────────────────────────────────
 
 export const STATUS_COLOR: Record<string, string> = {
-  Draft: "#64748b",
-  Pending: "#d97706",
-  Approved: "#059669",
-  Rejected: "#dc2626",
+  Draft: "#9ba0ab",
+  Pending: "#dcdfe5",
+  Approved: "#6467f2",
+  Rejected: "#e34545",
 };

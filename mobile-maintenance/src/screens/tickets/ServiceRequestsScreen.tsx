@@ -12,7 +12,6 @@ import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import {
   getHandedOverTickets, markTicketInProgress, resolveServiceTicket, closeServiceTicket,
-  type ServiceTicketRow, type TicketStatus,
 } from "@/api/serviceTicketApi";
 
 const VIOLET = "#a78bfa";

@@ -1926,6 +1926,18 @@ router.post("/:id/comment", addPurchaseOrderComment);
 
 module.exports = router;
 module.exports.createPurchaseOrderInternal = createPurchaseOrderInternal;
+// The PO's own save helpers, reused by services/docAmendment.js so an applied amendment writes the PO exactly as an
+// edit would (same subtotal, GST scalars, optional columns, financial year).
+module.exports.poSaveHelpers = {
+  parseJson,
+  safeJson,
+  extractGstScalars,
+  computeSubtotal,
+  resolveFyId,
+  buildUomMap,
+  getPOCols,
+  recomputePoMrs,
+};
 // Reused by Vehicle In/Out and GRN so their PO pickers / chat work under THEIR
 // page right — this router is gated by the separate Purchase Orders right, which
 // a store user may not have. The gate lives on the router, so these bare handlers

@@ -9,22 +9,39 @@
 // configured, a denied permission, or a flaky connection must not break login.
 // Identical in every Civilier mobile app; only the `appKey` differs.
 import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
-import Constants from "expo-constants";
+import * as Application from "expo-application";
+import type * as NotificationsModule from "expo-notifications";
+import Constants, { ExecutionEnvironment } from "expo-constants";
+import { isRunningInExpoGo } from "expo";
 import * as SecureStore from "expo-secure-store";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
 const TOKEN_KEY = "push_token";
 
-// While the app is open, still show the notification as a banner.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+/** Expo Go (SDK 53 and later) has no remote push on Android, and on SDK 58 its push calls throw. Push needs a real
+ * build (the APK); in Expo Go and on the web the app runs without it. */
+export const pushAvailable =
+  Platform.OS !== "web" && !isRunningInExpoGo() && Constants.executionEnvironment !== ExecutionEnvironment.StoreClient;
+
+/** expo-notifications, loaded only where push can work. Importing it in Expo Go is what prints the "Push
+ * notifications are unavailable in Expo Go" and "not fully supported in Expo Go" warnings on every start, so it is
+ * required on first use in a real build instead of imported at the top. Null in Expo Go and on the web. */
+let loaded: typeof NotificationsModule | null | undefined;
+export function notifications(): typeof NotificationsModule | null {
+  if (loaded !== undefined) return loaded;
+  if (!pushAvailable) return (loaded = null);
+  const mod: typeof NotificationsModule = require("expo-notifications");
+  // While the app is open, still show the notification as a banner.
+  mod.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+  return (loaded = mod);
+}
 
 async function post(path: string, body: unknown): Promise<boolean> {
   try {
@@ -37,7 +54,8 @@ async function post(path: string, body: unknown): Promise<boolean> {
 
 /** Returns the Expo push token once it is registered with the backend, else null. */
 export async function registerForPushAsync(appKey: string): Promise<string | null> {
-  if (Platform.OS === "web") return null;
+  const Notifications = notifications();
+  if (!Notifications) return null;
   try {
     // Android needs a channel before it will show the permission prompt (13+) or any notification.
     if (Platform.OS === "android") {
@@ -57,7 +75,9 @@ export async function registerForPushAsync(appKey: string): Promise<string | nul
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
     if (!token) return null;
 
-    const ok = await post("/api/push-devices/register", { token, appKey, platform: Platform.OS });
+    // The installed build (Android version code), so publishing a newer one in APK Manager notifies this phone.
+    const versionCode = Number(Application.nativeBuildVersion) || undefined;
+    const ok = await post("/api/push-devices/register", { token, appKey, platform: Platform.OS, versionCode });
     if (!ok) return null;
     await SecureStore.setItemAsync(TOKEN_KEY, token);
     return token;

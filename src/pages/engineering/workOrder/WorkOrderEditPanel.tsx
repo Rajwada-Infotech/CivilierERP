@@ -20,7 +20,9 @@ export const WorkOrderEditPanel: React.FC<{
   workOrderId: number;
   onBack: () => void;
   onSaved: (id: number) => void;
-}> = ({ workOrderId, onBack, onSaved }) => {
+  /** Amendment mode (Amend on an approved WO): saving raises an amendment instead of saving. */
+  amend?: { intercept: (id: string | number | null | undefined, payload: unknown) => Promise<boolean> };
+}> = ({ workOrderId, onBack, onSaved, amend }) => {
   const { currentUser } = useAuth();
   const { data: hsnData } = useQuery({
     queryKey: ["hsn"],
@@ -367,7 +369,7 @@ export const WorkOrderEditPanel: React.FC<{
             })),
         })),
       );
-      await saveFullWorkOrder(workOrderId, {
+      const fullBody = {
         header: {
           BoqID: form.boqId ? parseInt(form.boqId) : null,
           CompanyId: parseInt(form.companyId),
@@ -384,7 +386,9 @@ export const WorkOrderEditPanel: React.FC<{
           UpdatedBy: userId,
         },
         activities,
-      });
+      };
+      if (amend && (await amend.intercept(workOrderId, fullBody))) return;
+      await saveFullWorkOrder(workOrderId, fullBody);
       toast.success("Work order updated successfully!");
       setSaved(true);
       setTimeout(() => {

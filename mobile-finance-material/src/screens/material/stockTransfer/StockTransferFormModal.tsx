@@ -1,4 +1,5 @@
-// RN port of StockTransfer.tsx's "New Transfer" tab — Intra-Company mode
+// RN port of StockTransfer.tsx's "New Transfer" tab, on the drawing sheet: a page of the stack (asScreen, from
+// StockTransferFormScreen) with Cancel / Execute along its foot. Intra-Company mode
 // only (see stockTransferApi.ts header comment: Inter-Company/"Dummy Bank"
 // mode is a wholly separate cross-company commercial-document-chain
 // feature, out of scope). Create-only, no edit — a transfer executes
@@ -15,12 +16,13 @@
 // hand.
 import { istToday } from "@/utils/istTime";
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Alert } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, Repeat, Plus, Trash2, ArrowRight } from "lucide-react-native";
-import { colors } from "@/theme/colors";
-import { fonts } from "@/theme/fonts";
+import { Repeat } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
+import { Body, Field, Input, Label, Panel, Skel } from "@/components/sheet/Sheet";
+import { TextField } from "@/components/sheet/FormParts";
+import { AddLineKey, FormPage, LineBox } from "@/components/sheet/Register";
 import { getGodowns, getCompanies, getProjects, getInventoryMaster } from "@/api/stockApi";
 import { createStockTransfer, type CreateTransferPayload, type TransferItem } from "@/api/stockTransferApi";
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/screens/finance/payment/OptionPicker";
@@ -47,16 +49,7 @@ function blankForm(): FormState {
   return { companyId: "", projectId: "", fromGodownId: "", fromGodownName: "", toGodownId: "", toGodownName: "", transferDate: todayISO(), remarks: "" };
 }
 
-function FieldLabel({ children, required }: { children: string; required?: boolean }) {
-  return (
-    <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-      {children}{required ? " *" : ""}
-    </Text>
-  );
-}
-
-export function StockTransferFormModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
+export function StockTransferFormModal({ visible, onClose, asScreen }: { visible: boolean; onClose: () => void; asScreen?: boolean }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(blankForm());
   const [cart, setCart] = useState<CartItem[]>([blankCartItem()]);
@@ -190,145 +183,93 @@ export function StockTransferFormModal({ visible, onClose }: { visible: boolean;
   const itemOptions: PickerOption[] = availableItems.map((i) => ({ key: i.itemId, label: i.itemName, sublabel: `Available: ${i.available.toFixed(2)} ${i.uom}` }));
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#0891b226" }}>
-              <Repeat size={14} color="#0891b2" />
-            </View>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>New Stock Transfer</Text>
-          </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
-
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
+    <FormPage
+      asScreen={asScreen}
+      visible={visible}
+      onClose={onClose}
+      eyebrow="CivilierERP · Material · Stock transfer"
+      title="New transfer"
+      subtitle="Move stock from one godown to another. It executes at once: there is no draft to come back to."
+      saving={saving}
+      onSave={handleTransfer}
+      saveLabel="Execute transfer"
+      overlays={
+        <>
+          <OptionPickerModal visible={picker === "company"} title="Select company" options={companyOptions} selectedKey={form.companyId}
+            onSelect={(k) => { set("companyId", k); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable />
+          <OptionPickerModal visible={picker === "project"} title="Select project" options={projectOptions} selectedKey={form.projectId}
+            onSelect={(k) => { set("projectId", k); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable />
+          <OptionPickerModal visible={picker === "fromGodown"} title="Select source godown" options={fromGodownOptions} selectedKey={form.fromGodownId}
+            onSelect={(k) => { const g = godowns.find((x) => String(x.id) === k); handleFromGodownChange(k, g?.name ?? ""); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal visible={picker === "toGodown"} title="Select destination godown" options={toGodownOptions} selectedKey={form.toGodownId}
+            onSelect={(k) => { const g = godowns.find((x) => String(x.id) === k); set("toGodownId", k); set("toGodownName", g?.name ?? ""); setPicker(null); }}
+            onClose={() => setPicker(null)} searchable />
+          <OptionPickerModal
+            visible={linePicker != null} title="Select item" options={itemOptions}
+            selectedKey={linePicker != null ? cart[linePicker]?.itemId ?? "" : ""}
+            onSelect={(k) => linePicker != null && pickItem(linePicker, k)}
+            onClose={() => setLinePicker(null)} searchable
+          />
+        </>
+      }
+    >
+      <Panel title="Route">
+        <View>
           <PickerRow label="Company" value={companies.find((c) => c.id === form.companyId)?.name ?? ""} placeholder="All" onPress={() => setPicker("company")} />
           <PickerRow label="Project" value={projects.find((p) => p.id === form.projectId)?.name ?? ""} placeholder="All" onPress={() => setPicker("project")} />
-
-          <View className="flex-row items-center gap-2 mb-1">
-            <View style={{ flex: 1 }}>
-              <PickerRow label="From Godown" value={form.fromGodownName} placeholder="Source" onPress={() => setPicker("fromGodown")} />
-            </View>
-            <ArrowRight size={16} color={colors.mutedForeground} style={{ marginTop: 10 }} />
-            <View style={{ flex: 1 }}>
-              <PickerRow label="To Godown" value={form.toGodownName} placeholder="Destination" onPress={() => setPicker("toGodown")} disabled={!form.fromGodownId} />
-            </View>
-          </View>
-          {sameGodown && (
-            <Text style={{ color: colors.destructive, fontSize: 10.5, marginTop: -6, marginBottom: 12 }}>Source and destination must be different godowns.</Text>
-          )}
-
-          <FieldLabel required>Transfer Date</FieldLabel>
-          <TextInput
-            value={form.transferDate} onChangeText={(v) => set("transferDate", v)} placeholder="YYYY-MM-DD"
-            placeholderTextColor={`${colors.mutedForeground}99`}
-            style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: colors.foreground, fontSize: 13, marginBottom: 14 }}
-          />
-
-          <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 6, marginBottom: 10 }}>
-            Items to Transfer ({cart.length})
-          </Text>
-
-          {!form.fromGodownId ? (
-            <View className="rounded-xl px-3.5 py-4 items-center mb-2" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 11.5, textAlign: "center" }}>Select a source godown to add items.</Text>
-            </View>
-          ) : loadingItems ? (
-            <View className="py-6 items-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-          ) : (
-            <>
-              {cart.map((ci, idx) => {
-                const remaining = remainingForRow(idx);
-                const qty = Number(ci.quantity) || 0;
-                const overStock = remaining != null && qty > remaining;
-                return (
-                  <View key={ci.key} className="rounded-xl p-3 mb-2.5" style={{ borderWidth: 1, borderColor: overStock ? colors.destructive : colors.border, backgroundColor: `${colors.card}80` }}>
-                    <View className="flex-row items-center justify-between mb-2">
-                      <Pressable onPress={() => setLinePicker(idx)} style={{ flex: 1, marginRight: 8 }}>
-                        <Text numberOfLines={1} style={{ color: ci.itemName ? colors.foreground : colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.body.medium }}>
-                          {ci.itemName || "— Select Item —"}
-                        </Text>
-                      </Pressable>
-                      {cart.length > 1 && (
-                        <Pressable onPress={() => removeCartRow(idx)} className="p-1">
-                          <Trash2 size={14} color={colors.destructive} />
-                        </Pressable>
-                      )}
-                    </View>
-                    <View className="flex-row gap-2">
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>UOM</Text>
-                        <Text style={{ color: colors.foreground, fontSize: 12, marginTop: 6 }}>{ci.uom || "—"}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Quantity</Text>
-                        <TextInput
-                          value={ci.quantity}
-                          onChangeText={(v) => updateQty(idx, v.replace(/[^0-9.]/g, ""))}
-                          keyboardType="numeric"
-                          style={{ borderWidth: 1, borderColor: overStock ? colors.destructive : colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, color: colors.foreground, fontSize: 12, marginTop: 3 }}
-                        />
-                      </View>
-                    </View>
-                    {!!ci.itemId && (
-                      <Text style={{ color: overStock ? colors.destructive : colors.mutedForeground, fontSize: 10, marginTop: 6 }}>
-                        {overStock ? `Exceeds stock — only ${Math.max(remaining ?? 0, 0).toFixed(2)} ${ci.uom} available` : `Available: ${(remaining ?? 0).toFixed(2)} ${ci.uom}`}
-                      </Text>
-                    )}
-                  </View>
-                );
-              })}
-              <Pressable onPress={addCartRow} className="flex-row items-center justify-center gap-1.5 py-2.5 rounded-xl mb-2" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
-                <Plus size={13} color={colors.primary} />
-                <Text style={{ color: colors.primary, fontSize: 12, fontFamily: fonts.heading.medium }}>Add Item</Text>
-              </Pressable>
-            </>
-          )}
-
-          <FieldLabel>Remarks</FieldLabel>
-          <TextInput
-            value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" multiline
-            placeholderTextColor={`${colors.mutedForeground}99`}
-            style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: colors.foreground, fontSize: 13, minHeight: 70, textAlignVertical: "top" }}
-          />
-        </ScrollView>
-
-        <View className="flex-row gap-2.5 px-4" style={{ paddingBottom: insets.bottom + 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <Pressable onPress={onClose} className="px-5 py-3 rounded-xl items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleTransfer} disabled={saving}
-            className="flex-1 items-center justify-center py-3 rounded-xl"
-            style={{ backgroundColor: "#0891b2", opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : (
-              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Execute Transfer</Text>
-            )}
-          </Pressable>
+          <PickerRow label="From godown *" value={form.fromGodownName} placeholder="Source…" onPress={() => setPicker("fromGodown")} />
+          <PickerRow label="To godown *" value={form.toGodownName} placeholder={form.fromGodownId ? "Destination…" : "Choose the source first"} onPress={() => setPicker("toGodown")} disabled={!form.fromGodownId} />
+          {sameGodown && <Body size={11} color={S.red} style={{ marginTop: -6, marginBottom: 12 }}>Source and destination must be different godowns.</Body>}
         </View>
+        <Field label="Transfer date" required>
+          <Input value={form.transferDate} onChangeText={(v) => set("transferDate", v)} placeholder="YYYY-MM-DD" />
+        </Field>
+      </Panel>
+
+      <Panel title={`Items to transfer (${cart.length})`} icon={<Repeat size={14} color={S.ink} />}>
+        {!form.fromGodownId ? (
+          <Body size={12.5} color={S.graphite} style={{ textAlign: "center", paddingVertical: 14 }}>Select a source godown to add items.</Body>
+        ) : loadingItems ? (
+          <>
+            <Skel h={60} />
+            <Skel h={60} />
+          </>
+        ) : (
+          <>
+            {cart.map((ci, idx) => {
+              const remaining = remainingForRow(idx);
+              const overStock = remaining != null && (Number(ci.quantity) || 0) > remaining;
+              return (
+                <LineBox key={ci.key} index={idx} title={`Item ${idx + 1}`} onRemove={cart.length > 1 ? () => removeCartRow(idx) : undefined}>
+                  <View>
+                    <PickerRow label="Item" value={ci.itemName} placeholder="Select item…" onPress={() => setLinePicker(idx)} />
+                  </View>
+                  <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-end" }}>
+                    <View style={{ flex: 1, gap: 6 }}>
+                      <Label>UOM</Label>
+                      <Body size={13.5} style={{ paddingVertical: 12 }}>{ci.uom || "—"}</Body>
+                    </View>
+                    <Field label="Quantity" style={{ flex: 1 }}>
+                      <Input value={ci.quantity} onChangeText={(v) => updateQty(idx, v.replace(/[^0-9.]/g, ""))} keyboardType="numeric" placeholder="0" style={overStock ? { color: S.red } : undefined} />
+                    </Field>
+                  </View>
+                  {!!ci.itemId && (
+                    <Body size={11} color={overStock ? S.red : S.graphite}>
+                      {overStock ? `More than the stock: only ${Math.max(remaining ?? 0, 0).toFixed(2)} ${ci.uom} available` : `Available ${(remaining ?? 0).toFixed(2)} ${ci.uom}`}
+                    </Body>
+                  )}
+                </LineBox>
+              );
+            })}
+            <AddLineKey onPress={addCartRow} />
+          </>
+        )}
+      </Panel>
+
+      <View>
+        <TextField label="Remarks" value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" multiline />
       </View>
-
-      <OptionPickerModal visible={picker === "company"} title="Select Company" options={companyOptions} selectedKey={form.companyId}
-        onSelect={(k) => { set("companyId", k); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable />
-      <OptionPickerModal visible={picker === "project"} title="Select Project" options={projectOptions} selectedKey={form.projectId}
-        onSelect={(k) => { set("projectId", k); setPicker(null); }} onClose={() => setPicker(null)} searchable clearable />
-      <OptionPickerModal visible={picker === "fromGodown"} title="Select Source Godown" options={fromGodownOptions} selectedKey={form.fromGodownId}
-        onSelect={(k) => { const g = godowns.find((x) => String(x.id) === k); handleFromGodownChange(k, g?.name ?? ""); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-      <OptionPickerModal visible={picker === "toGodown"} title="Select Destination Godown" options={toGodownOptions} selectedKey={form.toGodownId}
-        onSelect={(k) => { const g = godowns.find((x) => String(x.id) === k); set("toGodownId", k); set("toGodownName", g?.name ?? ""); setPicker(null); }}
-        onClose={() => setPicker(null)} searchable />
-
-      <OptionPickerModal
-        visible={linePicker != null} title="Select Item" options={itemOptions}
-        selectedKey={linePicker != null ? cart[linePicker]?.itemId ?? "" : ""}
-        onSelect={(k) => linePicker != null && pickItem(linePicker, k)}
-        onClose={() => setLinePicker(null)} searchable
-      />
-    </Modal>
+    </FormPage>
   );
 }

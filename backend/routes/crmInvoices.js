@@ -1,6 +1,6 @@
 ﻿// backend/routes/crmInvoices.js
 //
-// Standalone, cross-booking Invoice list â€” backs the dedicated Invoice menu
+// Standalone, cross-booking Invoice list — backs the dedicated Invoice menu
 // item. Actual invoice creation still happens per-booking via
 // crmBookings.js's POST /:id/invoices (demand-gated, no auto-generation
 // anywhere) and the new bulk endpoint POST /bookings/invoices/bulk-generate
@@ -14,7 +14,7 @@
 //     invoiced" progress the CRM Invoices page shows). Each returned booking
 //     carries its own invoice list.
 //   - Flat: paginated over INVOICE rows directly, for Finance reconciliation
-//     across every booking in one sortable table â€” the old page's only mode.
+//     across every booking in one sortable table — the old page's only mode.
 //
 // Each view builds its filters once and uses them for the rows, the count and the summary, with the user's
 // project scope in all of them (the flat view had none, and the grouped count skipped it).
@@ -364,7 +364,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
   }
 });
 
-// GET /:id â€” one invoice, for a ?invoiceId= link (the page looked only through the page it had loaded).
+// GET /:id — one invoice, for a ?invoiceId= link (the page looked only through the page it had loaded).
 router.get("/:id", requirePageRight("crm-invoices", "view"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });

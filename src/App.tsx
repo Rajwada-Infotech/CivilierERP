@@ -143,6 +143,7 @@ const LandReportsPage = lazy(() => import("./pages/legal/land/LandReportsPage"))
 const LandDetailsPage = lazy(() => import("./pages/legal/land/LandDetailsPage"));
 const LandProfilePage = lazy(() => import("./pages/legal/land/LandProfilePage"));
 const LandSalesPage = lazy(() => import("./pages/legal/land/LandSalesPage"));
+const LandProjectMapPage = lazy(() => import("./pages/legal/land/LandProjectMapPage"));
 const LandRecordRegisterPage = lazy(() => import("./pages/legal/land/LandRecordRegisterPage"));
 const MaintenanceDashboard = withCountUp(lazy(() => import("./pages/maintenance/MaintenanceDashboard")));
 const HrPayrollDashboard = withCountUp(lazy(() => import("./pages/hrpayroll/HrPayrollDashboard")));
@@ -706,6 +707,12 @@ function ProtectedRoute({
   );
 }
 
+// The old Invoice address. Links arrive with ?view=<id> (Linked Documents, Trial Balance, reminders), and a plain redirect dropped it.
+const InvoiceRedirect = () => {
+  const { search } = useLocation();
+  return <Navigate to={`/finance/invoice${search}`} replace />;
+};
+
 // Redirects an old standalone pre-sale/AFS route into the merged Agreement
 // workspace, keeping ?bookingId= and forcing the right ?tab=.
 function AgreementTabRedirect({ tab }: { tab: string }) {
@@ -1071,6 +1078,7 @@ function AppRoutes() {
       <Route path="/legal/land/properties/:id/profile" element={<ProtectedRoute pageKey="legal-land-master"><LandProfilePage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id/details" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage /></ProtectedRoute>} />
       <Route path="/legal/land/register-existing" element={<Navigate to="/legal/land/properties" replace />} />
+      <Route path="/legal/land/projects" element={<ProtectedRoute pageKey="legal-land-master"><LandProjectMapPage /></ProtectedRoute>} />
       <Route path="/legal/land/sales" element={<ProtectedRoute pageKey="legal-land-master"><LandSalesPage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id/sales" element={<ProtectedRoute pageKey="legal-land-master"><LandSalesPage /></ProtectedRoute>} />
       <Route path="/legal/land/reports" element={<ProtectedRoute pageKey="legal-land-reports"><LandReportsPage /></ProtectedRoute>} />
@@ -1714,7 +1722,7 @@ function AppRoutes() {
       />
       <Route
         path="/material/expense-booking"
-        element={<Navigate to="/finance/invoice" replace />}
+        element={<InvoiceRedirect />}
       />
       <Route
         path="/material/debit-note"

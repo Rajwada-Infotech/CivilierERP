@@ -1,3 +1,5 @@
+import { askLegal } from "@/components/legal/LegalAsk";
+import { setUserWhatsApp } from "@/api/legalLandApi";
 import React, { useMemo, useRef, useState } from "react";
 import { FileText, Upload, X } from "lucide-react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -121,6 +123,31 @@ const FileField: React.FC<{ value: unknown; savedName: string; onChange: (v: unk
   );
 };
 
+/** A party list's label is "Name (PAN)": the name alone is what a form field holds. */
+const nameOf = (label: string) => label.replace(/ \([A-Z]{5}[0-9]{4}[A-Z]\)$/, "");
+
+/** Pick from the list or type a new entry. For a ref, the value is the picked row's id, or "new:<text>" for a
+ *  new name (the server adds it to that list on save); for a text field it is the text itself. */
+const Combo: React.FC<{ id: string; value: unknown; options: { value: string; label: string }[]; asRef: boolean; onChange: (v: unknown) => void; error: boolean }> = ({ id, value, options, asRef, onChange, error }) => {
+  const v = String(value ?? "");
+  const shown = !asRef ? v : v.startsWith("new:") ? v.slice(4) : options.find((o) => o.value === v)?.label ?? "";
+  const isNew = asRef ? v.startsWith("new:") : !!v.trim() && !options.some((o) => o.label.toLowerCase() === v.trim().toLowerCase());
+  return (
+    <div>
+      <input list={id} value={shown} placeholder="Select or type"
+        className={`h-[38px] w-full rounded-lg border bg-muted px-3 text-sm ${error ? "border-destructive" : "border-border"}`}
+        onChange={(e) => {
+          const t = e.target.value;
+          if (!asRef) return onChange(t);
+          const hit = options.find((o) => o.label.toLowerCase() === t.trim().toLowerCase());
+          onChange(hit ? hit.value : t.trim() ? `new:${t}` : "");
+        }} />
+      <datalist id={id}>{options.map((o) => <option key={o.value} value={o.label} />)}</datalist>
+      {isNew && <p className="mt-1 text-[0.6875rem] text-muted-foreground">New — it will be added to the list when you save.</p>}
+    </div>
+  );
+};
+
 function toFieldDef(f: LegalFieldMeta, lookups: Record<string, LegalOption[]>, defaults: Record<string, string>): FieldDef {
   const base = { name: f.name, label: f.label, required: f.required };
   if (f.auto) {
@@ -139,6 +166,22 @@ function toFieldDef(f: LegalFieldMeta, lookups: Record<string, LegalOption[]>, d
   // A page's own starting value (the land's Mouza for its RS records, "Existing / Backlog" for backlog land).
   if (defaults[f.name] !== undefined) {
     return { ...toFieldDef({ ...f }, lookups, {}), defaultValue: defaults[f.name] };
+  }
+  // A name typed or picked from a list (owner, seller, buyer, our company).
+  if (f.suggest) {
+    const opts = (lookups[f.suggest] ?? []).filter((o) => o.active !== false).map((o) => ({ value: nameOf(o.label), label: nameOf(o.label) }));
+    return { ...base, type: "custom", render: (p) => <Combo id={`dl-${f.name}`} value={p.value} options={opts} asRef={false} onChange={p.onChange} error={p.error} /> };
+  }
+  // A short list (transfer type, payment mode, a party list…): pick, or type a new one.
+  if (f.type === "ref" && f.creatable) {
+    return {
+      ...base,
+      type: "custom",
+      render: (p) => (
+        <Combo id={`dl-${f.name}`} value={p.value} asRef onChange={p.onChange} error={p.error}
+          options={refOptions(f, lookups, p.formData).map((o) => ({ value: String(o.value), label: nameOf(o.label) }))} />
+      ),
+    };
   }
   switch (f.type) {
     case "textarea":
@@ -250,6 +293,8 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   const parentField = parentId ? master?.parent : undefined;
   const allFields = useMemo(() => master?.fields ?? [], [master]);
   const fields = useMemo(() => allFields.filter((f) => f.name !== parentField), [allFields, parentField]);
+  // Server-kept fields (a matched party's id) stay in the payload but never show in the form or the table.
+  const shownFields = useMemo(() => fields.filter((f) => !f.hidden), [fields]);
 
   const { data: rows, isLoading, error } = useQuery({
     queryKey: ["legal-master", entry.key, parentId ?? null],
@@ -257,7 +302,10 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
     staleTime: 60 * 1000,
   });
 
-  const refs = useMemo(() => [...new Set(fields.filter((f) => f.type === "ref").map((f) => f.ref!))], [fields]);
+  const refs = useMemo(() => [...new Set([
+    ...shownFields.filter((f) => f.type === "ref").map((f) => f.ref!),
+    ...shownFields.filter((f) => f.suggest).map((f) => f.suggest!),
+  ])], [shownFields]);
   const lookupResults = useQueries({
     queries: refs.map((ref) => ({ queryKey: ["legal-lookup", ref], queryFn: () => getLegalLookup(ref), staleTime: 60 * 1000 })),
   });
@@ -277,13 +325,13 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   );
   // A pick filtered by the (hidden) parent behaves as if the parent were in the form.
   const formFields = useMemo(
-    () => fields.filter((f) => !fixed || !(f.name in fixed)).map((f) => toFieldDef(f.filterBy === parentField ? { ...f, filterBy: undefined } : f, lookups, defaults)),
+    () => shownFields.filter((f) => !f.system && (!fixed || !(f.name in fixed))).map((f) => toFieldDef(f.filterBy === parentField ? { ...f, filterBy: undefined } : f, lookups, defaults)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fields, lookups, parentField, JSON.stringify(defaults), JSON.stringify(fixed)],
+    [shownFields, lookups, parentField, JSON.stringify(defaults), JSON.stringify(fixed)],
   );
   const extras = useMemo(() => master?.extras ?? [], [master]);
   const data = useMemo(
-    () => (rows ?? []).filter((r) => !rowFilter || rowFilter(r)).map((r) => ({ ...mapRow(r, master?.pk ?? "", fields), ...Object.fromEntries(extras.map((x) => [`${x.name}__display`, r[x.name] ?? ""])) })),
+    () => (rows ?? []).filter((r) => !rowFilter || rowFilter(r)).map((r) => ({ ...mapRow(r, master?.pk ?? "", fields), ...Object.fromEntries(extras.flatMap((x) => [[`${x.name}__display`, r[x.name] ?? ""], [`${x.name}__wa`, r[`${x.name}__wa`] ?? ""], [`${x.name}__uid`, r[`${x.name}__uid`] ?? ""]])) })),
     [rows, master, fields, extras, rowFilter],
   );
   const rawById = useMemo(() => new Map((rows ?? []).map((r) => [String(r[master?.pk ?? ""]), r])), [rows, master]);
@@ -291,21 +339,28 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   // Every field as a column (the table scrolls sideways): documents as a preview chip, long notes cut to one
   // line with the full text on hover, then Status.
   const columns: ColumnDef[] = useMemo(() => {
-    const shown = fields.filter((f) => !isStatus(f));
+    const shown = shownFields.filter((f) => !isStatus(f));
     const cols: ColumnDef[] = shown.map((f, i) => ({ key: displayKey(f), label: f.label, hideOnMobile: i >= 2 }));
-    for (const x of extras) cols.push({ key: `${x.name}__display`, label: x.label, hideOnMobile: true });
+    // Extras go last, unless one names a field to sit right after (e.g. "Enquiry by" next to the enquiry date).
+    for (const x of extras) {
+      const col = { key: `${x.name}__display`, label: x.label, hideOnMobile: true };
+      const at = x.after ? cols.findIndex((c) => c.key === displayKey(shown.find((f) => f.name === x.after) ?? ({ name: "" } as never))) : -1;
+      if (at >= 0) cols.splice(at + 1, 0, col); else cols.push(col);
+    }
     if (fields.some(isStatus)) cols.push({ key: "status", label: "Status" });
     return cols;
-  }, [fields, extras]);
+  }, [shownFields, fields, extras]);
   const columnRenderers = useMemo(
     () => Object.fromEntries([
       ...fields.filter((f) => f.type === "file").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalFileLink id={row[f.name]} name={String(v || "")} />]),
       ...fields.filter((f) => f.type === "url").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalLinkChip url={v} name={String(row[fields[0]?.name ? displayKey(fields[0]) : ""] ?? "")} />]),
+      ...extras.filter((x) => x.whatsapp).map((x) => [`${x.name}__display`, (v: unknown, row: RecordWithId) => <WhatsAppName name={v} phone={row[`${x.name}__wa`]} userId={Number(row[`${x.name}__uid`]) || null} canSet={isAdminTier || String(row[`${x.name}__uid`]) === String(currentUser?.id ?? "")} onSaved={refresh} />]),
       ...fields.filter((f) => f.type === "textarea").map((f) => [displayKey(f), (v: unknown) => (v
         ? <span className="block max-w-[260px] truncate" title={String(v)}>{String(v)}</span>
         : <span className="text-muted-foreground">—</span>)]),
     ]),
-    [fields],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fields, extras, isAdminTier, currentUser?.id],
   );
   const exportColumns: ExportColumn[] = fields.map((f) => ({ header: f.label, accessor: displayKey(f) }));
 
@@ -326,7 +381,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
         wide: f.type === "textarea" || f.type === "url",
         url: f.type === "url",
       })),
-      ...extras.map((x) => ({ label: x.label, value: String(row[`${x.name}__display`] || "—") })),
+      ...extras.map((x) => ({ label: x.label, value: [row[`${x.name}__display`], x.whatsapp && row[`${x.name}__wa`] ? `WhatsApp ${row[`${x.name}__wa`]}` : ""].filter(Boolean).join(" · ") || "—" })),
       { label: "Created by", value: String(row.createdBy ?? "") },
       { label: "Last updated by", value: String(row.updatedBy ?? "") },
     ]);
@@ -343,7 +398,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
         toast.success(added.message);
         if (onCreated && added.id) onCreated(Number(added.id));
       }
-      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), payload(event.record))).message);
+      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), { ...payload(event.record), ...fixed })).message);
       if (event.action === "delete") toast.success((await deleteLegalRow(entry.key, Number(event.id))).message);
       onSaved?.();
     } catch (err) {
@@ -405,5 +460,47 @@ export default function LegalMasterPage({ entry }: { entry: LegalMasterEntry }) 
         <LegalMasterTable entry={entry} />
       </LegalShell>
     </>
+  );
+}
+
+// A person's name with a "WhatsApp" chat link (wa.me) when their number is saved on their user. A plain 10-digit Indian
+// mobile gets the 91 country code. No number yet → "+ Add WhatsApp" (that user themselves, or an administrator).
+export function WhatsAppName({ name, phone, userId, canSet, onSaved }: { name: unknown; phone: unknown; userId: number | null; canSet: boolean; onSaved: () => unknown }) {
+  const n = String(name ?? "").trim();
+  let digits = String(phone ?? "").replace(/\D/g, "");
+  if (digits.length === 10) digits = `91${digits}`;
+  if (!n) return <span className="text-muted-foreground">—</span>;
+
+  const add = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!userId) return;
+    const no = await askLegal({ title: `WhatsApp number of ${n}`, message: "Saved on this user, so anyone can chat with them about the records they raised.", input: { label: "WhatsApp number", placeholder: "e.g. 9876543210", required: true }, confirmText: "Save" });
+    if (!no) return;
+    try {
+      toast.success((await setUserWhatsApp(userId, no)).message);
+      await onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save");
+    }
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      {n}
+      {digits.length >= 10 ? (
+        <a href={`https://wa.me/${digits}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+          title={`Chat with ${n} on WhatsApp (${String(phone)})`}
+          className="rounded border border-emerald-600/40 px-1.5 py-0.5 text-[0.6875rem] font-medium text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400">
+          WhatsApp
+        </a>
+      ) : canSet && userId ? (
+        <button onClick={add} title={`Add the WhatsApp number of ${n}`}
+          className="rounded border border-dashed border-emerald-600/50 px-1.5 py-0.5 text-[0.6875rem] font-medium text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400">
+          + Add WhatsApp
+        </button>
+      ) : (
+        <span className="text-[0.6875rem] text-muted-foreground" title="No WhatsApp number on this user yet">no WhatsApp</span>
+      )}
+    </span>
   );
 }

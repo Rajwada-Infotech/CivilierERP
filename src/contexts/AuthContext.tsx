@@ -35,6 +35,7 @@ interface AuthContextType {
   login: (
     email: string,
     password: string,
+    portal?: "staff" | "supplier",
   ) => Promise<{
     success: boolean;
     error?: string;
@@ -242,9 +243,9 @@ export const AuthProvider = ({
 
   const queryClient = useQueryClient();
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string, portal: "staff" | "supplier" = "staff") => {
     try {
-      const data = await loginUser(email, password);
+      const data = await loginUser(email, password, portal);
 
       // A new identity is signing in — any react-query cache from a
       // previous session (e.g. a different supplier/customer on a shared

@@ -1583,6 +1583,7 @@ export default function ActivityDetailModal({
   onClose: () => void;
 }) {
   useOverlayBackClose(onClose);
+  const backdropDown = useRef(false);
   const [tab, setTab] = useState<DetailTab>(initialTab);
   const { currentUser } = useAuth();
   const canRestore = isSuperAdminRole(currentUser?.role) && row.status === "CANCELLED";
@@ -1615,7 +1616,13 @@ export default function ActivityDetailModal({
   }, []);
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4 overscroll-contain">
+    // A click on the dimmed backdrop closes it — only when the press also started there, so a text selection
+    // dragged out of the modal doesn't close it.
+    <div
+      className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4 overscroll-contain"
+      onMouseDown={(e) => { backdropDown.current = e.target === e.currentTarget; }}
+      onClick={(e) => { if (backdropDown.current && e.target === e.currentTarget) onClose(); backdropDown.current = false; }}
+    >
       <div
         className="sheet-frame w-full max-w-3xl max-h-[92dvh] overflow-hidden flex flex-col bg-card"
         style={{ margin: 0, border: "1.5px solid hsl(var(--foreground))", boxShadow: "6px 6px 0 hsl(var(--foreground) / 0.12)" }}

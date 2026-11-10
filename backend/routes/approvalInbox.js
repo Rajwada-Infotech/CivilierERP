@@ -427,6 +427,33 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
+    // Amendments to approved documents (routes/docAmendments.js): the amended document's number and its new value.
+    // The reason and the before / after are read from GET /api/doc-amendments/:id by the review panel.
+    if (!module || module === "doc-amendment") {
+      queries.push(`
+        SELECT
+          'doc-amendment'                      AS Module,
+          'Amendment'                          AS ModuleLabel,
+          CAST(da.Id AS NVARCHAR)              AS RecordId,
+          CONCAT(da.DocNo, N' · amendment')    AS Reference,
+          da.RequestedAt                       AS RecordDate,
+          da.Status,
+          CAST(NULL AS NVARCHAR)               AS ContractorName,
+          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          da.NewValue                          AS Amount,
+          ${withProjectName(NULL_EXTRA, "pr_da.name")}
+          CAST(da.RequestedBy AS NVARCHAR(255)) AS CreatedBy,
+          ''                                   AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ''                                   AS RejectionNote,
+          da.RequestedAt                       AS LastModified
+        FROM dbo.DocAmendment da
+        LEFT JOIN dbo.enterprise pr_da ON pr_da.id = da.ProjectId
+        WHERE da.Status = 'Pending'${pp("da.ProjectId")}
+      `);
+    }
+
     if (!module || module === "work-orders") {
       queries.push(`
         SELECT

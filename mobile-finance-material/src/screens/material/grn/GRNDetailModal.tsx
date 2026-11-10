@@ -1,41 +1,30 @@
-// RN port of GRN.tsx's view modal — Details tab only (no equivalent to
-// PO/VIO mobile ports for the extra tabs either, so consistent scoping).
-// Deferred vs. web: the Posting tab (GL journal preview + auto-post —
-// kept web-only, same call as outbound Payment never auto-posting from
-// mobile), the per-line quality debit-note button, DocumentChainPanel,
-// LinkedExpenseBookings, and the RemainingItemsPanel's "New GRN for
-// Remaining" quick action (use the main list's "+ New" + PO picker's own
-// "Create GRN for Remaining Items" button instead).
+// RN port of GRN.tsx's view, on the drawing sheet: the GRN's number as the title with its date, supplier and project;
+// its approval mark; the particulars (company, project, PO, supplier, source transfer / MR); the received items line by
+// line (ordered, received, pending; quantity × rate, GST); the GRN total against the PO's value and what is left on it;
+// the GST by rate; remarks. Deferred vs. web as before: the Posting tab (GL preview and auto-post), the per-line quality
+// debit note, DocumentChainPanel, LinkedExpenseBookings and the "New GRN for remaining" quick action.
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { View, Text, Modal, Pressable, ScrollView, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { X, PackageCheck } from "lucide-react-native";
-import { colors } from "@/theme/colors";
-import { fonts } from "@/theme/fonts";
+import { View } from "react-native";
+import { PackageCheck, Percent } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
 import { formatINR } from "@/utils/formatCurrency";
 import { getGRNById, type GRNRecord } from "@/api/grnApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { Body, InfoGrid, Label, Panel, SheetMark, statusTone } from "@/components/sheet/Sheet";
+import { DetailSheet, LineList, fmtDate } from "@/components/sheet/Register";
 
-function fmtDate(d: string | null | undefined) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function TotalLine({ label, value, strong, red }: { label: string; value: string; strong?: boolean; red?: boolean }) {
   return (
-    <View style={{ width: "50%", paddingRight: 8, marginBottom: 12 }}>
-      <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.heading.medium, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</Text>
-      <Text numberOfLines={1} style={{ color: mono ? colors.primary : colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium, marginTop: 2 }}>{value}</Text>
+    <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", paddingTop: strong ? 10 : 6, borderTopWidth: strong ? 1.5 : 0, borderTopColor: S.ink }}>
+      <Label color={strong ? S.ink : undefined}>{label}</Label>
+      <Body size={strong ? 16 : 13} weight="semibold" color={red ? S.red : S.ink}>{value}</Body>
     </View>
   );
 }
 
 export function GRNDetailModal({ recordId, onClose }: { recordId: number | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
-
-  const { data: grn, isLoading } = useQuery<GRNRecord>({
+  const { data: grn, isLoading, isError, error, refetch } = useQuery<GRNRecord>({
     queryKey: ["grn-detail", recordId],
     queryFn: () => getGRNById(recordId!),
     enabled: recordId != null,
@@ -47,7 +36,6 @@ export function GRNDetailModal({ recordId, onClose }: { recordId: number | null;
   const grandTotal = subtotal + gstTotal;
   const poTotal = Number(grn?.POTotalAmount ?? 0);
   const balance = poTotal - grandTotal;
-
   const gstByRate = useMemo(() => {
     const map = new Map<number, number>();
     for (const i of items) {
@@ -58,120 +46,67 @@ export function GRNDetailModal({ recordId, onClose }: { recordId: number | null;
     return Array.from(map.entries());
   }, [items]);
 
-  if (recordId == null) return null;
-
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5 flex-1 min-w-0">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#10b98126" }}>
-              <PackageCheck size={14} color="#10b981" />
+    <DetailSheet
+      visible={recordId != null}
+      onClose={onClose}
+      eyebrow="CivilierERP · Material · Goods receipt note"
+      title={grn?.DocNo || grn?.GRNNo || "GRN"}
+      subtitle={grn ? [fmtDate(grn.GRNDate), grn.SupplierName, grn.ProjectName].filter(Boolean).join(" · ") : undefined}
+      loading={isLoading || !grn}
+      error={isError ? (error as Error)?.message || "Could not load this GRN." : null}
+      onRetry={() => refetch()}
+    >
+      {grn && (
+        <>
+          <ApprovalStatusChain table="GoodsReceiptNotes" recordId={grn.GRNID} fallback={<SheetMark text={grn.Status || "Draft"} tone={statusTone(grn.Status || "Draft")} />} />
+          <InfoGrid
+            items={[
+              { label: "GRN date", value: fmtDate(grn.GRNDate) },
+              { label: "PO no", value: grn.PONumber || "—" },
+              { label: "Company", value: grn.CompanyName || "—" },
+              { label: "Project", value: grn.ProjectName || "—" },
+              { label: "Supplier", value: grn.SupplierName || "—" },
+              ...(grn.SourceTransferDocNo ? [{ label: "Source transfer", value: grn.SourceTransferDocNo }] : []),
+              ...(grn.SourceMRDocNo ? [{ label: "Source MR", value: grn.SourceMRDocNo }] : []),
+              ...(grn.Remarks ? [{ label: "Remarks", value: grn.Remarks, wide: true }] : []),
+            ]}
+          />
+
+          <Panel title={`Received items (${items.length})`} icon={<PackageCheck size={14} color={S.ink} />}>
+            <LineList
+              empty="No items on this GRN."
+              rows={items.map((it, i) => ({
+                key: i,
+                title: it.itemName || "—",
+                note: `Ordered ${it.orderedQty} · received ${it.receivedQty} · pending ${it.remainingQty} ${it.uom || ""}\n${it.quantity} ${it.uom || ""} × ${formatINR(it.rate)}${it.gstPct ? ` · ${it.gstPct}% GST` : ""}`,
+                right: formatINR(it.totalAmount),
+              }))}
+            />
+            <View>
+              <TotalLine label="GRN total (received)" value={formatINR(grandTotal)} strong />
+              {poTotal > 0 && (
+                <>
+                  <TotalLine label="PO value (incl. GST)" value={formatINR(poTotal)} />
+                  <TotalLine label="Balance on PO" value={balance > 0.005 ? formatINR(balance) : "Fully received"} />
+                </>
+              )}
             </View>
-            <View className="min-w-0">
-              <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>GRN</Text>
-              {!!(grn?.DocNo || grn?.GRNNo) && <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>{grn.DocNo || grn.GRNNo}</Text>}
-            </View>
-          </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
+          </Panel>
 
-        {isLoading || !grn ? (
-          <View className="flex-1 items-center justify-center"><ActivityIndicator color={colors.mutedForeground} /></View>
-        ) : (
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
-            <View className="flex-row items-center gap-2 mb-4">
-              <ApprovalStatusChain table="GoodsReceiptNotes" recordId={grn.GRNID} />
-            </View>
-
-            <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-              <Field label="Doc No" value={grn.DocNo || grn.GRNNo || "—"} mono />
-              <Field label="GRN Date" value={fmtDate(grn.GRNDate)} />
-              <Field label="Company" value={grn.CompanyName || "—"} />
-              <Field label="Project" value={grn.ProjectName || "—"} />
-              <Field label="PO No" value={grn.PONumber || "—"} />
-              <Field label="Supplier" value={grn.SupplierName || "—"} />
-              {!!grn.SourceTransferDocNo && <Field label="Source Transfer" value={grn.SourceTransferDocNo} />}
-              {!!grn.SourceMRDocNo && <Field label="Source MR" value={grn.SourceMRDocNo} />}
-            </View>
-
-            {items.length > 0 && (
-              <View className="mb-3">
-                <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.heading.semibold, textTransform: "uppercase", marginBottom: 6 }}>
-                  Received Items ({items.length})
-                </Text>
-                <View className="rounded-xl overflow-hidden" style={{ borderWidth: 1, borderColor: colors.border }}>
-                  {items.map((it, i) => (
-                    <View key={i} className="px-3 py-2.5" style={{ borderTopWidth: i > 0 ? 1 : 0, borderTopColor: `${colors.border}80` }}>
-                      <View className="flex-row items-center justify-between mb-1">
-                        <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.semibold, flex: 1, marginRight: 8 }}>{it.itemName || "—"}</Text>
-                        <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{formatINR(it.totalAmount)}</Text>
-                      </View>
-                      <Text style={{ color: colors.mutedForeground, fontSize: 10 }}>
-                        Ordered {it.orderedQty} · Received {it.receivedQty} · Pending {it.remainingQty} {it.uom || ""}
-                      </Text>
-                      <Text style={{ color: colors.mutedForeground, fontSize: 10, marginTop: 1 }}>
-                        {it.quantity} {it.uom} × {formatINR(it.rate)}{it.gstPct ? ` · ${it.gstPct}% GST` : ""}
-                      </Text>
-                    </View>
-                  ))}
-                  <View className="px-3 py-2.5" style={{ borderTopWidth: 2, borderTopColor: `${colors.primary}40`, backgroundColor: `${colors.primary}0d` }}>
-                    <View className="flex-row items-center justify-between">
-                      <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold }}>GRN Total (received)</Text>
-                      <Text style={{ color: colors.primary, fontSize: 13, fontFamily: fonts.heading.bold }}>{formatINR(grandTotal)}</Text>
-                    </View>
-                  </View>
-                  {poTotal > 0 && (
-                    <>
-                      <View className="flex-row items-center justify-between px-3 py-2" style={{ backgroundColor: `${colors.muted}30`, borderTopWidth: 1, borderTopColor: `${colors.border}60` }}>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>PO Value (incl. GST)</Text>
-                        <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.body.semibold }}>{formatINR(poTotal)}</Text>
-                      </View>
-                      <View className="flex-row items-center justify-between px-3 py-2" style={{ backgroundColor: balance > 0.005 ? "#d9770615" : "#05966915" }}>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>Balance on PO</Text>
-                        <Text style={{ color: balance > 0.005 ? "#d97706" : "#059669", fontSize: 11.5, fontFamily: fonts.heading.bold }}>
-                          {balance > 0.005 ? formatINR(balance) : "Fully received"}
-                        </Text>
-                      </View>
-                    </>
-                  )}
-                </View>
-              </View>
-            )}
-
-            {gstByRate.length > 0 && (
-              <View className="mb-3">
-                <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.heading.semibold, textTransform: "uppercase", marginBottom: 6 }}>GST Breakdown</Text>
-                <View className="rounded-xl overflow-hidden" style={{ borderWidth: 1, borderColor: colors.border }}>
-                  <View className="flex-row items-center justify-between px-3.5 py-2.5" style={{ backgroundColor: `${colors.muted}20` }}>
-                    <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>Subtotal (before GST)</Text>
-                    <Text style={{ color: colors.foreground, fontSize: 12 }}>{formatINR(subtotal)}</Text>
-                  </View>
-                  {gstByRate.map(([rate, amount]) => (
-                    <View key={rate} className="flex-row items-center justify-between px-3.5 py-2.5" style={{ borderTopWidth: 1, borderTopColor: `${colors.border}60` }}>
-                      <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>GST {rate}%</Text>
-                      <Text style={{ color: "#d97706", fontSize: 12 }}>+{formatINR(amount)}</Text>
-                    </View>
-                  ))}
-                  <View className="flex-row items-center justify-between px-3.5 py-3" style={{ backgroundColor: "#05966915", borderTopWidth: 2, borderTopColor: "#05966940" }}>
-                    <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold }}>Grand Total (incl. GST)</Text>
-                    <Text style={{ color: "#059669", fontSize: 13, fontFamily: fonts.heading.bold }}>{formatINR(grandTotal)}</Text>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {!!grn.Remarks && (
-              <View className="rounded-xl px-3 py-2.5" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.muted}30` }}>
-                <Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: fonts.heading.medium, textTransform: "uppercase", marginBottom: 4 }}>Remarks</Text>
-                <Text style={{ color: colors.foreground, fontSize: 12 }}>{grn.Remarks}</Text>
-              </View>
-            )}
-          </ScrollView>
-        )}
-      </View>
-    </Modal>
+          {gstByRate.length > 0 && (
+            <Panel title="GST breakdown" icon={<Percent size={14} color={S.ink} />}>
+              <LineList
+                rows={[
+                  { key: "sub", title: "Subtotal (before GST)", right: formatINR(subtotal) },
+                  ...gstByRate.map(([rate, amount]) => ({ key: rate, title: `GST ${rate}%`, right: `+${formatINR(amount)}` })),
+                ]}
+              />
+              <TotalLine label="Grand total (incl. GST)" value={formatINR(grandTotal)} strong />
+            </Panel>
+          )}
+        </>
+      )}
+    </DetailSheet>
   );
 }

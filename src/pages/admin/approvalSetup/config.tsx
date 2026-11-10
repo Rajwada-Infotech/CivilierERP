@@ -61,6 +61,12 @@ export const MODULE_OPTIONS = [
     desc: "Before a PO is raised",
   },
   {
+    id: "DocAmendment",
+    label: "Amendment",
+    icon: "✏️",
+    desc: "An approved document amended with a reason (PO, invoice, payment, voucher, BOQ, Work Order…) — applied once approved",
+  },
+  {
     id: "MaterialIssues",
     label: "Material Issue",
     icon: "🚚",
@@ -366,6 +372,7 @@ export const MODULE_GROUPS = [
     modules: [
       "GRN",
       "PurchaseOrders",
+      "DocAmendment",
       "MaterialIssues",
       "MaterialIssueReturn",
       "MaterialRequests",

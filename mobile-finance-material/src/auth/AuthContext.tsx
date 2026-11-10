@@ -31,6 +31,8 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
+  /** Changes the signed-in user here and in storage (e.g. a name edited on the profile), without signing in again. */
+  updateCurrentUser: (patch: Partial<AppUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -87,6 +89,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setCurrentUser(null);
   }, []);
 
+  const updateCurrentUser = useCallback((patch: Partial<AppUser>) => {
+    setCurrentUser((u) => {
+      if (!u) return u;
+      const next = { ...u, ...patch, ...(patch.name ? { initials: getInitials(patch.name) } : {}) };
+      void setStoredUser(next);
+      return next;
+    });
+  }, []);
+
   const { canAccessPage: rawAccess, canDoAction: rawAction } = useMemo(
     () => createPermissionCheckers(currentUser),
     [currentUser],
@@ -99,6 +110,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     logout,
     canAccessPage: rawAccess,
     canDoAction: rawAction,
+    updateCurrentUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

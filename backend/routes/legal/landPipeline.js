@@ -21,9 +21,10 @@
 // it back for re-verification (their history stays).
 
 const express = require("express");
+const { usersHaveWhatsApp } = require("../../services/usersWhatsApp");
 const { getPool, sql } = require("../../db");
 const { requirePageRight, hasAnyPageAction } = require("../../middleware/requirePageRight");
-const { canAct } = require("./approvalAuthority");
+const { canAct, ownWork, isSuperAdmin } = require("./approvalAuthority");
 const apiRateLimit = require("../../middleware/apiRateLimit");
 const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
 const { documentGate } = require("./landDocuments");
@@ -130,8 +131,7 @@ async function gates(conn, land) {
   if (o.eventsOpen) need.OWNERSHIP.push(`${o.eventsOpen} ownership transfer(s) not verified`);
   if (o.inheritOpen) need.OWNERSHIP.push(`${o.inheritOpen} inheritance record(s) not verified`);
   if (o.partitionOpen) need.OWNERSHIP.push(`${o.partitionOpen} partition record(s) not verified`);
-  if (o.checksFailed) need.OWNERSHIP.push(`${o.checksFailed} verification check(s) rejected or needing correction`);
-  else if (o.checksOpen) need.OWNERSHIP.push(`${o.checksOpen} ownership record(s) without all ${CHECKS_PER_RECORD} checks reviewed`);
+  // The seven per-owner checks are no longer required: the verifier ticks the whole Ownership section once (Verified).
 
   // Step 6: required documents from the land's checklist.
   const docs = await documentGate(conn, land.LandId);
@@ -414,6 +414,57 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
   }
 });
 
+// GET /api/legal/land/project-map: every company land with the project it serves. Complete = fully approved (L2);
+// everything else is under process. Cancelled lands are left out; sold / transferred ones are marked.
+router.get("/project-map", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
+  try {
+    const pool = getPool();
+    const lands = (await pool.request().query(`
+      SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, p.name AS ProjectName, m.MouzaName, d.DistrictName,
+             CAST(l.Area AS DECIMAL(18,4)) AS Area, u.UnitName, l.EntryType, l.LandStatus, l.WorkflowStatus,
+             l.VerificationStatus, l.L1Status, l.L2Status, l.IsOnHold,
+             CAST(CASE WHEN l.L2Status = 'Approved' THEN 1 ELSE 0 END AS BIT) AS IsComplete,
+             (SELECT COUNT(*) FROM dbo.LegalLandDocument x WHERE x.LandId = l.LandId AND x.IsActive = 1) AS Documents,
+             (SELECT STRING_AGG(r.OwnerName, ', ') FROM dbo.LegalOwnershipRecord r WHERE r.LandId = l.LandId AND r.IsActive = 1 AND r.ValidTo IS NULL) AS CurrentOwners
+      FROM dbo.LegalLand l
+      LEFT JOIN dbo.enterprise p ON p.id = l.ProjectId
+      LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
+      LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
+      WHERE l.IsActive = 1 AND ISNULL(l.IsCancelled, 0) = 0
+      ORDER BY p.name, l.LandCode`)).recordset;
+    const projects = (await pool.request().query("SELECT id, name FROM dbo.enterprise WHERE business_type = 'P' ORDER BY name")).recordset;
+    res.json({ lands, projects });
+  } catch (err) {
+    console.error("[legal-land] project-map:", err.message);
+    res.status(500).json({ error: "Could not load the land-project map" });
+  }
+});
+
+// PUT /api/legal/land/:id/project { projectId | null }: put a land under a project, or take it off.
+router.put("/:id/project", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const projectId = req.body?.projectId ? parseInt(req.body.projectId, 10) : null;
+  if (!id) return res.status(400).json({ error: "Invalid land" });
+  try {
+    const pool = getPool();
+    if (projectId) {
+      const ok = await pool.request().input("p", sql.Int, projectId).query("SELECT 1 AS x FROM dbo.enterprise WHERE id = @p AND business_type = 'P'");
+      if (!ok.recordset.length) return res.status(400).json({ error: "Project not found" });
+    }
+    const old = (await pool.request().input("id", sql.Int, id).query("SELECT ProjectId, L2Status FROM dbo.LegalLand WHERE LandId = @id AND IsActive = 1")).recordset[0];
+    if (!old) return res.status(404).json({ error: "Land not found" });
+    // Only fully approved land (L2) goes under a project; taking a land off its project is always allowed.
+    if (projectId && old.L2Status !== "Approved") return res.status(400).json({ error: "Only approved land (L2 approved) can be mapped to a project" });
+    await pool.request().input("id", sql.Int, id).input("p", sql.Int, projectId).input("u", sql.Int, req.user?.userId || null)
+      .query("UPDATE dbo.LegalLand SET ProjectId = @p, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @u WHERE LandId = @id");
+    await writeAudit(pool, req, { action: projectId ? "Land mapped to project" : "Land removed from project", entityType: "Land Property", entityId: id, landId: id, oldValue: { projectId: old.ProjectId }, newValue: { projectId } });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[legal-land] set project:", err.message);
+    res.status(500).json({ error: "Could not change the land's project" });
+  }
+});
+
 // GET /api/legal/land/pending-queue: All land records waiting for Verification or L1/L2 Approval
 router.get("/pending-queue", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
   try {
@@ -453,6 +504,7 @@ router.get("/:id/overview", requirePageRight(LAND_PAGE, "view"), async (req, res
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid land" });
   try {
+    const withWa = await usersHaveWhatsApp(getPool());
     const r = await getPool().request().input("Id", sql.Int, id).query(`
       SELECT l.LandId, l.LandCode, l.LandName, l.EntryType, l.LandStatus, l.PossessionStatus, l.WorkflowStatus, l.IsOnHold, l.IsActive,
              l.Area, u.UnitName, l.LocationAddress, l.AcquisitionDate, l.AcquisitionDateApprox, l.AcquisitionType,
@@ -465,8 +517,11 @@ router.get("/:id/overview", requirePageRight(LAND_PAGE, "view"), async (req, res
              (SELECT name FROM dbo.users WHERE id = l.L2ApproverId) AS L2ApproverName,
              sd.SubDivisionName, b.BlockName, lt.LandTypeName,
              d.DistrictName, m.MouzaName, m.JLNo, l.CreatedAt, ISNULL(l.UpdatedAt, l.CreatedAt) AS LastUpdated,
-             (SELECT name FROM dbo.users WHERE id = l.CreatedBy) AS CreatedByName
+             (SELECT name FROM dbo.users WHERE id = l.CreatedBy) AS CreatedByName,
+             enq.EnquiryNo, enq.CreatedBy AS EnquiryById, eu.name AS EnquiryByName${withWa ? ", eu.WhatsAppNo AS EnquiryByWhatsApp" : ""}
       FROM dbo.LegalLand l
+      LEFT JOIN dbo.LegalLandEnquiry enq ON enq.EnquiryId = l.EnquiryId
+      LEFT JOIN dbo.users eu ON eu.id = enq.CreatedBy
       LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
       LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
       LEFT JOIN dbo.LegalSubDivision sd ON sd.SubDivisionId = l.SubDivisionId
@@ -849,6 +904,8 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
 
   for (const n of c.to) {
     let eventId = null;
+    // Every new owner is in the Owner list (matched by name, added when new), so the same person is offered next time.
+    const personId = await ownerPersonId(tx, n.name, n.guardian, userId);
     {  // every owner, the first one too, gets a chain entry so it can be shown, edited and verified
       const ev = await tx.request()
         .input("Land", sql.Int, landId).input("Type", sql.Int, c.transferTypeId || (await tx.request().query("SELECT TOP 1 LookupId AS id FROM dbo.LegalLookupValue WHERE Category = N'transfer-type' AND Name = N'Sale'")).recordset[0]?.id)
@@ -857,20 +914,20 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
         .input("DocType", sql.Int, c.doc.docTypeId).input("DocNo", sql.NVarChar(100), c.doc.documentNo).input("DeedNo", sql.NVarChar(60), c.doc.deedNo)
         .input("Office", sql.Int, c.doc.officeId).input("RegDate", sql.Date, c.doc.regDate).input("Share", sql.Decimal(7, 4), n.share)
         .input("Value", sql.Decimal(18, 2), c.doc.value).input("File", sql.Int, c.doc.fileId).input("Deed", sql.Int, registeredDeedId)
-        .input("Remarks", sql.NVarChar(1000), c.first ? (c.remarks || "Earliest documented owner") : c.remarks).input("UserId", sql.Int, userId)
+        .input("Remarks", sql.NVarChar(1000), c.first ? (c.remarks || "Earliest documented owner") : c.remarks).input("UserId", sql.Int, userId).input("Person", sql.Int, personId)
         .query(`
           INSERT INTO dbo.LegalOwnershipEvent (LandId, TransferTypeId, EventDate, PreviousOwnerName, PreviousOwnerGuardian, NewOwnerName, NewOwnerGuardian, DocTypeId, DocumentNo, DeedNo,
-            RegistrationOfficeId, RegistrationDate, TransferSharePct, TransferValue, DocFileId, RegisteredDeedId, VerificationStatus, Remarks, CreatedBy)
+            RegistrationOfficeId, RegistrationDate, TransferSharePct, TransferValue, DocFileId, RegisteredDeedId, VerificationStatus, Remarks, CreatedBy, NewOwnerId)
           OUTPUT INSERTED.EventId AS id
-          VALUES (@Land, @Type, @Date, @Prev, @PrevG, @New, @NewG, @DocType, @DocNo, @DeedNo, @Office, @RegDate, @Share, @Value, @File, @Deed, N'Pending', @Remarks, @UserId)`);
+          VALUES (@Land, @Type, @Date, @Prev, @PrevG, @New, @NewG, @DocType, @DocNo, @DeedNo, @Office, @RegDate, @Share, @Value, @File, @Deed, N'Pending', @Remarks, @UserId, @Person)`);
       eventId = ev.recordset[0].id;
     }
     await tx.request().input("Land", sql.Int, landId).input("Name", sql.NVarChar(200), n.name).input("G", sql.NVarChar(200), n.guardian)
       .input("Type", sql.Int, newOwnershipType).input("Rel", sql.Int, n.relationshipTypeId).input("Share", sql.Decimal(7, 4), n.share)
       .input("Date", sql.Date, c.date).input("Event", sql.Int, eventId).input("Prev", sql.NVarChar(200), fromNames)
-      .input("File", sql.Int, c.doc.fileId).input("UserId", sql.Int, userId)
-      .query(`INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, OwnershipTypeId, RelationshipTypeId, SharePct, ValidFrom, EventId, PreviousOwnerName, TransferDocFileId, VerificationStatus, CreatedBy)
-              VALUES (@Land, @Name, @G, @Type, @Rel, @Share, @Date, @Event, @Prev, @File, N'Pending', @UserId)`);
+      .input("File", sql.Int, c.doc.fileId).input("UserId", sql.Int, userId).input("Person", sql.Int, personId)
+      .query(`INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, OwnershipTypeId, RelationshipTypeId, SharePct, ValidFrom, EventId, PreviousOwnerName, TransferDocFileId, VerificationStatus, CreatedBy, PersonId)
+              VALUES (@Land, @Name, @G, @Type, @Rel, @Share, @Date, @Event, @Prev, @File, N'Pending', @UserId, @Person)`);
     if (inheritanceId) {
       await tx.request().input("Land", sql.Int, landId).input("Inh", sql.Int, inheritanceId).input("Name", sql.NVarChar(200), n.name).input("G", sql.NVarChar(200), n.guardian)
         .input("Rel", sql.Int, n.relationshipTypeId).input("Share", sql.Decimal(7, 4), n.share).input("UserId", sql.Int, userId)
@@ -908,6 +965,20 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
 }
 
 // Step 5: add the first owner, or record one change of ownership.
+/** The Owner-list person for a name (same name, and same father / husband when both are known), added when new. */
+async function ownerPersonId(conn, name, guardian, userId) {
+  const n = String(name || "").trim().replace(/\s+/g, " ").slice(0, 200);
+  if (!n) return null;
+  const g = String(guardian || "").trim().slice(0, 200) || null;
+  const hit = (await conn.request().input("Name", sql.NVarChar(200), n).input("G", sql.NVarChar(200), g)
+    .query(`SELECT TOP 1 PersonId FROM dbo.LegalPerson WHERE PersonRole = N'Owner' AND IsActive = 1 AND LTRIM(RTRIM(FullName)) = @Name
+            AND (@G IS NULL OR GuardianName IS NULL OR GuardianName = @G) ORDER BY CASE WHEN GuardianName = @G THEN 0 ELSE 1 END`)).recordset[0];
+  if (hit) return hit.PersonId;
+  return (await conn.request().input("Name", sql.NVarChar(200), n).input("G", sql.NVarChar(200), g).input("UserId", sql.Int, userId || null)
+    .query(`INSERT INTO dbo.LegalPerson (PersonRole, FullName, GuardianName, PartyType, IsActive, CreatedBy, CreatedAt)
+            OUTPUT INSERTED.PersonId VALUES (N'Owner', @Name, @G, N'Individual', 1, @UserId, SYSUTCDATETIME())`)).recordset[0].PersonId;
+}
+
 router.post("/:id/ownership/change", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
@@ -1515,11 +1586,142 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
 
 // ── Land-Wise Verification & Two-Level Approval Endpoints ──────────────────────────────
 
-router.post("/:id/verify", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+// ── Section verification: one "Verified" tick at the end of each land-page section ───────────────────────────────
+// The verifier reads the whole section (rows and their documents) and ticks once; every active row of that section's
+// tables is marked Verified (unticking sets them back to Pending). Only a verifier (Setup → Approval Control), and
+// never on rows they entered themselves (super admin excepted).
+const VERIFY_SECTIONS = {
+  ownership: { label: "Ownership History", tables: ["LegalOwnershipEvent", "LegalOwnershipRecord", "LegalInheritance", "LegalPartition"] },
+  records: { label: "Land Records (RS / LR)", tables: ["LegalLandRsRecord", "LegalLandLrRecord"] },
+  legal: { label: "Legal Information", tables: ["LegalCase", "LegalLandLegalRecord", "LegalVerificationCheck"] },
+  loans: { label: "Loan & Mortgage", tables: ["LegalMortgage"] },
+  mutation: { label: "Mutation Records", tables: ["LegalMutationRecord"] },
+  payments: { label: "Payment History", tables: ["LegalPayment"] },
+  tax: { label: "Land Tax (Khajna)", tables: ["LegalLandTax"] },
+  survey: { label: "Survey & Valuation", tables: ["LegalValuation"] },
+};
+VERIFY_SECTIONS.transfers = { label: "Acquisition & Purchase", tables: ["LegalOwnershipEvent"] };
+
+router.get("/:id/sections", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land id" });
+  try {
+    const tables = [...new Set(Object.values(VERIFY_SECTIONS).flatMap((x) => x.tables))];
+    const r = await getPool().request().input("Id", sql.Int, id).query(tables.map((t) => `
+      SELECT '${t}' AS T, COUNT(*) AS Total, SUM(CASE WHEN VerificationStatus = N'Verified' THEN 1 ELSE 0 END) AS Verified,
+             MAX(VerifiedAt) AS VerifiedAt,
+             (SELECT TOP 1 u.name FROM dbo.${t} x JOIN dbo.users u ON u.id = x.VerifiedBy WHERE x.LandId = @Id AND x.IsActive = 1 ORDER BY x.VerifiedAt DESC) AS VerifiedByName
+      FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1`).join(" UNION ALL "));
+    const byT = Object.fromEntries(r.recordset.map((x) => [x.T, x]));
+    res.json(Object.fromEntries(Object.entries(VERIFY_SECTIONS).map(([k, sec]) => {
+      const rows = sec.tables.map((t) => byT[t]);
+      const total = rows.reduce((a, x) => a + (x?.Total ?? 0), 0);
+      const verified = rows.reduce((a, x) => a + (x?.Verified ?? 0), 0);
+      const last = rows.filter((x) => x?.VerifiedAt).sort((a, b) => new Date(b.VerifiedAt) - new Date(a.VerifiedAt))[0];
+      return [k, { label: sec.label, total, verified, done: total > 0 && verified === total, verifiedAt: last?.VerifiedAt ?? null, verifiedBy: last?.VerifiedByName ?? null }];
+    })));
+  } catch (err) {
+    console.error("[legal-land] sections error:", err.message);
+    res.status(500).json({ error: "Could not load the section status" });
+  }
+});
+
+router.post("/:id/sections/:section/verify", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  const sec = VERIFY_SECTIONS[req.params.section];
+  const verified = req.body?.verified !== false;
+  const remarks = text(req.body?.remarks, 1000);
+  if (!id || !sec) return res.status(400).json({ error: "Invalid land or section" });
+  try {
+    if (!(await canAct(req, "Verifier", LAND_PAGE))) return res.status(403).json({ error: "Only a verifier (Setup → Approval Control) can verify a section" });
+    const pool = getPool();
+    // Once the whole land is verified (or approved), its sections stay verified until L1 / L2 returns it.
+    const landNow = (await pool.request().input("Id", sql.Int, id).query("SELECT VerificationStatus FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
+    if (!landNow) return res.status(404).json({ error: "Land not found" });
+    if (!verified && landNow.VerificationStatus === "Verified") return res.status(409).json({ error: "The land is already verified — it must be returned by L1 / L2 before a section can be un-verified" });
+    if (verified && !isSuperAdmin(req)) {
+      const mine = await pool.request().input("Id", sql.Int, id).input("U", sql.Int, req.user?.userId).query(
+        sec.tables.map((t) => `SELECT COUNT(*) AS n FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1 AND CreatedBy = @U`).join(" UNION ALL "));
+      if (mine.recordset.some((x) => x.n > 0)) return res.status(409).json({ error: ownWork(req, req.user?.userId, `some ${sec.label} entries`) });
+    }
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    let n = 0;
+    try {
+      for (const t of sec.tables) {
+        const r = await new sql.Request(tx).input("Id", sql.Int, id).input("U", sql.Int, req.user?.userId || null).query(verified
+          ? `UPDATE dbo.${t} SET VerificationStatus = N'Verified', VerifiedBy = @U, VerifiedAt = SYSUTCDATETIME() WHERE LandId = @Id AND IsActive = 1 AND ISNULL(VerificationStatus, N'') <> N'Verified'`
+          : `UPDATE dbo.${t} SET VerificationStatus = N'Pending', VerifiedBy = NULL, VerifiedAt = NULL WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus = N'Verified'`);
+        n += r.rowsAffected[0];
+      }
+      await tx.commit();
+    } catch (e) {
+      await tx.rollback().catch(() => {});
+      throw e;
+    }
+    await writeAudit(pool, req, {
+      action: verified ? "Section Verified" : "Section Verification Removed",
+      entityType: "Land Property", entityId: id, landId: id,
+      newValue: { section: sec.label, rows: n }, remarks,
+    });
+    res.json({ message: verified ? `${sec.label} verified` : `${sec.label} set back to pending` });
+  } catch (err) {
+    console.error("[legal-land] section verify error:", err.message);
+    res.status(500).json({ error: "Could not verify this section" });
+  }
+});
+
+// ── Who may move a land through Verify → L1 → L2, and in what order ──────────────────────────────────────────────
+// Verifier / L1 Approver / L2 Approver come from Setup → Approval Control. Nobody acts on land they entered, and the
+// L2 approver is not the user who did L1 (super admin excepted). Each step needs the one before it.
+async function stageGuard(req, id, stage) {
+  const pool = getPool();
+  const land = (await pool.request().input("Id", sql.Int, id).query(`
+    SELECT LandCode, CreatedBy, ISNULL(VerificationStatus, N'Draft') AS VerificationStatus, ISNULL(L1Status, N'Pending') AS L1Status,
+           ISNULL(L2Status, N'Pending') AS L2Status, L1ReviewerId, IsOnHold, IsCancelled
+    FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1`)).recordset[0];
+  if (!land) return { status: 404, error: "Land not found" };
+  const role = { verify: "Verifier", l1: "L1 Approver", l2: "L2 Approver" }[stage];
+  if (!(await canAct(req, role, LAND_PAGE))) return { status: 403, error: `Only a ${role} (Setup → Approval Control) can do this` };
+  const own = ownWork(req, land.CreatedBy, "this land");
+  if (own) return { status: 409, error: own };
+  if (land.IsCancelled) return { status: 409, error: `${land.LandCode} is cancelled` };
+  if (land.IsOnHold) return { status: 409, error: `${land.LandCode} is on hold — resume it first` };
+  if (land.L2Status === "Approved") return { status: 409, error: `${land.LandCode} is already fully approved` };
+  if (stage === "verify") {
+    if (land.VerificationStatus === "Verified") return { status: 409, error: `${land.LandCode} is already verified` };
+    const open = await openSections(pool, id);
+    if (open.length) return { status: 409, error: `Verify these sections first (tick Verified at the end of each): ${open.join(", ")}` };
+  }
+  if (stage === "l1") {
+    if (land.VerificationStatus !== "Verified") return { status: 409, error: "Verify the land data before L1 review" };
+    if (land.L1Status === "Approved") return { status: 409, error: "L1 is already approved — waiting for L2" };
+  }
+  if (stage === "l2") {
+    if (land.L1Status !== "Approved") return { status: 409, error: "L1 approval comes before L2" };
+    if (!isSuperAdmin(req) && land.L1ReviewerId != null && Number(land.L1ReviewerId) === Number(req.user?.userId)) {
+      return { status: 409, error: "You gave the L1 approval — another user must give L2" };
+    }
+  }
+  return { land };
+}
+
+/** Sections that have entries not yet verified (empty sections do not block). */
+async function openSections(pool, id) {
+  const tables = [...new Set(Object.values(VERIFY_SECTIONS).flatMap((x) => x.tables))];
+  const r = await pool.request().input("Id", sql.Int, id).query(tables.map((t) =>
+    `SELECT '${t}' AS T, SUM(CASE WHEN ISNULL(VerificationStatus, N'') <> N'Verified' THEN 1 ELSE 0 END) AS n FROM dbo.${t} WHERE LandId = @Id AND IsActive = 1`).join(" UNION ALL "));
+  const open = new Set(r.recordset.filter((x) => x.n > 0).map((x) => x.T));
+  return [...new Set(Object.values(VERIFY_SECTIONS).filter((sec) => sec.tables.some((t) => open.has(t))).map((sec) => sec.label))];
+}
+
+router.post("/:id/verify", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   const remarks = text(req.body?.remarks, 1000);
   if (!id) return res.status(400).json({ error: "Invalid land id" });
   try {
+    const g = await stageGuard(req, id, "verify");
+    if (g.error) return res.status(g.status).json({ error: g.error });
     const pool = getPool();
     const r = await pool.request()
       .input("Id", sql.Int, id)
@@ -1555,6 +1757,10 @@ router.post("/:id/submit-l1", requirePageRight(LAND_PAGE, "edit"), async (req, r
   if (!id) return res.status(400).json({ error: "Invalid land id" });
   try {
     const pool = getPool();
+    const st = (await pool.request().input("Id", sql.Int, id).query("SELECT VerificationStatus, L2Status FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
+    if (!st) return res.status(404).json({ error: "Land not found" });
+    if (st.VerificationStatus !== "Verified") return res.status(409).json({ error: "Verify the land data before sending it for L1 review" });
+    if (st.L2Status === "Approved") return res.status(409).json({ error: "This land is already fully approved" });
     const r = await pool.request()
       .input("Id", sql.Int, id)
       .input("UserId", sql.Int, req.user?.userId || null)
@@ -1575,7 +1781,7 @@ router.post("/:id/submit-l1", requirePageRight(LAND_PAGE, "edit"), async (req, r
   }
 });
 
-router.post("/:id/action-l1", async (req, res) => {
+router.post("/:id/action-l1", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   const action = req.body?.action;
   const remarks = text(req.body?.remarks, 1000);
@@ -1583,6 +1789,8 @@ router.post("/:id/action-l1", async (req, res) => {
   if (!["Approve", "Return"].includes(action)) return res.status(400).json({ error: "Action must be Approve or Return" });
   if (action === "Return" && !remarks) return res.status(400).json({ error: "Remarks required when returning" });
   try {
+    const g = await stageGuard(req, id, "l1");
+    if (g.error) return res.status(g.status).json({ error: g.error });
     const pool = getPool();
     const isApprove = action === "Approve";
     const r = await pool.request()
@@ -1622,7 +1830,7 @@ router.post("/:id/action-l1", async (req, res) => {
   }
 });
 
-router.post("/:id/action-l2", async (req, res) => {
+router.post("/:id/action-l2", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   const action = req.body?.action;
   const remarks = text(req.body?.remarks, 1000);
@@ -1630,6 +1838,8 @@ router.post("/:id/action-l2", async (req, res) => {
   if (!["Approve", "Return", "Reject"].includes(action)) return res.status(400).json({ error: "Action must be Approve, Return or Reject" });
   if ((action === "Return" || action === "Reject") && !remarks) return res.status(400).json({ error: "Remarks required when returning or rejecting" });
   try {
+    const g = await stageGuard(req, id, "l2");
+    if (g.error) return res.status(g.status).json({ error: g.error });
     const pool = getPool();
     const isApprove = action === "Approve";
     const isReturn = action === "Return";

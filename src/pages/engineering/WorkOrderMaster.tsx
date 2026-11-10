@@ -25,6 +25,7 @@ import { ActivityGroupCard } from "./workOrder/ActivityGroupCard";
 import { WorkOrderDetailPanel } from "./workOrder/WorkOrderDetailPanel";
 import { WorkOrdersList } from "./workOrder/WorkOrdersList";
 import { WorkOrderEditPanel } from "./workOrder/WorkOrderEditPanel";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -72,6 +73,8 @@ const WorkOrderMaster: React.FC = () => {
 
   // ── Tab state ─────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  // Amend (an approved WO): the edit panel opens as usual; saving raises an amendment for approval instead.
+  const amend = useAmendMode("work-order", "Work Order", { onRaised: () => setViewMode("detail") });
   const [listKey, setListKey] = useState(0);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
 
@@ -547,17 +550,26 @@ const WorkOrderMaster: React.FC = () => {
             onBack={() => setViewMode("list")}
             onDelete={() => setViewMode("list")}
             onEdit={(id) => {
+              amend.stop();
+              setSelectedOrderId(id);
+              setViewMode("edit");
+            }}
+            onAmend={(id) => {
+              amend.start(id);
               setSelectedOrderId(id);
               setViewMode("edit");
             }}
           />
         )}
+        {amend.dialog}
 
         {/* ── EDIT VIEW ── */}
         {viewMode === "edit" && selectedOrderId !== null && (
           <WorkOrderEditPanel
             workOrderId={selectedOrderId}
+            amend={amend.amending ? amend : undefined}
             onBack={() => {
+              amend.stop();
               setViewMode("detail");
             }}
             onSaved={(id) => {

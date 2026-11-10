@@ -8,7 +8,7 @@ import { recordOwnershipChange, undoOwnershipChange, updateOwnershipChange, type
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { LEGAL_GRADIENT } from "@/components/legal/LegalShell";
-import { StepTabs, stepCard } from "./StepTabs";
+import { stepCard } from "./StepTabs";
 
 // Pipeline step 5 — Ownership History & Verification, read the way a chain of title is read:
 //   1. the first documented owner(s);
@@ -172,7 +172,7 @@ const ChangeForm: React.FC<StepProps & { current: LegalRow[]; onDone: () => void
         <div className="mt-2 space-y-2">
           {to.map((x, i) => (
             <div key={i} className={`grid gap-2 ${askRelation ? "sm:grid-cols-[1.3fr_1.2fr_1fr_90px_auto]" : "sm:grid-cols-[1.5fr_1.4fr_90px_auto]"}`}>
-              <input className={input} placeholder="Name *" value={x.name} onChange={(e) => setTo(to.map((y, j) => (j === i ? { ...y, name: e.target.value } : y)))} />
+              <input className={input} list="legal-owner-names" placeholder="Name * (select or type)" value={x.name} onChange={(e) => setTo(to.map((y, j) => (j === i ? { ...y, name: e.target.value } : y)))} />
               <input className={input} placeholder="Father / husband" value={x.guardian} onChange={(e) => setTo(to.map((y, j) => (j === i ? { ...y, guardian: e.target.value } : y)))} />
               {askRelation && <select className={input} value={x.rel} title="Relationship to the giving owner (optional)" onChange={(e) => setTo(to.map((y, j) => (j === i ? { ...y, rel: e.target.value } : y)))}>
                 <option value="">Not related</option>
@@ -284,7 +284,7 @@ const EditChange: React.FC<{ landId: number; date: string; evs: LegalRow[]; reco
       <div className="mt-2 space-y-2">
         {owners.map((o, i) => (
           <div key={o.eventId} className="grid gap-2 sm:grid-cols-[1.3fr_1.2fr_1fr_auto] sm:items-center">
-            <input className={input} placeholder="Name *" value={o.name} onChange={(e) => setOwners(owners.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+            <input className={input} list="legal-owner-names" placeholder="Name * (select or type)" value={o.name} onChange={(e) => setOwners(owners.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
             <input className={input} placeholder="Father / husband" value={o.guardian} onChange={(e) => setOwners(owners.map((x, j) => (j === i ? { ...x, guardian: e.target.value } : x)))} />
             <select className={input} value={o.rel} onChange={(e) => setOwners(owners.map((x, j) => (j === i ? { ...x, rel: e.target.value } : x)))}>
               <option value="">Not related</option>
@@ -425,26 +425,17 @@ const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
   );
 };
 
+/** Names in the Owner list, offered on every owner-name box of the chain (pick one or type a new one). */
+const OwnerNames: React.FC = () => {
+  const { data } = useQuery({ queryKey: ["legal-lookup", "owner"], queryFn: () => getLegalLookup("owner"), staleTime: 60 * 1000 });
+  return <datalist id="legal-owner-names">{(data ?? []).map((o) => <option key={String(o.value)} value={o.label.replace(/ \([A-Z]{5}[0-9]{4}[A-Z]\)$/, "")} />)}</datalist>;
+};
+
+// One page: the ownership chain, where every change is added (New) and corrected (edit / undo on its row).
+// Verification is a single "Verified" tick under the section (SectionVerify), not row by row.
 export const OwnershipStep: React.FC<StepProps> = (p) => (
-  <StepTabs {...p} tabs={[
-    { key: "chain", label: "Ownership chain", content: <Chain {...p} /> },
-    {
-      key: "verify", label: "Verification",
-      note: "Reviewer: verify each transfer and ownership record, and give every ownership record its seven checks (Verified or Not Applicable).",
-      tables: [
-        { key: "ownership-event", label: "Transfers to verify", noAdd: true },
-        { key: "ownership-record", label: "Ownership records to verify", noAdd: true },
-        { key: "ownership-check", label: "Seven checks per ownership record" },
-        { key: "inheritance", label: "Inheritances to verify", noAdd: true },
-      ],
-    },
-    {
-      key: "corrections", label: "Corrections",
-      note: "Only to correct a typing mistake. Normal entries are made from Ownership chain, which keeps dates and shares consistent.",
-      tables: [
-        { key: "inheritance-heir", label: "Legal Heirs", noAdd: true },
-        { key: "partition", label: "Partitions", noAdd: true },
-      ],
-    },
-  ]} />
+  <>
+    <OwnerNames />
+    <Chain {...p} />
+  </>
 );

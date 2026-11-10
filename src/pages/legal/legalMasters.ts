@@ -48,6 +48,7 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("area-unit", "Area Unit", "Land records", Ruler, "Decimal, Cottah, Bigha, Acre… to sq ft"),
   S("copy-type", "Document Copy Type", "Land records", Copy, "Certified, online, office copy, photocopy"),
   S("enquiry-source", "Enquiry Source", "Land records", TrendUp, "Where land enquiries come from"),
+  S("portal-link", "Government Site Links", "Land records", Link21, "Banglarbhumi, WB Registration and other official sites"),
   // ── Setup: Ownership ──
   S("ownership-type", "Ownership Type", "Ownership", Profile, "Individual, joint, inherited, company…"),
   S("relationship-type", "Relationship Type", "Ownership", People, "Father, son, wife, legal heir…"),
@@ -65,16 +66,16 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("registration-office", "Deed Registration Office", "Deed & Registration", Building4, "ADSR / DSR / ARA offices"),
   S("deed-type", "Deed Type", "Deed & Registration", Book1, "Sale, gift, partition, POA…"),
   S("document-type", "Legal Document Type", "Deed & Registration", DocumentCopy, "Evidence catalogue & retention"),
-  S("portal-link", "Official Portal Link", "Deed & Registration", Link21, "Verified government URLs"),
   S("checklist-template", "Document Checklist Template", "Deed & Registration", ClipboardTick, "Versioned document requirements"),
   S("checklist-item", "Checklist Item", "Deed & Registration", ClipboardTick, "Required / conditional / optional rules"),
   // ── Setup: Workflow ──
   S("approval-authority", "Approval Control", "Workflow", ShieldTick, "Who verifies and who approves at L1 / L2 — admin only"),
   // ── Setup: Parties ──
-  S("buyer", "Buyer", "Parties", UserTick, "PAN, Aadhaar & land documents"),
-  S("seller", "Seller", "Parties", UserMinus, "PAN, Aadhaar & title documents"),
-  S("owner", "Owner", "Parties", Crown1, "Recorded owners of land"),
-  S("customer", "Legal Customer", "Parties", People, "Legal module customers — not the Sales / CRM customers"),
+  // We are the company: we buy land from Sellers and sell land to Buyers; Owners are the people in a land's ownership chain.
+  // Each list also fills itself when a new name is typed in a purchase, sale or ownership entry.
+  S("buyer", "Buyer", "Parties", UserTick, "Who buys land from us (sales)"),
+  S("seller", "Seller", "Parties", UserMinus, "Who we buy land from (purchases)"),
+  S("owner", "Owner", "Parties", Crown1, "Past and present owners in land ownership chains"),
   S("witness", "Witness", "Parties", Eye, "Deed witnesses & ID proof"),
   S("advocate", "Advocate", "Parties", Judge, "Enrolment, practice & chamber"),
 ];

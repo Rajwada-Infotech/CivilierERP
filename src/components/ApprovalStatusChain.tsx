@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 export type ApprovalTable =
   | "GoodsReceiptNotes"
   | "PurchaseOrders"
+  | "DocAmendment"
   | "WorkOrderHeader"
   | "ExpenseBooking"
   | "NewPayment"

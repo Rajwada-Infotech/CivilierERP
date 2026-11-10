@@ -4,7 +4,7 @@ import React from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { computeGrnNetWithTerms } from "@/pages/material/ExpenseBooking/helpers";
-import { ClipboardCheck, ClipboardList, Package, PackageOpen, Hammer, Banknote, Truck, Receipt, ArrowDownCircle, XCircle, ArrowLeftRight, Warehouse, ShoppingCart, Building2, Home, Car, Eye, FileText, Landmark, UserCheck, FileWarning, Undo2, ShieldCheck } from "lucide-react";
+import { ClipboardCheck, ClipboardList, Package, PackageOpen, Hammer, Banknote, Truck, Receipt, ArrowDownCircle, XCircle, ArrowLeftRight, Warehouse, ShoppingCart, Building2, Home, Car, Eye, FileText, Landmark, UserCheck, FileWarning, Undo2, ShieldCheck, FilePenLine } from "lucide-react";
 import { type ApprovalTable } from "@/components/ApprovalStatusChain";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -89,6 +89,14 @@ export const MODULE_CONFIG: Record<
     label: string;
   }
 > = {
+  // An amendment to an approved document (backend/routes/docAmendments.js) — applied once approved.
+  "doc-amendment": {
+    icon: FilePenLine,
+    color: "text-blue-500 bg-blue-500/10",
+    navPath: "/material/amendment",
+    apiEndpoint: "/api/doc-amendments",
+    label: "Amendments",
+  },
   "purchase-orders": {
     icon: Package,
     color: "text-blue-500 bg-blue-500/10",
@@ -426,6 +434,7 @@ export const MODULE_CONFIG: Record<
 export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "goods-receipt": "GoodsReceiptNotes",
   "purchase-orders": "PurchaseOrders",
+  "doc-amendment": "DocAmendment",
   "work-orders": "WorkOrderHeader",
   "expense-booking": "ExpenseBooking",
   payments: "NewPayment",
@@ -468,6 +477,7 @@ export const CATEGORY_ORDER: CategoryId[] = ["material", "finance", "engineering
 export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "material-requests": "material",
   "purchase-orders": "material",
+  "doc-amendment": "material",
   "work-orders": "material",
   "goods-receipt": "material",
   "material-issues": "material",
@@ -669,6 +679,7 @@ export function getEffectiveAmount(item: InboxItem): number | null {
 // Left-rail accent border colour per module (tailwind border-* class)
 export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "purchase-orders":      "border-blue-500",
+  "doc-amendment":        "border-blue-500",
   "work-orders":          "border-amber-500",
   payments:               "border-emerald-500",
   "goods-receipt":        "border-violet-500",

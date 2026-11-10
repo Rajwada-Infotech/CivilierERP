@@ -1,5 +1,5 @@
 import React from "react";
-import { Eye, Trash2, CreditCard, PenSquare } from "lucide-react";
+import { Eye, Trash2, CreditCard, PenSquare, FilePenLine } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { computeBreakdown, computeGrnNetWithTerms, fmt } from "./helpers";
@@ -9,6 +9,8 @@ import { ApprovalStatusChain, type TrailData } from "@/components/ApprovalStatus
 interface Props {
   rec: ExpenseRecord;
   onEdit: () => void;
+  /** Amend an approved invoice (raised with a reason, applied once approved). */
+  onAmend?: () => void;
   onPreview: () => void;
   onDelete: () => void;
   onApprovalSuccess: () => void;
@@ -23,6 +25,7 @@ interface Props {
 export function RecordCard({
   rec,
   onEdit,
+  onAmend,
   onPreview,
   onDelete,
   onApprovalSuccess,
@@ -160,6 +163,16 @@ export function RecordCard({
                 className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <PenSquare size={12} />
+              </button>
+            )}
+            {canEdit && onAmend && rec.status === "Approved" && (
+              <button
+                onClick={onAmend}
+                title="Amend — change it with a reason; applies once approved"
+                aria-label="Amend"
+                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <FilePenLine size={12} />
               </button>
             )}
             {canDelete && (

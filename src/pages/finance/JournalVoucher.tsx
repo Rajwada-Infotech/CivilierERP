@@ -28,8 +28,9 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Plus, Trash2, Scale, Loader2, RefreshCw,
-  CheckCircle2, Clock, FileText, AlertCircle, Search, X, BookOpen, Pencil,
+  CheckCircle2, Clock, FileText, AlertCircle, Search, X, BookOpen, Pencil, FilePenLine,
 } from "lucide-react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import {
   getJournalVouchers,
   getJournalVoucher,
@@ -240,6 +241,7 @@ export default function JournalVoucher() {
     setLines((prev) => (prev.length > 2 ? prev.filter((_, i) => i !== idx) : prev));
 
   const resetForm = () => {
+    amend.stop();
     setJvDate(new Date().toISOString().slice(0, 10));
     setNarration("");
     setLines([emptyLine(), emptyLine()]);
@@ -352,6 +354,15 @@ export default function JournalVoucher() {
     }
   };
 
+  // Amend (an approved voucher): the form opens as for an edit; saving raises an amendment for approval instead.
+  const amend = useAmendMode("journal-voucher", "Journal Voucher", {
+    onRaised: () => {
+      setDialogOpen(false);
+      resetForm();
+      load();
+    },
+  });
+
   const submit = async () => {
     if (!companyId) { toast.error("Select the Company this voucher belongs to."); return; }
     if (!totals.balanced) { toast.error("Debit and Credit totals must match before saving."); return; }
@@ -369,6 +380,7 @@ export default function JournalVoucher() {
         ...settlementPayload(settlement),
       };
       if (editingId) {
+        if (await amend.intercept(editingId, payload)) return;
         const result: any = await updateJournalVoucher(editingId, payload);
         toast.success(
           result?.message ||
@@ -597,6 +609,17 @@ export default function JournalVoucher() {
                           <Pencil size={13} />
                         </button>
                       )}
+                      {rights.canEdit && v.Status === "Approved" && (
+                        <button
+                          disabled={editLoading}
+                          onClick={() => { amend.start(v.JVID); void startEdit(v); }}
+                          title="Amend — change it with a reason; applies once approved"
+                          aria-label="Amend"
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
+                        >
+                          <FilePenLine size={13} />
+                        </button>
+                      )}
                       {rights.canDelete && (
                         <button
                           onClick={() => setDeleteId(v.JVID)}
@@ -706,6 +729,17 @@ export default function JournalVoucher() {
                             <Pencil size={12} />
                           </button>
                         )}
+                        {rights.canEdit && v.Status === "Approved" && (
+                          <button
+                            disabled={editLoading}
+                            onClick={(e) => { e.stopPropagation(); amend.start(v.JVID); void startEdit(v); }}
+                            title="Amend — change it with a reason; applies once approved"
+                            aria-label="Amend"
+                            className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40"
+                          >
+                            <FilePenLine size={12} />
+                          </button>
+                        )}
                         {rights.canDelete && (
                           <button
                             onClick={(e) => { e.stopPropagation(); setDeleteId(v.JVID); }}
@@ -734,6 +768,7 @@ export default function JournalVoucher() {
       </SheetShell>
 
       {/* ── New JV Dialog ── */}
+      {amend.dialog}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
         <DialogContent className="sheet-frame max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
           <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-foreground">

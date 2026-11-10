@@ -37,6 +37,14 @@ const crmBooking = (table, fk = "BookingId") => ({
 //   key     the column the inbox row's RecordId holds
 //   company / project / party   SQL expressions that return a name (null when the document has none)
 const SPECS = {
+  // An amendment shows the amended document's company / project, and (for a PO) its supplier.
+  "doc-amendment": {
+    from: "dbo.DocAmendment t LEFT JOIN dbo.PurchaseOrders po_da ON t.DocType = N'purchase-order' AND po_da.PurchaseOrderID = t.DocId",
+    key: "t.Id",
+    company: ent("t.CompanyId"),
+    project: ent("t.ProjectId"),
+    party: head("po_da.SupplierID"),
+  },
   "purchase-orders": { from: "dbo.PurchaseOrders t", key: "t.PurchaseOrderID", company: ent("t.CompanyId"), project: ent("t.ProjectId"), party: head("t.SupplierID") },
   "work-orders": { from: "dbo.WorkOrderHeader t", key: "t.Id", company: ent("t.CompanyId"), project: ent("t.ProjectId"), party: `COALESCE(${head("t.ContractorId")}, ${head("t.SupplierId")})` },
   "work-done": { from: "dbo.WorkDone t", key: "t.ID", company: ent("t.CompanyId"), project: ent("t.ProjectId"), party: head("t.SupplierId") },

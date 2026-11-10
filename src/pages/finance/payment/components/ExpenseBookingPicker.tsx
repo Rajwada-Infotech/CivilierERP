@@ -16,6 +16,7 @@ export function ExpenseBookingPicker({
   jvLines = [],
   jvLinesLoading = false,
   selectedJVLine = null,
+  savedTag = null,
   onJVLineSelect,
   onJVLineClear,
   onMergeConfirm,
@@ -35,6 +36,9 @@ export function ExpenseBookingPicker({
   jvLines?: PayableJVLine[];
   jvLinesLoading?: boolean;
   selectedJVLine?: PayableJVLine | null;
+  /** What a saved payment being edited is already tagged to, until another is picked. A fully paid invoice or JV is no
+   *  longer among the options, so it can't be found there. */
+  savedTag?: { kind: string; label: string } | null;
   onJVLineSelect?: (line: PayableJVLine) => void;
   onJVLineClear?: () => void;
   /** "Merge invoices into one payment" — called with the full, validated
@@ -84,7 +88,7 @@ export function ExpenseBookingPicker({
   }, []);
 
   const selected = options.find((o) => o.id === value);
-  const hasSelection = !!selected || !!selectedContract || !!selectedJVLine || !!mergedSummary;
+  const hasSelection = !!selected || !!selectedContract || !!selectedJVLine || !!mergedSummary || !!savedTag;
 
   // A search like "194" also matches ledger names ("TDS SECTION 194H"), which
   // buried JV-2026-00194 itself under dozens of unrelated lines — so lines
@@ -268,6 +272,13 @@ export function ExpenseBookingPicker({
                 {selected.type === "emi" ? "EMI" : "EXB"}
               </span>
               <span className="font-heading tabular-nums text-xs text-primary font-semibold truncate">{selected.label}</span>
+            </span>
+          ) : savedTag ? (
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-[0.625rem] font-heading font-semibold border border-foreground text-foreground">
+                {savedTag.kind}
+              </span>
+              <span className="font-heading tabular-nums text-xs text-foreground font-semibold truncate">{savedTag.label}</span>
             </span>
           ) : (
             <span className="text-muted-foreground">— Choose an invoice, contract or JV —</span>

@@ -3,7 +3,7 @@ import type { POState } from "./usePurchaseOrder";
 
 // The bottom action bar: save, submit, print, cancel.
 export function POActionBar({ m }: { m: POState }) {
-  const { form, lineItems, saving, saved, items, handleSave, goToCreate, isReadOnly } = m;
+  const { form, lineItems, saving, saved, items, handleSave, goToCreate, isReadOnly, amending, amendChecking } = m;
   return (
     <>
       {/* Bottom action bar */}
@@ -50,6 +50,7 @@ export function POActionBar({ m }: { m: POState }) {
                 )}
               </p>
               <div className="flex items-center gap-2 sm:ml-auto">
+                {!amending && (
                 <button
                   onClick={goToCreate}
                   disabled={saving || saved || !poIsDirty}
@@ -57,9 +58,10 @@ export function POActionBar({ m }: { m: POState }) {
                 >
                   <RotateCcw size={12} /> Reset
                 </button>
+                )}
                 <button
                   onClick={handleSave}
-                  disabled={saving || saved || !poCanSave}
+                  disabled={saving || saved || !poCanSave || amendChecking}
                   className="flex-1 sm:flex-none px-5 py-2 text-sm font-heading font-semibold bg-foreground text-card border border-foreground disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                 >
                   {saved ? (
@@ -73,7 +75,11 @@ export function POActionBar({ m }: { m: POState }) {
                     ? "Saved!"
                     : saving
                       ? "Saving…"
-                      : "Save Purchase Order"}
+                      : amending
+                        ? amendChecking
+                          ? "Checking…"
+                          : "Review amendment"
+                        : "Save Purchase Order"}
                 </button>
               </div>
             </div>

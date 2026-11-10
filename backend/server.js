@@ -153,6 +153,7 @@ function isLocalRequest(req) {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 const ALL_ROUTES = [
   { path: "/api/amendments", file: "./routes/amendmentLog" },
+  { path: "/api/doc-amendments", file: "./routes/docAmendments" },
   { path: "/api/audit-trail", file: "./routes/auditTrail" },
   { path: "/api/roles", file: "./routes/roles" },
   { path: "/api/user-rights", file: "./routes/userRights" },

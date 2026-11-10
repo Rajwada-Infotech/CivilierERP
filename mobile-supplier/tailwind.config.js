@@ -5,15 +5,14 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Mirrors the web app's semantic tokens (src/index.css) so screens
-        // built here read the same way as the Finance/Material/CRM web UI.
-        primary: "#6366f1",
-        background: "#0b0f19",
-        card: "#111826",
-        border: "#1f2937",
-        muted: "#6b7280",
-        foreground: "#e5e7eb",
-        destructive: "#ef4444",
+        // The web app's default (dark) theme tokens (src/index.css), as in src/theme/colors.ts.
+        primary: "#6467f2",
+        background: "#0f1114",
+        card: "#17191e",
+        border: "#373a43",
+        muted: "#9ba0ab",
+        foreground: "#dcdfe5",
+        destructive: "#e34545",
       },
     },
   },

@@ -103,6 +103,18 @@ export const ReportTable: React.FC<{
       .catch(() => {});
   }, [isPaymentReasonReport]);
 
+  // ── Land switcher (Legal reports) — one land or all; the list comes from the Land Property Register.
+  const isLegalReport = report.id.startsWith("legal-");
+  const [landCode, setLandCode] = useState<string>("");
+  const [landOptions, setLandOptions] = useState<{ code: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!isLegalReport) return;
+    fetchWithAuth("/api/legal/land-reports/land-register")
+      .then((r) => r.json().catch(() => ({})))
+      .then((j) => setLandOptions(Array.isArray(j?.rows) ? j.rows.map((x: Record<string, string>) => ({ code: x["Land ID"], name: x["Land"] })) : []))
+      .catch(() => {});
+  }, [isLegalReport]);
+
   // ── Expense Head switcher (expense-register only) — nested (grouped by
   //     parent Account Group) multi-select, so more than one head can be
   //     picked at once instead of one at a time. ───────────────────────────
@@ -283,6 +295,7 @@ export const ReportTable: React.FC<{
 
     // Payment Reason Report: scope to a single reason when selected
     if (isPaymentReasonReport && reasonFilter) f["reason"] = reasonFilter;
+    if (isLegalReport && landCode) f["landCode"] = landCode;
 
     return f;
   };
@@ -342,7 +355,7 @@ export const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, tagIds, autoSearchTerm, userDate, dateFrom, dateTo, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, landCode, expenseHeadIds, companyIds, projectIds, userIds, tagIds, autoSearchTerm, userDate, dateFrom, dateTo, projects]);
 
   // ── Server-paged reports: fetch just the page on screen ──────────────────
   // Fetching every page up front (fetchAllRows) meant hundreds of sequential
@@ -531,6 +544,23 @@ export const ReportTable: React.FC<{
           )}
 
           {/* Reason switcher — payment-reason-report only */}
+          {isLegalReport && landOptions.length > 0 && (
+            <div className="relative flex items-center">
+              <FileText size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <select
+                value={landCode}
+                onChange={(e) => setLandCode(e.target.value)}
+                className="appearance-none pl-7 pr-6 py-1.5 h-[30px] max-w-[260px] rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              >
+                <option value="">All Lands</option>
+                {landOptions.map((l) => (
+                  <option key={l.code} value={l.code}>{l.code} · {l.name}</option>
+                ))}
+              </select>
+              <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            </div>
+          )}
+
           {isPaymentReasonReport && reasonOptions.length > 0 && (
             <div className="relative flex items-center">
               <Receipt

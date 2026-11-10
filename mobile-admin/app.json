@@ -24,7 +24,6 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.rajwadainfotech.civiliererpadmin",
-      "googleServicesFile": "./google-services.json",
       "permissions": [
         "REQUEST_INSTALL_PACKAGES"
       ]
@@ -45,6 +44,14 @@
         }
       ]
     ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/77756cc3-b2bc-479c-bcdc-56555bdf3509",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "extra": {
       "eas": {
         "projectId": "77756cc3-b2bc-479c-bcdc-56555bdf3509"

@@ -258,6 +258,7 @@ const Reports: React.FC = () => {
                       onChange={patchFilters}
                       activeFilters={activeFilters}
                       onClearAll={clearFilters}
+                      datesOnly={section.id === "legal"}
                     />
 
                     {/* Tiles */}

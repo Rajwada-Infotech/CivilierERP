@@ -1,62 +1,68 @@
-// RN port of src/pages/admin/MenuRights.tsx (web) — same subject modes
-// (Role-wise / Custom User-wise), same page×action permission matrix, same
-// presets, same module filter + search, same group "Grant all/Revoke all".
-// Web's wide table (7 action columns) becomes a per-page card with the
-// actions as a wrapped row of small toggle chips — a 7-column table doesn't
-// fit a phone width, and this keeps every action independently tappable
-// without horizontal scrolling.
+// RN port of src/pages/admin/MenuRights.tsx (web), on the drawing sheet as the web draws it: the title block; the
+// subject box — "Choose a role" / "Choose a person" with ink segments for Role-wise and Custom user-wise and the picker;
+// then, once someone is chosen, the presets, and the rights box: who (name and role tag), how many pages and actions are
+// granted, an Unsaved mark, the page search and module keys, the pages by group (module tag, group, Grant all / Revoke
+// all) — each page a ruled row with an "every action" square and its actions as small square checks (a dash where the
+// page doesn't offer one) — and the footer with Save permissions. The web's seven-column table becomes the wrapped row of
+// checks, so no column has to scroll sideways on a phone.
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, Alert, Switch } from "react-native";
-import { Search, Save, Users, Check, ShieldCheck } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { View, Text, Alert } from "react-native";
+import { Check, ChevronRight, Save } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/components/OptionPicker";
-import { ALL_ACTIONS, MODULE_COLORS, ROLE_PRESETS } from "./menuRightsConfig";
+import { ALL_ACTIONS, ROLE_PRESETS } from "./menuRightsConfig";
 import {
   fetchPageDefinitions, getUsersForRights, getUserPermissions, saveUserPermissions,
   getRolesList, getRolePermissions, saveRolePermissions,
   type PageDef, type PagePermission,
 } from "@/api/postApprovalRightsApi";
+import { Body, Key, Label, Press, SearchBox, Seg, SheetShell, Skel } from "@/components/sheet/Sheet";
+import { KeyRow, SheetPage } from "@/components/sheet/Register";
 
 type Subject = "user" | "role";
 
-function SubjectToggle({ subject, onChange }: { subject: Subject; onChange: (s: Subject) => void }) {
+/** A small square check: filled ink when on, a dash in the middle for "some" (the page's every-action square). */
+export function CheckSquare({ checked, mixed, onPress, size = 22 }: { checked: boolean; mixed?: boolean; onPress: () => void; size?: number }) {
   return (
-    <View style={{ flexDirection: "row", gap: 4, padding: 4, borderRadius: 12, backgroundColor: colors.muted, alignSelf: "flex-start", marginBottom: 12 }}>
-      {(["role", "user"] as Subject[]).map((s) => {
-        const active = subject === s;
-        return (
-          <Pressable
-            key={s}
-            onPress={() => onChange(s)}
-            style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9, backgroundColor: active ? colors.card : "transparent", borderWidth: active ? 1 : 0, borderColor: colors.border }}
-          >
-            <Text style={{ color: active ? colors.foreground : colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.heading.medium }}>
-              {s === "role" ? "Role-wise" : "Custom User-wise"}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
+    <Press
+      onPress={onPress}
+      hitSlop={6}
+      style={() => ({ width: size, height: size, borderWidth: 1, borderColor: checked || mixed ? S.ink : S.line40, backgroundColor: checked ? S.ink : S.paper, alignItems: "center", justifyContent: "center" })}
+    >
+      {checked ? <Check size={size * 0.6} color={S.paper} /> : mixed ? <View style={{ width: size * 0.4, height: 2, backgroundColor: S.ink }} /> : null}
+    </Press>
   );
 }
 
-function ActionChip({ label, available, checked, onPress }: { label: string; available: boolean; checked: boolean; onPress: () => void }) {
+/** One action on a page: its check and its name; an action the page doesn't offer shows a faint dash instead. */
+function ActionCheck({ label, available, checked, onPress }: { label: string; available: boolean; checked: boolean; onPress: () => void }) {
   if (!available) {
     return (
-      <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7, backgroundColor: `${colors.muted}66` }}>
-        <Text style={{ color: `${colors.mutedForeground}4d`, fontSize: 10 }}>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 5, opacity: 0.45 }}>
+        <View style={{ width: 18, height: 18, alignItems: "center", justifyContent: "center" }}>
+          <View style={{ width: 8, height: 1, backgroundColor: S.graphite }} />
+        </View>
+        <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 9.5, letterSpacing: 0.9, textTransform: "uppercase", color: S.graphite }}>{label}</Text>
       </View>
     );
   }
   return (
-    <Pressable
-      onPress={onPress}
-      style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7, borderWidth: 1, borderColor: checked ? colors.primary : colors.border, backgroundColor: checked ? colors.primary : "transparent" }}
-    >
-      {checked && <Check size={9} color="#fff" />}
-      <Text style={{ color: checked ? "#fff" : colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium }}>{label}</Text>
-    </Pressable>
+    <Press onPress={onPress} hitSlop={4} style={() => ({ flexDirection: "row", alignItems: "center", gap: 5 })}>
+      <View style={{ width: 18, height: 18, borderWidth: 1, borderColor: checked ? S.ink : S.line40, backgroundColor: checked ? S.ink : S.paper, alignItems: "center", justifyContent: "center" }}>
+        {checked && <Check size={11} color={S.paper} />}
+      </View>
+      <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 9.5, letterSpacing: 0.9, textTransform: "uppercase", color: S.ink }}>{label}</Text>
+    </Press>
+  );
+}
+
+/** A module's tag: capitals in a faint ruled box. */
+export function ModuleTag({ children }: { children: string }) {
+  return (
+    <View style={{ alignSelf: "flex-start", borderWidth: 1, borderColor: S.line40, paddingHorizontal: 5, paddingVertical: 1 }}>
+      <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 9, letterSpacing: 0.9, textTransform: "uppercase", color: S.graphite }}>{children}</Text>
+    </View>
   );
 }
 
@@ -81,15 +87,18 @@ export default function MenuRightsScreen() {
   const [loadingPerms, setLoadingPerms] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // Groups start folded: every page with its seven checks drawn at once took long enough to stall the phone.
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const toggleOpen = (g: string) => setOpenGroups((prev) => { const n = new Set(prev); n.has(g) ? n.delete(g) : n.add(g); return n; });
 
   useEffect(() => {
-    fetchPageDefinitions().then(setPageDefs).catch(() => Alert.alert("Error", "Failed to load page definitions")).finally(() => setLoadingDefs(false));
+    fetchPageDefinitions().then(setPageDefs).catch(() => Alert.alert("Could not load", "The page list could not be loaded.")).finally(() => setLoadingDefs(false));
   }, []);
   useEffect(() => {
-    getUsersForRights().then(setUsers).catch(() => Alert.alert("Error", "Failed to load users")).finally(() => setLoadingUsers(false));
+    getUsersForRights().then(setUsers).catch(() => Alert.alert("Could not load", "The users could not be loaded.")).finally(() => setLoadingUsers(false));
   }, []);
   useEffect(() => {
-    getRolesList().then(setRoles).catch(() => Alert.alert("Error", "Failed to load roles")).finally(() => setLoadingRoles(false));
+    getRolesList().then(setRoles).catch(() => Alert.alert("Could not load", "The roles could not be loaded.")).finally(() => setLoadingRoles(false));
   }, []);
 
   const selectedUser = users.find((u) => u.id === selectedUserId);
@@ -108,14 +117,14 @@ export default function MenuRightsScreen() {
     if (subject !== "user" || !selectedUserId) return;
     setLoadingPerms(true);
     setDirty(false);
-    getUserPermissions(selectedUserId).then(setPermissions).catch(() => { Alert.alert("Error", "Failed to load permissions"); setPermissions([]); }).finally(() => setLoadingPerms(false));
+    getUserPermissions(selectedUserId).then(setPermissions).catch(() => { Alert.alert("Could not load", "This person's rights could not be loaded."); setPermissions([]); }).finally(() => setLoadingPerms(false));
   }, [subject, selectedUserId]);
 
   useEffect(() => {
     if (subject !== "role" || !selectedRoleId) return;
     setLoadingPerms(true);
     setDirty(false);
-    getRolePermissions(selectedRoleId).then(setPermissions).catch(() => { Alert.alert("Error", "Failed to load role permissions"); setPermissions([]); }).finally(() => setLoadingPerms(false));
+    getRolePermissions(selectedRoleId).then(setPermissions).catch(() => { Alert.alert("Could not load", "This role's rights could not be loaded."); setPermissions([]); }).finally(() => setLoadingPerms(false));
   }, [subject, selectedRoleId]);
 
   const modules = useMemo(() => ["All", ...Array.from(new Set(pageDefs.map((p) => p.module)))], [pageDefs]);
@@ -202,7 +211,7 @@ export default function MenuRightsScreen() {
       }
       setDirty(false);
     } catch (e: any) {
-      Alert.alert("Save failed", e.message || "Something went wrong.");
+      Alert.alert("Could not save", e.message || "Something went wrong.");
     } finally {
       setSaving(false);
     }
@@ -220,198 +229,173 @@ export default function MenuRightsScreen() {
   const userOptions: PickerOption[] = users.map((u) => ({ key: String(u.id), label: u.name, sublabel: u.role.replace(/_/g, " ") }));
   const roleOptions: PickerOption[] = roles.map((r) => ({ key: String(r.RId), label: r.RName }));
 
+  const subjectName = subject === "user" ? selectedUser?.name : selectedRole?.RName;
+
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
-        <Text style={{ color: colors.foreground, fontSize: 15, fontFamily: fonts.heading.bold, marginBottom: 3 }}>Menu Rights</Text>
-        <Text style={{ color: colors.mutedForeground, fontSize: 11.5, marginBottom: 14 }}>
-          Configure per-user page and action permissions.
-        </Text>
-
-        <View style={{ borderRadius: 16, padding: 14, marginBottom: 14, backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
-            <Users size={12} color={colors.mutedForeground} />
-            <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.5 }}>
-              {subject === "user" ? "Select User" : "Select Role"}
-            </Text>
-          </View>
-          <SubjectToggle subject={subject} onChange={switchSubject} />
-          {subject === "role" && (
-            <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 10.5, lineHeight: 15, marginBottom: 10 }}>
-              Sets the baseline every user with this role inherits, effective immediately.
-            </Text>
-          )}
-          {subject === "user" ? (
-            <PickerRow
-              label="User"
-              value={loadingUsers ? "" : selectedUser?.name ?? ""}
-              placeholder={loadingUsers ? "Loading users…" : "Choose a user…"}
-              sublabel={selectedUser?.role}
-              onPress={() => setUserPickerOpen(true)}
-            />
-          ) : (
-            <PickerRow
-              label="Role"
-              value={loadingRoles ? "" : selectedRole?.RName ?? ""}
-              placeholder={loadingRoles ? "Loading roles…" : "Choose a role…"}
-              onPress={() => setRolePickerOpen(true)}
-            />
-          )}
-        </View>
-
-        {loadingDefs && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <ActivityIndicator size="small" color={colors.mutedForeground} />
-            <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>Loading page definitions…</Text>
-          </View>
-        )}
-
-        {!hasSubjectSelected ? (
-          <View style={{ alignItems: "center", justifyContent: "center", borderRadius: 16, borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, paddingVertical: 48 }}>
-            <ShieldCheck size={36} color={`${colors.mutedForeground}33`} />
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium, marginTop: 12, textAlign: "center", paddingHorizontal: 30 }}>
-              {subject === "user" ? "Select a user to manage permissions" : "Select a role to manage its baseline permissions"}
-            </Text>
-          </View>
-        ) : loadingPerms ? (
-          <View style={{ alignItems: "center", paddingVertical: 48 }}>
-            <ActivityIndicator color={colors.mutedForeground} />
-          </View>
-        ) : (
-          <>
-            {/* Presets */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -16, marginBottom: 12 }} contentContainerStyle={{ paddingHorizontal: 16 }}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.medium, alignSelf: "center", marginRight: 8 }}>Presets:</Text>
-              {Object.entries(ROLE_PRESETS).map(([key, preset]) => (
-                <Pressable
-                  key={key}
-                  onPress={() => applyPreset(key)}
-                  style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.muted, marginRight: 6 }}
-                >
-                  <Text style={{ color: colors.foreground, fontSize: 10.5, fontFamily: fonts.body.medium }}>{preset.label}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
-            {/* Module filter */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -16, marginBottom: 10 }} contentContainerStyle={{ paddingHorizontal: 16 }}>
-              {modules.map((mod) => {
-                const active = moduleFilter === mod;
-                const accent = mod === "All" ? colors.primary : (MODULE_COLORS[mod] ?? colors.mutedForeground);
-                return (
-                  <Pressable
-                    key={mod}
-                    onPress={() => setModuleFilter(mod)}
-                    style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: active ? accent : colors.border, backgroundColor: active ? accent : "transparent", marginRight: 6 }}
-                  >
-                    <Text style={{ color: active ? "#fff" : colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.medium }}>{mod}</Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-
-            {/* Search */}
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 12 }}>
-              <Search size={13} color={colors.mutedForeground} />
-              <TextInput
-                value={pageSearch}
-                onChangeText={setPageSearch}
-                placeholder="Search page…"
-                placeholderTextColor={`${colors.mutedForeground}99`}
-                style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 12.5, paddingVertical: 9 }}
+    <View style={{ flex: 1 }}>
+      <SheetPage>
+        <SheetShell
+          eyebrow="CivilierERP · Admin · Rights"
+          title="Menu rights"
+          subtitle="Which pages a role or a person can open, and what they may do on each of them."
+        >
+          {/* Whose rights: a role's baseline, or one person's own. */}
+          <View style={{ borderWidth: 1, borderColor: S.ink }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+              <Label color={S.ink}>{subject === "user" ? "Choose a person" : "Choose a role"}</Label>
+              <Seg
+                options={[
+                  { value: "role", label: "Role-wise" },
+                  { value: "user", label: "Custom user-wise" },
+                ]}
+                value={subject}
+                onChange={switchSubject}
               />
             </View>
-
-            {/* Stats + Save */}
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", flex: 1 }}>
-                <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: `${colors.primary}1a` }}>
-                  <Text style={{ color: colors.primary, fontSize: 10, fontFamily: fonts.heading.semibold }}>{stats.pagesGranted}/{stats.total} pages</Text>
-                </View>
-                <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: colors.muted }}>
-                  <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.heading.semibold }}>{stats.actionsGranted} actions</Text>
-                </View>
-                {dirty && (
-                  <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: "#ffe2021a", borderWidth: 1, borderColor: "#f59e0b40" }}>
-                    <Text style={{ color: "#f59e0b", fontSize: 10, fontFamily: fonts.heading.semibold }}>Unsaved</Text>
-                  </View>
-                )}
-              </View>
-              <Pressable
-                onPress={handleSave}
-                disabled={saving || !dirty}
-                style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: colors.primary, opacity: saving || !dirty ? 0.5 : 1 }}
-              >
-                {saving ? <ActivityIndicator size="small" color="#fff" /> : <Save size={13} color="#fff" />}
-                <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>{saving ? "Saving…" : "Save"}</Text>
-              </Pressable>
+            <View style={{ padding: 12, gap: 10 }}>
+              {subject === "role" && (
+                <Body size={12} color={S.graphite}>
+                  Sets the baseline every user with this role inherits, effective at once — a person's own rights (Custom user-wise) take precedence over it on any page they touch.
+                </Body>
+              )}
+              {subject === "user" ? (
+                <PickerRow
+                  label="Person"
+                  value={loadingUsers ? "" : selectedUser?.name ?? ""}
+                  placeholder={loadingUsers ? "Loading users…" : "Choose a user…"}
+                  sublabel={selectedUser?.role?.replace(/_/g, " ")}
+                  onPress={() => setUserPickerOpen(true)}
+                />
+              ) : (
+                <PickerRow
+                  label="Role"
+                  value={loadingRoles ? "" : selectedRole?.RName ?? ""}
+                  placeholder={loadingRoles ? "Loading roles…" : "Choose a role…"}
+                  onPress={() => setRolePickerOpen(true)}
+                />
+              )}
             </View>
+          </View>
 
-            {/* Groups */}
-            {Object.entries(groupedPages).map(([group, pages]) => {
-              const groupModule = pages[0]?.module ?? "General";
-              const accent = MODULE_COLORS[groupModule] ?? colors.mutedForeground;
-              const allGroupChecked = pages.every((p) => p.actions.every((a) => isChecked(p.key, a)));
+          {loadingDefs && <Label>Loading page definitions…</Label>}
 
-              return (
-                <View key={group} style={{ marginBottom: 14 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
-                      <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 999, backgroundColor: `${accent}1a` }}>
-                        <Text style={{ color: accent, fontSize: 9, fontFamily: fonts.heading.bold }}>{groupModule}</Text>
-                      </View>
-                      <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4, flexShrink: 1 }}>{group}</Text>
-                    </View>
-                    <Pressable
-                      onPress={() => toggleGroup(pages)}
-                      style={{ paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, backgroundColor: allGroupChecked ? `${colors.primary}1a` : colors.muted, borderWidth: 1, borderColor: allGroupChecked ? `${colors.primary}40` : colors.border }}
-                    >
-                      <Text style={{ color: allGroupChecked ? colors.primary : colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.heading.semibold }}>{allGroupChecked ? "Revoke all" : "Grant all"}</Text>
-                    </Pressable>
-                  </View>
-
-                  {pages.map((page) => {
-                    const checkedCount = page.actions.filter((a) => isChecked(page.key, a)).length;
-                    const allChecked = checkedCount === page.actions.length && page.actions.length > 0;
-                    return (
-                      <View key={page.key} style={{ borderRadius: 14, padding: 12, marginBottom: 8, backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium, flex: 1, marginRight: 8 }}>{page.label}</Text>
-                          <Switch
-                            value={allChecked}
-                            onValueChange={() => toggleAllForPage(page.key, page.actions)}
-                            trackColor={{ false: colors.muted, true: `${colors.primary}80` }}
-                            thumbColor={allChecked ? colors.primary : "#f4f3f4"}
-                          />
-                        </View>
-                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                          {ALL_ACTIONS.map((action) => (
-                            <ActionChip
-                              key={action.key}
-                              label={action.label}
-                              available={page.actions.includes(action.key)}
-                              checked={isChecked(page.key, action.key)}
-                              onPress={() => togglePermission(page.key, action.key)}
-                            />
-                          ))}
-                        </View>
-                      </View>
-                    );
-                  })}
+          {!hasSubjectSelected ? (
+            <View style={{ minHeight: 120, alignItems: "center", justifyContent: "center", padding: 16, borderWidth: 1, borderStyle: "dashed", borderColor: S.line40 }}>
+              <Body size={13} color={S.graphite} style={{ textAlign: "center" }}>
+                {subject === "user" ? "Choose a person to manage their rights." : "Choose a role to manage its baseline rights."}
+              </Body>
+            </View>
+          ) : loadingPerms ? (
+            <View style={{ gap: 8 }}>
+              <Skel h={40} />
+              <Skel h={200} />
+            </View>
+          ) : (
+            <>
+              {/* Presets: fill the rights from a typical role, then adjust. */}
+              <View style={{ gap: 8 }}>
+                <Label>Presets</Label>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                  {Object.entries(ROLE_PRESETS).map(([key, preset]) => (
+                    <Key key={key} label={preset.label} onPress={() => applyPreset(key)} style={{ minHeight: 34, paddingHorizontal: 12 }} />
+                  ))}
                 </View>
-              );
-            })}
+              </View>
 
-            {Object.keys(groupedPages).length === 0 && (
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", paddingVertical: 32 }}>No pages match your filters.</Text>
-            )}
-          </>
-        )}
-      </ScrollView>
+              <View style={{ borderWidth: 1, borderColor: S.ink }}>
+                {/* Who, the counts, search and the module keys. */}
+                <View style={{ paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ink, gap: 10 }}>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                    <Label color={S.ink}>{subjectName ?? ""}</Label>
+                    <ModuleTag>{subject === "user" ? (selectedUser?.role ?? "").replace(/_/g, " ") : "role baseline"}</ModuleTag>
+                  </View>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+                    <Text style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite }}>
+                      <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{stats.pagesGranted}</Text>
+                      {` of ${stats.total} pages`}
+                    </Text>
+                    <Text style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite }}>
+                      <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{stats.actionsGranted}</Text>
+                      {" actions"}
+                    </Text>
+                    {dirty && (
+                      <View style={{ borderWidth: 1, borderStyle: "dashed", borderColor: S.ink, paddingHorizontal: 6, paddingVertical: 1 }}>
+                        <Label color={S.ink}>Unsaved</Label>
+                      </View>
+                    )}
+                  </View>
+                  <SearchBox value={pageSearch} onChange={setPageSearch} placeholder="Search page…" />
+                  <KeyRow options={modules.map((m) => ({ value: m, label: m }))} value={moduleFilter} onChange={setModuleFilter} />
+                </View>
+
+                {/* The pages, by group. */}
+                {Object.entries(groupedPages).map(([group, pages]) => {
+                  const groupModule = pages[0]?.module ?? "General";
+                  const allGroupChecked = pages.every((p) => p.actions.every((a) => isChecked(p.key, a)));
+                  const grantedInGroup = pages.filter((p) => p.actions.some((a) => isChecked(p.key, a))).length;
+                  // A search opens every group it matches.
+                  const open = !!pageSearch.trim() || openGroups.has(group);
+                  return (
+                    <View key={group}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 12, backgroundColor: S.blueWash, borderBottomWidth: 1, borderBottomColor: S.line15 }}>
+                        <Press onPress={() => toggleOpen(group)} style={() => ({ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 12, paddingVertical: 10 })}>
+                          <ChevronRight size={13} color={S.ink} style={{ transform: [{ rotate: open ? "90deg" : "0deg" }] }} />
+                          <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                            <Text numberOfLines={1} style={{ fontFamily: fonts.heading.bold, fontSize: 10.5, letterSpacing: 1.1, textTransform: "uppercase", color: S.ink }}>{group}</Text>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                              <ModuleTag>{groupModule}</ModuleTag>
+                              <Text style={{ fontFamily: fonts.body.regular, fontSize: 11, color: S.graphite }}>{`${grantedInGroup} of ${pages.length}`}</Text>
+                            </View>
+                          </View>
+                        </Press>
+                        <Key tone={allGroupChecked ? "line" : "ink"} label={allGroupChecked ? "Revoke all" : "Grant all"} onPress={() => toggleGroup(pages)} style={{ minHeight: 28, paddingHorizontal: 10 }} />
+                      </View>
+                      {open && pages.map((page) => {
+                        const checkedCount = page.actions.filter((a) => isChecked(page.key, a)).length;
+                        const allChecked = page.actions.length > 0 && checkedCount === page.actions.length;
+                        return (
+                          <View key={page.key} style={{ paddingHorizontal: 12, paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                              <Text numberOfLines={2} style={{ flex: 1, fontFamily: checkedCount ? fonts.body.semibold : fonts.body.medium, fontSize: 13, color: S.ink }}>{page.label}</Text>
+                              <Label>All</Label>
+                              <CheckSquare checked={allChecked} mixed={checkedCount > 0 && !allChecked} onPress={() => toggleAllForPage(page.key, page.actions)} />
+                            </View>
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 14, rowGap: 8 }}>
+                              {ALL_ACTIONS.map((action) => (
+                                <ActionCheck
+                                  key={action.key}
+                                  label={action.label}
+                                  available={page.actions.includes(action.key)}
+                                  checked={isChecked(page.key, action.key)}
+                                  onPress={() => togglePermission(page.key, action.key)}
+                                />
+                              ))}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  );
+                })}
+
+                {Object.keys(groupedPages).length === 0 && (
+                  <Body size={13} color={S.graphite} style={{ textAlign: "center", paddingVertical: 24 }}>No pages match your filters.</Body>
+                )}
+
+                {/* Footer: what is granted, and Save. */}
+                <View style={{ paddingHorizontal: 12, paddingVertical: 10, gap: 10, borderTopWidth: Object.keys(groupedPages).length ? 0 : 1, borderTopColor: S.ink }}>
+                  <Body size={12} color={S.graphite}>{`${stats.pagesGranted} of ${stats.total} pages · ${stats.actionsGranted} total actions granted`}</Body>
+                  <Key tone="ink" label={saving ? "Saving…" : "Save permissions"} icon={<Save size={13} color={S.paper} />} onPress={handleSave} disabled={saving || !dirty} />
+                </View>
+              </View>
+            </>
+          )}
+        </SheetShell>
+      </SheetPage>
 
       <OptionPickerModal
         visible={userPickerOpen}
-        title="Select User"
+        title="Choose a person"
         options={userOptions}
         selectedKey={selectedUserId != null ? String(selectedUserId) : null}
         searchable
@@ -420,7 +404,7 @@ export default function MenuRightsScreen() {
       />
       <OptionPickerModal
         visible={rolePickerOpen}
-        title="Select Role"
+        title="Choose a role"
         options={roleOptions}
         selectedKey={selectedRoleId != null ? String(selectedRoleId) : null}
         searchable

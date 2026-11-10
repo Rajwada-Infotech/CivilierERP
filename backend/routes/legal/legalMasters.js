@@ -15,6 +15,7 @@
 // Table and column names only ever come from the config, never from the request.
 
 const express = require("express");
+const { usersHaveWhatsApp } = require("../../services/usersWhatsApp");
 const { getPool, sql } = require("../../db");
 const { cache } = require("../../middleware/cache");
 const { requirePageRight, requireAnyPageRight, hasAnyPageAction } = require("../../middleware/requirePageRight");
@@ -159,6 +160,9 @@ async function validate(pool, cfg, body) {
   const values = {};
   for (const field of cfg.fields) {
     if (field.auto) continue; // generated on add, never edited
+    // Status kept by the workflow (section Verified tick, L1 / L2 approval): never taken from the form. Its default on
+    // add; on edit it is not written at all.
+    if (field.system) { values[field.name] = field.default ?? null; continue; }
     const { value, error } = readValue(field, body?.[field.name]);
     if (error) return { error };
     if (field.required && value === null) return { error: `${field.label} is required` };
@@ -217,7 +221,7 @@ function bindValues(request, cfg, values) {
 }
 
 /** The fields an insert / update writes: all of them, except generated codes and a masked value sent back unchanged. */
-const writtenFields = (cfg, values) => cfg.fields.filter((f) => !f.auto && values[f.name] !== KEEP);
+const writtenFields = (cfg, values, isUpdate = false) => cfg.fields.filter((f) => !f.auto && !(isUpdate && f.system) && values[f.name] !== KEEP);
 
 /** SET / VALUES expressions for `derived` text columns, read from the picked row (Mouza's District name). */
 const derivedSql = (cfg) => (cfg.derived || []).map((d) => {
@@ -235,7 +239,7 @@ const isReviewer = (req, cfg) => canAct(req, "Verifier", cfg.pageKey);
 
 async function reviewCols(req, cfg, values, before) {
   const rv = cfg.review;
-  if (!rv) return { cols: [] };
+  if (!rv || cfg.fields.find((f) => f.name === rv.field)?.system) return { cols: [] };
   const free = rv.free || ["Pending"];
   const next = values[rv.field];
   const prev = before ? before[rv.field] : free[0];
@@ -279,9 +283,10 @@ function sendDbError(res, cfg, err, where) {
 router.get("/meta", (req, res) => {
   res.json(PAGED.map(([key, m]) => ({
     key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, adminOnly: !!m.adminOnly,
-    extras: (m.extras || []).map(({ name, label }) => ({ name, label })),
-    fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto }) =>
-      ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto })),
+    extras: (m.extras || []).map(({ name, label, whatsapp, after }) => ({ name, label, whatsapp: !!whatsapp, after })),
+    fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden, system }) =>
+      ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden, system: !!system,
+        creatable: type === "ref" && creatableRef(ref) })),
   })));
 });
 
@@ -320,7 +325,7 @@ router.get("/summary", anyLegalView, listCache, async (req, res) => {
   }
 });
 
-// The official sites (Setup → Official Portal Link) as quick links for anyone in the Legal module — opened in a new
+// The official sites (Setup → Government Site Links) as quick links for anyone in the Legal module — opened in a new
 // tab to check land details by hand. Nothing is sent to or read from those sites.
 router.get("/portal-links", anyLegalView, listCache, async (_req, res) => {
   try {
@@ -416,8 +421,9 @@ router.get("/:master", withRight("view"), listCache, async (req, res) => {
   if (parentId !== null && (!cfg.parent || !Number.isInteger(parentId) || parentId <= 0)) return res.status(400).json({ error: "Invalid parent" });
   try {
     const labels = cfg.fields.filter((f) => f.type === "ref" || f.type === "file").map((f) => `, ${refLabelSql(f, "t")} AS ${f.name}__label`).join("");
+    const withWa = (cfg.extras || []).some((x) => x.whatsapp) && (await usersHaveWhatsApp(getPool()));
     const result = await getPool().request().input("Parent", sql.Int, parentId).query(`
-      SELECT t.*${labels}${(cfg.extras || []).map((x) => `, ${x.sql} AS ${x.name}`).join("")},
+      SELECT t.*${labels}${(cfg.extras || []).map((x) => `, ${x.sql} AS ${x.name}${x.whatsapp && withWa ? `, ${x.whatsapp} AS ${x.name}__wa` : ""}${x.userId ? `, ${x.userId} AS ${x.name}__uid` : ""}`).join("")},
              (SELECT name FROM dbo.users WHERE id = t.CreatedBy) AS CreatedByName,
              (SELECT name FROM dbo.users WHERE id = t.UpdatedBy) AS UpdatedByName
       FROM dbo.${cfg.table} t WHERE 1 = 1${scopeSql(cfg, "t")}${parentId !== null ? ` AND t.${cfg.parent} = @Parent` : ""} ORDER BY ${cfg.orderBy.split(",").map((s) => `t.${s.trim()}`).join(", ")}`);
@@ -427,10 +433,72 @@ router.get("/:master", withRight("view"), listCache, async (req, res) => {
   }
 });
 
+// A party name typed or picked in a form (seller of a purchase, buyer of a sale, an owner in the chain): the name
+// is matched to that party list (same role, same name) and added there when it is new, so every party typed once
+// is offered next time. `party` is the role; `partyId` (optional) is the column that keeps the matched person's id.
+// Several names can be given comma-separated (co-owner sellers); each is matched or added.
+// A dropdown whose list takes a plain name (Transfer Type, Payment Mode… and the party lists): a new name typed in
+// the form arrives as "new:<name>" and is matched (same list, same name) or added to that list, then saved by its id.
+const creatableRef = (ref) => {
+  const m = MASTERS[ref];
+  return !!m && !!m.scope && (m.table === "LegalLookupValue" || m.table === "LegalPerson");
+};
+async function resolveNewRefs(pool, cfg, body, userId, added = []) {
+  for (const f of cfg.fields) {
+    const v = body[f.name];
+    if (f.type !== "ref" || typeof v !== "string" || !v.startsWith("new:") || !creatableRef(f.ref)) continue;
+    const m = MASTERS[f.ref], name = v.slice(4).trim().replace(/\s+/g, " ").slice(0, m.table === "LegalPerson" ? 200 : 150);
+    if (!name) { body[f.name] = null; continue; }
+    const isPerson = m.table === "LegalPerson", col = isPerson ? "FullName" : "Name";
+    const found = (await pool.request().input("Scope", m.scope.value).input("Name", name)
+      .query(`SELECT TOP 1 ${m.pk} AS id FROM dbo.${m.table} WHERE ${m.scope.column} = @Scope AND LTRIM(RTRIM(${col})) = @Name`)).recordset[0];
+    if (found) { body[f.name] = found.id; continue; }
+    body[f.name] = (await pool.request().input("Scope", m.scope.value).input("Name", name).input("UserId", userId || null)
+      .query(`INSERT INTO dbo.${m.table} (${m.scope.column}, ${col}${isPerson ? ", PartyType" : ""}, IsActive, CreatedBy, CreatedAt)
+              OUTPUT INSERTED.${m.pk} AS id VALUES (@Scope, @Name${isPerson ? ", N'Individual'" : ""}, 1, @UserId, SYSUTCDATETIME())`)).recordset[0].id;
+    added.push({ table: m.table, pk: m.pk, id: body[f.name] });
+  }
+}
+
+/** Takes back list entries added for a save that was then refused. */
+async function dropAdded(pool, added) {
+  for (const a of added.reverse()) await pool.request().input("Id", a.id).query(`DELETE FROM dbo.${a.table} WHERE ${a.pk} = @Id`).catch(() => {});
+}
+
+async function resolveParties(pool, cfg, body, userId, added = []) {
+  for (const f of cfg.fields) {
+    if (!f.party || body[f.name] === undefined) continue;
+    const names = String(body[f.name] ?? "").split(",").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean);
+    const ids = [];
+    for (const name of names) {
+      const found = (await pool.request().input("Role", f.party).input("Name", name.slice(0, 200))
+        .query("SELECT TOP 1 PersonId FROM dbo.LegalPerson WHERE PersonRole = @Role AND IsActive = 1 AND LTRIM(RTRIM(FullName)) = @Name")).recordset[0];
+      if (found) { ids.push(found.PersonId); continue; }
+      const row = (await pool.request().input("Role", f.party).input("Name", name.slice(0, 200)).input("UserId", userId || null)
+        .query(`INSERT INTO dbo.LegalPerson (PersonRole, FullName, PartyType, IsActive, CreatedBy, CreatedAt)
+                OUTPUT INSERTED.PersonId VALUES (@Role, @Name, N'Individual', 1, @UserId, SYSUTCDATETIME())`)).recordset[0];
+      ids.push(row.PersonId);
+      added.push({ table: "LegalPerson", pk: "PersonId", id: row.PersonId });
+    }
+    body[f.name] = names.join(", ");
+    if (f.partyId) body[f.partyId] = ids.length === 1 ? ids[0] : null;
+  }
+}
+
 router.post("/:master", withRight("create"), async (req, res) => {
   const cfg = MASTERS[req.params.master];
   try {
     const pool = getPool();
+    await resolveParties(pool, cfg, req.body, req.user?.userId, res.locals.added = []);
+    await resolveNewRefs(pool, cfg, req.body, req.user?.userId, res.locals.added);
+    // A refused save (validation, a business rule, a duplicate…) takes back the list entries it just added.
+    res.once("finish", () => { if (res.statusCode >= 400 && res.locals.added.length) dropAdded(pool, res.locals.added); });
+    if (cfg.needsWhatsApp && (await usersHaveWhatsApp(pool))) {
+      const me = (await pool.request().input("U", sql.Int, req.user?.userId).query("SELECT WhatsAppNo FROM dbo.users WHERE id = @U")).recordset[0];
+      if (!me?.WhatsAppNo) return res.status(400).json({ error: "Add your WhatsApp number first (box at the top of this page) — others reach you on it about this entry" });
+    }
+    // `self` fields are always the user who adds the row.
+    for (const f of cfg.fields) if (f.self) req.body[f.name] = req.user?.userId ?? req.user?.id ?? null;
     const { values, error } = await validate(pool, cfg, req.body);
     if (error) return res.status(400).json({ error });
     // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.
@@ -475,6 +543,12 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    await resolveParties(pool, cfg, req.body, req.user?.userId, res.locals.added = []);
+    await resolveNewRefs(pool, cfg, req.body, req.user?.userId, res.locals.added);
+    // A refused save (validation, a business rule, a duplicate…) takes back the list entries it just added.
+    res.once("finish", () => { if (res.statusCode >= 400 && res.locals.added.length) dropAdded(pool, res.locals.added); });
+    // `self: "always"` fields (Verified by, Approved by) are whoever saves — never picked.
+    for (const f of cfg.fields) if (f.self === "always") req.body[f.name] = req.user?.userId ?? req.user?.id ?? null;
     const { values, error } = await validate(pool, cfg, req.body);
     if (error) return res.status(400).json({ error });
     // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.
@@ -491,7 +565,7 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
     if (!before) return res.status(404).json({ error: `${cfg.title} not found` });
     const review = await reviewCols(req, cfg, values, before);
     if (review.error) return res.status(403).json({ error: review.error });
-    const written = writtenFields(cfg, values);
+    const written = writtenFields(cfg, values, true);
     const request = pool.request();
     bindValues(request, { fields: written }, values);
     request.input("Id", sql.Int, id).input("UserId", sql.Int, req.user?.userId || null);

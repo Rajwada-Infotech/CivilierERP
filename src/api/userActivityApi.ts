@@ -171,7 +171,7 @@ export const deleteActivityHistory = async (): Promise<{ message: string }> => {
 // Replaces the old SSE subscribeToActivityStream.
 // The Activity Browser context uses this to receive live activity:new events.
 //
-// Returns an unsubscribe function â€” call it in useEffect cleanup.
+// Returns an unsubscribe function — call it in useEffect cleanup.
 //
 // Design note: we import socket.ts synchronously at the top of the module
 // (via a top-level import below) so the socket ref captured inside
@@ -191,7 +191,7 @@ export function subscribeToActivityStream(
   onConnect?: () => void,
   onDisconnect?: (reason: string) => void,
 ): () => void {
-  // connectSocket() is idempotent â€” returns the existing socket if already
+  // connectSocket() is idempotent — returns the existing socket if already
   // connected, so calling it here is safe even when called multiple times.
   const socket = connectSocket();
 
@@ -205,7 +205,7 @@ export function subscribeToActivityStream(
   if (onDisconnect) socket.on("disconnect", onDisconnect);
 
   // Capture the exact socket instance so the cleanup always targets the right
-  // object â€” even if connectSocket() later returns a different instance after
+  // object — even if connectSocket() later returns a different instance after
   // a logout/reconnect cycle.
   return () => {
     socket.off("activity:new", onEvent);

@@ -9,7 +9,6 @@ import { fonts } from "@/theme/fonts";
 import { navigationRef } from "./navigationRef";
 import type { MainStackParamList } from "./MainStack";
 
-const ACCENT = "#eab308";
 const ACCENT_SOFT = "#fde68a";
 
 const TABS: {

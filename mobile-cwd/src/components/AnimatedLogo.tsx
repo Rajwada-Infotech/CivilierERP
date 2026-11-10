@@ -4,7 +4,7 @@
 // version line "matrix-scrambles" between "app. vX" and "db. vX" every 5s.
 // Shared brand asset — not module-tinted, same as on mobile-supplier.
 import { useEffect, useRef, useState } from "react";
-import { Animated, Image, Text, View } from "react-native";
+import { Animated, Text, View } from "react-native";
 import MaskedView from "@react-native-masked-view/masked-view";
 import { LinearGradient } from "expo-linear-gradient";
 import { fonts } from "@/theme/fonts";

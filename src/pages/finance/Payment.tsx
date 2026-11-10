@@ -1,3 +1,4 @@
+import { panDisplay } from "@/lib/panDisplay";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { useLiveData } from "@/hooks/useLiveData";
 import { autoPostKey, autoPostUrl, nextEntryToAutoPost } from "./paymentAutoPost";
@@ -78,7 +79,9 @@ import {
   ListChecks,
   IndianRupee,
   MessageSquare,
+  FilePenLine,
 } from "lucide-react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
@@ -859,6 +862,8 @@ const Payment: React.FC = () => {
   // GL posting is identical to any other payment; see
   // backend/routes/journalVoucher.js's GET /payable-lines for eligibility).
   const [selectedJVLine, setSelectedJVLine] = useState<PayableJVLine | null>(null);
+  // On an edit: the invoice / JV was changed here, so the save carries the new tag. Otherwise the saved tag is left alone.
+  const [tagTouched, setTagTouched] = useState(false);
   const { data: jvLineOptions = [], isLoading: jvLinesLoading } = useQuery<PayableJVLine[]>({
     queryKey: ["payment-payable-jv-lines"],
     queryFn: () => getPayableJVLines(),
@@ -892,6 +897,11 @@ const Payment: React.FC = () => {
     }));
   };
   const clearJVLineLink = () => {
+    // Nothing picked here, only a saved tag: just drop it. Picking an invoice comes through here too, and must keep what it filled in.
+    if (!selectedJVLine) {
+      setForm((prev) => (prev.jvLineId ? { ...prev, jvLineId: null } : prev));
+      return;
+    }
     setSelectedJVLine(null);
     setForm((prev) => ({
       ...prev,
@@ -1141,6 +1151,7 @@ const Payment: React.FC = () => {
   };
 
   const openEdit = (rec: PaymentRecord) => {
+    setTagTouched(false);
     setSelectedContract(null);
     setSelectedJVLine(null);
     setEditingId(rec.id);
@@ -1161,6 +1172,7 @@ const Payment: React.FC = () => {
   };
 
   const cancelForm = () => {
+    amend.stop();
     setView("list");
     setEditingId(null);
     setForm(blankForm());
@@ -2027,6 +2039,9 @@ const Payment: React.FC = () => {
 
   // ── Save ───────────────────────────────────────────────────────────────────
 
+  // Amend (an approved payment): the form opens as for an edit; saving raises an amendment for approval instead.
+  const amend = useAmendMode("payment", "Payment", { onRaised: () => cancelForm() });
+
   const handleSave = async () => {
     if (!validate()) return;
 
@@ -2084,6 +2099,7 @@ const Payment: React.FC = () => {
       cardId: form.cardId ?? null,
       ContractId: form.contractId ? Number(form.contractId) : null,
       JVLineId: form.jvLineId ?? null,
+      tagChange: !!editingId && tagTouched,
       // Direct Expense Payment (migration 303) — pay one or more Expense
       // Heads straight from the bank instead of a Party/Invoice.
       EExpenseHeadAllocations:
@@ -2111,6 +2127,7 @@ const Payment: React.FC = () => {
     try {
       setSaving(true);
       if (editingId) {
+        if (await amend.intercept(editingId, payload)) return;
         await updatePayment(editingId, payload);
         toast.success("Payment updated.");
       } else {
@@ -2173,6 +2190,7 @@ const Payment: React.FC = () => {
 
   return (
     <>
+      {amend.dialog}
       <Breadcrumbs items={["Dashboard", "Finance", "Payments"]} />
       <SheetShell
         eyebrow="CivilierERP · Finance"
@@ -2397,19 +2415,42 @@ const Payment: React.FC = () => {
                         <ExpenseBookingPicker
                           options={filteredOptions}
                           value={form.expenseId}
-                          onChange={handleExpenseSelect}
+                          onChange={(id, amount) => {
+                            setTagTouched(true);
+                            return handleExpenseSelect(id, amount);
+                          }}
                           loading={loadingExpense}
                           contracts={contractOptions}
                           contractsLoading={contractsLoading}
                           selectedContract={selectedContract}
-                          onContractSelect={handleContractSelect}
+                          onContractSelect={(c) => {
+                            setTagTouched(true);
+                            handleContractSelect(c);
+                          }}
                           onContractClear={clearContractLink}
                           jvLines={jvLineOptions}
                           jvLinesLoading={jvLinesLoading}
                           selectedJVLine={selectedJVLine}
-                          onJVLineSelect={handleJVLineSelect}
+                          savedTag={
+                            !editingId || tagTouched
+                              ? null
+                              : form.jvNo
+                                ? { kind: "JV", label: form.jvNo }
+                                : form.mergedDocNos?.length
+                                  ? { kind: "Merged", label: form.mergedDocNos.join(", ") }
+                                  : form.expenseRef
+                                    ? { kind: "EXB", label: form.expenseRef }
+                                    : null
+                          }
+                          onJVLineSelect={(line) => {
+                            setTagTouched(true);
+                            handleJVLineSelect(line);
+                          }}
                           onJVLineClear={clearJVLineLink}
-                          onMergeConfirm={handleMergeConfirm}
+                          onMergeConfirm={(selected) => {
+                            setTagTouched(true);
+                            handleMergeConfirm(selected);
+                          }}
                           mergedSummary={mergedSummary}
                           onMergeClear={handleMergeClear}
                           onRefreshOptions={refetchExpenseOptions}
@@ -4639,6 +4680,16 @@ const Payment: React.FC = () => {
                               <Edit size={12} />
                             </button>
                           )}
+                          {rights.canEdit && rec.status === "Approved" && (
+                            <button
+                              onClick={() => { amend.start(rec.id); openEdit(rec); }}
+                              title="Amend — change it with a reason; applies once approved"
+                              aria-label="Amend"
+                              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            >
+                              <FilePenLine size={12} />
+                            </button>
+                          )}
                           {rights.canDelete && (
                             <button
                               onClick={() => setDeleteId(rec.id)}
@@ -4802,6 +4853,16 @@ const Payment: React.FC = () => {
                                     className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                                   >
                                     <Edit size={12} />
+                                  </button>
+                                )}
+                                {rights.canEdit && rec.status === "Approved" && (
+                                  <button
+                                    onClick={() => { amend.start(rec.id); openEdit(rec); }}
+                                    title="Amend — change it with a reason; applies once approved"
+                                    aria-label="Amend"
+                                    className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+                                  >
+                                    <FilePenLine size={12} />
                                   </button>
                                 )}
                                 {rights.canDelete && (
@@ -5247,7 +5308,7 @@ const Payment: React.FC = () => {
                         ? `GSTIN: ${viewingChain.supplier.gst}`
                         : null,
                       viewingChain.supplier.pan
-                        ? `PAN: ${viewingChain.supplier.pan}`
+                        ? `PAN: ${panDisplay(viewingChain.supplier.pan)}`
                         : null,
                     ]
                       .filter(Boolean)
@@ -5794,6 +5855,22 @@ const Payment: React.FC = () => {
                 >
                   <Edit size={12} />
                   Edit
+                </button>
+              )}
+              {rights.canEdit && viewingRec.status === "Approved" && (
+                <button
+                  onClick={() => {
+                    const rec = viewingRec;
+                    setViewingRec(null);
+                    setViewingChain(null);
+                    amend.start(rec.id);
+                    openEdit(rec);
+                  }}
+                  title="Amend — change it with a reason; applies once approved"
+                  className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors"
+                >
+                  <FilePenLine size={12} />
+                  Amend
                 </button>
               )}
               <button

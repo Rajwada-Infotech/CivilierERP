@@ -28,7 +28,7 @@ const READINESS: { key: string; label: string; hint: string }[] = [
 const fmtDate = (d: string | null) =>
   d ? new Date(d.slice(0, 10)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Never tested";
 
-const PARTY_KEYS = ["owner", "seller", "buyer", "customer", "witness"] as const;
+const PARTY_KEYS = ["owner", "seller", "buyer", "witness"] as const;
 
 export default function LegalDashboard() {
   usePageRights("legal-dashboard");

@@ -158,7 +158,7 @@ export default function SupplierLogin() {
     setError("");
     setIsLoading(true);
     try {
-      const result = await login(email, password);
+      const result = await login(email, password, "supplier");
       if (result.success) {
         setLoginName(result.name || "");
         setLoginSuccess(true);

@@ -1,3 +1,4 @@
+import { panDisplay } from "@/lib/panDisplay";
 import { CrmStatus, bookingWorkflowStageLabel, BOOKING_STAGE_REVIEW, isBookingClosed } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useEffect, useRef } from "react";
@@ -1935,7 +1936,7 @@ const CrmApplication: React.FC = () => {
                             {selectedBroker.LHeadPan && (
                               <div>
                                 <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">PAN (Permanent Account Number)</dt>
-                                <dd className="text-foreground font-heading tabular-nums text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
+                                <dd className="text-foreground font-heading tabular-nums text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{panDisplay(selectedBroker.LHeadPan)}</dd>
                               </div>
                             )}
                             {selectedBroker.LHeadRera && (

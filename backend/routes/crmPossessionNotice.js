@@ -217,7 +217,7 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    // The same rule as the list of bookings that can get a notice. Migration 627 backs it up.
+    // The same rule as the list of bookings that can get a notice. Migration 632 backs it up.
     const active = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 NoticeNo, Status FROM dbo.CrmPossessionNotice WHERE BookingId = @bid AND Status IN (N'Draft', N'Sent')");
     if (active.recordset.length) {

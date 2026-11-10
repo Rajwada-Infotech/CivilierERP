@@ -1,28 +1,20 @@
-// RN port of src/pages/finance/Contract.tsx's list view ("Contract
-// Register") — same content as the Invoice register screen: search, a card
-// per contract, status pill, tap to view detail. The New/Edit form (doc-type
-// picker, contact-person picker, file upload, T&C picker) isn't ported —
-// same "not built on mobile yet" convention as Invoice's row actions.
+// RN port of src/pages/finance/Contract.tsx's list view, on the drawing sheet as the web draws it: the sheet's title
+// block with "New contract", four figures (contracts, active, draft or pending, contract value), then the contract
+// register — its heading and count, a search box, and one ruled row per contract with its approval status and the
+// View / Edit / Delete keys the web row has (each shown only with the matching right on finance-contracts).
 import { useMemo, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, TextInput } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { View, Text, ScrollView, RefreshControl, Alert } from "react-native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { FileText, Search, X, Plus, RefreshCw, ChevronRight } from "lucide-react-native";
-import { getContracts, type ContractListItem } from "@/api/contractApi";
+import { Eye, FileText, Plus, Trash2 } from "lucide-react-native";
+import { deleteContract, getContracts, type ContractListItem } from "@/api/contractApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { colors } from "@/theme/colors";
+import { usePageRights } from "@/hooks/usePageRights";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { colors, sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-
-const ACCENT = "#8b5cf6";
-
-const STATUS_STYLE: Record<string, string> = {
-  Active: "#8b5cf6",
-  Expired: "#ef4444",
-  Draft: "#f59e0b",
-  Approved: "#10b981",
-  Pending: "#f59e0b",
-};
+import { Body, IconKey, Key, Notice, Press, RegisterHead, SearchBox, SheetMark, SheetShell, Skel, StatRow } from "@/components/sheet/Sheet";
 
 function fmtDate(d?: string | null) {
   if (!d) return "—";
@@ -30,77 +22,89 @@ function fmtDate(d?: string | null) {
   return isNaN(dt.getTime()) ? "—" : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function fmtAmt(n: number | null) {
-  return n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
+const fmtAmt = (n: number | null | undefined) => (n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—");
+
+/** Web's StatusBadge: active / approved settled, expired / deleted / rejected stopped, the rest waiting. */
+function StatusMark({ status }: { status: string }) {
+  const s = (status || "Draft").toLowerCase();
+  const tone = s === "active" || s === "approved" ? "done" : s === "expired" || s === "deleted" || s === "rejected" ? "stopped" : "waiting";
+  return <SheetMark text={status || "Draft"} tone={tone} />;
 }
 
-function StatusPill({ status }: { status: string }) {
-  const color = STATUS_STYLE[status] ?? colors.mutedForeground;
+function ContractRow({
+  item,
+  last,
+  onView,
+  onEdit,
+  onDelete,
+}: {
+  item: ContractListItem;
+  last: boolean;
+  onView: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
   return (
-    <View className="px-2 py-1 rounded-md" style={{ backgroundColor: `${color}22`, borderWidth: 1, borderColor: `${color}40` }}>
-      <Text style={{ color, fontSize: 10, fontFamily: fonts.heading.semibold }}>{status || "Draft"}</Text>
-    </View>
-  );
-}
-
-function ContractCard({ item, onPress }: { item: ContractListItem; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} className="rounded-xl p-3.5 mb-2.5" style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}>
-      <View className="flex-row items-start justify-between gap-2">
-        <View className="flex-1 min-w-0">
-          <Text numberOfLines={1} style={{ color: ACCENT, fontSize: 12.5, fontFamily: fonts.heading.semibold }}>
-            {item.DocNo || "—"}
-          </Text>
-          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium, marginTop: 2 }}>
-            {item.CompanyName || "—"}{item.ProjectName ? ` · ${item.ProjectName}` : ""}
-          </Text>
+    <Press
+      onPress={onView}
+      style={(pressed) => ({ paddingVertical: 12, borderBottomWidth: last ? 0 : 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
+    >
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <Text numberOfLines={1} style={{ fontFamily: fonts.heading.semibold, fontSize: 13, letterSpacing: 0.2, color: S.ink }}>{item.DocNo || "—"}</Text>
+          <Text numberOfLines={1} style={{ fontFamily: fonts.body.medium, fontSize: 12.5, color: S.ink }}>{item.CompanyName || "—"}</Text>
+          {!!item.ProjectName && <Text numberOfLines={1} style={{ fontFamily: fonts.body.regular, fontSize: 11.5, color: S.graphite }}>{item.ProjectName}</Text>}
         </View>
-        <StatusPill status={item.Status} />
+        <ApprovalStatusChain table="Contract" recordId={item.ContractId} fallback={<StatusMark status={item.Status} />} />
       </View>
 
-      <View className="flex-row flex-wrap gap-x-4 gap-y-1 mt-2.5">
-        <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular }}>
-          Date: <Text style={{ color: colors.foreground }}>{fmtDate(item.DocDate)}</Text>
-        </Text>
-        {!!item.ContactPerson && (
-          <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular }}>
-            Contact: <Text style={{ color: colors.foreground }}>{item.ContactPerson}</Text>
-          </Text>
-        )}
-        {!!item.NatureOfContract && (
-          <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular }}>
-            Type: <Text style={{ color: colors.foreground }}>{item.NatureOfContract}</Text>
-          </Text>
-        )}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 14, rowGap: 2, marginTop: 8 }}>
+        <Body size={11.5} color={S.graphite}>{fmtDate(item.DocDate)}</Body>
+        {!!item.ContactPerson && <Body size={11.5} color={S.graphite}>{item.ContactPerson}</Body>}
+        {!!item.NatureOfContract && <Body size={11.5} color={S.graphite}>{item.NatureOfContract}</Body>}
       </View>
 
-      <View className="flex-row items-center justify-between pt-2.5 mt-2.5" style={{ borderTopWidth: 1, borderTopColor: `${colors.border}60` }}>
-        <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 14 }}>{fmtAmt(item.ContractAmount)}</Text>
-        <ChevronRight size={15} color={colors.mutedForeground} />
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+        <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 16, letterSpacing: -0.3, color: S.ink }}>{fmtAmt(item.ContractAmount)}</Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <IconKey onPress={onView} size={32}>
+            <Eye size={14} color={S.ink} />
+          </IconKey>
+          {onEdit && (
+            <IconKey onPress={onEdit} size={32}>
+              <FileText size={14} color={S.ink} />
+            </IconKey>
+          )}
+          {onDelete && (
+            <IconKey onPress={onDelete} size={32} red>
+              <Trash2 size={14} color={S.red} />
+            </IconKey>
+          )}
+        </View>
       </View>
-    </Pressable>
+    </Press>
   );
 }
 
 export default function ContractListScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const queryClient = useQueryClient();
+  const rights = usePageRights("finance-contracts");
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["contracts"],
     queryFn: getContracts,
     staleTime: 60 * 1000,
   });
+  const contracts = data ?? [];
 
   const filtered = useMemo(() => {
-    const rows = data ?? [];
-    if (!search.trim()) return rows;
+    if (!search.trim()) return contracts;
     const q = search.trim().toLowerCase();
-    return rows.filter((c) =>
-      [c.DocNo, c.ContactPerson, c.NatureOfContract, c.CompanyName, c.ProjectName].some((f) => f?.toLowerCase().includes(q)),
-    );
-  }, [data, search]);
+    return contracts.filter((c) => [c.DocNo, c.ContactPerson, c.NatureOfContract, c.CompanyName, c.ProjectName].some((f) => f?.toLowerCase().includes(q)));
+  }, [contracts, search]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -108,86 +112,78 @@ export default function ContractListScreen() {
     setRefreshing(false);
   };
 
+  const confirmDelete = (c: ContractListItem) =>
+    Alert.alert("Delete contract?", `${c.DocNo || "This contract"} will be deleted. This cannot be undone.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteContract(c.ContractId);
+            await queryClient.invalidateQueries({ queryKey: ["contracts"] });
+          } catch (e) {
+            Alert.alert("Could not delete", e instanceof Error ? e.message : "Something went wrong.");
+          }
+        },
+      },
+    ]);
+
+  const value = contracts.reduce((sum, c) => sum + (Number(c.ContractAmount) || 0), 0);
+
   return (
     <ScrollView
-      className="flex-1"
-      style={{ backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={{ paddingBottom: 96 }}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={S.ink} />}
     >
-      {/* Header */}
-      <View className="flex-row items-center gap-2.5 mb-1">
-        <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: `${ACCENT}26`, borderWidth: 1, borderColor: `${ACCENT}4d` }}>
-          <FileText size={16} color={ACCENT} />
-        </View>
-        <View className="flex-1">
-          <Text style={{ color: colors.foreground, fontFamily: fonts.heading.bold, fontSize: 20 }}>Contracts</Text>
-          <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 10.5, fontFamily: fonts.body.regular, marginTop: 1 }}>
-            Create and manage contracts
-          </Text>
-        </View>
-        <Pressable onPress={() => refetch()} disabled={isFetching} hitSlop={8} className="p-2 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
-          {isFetching ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <RefreshCw size={14} color={colors.mutedForeground} />}
-        </Pressable>
-      </View>
-
-      <Pressable
-        onPress={() => navigation.navigate("NewContract")}
-        className="flex-row items-center justify-center gap-1.5 rounded-xl mt-3 mb-1"
-        style={{ backgroundColor: ACCENT, paddingVertical: 11 }}
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Contracts"
+        subtitle="Create and manage contracts"
+        action={rights.canCreate ? <Key tone="ink" label="New contract" icon={<Plus size={13} color={S.paper} />} onPress={() => navigation.navigate("NewContract")} style={{ alignSelf: "flex-start" }} /> : undefined}
       >
-        <Plus size={14} color="#fff" />
-        <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>New Contract</Text>
-      </Pressable>
-
-      {isError && (
-        <View className="mt-3 flex-row items-center gap-2 px-4 py-2.5 rounded-xl" style={{ backgroundColor: `${colors.destructive}1a`, borderWidth: 1, borderColor: `${colors.destructive}33` }}>
-          <Text style={{ color: colors.destructive, fontSize: 11, fontFamily: fonts.body.medium, flex: 1 }}>
-            Could not reach the server — showing cached data.
-          </Text>
-        </View>
-      )}
-
-      {/* Search */}
-      <View className="mt-5 mb-1">
-        <Text style={{ color: `${colors.mutedForeground}b3`, fontSize: 10.5, fontFamily: fonts.body.regular, marginBottom: 8 }}>
-          {filtered.length} record{filtered.length !== 1 ? "s" : ""}
-        </Text>
-        <View className="flex-row items-center rounded-xl px-3" style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}>
-          <Search size={13} color={colors.mutedForeground} />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search contract, company…"
-            placeholderTextColor={`${colors.mutedForeground}99`}
-            style={{ flex: 1, color: colors.foreground, fontSize: 12.5, paddingVertical: 10, paddingHorizontal: 8, fontFamily: fonts.body.regular }}
+        {!isLoading && (
+          <StatRow
+            items={[
+              { label: "Contracts", value: contracts.length.toLocaleString("en-IN"), note: "in the register" },
+              { label: "Active", value: contracts.filter((c) => /^(active|approved)$/i.test(c.Status || "")).length.toLocaleString("en-IN"), note: "in force" },
+              { label: "Draft or pending", value: contracts.filter((c) => /^(draft|pending)$/i.test(c.Status || "Draft")).length.toLocaleString("en-IN"), note: "not yet in force" },
+              { label: "Contract value", value: fmtAmt(value), note: "all contracts listed" },
+            ]}
           />
-          {!!search && (
-            <Pressable onPress={() => setSearch("")} hitSlop={8}>
-              <X size={13} color={colors.mutedForeground} />
-            </Pressable>
+        )}
+
+        {isError && <Notice>Could not load the contracts. Pull down to try again.</Notice>}
+
+        <View style={{ borderWidth: 1, borderColor: S.ink, padding: 12, gap: 12 }}>
+          <RegisterHead title="Contract register" count={contracts.length} />
+          <SearchBox value={search} onChange={setSearch} placeholder="Search contract, company…" />
+          {isLoading ? (
+            <>
+              <Skel h={70} />
+              <Skel h={70} />
+              <Skel h={70} />
+            </>
+          ) : filtered.length === 0 ? (
+            <Body color={S.graphite}>{search ? "No contract matches that search." : "No contracts yet. Tap New contract to create one."}</Body>
+          ) : (
+            <View>
+              {filtered.map((c, i) => (
+                <ContractRow
+                  key={c.ContractId}
+                  item={c}
+                  last={i === filtered.length - 1}
+                  onView={() => navigation.navigate("ContractDetail", { id: c.ContractId })}
+                  onEdit={rights.canEdit ? () => navigation.navigate("NewContract", { id: c.ContractId }) : undefined}
+                  onDelete={rights.canDelete ? () => confirmDelete(c) : undefined}
+                />
+              ))}
+            </View>
           )}
         </View>
-      </View>
-
-      {/* List */}
-      {isLoading ? (
-        <View className="py-14 items-center">
-          <ActivityIndicator color={colors.mutedForeground} />
-        </View>
-      ) : filtered.length === 0 ? (
-        <View className="py-12 items-center">
-          <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 12.5, fontFamily: fonts.body.regular }}>
-            No contracts yet. Tap "New Contract" to create one.
-          </Text>
-        </View>
-      ) : (
-        <View className="mt-1">
-          {filtered.map((c) => (
-            <ContractCard key={c.ContractId} item={c} onPress={() => navigation.navigate("ContractDetail", { id: c.ContractId })} />
-          ))}
-        </View>
-      )}
+      </SheetShell>
     </ScrollView>
   );
 }

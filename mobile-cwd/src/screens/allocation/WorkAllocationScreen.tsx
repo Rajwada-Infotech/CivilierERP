@@ -29,7 +29,6 @@ function QcBadge({ qc }: { qc?: "APPROVED" | "REWORK" | null }) {
 }
 
 function RoomChains({ room, canInspect }: { room: ScopeRoom; canInspect: boolean }) {
-  const navigation = useNavigation<{ navigate: (name: string, params?: object) => void }>();
   const q = useQuery({
     queryKey: ["cwd-room", room.projectId, room.roomId, "ALL"],
     queryFn: () => getRoomActivities({ roomId: room.roomId, projectId: room.projectId }),

@@ -27,6 +27,8 @@ export interface FormModalProps {
   activeFinYear?: string;
   onClose: () => void;
   onSaved: () => void;
+  /** Amendment mode (Amend on an approved BOQ): saving raises an amendment instead of saving. */
+  amend?: { intercept: (id: string | number | null | undefined, payload: unknown) => Promise<boolean> };
 }
 
 export const FormModal: React.FC<FormModalProps> = ({
@@ -42,6 +44,7 @@ export const FormModal: React.FC<FormModalProps> = ({
   activeFinYear,
   onClose,
   onSaved,
+  amend,
 }) => {
   const isEdit = record !== null;
   const [form, setForm] = useState<FormState>(
@@ -169,6 +172,7 @@ export const FormModal: React.FC<FormModalProps> = ({
     try {
       const payload = buildPayload(form, items, activities, activityOptions, activityGroups);
       if (isEdit) {
+        if (amend && (await amend.intercept(record!.BoqID, payload))) return;
         await apiFetch(`/boq/${record!.BoqID}`, {
           method: "PUT",
           body: JSON.stringify(payload),

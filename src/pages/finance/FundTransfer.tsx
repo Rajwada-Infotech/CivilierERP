@@ -27,8 +27,9 @@ import {
   Plus, ArrowLeftRight, Landmark, Loader2, RefreshCw,
   CheckCircle2, Clock, FileText, AlertCircle, Search, X, ExternalLink,
   Calendar, ShieldCheck, Wallet, BookOpen, Hash, CalendarDays, ChevronDown,
-  AlertTriangle, Info, CalendarClock, Pencil,
+  AlertTriangle, Info, CalendarClock, Pencil, FilePenLine,
 } from "lucide-react";
+import { useAmendMode } from "@/components/amendment/useAmendMode";
 import {
   getFundTransfers,
   getFundTransfer,
@@ -733,6 +734,7 @@ export default function FundTransfer() {
   }, [sourceCompanyId, transferType]);
 
   const resetForm = () => {
+    amend.stop();
     setEditingId(null);
     setHeldCheque(null);
     setTransferType("Intra");
@@ -853,6 +855,15 @@ export default function FundTransfer() {
     if (!DIGITAL_MODES.includes(m)) setDigitalRefNumber("");
   };
 
+  // Amend (an approved Intra transfer): the form opens as for an edit; saving raises an amendment for approval.
+  const amend = useAmendMode("fund-transfer", "Fund Transfer", {
+    onRaised: () => {
+      setDialogOpen(false);
+      resetForm();
+      load();
+    },
+  });
+
   const submit = async () => {
     if (!sourceCompanyId) { toast.error("Select the source company."); return; }
     if (!destCompanyId) { toast.error("Select the destination company."); return; }
@@ -896,6 +907,7 @@ export default function FundTransfer() {
         ...(isDigitalMode && digitalRefNumber ? { DigitalRefNumber: digitalRefNumber } : {}),
       };
       if (editingId) {
+        if (await amend.intercept(editingId, payload)) return;
         const result = await updateFundTransfer(editingId, payload);
         toast.success(result.message || "Fund Transfer updated");
       } else {
@@ -1185,6 +1197,16 @@ export default function FundTransfer() {
                             <Pencil size={12} />
                           </button>
                         )}
+                        {rights.canEdit && t.TransferType === "Intra" && t.Status === "Approved" && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); amend.start(t.FTId); void startEditById(t.FTId); }}
+                            title="Amend — change it with a reason; applies once approved"
+                            aria-label="Amend"
+                            className="ml-1 p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+                          >
+                            <FilePenLine size={12} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1208,6 +1230,7 @@ export default function FundTransfer() {
       )}
 
       {/* ── New Fund Transfer Dialog ── */}
+      {amend.dialog}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
         <DialogContent className="sheet-frame max-w-4xl p-0 gap-0 flex flex-col max-h-[96dvh] overflow-hidden" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
           <DialogHeader className="shrink-0 px-4 sm:px-7 py-3 sm:py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>

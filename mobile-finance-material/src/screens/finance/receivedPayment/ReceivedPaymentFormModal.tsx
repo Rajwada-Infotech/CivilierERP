@@ -1,6 +1,7 @@
 // RN port of ReceivedPayment.tsx's inline create form (view === "form").
 // Web renders this as a swapped-in view within the same page; mobile uses
-// a full-screen modal instead, matching PaymentFormModal.tsx's convention.
+// its own page of the stack (ReceivedPaymentFormScreen, `asScreen`) under the app's header, drawn on the sheet —
+// matching PaymentFormModal.tsx's convention.
 // Field order follows the same "context fields first, then amount/purpose/
 // mode" convention requested for the outbound Payment form. Create AND
 // edit are supported (editingRecord prop, mirroring PaymentFormModal's
@@ -9,18 +10,18 @@
 import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
+import { View, Text, Modal, ScrollView, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, ArrowDownCircle } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { X } from "lucide-react-native";
+import { colors, sheet as S } from "@/theme/colors";
+import { Body, Field, Input, Key, Label, Panel, Press, SheetShell } from "@/components/sheet/Sheet";
 import { fonts } from "@/theme/fonts";
 import {
   addReceivedPayment, updateReceivedPayment, fetchCompanyOptions, fetchProjectOptions, fetchCustomerOptions,
   fetchBankOptions, fetchFinYearOptions, fetchDocTypes, fetchNextDocNumber,
   PAYMENT_MODES, type ReceivedPaymentFormPayload, type ReceivedPayment,
 } from "@/api/receivedPaymentApi";
-import { ModeBadge } from "./ReceivedPaymentBadges";
 import { PickerRow, OptionPickerModal, type PickerOption } from "../payment/OptionPicker";
 
 type FormState = {
@@ -52,34 +53,6 @@ function blankForm(): FormState {
   };
 }
 
-function FieldLabel({ children, required }: { children: string; required?: boolean }) {
-  return (
-    <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.4 }}>
-      {children}{required ? " *" : ""}
-    </Text>
-  );
-}
-
-function TextField({
-  value, onChangeText, placeholder, keyboardType, multiline,
-}: { value: string; onChangeText: (v: string) => void; placeholder?: string; keyboardType?: "default" | "numeric"; multiline?: boolean }) {
-  return (
-    <TextInput
-      value={value}
-      onChangeText={onChangeText}
-      placeholder={placeholder}
-      placeholderTextColor={`${colors.mutedForeground}99`}
-      keyboardType={keyboardType}
-      multiline={multiline}
-      style={{
-        borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: multiline ? 12 : 10,
-        color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, marginBottom: 14,
-        textAlignVertical: multiline ? "top" : "center", minHeight: multiline ? 80 : undefined,
-      }}
-    />
-  );
-}
-
 function validateForm(f: FormState): string | null {
   if (!f.companyId) return "Company is required.";
   if (!f.projectId) return "Project is required.";
@@ -91,7 +64,13 @@ function validateForm(f: FormState): string | null {
   return null;
 }
 
-export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { visible: boolean; onClose: () => void; editingRecord?: ReceivedPayment | null }) {
+export function ReceivedPaymentFormModal({
+  visible, onClose, editingRecord, asScreen,
+}: {
+  visible: boolean; onClose: () => void; editingRecord?: ReceivedPayment | null;
+  /** Drawn as a page of the stack (ReceivedPaymentFormScreen) instead of a modal over the list. */
+  asScreen?: boolean;
+}) {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const isEditing = !!editingRecord;
@@ -222,107 +201,96 @@ export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { 
   const customerOptions: PickerOption[] = useMemo(() => customers.map((c) => ({ key: c.label, label: c.label })), [customers]);
   const bankOptions: PickerOption[] = useMemo(() => depositBankOptions.map((b) => ({ key: String(b.id), label: b.label })), [depositBankOptions]);
 
-  return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ paddingTop: insets.top + 8 }} className="flex-row items-center justify-between px-4 pb-3">
-          <View className="flex-row items-center gap-2.5">
-            <View className="w-8 h-8 rounded-lg items-center justify-center" style={{ backgroundColor: "#10b98126" }}>
-              <ArrowDownCircle size={14} color="#10b981" />
-            </View>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>{isEditing ? "Edit Received Payment" : "New Received Payment"}</Text>
-          </View>
-          <Pressable onPress={onClose} className="w-8 h-8 rounded-lg items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <X size={15} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
+  const content = (
+    <>
+      <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: asScreen ? 0 : insets.top }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+          <SheetShell
+            eyebrow="CivilierERP · Finance · Receipt"
+            title={isEditing ? "Edit receipt" : "New receipt"}
+            subtitle={docNoLoading ? "Numbering…" : docNoPreview || "A payment received from a client or customer"}
+            action={<Key label={asScreen ? "Back" : "Close"} icon={<X size={13} color={S.ink} />} onPress={onClose} style={{ alignSelf: "flex-start" }} />}
+          >
+            <Panel title="Party & date">
+              <View>
+                <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
+                <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
+                <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} onPress={() => setPicker("finYear")} disabled={finYearLocked} />
+                <Field label="Date of Receipt" required style={{ marginBottom: 12 }}>
+                  <Input value={form.date} onChangeText={(v) => set("date", v)} placeholder="YYYY-MM-DD" />
+                </Field>
+                <PickerRow label="Customer" value={form.customerName} onPress={() => setPicker("customer")} placeholder="Search / select a customer" />
+                <PickerRow label="Deposit Bank" value={form.depositBankName} onPress={() => setPicker("bank")} disabled={!form.companyId} />
+              </View>
+            </Panel>
 
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
-          <PickerRow
-            label="Company" value={form.companyName}
-            onPress={() => setPicker("company")}
-          />
-          <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-          <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} onPress={() => setPicker("finYear")} disabled={finYearLocked} />
+            <Panel title="Receipt">
+              <Field label="Amount" required>
+                <Input value={form.amount} onChangeText={(v) => set("amount", v.replace(/[^0-9.]/g, ""))} placeholder="0.00" keyboardType="numeric" />
+              </Field>
 
-          <FieldLabel required>Date of Receipt</FieldLabel>
-          <TextField value={form.date} onChangeText={(v) => set("date", v)} placeholder="YYYY-MM-DD" />
+              <Field label="Payment Type / Mode" required>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {PAYMENT_MODES.map((m) => {
+                    const on = form.mode === m;
+                    return (
+                      <Press
+                        key={m}
+                        onPress={() => set("mode", on ? "" : m)}
+                        style={(pressed) => ({ paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: S.ink, backgroundColor: on ? S.ink : pressed ? S.blueWash : "transparent" })}
+                      >
+                        <Text style={{ color: on ? S.paper : S.ink, fontSize: 10, letterSpacing: 1.1, textTransform: "uppercase", fontFamily: fonts.heading.semibold }}>{m}</Text>
+                      </Press>
+                    );
+                  })}
+                </View>
+              </Field>
 
-          <PickerRow label="Customer" value={form.customerName} onPress={() => setPicker("customer")} placeholder="Search / select a customer" />
-
-          <PickerRow
-            label="Deposit Bank" value={form.depositBankName}
-            onPress={() => setPicker("bank")}
-            disabled={!form.companyId}
-          />
-
-          <FieldLabel required>Amount</FieldLabel>
-          <TextField value={form.amount} onChangeText={(v) => set("amount", v.replace(/[^0-9.]/g, ""))} placeholder="0.00" keyboardType="numeric" />
-
-          <FieldLabel required>Payment Type / Mode</FieldLabel>
-          <View className="flex-row flex-wrap gap-2 mb-4">
-            {PAYMENT_MODES.map((m) => (
-              <Pressable key={m} onPress={() => set("mode", m === form.mode ? "" : m)} style={{ opacity: form.mode && form.mode !== m ? 0.5 : 1 }}>
-                <ModeBadge mode={m} />
-              </Pressable>
-            ))}
-          </View>
-
-          {needsBankRef && (
-            <>
-              {form.mode === "Check" ? (
+              {needsBankRef && (
                 <>
-                  <FieldLabel>Cheque Number</FieldLabel>
-                  <TextField value={form.checkNumber} onChangeText={(v) => set("checkNumber", v)} placeholder="Cheque No." />
-                  <FieldLabel>Cheque Date</FieldLabel>
-                  <TextField value={form.chequeDate} onChangeText={onChequeDateChange} placeholder="YYYY-MM-DD" />
-                  {form.isPostDated && (
-                    <Text style={{ color: "#8b5cf6", fontSize: 10.5, marginTop: -10, marginBottom: 14 }}>Marked as post-dated (future cheque date).</Text>
+                  {form.mode === "Check" ? (
+                    <>
+                      <Field label="Cheque Number">
+                        <Input value={form.checkNumber} onChangeText={(v) => set("checkNumber", v)} placeholder="Cheque No." />
+                      </Field>
+                      <Field label="Cheque Date">
+                        <Input value={form.chequeDate} onChangeText={onChequeDateChange} placeholder="YYYY-MM-DD" />
+                      </Field>
+                      {form.isPostDated && <Body size={12} color={S.ink2}>Marked as post-dated (a future cheque date).</Body>}
+                    </>
+                  ) : (
+                    <Field label="Transaction / UTR Ref">
+                      <Input value={form.transactionId} onChangeText={(v) => set("transactionId", v)} placeholder="Transaction ID / UTR" />
+                    </Field>
                   )}
-                </>
-              ) : (
-                <>
-                  <FieldLabel>Transaction / UTR Ref</FieldLabel>
-                  <TextField value={form.transactionId} onChangeText={(v) => set("transactionId", v)} placeholder="Transaction ID / UTR" />
+                  <Field label="Customer Bank Name">
+                    <Input value={form.bankName} onChangeText={(v) => set("bankName", v)} placeholder="Bank of customer" />
+                  </Field>
                 </>
               )}
-              <FieldLabel>Customer Bank Name</FieldLabel>
-              <TextField value={form.bankName} onChangeText={(v) => set("bankName", v)} placeholder="Bank of customer" />
-            </>
-          )}
 
-          <FieldLabel>Remarks</FieldLabel>
-          <TextField value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" multiline />
+              <Field label="Remarks">
+                <Input value={form.remarks} onChangeText={(v) => set("remarks", v)} placeholder="Optional notes" multiline numberOfLines={3} style={{ minHeight: 76, paddingVertical: 10, textAlignVertical: "top" }} />
+              </Field>
+            </Panel>
 
-          {(docNoLoading || docNoPreview) && (
-            <View className="rounded-xl px-3.5 py-2.5 mt-1" style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.muted}30` }}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular }}>Document Number</Text>
-              <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
-                {docNoLoading ? "Loading…" : docNoPreview}
-              </Text>
-            </View>
-          )}
+            {(docNoLoading || docNoPreview) && (
+              <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: S.ink }}>
+                <Label>Document number</Label>
+                <Text style={{ color: S.ink, fontSize: 14, fontFamily: fonts.heading.semibold }}>{docNoLoading ? "Loading…" : docNoPreview}</Text>
+              </View>
+            )}
+          </SheetShell>
         </ScrollView>
 
-        <View className="flex-row gap-2.5 px-4" style={{ paddingBottom: insets.bottom + 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <Pressable onPress={onClose} className="px-5 py-3 rounded-xl items-center justify-center" style={{ borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleSave}
-            disabled={saving}
-            className="flex-1 items-center justify-center py-3 rounded-xl"
-            style={{ backgroundColor: "#10b981", opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : (
-              <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>{isEditing ? "Update Payment" : "Save Payment"}</Text>
-            )}
-          </Pressable>
+        <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 12, paddingTop: 10, paddingBottom: insets.bottom + 12, borderTopWidth: 1.5, borderTopColor: S.ink, backgroundColor: colors.background }}>
+          <Key label="Cancel" onPress={onClose} />
+          <Key tone="ink" label={saving ? "Saving…" : isEditing ? "Update receipt" : "Save receipt"} onPress={handleSave} disabled={saving} style={{ flex: 1 }} />
         </View>
       </View>
 
       <OptionPickerModal
-        visible={picker === "company"} title="Select Company" options={companyOptions}
+        visible={picker === "company"} title="Select company" options={companyOptions}
         selectedKey={form.companyId}
         onSelect={(k) => {
           const c = companies.find((x) => String(x.id) === k);
@@ -332,7 +300,7 @@ export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { 
         onClose={() => setPicker(null)} searchable
       />
       <OptionPickerModal
-        visible={picker === "project"} title="Select Project" options={projectOptions}
+        visible={picker === "project"} title="Select project" options={projectOptions}
         selectedKey={form.projectId}
         onSelect={(k) => {
           const p = projects.find((x) => String(x.id) === k);
@@ -342,15 +310,15 @@ export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { 
         onClose={() => setPicker(null)} searchable
       />
       <OptionPickerModal
-        visible={picker === "finYear"} title="Select Financial Year" options={finYearOptions}
+        visible={picker === "finYear"} title="Select financial year" options={finYearOptions}
         selectedKey={form.finYear} onSelect={(k) => { set("finYear", k); setPicker(null); }} onClose={() => setPicker(null)}
       />
       <OptionPickerModal
-        visible={picker === "customer"} title="Select Customer" options={customerOptions}
+        visible={picker === "customer"} title="Select customer" options={customerOptions}
         selectedKey={form.customerName} onSelect={(k) => { set("customerName", k); setPicker(null); }} onClose={() => setPicker(null)} searchable
       />
       <OptionPickerModal
-        visible={picker === "bank"} title="Select Deposit Bank" options={bankOptions}
+        visible={picker === "bank"} title="Select deposit bank" options={bankOptions}
         selectedKey={form.depositBankId}
         onSelect={(k) => {
           const b = depositBankOptions.find((x) => String(x.id) === k);
@@ -359,6 +327,14 @@ export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { 
         }}
         onClose={() => setPicker(null)} searchable
       />
+    </>
+  );
+
+  return asScreen ? (
+    <View style={{ flex: 1 }}>{content}</View>
+  ) : (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
+      {content}
     </Modal>
   );
 }

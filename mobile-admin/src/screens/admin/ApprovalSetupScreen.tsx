@@ -1,122 +1,53 @@
-// RN port of src/pages/admin/ApprovalSetup.tsx's list view (web) — same
-// endpoint/actions (toggle, edit, delete), rebuilt as a card list. The
-// create/edit wizard lives in ApprovalSetupFormModal.tsx.
-import { useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, Alert, Switch, useWindowDimensions } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+// RN port of src/pages/admin/ApprovalSetup.tsx's list, on the drawing sheet as the web draws it: the title block with
+// New approval rule; the figures (rules, on, modules covered by a rule that is on); and the rule register — one ruled row
+// per rule with its On / Off mark, name, how many steps need everyone, the modules it covers (four, then "+n more"),
+// its step count, a square on / off switch and Edit / Delete (each with its right). New and Edit open the rule as its
+// own page (ApprovalSetupFormScreen).
+import { View, Text, Alert } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck, Plus, Pencil, Trash2 } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { GitBranch, Plus, RefreshCw } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
-import { fetchWorkflows, getUsers, toggleWorkflow, deleteWorkflow, type ApprovalWorkflow } from "@/api/approvalSetupApi";
-import { MODULE_OPTIONS, APPROVAL_TYPES } from "./approvalSetupConfig";
-import { ApprovalSetupFormModal } from "./ApprovalSetupFormModal";
+import type { MainStackParamList } from "@/navigation/MainStack";
+import { fetchWorkflows, toggleWorkflow, deleteWorkflow, type ApprovalWorkflow } from "@/api/approvalSetupApi";
+import { Body, Key, Label, Notice, Press, RegisterHead, SheetMark, SheetShell, StatRow } from "@/components/sheet/Sheet";
+import { RecordRow, RegisterBox, RegisterLoading, RowKeys, SheetPage } from "@/components/sheet/Register";
+import { moduleLabel } from "./approvalSetupConfig";
 
-function WorkflowCard({
-  wf, canEdit, canDelete, onToggle, onEdit, onDelete,
-}: { wf: ApprovalWorkflow; canEdit: boolean; canDelete: boolean; onToggle: () => void; onEdit: () => void; onDelete: () => void }) {
-  const typeInfo = APPROVAL_TYPES.find((t) => t.id === wf.type);
-  const TypeIcon = typeInfo?.icon ?? ShieldCheck;
-
+/** The web's square on / off key, in place of the round switch. */
+export function SquareSwitch({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <View
-      className="rounded-2xl p-3.5 mb-2.5"
-      style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99`, opacity: wf.active ? 1 : 0.6 }}
-    >
-      <View className="flex-row items-start justify-between gap-2 mb-2">
-        <View className="flex-row items-center gap-2 flex-1 min-w-0">
-          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: wf.active ? "#10b981" : colors.mutedForeground }} />
-          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold, flexShrink: 1 }}>{wf.name}</Text>
-        </View>
-        <View className="flex-row items-center gap-1">
-          {canEdit && (
-            <Pressable onPress={onEdit} hitSlop={6} className="p-1.5 rounded-lg" style={{ backgroundColor: `${colors.primary}14` }}>
-              <Pencil size={12} color={colors.primary} />
-            </Pressable>
-          )}
-          {canDelete && (
-            <Pressable onPress={onDelete} hitSlop={6} className="p-1.5 rounded-lg" style={{ backgroundColor: `${colors.destructive}14` }}>
-              <Trash2 size={12} color={colors.destructive} />
-            </Pressable>
-          )}
-        </View>
-      </View>
-
-      <View className="flex-row items-center gap-1.5 mb-2">
-        <TypeIcon size={11} color={colors.mutedForeground} />
-        <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>{typeInfo?.label}</Text>
-        <Text style={{ color: `${colors.mutedForeground}80`, fontSize: 10.5 }}>· {wf.levels.length} step{wf.levels.length !== 1 ? "s" : ""}</Text>
-      </View>
-
-      <View className="flex-row flex-wrap gap-1.5 mb-2.5">
-        {wf.modules.slice(0, 4).map((mid) => {
-          const m = MODULE_OPTIONS.find((x) => x.id === mid);
-          return (
-            <View key={mid} className="px-2 py-0.5 rounded-full" style={{ backgroundColor: colors.muted, borderWidth: 1, borderColor: colors.border }}>
-              <Text style={{ color: colors.mutedForeground, fontSize: 10 }}>{m?.icon} {m?.label ?? mid}</Text>
-            </View>
-          );
-        })}
-        {wf.modules.length > 4 && (
-          <View className="px-2 py-0.5 rounded-full" style={{ backgroundColor: colors.muted, borderWidth: 1, borderColor: colors.border }}>
-            <Text style={{ color: colors.mutedForeground, fontSize: 10 }}>+{wf.modules.length - 4} more</Text>
-          </View>
-        )}
-      </View>
-
-      <View className="flex-row items-center justify-between pt-2" style={{ borderTopWidth: 1, borderTopColor: `${colors.border}66` }}>
-        <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.medium }}>{wf.active ? "On" : "Off"}</Text>
-        <Switch
-          value={wf.active}
-          onValueChange={onToggle}
-          disabled={!canEdit}
-          trackColor={{ false: colors.muted, true: `${colors.primary}80` }}
-          thumbColor={wf.active ? colors.primary : "#f4f3f4"}
-        />
-      </View>
-    </View>
+    <Press onPress={() => onChange(!on)} disabled={disabled} hitSlop={8} style={() => ({ width: 34, height: 20, borderWidth: 1, borderColor: S.ink, backgroundColor: on ? S.ink : S.paper, opacity: disabled ? 0.4 : 1 })}>
+      <View style={{ position: "absolute", top: 3, left: on ? 17 : 3, width: 12, height: 12, backgroundColor: on ? S.paper : S.ink }} />
+    </Press>
   );
 }
 
 export default function ApprovalSetupScreen() {
-  const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const queryClient = useQueryClient();
   const { canDoAction } = useAuth();
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<ApprovalWorkflow | null>(null);
-
-  const { data: workflows = [], isLoading, isFetching, refetch } = useQuery({
-    queryKey: ["approval-workflows"],
-    queryFn: fetchWorkflows,
-    staleTime: 30_000,
-  });
-
-  const { data: users = [] } = useQuery({
-    queryKey: ["approval-setup-users"],
-    queryFn: getUsers,
-    staleTime: 60_000,
-  });
-
   const canCreate = canDoAction("admin_approval_setup", "create");
   const canEdit = canDoAction("admin_approval_setup", "edit");
   const canDelete = canDoAction("admin_approval_setup", "delete");
 
-  const openNew = () => { setEditing(null); setFormOpen(true); };
-  const openEdit = (wf: ApprovalWorkflow) => { setEditing(wf); setFormOpen(true); };
+  const { data: workflows = [], isLoading, isError, isFetching, refetch } = useQuery({ queryKey: ["approval-workflows"], queryFn: fetchWorkflows, staleTime: 30_000 });
+  const list = Array.isArray(workflows) ? workflows : [];
+  const on = list.filter((w) => w.active);
 
   const handleToggle = async (wf: ApprovalWorkflow) => {
     try {
       await toggleWorkflow(wf.id);
       queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
     } catch (e: any) {
-      Alert.alert("Toggle failed", e.message || "Something went wrong.");
+      Alert.alert("Could not switch it", e.message || "Something went wrong.");
     }
   };
-
-  const confirmDelete = (wf: ApprovalWorkflow) => {
-    Alert.alert("Delete Approval Rule?", `"${wf.name}" will be permanently removed. This can't be undone.`, [
+  const confirmDelete = (wf: ApprovalWorkflow) =>
+    Alert.alert("Delete approval rule?", `"${wf.name}" will be permanently removed. This can't be undone.`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
@@ -126,76 +57,103 @@ export default function ApprovalSetupScreen() {
             await deleteWorkflow(wf.id);
             queryClient.invalidateQueries({ queryKey: ["approval-workflows"] });
           } catch (e: any) {
-            Alert.alert("Delete failed", e.message || "Something went wrong.");
+            Alert.alert("Could not delete", e.message || "Something went wrong.");
           }
         },
       },
     ]);
-  };
-
-  const ListHeader = (
-    <View style={{ width: width - 32, marginBottom: 14 }}>
-      <Text style={{ color: colors.foreground, fontSize: 15, fontFamily: fonts.heading.bold }}>Approval Rules</Text>
-      <Text style={{ color: colors.mutedForeground, fontSize: 11.5, marginTop: 3 }}>
-        Control who needs to approve requests before they go through.
-      </Text>
-    </View>
-  );
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {isLoading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator color={colors.mutedForeground} />
-        </View>
-      ) : (
-        <FlatList
-          data={workflows}
-          keyExtractor={(wf) => String(wf.id)}
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 16, paddingTop: 12 }}
-          refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.primary} />}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => (
-            <WorkflowCard
-              wf={item}
-              canEdit={canEdit}
-              canDelete={canDelete}
-              onToggle={() => handleToggle(item)}
-              onEdit={() => openEdit(item)}
-              onDelete={() => confirmDelete(item)}
-            />
-          )}
-          ListEmptyComponent={
-            <View style={{ alignItems: "center", paddingVertical: 48 }}>
-              <ShieldCheck size={28} color={`${colors.mutedForeground}4d`} />
-              <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 13, fontFamily: fonts.body.medium, marginTop: 12 }}>No approval rules yet.</Text>
-              <Text style={{ color: `${colors.mutedForeground}66`, fontSize: 11, marginTop: 3, textAlign: "center", paddingHorizontal: 24 }}>
-                Once you create a rule, matching requests are automatically sent for approval.
-              </Text>
-            </View>
-          }
+    <SheetPage refreshing={isFetching && !isLoading} onRefresh={() => void refetch()}>
+      <SheetShell
+        eyebrow="CivilierERP · Approvals"
+        title="Approval rules"
+        subtitle="Who has to approve a request before it goes through — purchase orders, expenses and the rest — level by level."
+        action={
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {canCreate && <Key tone="ink" label="New approval rule" icon={<Plus size={13} color={S.paper} />} onPress={() => navigation.navigate("ApprovalSetupForm")} />}
+            <Key label={isFetching ? "Reading…" : "Refresh"} icon={<RefreshCw size={13} color={S.ink} />} onPress={() => void refetch()} disabled={isFetching} />
+          </View>
+        }
+      >
+        <StatRow
+          items={[
+            { label: "Rules", value: isLoading ? "…" : String(list.length), note: "set up" },
+            { label: "On", value: isLoading ? "…" : String(on.length), note: "sending requests for approval" },
+            { label: "Modules covered", value: isLoading ? "…" : String(new Set(on.flatMap((w) => w.modules)).size), note: "by a rule that is on" },
+          ]}
         />
-      )}
 
-      {canCreate && (
-        // Offset above NavSheet.tsx's own Menu FAB, which occupies this
-        // same corner (right:20, bottom: insets.bottom+20) on every screen.
-        <Pressable
-          onPress={openNew}
-          style={{ position: "absolute", right: 20, bottom: insets.bottom + 90, width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary, elevation: 6, shadowColor: colors.primary, shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } }}
-        >
-          <Plus size={22} color="#fff" />
-        </Pressable>
-      )}
-
-      <ApprovalSetupFormModal
-        visible={formOpen}
-        editing={editing}
-        users={users}
-        onClose={() => setFormOpen(false)}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ["approval-workflows"] })}
-      />
-    </View>
+        <RegisterBox>
+          <RegisterHead title="Approval rules" count={list.length} unit={["rule", "rules"]} />
+          {isLoading ? (
+            <RegisterLoading />
+          ) : isError ? (
+            <Notice>Could not load the approval rules. Pull down to try again.</Notice>
+          ) : list.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: 22, gap: 6 }}>
+              <Text style={{ fontFamily: fonts.heading.bold, fontSize: 15, color: S.ink }}>No approval rules yet</Text>
+              <Body size={12.5} color={S.graphite} style={{ textAlign: "center" }}>
+                Once you create a rule, any matching request is sent for approval before it's processed.
+              </Body>
+              {canCreate && <Key tone="ink" label="Create your first rule" icon={<Plus size={13} color={S.paper} />} onPress={() => navigation.navigate("ApprovalSetupForm")} style={{ marginTop: 8 }} />}
+            </View>
+          ) : (
+            <>
+              <Body size={12} color={S.graphite}>{`${list.length} rule${list.length > 1 ? "s" : ""} — switch them on or off`}</Body>
+              <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+                {list.map((wf, i) => {
+                  const allSteps = wf.levels.filter((l) => l.mode === "all" && l.userIds.length > 1).length;
+                  const mods = wf.modules.slice(0, 4).map(moduleLabel);
+                  return (
+                    <RecordRow
+                      key={wf.id}
+                      last={i === list.length - 1}
+                      title={wf.name}
+                      onPress={canEdit ? () => navigation.navigate("ApprovalSetupForm", { id: wf.id }) : undefined}
+                      lines={[
+                        <View key="m" style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
+                          {mods.map((m) => (
+                            <View key={m} style={{ borderWidth: 1, borderColor: S.line40, paddingHorizontal: 6, paddingVertical: 2 }}>
+                              <Text style={{ fontFamily: fonts.body.regular, fontSize: 11, color: S.ink2 }}>{m}</Text>
+                            </View>
+                          ))}
+                          {wf.modules.length > 4 && (
+                            <View style={{ borderWidth: 1, borderColor: S.line40, paddingHorizontal: 6, paddingVertical: 2 }}>
+                              <Text style={{ fontFamily: fonts.body.regular, fontSize: 11, color: S.graphite }}>{`+${wf.modules.length - 4} more`}</Text>
+                            </View>
+                          )}
+                        </View>,
+                        <View key="s" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+                          <Body size={11.5} color={S.graphite}>{`${wf.levels.length} approval step${wf.levels.length !== 1 ? "s" : ""}`}</Body>
+                          {allSteps > 0 && (
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderColor: S.line40, paddingHorizontal: 5, paddingVertical: 1 }}>
+                              <GitBranch size={10} color={S.ink} />
+                              <Label color={S.ink}>{`${allSteps} step${allSteps > 1 ? "s" : ""} need everyone`}</Label>
+                            </View>
+                          )}
+                        </View>,
+                      ]}
+                      marks={
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                          <SquareSwitch on={wf.active} onChange={() => handleToggle(wf)} disabled={!canEdit} />
+                          {wf.active ? <SheetMark text="On" tone="done" /> : <Label>Off</Label>}
+                        </View>
+                      }
+                      actions={
+                        <RowKeys
+                          onEdit={canEdit ? () => navigation.navigate("ApprovalSetupForm", { id: wf.id }) : undefined}
+                          onDelete={canDelete ? () => confirmDelete(wf) : undefined}
+                        />
+                      }
+                    />
+                  );
+                })}
+              </View>
+            </>
+          )}
+        </RegisterBox>
+      </SheetShell>
+    </SheetPage>
   );
 }

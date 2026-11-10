@@ -23,6 +23,7 @@ import { makeAvatarThumb } from "@/lib/avatarThumb";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { UserStatusDialog } from "@/components/UserStatusDialog";
 import { fmtIstDateTime } from "@/lib/istTime";
+import { deactivateHeldUntil, fmtHeldUntil } from "@/lib/userStatusHold";
 
 import { isPrivilegedRole } from "@/contexts/auth.utils";
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -42,6 +43,8 @@ interface User {
   can_accept_tickets?: boolean;
   DepartmentId?: number | null;
   DepartmentName?: string | null;
+  /** for "chat on WhatsApp" links next to records this user created (migration 626) */
+  WhatsAppNo?: string | null;
   /** the list's small thumbnail when there is one, else the full picture (migration 575) */
   avatar_url?: string | null;
   /** a picture uploaded before thumbnails existed — made once on this page */
@@ -69,6 +72,7 @@ const addUserApi = async (user: {
   password: string;
   can_accept_tickets?: boolean;
   DepartmentId?: number | null;
+  WhatsAppNo?: string | null;
 }) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
@@ -223,6 +227,7 @@ function buildUserColumns(
       accessorKey: "DepartmentName",
       header: "Department",
       size: 140,
+      meta: { className: "hidden xl:table-cell" },
       cell: ({ row }) => (
         <span className="text-sm text-foreground">
           {row.original.DepartmentName ?? "—"}
@@ -233,6 +238,7 @@ function buildUserColumns(
       accessorKey: "can_accept_tickets",
       header: "Ticket Access",
       size: 140,
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => {
         const user = row.original;
         const canAccept =
@@ -272,9 +278,11 @@ function buildUserColumns(
       cell: ({ row, getValue }) => {
         const inactive = getValue() as boolean;
         const u = row.original;
+        const heldUntil = deactivateHeldUntil(u);
         return (
           <div className="leading-tight">
             {!inactive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
+            {heldUntil && <p className="mt-1 text-[0.6875rem] font-medium text-foreground whitespace-nowrap">Held to {fmtHeldUntil(heldUntil)}</p>}
             {u.StatusReason && (
               <p className="mt-1 max-w-[220px] whitespace-normal text-[0.6875rem] text-muted-foreground" title={u.StatusReason}>
                 {u.StatusReason}
@@ -292,15 +300,18 @@ function buildUserColumns(
       enableSorting: false,
       cell: ({ row }) => {
         const user = row.original;
+        const heldUntil = deactivateHeldUntil(user);
         return (
           <div className="flex items-center justify-end gap-2.5">
             <button data-row-view onClick={() => setViewUserId(user.id)} className={ACT} title="View" aria-label="View"><Eye size={13} /></button>
             <button onClick={() => setEditUserId(user.id)} className={ACT} title="Edit" aria-label="Edit"><Edit size={13} /></button>
             <button
               onClick={() => onStatus(user)}
-              className={`${KEY} h-7 px-2.5 border ${!user.discontinue ? "border-foreground/40 text-muted-foreground hover:text-destructive hover:border-destructive" : "border-foreground text-foreground hover:bg-primary/10"}`}
+              disabled={!!heldUntil}
+              title={heldUntil ? `Activated less than 90 days ago. Can be made inactive from ${fmtHeldUntil(heldUntil)}.` : undefined}
+              className={`${KEY} h-7 w-[5.75rem] shrink-0 border ${!user.discontinue ? "border-foreground/40 text-muted-foreground hover:text-destructive hover:border-destructive" : "border-foreground text-foreground hover:bg-primary/10"}`}
             >
-              {!user.discontinue ? "Deactivate" : "Activate"}
+              {heldUntil ? "Held" : !user.discontinue ? "Deactivate" : "Activate"}
             </button>
             {deleteConfirmId === user.id ? (
               <div className="flex items-center gap-1 ml-1">
@@ -390,6 +401,7 @@ const Users = () => {
     password: "",
     isActive: true,
     canAcceptTickets: false,
+    whatsApp: "",
   });
 
   const [editUserId, setEditUserId] = useState<number | null>(null);
@@ -415,6 +427,7 @@ const Users = () => {
           password: "",
           isActive: !user.discontinue,
           canAcceptTickets: !!user.can_accept_tickets,
+          whatsApp: user.WhatsAppNo ?? "",
         });
         setDrawerOpen(true);
       }
@@ -451,6 +464,7 @@ const Users = () => {
         email: form.email.trim(),
         RoleId: form.RoleId,
         DepartmentId: form.DepartmentId || null,
+        WhatsAppNo: form.whatsApp.trim() || null,
         discontinue: !form.isActive,
         can_accept_tickets: form.canAcceptTickets,
       };
@@ -467,6 +481,7 @@ const Users = () => {
         email: form.email.trim(),
         RoleId: form.RoleId,
         DepartmentId: form.DepartmentId || null,
+        WhatsAppNo: form.whatsApp.trim() || null,
         password: form.password,
         can_accept_tickets: form.canAcceptTickets,
       });
@@ -482,6 +497,7 @@ const Users = () => {
       password: "",
       isActive: true,
       canAcceptTickets: false,
+      whatsApp: "",
     });
     setEditUserId(null);
     setShowPass(false);
@@ -641,6 +657,23 @@ const Users = () => {
                   required
                   className={INPUT}
                 />
+              </div>
+
+              <div>
+                <label className={`${LBL} mb-1.5 block`}>
+                  WhatsApp Number
+                </label>
+                <input
+                  name="whatsApp"
+                  type="tel"
+                  inputMode="tel"
+                  maxLength={20}
+                  placeholder="e.g. 9876543210 or +91 98765 43210"
+                  value={form.whatsApp}
+                  onChange={handleChange}
+                  className={INPUT}
+                />
+                <p className="mt-1 text-[0.6875rem] text-muted-foreground">Others can chat with this user on WhatsApp from records they created (e.g. land enquiries).</p>
               </div>
 
               <div>

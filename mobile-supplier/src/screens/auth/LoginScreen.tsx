@@ -1,46 +1,25 @@
-// RN port of src/pages/supplier/SupplierLogin.tsx (web), matching what the
-// web app itself renders at its own mobile breakpoint: the left brand
-// panel (green hero copy, feature list, testimonial) is `hidden lg:flex`
-// there too, so a faithful mobile port is the right panel's login card,
-// full screen, centered — not a shrunk-down version of the desktop split
-// layout. Built with RN's Animated API + expo-linear-gradient instead of
-// framer-motion, and with no mouse-tilt (TiltCard) since there's no
-// pointer on a touch device.
+// Supplier sign-in, drawn on the web app's drawing sheet (see components/sheet): the title block with the logo, the
+// two fields, one ink key. Port of src/pages/supplier/SupplierLogin.tsx — what the web renders at its own mobile
+// breakpoint is the sign-in card alone, full screen, centred.
 import { useEffect, useRef, useState } from "react";
-import {
-  Animated,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { Eye, EyeOff, AlertCircle } from "lucide-react-native";
+import { Animated, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "react-native";
+import { Eye, EyeOff } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import { AnimatedInput } from "@/components/AnimatedInput";
-import { ShimmerButton } from "@/components/ShimmerButton";
-import { GradientText } from "@/components/GradientText";
-import { SupplierLogoRing } from "@/components/SupplierLogoRing";
+import { Field, Input, Key, Notice, SheetFrame, TitleBlock } from "@/components/sheet/Sheet";
 import { WelcomeOverlay } from "@/components/WelcomeOverlay";
-import { fonts } from "@/theme/fonts";
+import { colors, sheet as S } from "@/theme/colors";
 
 // Same ~1.8s window SupplierLogin.tsx (web) holds before navigate("/supplier")
 // after a successful login — long enough for the welcome moment to read,
 // short enough not to feel like a stall.
 const NAV_HOLD_MS = 1800;
 
-function CornerAccents() {
-  const corner = "absolute w-5 h-5";
-  const color = "rgba(52,211,153,0.4)";
+/** The company logo in a ruled circle, as on the web sign-in. */
+function Logo({ size = 52 }: { size?: number }) {
   return (
-    <>
-      <View className={`${corner} top-0 left-0 border-t-2 border-l-2 rounded-tl-2xl`} style={{ borderColor: color }} />
-      <View className={`${corner} top-0 right-0 border-t-2 border-r-2 rounded-tr-2xl`} style={{ borderColor: color }} />
-      <View className={`${corner} bottom-0 left-0 border-b-2 border-l-2 rounded-bl-2xl`} style={{ borderColor: color }} />
-      <View className={`${corner} bottom-0 right-0 border-b-2 border-r-2 rounded-br-2xl`} style={{ borderColor: color }} />
-    </>
+    <View style={{ width: size, height: size, borderRadius: size / 2, borderWidth: 1.5, borderColor: S.ink, backgroundColor: "#ffffff", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+      <Image source={require("../../../assets/branding/Civilier.png")} style={{ width: size * 0.72, height: size * 0.72 }} resizeMode="contain" />
+    </View>
   );
 }
 
@@ -54,12 +33,10 @@ export default function LoginScreen() {
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [loginName, setLoginName] = useState("");
 
-  const cardFade = useRef(new Animated.Value(0)).current;
-  const cardY = useRef(new Animated.Value(24)).current;
+  const rise = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.timing(cardFade, { toValue: 1, duration: 500, useNativeDriver: true }).start();
-    Animated.timing(cardY, { toValue: 0, duration: 500, useNativeDriver: true }).start();
-  }, [cardFade, cardY]);
+    Animated.timing(rise, { toValue: 1, duration: 450, useNativeDriver: true }).start();
+  }, [rise]);
 
   const onSubmit = async () => {
     if (loading) return;
@@ -77,122 +54,63 @@ export default function LoginScreen() {
   };
 
   return (
-    <View className="flex-1">
-      <LinearGradient
-        colors={["#f0fdf4", "#ecfdf5", "#ffffff", "#f8fff9"]}
-        locations={[0, 0.3, 0.65, 1]}
-        start={{ x: 0.1, y: 0 }}
-        end={{ x: 0.9, y: 1 }}
-        style={{ position: "absolute", inset: 0 }}
-      />
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 12 }} keyboardShouldPersistTaps="handled">
+          <Animated.View style={{ opacity: rise, transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }] }}>
+            <SheetFrame>
+              <TitleBlock
+                eyebrow="CivilierERP · Supplier"
+                title="Supplier Portal"
+                subtitle="Sign in to your supplier account"
+                action={<Logo />}
+              />
 
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
-        <ScrollView
-          contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 20 }}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Animated.View style={{ opacity: cardFade, transform: [{ translateY: cardY }] }}>
-            <View
-              className="rounded-3xl p-6 overflow-hidden"
-              style={{
-                backgroundColor: "rgba(255,255,255,0.92)",
-                borderWidth: 1,
-                borderColor: "rgba(5,150,105,0.12)",
-                shadowColor: "#059669",
-                shadowOpacity: 0.1,
-                shadowRadius: 24,
-                shadowOffset: { width: 0, height: 10 },
-                elevation: 6,
-              }}
-            >
-              <CornerAccents />
+              <View style={{ borderTopWidth: 1, borderTopColor: S.rule, padding: 16, gap: 16 }}>
+                <Field label="Email Address">
+                  <Input
+                    value={email}
+                    placeholder="name@company.com"
+                    onChangeText={(t) => {
+                      setEmail(t);
+                      setError(null);
+                    }}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="email-address"
+                    textContentType="emailAddress"
+                  />
+                </Field>
 
-              {/* Header */}
-              <View className="items-center mb-6">
-                <SupplierLogoRing size={64} />
-                <View className="mt-3">
-                  <GradientText
-                    style={{ fontSize: 24, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}
-                    colors={["#064e3b", "#059669", "#34d399"]}
-                  >
-                    Supplier Portal
-                  </GradientText>
-                </View>
-                <Text style={{ color: "#94a3b8", fontSize: 12, fontFamily: fonts.body.regular, marginTop: 6 }}>
-                  Sign in to your supplier account
-                </Text>
-              </View>
+                <Field label="Password">
+                  <Input
+                    value={password}
+                    placeholder="••••••••"
+                    onChangeText={(t) => {
+                      setPassword(t);
+                      setError(null);
+                    }}
+                    secureTextEntry={!showPass}
+                    textContentType="password"
+                    onSubmitEditing={onSubmit}
+                    right={
+                      <Pressable onPress={() => setShowPass((v) => !v)} hitSlop={10} style={{ paddingHorizontal: 12, height: 44, justifyContent: "center" }}>
+                        {showPass ? <EyeOff size={16} color={S.graphite} /> : <Eye size={16} color={S.graphite} />}
+                      </Pressable>
+                    }
+                  />
+                </Field>
 
-              {/* Form */}
-              <View className="gap-4">
-                <AnimatedInput
-                  label="Email Address"
-                  value={email}
-                  placeholder="name@company.com"
-                  onChangeText={(t) => {
-                    setEmail(t);
-                    setError(null);
-                  }}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                  textContentType="emailAddress"
+                {error && <Notice>{error}</Notice>}
+
+                <Key
+                  tone="ink"
+                  label={loading ? "Signing in…" : "Sign in →"}
+                  onPress={onSubmit}
+                  disabled={loading || !email || !password || loginSuccess}
                 />
-
-                <AnimatedInput
-                  label="Password"
-                  value={password}
-                  placeholder="••••••••"
-                  onChangeText={(t) => {
-                    setPassword(t);
-                    setError(null);
-                  }}
-                  secureTextEntry={!showPass}
-                  textContentType="password"
-                  rightElement={
-                    <Pressable onPress={() => setShowPass((v) => !v)} hitSlop={10} className="pr-3">
-                      {showPass ? (
-                        <EyeOff size={16} color="#94a3b8" />
-                      ) : (
-                        <Eye size={16} color="#94a3b8" />
-                      )}
-                    </Pressable>
-                  }
-                />
-
-                {error && (
-                  <View
-                    className="flex-row items-center gap-2 px-4 py-2.5 rounded-xl"
-                    style={{ backgroundColor: "rgba(254,226,226,0.8)", borderWidth: 1, borderColor: "rgba(252,165,165,0.5)" }}
-                  >
-                    <AlertCircle size={14} color="#dc2626" />
-                    <Text className="text-sm flex-1" style={{ color: "#dc2626", fontFamily: fonts.body.medium }}>
-                      {error}
-                    </Text>
-                  </View>
-                )}
-
-                <ShimmerButton onPress={onSubmit} disabled={loading || !email || !password || loginSuccess}>
-                  {loading ? (
-                    <>
-                      <Animated.View
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: 8,
-                          borderWidth: 2,
-                          borderColor: "rgba(255,255,255,0.3)",
-                          borderTopColor: "#fff",
-                        }}
-                      />
-                      <Text style={{ color: "#fff", fontSize: 14, fontFamily: fonts.body.semibold }}>Signing in…</Text>
-                    </>
-                  ) : (
-                    <Text style={{ color: "#fff", fontSize: 14, fontFamily: fonts.body.semibold }}>Sign In →</Text>
-                  )}
-                </ShimmerButton>
               </View>
-            </View>
+            </SheetFrame>
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
