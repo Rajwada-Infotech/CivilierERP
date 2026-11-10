@@ -44,9 +44,9 @@ const EMPTY_COMPLETE = () => ({
   RegistrationDate: localDay(), WitnessNames: "", BuyerAttended: false, SellerAttended: false,
 });
 
-export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canCompleteOrCancel, canEditDeed, onSaveIndex2, savingIndex2, onChanged }: {
+export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComplete, canCancel, canEditDeed, onSaveIndex2, savingIndex2, onChanged }: {
   detail: any; qpConfirmed: boolean;
-  canCreate: boolean; canEdit: boolean; canCompleteOrCancel: boolean; canEditDeed: boolean;
+  canCreate: boolean; canEdit: boolean; canComplete: boolean; canCancel: boolean; canEditDeed: boolean;
   onSaveIndex2: (date: string) => void; savingIndex2: boolean;
   onChanged: () => void;
 }) {
@@ -204,7 +204,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
                         <button onClick={() => { setScheduleOpen("reschedule"); setDate(registry.ScheduledDate ? String(registry.ScheduledDate).slice(0, 10) : ""); setTime(registry.AppointmentTime || ""); setOffice(registry.AppointmentOffice || ""); setReason(""); }}
                           className={`${KEY_LINE} h-8 px-3`}>Reschedule</button>
                       )}
-                      {canCompleteOrCancel ? (
+                      {canComplete ? (
                         <button onClick={() => { setComplete({ ...EMPTY_COMPLETE(), SubRegistrarOffice: registry.AppointmentOffice || registry.SubRegistrarOffice || "" }); setCompleteOpen(true); }}
                           disabled={required.length > 0 && verified < required.length}
                           title={required.length > 0 && verified < required.length ? "Verify every mandatory document first" : undefined}
@@ -229,7 +229,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
                     {registry.CancelledReason && <p className="text-muted-foreground mt-0.5">{registry.CancelledReason}</p>}
                   </div>
                 )}
-                {!locked && canCompleteOrCancel && (
+                {!locked && canCancel && (
                   <button onClick={() => setCancelOpen(true)} className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}>Cancel registry</button>
                 )}
 

@@ -64,6 +64,7 @@ const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmSalesDeed) D, (SELECT COUNT(*
       expectCall(`Attach ${doc.Label || doc.DocumentType}`, a, 200);
       expectCall(`Verify ${doc.Label || doc.DocumentType}`, await call("PUT", `/d/${LIVE}/documents/${doc.Id}`, { Status: "Verified" }), 200);
     }
+    expectCall("Submitting without stamp duty or fee is refused", await call("PUT", `/d/${LIVE}/submit`), 400, "Stamp Duty");
     // Sent back, the figures can be corrected again (they lock once it goes to the customer).
     const fig = await call("PUT", `/d/${LIVE}`, { DeedValue: before.DeedValue || 5000000, StampDuty: 350000, RegistrationFee: 30000 });
     check("The figures can be corrected again", fig.status === 200 && Number((await deed(LIVE)).deed.StampDuty) === 350000, `got ${fig.status} ${fig.json?.error}`);
@@ -74,6 +75,7 @@ const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmSalesDeed) D, (SELECT COUNT(*
     expectCall("Record the customer's recheck (offline)", await call("PUT", `/d/${LIVE}/proxy-customer-recheck`, { ProxyMethod: "Phone", ProxyRemarks: "Spelling of name" }), 200);
     expectCall("Resend to the customer", await call("PUT", `/d/${LIVE}/send-to-customer`), 200);
     expectCall("Record the customer's approval (offline)", await call("PUT", `/d/${LIVE}/proxy-customer-approve`, { ProxyMethod: "Phone", ProxyRemarks: "Approved on call" }), 200);
+    expectCall("Resending after the customer approved is refused", await call("PUT", `/d/${LIVE}/send-to-customer`), 400, "already approved");
     d = (await deed(LIVE)).deed;
     check("The director is asked again", d.CustomerApprovalStatus === "Approved" && d.DirectorApprovalStatus === "Pending");
     const da = await call("PUT", `/d/${LIVE}/director/approve`, { Remarks: "ok" });
@@ -101,6 +103,7 @@ const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmSalesDeed) D, (SELECT COUNT(*
 
     section("Repeat clicks");
     await q(`UPDATE dbo.CrmSalesDeed SET DirectorApprovalStatus = 'Pending' WHERE Id = ${LIVE}`);
+    expectCall("The director's rejection needs a reason", await call("PUT", `/d/${LIVE}/director/reject`, { Remarks: " " }), 400, "remarks");
     expectCall("Reject", await call("PUT", `/d/${LIVE}/director/reject`, { Remarks: "again" }), 200);
     const v1 = (await deed(LIVE)).deed.VersionNo;
     await call("PUT", `/d/${LIVE}/director/reject`, { Remarks: "again" });

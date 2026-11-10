@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { CrmStatus } from "@/constants/crmStatuses";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useCanApprove } from "@/hooks/useCanApprove";
 import { useAuth } from "@/contexts/AuthContext";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -32,8 +33,8 @@ import { useCrmListState, useSticky, listParams, type CrmSort } from "@/hooks/us
 import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, BandNext, CollectionBar, MoneyBand, StepBar, personName, type StepState } from "./payments/parts";
 import { fmtShort } from "./payments/config";
 import {
-  API, EMPTY_FORM, CRM_REGISTRY_APPROVER_ROLES, LOG_ACTION_LABEL, STATUSES, DEED_ALERTS, DEED_STEP_NAMES,
-  deedTone, roleKey, fmtDate, deedDocumentProgress, deedStepStates, fetchBookingContext, fetchDeedsList, fetchAllDeeds,
+  API, EMPTY_FORM, LOG_ACTION_LABEL, STATUSES, DEED_ALERTS, DEED_STEP_NAMES,
+  deedTone, fmtDate, deedDocumentProgress, deedStepStates, fetchBookingContext, fetchDeedsList, fetchAllDeeds,
   fetchEligible, fetchLegalExecutives, rowDeedProgress, deedAlerts, type DeedAlertTone, type DeedTab,
 } from "./salesDeed/config";
 import { DeedDetailsSection, DocumentCentre, StepBox, auditToHistory } from "./salesDeed/parts";
@@ -107,7 +108,7 @@ const CrmSalesDeed: React.FC = () => {
   // Query Payment and Registry were their own pages; either their own right or the deed's works their sections.
   const qpRights = usePageRights("crm-query-payment");
   const regRights = usePageRights("crm-registry");
-  const { currentUser, canDoAction } = useAuth();
+  const { currentUser } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
@@ -194,8 +195,12 @@ const CrmSalesDeed: React.FC = () => {
     enabled: deedCancelled && detail?.BookingId != null,
   });
 
-  const role = roleKey(currentUser?.role);
-  const legalOrInbox = CRM_REGISTRY_APPROVER_ROLES.includes(role) || canDoAction("approval-inbox" as any, "edit");
+  // Who may work the papers, confirm the stamp duty payment and complete or cancel the registry is set in Approval
+  // Setup (Super Admin always, in parallel): the server answers, the page keeps no list of roles.
+  const docsApprover = useCanApprove("crm-sales-deed-docs");
+  const canConfirmPayment = useCanApprove("crm-query-payment-confirm");
+  const canCompleteRegistry = useCanApprove("crm-registry-complete");
+  const canCancelRegistry = useCanApprove("crm-registry-cancel");
   const qpCanCreate = rights.canCreate || qpRights.canCreate;
   const qpCanEdit = rights.canEdit || qpRights.canEdit;
   const regCanCreate = rights.canCreate || regRights.canCreate;
@@ -215,8 +220,8 @@ const CrmSalesDeed: React.FC = () => {
   const canWork = rights.canEdit && !closed;
   // Mirrors the server's requireAssignedLegalOrApprover: the deed's documents are worked by its assigned Legal
   // Executive (or Legal / admin), not anyone with page rights.
-  const canActAsLegal = !detail?.LegalExecutiveId ? false : CRM_REGISTRY_APPROVER_ROLES.includes(role) || String(detail.LegalExecutiveId) === String(currentUser?.id ?? "");
-  const legalLockReason = !detail?.LegalExecutiveId ? "Assign a Legal Executive to this deed first" : "Locked to the assigned Legal Executive (or Legal/admin)";
+  const canActAsLegal = !detail?.LegalExecutiveId ? false : docsApprover || String(detail.LegalExecutiveId) === String(currentUser?.id ?? "");
+  const legalLockReason = !detail?.LegalExecutiveId ? "Assign a Legal Executive to this deed first" : "Locked to the assigned Legal Executive (or someone named for sale deed papers in Approval Setup)";
 
   // Deep links: ?deedId opens that deed; ?bookingId opens the booking's deed (found on the server), or, when it has
   // none and is eligible, the New Sale Deed dialog.
@@ -614,10 +619,10 @@ const CrmSalesDeed: React.FC = () => {
             {currentDeed?.Id && currentDeed.Id !== d.Id && <button type="button" onClick={() => selectDetail(currentDeed.Id)} className={GRID_BTN}>Open Current Deed <ArrowRight size={13} /></button>}
           </div>
         ) : <>
-        {step("stampDuty", <QueryPaymentTab key={d.Id} detail={d} canCreate={qpCanCreate && !closed} canEdit={qpCanEdit && !closed} canConfirm={qpCanEdit && !closed && legalOrInbox} onChanged={invalidate} />)}
+        {step("stampDuty", <QueryPaymentTab key={d.Id} detail={d} canCreate={qpCanCreate && !closed} canEdit={qpCanEdit && !closed} canConfirm={qpCanEdit && !closed && canConfirmPayment} onChanged={invalidate} />)}
 
         {step("registry", <RegistryTab key={d.Id} detail={d} qpConfirmed={detailContext?.queryPaymentStatus === "Confirmed"} canCreate={regCanCreate && !closed} canEdit={regCanEdit && !closed}
-          canCompleteOrCancel={regCanEdit && !closed && legalOrInbox} canEditDeed={canWork} onSaveIndex2={handleSaveIndex2} savingIndex2={stepSaving} onChanged={invalidate} />)}
+          canComplete={regCanEdit && !closed && canCompleteRegistry} canCancel={regCanEdit && !closed && canCancelRegistry} canEditDeed={canWork} onSaveIndex2={handleSaveIndex2} savingIndex2={stepSaving} onChanged={invalidate} />)}
         </>}
 
         {step("history", (

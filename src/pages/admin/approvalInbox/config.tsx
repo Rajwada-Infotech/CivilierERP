@@ -262,6 +262,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/agreements",
     label: "CRM Agreement Date",
   },
+  "crm-sales-deed-senior": {
+    icon: Building2,
+    color: "text-purple-500 bg-purple-500/10",
+    navPath: "/crm/sales-deed",
+    apiEndpoint: "/api/crm/sales-deed",
+    label: "CRM Sales Deed (Senior)",
+  },
   "crm-sales-deed-director": {
     icon: Building2,
     color: "text-purple-500 bg-purple-500/10",
@@ -489,6 +496,7 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "crm-bookings": "sales",
   "crm-agreements": "sales",
   "crm-agreement-date": "sales",
+  "crm-sales-deed-senior": "sales",
   "crm-sales-deed-director": "sales",
   "crm-brokerage": "sales",
   "crm-cancellations": "sales",
@@ -578,6 +586,10 @@ export function openInModulePath(item: InboxItem, navPath: string): string {
   }
   if (item.Module === "crm-ownership-changes") {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
+  }
+  // The sale deed page opens one deed by ?deedId=, at its approvals.
+  if (item.Module === "crm-sales-deed-senior" || item.Module === "crm-sales-deed-director") {
+    return hasValidId ? `${navPath}?deedId=${item.RecordId}&tab=${encodeURIComponent("Legal & Approval")}` : navPath;
   }
   if (item.Module === "crm-agreements" || item.Module === "crm-agreement-date") {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
@@ -676,6 +688,7 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "crm-bookings":         "border-orange-500",
   "crm-agreements":       "border-indigo-500",
   "crm-agreement-date":   "border-indigo-400",
+  "crm-sales-deed-senior": "border-purple-400",
   "crm-sales-deed-director":"border-purple-500",
   "crm-brokerage":        "border-amber-500",
   "crm-cancellations":    "border-rose-500",

@@ -18,10 +18,6 @@ export const STATUSES = ["Draft", "Executed", "Registered", "Overdue", "Cancelle
 export const deedTone = (s: string): "done" | "waiting" | "stopped" =>
   s === "Registered" || s === "Completed" || s === "Confirmed" ? "done" : s === "Overdue" ? "stopped" : statusTone(s);
 
-// Legal & registry roles allowed to confirm the government payment and complete / cancel the registry.
-export const CRM_REGISTRY_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "legal_head"];
-export const roleKey = (role: unknown) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-
 /** Today (or `o` days on) as YYYY-MM-DD in local time; toISOString gave yesterday before 05:30 IST. */
 export const localDay = (o = 0) => {
   const d = new Date();

@@ -1824,6 +1824,14 @@ router.put("/:id/assign-legal", requirePageRight("crm-sales-deed", "edit"), asyn
   }
 });
 
+// The deed's figures are what the customer and the director sign off and what the stamp duty payment is drawn from:
+// they can't be blank when it goes for senior approval (asked at submit and again at approval).
+function deedFiguresMissing(deed) {
+  if (!(Number(deed.DeedValue) > 0)) return "Enter the Deed Value on the Sale Deed first";
+  if (!(Number(deed.StampDuty) > 0) && !(Number(deed.RegistrationFee) > 0)) return "Enter the Stamp Duty and/or Registration Fee on the Sale Deed first";
+  return null;
+}
+
 // 7. PUT /:id/submit
 router.put("/:id/submit", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
@@ -1834,8 +1842,10 @@ router.put("/:id/submit", requirePageRight("crm-sales-deed", "edit"), async (req
     const lock = await getDeedBookingLockReason(pool, id);
     if (lock) return res.status(400).json({ error: `Cannot submit deed because ${lock}` });
     
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT SeniorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT SeniorApprovalStatus, DeedValue, StampDuty, RegistrationFee FROM dbo.CrmSalesDeed WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Deed not found" });
+    const figures = deedFiguresMissing(cur.recordset[0]);
+    if (figures) return res.status(400).json({ error: figures });
     // NULL is the real starting state for every deed (never initialized at
     // creation, matching Agreement's own SeniorApprovalStatus) — this used
     // to only accept 'Rejected', which meant a brand new deed could never
@@ -1876,12 +1886,8 @@ router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (re
     if (lock) return res.status(400).json({ error: `Cannot approve deed because ${lock}` });
 
     if (!deed.LegalExecutiveId) return res.status(400).json({ error: "A Legal Executive must be assigned before approval" });
-    // The deed's figures are what the customer and the director sign off and
-    // what the query payment is drawn from — they can't be blank at approval.
-    if (!(Number(deed.DeedValue) > 0)) return res.status(400).json({ error: "Enter the Deed Value on the Sale Deed before approval" });
-    if (!(Number(deed.StampDuty) > 0) && !(Number(deed.RegistrationFee) > 0)) {
-      return res.status(400).json({ error: "Enter the Stamp Duty and/or Registration Fee on the Sale Deed before approval" });
-    }
+    const figures = deedFiguresMissing(deed);
+    if (figures) return res.status(400).json({ error: figures });
     
     const prog = await deedDocumentProgress(pool, id);
     if (prog.required === 0) return res.status(400).json({ error: "No mandatory documents requested yet" });
@@ -1901,7 +1907,7 @@ router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (re
     // used to skip every level after the first (as the director approval,
     // the agreement approvals and the cancellation approval already avoid).
     if (transitionResult.newStatus !== "Approved") {
-      return res.json({ success: true, status: transitionResult.newStatus, message: "Approved at this level — waiting for the next approver" });
+      return res.json({ success: true, ...transitionResult, status: transitionResult.newStatus, message: "Approved at this level — waiting for the next approver" });
     }
 
     // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────
@@ -1946,7 +1952,7 @@ router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (re
       } catch (notifErr) { console.error("[crm-sales-deed] approve emitNotification failed:", notifErr.message); }
     }
 
-    res.json({ success: true, status: transitionResult.newStatus });
+    res.json({ success: true, ...transitionResult, status: transitionResult.newStatus });
   } catch (e) {
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
   }
@@ -2090,7 +2096,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const deed = await pool.request().input("id", sql.Int, id).query(`
-      SELECT d.Id, d.Status, d.SeniorApprovalStatus, ag.Status AS AgreementStatus, d.BookingId
+      SELECT d.Id, d.Status, d.SeniorApprovalStatus, d.CustomerApprovalStatus, ag.Status AS AgreementStatus, d.BookingId
       FROM dbo.CrmSalesDeed d
       -- The deed's own agreement, or (a deed saved without the link) the booking's latest, as New Sale Deed picks it.
       OUTER APPLY (SELECT TOP 1 g.Status FROM dbo.CrmAgreement g WHERE g.BookingId = d.BookingId
@@ -2111,6 +2117,9 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
     }
     if (row.Status === CrmStatus.REGISTERED) {
       return res.status(400).json({ error: "Registered sales deed cannot be resent for customer approval" });
+    }
+    if (row.CustomerApprovalStatus === CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "The customer has already approved this deed: to change it, send it back to legal" });
     }
 
     await pool.request()
@@ -2227,7 +2236,8 @@ router.put("/:id/director/reject", requirePageRight("crm-sales-deed", "edit"), a
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const remarks = req.body?.Remarks || null;
+    const remarks = (req.body?.Remarks || "").trim();
+    if (!remarks) return res.status(400).json({ error: "Rejection remarks are required: the deed goes back to legal to correct" });
     const result = await approvalTransition("crm-sales-deed-director", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks, actorId(req));
     // The director's rejection sends the deed back to the legal executive, the same as a senior rejection: rework the
     // papers, then senior, customer and director again. The director's own step keeps Rejected and the reason until
