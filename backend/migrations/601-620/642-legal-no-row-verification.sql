@@ -1,4 +1,4 @@
--- 632: Land records are no longer verified row by row — the whole land is verified once (Final verification, 631).
+-- 632: Land records are no longer verified row by row — the whole land is verified once (Final verification, 641).
 -- Every Legal record row is marked Verified and new rows default to Verified, so totals that counted only verified
 -- rows (payments, fees, valuations…) count every row. The column stays (old reports / history) but is no longer shown.
 -- The land's own status (dbo.LegalLand) is not touched. Safe to re-run.

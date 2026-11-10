@@ -1674,7 +1674,7 @@ router.post("/:id/final-verify", requirePageRight(LAND_PAGE, "view"), async (req
   if (!target) return res.status(400).json({ error: "Set the timeline (deed to be done by)" });
   const pool = getPool();
   try {
-    if (!(await deedReady(pool))) return res.status(503).json({ error: "Deed Process is not set up yet (migration 631)" });
+    if (!(await deedReady(pool))) return res.status(503).json({ error: "Deed Process is not set up yet (migration 641)" });
     const l = (await pool.request().input("Id", sql.Int, id).query(
       "SELECT LandCode, CreatedBy, IsOnHold, IsCancelled, WorkflowStatus FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1")).recordset[0];
     if (!l) return res.status(404).json({ error: "Land not found" });
@@ -1751,7 +1751,7 @@ router.put("/:id/deed-process", requirePageRight(LAND_PAGE, "view"), async (req,
     }
     if (req.body?.deedFileId !== undefined) {
       if (!(await hasAnyPageAction(req, LAND_PAGE, ["edit"]))) return res.status(403).json({ error: "You cannot upload the deed copy" });
-      if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedFileId') AS c")).recordset[0].c) return res.status(503).json({ error: "Deed copy is not set up yet (migration 634)" });
+      if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedFileId') AS c")).recordset[0].c) return res.status(503).json({ error: "Deed copy is not set up yet (migration 644)" });
       const fileId = req.body.deedFileId === null ? null : idParam(req.body.deedFileId);
       if (req.body.deedFileId !== null && !fileId) return res.status(400).json({ error: "Invalid file" });
       if (fileId && !(await pool.request().input("F", sql.Int, fileId).query("SELECT 1 AS x FROM dbo.LegalMasterFile WHERE FileId = @F")).recordset[0]) return res.status(400).json({ error: "File not found" });
@@ -1786,7 +1786,7 @@ router.post("/:id/deed-process/reverify", requirePageRight(LAND_PAGE, "view"), a
   if (!id) return res.status(400).json({ error: "Invalid land id" });
   const pool = getPool();
   try {
-    if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') AS c")).recordset[0].c) return res.status(503).json({ error: "Re-verification is not set up yet (migration 635)" });
+    if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') AS c")).recordset[0].c) return res.status(503).json({ error: "Re-verification is not set up yet (migration 645)" });
     if (!(await canAct(req, "Verifier", LAND_PAGE))) return res.status(403).json({ error: "Only a Verifier (Setup → Approval Control) can re-verify" });
     const l = (await pool.request().input("Id", sql.Int, id).query("SELECT LandCode, DeedChangedAt, DeedChangedBy FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1")).recordset[0];
     if (!l) return res.status(404).json({ error: "Land not found" });
@@ -1962,7 +1962,7 @@ router.post("/:id/registry-search", requirePageRight(LAND_PAGE, "edit"), async (
   if (result !== "Clear — no other deed" && result !== "Record not found" && !text(b.details, 2000)) return res.status(400).json({ error: "Write the details found" });
   const pool = getPool();
   try {
-    if (!(await searchReady(pool))) return res.status(503).json({ error: "Registry search is not set up yet (migration 637)" });
+    if (!(await searchReady(pool))) return res.status(503).json({ error: "Registry search is not set up yet (migration 647)" });
     if (!(await pool.request().input("O", sql.Int, officeId).query("SELECT 1 AS x FROM dbo.LegalRegistrationOffice WHERE OfficeId = @O")).recordset[0]) return res.status(400).json({ error: "Registration office not found" });
     const r = await pool.request().input("Id", sql.Int, id).input("O", sql.Int, officeId).input("Fy", sql.NVarChar(20), fy)
       .input("RsD", sql.NVarChar(30), text(b.rsDagNo, 30)).input("RsK", sql.NVarChar(30), text(b.rsKhatianNo, 30))
@@ -1991,7 +1991,7 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
   if (!id || !["apply", "submit"].includes(action)) return res.status(400).json({ error: "Invalid request" });
   const pool = getPool();
   try {
-    if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'RegAppliedAt') AS c")).recordset[0].c) return res.status(503).json({ error: "Deed registration is not set up yet (migration 638)" });
+    if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'RegAppliedAt') AS c")).recordset[0].c) return res.status(503).json({ error: "Deed registration is not set up yet (migration 648)" });
     if (!(await canAct(req, "L1 Approver", LAND_PAGE)) && !(await canAct(req, "L2 Approver", LAND_PAGE))) return res.status(403).json({ error: "Only an approver (Setup → Approval Control) can do this" });
     const l = (await pool.request().input("Id", sql.Int, id).query("SELECT LandCode, WorkflowStatus, RegAppliedAt FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1")).recordset[0];
     if (!l) return res.status(404).json({ error: "Land not found" });

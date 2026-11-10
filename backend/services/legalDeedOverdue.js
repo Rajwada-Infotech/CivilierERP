@@ -1,7 +1,7 @@
 /**
  * Deed Process overdue alerts: once a day, for every land still in Deed Process whose timeline (DeedTargetDate)
  * has passed, the verifier who set it and the user who entered the land get a bell (and phone) notification.
- * Runs from the worker; quietly does nothing until migrations 633/634 have run.
+ * Runs from the worker; quietly does nothing until migrations 643/644 have run.
  */
 const { getPool } = require("../db");
 const { emitNotification } = require("./notify");
