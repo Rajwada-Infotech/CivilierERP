@@ -1,4 +1,5 @@
 const express = require("express");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -14,7 +15,7 @@ const { deleteProjectCascade } = require("../services/projectCascadeDelete");
 const { getProjectLockReason } = require("../services/crmHierarchyLocks");
 const { recordAmendment } = require("../services/amendmentLog");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const adminOnly = pageRightByMethod("project-master");
 
 let _acctHeadHasLGSTType = null;
 async function acctHeadHasLGSTType(pool) {

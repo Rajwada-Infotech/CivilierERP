@@ -158,4 +158,11 @@ function requireAnyPageAction(pageKey, actions) {
   };
 }
 
-module.exports = { requirePageRight, requireAnyPageRight, requireAnyPageAction, hasAnyPageAction };
+// The page's right for what the request does: GET reads (view), POST creates, PUT / PATCH edit, DELETE deletes. For
+// routes that belong to one page, so Role Rights decides who may use them (full-access roles always may).
+const ACTION_OF_METHOD = { GET: "view", HEAD: "view", POST: "create", PUT: "edit", PATCH: "edit", DELETE: "delete" };
+function pageRightByMethod(pageKey) {
+  return (req, res, next) => requirePageRight(pageKey, ACTION_OF_METHOD[req.method] || "edit")(req, res, next);
+}
+
+module.exports = { requirePageRight, requireAnyPageRight, requireAnyPageAction, hasAnyPageAction, pageRightByMethod };

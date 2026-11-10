@@ -431,7 +431,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
-router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(customerSaleOrderBodySchema), async (req, res) => {
+router.post("/", allowRoles.fullAccessOnly, validateBody(customerSaleOrderBodySchema), async (req, res) => {
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
@@ -448,7 +448,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(custome
 });
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(customerSaleOrderUpdateSchema), async (req, res) => {
+router.put("/:id", allowRoles.fullAccessOnly, validateBody(customerSaleOrderUpdateSchema), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
 

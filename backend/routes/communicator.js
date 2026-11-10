@@ -1,4 +1,5 @@
 const express = require("express");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -24,8 +25,8 @@ const ownUrl = (value) => {
 
 
 router.use(authMiddleware);
-const adminOnly = allowRoles("admin", "super_admin", "dba");
-const superAdminOnly = allowRoles("super_admin");
+const adminOnly = pageRightByMethod("integration-channels");
+const { superAdminOnly } = allowRoles;
 
 // ─── Channel management CRUD (super_admin only) ──────────────────────────────
 

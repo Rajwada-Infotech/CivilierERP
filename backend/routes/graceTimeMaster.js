@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -30,7 +31,7 @@ router.get("/", cache("grace-time-master", 300), async (req, res) => {
 });
 
 // POST — add grace time rule
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("grace-time-master"), async (req, res) => {
   const { GraceName, GraceCode, TimeMinutes, ReasonRemarks, IsActive } = req.body;
   if (!GraceName?.trim()) return res.status(400).json({ error: "GraceName is required" });
   if (!GraceCode?.trim()) return res.status(400).json({ error: "GraceCode is required" });
@@ -64,7 +65,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update grace time rule
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("grace-time-master"), async (req, res) => {
   const { id } = req.params;
   const { GraceName, GraceCode, TimeMinutes, ReasonRemarks, IsActive } = req.body;
   if (!GraceName?.trim()) return res.status(400).json({ error: "GraceName is required" });
@@ -102,7 +103,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // DELETE
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("grace-time-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

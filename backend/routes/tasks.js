@@ -7,6 +7,7 @@
  */
 
 const express = require("express");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const logger = require("../logger");
 const { bumpCacheVersion } = require("../redis");
 const { cache } = require("../middleware/cache");
@@ -16,7 +17,8 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 
-const adminOnly = allowRoles("admin", "super_admin");
+// Who may change this is set in Role Rights on the page (tasks); full-access roles always may.
+const adminOnly = pageRightByMethod("tasks");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

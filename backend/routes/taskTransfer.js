@@ -1,4 +1,5 @@
 const express = require("express");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -9,7 +10,7 @@ const allowRoles = require("../middleware/role");
 // Bulk reassignment is an admin action, same role gate TaskMaster itself
 // uses for every task-mutating route — applied to the whole file since
 // there's no non-admin use case for this page.
-router.use(allowRoles("admin", "super_admin", "dba"));
+router.use(pageRightByMethod("followup-task-transfer"));
 
 const OPEN_STATUSES = ["Active", "Hold"]; // this app's "Pending + Ongoing" equivalent — excludes Cancel/Closed
 

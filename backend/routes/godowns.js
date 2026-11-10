@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -82,7 +83,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─── POST create godown ───────────────────────────────────────────────────────
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("godowns"), async (req, res) => {
   try {
     const {
       GodownCode,
@@ -134,7 +135,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // ─── PUT update godown ────────────────────────────────────────────────────────
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("godowns"), async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;
@@ -201,7 +202,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // ─── DELETE (soft) godown ─────────────────────────────────────────────────────
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("godowns"), async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;

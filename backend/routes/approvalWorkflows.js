@@ -1,4 +1,5 @@
 const express = require("express");
+const { fullAccessOnly } = require("../middleware/role");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -73,7 +74,7 @@ router.get("/", authMiddleware, cache(CACHE_NS, 60), async (req, res) => {
 });
 
 // POST /api/approval-workflows
-router.post("/", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", authMiddleware, fullAccessOnly, async (req, res) => {
   // Whatever this does to a workflow, approval checks read it fresh from now on.
   res.on("finish", () => require("../services/approvalService").invalidateWorkflowCache());
   const {
@@ -132,7 +133,7 @@ router.post("/", authMiddleware, allowRoles("admin", "super_admin", "dba"), asyn
 });
 
 // PUT /api/approval-workflows/:id
-router.put("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", authMiddleware, fullAccessOnly, async (req, res) => {
   // Whatever this does to a workflow, approval checks read it fresh from now on.
   res.on("finish", () => require("../services/approvalService").invalidateWorkflowCache());
   const {
@@ -177,7 +178,7 @@ router.put("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"), as
 });
 
 // PATCH /api/approval-workflows/:id/toggle
-router.patch("/:id/toggle", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/toggle", authMiddleware, fullAccessOnly, async (req, res) => {
   // Whatever this does to a workflow, approval checks read it fresh from now on.
   res.on("finish", () => require("../services/approvalService").invalidateWorkflowCache());
   try {
@@ -201,7 +202,7 @@ router.patch("/:id/toggle", authMiddleware, allowRoles("admin", "super_admin", "
 });
 
 // DELETE /api/approval-workflows/:id
-router.delete("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", authMiddleware, fullAccessOnly, async (req, res) => {
   // Whatever this does to a workflow, approval checks read it fresh from now on.
   res.on("finish", () => require("../services/approvalService").invalidateWorkflowCache());
   try {

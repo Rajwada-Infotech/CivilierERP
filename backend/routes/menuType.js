@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -45,7 +46,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST
-router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(menuTypeCreateSchema), async (req, res) => {
+router.post("/", pageRightByMethod("menu-types"), validateBody(menuTypeCreateSchema), async (req, res) => {
   const { MenuReceipt, MenuPayment, MenuBOQ, MenuPurchaseOrder, MenuWorkOrder, CreatedBy } = req.body;
   try {
     const pool = await getPool();
@@ -73,7 +74,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), validateBody(menuTyp
 });
 
 // PUT
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(menuTypeUpdateSchema), async (req, res) => {
+router.put("/:id", pageRightByMethod("menu-types"), validateBody(menuTypeUpdateSchema), async (req, res) => {
   const { MenuReceipt, MenuPayment, MenuBOQ, MenuPurchaseOrder, MenuWorkOrder, UpdatedBy, ApprovedBy, ApprovedAt } = req.body;
   try {
     const pool = await getPool();
@@ -110,7 +111,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), validateBody(menuT
 });
 
 // DELETE
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("menu-types"), async (req, res) => {
   try {
     const pool = await getPool();
     await pool

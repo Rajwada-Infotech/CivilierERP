@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -399,7 +400,7 @@ router.get("/:id", async (req, res) => {
 
 // POST — create a task. TaskNo is filled in by trg_TaskMaster_TaskNo right
 // after the insert, so it's read back in the same round trip.
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("task-master"), async (req, res) => {
   const {
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
     CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber,
@@ -504,7 +505,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update a task
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("task-master"), async (req, res) => {
   const { id } = req.params;
   const {
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
@@ -591,7 +592,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 
 // PATCH /:id/status — quick lifecycle transition (Active/Hold/Cancel) from
 // the grid's row actions, independent of the Add/Edit form's Active toggle.
-router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/status", pageRightByMethod("task-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { Status, CancelReasonId } = req.body;
@@ -646,7 +647,7 @@ router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (re
   }
 });
 
-router.patch("/:id/priority", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/priority", pageRightByMethod("task-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { Priority } = req.body;
@@ -1147,7 +1148,7 @@ router.delete("/attachment/:attachmentId", async (req, res) => {
 });
 
 // DELETE — soft delete, consistent with the rest of the platform.
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("task-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const updatedBy = req.user?.userId || null;

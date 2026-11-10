@@ -13,6 +13,7 @@
  */
 
 const express = require("express");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -20,7 +21,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const adminOnly = pageRightByMethod("widget-catalog");
 
 router.use(authMiddleware, adminOnly);
 
@@ -53,7 +54,7 @@ router.get("/", async (_req, res) => {
 });
 
 // ── POST / — add a new widget ─────────────────────────────────────────────────
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("widget-catalog"), async (req, res) => {
   const { key, label, iconKey, category, description, sortOrder = 0 } = req.body;
 
   const wKey  = clean(key, 100);
@@ -100,7 +101,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // ── PUT /:key — update metadata ───────────────────────────────────────────────
-router.put("/:key", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:key", pageRightByMethod("widget-catalog"), async (req, res) => {
   const wKey = req.params.key;
   const { label, iconKey, category, description, sortOrder } = req.body;
 
@@ -149,7 +150,7 @@ router.put("/:key", allowRoles("admin", "super_admin", "dba"), async (req, res) 
 });
 
 // ── PATCH /:key/toggle — flip IsActive ────────────────────────────────────────
-router.patch("/:key/toggle", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:key/toggle", pageRightByMethod("widget-catalog"), async (req, res) => {
   const wKey = req.params.key;
   try {
     const pool = getPool();
@@ -180,7 +181,7 @@ router.patch("/:key/toggle", allowRoles("admin", "super_admin", "dba"), async (r
 });
 
 // ── DELETE /:key — hard delete, blocks if any user has this widget assigned ───
-router.delete("/:key", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:key", pageRightByMethod("widget-catalog"), async (req, res) => {
   const wKey = req.params.key;
   try {
     const pool = getPool();

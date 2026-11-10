@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -48,7 +49,7 @@ router.get("/", cache("entry-type", 300), async (req, res) => {
 });
 
 // ── POST / — store project_id FK + keep Epname in sync ───────────────────────
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("named-entry-type"), async (req, res) => {
   const { project_id, EntryType, Eprefix, EDoc_N } = req.body;
   try {
     const userEmail = req.user?.name;
@@ -88,7 +89,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // ── PUT /:id — update project_id FK + keep Epname in sync ────────────────────
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("named-entry-type"), async (req, res) => {
   const { id } = req.params;
   const { project_id, EntryType, Eprefix, EDoc_N } = req.body;
   try {
@@ -128,7 +129,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("named-entry-type"), async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();

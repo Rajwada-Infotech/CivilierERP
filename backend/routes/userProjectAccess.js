@@ -1,4 +1,5 @@
 const express = require("express");
+const { fullAccessOnly } = require("../middleware/role");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -7,7 +8,7 @@ const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 const { invalidateProjectScope, getProjectScope } = require("../services/projectScope");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const adminOnly = fullAccessOnly;
 
 // GET /my — the viewer's own scope (null = all projects).
 router.get("/my", authMiddleware, async (req, res) => {

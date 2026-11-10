@@ -1,4 +1,5 @@
 const express = require("express");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -47,7 +48,8 @@ function rootOf(groupMap, groupId) {
   return null;
 }
 
-const adminOnly = allowRoles("admin", "super_admin", "dba", "accounts_head");
+// Who may change this is set in Role Rights on the page (year-end-close); full-access roles always may.
+const adminOnly = pageRightByMethod("year-end-close");
 
 router.get("/preview", adminOnly, async (req, res) => {
   try {

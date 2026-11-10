@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const multer = require("multer");
 const { cache } = require("../middleware/cache");
@@ -251,7 +252,7 @@ router.get("/unit-rooms/:unitId", async (req, res) => {
 });
 
 // POST — add room
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("civilworkdpr-room-master"), async (req, res) => {
   const { ProjectId, UnitId, RoomName, RoomCategoryId, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
 
@@ -324,7 +325,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update room
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("civilworkdpr-room-master"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, UnitId, RoomName, RoomCategoryId, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
@@ -402,7 +403,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // DELETE
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("civilworkdpr-room-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
@@ -428,7 +429,7 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
 });
 
 // POST — upload (or replace) a room's blueprint. PDF, JPG, or PNG only.
-router.post("/:id/blueprint", allowRoles("admin", "super_admin", "dba"), upload.single("file"), async (req, res) => {
+router.post("/:id/blueprint", pageRightByMethod("civilworkdpr-room-master"), upload.single("file"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
@@ -509,7 +510,7 @@ router.get("/:id/blueprint", async (req, res) => {
 // Idempotent/additive, same convention as generate-units/generate-parking-
 // slots: an existing active RoomName for this unit is left untouched, so
 // re-running after growing the unit's template only fills in the gap.
-router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/generate/:unitId", pageRightByMethod("civilworkdpr-room-master"), async (req, res) => {
   const unitId = parseInt(req.params.unitId, 10);
   if (!Number.isFinite(unitId) || unitId <= 0) return res.status(400).json({ error: "Invalid unitId" });
   const createdBy = req.user?.userId || null;
@@ -578,7 +579,7 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
 // For backfilling units that existed before rooms were generated automatically
 // (new units get theirs at creation). Idempotent — re-running only fills gaps.
 // Units with no layout type / no composition are skipped and counted.
-router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/generate-bulk", pageRightByMethod("civilworkdpr-room-master"), async (req, res) => {
   const projectId = parseInt(req.body?.ProjectId, 10);
   const blockId = req.body?.BlockId != null && req.body.BlockId !== "" ? parseInt(req.body.BlockId, 10) : null;
   if (!Number.isFinite(projectId) || projectId <= 0) return res.status(400).json({ error: "ProjectId is required" });
@@ -627,7 +628,7 @@ router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (
 // Rooms that have work entries or blueprints attached are automatically skipped (retained)
 // rather than blocking the entire operation — the response tells the caller exactly how many
 // were deleted vs skipped.
-router.post("/delete-bulk", allowRoles("super_admin"), async (req, res) => {
+router.post("/delete-bulk", allowRoles.superAdminOnly, async (req, res) => {
   const { level, position } = req.body;
   if (!level || !position) return res.status(400).json({ error: "level and position are required" });
 

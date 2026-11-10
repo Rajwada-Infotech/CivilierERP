@@ -1,4 +1,5 @@
 const express = require("express");
+const { fullAccessOnly } = require("../middleware/role");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -7,7 +8,7 @@ const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 
 router.use(authMiddleware);
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const adminOnly = fullAccessOnly;
 
 // ─── GET /api/lookups?type=CURRENCY ──────────────────────────────────────────
 // Public to all authenticated users — used by dropdowns throughout the app.

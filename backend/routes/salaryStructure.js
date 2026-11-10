@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -204,7 +205,7 @@ router.post("/calculate", async (req, res) => {
 });
 
 // POST — add salary structure + its lines
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("salary-structure"), async (req, res) => {
   const { CompanyId, Name, Code, Description, EffectiveFrom, EffectiveTo, CTCFrequency, IsActive, Lines } = req.body;
   const pool = getPool();
 
@@ -294,7 +295,7 @@ async function insertLines(tx, structureId, engineLines) {
 }
 
 // PUT — update salary structure header + replace its lines
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("salary-structure"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { CompanyId, Name, Code, Description, EffectiveFrom, EffectiveTo, CTCFrequency, IsActive, Lines } = req.body;
@@ -358,7 +359,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // POST /:id/activate -- blocked while validation errors exist.
-router.post("/:id/activate", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/:id/activate", pageRightByMethod("salary-structure"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -380,7 +381,7 @@ router.post("/:id/activate", allowRoles("admin", "super_admin", "dba"), async (r
   }
 });
 
-router.post("/:id/deactivate", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/:id/deactivate", pageRightByMethod("salary-structure"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -397,7 +398,7 @@ router.post("/:id/deactivate", allowRoles("admin", "super_admin", "dba"), async 
 });
 
 // POST /:id/copy -- duplicate as a new Draft (new Code supplied by caller).
-router.post("/:id/copy", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/:id/copy", pageRightByMethod("salary-structure"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { Code, Name } = req.body;
@@ -463,7 +464,7 @@ router.post("/:id/copy", allowRoles("admin", "super_admin", "dba"), async (req, 
 });
 
 // DELETE — lines cascade automatically (ON DELETE CASCADE)
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("salary-structure"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

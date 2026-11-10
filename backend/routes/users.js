@@ -263,7 +263,7 @@ router.get(
 router.get(
   "/",
   authMiddleware,
-  allowRoles(...allowRoles.FULL_ACCESS_ROLES),
+  allowRoles.fullAccessOnly,
   async (req, res) => {
     try {
       const pool = getPool();

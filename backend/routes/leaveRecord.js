@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -34,7 +35,7 @@ router.get("/", cache("leave-record", 300), async (req, res) => {
   }
 });
 
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("attendance-leave-overtime"), async (req, res) => {
   const { EmployeeId, LeaveType, FromDate, ToDate, Reason, Status, IsActive } = req.body;
   if (!EmployeeId) return res.status(400).json({ error: "Employee is required" });
   if (!LEAVE_TYPES.includes(LeaveType)) return res.status(400).json({ error: `Leave Type must be one of: ${LEAVE_TYPES.join(", ")}` });
@@ -67,7 +68,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   }
 });
 
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("attendance-leave-overtime"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { EmployeeId, LeaveType, FromDate, ToDate, Reason, Status, IsActive } = req.body;
@@ -106,7 +107,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 });
 
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("attendance-leave-overtime"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

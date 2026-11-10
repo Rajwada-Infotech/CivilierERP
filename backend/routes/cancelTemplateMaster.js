@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const { pageRightByMethod } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -49,7 +50,7 @@ function bumpCancelTemplateCaches() {
   ]);
 }
 
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", pageRightByMethod("followup-cancel-template-master"), async (req, res) => {
   const { Reason, IsActive } = req.body;
   if (!Reason?.trim()) return res.status(400).json({ error: "Reason is required" });
   const createdBy = req.user?.userId || null;
@@ -75,7 +76,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   }
 });
 
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", pageRightByMethod("followup-cancel-template-master"), async (req, res) => {
   const { id } = req.params;
   const { Reason, IsActive } = req.body;
   if (!Reason?.trim()) return res.status(400).json({ error: "Reason is required" });
@@ -109,7 +110,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 // where deleting just drops the association — here the reason is audit
 // evidence on a cancelled task, so silently orphaning it is worse than
 // telling the admin to deactivate instead).
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", pageRightByMethod("followup-cancel-template-master"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
