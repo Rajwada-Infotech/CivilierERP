@@ -478,7 +478,7 @@ const CrmDemands           = lazy(() => import("./pages/CRM/CrmDemands"));
 const CrmMoneyReceipts     = lazy(() => import("./pages/CRM/CrmMoneyReceipts"));
 const CrmOnAccount         = lazy(() => import("./pages/CRM/CrmOnAccount"));
 const CrmInvoices          = lazy(() => import("./pages/CRM/CrmInvoices"));
-const CrmHandover          = lazy(() => import("./pages/CRM/CrmHandover"));
+const CrmPossession        = lazy(() => import("./pages/CRM/CrmPossession"));
 const CrmServiceTickets    = lazy(() => import("./pages/CRM/CrmServiceTickets"));
 const CrmCancellations     = lazy(() => import("./pages/CRM/CrmCancellations"));
 const CrmRefunds           = lazy(() => import("./pages/CRM/CrmRefunds"));
@@ -491,8 +491,6 @@ const CrmSalesDeed         = lazy(() => import("./pages/CRM/CrmSalesDeed"));
 const CrmLeads             = lazy(() => import("./pages/CRM/CrmLeads"));
 const CrmOcCc              = lazy(() => import("./pages/CRM/CrmOcCc"));
 const CrmMutation          = lazy(() => import("./pages/CRM/CrmMutation"));
-const CrmPrePossession     = lazy(() => import("./pages/CRM/CrmPrePossession"));
-const CrmPossessionNotice  = lazy(() => import("./pages/CRM/CrmPossessionNotice"));
 const CrmConstructionUpdates = lazy(() => import("./pages/CRM/CrmConstructionUpdates"));
 const CrmDashboard         = withCountUp(lazy(() => import("./pages/CRM/CrmDashboard")));
 const CrmCustomerBankDetails = lazy(() => import("./pages/CRM/CrmCustomerBankDetails"));
@@ -2727,7 +2725,9 @@ function AppRoutes() {
       <Route path="/crm/money-receipts"   element={<ProtectedRoute pageKey="crm-money-receipts"><CrmMoneyReceipts /></ProtectedRoute>} />
       <Route path="/crm/on-account"       element={<ProtectedRoute pageKey="crm-payments"><CrmOnAccount /></ProtectedRoute>} />
       <Route path="/crm/invoices"         element={<ProtectedRoute pageKey="crm-invoices"><CrmInvoices /></ProtectedRoute>} />
-      <Route path="/crm/handover"         element={<ProtectedRoute pageKey="crm-handover"><CrmHandover /></ProtectedRoute>} />
+      <Route path="/crm/possession" element={<ProtectedRoute pageKey="crm-possession"><CrmPossession /></ProtectedRoute>} />
+      {/* The three pages it replaced: their links keep working. */}
+      <Route path="/crm/handover" element={<ProtectedRoute pageKey="crm-possession"><CrmPossession /></ProtectedRoute>} />
       <Route path="/crm/service-tickets"  element={<ProtectedRoute pageKey="crm-service-tickets"><CrmServiceTickets /></ProtectedRoute>} />
       <Route path="/crm/cancellations"    element={<ProtectedRoute pageKey="crm-cancellations"><CrmCancellations /></ProtectedRoute>} />
       <Route path="/crm/refunds"          element={<ProtectedRoute pageKey="crm-refunds"><CrmRefunds /></ProtectedRoute>} />
@@ -2747,8 +2747,8 @@ function AppRoutes() {
       <Route path="/crm/registry"              element={<ProtectedRoute pageKey="crm-registry"><SalesDeedTabRedirect tab="Registry" /></ProtectedRoute>} />
       <Route path="/crm/mutation"              element={<ProtectedRoute pageKey="crm-mutation"><CrmMutation /></ProtectedRoute>} />
       <Route path="/crm/oc-cc"                 element={<ProtectedRoute pageKey="crm-oc-cc"><CrmOcCc /></ProtectedRoute>} />
-      <Route path="/crm/pre-possession"        element={<ProtectedRoute pageKey="crm-pre-possession"><CrmPrePossession /></ProtectedRoute>} />
-      <Route path="/crm/possession-notice"     element={<ProtectedRoute pageKey="crm-possession-notice"><CrmPossessionNotice /></ProtectedRoute>} />
+      <Route path="/crm/pre-possession" element={<ProtectedRoute pageKey="crm-possession"><CrmPossession /></ProtectedRoute>} />
+      <Route path="/crm/possession-notice" element={<ProtectedRoute pageKey="crm-possession"><CrmPossession /></ProtectedRoute>} />
       <Route path="/crm/construction-updates"  element={<ProtectedRoute pageKey="crm-construction-updates"><CrmConstructionUpdates /></ProtectedRoute>} />
       {/* Communication Log page removed — stale links land on Bookings */}
       <Route path="/crm/communication"         element={<Navigate to="/crm/bookings" replace />} />

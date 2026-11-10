@@ -27,7 +27,7 @@ const PipelineSection: React.FC<{ funnel: any; onOpen: (path: string) => void }>
     { key: "Applications", label: "Applications", path: "/crm/applications" },
     { key: "Bookings", label: "Bookings", path: "/crm/bookings" },
     { key: "Agreements", label: "Agreements", path: "/crm/agreements" },
-    { key: "Possessions", label: "Possessions", path: "/crm/handover" },
+    { key: "Possessions", label: "Possessions", path: "/crm/possession" },
   ].map((s) => ({ ...s, value: n0(funnel?.[s.key]) }));
   const max = Math.max(1, ...stages.map((s) => s.value));
   const W = 760, H = 150, mid = 70, bw = 112, gap = (W - bw * 4) / 3;
@@ -224,7 +224,7 @@ const CrmDashboard: React.FC = () => {
   const attention = useMemo(() => {
     const items = [
       { key: "overduePayments", label: "Overdue payments", note: "Demand milestones past their due date", path: "/crm/payments", hot: true },
-      { key: "disputedNotices", label: "Possession notices disputed", note: "Disputed by the customer", path: "/crm/possession-notice", hot: true },
+      { key: "disputedNotices", label: "Possession notices disputed", note: "Disputed by the customer", path: "/crm/possession", hot: true },
       { key: "urgentTickets", label: "Urgent service tickets", note: "High priority, not resolved", path: "/crm/service-tickets", hot: true },
       { key: "welcomeCallPending", label: "Welcome calls pending", note: "Approved bookings with no call made", path: "/crm/welcome-calls", hot: false },
       { key: "agreementsPending", label: "Agreements need action", note: "None drawn up, or in draft over 5 days", path: "/crm/agreements", hot: false },
@@ -232,7 +232,7 @@ const CrmDashboard: React.FC = () => {
       { key: "deedsAwaitingDirector", label: "Deeds awaiting director", note: "Pending director approval", path: "/crm/sales-deed", hot: false },
       { key: "nocsNotIssued", label: "NOCs not issued", note: "Approved, not handed over", path: "/crm/noc", hot: false },
       { key: "cancellationsPending", label: "Cancellations pending", note: "Awaiting management approval", path: "/crm/cancellations", hot: false },
-      { key: "handoversThisWeek", label: "Handovers this week", note: "Scheduled in the next 7 days", path: "/crm/handover", hot: false },
+      { key: "handoversThisWeek", label: "Handovers this week", note: "Scheduled in the next 7 days", path: "/crm/possession", hot: false },
     ].map((i) => ({ ...i, count: n0(alerts[i.key]) })).concat(sentBackItems);
     const open = items.filter((i) => i.count > 0).sort((a, b) => Number(b.hot) - Number(a.hot) || b.count - a.count);
     return { open, clear: items.filter((i) => i.count === 0), max: Math.max(1, ...open.map((i) => i.count)) };
@@ -374,7 +374,7 @@ const CrmDashboard: React.FC = () => {
                       <div className="mono" style={{ marginTop: 9, fontSize: 11.5, lineHeight: 1.75, color: total ? "var(--ink)" : "var(--graphite)" }}>
                         {total === 0 ? "Nothing booked" : (
                           <>
-                            {h > 0 && <button onClick={() => navigate("/crm/handover")} style={{ display: "block" }}>▲ {h} handover{h === 1 ? "" : "s"}</button>}
+                            {h > 0 && <button onClick={() => navigate("/crm/possession")} style={{ display: "block" }}>▲ {h} handover{h === 1 ? "" : "s"}</button>}
                             {r > 0 && <button onClick={() => navigate("/crm/sales-deed?tab=Registry")} style={{ display: "block" }}>■ {r} registr{r === 1 ? "y" : "ies"}</button>}
                             {m > 0 && <button onClick={() => navigate("/crm/payments")} style={{ display: "block" }}>● {m} payment{m === 1 ? "" : "s"} due</button>}
                           </>
@@ -454,7 +454,7 @@ const CrmDashboard: React.FC = () => {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "0 28px" }}>
               <Register name="Applications" rows={data?.applications ?? []} onOpen={() => navigate("/crm/applications")} />
               <Register name="Bookings" rows={data?.bookings ?? []} onOpen={() => navigate("/crm/bookings")} />
-              <Register name="Handovers" rows={data?.handovers ?? []} onOpen={() => navigate("/crm/handover")} />
+              <Register name="Handovers" rows={data?.handovers ?? []} onOpen={() => navigate("/crm/possession")} />
               <Register name="Service tickets" rows={data?.serviceTickets ?? []} onOpen={() => navigate("/crm/service-tickets")} />
               <Register name="Cancellations" rows={data?.cancellations ?? []} onOpen={() => navigate("/crm/cancellations")} />
             </div>

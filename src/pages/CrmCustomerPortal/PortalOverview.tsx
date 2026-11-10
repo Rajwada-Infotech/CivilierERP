@@ -83,6 +83,10 @@ const PortalOverview: React.FC = () => {
   if (timeline.salesDeed?.SentToCustomerAt && timeline.salesDeed?.CustomerApprovalStatus === "Pending") {
     actionItems.push({ label: "Your sales deed is waiting for your review", sub: "Approve or request a recheck", to: "/crm-client-portal/agreement" });
   }
+  if (timeline.possessionNotice?.Status === "Sent") {
+    const n = timeline.possessionNotice;
+    actionItems.push({ label: "Your possession letter is waiting for your response", sub: `${n.NoticeNo}${n.ResponseDeadline ? ` — respond by ${fmtDate(n.ResponseDeadline)}` : ""}`, to: "/crm-client-portal/construction" });
+  }
   if (timeline.queryPayment?.Status === "InfoSent") {
     actionItems.push({ label: "Government payment proof needed", sub: `${fmtMoney(timeline.queryPayment.RequiredAmount)} — upload your proof once paid`, to: "/crm-client-portal/agreement" });
   }

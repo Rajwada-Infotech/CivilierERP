@@ -287,6 +287,8 @@ const MODULE_TABLE_MAP = {
   "crm-ownership-changes": { workflowId: "crm-ownership-changes", tableName: "CrmOwnershipChange" },
   "crm-credit-notes": { workflowId: "crm-credit-notes", tableName: "CrmGstNote" },
   "crm-credit-note-cancel": { workflowId: "crm-credit-note-cancel", tableName: "CrmGstNote" },
+  "crm-milestone-waiver": { workflowId: "crm-milestone-waiver", tableName: "CrmMilestoneWaiver" },
+  "crm-milestone-waiver-reversal": { workflowId: "crm-milestone-waiver-reversal", tableName: "CrmMilestoneWaiver" },
   "crm-transfer-deeds": { workflowId: "crm-transfer-deeds", tableName: "CrmTransferDeed" },
   "crm-transfer-deed-date": { workflowId: "crm-transfer-deed-date", tableName: "CrmTransferDeed" },
   "crm-noc": { workflowId: "crm-noc", tableName: "CrmNoc" },

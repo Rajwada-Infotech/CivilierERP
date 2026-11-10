@@ -1,4 +1,5 @@
 const { sql } = require("../db");
+const { CrmStatus } = require("../constants/crmStatuses");
 const { round2, sumMoney } = require("./bookingUnits");
 const { onAccountWithAvailableSql, recordedMoneySql } = require("./crmPaymentFunding");
 const { DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
@@ -243,4 +244,31 @@ async function pendingVerificationTotal(pool, bookingId) {
   return sumMoney(await pendingVerificationEntries(pool, bookingId), (r) => r.RPAmount);
 }
 
-module.exports = { coverMilestones, stageMilestones, getBookingOnAccountCoverage, getMilestoneMoneyStages, getBookingMoneyTrail, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };
+// A booking's waivers, newest first, with who asked, who decided, and any reversal.
+// What stops an approved waiver being reversed: something already relies on the waived figure. Null when nothing does.
+async function waiverReversalBlock(executor, bookingId) {
+  const dep = (await executor.request().input("b", sql.Int, bookingId).query(`
+    SELECT (SELECT TOP 1 InvoiceNo FROM dbo.CrmInvoice WHERE BookingId = @b AND InvoiceType = 'Final' AND Status <> 'Void') AS FinalNo,
+           (SELECT TOP 1 DeedNo FROM dbo.CrmSalesDeed WHERE BookingId = @b AND Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS DeedNo`)).recordset[0];
+  if (dep?.FinalNo) return `Final invoice ${dep.FinalNo} already bills this booking without this milestone. Void it first.`;
+  if (dep?.DeedNo) return `Sale deed ${dep.DeedNo} already relies on this waiver, so it can't be reversed.`;
+  return null;
+}
+
+async function getBookingWaivers(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT w.Id, w.MilestoneId, m.MilestoneNo, m.MilestoneName, w.Amount, w.TaxableValue, w.GstAmount, w.Reason, w.Status, w.RequestedAt, w.DecidedAt, w.RejectionNote,
+           w.ReversalStatus, w.ReversalReason, w.ReversalRequestedAt, w.ReversalDecidedAt, w.ReversalRejectionNote,
+           rq.name AS RequestedByName, dc.name AS DecidedByName, rr.name AS ReversalRequestedByName
+    FROM dbo.CrmMilestoneWaiver w
+    JOIN dbo.CrmPaymentMilestone m ON m.Id = w.MilestoneId
+    LEFT JOIN dbo.Users rq ON rq.id = w.RequestedById
+    LEFT JOIN dbo.Users dc ON dc.id = w.DecidedById
+    LEFT JOIN dbo.Users rr ON rr.id = w.ReversalRequestedById
+    WHERE w.BookingId = @bid AND w.Status <> N'Draft' ORDER BY w.Id DESC`);
+  if (!r.recordset.length) return [];
+  const ReversalBlock = await waiverReversalBlock(pool, bookingId);
+  return r.recordset.map((w) => ({ ...w, ReversalBlock }));
+}
+
+module.exports = { getBookingWaivers, waiverReversalBlock, coverMilestones, stageMilestones, getBookingOnAccountCoverage, getMilestoneMoneyStages, getBookingMoneyTrail, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };

@@ -1,10 +1,11 @@
 const express = require("express");
 const { round2, sumMoney } = require("../services/bookingUnits");
+const { transition: approvalTransition } = require("../services/approvalService");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on records outside their projects.
-{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, { "/on-account/": crmViaBookingSql("CrmOnAccountPayment"), default: crmViaBookingSql("CrmPaymentMilestone") }); }
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, { "/on-account/": crmViaBookingSql("CrmOnAccountPayment"), "/waivers/": crmViaBookingSql("CrmMilestoneWaiver"), "/waiver-reversals/": crmViaBookingSql("CrmMilestoneWaiver"), default: crmViaBookingSql("CrmPaymentMilestone") }); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -16,8 +17,21 @@ const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking
 const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
-const { areEarlierMilestonesCoveredByOnAccount, getBookingMoneyTrail, getMilestoneMoneyStages, stageMilestones, pendingVerificationEntries, returnedEntries } = require("../services/crmOnAccountCoverage");
+const { areEarlierMilestonesCoveredByOnAccount, getBookingMoneyTrail, getBookingWaivers, waiverReversalBlock, getMilestoneMoneyStages, stageMilestones, pendingVerificationEntries, returnedEntries } = require("../services/crmOnAccountCoverage");
 const { getBookingFunding, onAccountAvailableSql, onAccountWithAvailableSql, recordedMoneySql } = require("../services/crmPaymentFunding");
+const { MILESTONE_COVER_APPLY, COVER_IS_OVERDUE_SQL, COVER_OVERDUE_SHORT_SQL, COVER_MISSING_SQL } = require("../services/crmAttentionConditions");
+
+// The Demands page's tabs. A milestone is in exactly one, most urgent first.
+const DEMAND_FOCUS = {
+  overdue: `m.DemandStatus <> 'Paid' AND ${COVER_IS_OVERDUE_SQL} = 1`,
+  pending: `m.DemandStatus = 'Pending' AND ${COVER_IS_OVERDUE_SQL} = 0`,
+  demanded: `m.DemandStatus = 'Demanded' AND ${COVER_IS_OVERDUE_SQL} = 0`,
+  paid: "m.DemandStatus = 'Paid'",
+};
+const DEMAND_SORT = {
+  ApplicantName: "a.ApplicantName", BookingNo: "b.BookingNo", MilestoneName: "m.MilestoneName", DueDate: "m.DueDate", AmountDue: "m.AmountDue", DemandNo: "m.DemandNo",
+  Balance: "m.AmountDue - ISNULL(m.AmountPaid, 0)",
+};
 const { bulkDemandSchema } = require("../validation/crmBookingSchemas");
 const ON_ACCOUNT_AVAILABLE_SQL = onAccountAvailableSql("o");
 
@@ -508,7 +522,8 @@ router.get("/ledger", requirePageRight("crm-payments", "view"), async (req, res)
     const age = LEDGER_AGES.find((a) => a.key === req.query.age);
     const match = `${LEDGER_FOCUS[focus]}${age ? ` AND y.A_${age.key} > 0` : ""}`;
     const sortCol = Object.hasOwn(LEDGER_SORT, req.query.sortKey) ? LEDGER_SORT[req.query.sortKey] : LEDGER_SORT.Priority;
-    const orderBy = `ORDER BY ${sortCol} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, y.A_soon DESC, y.BookingId DESC`;
+    // Unless someone picks a sort, closed bookings go last: nothing is owed on them.
+    const orderBy = `ORDER BY ${req.query.sortKey ? "" : "y.Closed ASC, "}${sortCol} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, y.A_soon DESC, y.BookingId DESC`;
 
     if (!req.query.page) {
       const all = await req0.query(`SELECT y.* FROM (${BASE}) y WHERE ${match} ${orderBy}`);
@@ -603,7 +618,11 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const whereAll = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const where = Object.hasOwn(DEMAND_FOCUS, req.query.focus) ? `${whereAll} AND ${DEMAND_FOCUS[req.query.focus]}` : whereAll;
+    const ORDER = Object.hasOwn(DEMAND_SORT, req.query.sortKey)
+      ? `ORDER BY ${DEMAND_SORT[req.query.sortKey]} ${req.query.sortDir === "desc" ? "DESC" : "ASC"}, b.BookingNo, m.MilestoneNo`
+      : "ORDER BY b.BookingNo, m.MilestoneNo";
     const BASE_SELECT = `
       SELECT m.Id, m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.[Percent], m.DueDate, m.Status,
              m.DemandStatus, m.DemandNo, m.DemandRaisedOn, m.DemandNotes,
@@ -611,13 +630,14 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
              b.GrandTotal AS BookingGrandTotal, b.TotalValue AS BookingTotalValue,
              a.ApplicantName, a.Mobile,
              u.name AS AssignedToName,
-             CASE WHEN m.DueDate < CAST(SYSDATETIME() AS DATE) AND m.Status = '${CrmStatus.PENDING}' THEN 1 ELSE 0 END AS IsOverdue,
+             ${COVER_IS_OVERDUE_SQL} AS IsOverdue, ${COVER_OVERDUE_SHORT_SQL} AS OverdueShort, ${COVER_MISSING_SQL} AS Missing,
              DATEDIFF(DAY, m.DueDate, CAST(SYSDATETIME() AS DATE)) AS DaysOverdue
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.Users u ON u.id = b.AssignedTo
       LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      ${MILESTONE_COVER_APPLY}
     `;
 
     // Summary is always computed over the FULL filtered set, independent of
@@ -631,6 +651,7 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
         demandedCount: 0, demandedAmount: 0,
         paidCount: 0, paidAmount: 0,
         overdueCount: 0, overdueAmount: 0,
+        tabs: { overdue: { count: 0, amount: 0 }, pending: { count: 0, amount: 0 }, demanded: { count: 0, amount: 0 }, paid: { count: 0, amount: 0 } },
       };
       for (const r of rows) {
         const balance = Math.max(0, round2(Number(r.AmountDue || 0) - Number(r.AmountPaid || 0)));
@@ -638,15 +659,19 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
         if (r.DemandStatus === CrmStatus.PENDING) { summary.pendingCount++; summary.pendingAmount += balance; }
         else if (r.DemandStatus === CrmStatus.DEMANDED) { summary.demandedCount++; summary.demandedAmount += balance; }
         else if (r.DemandStatus === CrmStatus.PAID) { summary.paidCount++; summary.paidAmount += paid; }
-        if (r.IsOverdue && r.DemandStatus !== CrmStatus.PAID) { summary.overdueCount++; summary.overdueAmount += balance; }
+        // Only the money still missing, the same figure as the Payment Milestones page.
+        if (r.IsOverdue && r.DemandStatus !== CrmStatus.PAID) { summary.overdueCount++; summary.overdueAmount += Number(r.OverdueShort || 0); }
+        const tab = r.DemandStatus === CrmStatus.PAID ? "paid" : r.IsOverdue ? "overdue" : r.DemandStatus === CrmStatus.DEMANDED ? "demanded" : r.DemandStatus === CrmStatus.PENDING ? "pending" : null;
+        if (tab) { summary.tabs[tab].count++; summary.tabs[tab].amount += tab === "paid" ? paid : tab === "overdue" ? Number(r.OverdueShort || 0) : Number(r.Missing || 0); }
       }
       // Running totals, to the paisa.
       for (const k of ["pendingAmount", "demandedAmount", "paidAmount", "overdueAmount"]) summary[k] = round2(summary[k]);
+      for (const t of Object.values(summary.tabs)) t.amount = round2(t.amount);
       return summary;
     }
 
     if (!req.query.page) {
-      const result = await req0.query(`${BASE_SELECT} ${where} ORDER BY b.BookingNo, m.MilestoneNo`);
+      const result = await req0.query(`${BASE_SELECT} ${where} ${ORDER}`);
       return res.json({ demands: result.recordset, summary: computeSummary(result.recordset) });
     }
 
@@ -663,29 +688,20 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
     const [rowsResult, summaryRows] = await Promise.all([
-      req0.query(`${BASE_SELECT} ${where} ORDER BY b.BookingNo, m.MilestoneNo OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      req0.query(`${BASE_SELECT} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       summaryReq.query(`
-        SELECT m.AmountDue, m.AmountPaid, m.DemandStatus,
-               CASE WHEN m.DueDate < CAST(SYSDATETIME() AS DATE) AND m.Status = '${CrmStatus.PENDING}' THEN 1 ELSE 0 END AS IsOverdue
+        SELECT m.AmountDue, m.AmountPaid, m.DemandStatus, ${COVER_IS_OVERDUE_SQL} AS IsOverdue, ${COVER_OVERDUE_SHORT_SQL} AS OverdueShort, ${COVER_MISSING_SQL} AS Missing
         FROM dbo.CrmPaymentMilestone m
         JOIN dbo.CrmBooking b ON b.Id = m.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-        WHERE b.IsActive = 1
-          AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
-          AND m.Status NOT IN ('Waived')
-          ${view !== "all" ? "AND (m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0" : ""}
-          AND (@st IS NULL OR m.DemandStatus = @st)
-          AND (@q IS NULL OR (a.ApplicantName LIKE @q OR b.BookingNo LIKE @q OR m.DemandNo LIKE @q OR m.MilestoneName LIKE @q))
-          AND (@companyId IS NULL OR b.CompanyId = @companyId)
-          AND (@projectId IS NULL OR b.ProjectId = @projectId)
-          AND (@blockId IS NULL OR b.BlockId = @blockId)
+        ${MILESTONE_COVER_APPLY}
+        ${whereAll}
       `),
     ]);
     res.json({
       demands: rowsResult.recordset,
       summary: computeSummary(summaryRows.recordset),
-      total: summaryRows.recordset.length,
+      total: Object.hasOwn(DEMAND_FOCUS, req.query.focus) ? computeSummary(summaryRows.recordset).tabs[req.query.focus].count : summaryRows.recordset.length,
       page, pageSize,
     });
   } catch (e) {
@@ -820,7 +836,6 @@ router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (re
       // Filter by ProjectId via enterprise master so a renamed project still matches.
       conds.push("b.ProjectId IN (SELECT id FROM dbo.enterprise WHERE name = @pname AND business_type = 'P')");
     }
-    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (milestoneName) {
       req0.input("mname", sql.NVarChar(200), milestoneName);
       conds.push("m.MilestoneName = @mname");
@@ -1461,6 +1476,8 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       adjusted: round2(totalPaid), held, collected,
       inVerification, inVerificationCount: pending.length, recorded,
       toCollect: Math.max(0, round2(totalDue - collected - inVerification - recorded)),
+      // Verified money beyond all that is still billable, such as after a waiver: to refund or adjust.
+      excess: Math.max(0, round2(collected - totalDue)),
       trail: await getBookingMoneyTrail(pool, bid),
       entries: pending.map((r) => ({
         id: r.RPPaymentID, docNo: r.RPDocNo, amount: Number(r.RPAmount), mode: r.RPMode, date: r.RPDocDate,
@@ -1482,6 +1499,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       milestones,
       summary: { totalDue, totalPaid, balance, waivedDue, waivedCount: waivedMilestones.length, overdue },
       money,
+      waivers: await getBookingWaivers(pool, bid),
     });
   } catch (e) {
     console.error("[crm-payments] GET /booking/:id error:", e.message);
@@ -1750,73 +1768,185 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
   }
 });
 
-// PUT /:id/waive — explicit business decision to waive a milestone. Requires
-// a reason so it's auditable, unlike a free Status dropdown pick.
+// ── Waiving a milestone: a request, then Approval Setup ──────────────────────
+// A waiver is a discount given before the amount is invoiced: the invoice bills less and GST follows, so it posts nothing
+// itself. A milestone already invoiced takes a credit note instead. The milestone stays due until the waiver is approved.
+const waiverUser = (req) => ({ email: req.user?.email || req.user?.name || String(actorId(req)), role: req.user?.role, userId: actorId(req) });
+const failWaiver = (res, e, where) => {
+  console.error(`[crm-payments] ${where} error:`, e.message);
+  res.status(e.status || 500).json({ error: e.message });
+};
+const refused = (message, status = 409) => Object.assign(new Error(message), { status });
+const MIN_WAIVER_REASON = 10;
+
+// What stops a milestone being waived now. Checked when asked, and again when approved.
+async function assertWaivable(executor, milestoneId) {
+  const m = (await executor.request().input("id", sql.Int, milestoneId).query(`
+    SELECT m.Id, m.BookingId, m.AmountDue, m.AmountPaid, m.Status,
+           (SELECT TOP 1 i.InvoiceNo FROM dbo.CrmInvoice i WHERE i.MilestoneId = m.Id AND i.Status <> 'Void') AS InvoiceNo,
+           (SELECT TOP 1 i.InvoiceNo FROM dbo.CrmInvoice i WHERE i.BookingId = m.BookingId AND i.InvoiceType = 'Final' AND i.Status <> 'Void') AS FinalNo
+    FROM dbo.CrmPaymentMilestone m WHERE m.Id = @id`)).recordset[0];
+  if (!m) throw refused("Milestone not found", 404);
+  if (m.Status === CrmStatus.PAID) throw refused("Cannot waive an already-paid milestone", 400);
+  if (m.Status === "Waived") throw refused("This milestone is already waived", 400);
+  if (m.InvoiceNo || m.FinalNo) throw refused(`This milestone is already invoiced (${m.InvoiceNo || m.FinalNo}). Raise a credit note against the invoice instead of waiving it.`);
+  const activeErr = await requireActiveBooking(executor, m.BookingId);
+  if (activeErr) throw refused(activeErr);
+  return m;
+}
+
+// PUT /:id/waive: asks for the waiver. It applies once Approval Setup's approvers have approved it.
 router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
-    const b = req.body || {};
-    if (!b.Reason) return res.status(400).json({ error: "Reason is required to waive a milestone" });
-
-    const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, BookingId FROM dbo.CrmPaymentMilestone WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Milestone not found" });
-    if (cur.recordset[0].Status === CrmStatus.PAID) {
-      return res.status(400).json({ error: "Cannot waive an already-paid milestone" });
-    }
-    // Every other mutation endpoint in this file guards on this — waive was
-    // the one gap, letting a milestone on a Cancelled/inactive booking be
-    // waived after the fact (its balance is already being handled through
-    // the Cancellation/refund flow, not this one).
-    const bookingId = cur.recordset[0].BookingId;
-    const tx = pool.transaction();
-    await tx.begin();
-    let result;
+    const reason = String(req.body?.Reason || "").trim();
+    if (reason.length < MIN_WAIVER_REASON) return res.status(400).json({ error: "Say why this milestone is being waived" });
+    const m = await assertWaivable(pool, id);
+    const open = (await pool.request().input("id", sql.Int, id).query("SELECT TOP 1 Id FROM dbo.CrmMilestoneWaiver WHERE MilestoneId = @id AND Status IN (N'Draft', N'Pending')")).recordset[0];
+    if (open) throw refused("A waiver of this milestone is already waiting for approval");
+    const amount = Math.max(0, round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)));
+    const { gstAmount, baseAmount } = await getGstSplit(pool, m.BookingId, amount);
+    const user = waiverUser(req);
+    const row = (await pool.request().input("b", sql.Int, m.BookingId).input("m", sql.Int, id).input("a", sql.Decimal(18, 2), amount)
+      .input("t", sql.Decimal(18, 2), baseAmount).input("g", sql.Decimal(18, 2), gstAmount).input("r", sql.NVarChar(500), reason.slice(0, 500)).input("u", sql.Int, user.userId ?? null)
+      .query(`INSERT INTO dbo.CrmMilestoneWaiver (BookingId, MilestoneId, Amount, TaxableValue, GstAmount, Reason, Status, RequestedById)
+              OUTPUT INSERTED.Id VALUES (@b, @m, @a, @t, @g, @r, N'Draft', @u)`)).recordset[0];
     try {
-      await tx.request().input("bid", sql.Int, bookingId).query(`
-        SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
-      `);
-      const activeErr = await requireActiveBooking(tx, bookingId);
-      if (activeErr) throw Object.assign(new Error(activeErr), { status: 409 });
-      result = await tx.request()
-        .input("id",  sql.Int, id)
-        .input("rem", sql.NVarChar(sql.MAX), b.Reason)
-        .input("ub",  sql.Int, actorId(req))
-        .query(`
-          UPDATE dbo.CrmPaymentMilestone SET
-            Status = 'Waived', Remarks = @rem, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-          OUTPUT INSERTED.BookingId, INSERTED.MilestoneNo
-          WHERE Id = @id AND Status <> '${CrmStatus.PAID}'
-        `);
-      if (!result.recordset.length) {
-        throw Object.assign(new Error("This milestone was paid before the waiver could be applied"), { status: 409 });
-      }
-      await tx.commit();
-    } catch (txError) {
-      try { await tx.rollback(); } catch {}
-      throw txError;
+      await approvalTransition("crm-milestone-waiver", row.Id, CrmStatus.PENDING, user.email, user.role, null, user.userId);
+    } catch (e) {
+      // It never reached an approver (no workflow set up, say): close the request, or it would block asking again.
+      await pool.request().input("id", sql.Int, row.Id).input("n", sql.NVarChar(500), String(e.message).slice(0, 500))
+        .query("UPDATE dbo.CrmMilestoneWaiver SET Status = N'Rejected', RejectionNote = @n, DecidedAt = SYSDATETIME() WHERE Id = @id");
+      throw e;
     }
-
-    const { BookingId: waivedBookingId, MilestoneNo: waivedMilestoneNo } = result.recordset[0];
-    // Auto-flow: a waived milestone can also be the last one outstanding.
-    await maybeAutoCreateSalesDeed(pool, waivedBookingId, actorId(req));
-    // Milestone #1 waive must also trigger brokerage auto-create — same gate
-    // as handleMilestoneBecamePaid, which only fires on payment, not waive.
-    if (Number(waivedMilestoneNo) === 1) {
-      await maybeAutoCreateBrokerage(pool, waivedBookingId, actorId(req));
-    }
-    try { await syncParkingPaymentStatus(pool, waivedBookingId); } catch (e) {
-      console.error("[crm-payments] syncParkingPaymentStatus (waive) failed:", e.message);
-    }
-
-    res.json({ success: true, status: "Waived" });
-  } catch (e) {
-    console.error("[crm-payments] waive error:", e.message);
-    res.status(e.status || 500).json({ error: e.message });
-  }
+    res.json({ success: true, status: CrmStatus.PENDING, waiverId: row.Id, amount });
+  } catch (e) { failWaiver(res, e, "waive"); }
 });
+
+// PUT /waivers/:id/approve and /reject: the inbox's calls. The waiver applies only when the last level has approved.
+async function decideWaiver(req, res, approve) {
+  try {
+    const pool = getPool();
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const note = String(req.body?.note ?? req.body?.remarks ?? req.body?.reason ?? "").trim();
+    if (!approve && !note) throw refused("Say why this waiver is rejected", 400);
+    const w = (await pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmMilestoneWaiver WHERE Id = @id")).recordset[0];
+    if (!w) throw refused("Waiver not found", 404);
+    if (w.Status !== CrmStatus.PENDING) throw refused("This waiver is not waiting for approval");
+    const user = waiverUser(req);
+    let milestoneNo;
+    const r = await approvalTransition("crm-milestone-waiver", id, approve ? CrmStatus.APPROVED : CrmStatus.REJECTED, user.email, user.role, note || null, user.userId,
+      approve ? (tx) => assertWaivable(tx, w.MilestoneId) : null,
+      approve ? async (tx) => { milestoneNo = await applyWaiver(tx, w, user); } : null);
+    if (r.newStatus === CrmStatus.REJECTED) {
+      await pool.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), note.slice(0, 500)).input("u", sql.Int, user.userId ?? null)
+        .query("UPDATE dbo.CrmMilestoneWaiver SET RejectionNote = @n, DecidedById = @u, DecidedAt = SYSDATETIME() WHERE Id = @id");
+    }
+    if (r.newStatus === CrmStatus.APPROVED) await afterWaiverApplied(pool, w.BookingId, milestoneNo, user);
+    res.json({ success: true, status: r.newStatus });
+  } catch (e) { failWaiver(res, e, approve ? "approve waiver" : "reject waiver"); }
+}
+router.put("/waivers/:id/approve", requirePageRight("crm-payments", "edit"), (req, res) => decideWaiver(req, res, true));
+router.put("/waivers/:id/reject", requirePageRight("crm-payments", "edit"), (req, res) => decideWaiver(req, res, false));
+
+// Runs inside the last approval's transaction. The amount is worked out now: money may have come in while it waited.
+async function applyWaiver(tx, w, user) {
+  await tx.request().input("bid", sql.Int, w.BookingId).query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid");
+  const m = (await tx.request().input("id", sql.Int, w.MilestoneId).query("SELECT AmountDue, ISNULL(AmountPaid, 0) AS AmountPaid FROM dbo.CrmPaymentMilestone WHERE Id = @id")).recordset[0];
+  const amount = Math.max(0, round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)));
+  const { gstAmount, baseAmount } = await getGstSplit(tx, w.BookingId, amount);
+  const done = await tx.request().input("id", sql.Int, w.MilestoneId).input("rem", sql.NVarChar(sql.MAX), w.Reason).input("ub", sql.Int, user.userId ?? null).query(`
+    UPDATE dbo.CrmPaymentMilestone SET Status = 'Waived', Remarks = @rem, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+    OUTPUT INSERTED.MilestoneNo WHERE Id = @id AND Status <> '${CrmStatus.PAID}'`);
+  if (!done.recordset.length) throw refused("This milestone was paid before the waiver could be applied");
+  await tx.request().input("id", sql.Int, w.Id).input("u", sql.Int, user.userId ?? null).input("a", sql.Decimal(18, 2), amount)
+    .input("t", sql.Decimal(18, 2), baseAmount).input("g", sql.Decimal(18, 2), gstAmount)
+    .query("UPDATE dbo.CrmMilestoneWaiver SET Amount = @a, TaxableValue = @t, GstAmount = @g, DecidedById = @u, DecidedAt = SYSDATETIME() WHERE Id = @id");
+  return done.recordset[0].MilestoneNo;
+}
+
+// The waiver is approved by now, so a failure here is logged rather than reported as a failed approval.
+async function afterWaiverApplied(pool, bookingId, milestoneNo, user) {
+  try {
+    // A waiver lowers what is owed, so the money on account may now be the full amount: settle it, as a payment would.
+    await autoApplyOnAccountIfFullyFunded(pool, bookingId, user.userId, user.email);
+    // Auto-flow: a waived milestone can also be the last one outstanding.
+    await maybeAutoCreateSalesDeed(pool, bookingId, user.userId);
+    // Milestone #1 waive must also trigger brokerage auto-create, the same gate as handleMilestoneBecamePaid.
+    if (Number(milestoneNo) === 1) await maybeAutoCreateBrokerage(pool, bookingId, user.userId);
+    await syncParkingPaymentStatus(pool, bookingId);
+  } catch (e) {
+    console.error("[crm-payments] after-waiver steps failed:", e.message);
+  }
+}
+
+// What stops an approved waiver being reversed: something already relies on the waived figure.
+async function assertReversible(executor, w) {
+  const block = await waiverReversalBlock(executor, w.BookingId);
+  if (block) throw refused(block);
+  const activeErr = await requireActiveBooking(executor, w.BookingId);
+  if (activeErr) throw refused(activeErr);
+}
+
+// PUT /waivers/:id/reverse: asks to put a waived milestone back as due. A second approval, like the waiver itself.
+router.put("/waivers/:id/reverse", requirePageRight("crm-payments", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const reason = String(req.body?.Reason || "").trim();
+    if (reason.length < MIN_WAIVER_REASON) throw refused("Say why this waiver is being reversed", 400);
+    const w = (await pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmMilestoneWaiver WHERE Id = @id")).recordset[0];
+    if (!w) throw refused("Waiver not found", 404);
+    if (w.Status !== CrmStatus.APPROVED) throw refused("Only an approved waiver can be reversed");
+    if (w.ReversalStatus === CrmStatus.APPROVED) throw refused("This waiver is already reversed");
+    if (w.ReversalStatus === CrmStatus.PENDING) throw refused("Its reversal is already waiting for approval");
+    await assertReversible(pool, w);
+    const user = waiverUser(req);
+    await pool.request().input("id", sql.Int, id).input("r", sql.NVarChar(500), reason.slice(0, 500)).input("u", sql.Int, user.userId ?? null)
+      .query("UPDATE dbo.CrmMilestoneWaiver SET ReversalStatus = N'Draft', ReversalReason = @r, ReversalRequestedById = @u, ReversalRequestedAt = SYSDATETIME(), ReversalRejectionNote = NULL WHERE Id = @id");
+    try {
+      await approvalTransition("crm-milestone-waiver-reversal", id, CrmStatus.PENDING, user.email, user.role, null, user.userId);
+    } catch (e) {
+      await pool.request().input("id", sql.Int, id).query("UPDATE dbo.CrmMilestoneWaiver SET ReversalStatus = NULL WHERE Id = @id");
+      throw e;
+    }
+    res.json({ success: true, status: CrmStatus.PENDING });
+  } catch (e) { failWaiver(res, e, "reverse waiver"); }
+});
+
+async function decideReversal(req, res, approve) {
+  try {
+    const pool = getPool();
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const note = String(req.body?.note ?? req.body?.remarks ?? req.body?.reason ?? "").trim();
+    if (!approve && !note) throw refused("Say why this reversal is rejected", 400);
+    const w = (await pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmMilestoneWaiver WHERE Id = @id")).recordset[0];
+    if (!w) throw refused("Waiver not found", 404);
+    if (w.ReversalStatus !== CrmStatus.PENDING) throw refused("No reversal is waiting for approval");
+    const user = waiverUser(req);
+    const r = await approvalTransition("crm-milestone-waiver-reversal", id, approve ? CrmStatus.APPROVED : CrmStatus.REJECTED, user.email, user.role, note || null, user.userId,
+      approve ? (tx) => assertReversible(tx, w) : null,
+      approve ? async (tx) => {
+        // The waiver's reason goes with it: the record keeps it, the milestone is due again.
+        await tx.request().input("m", sql.Int, w.MilestoneId).input("u", sql.Int, user.userId ?? null).input("rem", sql.NVarChar(sql.MAX), w.Reason)
+          .query(`UPDATE dbo.CrmPaymentMilestone SET Status = '${CrmStatus.PENDING}', Remarks = CASE WHEN Remarks = @rem THEN NULL ELSE Remarks END, UpdatedBy = @u, UpdatedAt = SYSDATETIME() WHERE Id = @m AND Status = 'Waived'`);
+        await tx.request().input("id", sql.Int, id).input("u", sql.Int, user.userId ?? null)
+          .query("UPDATE dbo.CrmMilestoneWaiver SET ReversalDecidedById = @u, ReversalDecidedAt = SYSDATETIME() WHERE Id = @id");
+      } : null);
+    if (r.newStatus === CrmStatus.REJECTED) {
+      await pool.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), note.slice(0, 500)).input("u", sql.Int, user.userId ?? null)
+        .query("UPDATE dbo.CrmMilestoneWaiver SET ReversalRejectionNote = @n, ReversalDecidedById = @u, ReversalDecidedAt = SYSDATETIME() WHERE Id = @id");
+    }
+    res.json({ success: true, status: r.newStatus });
+  } catch (e) { failWaiver(res, e, approve ? "approve reversal" : "reject reversal"); }
+}
+router.put("/waiver-reversals/:id/approve", requirePageRight("crm-payments", "edit"), (req, res) => decideReversal(req, res, true));
+router.put("/waiver-reversals/:id/reject", requirePageRight("crm-payments", "edit"), (req, res) => decideReversal(req, res, false));
 
 // GET /booking/:bookingId/on-account — every on-account deposit for this
 // booking, plus the balance still unapplied. Used by Welcome Call and the

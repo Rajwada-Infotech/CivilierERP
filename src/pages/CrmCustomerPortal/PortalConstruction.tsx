@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { HardHat, Home, FileCheck2, CheckCircle2, AlertTriangle, FileText, ShieldCheck, ClipboardCheck } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { fmtDate, fmtDateTime, respondPossessionNotice } from "./portalApi";
+import { fmtDate, fmtDateTime, openPossessionLetter, respondPossessionNotice } from "./portalApi";
 import {
   PageHeader, Card, HAIRLINE, GOLD, GOLD_SOFT, TEXT, TEXT_MUTED, TEXT_FAINT, INK, serif,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
@@ -145,6 +145,10 @@ const PortalConstruction: React.FC = () => {
                 {notice.ResponseDeadline ? ` · respond by ${fmtDate(notice.ResponseDeadline)}` : ""}
               </p>
             </div>
+            <button onClick={() => openPossessionLetter(notice.Id, applicationId).catch((e) => toast.error(e.message))}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg shrink-0" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT }}>
+              <FileText size={13} /> View Letter
+            </button>
           </div>
 
           {notice.Status === "Sent" && (

@@ -1,13 +1,18 @@
 // Payment Milestones' parts. The list's masthead and columns; the plan's ribbon, its money trail, its full schedule, and
 // the deposits, Finance entries and price, every one shown on the page.
-import React from "react";
+import React, { useState } from "react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { CrmStatus } from "@/constants/crmStatuses";
-import { AlertTriangle, CheckCircle2, Clock, Hourglass, MessageSquare } from "lucide-react";
-import { GRID_CARD, GRID_SHEET_KEYS, GridMiniTable, GridStatusPill, GridToneMark, type GridCol } from "@/components/crm/CrmDataTable";
+import { translateError } from "@/lib/translateError";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertTriangle, CheckCircle2, Clock, Hourglass, MessageSquare, Percent, Undo2 } from "lucide-react";
+import { GRID_CARD, GRID_SHEET_KEYS, GridMiniTable, GridRelated, GridStatusPill, GridToneMark, type GridCol } from "@/components/crm/CrmDataTable";
 import { cn } from "@/lib/utils";
 import { fmt, fmtDate, fmtShort, isOverdue, milestoneFill, nextOpenMilestone, pct, MONEY_STAGE, RIBBON, TRAIL_STAGE, type LedgerRow, type LedgerSummary } from "./config";
+import { reverseWaiver, waiverState } from "./config";
 
-const { KEY_INK, KEY_LINE } = GRID_SHEET_KEYS;
+const { KEY_INK, KEY_LINE, LBL, TEXTAREA } = GRID_SHEET_KEYS;
 const SMALL_KEY = "h-7 px-2.5";
 const dash = <span className="text-muted-foreground">—</span>;
 
@@ -103,6 +108,9 @@ export function MoneyBand({ eyebrow, title, sub, status, actions, lead, leadNote
   );
 }
 
+export const BAND_KEY = "inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-md border border-white/25 text-xs font-medium text-white hover:bg-white/10 disabled:opacity-50";
+export const BAND_KEY_MAIN = "inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-md bg-white text-xs font-semibold text-slate-900 hover:bg-slate-100";
+
 // The money's colours on the masthead's dark ground and on the rows' white one.
 export const BAND_DOT = { collected: "bg-emerald-400", held: RIBBON.held.cls, finance: "bg-amber-300", recorded: RIBBON.recorded.cls, notDue: "bg-slate-500", overdue: "bg-rose-400" };
 const ROW_FILL = { collected: "bg-emerald-500", finance: "bg-amber-400", overdue: "bg-rose-500" };
@@ -120,13 +128,13 @@ export function CollectionBar({ due, collected, finance, recorded, onDark, title
 }
 
 /** A person's two initials. */
-function Initials({ name, small }: { name: string | null; small?: boolean }) {
+export function Initials({ name, small }: { name: string | null; small?: boolean }) {
   const parts = String(name || "?").trim().split(/\s+/);
   const text = `${parts[0]?.[0] || "?"}${parts.length > 1 ? parts[parts.length - 1][0] : ""}`.toUpperCase();
   return <span className={cn("shrink-0 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 font-semibold flex items-center justify-center", small ? "w-6 h-6 text-[0.625rem]" : "w-8 h-8 text-[0.6875rem]")}>{text}</span>;
 }
 /** Names come in as typed, often all capitals: on the list they read as names. */
-const asName = (s: string | null) => String(s || "").toLowerCase();
+export const asName = (s: string | null) => String(s || "").toLowerCase();
 
 /** The next step on a booking, in words, from its plan. */
 function nextStep(r: LedgerRow) {
@@ -167,6 +175,13 @@ export const LEDGER_COLS: GridCol<LedgerRow>[] = [
   ) },
   { id: "tracker", label: "Received", sortKey: "Collected", csv: (r) => Number(r.Collected) + Number(r.WithFinance) + Number(r.Recorded), cell: (r) => {
     const received = Number(r.Collected) + Number(r.WithFinance) + Number(r.Recorded);
+    // A closed booking owes nothing, so there is no plan to measure against: only what actually came in.
+    if (r.Closed) return (
+      <span className="block min-w-[15rem] py-1.5 text-xs tabular-nums text-muted-foreground">
+        {received > 0 ? <><span className="font-medium text-foreground">{fmtShort(received)}</span> received</> : "Nothing received"}
+        <span className="block mt-0.5">Closed, no balance owed</span>
+      </span>
+    );
     return (
       <span className="block min-w-[15rem] py-1.5" title={collectionTitle(r)}>
         <CollectionBar due={Number(r.TotalDue)} collected={Number(r.Collected)} finance={Number(r.WithFinance)} recorded={Number(r.Recorded)} />
@@ -178,9 +193,17 @@ export const LEDGER_COLS: GridCol<LedgerRow>[] = [
     );
   } },
   { id: "verified", label: "Approved by Finance", align: "right", sortKey: "Collected", csv: (r) => r.Collected, cell: (r) => (Number(r.Collected) > 0 ? <span className="tabular-nums" title={fmt(r.Collected)}>{fmtShort(r.Collected)}</span> : dash) },
-  { id: "pending", label: "Pending approval", align: "right", csv: (r) => Number(r.WithFinance) + Number(r.Recorded), cell: (r) => {
+  { id: "pending", label: "Not yet approved", align: "right", csv: (r) => Number(r.WithFinance) + Number(r.Recorded), cell: (r) => {
     const n = Number(r.WithFinance) + Number(r.Recorded);
-    return n > 0 ? <span className="tabular-nums text-amber-700 dark:text-amber-300" title={`${RIBBON.finance.label} ${fmt(r.WithFinance)} · ${RIBBON.recorded.label} ${fmt(r.Recorded)}`}>{fmtShort(n)}</span> : dash;
+    if (!(n > 0)) return dash;
+    // Named as on the band, so the same money reads the same everywhere.
+    const parts = [{ amount: Number(r.WithFinance), label: RIBBON.finance.label }, { amount: Number(r.Recorded), label: RIBBON.recorded.label }].filter((x) => x.amount > 0);
+    return (
+      <span className="inline-flex flex-col items-end leading-tight" title={parts.map((x) => `${x.label} ${fmt(x.amount)}`).join(" · ")}>
+        <span className="tabular-nums text-amber-700 dark:text-amber-300">{fmtShort(n)}</span>
+        {parts.map((x) => <span key={x.label} className="mt-0.5 text-xs text-muted-foreground whitespace-nowrap">{parts.length > 1 ? `${fmtShort(x.amount)} ` : ""}{x.label}</span>)}
+      </span>
+    );
   } },
   { id: "toCollect", label: "Balance", align: "right", sortKey: "ToCollect", csv: (r) => r.ToCollect, cell: (r) => (!r.Closed && Number(r.ToCollect) > 0 ? <span className="tabular-nums font-medium" title={fmt(r.ToCollect)}>{fmtShort(r.ToCollect)}</span> : dash) },
   { id: "overdue", label: "Overdue", align: "right", sortKey: "OverdueAmount", csv: (r) => r.OverdueAmount, cell: (r) => (!r.Closed && r.OverdueAmount > 0 ? (
@@ -337,6 +360,69 @@ export function MoneyTrail({ trail, totalDue }: { trail: any; totalDue: number }
   );
 }
 
+/** What a waiver did to the price, and any verified money beyond what is still billable. Both pages' band footers. */
+export function WaiverNotes({ agreed, waived, net, excess, bookingId }: { agreed: number; waived: number; net: number; excess: number; bookingId: number | string }) {
+  if (!(waived > 0) && !(excess > 0)) return null;
+  return (
+    <span className="block mt-1 text-slate-300 space-y-0.5">
+      {waived > 0 && <span className="block">Agreed price {fmt(agreed)}, less {fmt(waived)} waived: {fmt(net)} to be billed.</span>}
+      {excess > 0 && <span className="block text-amber-200">{fmt(excess)} on account is more than is still billable. <Link to={`/crm/refunds?newForBooking=${bookingId}`} className="underline underline-offset-2 hover:text-white">Refund or adjust it</Link>.</span>}
+    </span>
+  );
+}
+
+/** Every waiver on a booking: who asked, who decided, why, and reversing one. On both the plan and the invoices page. */
+export function WaiverSection({ waivers, canEdit, onChanged }: { waivers: any[]; canEdit: boolean; onChanged: () => void }) {
+  const [reversing, setReversing] = useState<any | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!waivers?.length) return null;
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await reverseWaiver(reversing.Id, reason.trim());
+      toast.success("Reversal sent for approval");
+      setReversing(null); setReason("");
+      onChanged();
+    } catch (e: any) { toast.error(translateError(e.message)); } finally { setBusy(false); }
+  };
+  return (
+    <GridRelated icon={Percent} title="Waivers" count={waivers.length}>
+      <GridMiniTable rows={waivers} rowKey={(w: any) => w.Id} empty="No waivers." cols={[
+        { header: "Milestone", cell: (w: any) => <span className="font-medium"><span className="text-muted-foreground tabular-nums mr-1.5">{w.MilestoneNo}</span>{w.MilestoneName}</span> },
+        { header: "Taxable value", align: "right", cell: (w: any) => <span className="tabular-nums">{fmt(w.TaxableValue)}</span> },
+        { header: "GST", align: "right", cell: (w: any) => <span className="tabular-nums">{fmt(w.GstAmount)}</span> },
+        { header: "Amount", align: "right", cell: (w: any) => <span className="tabular-nums font-semibold">{fmt(w.Amount)}</span> },
+        { header: "Reason", cell: (w: any) => <span className="block max-w-[20rem] whitespace-normal text-xs" title={w.Reason}>{w.Reason}{w.RejectionNote ? <span className="block text-destructive">Rejected: {w.RejectionNote}</span> : null}{w.ReversalReason ? <span className="block text-muted-foreground">Reversal: {w.ReversalReason}{w.ReversalRejectionNote ? ` (rejected: ${w.ReversalRejectionNote})` : ""}</span> : null}</span> },
+        { header: "Asked by", cell: (w: any) => <span className="text-xs text-muted-foreground">{w.RequestedByName || "—"} · {fmtDate(w.RequestedAt)}</span> },
+        { header: "Decided by", cell: (w: any) => <span className="text-xs text-muted-foreground">{w.DecidedAt ? `${w.DecidedByName || "—"} · ${fmtDate(w.DecidedAt)}` : "—"}</span> },
+        { header: "Status", cell: (w: any) => { const st = waiverState(w); return <GridToneMark text={st.label} tone={st.tone} />; } },
+        { header: "Actions", cell: (w: any) => (!canEdit || !waiverState(w).reversible ? null
+          : w.ReversalBlock ? <span className="block max-w-[14rem] whitespace-normal text-xs text-muted-foreground">{w.ReversalBlock}</span>
+          : <button type="button" onClick={() => { setReversing(w); setReason(""); }} className={cn(KEY_LINE, SMALL_KEY)}><Undo2 size={12} /> Reverse</button>) },
+      ]} />
+      {reversing && (
+        <Dialog open onOpenChange={(o) => { if (!o && !busy) setReversing(null); }}>
+          <DialogContent className="max-w-md p-5 gap-4">
+            <DialogHeader>
+              <DialogTitle>Reverse this waiver?</DialogTitle>
+              <DialogDescription className="text-xs tabular-nums">{reversing.MilestoneName}: {fmt(reversing.Amount)} becomes due again once the reversal is approved.</DialogDescription>
+            </DialogHeader>
+            <div>
+              <label className={cn("block mb-1.5", LBL)}>Reason</label>
+              <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus className={TEXTAREA} />
+            </div>
+            <DialogFooter className="gap-2">
+              <button type="button" onClick={() => setReversing(null)} disabled={busy} className={cn(KEY_LINE, "h-9 px-4")}>Cancel</button>
+              <button type="button" onClick={submit} disabled={busy || reason.trim().length < 10} title={reason.trim().length < 10 ? "Say why: at least 10 characters" : undefined} className={cn(KEY_INK, "h-9 px-4")}>{busy ? "Sending…" : "Send for approval"}</button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </GridRelated>
+  );
+}
+
 // Deposits that aren't usable money: never counted, never applied.
 const UNAVAILABLE = ["Bounced", "Held", "Void", "Cancelled", "Refunded"];
 
@@ -378,7 +464,7 @@ export function OnAccountPanel({ onAccountData, notFullyPaid, fundsOnHand, requi
 }
 
 /** The money against a milestone, in words on one line. */
-function moneyWords(m: any) {
+export function moneyWords(m: any) {
   const f = milestoneFill(m);
   if (f.waived) return <span className="text-muted-foreground">Waived</span>;
   const bits = [
@@ -406,9 +492,9 @@ function milestoneDetails(m: any) {
   return lines;
 }
 
-export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, nextMilestone, canManuallyApply, activeId, onPay, onApply, onWaive, onRemarks }: {
+export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, nextMilestone, canManuallyApply, activeId, pendingWaivers, onPay, onApply, onWaive, onRemarks }: {
   milestones: any[]; canEdit: boolean; onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; fullPaymentShortfall: number;
-  nextMilestone: any; canManuallyApply: boolean; activeId: number | null;
+  nextMilestone: any; canManuallyApply: boolean; activeId: number | null; pendingWaivers?: Set<number>;
   onPay: (m: any) => void; onApply: (payment: any, m: any) => void; onWaive: (m: any) => void; onRemarks: (m: any) => void;
 }) {
   const th = "h-8 px-3 text-xs font-semibold text-muted-foreground whitespace-nowrap bg-muted border-b border-border text-left";
@@ -462,7 +548,7 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                   <td className={cn(td, "text-right tabular-nums whitespace-nowrap font-medium")}>{noAmount ? <span className="text-xs font-normal text-muted-foreground">No amount due</span> : fmt(m.AmountDue)}</td>
                   <td className={cn(td, "text-xs")}>{moneyWords(m)}</td>
                   <td className={cn(td, "text-right tabular-nums whitespace-nowrap", f.missing > 0 && "font-semibold")}>{f.waived || f.missing <= 0 ? dash : fmt(f.missing)}</td>
-                  <td className={td} title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={status} tone={overdue ? "stopped" : stage?.tone ?? "waiting"} />}</td>
+                  <td className={td} title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={pendingWaivers?.has(m.Id) ? "waiting" : overdue ? "stopped" : stage?.tone ?? "waiting"} />}</td>
                   <td className={cn(td, "whitespace-nowrap")}>
                     {canEdit && open && (
                       <div className="flex items-center justify-end gap-1.5">
@@ -472,7 +558,7 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                           : !canManuallyApply
                           ? <span title="Raise the Demand before applying on-account money to this milestone" className={passive}>Raise demand</span>
                           : <button type="button" onClick={() => onApply(pmt, m)} title="The full booking amount is received, so this should adjust automatically: use this only if it has not" className={cn(KEY_LINE, SMALL_KEY)}>Apply</button>)}
-                        {!covered && <button type="button" onClick={() => onWaive(m)} className={cn(KEY_LINE, SMALL_KEY)}>Waive</button>}
+                        {!covered && !pendingWaivers?.has(m.Id) && <button type="button" onClick={() => onWaive(m)} className={cn(KEY_LINE, SMALL_KEY)}>Waive</button>}
                       </div>
                     )}
                   </td>

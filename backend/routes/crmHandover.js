@@ -10,7 +10,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
-const { requireActiveBooking, maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, maybeAutoCreateSalesDeed, refreshPrePossessionStatus } = require("../services/crmWorkflowGuards");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { getBookingFunding, bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
@@ -18,6 +18,8 @@ router.use(apiRateLimit);
 router.use(authMiddleware);
 
 const SNAG_CATEGORIES = ["Electrical", "Plumbing", "Civil", "Paint", "Carpentry", "Other"];
+// Completing a handover counts Open and InProgress snags: any other word would slip past it.
+const SNAG_STATUSES = [CrmStatus.OPEN, CrmStatus.IN_PROGRESS, CrmStatus.RESOLVED];
 
 const HANDOVER_SELECT = `
   SELECT
@@ -178,6 +180,11 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
         )
         -- 4. Net booking funding covers every non-waived due.
         AND (${bookingFullyFundedSql("b.Id")})
+        -- 5. A Pre-Possession check, if there is one, has all its items done.
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id
+            AND (pp.Status = 'Blocked' OR pp.DocumentationCheck = 0 OR pp.QualityInspectionCheck = 0 OR pp.UtilityReadinessCheck = 0)
+        )
       ORDER BY b.BookingNo
     `);
 
@@ -255,6 +262,7 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     // nothing on the notice itself re-validates when that happens. Without
     // this, a flagged, uncorrected inspection defect would still let the
     // unit go out the door because Handover only ever looked at the notice.
+    await refreshPrePossessionStatus(pool, parseInt(b.BookingId));
     const pp = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
       .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
     if (pp.recordset.length && pp.recordset[0].Status !== "Ready") {
@@ -378,6 +386,7 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       // checklist can be unchecked (e.g. a defect found) any time after the
       // Possession Notice was already scheduled/acknowledged.
       {
+        await refreshPrePossessionStatus(pool, cur0.recordset[0].BookingId);
         const pp = await pool.request().input("bid", sql.Int, cur0.recordset[0].BookingId)
           .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
         if (pp.recordset.length && pp.recordset[0].Status !== "Ready") {
@@ -494,6 +503,8 @@ router.put("/:id/snags/:snagId", requirePageRight("crm-handover", "edit"), async
     const b = req.body;
     const snagId = parseInt(req.params.snagId);
     if (!Number.isFinite(snagId)) return res.status(400).json({ error: "Invalid snag id" });
+
+    if (b.Status && !SNAG_STATUSES.includes(b.Status)) return res.status(400).json({ error: `Status must be one of: ${SNAG_STATUSES.join(", ")}` });
 
     const snagCur = await pool.request().input("id", sql.Int, snagId).query(`
       SELECT h.BookingId FROM dbo.CrmSnagItem s JOIN dbo.CrmHandover h ON h.Id = s.HandoverId WHERE s.Id = @id

@@ -78,6 +78,8 @@ const SPECS = {
   "crm-brokerage": crmBooking("CrmBrokerageMaster"),
   "crm-cancellations": crmBooking("CrmCancellation"),
   "crm-noc": crmBooking("CrmNoc"),
+  "crm-milestone-waiver": crmBooking("CrmMilestoneWaiver"),
+  "crm-milestone-waiver-reversal": crmBooking("CrmMilestoneWaiver"),
   "crm-booking-amendment": crmBooking("CrmBookingAmendmentRequest"),
   "crm-refunds": { from: "dbo.CrmRefund t", key: "t.Id", company: ent("t.CompanyId"), project: ent("t.ProjectId"), party: crmCust("t.CustomerId") },
   "crm-resales": {

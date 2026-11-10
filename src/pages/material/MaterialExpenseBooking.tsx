@@ -404,7 +404,12 @@ export default function MaterialExpenseBooking() {
   // form is filled (direct/TOD bookings only; see the field's gating
   // condition below for why). Purely informational until save, where the
   // backend re-validates everything server-side regardless.
-  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
+  // advanceCovered / tdsBase: advances to this party that already had TDS deducted cover that much of the invoice, so
+  // TDS is only due on tdsBase; coveredByAdvance = they cover all of it and no TDS can be deducted.
+  const [tdsEligibility, setTdsEligibility] = useState<{
+    tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number;
+    advanceCovered?: number; tdsBase?: number; coveredByAdvance?: boolean;
+  } | null>(null);
 
   const isEditing = editingId !== null;
 
@@ -1644,6 +1649,7 @@ export default function MaterialExpenseBooking() {
       amount: String(form.basicAmount || 0),
     });
     if (form.bookingDate) qs.set("date", form.bookingDate);
+    if (editingId) qs.set("eid", String(editingId));
     apiFetch(`${API}/tds-eligibility?${qs.toString()}`)
       .then((data: any) => {
         if (!cancelled) setTdsEligibility(data);
@@ -1655,7 +1661,10 @@ export default function MaterialExpenseBooking() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirectPartyMode, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
+  }, [isDirectPartyMode, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate, editingId]);
+
+  // What TDS is worked out on: the invoice amount less what TDS-deducted advances already cover.
+  const tdsBaseAmount = tdsEligibility?.tdsBase ?? form.basicAmount;
 
   // Keep form.tdsAmount live — it used to only be set once, inside the TDS
   // <select>'s onChange, so editing the basic amount (or anything else that
@@ -1663,11 +1672,19 @@ export default function MaterialExpenseBooking() {
   // shown TDS amount frozen at its old value instead of tracking the
   // invoice in real time.
   useEffect(() => {
-    if (!form.tdsId || form.tdsPercentage == null) return;
-    const recalculated = calculateTdsPreview(form.basicAmount, form.tdsPercentage);
+    if (!form.tdsId) return;
+    // Advances already TDS'd cover the whole invoice: no TDS can be deducted on it.
+    if (tdsEligibility?.coveredByAdvance) {
+      set("tdsId", null);
+      set("tdsPercentage", null);
+      set("tdsAmount", 0);
+      return;
+    }
+    if (form.tdsPercentage == null) return;
+    const recalculated = calculateTdsPreview(tdsBaseAmount, form.tdsPercentage);
     if (recalculated !== form.tdsAmount) set("tdsAmount", recalculated);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.tdsId, form.tdsPercentage, form.basicAmount]);
+  }, [form.tdsId, form.tdsPercentage, tdsBaseAmount, tdsEligibility?.coveredByAdvance]);
 
   const { bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
     useMemo(() => {
@@ -2330,7 +2347,11 @@ export default function MaterialExpenseBooking() {
                         label="TDS"
                         className="sm:col-span-2"
                         hint={
-                          tdsEligibility.thresholdMet
+                          tdsEligibility.coveredByAdvance
+                            ? `TDS was already deducted on advance payments covering this whole invoice (₹${fmt(tdsEligibility.advanceCovered || 0)}) — no TDS can be deducted again`
+                            : (tdsEligibility.advanceCovered || 0) > 0
+                            ? `₹${fmt(tdsEligibility.advanceCovered || 0)} of this invoice was covered by advances that already had TDS — TDS applies only on the remaining ₹${fmt(tdsEligibility.tdsBase || 0)}`
+                            : tdsEligibility.thresholdMet
                             ? "This supplier/contractor has crossed the TDS threshold — select the applicable TDS"
                             : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} booked this year so far) — optional`
                         }
@@ -2338,14 +2359,15 @@ export default function MaterialExpenseBooking() {
                         <div className="flex items-center gap-3">
                           <select
                             value={form.tdsId ?? ""}
+                            disabled={!!tdsEligibility.coveredByAdvance}
                             onChange={(e) => {
                               const id = e.target.value ? Number(e.target.value) : null;
                               const rec = tdsRecords.find((t) => Number(t.id) === id);
                               set("tdsId", id);
                               set("tdsPercentage", rec?.percentage ?? null);
-                              set("tdsAmount", rec ? calculateTdsPreview(form.basicAmount, rec.percentage) : 0);
+                              set("tdsAmount", rec ? calculateTdsPreview(tdsBaseAmount, rec.percentage) : 0);
                             }}
-                            className="flex-1 appearance-none pl-3 pr-7 py-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            className="flex-1 appearance-none pl-3 pr-7 py-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
                           >
                             <option value="">-- No TDS --</option>
                             {tdsRecords.filter((t) => t.status).map((t) => (

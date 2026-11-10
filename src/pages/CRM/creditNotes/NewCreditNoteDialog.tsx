@@ -32,7 +32,8 @@ export function NewCreditNoteDialog({ onClose, onCreated }: { onClose: () => voi
   const gst = Math.round(amt * ratio * 100) / 100;
   const paid = Number(inv?.MilestonePaid || 0);
   const newDue = inv?.MilestoneDue != null ? Math.max(0, Number(inv.MilestoneDue) - amt) : null;
-  const toAccount = newDue != null ? Math.max(0, paid - newDue) : 0;
+  // A Final invoice is only issued once everything is paid, so the whole reduction comes back to the account.
+  const toAccount = inv?.InvoiceType === "Final" ? amt : newDue != null ? Math.max(0, paid - newDue) : 0;
   const daysLeft = inv ? Math.ceil((new Date(inv.Deadline).getTime() - Date.now()) / 864e5) : 0;
   const ready = !!inv && amt > 0 && !tooMuch && !!remarks.trim();
 

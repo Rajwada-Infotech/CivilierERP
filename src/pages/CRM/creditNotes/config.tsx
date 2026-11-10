@@ -10,14 +10,12 @@
 // refunds that carried GST but have none yet.
 import React from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { SheetMark } from "@/components/sheet/Sheet";
+import { GridToneMark } from "@/components/crm/CrmDataTable";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 
 export const API = "/api/crm/refunds";
-export const PAGE_SIZE = 20;
 export const inr = (n: any) => fmtRupees(Number(n || 0));
 export const day = (d: any) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
-const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 export const formatSac = (hsn: any) => {
   if (!hsn) return "9954";
   const s = String(hsn).trim();
@@ -73,35 +71,17 @@ export const TABS = [
   ["pending", "To issue"],
 ] as const;
 export type Tab = (typeof TABS)[number][0];
-export type KindCounts = Partial<Record<Kind, { count: number; gst: number; dueSoon: number }>>;
+export type KindCounts = Partial<Record<Kind, { count: number; gst: number; amount: number; dueSoon: number }>>;
 
 /** A document's state as a mark: issued done, waiting / past deadline waiting, sent back or cancelled stopped. */
 export function NoteMark({ n }: { n: any }) {
   const s = n.Status;
-  if (s === "Issued") return <SheetMark text="Issued" tone="done" />;
-  if (s === "Cancelled") return <SheetMark text="Cancelled" tone="stopped" />;
-  if (s === "Rejected") return <SheetMark text="Sent back" tone="stopped" />;
-  if (s === "TimeBarred") return <SheetMark text="Past deadline" tone="waiting" />;
-  return <SheetMark text={REQ_LABEL[s] || s} tone="waiting" />;
+  if (s === "Issued") return <GridToneMark text="Issued" tone="done" />;
+  if (s === "Cancelled") return <GridToneMark text="Cancelled" tone="stopped" />;
+  if (s === "Rejected") return <GridToneMark text="Sent back" tone="stopped" />;
+  if (s === "TimeBarred") return <GridToneMark text="Past deadline" tone="waiting" />;
+  return <GridToneMark text={REQ_LABEL[s] || s} tone="waiting" />;
 }
-
-export function periods() {
-  const now = new Date();
-  const fyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-  return {
-    month: [ymd(new Date(now.getFullYear(), now.getMonth(), 1)), ymd(now)],
-    last: [ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)), ymd(new Date(now.getFullYear(), now.getMonth(), 0))],
-    fy: [`${fyStart}-04-01`, ymd(now)],
-    lastfy: [`${fyStart - 1}-04-01`, `${fyStart}-03-31`],
-  } as Record<string, [string, string]>;
-}
-export const PERIOD_LABEL: Record<string, string> = {
-  month: "This month",
-  last: "Last month",
-  fy: "This financial year",
-  lastfy: "Last financial year",
-  custom: "Custom",
-};
 
 /** Days to the declare-by date of a credit note on an invoice. */
 export function DeadlineNote({ n }: { n: any }) {

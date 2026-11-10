@@ -870,7 +870,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     .query(`
       SELECT PPaymentID, Status, PAmount, PDate, PBankID, PMode, PExpenseRef, DocNo,
              PCompany, PProject, ContractId, PPartyId, PPaymentName, JVLineId,
-             ISNULL(TDSAmount, 0) AS TDSAmount
+             ISNULL(TDSAmount, 0) AS TDSAmount, TDSId
       FROM dbo.NewPayment
       WHERE PPaymentID = @PPaymentID
     `);
@@ -978,10 +978,11 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   }
   let tdsPayableHeadId = null;
   if (tdsAmount > 0) {
-    const { GL_ACCOUNTS: TDS_GL_ACCOUNTS } = require("./tds");
-    tdsPayableHeadId = await getGLHeadId(pool, TDS_GL_ACCOUNTS.TDS_PAYABLE);
+    // The GL head of the TDS picked on the payment (TDS Master), else the common TDS Payable A/c.
+    const { getPaymentTdsHeadId } = require("./tds");
+    tdsPayableHeadId = await getPaymentTdsHeadId(pool, sql, payment.TDSId);
     if (!tdsPayableHeadId) {
-      return { posted: false, reason: `Payment ${paymentId}: TDS Payable system ledger not configured.` };
+      return { posted: false, reason: `Payment ${paymentId}: the TDS on this payment has no GL head, and the TDS Payable system ledger is not configured.` };
     }
   }
   const bankAndTdsLegs = (bankId, bankNarration, tdsNarration) => [
@@ -1018,7 +1019,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
           debit: a.amount,
           narration: `${docNo} — ${a.lHeadName} (direct expense payment)`,
         })),
-        ...bankAndTdsLegs(bankId, `${docNo} — direct expense payment`, `${docNo} — TDS Payable`),
+        ...bankAndTdsLegs(bankId, `${docNo} — direct expense payment`, `${docNo} — TDS`),
       ],
     });
     return { posted: true };
@@ -1105,7 +1106,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
           ? `${docNo} — advance / on account payment`
           : `${docNo} — payment made`,
       },
-      ...bankAndTdsLegs(bankId, `${docNo} — payment made`, `${docNo} — TDS Payable`),
+      ...bankAndTdsLegs(bankId, `${docNo} — payment made`, `${docNo} — TDS`),
     ],
   });
   return { posted: true };
