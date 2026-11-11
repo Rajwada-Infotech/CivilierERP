@@ -175,7 +175,7 @@ const Payment: React.FC = () => {
   // TDS (migration 304) — live-checked against the chosen Payee/Party for a
   // direct (no invoice linked) payment. An invoice-linked payment always
   // inherits its invoice's own snapshot server-side instead — no dropdown.
-  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
+  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number; singleBillThreshold?: number; yearlyThreshold?: number } | null>(null);
   // Live preview of what an invoice-linked payment will inherit/enforce —
   // calls the exact same resolver the save itself uses, so this can never
   // disagree with what actually happens on save.
@@ -687,7 +687,7 @@ const Payment: React.FC = () => {
         hint={
           tdsEligibility.thresholdMet
             ? "This party has crossed the TDS threshold — select the applicable TDS"
-            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far) — optional`
+            : `Not yet required — ₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far; this party's limit is ₹${(tdsEligibility.singleBillThreshold ?? 30000).toLocaleString("en-IN")} per bill / ₹${(tdsEligibility.yearlyThreshold ?? 100000).toLocaleString("en-IN")} per year — optional`
         }
       >
         <select

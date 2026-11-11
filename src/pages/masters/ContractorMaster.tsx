@@ -123,6 +123,9 @@ interface Contractor {
   GroupName: string | null;
   isTdsApplicable: boolean;
   tdsLimitApplicable: boolean;
+  // This contractor's own TDS limits (null = standard ₹30k per bill / ₹1L per year).
+  tdsSingleBillLimit: number | null;
+  tdsYearlyLimit: number | null;
   // Bank Details — all optional
   bankAccountNo: string | null;
   bankIfscCode: string | null;
@@ -154,6 +157,9 @@ interface ContractorForm {
   LHeadStatus: boolean;
   isTdsApplicable: boolean;
   tdsLimitApplicable: boolean;
+  // As typed — blank = the standard ₹30,000 per bill / ₹1,00,000 per year.
+  tdsSingleBillLimit?: string;
+  tdsYearlyLimit?: string;
   // Bank Details — all optional
   bankAccountNo: string;
   bankIfscCode: string;
@@ -460,6 +466,8 @@ const ContractorMaster: React.FC = () => {
       GroupName: item.GroupName ?? null,
       isTdsApplicable: Boolean(item.IsTdsApplicable),
       tdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
+      tdsSingleBillLimit: item.TdsSingleBillLimit != null ? Number(item.TdsSingleBillLimit) : null,
+      tdsYearlyLimit: item.TdsYearlyLimit != null ? Number(item.TdsYearlyLimit) : null,
       bankAccountNo: item.LAccountNo || null,
       bankIfscCode: item.LIFSCCode || null,
       bankName: item.LBankName || null,
@@ -491,6 +499,8 @@ const ContractorMaster: React.FC = () => {
     LDescription: null,
     IsTdsApplicable: f.isTdsApplicable,
     TdsLimitApplicable: f.tdsLimitApplicable,
+    TdsSingleBillLimit: f.tdsSingleBillLimit ?? "",
+    TdsYearlyLimit: f.tdsYearlyLimit ?? "",
     LAccountNo: f.bankAccountNo || null,
     LIFSCCode: f.bankIfscCode || null,
     LBankName: f.bankName || null,
@@ -739,6 +749,8 @@ const ContractorMaster: React.FC = () => {
       LHeadStatus: c.LHeadStatus,
       isTdsApplicable: c.isTdsApplicable,
       tdsLimitApplicable: c.tdsLimitApplicable,
+      tdsSingleBillLimit: c.tdsSingleBillLimit != null ? String(c.tdsSingleBillLimit) : "",
+      tdsYearlyLimit: c.tdsYearlyLimit != null ? String(c.tdsYearlyLimit) : "",
       bankAccountNo: c.bankAccountNo ?? "",
       bankIfscCode: c.bankIfscCode ?? "",
       bankName: c.bankName ?? "",
@@ -1351,11 +1363,34 @@ const ContractorMaster: React.FC = () => {
                   />
                 </button>
                 <span className={LBL}>
-                  TDS Limit (₹30k / ₹1L threshold) —{" "}
+                  TDS Limit —{" "}
                   <span className="text-foreground">
                     {form.tdsLimitApplicable ? "Applied" : "Deduct on every bill"}
                   </span>
                 </span>
+              </div>
+            )}
+            {/* This contractor's own limits — blank keeps the standard ₹30,000 per bill / ₹1,00,000 per year. */}
+            {form.isTdsApplicable && form.tdsLimitApplicable && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className={LBL}>TDS limit per bill (₹)</span>
+                  <input
+                    type="number" min={0} inputMode="decimal" placeholder="30000 (standard)"
+                    value={form.tdsSingleBillLimit ?? ""}
+                    onChange={(e) => setForm((p) => ({ ...p, tdsSingleBillLimit: e.target.value }))}
+                    className={`${inputCls} font-heading tabular-nums`}
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className={LBL}>TDS limit per year (₹)</span>
+                  <input
+                    type="number" min={0} inputMode="decimal" placeholder="100000 (standard)"
+                    value={form.tdsYearlyLimit ?? ""}
+                    onChange={(e) => setForm((p) => ({ ...p, tdsYearlyLimit: e.target.value }))}
+                    className={`${inputCls} font-heading tabular-nums`}
+                  />
+                </label>
               </div>
             )}
           </div>
@@ -1577,7 +1612,7 @@ const ContractorMaster: React.FC = () => {
                       : "—",
                 },
                 { label: "TDS Applicable", value: viewRecord.isTdsApplicable ? "Yes" : "No" },
-                { label: "TDS Limit", value: viewRecord.isTdsApplicable ? (viewRecord.tdsLimitApplicable ? "Applied" : "Deduct on every bill") : "—" },
+                { label: "TDS Limit", value: viewRecord.isTdsApplicable ? (viewRecord.tdsLimitApplicable ? `Applied (₹${(viewRecord.tdsSingleBillLimit ?? 30000).toLocaleString("en-IN")} per bill / ₹${(viewRecord.tdsYearlyLimit ?? 100000).toLocaleString("en-IN")} per year)` : "Deduct on every bill") : "—" },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
                 { label: "Bank Account Number", value: viewRecord.bankAccountNo || "—", mono: true },
                 { label: "Bank Name", value: viewRecord.bankName || "—" },

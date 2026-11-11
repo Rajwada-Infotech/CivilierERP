@@ -1441,15 +1441,17 @@ router.get("/tds-eligibility", async (req, res) => {
   }
   try {
     const pool = getPool();
-    const { resolveFinYearId, resolveThresholdStatus, SINGLE_BILL_THRESHOLD, YEARLY_CUMULATIVE_THRESHOLD } = require("../services/tds");
+    const { resolveFinYearId, resolveThresholdStatus, getTdsLimits } = require("../services/tds");
 
     const supRes = await pool.request().input("Id", sql.Int, supplierId)
       .query("SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id");
     const tdsApplicable = !!supRes.recordset[0]?.IsTdsApplicable;
     const tdsLimitApplicable = !!supRes.recordset[0]?.TdsLimitApplicable;
 
+    // This party's own limits (Vendor / Contractor Master), else the standard ₹30k / ₹1L.
+    const limits = await getTdsLimits(pool, sql, supplierId);
     if (!tdsApplicable) {
-      return res.json({ tdsApplicable: false, thresholdMet: false, cumulativeAmount: 0, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD });
+      return res.json({ tdsApplicable: false, thresholdMet: false, cumulativeAmount: 0, singleBillThreshold: limits.singleBill, yearlyThreshold: limits.yearly });
     }
 
     const finYearId = await resolveFinYearId(pool, sql, date || new Date());
@@ -1467,7 +1469,7 @@ router.get("/tds-eligibility", async (req, res) => {
     const tdsBase = Math.max(0, Math.round((amount - advanceCovered) * 100) / 100);
 
     res.json({
-      tdsApplicable: true, thresholdMet, cumulativeAmount, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD,
+      tdsApplicable: true, thresholdMet, cumulativeAmount, singleBillThreshold: limits.singleBill, yearlyThreshold: limits.yearly, tdsLimitApplicable,
       advanceAvailable, advanceCovered, tdsBase, coveredByAdvance: advanceCovered > 0 && tdsBase <= 0,
     });
   } catch (err) {
