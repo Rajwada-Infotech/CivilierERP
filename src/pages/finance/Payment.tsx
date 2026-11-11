@@ -175,7 +175,7 @@ const Payment: React.FC = () => {
   // TDS (migration 304) — live-checked against the chosen Payee/Party for a
   // direct (no invoice linked) payment. An invoice-linked payment always
   // inherits its invoice's own snapshot server-side instead — no dropdown.
-  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
+  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number; singleBillThreshold?: number; yearlyThreshold?: number } | null>(null);
   // Live preview of what an invoice-linked payment will inherit/enforce —
   // calls the exact same resolver the save itself uses, so this can never
   // disagree with what actually happens on save.
@@ -687,7 +687,7 @@ const Payment: React.FC = () => {
         hint={
           tdsEligibility.thresholdMet
             ? "This party has crossed the TDS threshold — select the applicable TDS"
-            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far) — optional`
+            : `Not yet required — ₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far; this party's limit is ₹${(tdsEligibility.singleBillThreshold ?? 30000).toLocaleString("en-IN")} per bill / ₹${(tdsEligibility.yearlyThreshold ?? 100000).toLocaleString("en-IN")} per year — optional`
         }
       >
         <select
@@ -1116,11 +1116,13 @@ const Payment: React.FC = () => {
 
   // ── Stats ──────────────────────────────────────────────────────────────────
 
-  const totalAmount = dbItems.reduce((s, p) => s + (p.PAmount || 0), 0);
-  const chequeCount = dbItems.filter(
+  // Across every payment matching the filters (server-side summary), not just the rows on this page.
+  const listSummary = (dbData as { summary?: { totalAmount: number; chequeCount: number; cashCount: number } } | undefined)?.summary;
+  const totalAmount = listSummary?.totalAmount ?? dbItems.reduce((s, p) => s + (p.PAmount || 0), 0);
+  const chequeCount = listSummary?.chequeCount ?? dbItems.filter(
     (p) => p.PMode === "Cheque" || p.PMode === "Post-Dated Cheque",
   ).length;
-  const cashCount = dbItems.filter((p) => p.PMode === "Cash").length;
+  const cashCount = listSummary?.cashCount ?? dbItems.filter((p) => p.PMode === "Cash").length;
 
   // ── Form helpers ───────────────────────────────────────────────────────────
 
@@ -2244,7 +2246,7 @@ const Payment: React.FC = () => {
         {view === "list" && (
           <div className="statrow">
             {[
-              { label: "Total paid", value: formatINR(totalAmount), note: "in this list" },
+              { label: "Total paid", value: formatINR(totalAmount), note: "all matching payments" },
               { label: "By cheque", value: String(chequeCount), note: "payments" },
               { label: "By cash", value: String(cashCount), note: "payments" },
             ].map((x) => (
@@ -5698,6 +5700,13 @@ const Payment: React.FC = () => {
                                   <span className="text-[0.625rem] text-muted-foreground">{fmtDate(entry.date)}</span>
                                   {entry.mode && (
                                     <span className="text-[0.5625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{entry.mode}</span>
+                                  )}
+                                  {/* The posting shows (and is made) before approval — say so for the payment being viewed. */}
+                                  {!isBounce && !isDebitNote && viewingRec && (entry.pmtId == null || String(entry.pmtId) === String(viewingRec.id))
+                                    && viewingRec.status !== "Approved" && (
+                                    <span className="text-[0.5625rem] px-1.5 py-0.5 rounded-none border border-destructive/40 bg-destructive/10 text-destructive font-medium">
+                                      Not approved{viewingRec.status ? ` — ${viewingRec.status}` : ""}
+                                    </span>
                                   )}
                                   {isBounce && entry.bounceReason && (
                                     <span className="text-[0.5625rem] text-destructive italic">{entry.bounceReason}</span>

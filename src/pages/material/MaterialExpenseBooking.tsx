@@ -407,7 +407,7 @@ export default function MaterialExpenseBooking() {
   // advanceCovered / tdsBase: advances to this party that already had TDS deducted cover that much of the invoice, so
   // TDS is only due on tdsBase; coveredByAdvance = they cover all of it and no TDS can be deducted.
   const [tdsEligibility, setTdsEligibility] = useState<{
-    tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number;
+    tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number; singleBillThreshold?: number; yearlyThreshold?: number;
     advanceCovered?: number; tdsBase?: number; coveredByAdvance?: boolean;
   } | null>(null);
 
@@ -2353,7 +2353,7 @@ export default function MaterialExpenseBooking() {
                             ? `₹${fmt(tdsEligibility.advanceCovered || 0)} of this invoice was covered by advances that already had TDS — TDS applies only on the remaining ₹${fmt(tdsEligibility.tdsBase || 0)}`
                             : tdsEligibility.thresholdMet
                             ? "This supplier/contractor has crossed the TDS threshold — select the applicable TDS"
-                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} booked this year so far) — optional`
+                            : `Not yet required — ₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} booked this year so far; this party's limit is ₹${(tdsEligibility.singleBillThreshold ?? 30000).toLocaleString("en-IN")} per bill / ₹${(tdsEligibility.yearlyThreshold ?? 100000).toLocaleString("en-IN")} per year — optional`
                         }
                       >
                         <div className="flex items-center gap-3">

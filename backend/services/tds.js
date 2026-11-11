@@ -33,8 +33,25 @@ function calculateTds(baseAmount, percentage) {
   return Math.round(((base * pct) / 100) * 100) / 100;
 }
 
-function isThresholdMet(billAmount, cumulativeAmount) {
-  return Number(billAmount) > SINGLE_BILL_THRESHOLD || Number(cumulativeAmount) > YEARLY_CUMULATIVE_THRESHOLD;
+/**
+ * A party's own TDS limits (AccountHeadMaster.TdsSingleBillLimit / TdsYearlyLimit, migration 635), set on Vendor /
+ * Contractor / Broker Master for parties whose limit differs from the standard. Blank = the standard ₹30k / ₹1L.
+ */
+async function getTdsLimits(pool, sql, partyHeadId) {
+  const limits = { singleBill: SINGLE_BILL_THRESHOLD, yearly: YEARLY_CUMULATIVE_THRESHOLD };
+  if (!partyHeadId) return limits;
+  try {
+    const r = await pool.request().input("Id", sql.Int, partyHeadId)
+      .query("SELECT TdsSingleBillLimit, TdsYearlyLimit FROM dbo.AccountHeadMaster WHERE LHeadId = @Id");
+    const row = r.recordset[0];
+    if (row?.TdsSingleBillLimit != null && Number(row.TdsSingleBillLimit) > 0) limits.singleBill = Number(row.TdsSingleBillLimit);
+    if (row?.TdsYearlyLimit != null && Number(row.TdsYearlyLimit) > 0) limits.yearly = Number(row.TdsYearlyLimit);
+  } catch (_) { /* columns not there yet (migration 635 pending): standard limits */ }
+  return limits;
+}
+
+function isThresholdMet(billAmount, cumulativeAmount, limits = { singleBill: SINGLE_BILL_THRESHOLD, yearly: YEARLY_CUMULATIVE_THRESHOLD }) {
+  return Number(billAmount) > limits.singleBill || Number(cumulativeAmount) > limits.yearly;
 }
 
 /**
@@ -46,11 +63,17 @@ function isThresholdMet(billAmount, cumulativeAmount) {
  *                     always true, cumulative is never even queried).
  */
 async function resolveThresholdStatus(pool, sql, { tdsLimitApplicable, billAmount, partyHeadId, companyId, finYearId }) {
+  const limits = await getTdsLimits(pool, sql, partyHeadId);
   if (tdsLimitApplicable === false) {
-    return { thresholdMet: true, cumulativeAmount: 0 };
+    return { thresholdMet: true, cumulativeAmount: 0, singleBillLimit: limits.singleBill, yearlyLimit: limits.yearly };
   }
   const cumulativeAmount = await getYearlyCumulativeAmount(pool, sql, { partyHeadId, companyId, finYearId });
-  return { thresholdMet: isThresholdMet(billAmount, cumulativeAmount), cumulativeAmount };
+  return {
+    thresholdMet: isThresholdMet(billAmount, cumulativeAmount, limits),
+    cumulativeAmount,
+    singleBillLimit: limits.singleBill,
+    yearlyLimit: limits.yearly,
+  };
 }
 
 /**
@@ -346,6 +369,7 @@ module.exports = {
   SINGLE_BILL_THRESHOLD,
   YEARLY_CUMULATIVE_THRESHOLD,
   calculateTds,
+  getTdsLimits,
   isThresholdMet,
   resolveFinYearId,
   getYearlyCumulativeAmount,

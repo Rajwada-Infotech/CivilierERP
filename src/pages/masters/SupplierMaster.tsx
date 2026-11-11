@@ -149,6 +149,9 @@ interface Supplier {
   LHeadStatus: boolean;
   IsTdsApplicable: boolean;
   TdsLimitApplicable: boolean;
+  // This vendor's own TDS limits (null = standard ₹30k per bill / ₹1L per year).
+  TdsSingleBillLimit: number | null;
+  TdsYearlyLimit: number | null;
   GroupName: string | null;
   // Auto-generated on create as <SupplierName>@civilier.in — this is the
   // supplier's login username for the Supplier Portal, distinct from
@@ -185,6 +188,9 @@ interface SupplierForm {
   // ON (default): ₹30k single-bill / ₹1L yearly-cumulative threshold gates
   // TDS deduction. OFF: TDS deducts on every eligible bill unconditionally.
   tdsLimitApplicable: boolean;
+  // This vendor's own limits, as typed — blank = the standard ₹30,000 per bill / ₹1,00,000 per year.
+  tdsSingleBillLimit?: string;
+  tdsYearlyLimit?: string;
   // Mandatory on create; optional on edit (blank = keep existing password).
   SupplierPassword: string;
   // Bank Details — all optional
@@ -209,6 +215,8 @@ const EMPTY_FORM: SupplierForm = {
   LHeadStatus: true,
   isTdsApplicable: false,
   tdsLimitApplicable: true,
+  tdsSingleBillLimit: "",
+  tdsYearlyLimit: "",
   SupplierPassword: "",
   bankAccountNo: "",
   bankIfscCode: "",
@@ -246,7 +254,9 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   },
   {
     header: "TDS Limit",
-    accessor: (r) => (r.TdsLimitApplicable ? "Applied" : "Deduct on every bill"),
+    accessor: (r) => (r.TdsLimitApplicable
+      ? `Applied (₹${Number(r.TdsSingleBillLimit ?? 30000).toLocaleString("en-IN")} / ₹${Number(r.TdsYearlyLimit ?? 100000).toLocaleString("en-IN")})`
+      : "Deduct on every bill"),
   },
   { header: "Bank Account No", accessor: "bankAccountNo" },
   { header: "Bank Name", accessor: "bankName" },
@@ -534,6 +544,8 @@ const SupplierMaster: React.FC = () => {
       LHeadStatus: Boolean(item.LHeadStatus),
       IsTdsApplicable: Boolean(item.IsTdsApplicable),
       TdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
+      TdsSingleBillLimit: item.TdsSingleBillLimit != null ? Number(item.TdsSingleBillLimit) : null,
+      TdsYearlyLimit: item.TdsYearlyLimit != null ? Number(item.TdsYearlyLimit) : null,
       GroupName: item.GroupName ?? null,
       SupplierLoginEmail: item.SupplierLoginEmail ?? null,
       bankAccountNo: item.LAccountNo || null,
@@ -561,6 +573,8 @@ const SupplierMaster: React.FC = () => {
     LHeadStatus: f.LHeadStatus,
     IsTdsApplicable: f.isTdsApplicable,
     TdsLimitApplicable: f.tdsLimitApplicable,
+    TdsSingleBillLimit: f.tdsSingleBillLimit ?? "",
+    TdsYearlyLimit: f.tdsYearlyLimit ?? "",
     LBranchName: null,
     LGSTState: f.LGSTState || null,
     LCountry: "India",
@@ -875,6 +889,8 @@ const SupplierMaster: React.FC = () => {
       LHeadStatus: s.LHeadStatus,
       isTdsApplicable: Boolean(s.IsTdsApplicable),
       tdsLimitApplicable: s.TdsLimitApplicable,
+      tdsSingleBillLimit: s.TdsSingleBillLimit != null ? String(s.TdsSingleBillLimit) : "",
+      tdsYearlyLimit: s.TdsYearlyLimit != null ? String(s.TdsYearlyLimit) : "",
       // Never pre-filled from the existing (hashed) password — blank means
       // "keep current password" on save.
       SupplierPassword: "",
@@ -1616,11 +1632,34 @@ const SupplierMaster: React.FC = () => {
                     />
                   </button>
                   <span className={LBL}>
-                    TDS Limit (₹30k / ₹1L threshold) —{" "}
+                    TDS Limit —{" "}
                     <span className="text-foreground">
                       {form.tdsLimitApplicable ? "Applied" : "Deduct on every bill"}
                     </span>
                   </span>
+                </div>
+              )}
+              {/* This vendor's own limits — blank keeps the standard ₹30,000 per bill / ₹1,00,000 per year. */}
+              {form.isTdsApplicable && form.tdsLimitApplicable && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1">
+                    <span className={LBL}>TDS limit per bill (₹)</span>
+                    <input
+                      type="number" min={0} inputMode="decimal" placeholder="30000 (standard)"
+                      value={form.tdsSingleBillLimit ?? ""}
+                      onChange={(e) => setForm((p) => ({ ...p, tdsSingleBillLimit: e.target.value }))}
+                      className={`${inputCls} font-heading tabular-nums`}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className={LBL}>TDS limit per year (₹)</span>
+                    <input
+                      type="number" min={0} inputMode="decimal" placeholder="100000 (standard)"
+                      value={form.tdsYearlyLimit ?? ""}
+                      onChange={(e) => setForm((p) => ({ ...p, tdsYearlyLimit: e.target.value }))}
+                      className={`${inputCls} font-heading tabular-nums`}
+                    />
+                  </label>
                 </div>
               )}
             </div>
