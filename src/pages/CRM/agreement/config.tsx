@@ -71,8 +71,9 @@ export function rowFollowupProgress(a: any): { required: number; uploaded: numbe
 export function agreementStepStates(a: any, documents: any[] | undefined | { required: number; uploaded: number; percent: number }): { label: string; state: StepState; tab: AgrTab }[] {
   const legalAssigned = a?.LegalExecutiveId != null;
   const followup = documents && !Array.isArray(documents) ? documents : followupProgress(documents as any[] | undefined);
-  const followupDone = followup.required > 0 && followup.percent === 100;
   const senior = a?.SeniorApprovalStatus === CrmStatus.APPROVED;
+  // Every paper asked for is in, or the agreement has already moved past this step (none asked, yet senior-approved).
+  const followupDone = (followup.required > 0 && followup.percent === 100) || senior;
   const sent = !!a?.SentToCustomerAt;
   const custApproved = a?.CustomerApprovalStatus === CrmStatus.APPROVED;
   const dated = !!a?.AgreementDate;
