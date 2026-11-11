@@ -50,7 +50,7 @@ async function callPortal(cfg, vals) {
   const textBody = buf.subarray(0, MAX_BYTES).toString("utf8");
   let data = null;
   try { data = JSON.parse(textBody); } catch { /* not JSON */ }
-  return { status: r.status, ok: r.ok, ms: Date.now() - started, truncated: buf.length > MAX_BYTES, data, text: data == null ? textBody : null };
+  return { sourceUrl: `${u.origin}${u.pathname}`, status: r.status, ok: r.ok, ms: Date.now() - started, truncated: buf.length > MAX_BYTES, data, text: data == null ? textBody : null };
 }
 
 router.get("/", requirePageRight(ADMIN_PAGE, "view"), async (req, res) => {

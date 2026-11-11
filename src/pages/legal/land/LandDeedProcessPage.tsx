@@ -35,11 +35,14 @@ export default function LandDeedProcessPage() {
   const lands = data?.lands ?? [];
   const act = async (l: DeedProcessLand, level: 1 | 2, action: "Approve" | "Reject" | "Hold") => {
     let remarks: string | undefined;
-    if (action !== "Approve") {
-      const r = await askLegal({ title: `${action} ${l.LandCode} at L${level}?`, input: { label: "Reason", required: true, multiline: true }, confirmText: action });
-      if (r == null) return;
-      remarks = r;
-    } else if (!(await askLegal({ title: `L${level} approve ${l.LandCode}?`, message: level === 2 ? "The land moves to Deed Registration." : "It then waits for L2 approval.", confirmText: "Approve" }))) return;
+    // Every decision carries remarks (Approve too); Hold / Reject give the reason.
+    const r = await askLegal({
+      title: `${action === "Approve" ? `L${level} approve` : action} ${l.LandCode}${action === "Approve" ? "" : ` at L${level}`}?`,
+      message: action === "Approve" ? (level === 2 ? "The land moves to Deed Registration." : "It then waits for L2 approval.") : undefined,
+      input: { label: action === "Approve" ? "Approval remarks" : "Reason", required: true, multiline: true }, confirmText: action,
+    });
+    if (r == null) return;
+    remarks = r;
     try {
       toast.success((await approveDeedProcess(l.LandId, level, action, remarks)).message);
       qc.invalidateQueries({ queryKey: ["legal-deed-process"] });
@@ -118,7 +121,7 @@ export default function LandDeedProcessPage() {
                         ) : "—"}
                       </td>
                       <td className="px-3 py-2 text-xs">
-                        {l.DeedChangedAt ? <b className="block text-amber-600">Changed — re-verify{l.DeedChangedByName ? ` (by ${l.DeedChangedByName})` : ""}</b> : null}
+                        {l.DeedChangedAt ? <b className="block text-amber-600">Re-verification Required{l.DeedChangedByName ? ` (changed by ${l.DeedChangedByName})` : ""}</b> : null}
                         <span className="block">L1: <b className={l.L1Status === "Approved" ? "text-emerald-600" : l.L1Status === "Rejected" ? "text-destructive" : l.L1Status === "On Hold" ? "text-amber-600" : ""}>{l.L1Status ?? "Pending"}</b>{l.L1By && l.L1Status !== "Pending" ? ` · ${l.L1By}` : ""}</span>
                         <span className="block">L2: <b className={l.L2Status === "Rejected" ? "text-destructive" : l.L2Status === "On Hold" ? "text-amber-600" : ""}>{l.L2Status ?? "Pending"}</b></span>
                         {(l.L1Status === "Rejected" || l.L1Status === "On Hold" || l.L2Status === "Rejected" || l.L2Status === "On Hold") && l.DeedApprovalNote && <span className="block text-muted-foreground">“{l.DeedApprovalNote}”</span>}

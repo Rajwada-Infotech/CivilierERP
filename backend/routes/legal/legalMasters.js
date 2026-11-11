@@ -44,6 +44,8 @@ for (const m of Object.values(MASTERS)) {
     for (const src of Object.values(f.fill || {})) LOOKUP_COLUMNS[f.ref].add(src);
   }
 }
+// Registry search (Deed Registration) picks a district first, then shows its offices with their type and jurisdiction.
+["DistrictId", "OfficeType", "Jurisdiction"].forEach((c) => LOOKUP_COLUMNS["registration-office"]?.add(c));
 const PAGE_KEYS = [...new Set(Object.values(MASTERS).map((m) => m.pageKey))];
 // Masters with a page of their own (a lookupOnly master only feeds pickers).
 const PAGED = Object.entries(MASTERS).filter(([, m]) => !m.lookupOnly);

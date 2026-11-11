@@ -105,7 +105,9 @@ router.get("/:landId", requirePageRight(PAGE, "view"), async (req, res) => {
                v.VersionId, v.FileId, f.FileName, v.UploadedAt, v.ReviewStatus, v.ReviewedAt, v.ReviewRemarks,
                (SELECT name FROM dbo.users WHERE id = v.UploadedBy) AS UploadedByName,
                (SELECT name FROM dbo.users WHERE id = v.ReviewedBy) AS ReviewedByName,
-               (SELECT COUNT(*) FROM dbo.LegalLandDocumentVersion x WHERE x.DocumentId = d.DocumentId) AS Versions
+               (SELECT COUNT(*) FROM dbo.LegalLandDocumentVersion x WHERE x.DocumentId = d.DocumentId) AS Versions,
+               -- Validity from the document type (Setup → Legal Document Type → Valid for days), counted from the document date.
+               CASE WHEN dt.ExpiryDays IS NOT NULL AND d.DocumentDate IS NOT NULL THEN CONVERT(char(10), DATEADD(day, dt.ExpiryDays, d.DocumentDate), 23) END AS ExpiresOn
         FROM dbo.LegalLandDocument d
         JOIN dbo.LegalDocumentType dt ON dt.DocTypeId = d.DocTypeId
         JOIN dbo.LegalLandDocumentVersion v ON v.DocumentId = d.DocumentId AND v.VersionNo = d.CurrentVersionNo

@@ -22,6 +22,7 @@ export const legalNavItems: NavItem[] = [
   { label: "Pending Verification", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
   { label: "Deed Process", icon: Note1, path: "/legal/land/deed-process", pageKey: "legal-land-master" },
   { label: "Deed Registration", icon: DocumentText, path: "/legal/deed-registration", pageKey: "legal-approvals" },
+  { label: "Post-Registration", icon: Note1, path: "/legal/land/post-registration", pageKey: "legal-land-master" },
   { label: "Land & Projects", icon: Building, path: "/legal/land/projects", pageKey: "legal-land-master" },
   { label: "Land Sales", icon: MoneySend, path: "/legal/land/sales", pageKey: "legal-land-master" },
   { label: "RS Record Register", icon: Note1, path: "/legal/land/rs-register", pageKey: "legal-land-master" },

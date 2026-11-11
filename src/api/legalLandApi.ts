@@ -101,6 +101,9 @@ export interface LandStats {
   recent: { LandId: number; LandCode: string; LandName: string; WorkflowStatus: string | null; IsOnHold: boolean; MouzaName: string | null; JLNo: string | null }[];
   allLands?: LandSummaryItem[];
   /** Lands in Deed Process whose timeline has passed. */
+  /** Counters along the legal flow (Legal dashboard). */
+  pipeline?: Partial<Record<"enquiries" | "pendingOwnership" | "pendingDiligence" | "pendingInheritance" | "pendingReview" | "highRisk" | "restricted" | "pendingFinal"
+    | "pendingL1" | "pendingL2" | "pendingRegistration" | "deedOverdue" | "pendingMutation" | "registered", number>>;
   deedOverdue?: { LandId: number; LandCode: string; LandName: string; DeedTargetDate: string; DaysOver: number }[];
   pendingRegistration: number;
   mutationPending: number;
@@ -113,7 +116,7 @@ export interface LandStats {
 }
 
 export interface AuditEvent {
-  EventId: number; Action: string; EntityType: string; EntityId: number | null; OldValue: string | null; NewValue: string | null;
+  EventId: number; UserRole?: string | null; DocumentRef?: string | null; Action: string; EntityType: string; EntityId: number | null; OldValue: string | null; NewValue: string | null;
   Remarks: string | null; CreatedAt: string; UserName: string | null;
 }
 
@@ -278,7 +281,7 @@ export const setUserWhatsApp = async (userId: number, WhatsAppNo: string) =>
 
 // Registry search (Deed Registration page): look a land up, check its RS / LR references on the government site, store the finding.
 export interface RegistryLookup {
-  land: { LandId: number; LandCode: string; LandName: string; EnquiryNo: string | null; DistrictName: string | null; MouzaName: string | null; JLNo: string | null;
+  land: { LandId: number; LandCode: string; LandName: string; EnquiryNo: string | null; DistrictId: number | null; DistrictName: string | null; MouzaName: string | null; JLNo: string | null;
     WorkflowStatus: string | null; RsDagNo: string | null; RsKhatianNo: string | null; LrDagNo: string | null; LrKhatianNo: string | null;
     Area: number | null; UnitName: string | null; LocationAddress: string | null; Owners: string | null };
   records: { Kind: "RS" | "LR"; Dag: string | null; Khatian: string | null }[];
@@ -286,9 +289,22 @@ export interface RegistryLookup {
 }
 export interface RegistrySearch {
   SearchId: number; FinYear: string | null; OfficeName: string | null; RsDagNo: string | null; RsKhatianNo: string | null; LrDagNo: string | null; LrKhatianNo: string | null;
-  SiteName: string | null; Result: string; DeedNoFound: string | null; Details: string | null; FileId: number | null; FileName: string | null; CreatedAt: string; CreatedByName: string | null;
+  SiteName: string | null; SourceUrl?: string | null; CheckedAt?: string | null; MatchResult?: string | null; Result: string; DeedNoFound: string | null; Details: string | null; FileId: number | null; FileName: string | null; CreatedAt: string; CreatedByName: string | null;
 }
 export const lookupRegistryLand = async (q: string) => handle<RegistryLookup>(await fetchWithAuth(`${BASE}/registry-search/lookup?q=${encodeURIComponent(q)}`));
 export const getRegistrySearches = async (landId: number) => handle<RegistrySearch[]>(await fetchWithAuth(`${BASE}/${landId}/registry-search`));
+export const updateRegistrySearch = async (searchId: number, body: Record<string, unknown>) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/registry-search/${searchId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+export const deleteRegistrySearch = async (searchId: number) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/registry-search/${searchId}`, { method: "DELETE" }));
 export const saveRegistrySearch = async (landId: number, body: Record<string, unknown>) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${landId}/registry-search`, post(body)));
+
+// Post-registration compliance (after the deed is registered).
+export interface PostRegTask { TaskId: number; LandId: number; TaskNo: number; Task: string; Status: string; RefNo: string | null; DueDate: string | null; Remarks: string | null;
+  FileId: number | null; FileName: string | null; UpdatedAt: string | null; UpdatedByName: string | null }
+export interface PostRegLand { LandId: number; LandCode: string; LandName: string; DistrictName: string | null; MouzaName: string | null; RegCompletedAt: string | null;
+  RegDeedFileId: number | null; RegDeedFileName: string | null; tasks: PostRegTask[] }
+export const getPostRegistration = async () => handle<{ lands: PostRegLand[]; statuses: string[] }>(await fetchWithAuth(`${BASE}/post-registration/list`));
+export const updatePostRegTask = async (taskId: number, body: Record<string, unknown>) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/post-registration/task/${taskId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));

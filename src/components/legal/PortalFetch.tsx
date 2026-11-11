@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { savePortalFetch } from "@/api/legalDiligenceApi";
 import { DownloadCloud } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { fetchFromPortal, getEnabledPortals, type PortalResult, type PortalValues } from "@/api/legalPortalApi";
@@ -43,15 +44,17 @@ export const PortalResultView: React.FC<{ r: PortalResult }> = ({ r }) => {
 };
 
 /** "Fetch from <site>" for every Government Site Link whose API is switched on (Admin → API Integration). */
-export const PortalFetchButtons: React.FC<{ values: PortalValues; className?: string; title?: string }> = ({ values, className = "", title }) => {
+export const PortalFetchButtons: React.FC<{ values: PortalValues; className?: string; title?: string; landId?: number }> = ({ values, className = "", title, landId }) => {
+  const [match, setMatch] = useState("");
+  const [note, setNote] = useState("");
   const { data } = useQuery({ queryKey: ["legal-portal-enabled"], queryFn: getEnabledPortals, staleTime: 5 * 60_000 });
   const [busy, setBusy] = useState<number | null>(null);
-  const [shown, setShown] = useState<{ label: string; r: PortalResult } | null>(null);
+  const [shown, setShown] = useState<{ label: string; linkId: number; r: PortalResult } | null>(null);
   if (!data?.length) return null;
 
   const run = async (linkId: number, label: string) => {
     setBusy(linkId);
-    try { setShown({ label, r: await fetchFromPortal(linkId, values) }); }
+    try { setShown({ label, linkId, r: await fetchFromPortal(linkId, values) }); setMatch(""); setNote(""); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Could not fetch"); }
     finally { setBusy(null); }
   };
@@ -74,6 +77,26 @@ export const PortalFetchButtons: React.FC<{ values: PortalValues; className?: st
             <DialogDescription>What the site's API returned for this land. Check it, then enter what you need in the form.</DialogDescription>
           </DialogHeader>
           {shown && <PortalResultView r={shown.r} />}
+          {/* Keep what was fetched as evidence on the land: source, time, officer, comparison with our records. */}
+          {shown && landId ? (
+            <div className="space-y-2 border-t border-border pt-3">
+              <p className="text-[0.6875rem] text-muted-foreground">Source: {shown.r.sourceUrl ?? "—"} · Government site data is a check, not conclusive proof of title.</p>
+              <div className="flex flex-wrap items-end gap-2">
+                <select className="h-8 border border-border bg-background px-2 text-xs" value={match} onChange={(e) => setMatch(e.target.value)}>
+                  <option value="">Compared with our records…</option>
+                  {["Matches our records", "Partly matches", "Does not match", "Not compared"].map((m) => <option key={m}>{m}</option>)}
+                </select>
+                <input className="h-8 min-w-[200px] flex-1 border border-border bg-background px-2 text-xs" placeholder="Verification remarks" value={note} onChange={(e) => setNote(e.target.value)} />
+                <button className="h-8 bg-foreground px-3 text-xs font-semibold text-card disabled:opacity-40" disabled={!match} onClick={async () => {
+                  try {
+                    toast.success((await savePortalFetch(landId, { linkId: shown.linkId, siteName: shown.label, sourceUrl: shown.r.sourceUrl, matchResult: match, remarks: note,
+                      response: shown.r.text ?? JSON.stringify(shown.r.data ?? null) })).message);
+                    setShown(null);
+                  } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
+                }}>Save as evidence</button>
+              </div>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </>
