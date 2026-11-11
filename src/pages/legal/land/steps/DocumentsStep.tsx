@@ -253,7 +253,8 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
                       </td>
                       <td className="py-2 pr-3">{d.DocTypeName}<div className="text-xs text-muted-foreground">{d.RelatedSection}{d.RelatedOwner ? ` · ${d.RelatedOwner}` : ""}{d.RelatedLegalRecord ? ` · ${d.RelatedLegalRecord}` : ""}{d.RelatedMortgage ? ` · ${d.RelatedMortgage}` : ""}</div></td>
                       <td className="py-2 pr-3"><div className="flex items-center gap-1.5"><span className="font-mono text-xs text-muted-foreground">v{d.CurrentVersionNo}</span><LegalFileLink id={d.FileId} name={d.FileName} /></div></td>
-                      <td className="py-2 pr-3 whitespace-nowrap text-xs text-muted-foreground">{fmt(d.UploadedAt)}<div>{d.UploadedByName ?? ""}</div></td>
+                      <td className="py-2 pr-3 whitespace-nowrap text-xs text-muted-foreground">{fmt(d.UploadedAt)}<div>{d.UploadedByName ?? ""}</div>
+                        {d.ExpiresOn && <div className={d.ExpiresOn < new Date().toISOString().slice(0, 10) ? "font-semibold text-destructive" : ""}>{d.ExpiresOn < new Date().toISOString().slice(0, 10) ? "Expired" : "Valid till"} {fmt(d.ExpiresOn)}</div>}</td>
                       <td className="py-2 text-right">
                         <div className="flex flex-wrap justify-end gap-1.5">
                           {rights.canEdit && <button className={btn} disabled={busy || up.busy} onClick={() => reattach(d)}><Upload size={12} /> New version</button>}

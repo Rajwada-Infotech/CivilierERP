@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { OwnershipStep } from "./steps/OwnershipStep";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { FinalVerifyBar } from "@/components/legal/FinalVerifyBar";
+import { DueDiligencePanel } from "@/components/legal/DueDiligencePanel";
 import { PortalFetchButtons } from "@/components/legal/PortalFetch";
 import { DocumentsStep, RecordDocuments, type DocLink } from "./steps/DocumentsStep";
 import { getLandDocuments } from "@/api/legalDocumentsApi";
@@ -35,6 +36,7 @@ type TabKey =
   | "transfers"
   | "records"
   | "documents"
+  | "diligence"
   | "legal"
   | "loans"
   | "mutation"
@@ -58,6 +60,7 @@ const TABS: { key: TabKey; label: string; count?: keyof LandOverview["counts"] }
   { key: "survey", label: "Survey & Valuation", count: "valuations" },
   // Each section uploads its own documents; this tab is for everything else (and lists them all).
   { key: "documents", label: "Other Documents", count: "documents" },
+  { key: "diligence", label: "Due Diligence" },
   { key: "photos", label: "Notes & Attachments" },
   { key: "activity", label: "Activity History" },
 ];
@@ -117,13 +120,13 @@ const Activity: React.FC<{ landId: number }> = ({ landId }) => {
           {data.map((a) => (
             <tr key={a.EventId}>
               <td className="whitespace-nowrap px-2 py-2 text-xs text-muted-foreground">{new Date(a.CreatedAt).toLocaleString("en-IN")}</td>
-              <td className="px-2 py-2">{a.UserName ?? "—"}</td>
+              <td className="px-2 py-2">{a.UserName ?? "—"}{a.UserRole ? <span className="block text-[0.6875rem] text-muted-foreground">{a.UserRole}</span> : null}</td>
               <td className="px-2 py-2">{a.Action}</td>
               <td className="px-2 py-2 text-xs text-muted-foreground">
                 {a.EntityType}
                 {a.EntityId ? ` #${a.EntityId}` : ""}
               </td>
-              <td className="px-2 py-2 text-xs text-muted-foreground">{a.Remarks ?? ""}</td>
+              <td className="px-2 py-2 text-xs text-muted-foreground">{a.Remarks ?? ""}{a.DocumentRef ? <span className="block">Document: {a.DocumentRef}</span> : null}</td>
             </tr>
           ))}
         </tbody>
@@ -430,7 +433,7 @@ export default function LandProfilePage() {
                 />
                 <Field k="Full location address" v={land.LocationAddress} />
                 <Field k="Internal remarks" v={land.Remarks} />
-                <Field k="Fetch from government site" v={<PortalFetchButtons title={land.LandCode} values={{
+                <Field k="Fetch from government site" v={<PortalFetchButtons landId={landId} title={land.LandCode} values={{
                   district: land.DistrictName, mouza: land.MouzaName, jlNo: land.JLNo, location: land.LocationAddress, lat: land.GpsLatitude, lng: land.GpsLongitude,
                   rsDag: land.RsDagNo, lrDag: land.LrDagNo, rsKhatian: land.RsKhatianNo, lrKhatian: land.LrKhatianNo, landCode: land.LandCode,
                 }} />} />
@@ -490,6 +493,8 @@ export default function LandProfilePage() {
             )}
 
             {/* TAB 6: DOCUMENTS ARCHIVE */}
+            {tab === "diligence" && <DueDiligencePanel landId={landId} onGoTab={(t) => setParams({ tab: t })} />}
+
             {tab === "documents" && (
               <Section
                 title="Centralized Document Archive"

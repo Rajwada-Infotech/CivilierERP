@@ -343,6 +343,36 @@ async function moveStep(conn, req, landId, code, from, to, { remarks = null, ski
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────────────────────────
+/** Legal dashboard counters along the whole flow (each part only once its migration has run). */
+async function pipelineCounters(pool) {
+  const has = (await pool.request().query(`SELECT OBJECT_ID('dbo.LegalDiligenceArea','U') AS dd, OBJECT_ID('dbo.LegalPropertyRestriction','U') AS pr,
+    OBJECT_ID('dbo.LegalPostRegTask','U') AS pt, COL_LENGTH('dbo.LegalLand','DeedTargetDate') AS dt`)).recordset[0];
+  const PRE = "l.IsActive = 1 AND ISNULL(l.IsCancelled, 0) = 0 AND ISNULL(l.WorkflowStatus, N'') NOT IN (N'Deed Process', N'Deed Completed', N'Deed Registration', N'Registered')";
+  const area = (a) => `(SELECT COUNT(*) FROM dbo.LegalLand l WHERE ${PRE} AND NOT EXISTS (SELECT 1 FROM dbo.LegalDiligenceArea x WHERE x.LandId = l.LandId AND x.Area = N'${a}' AND x.Status IN (N'Verified', N'Not Applicable')))`;
+  const parts = [
+    "(SELECT COUNT(*) FROM dbo.LegalLandEnquiry WHERE IsActive = 1) AS enquiries",
+    `(SELECT COUNT(*) FROM dbo.LegalLand l WHERE ${PRE}) AS pendingFinal`,
+    "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND ISNULL(L1Status, N'Pending') <> N'Approved') AS pendingL1",
+    "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND L1Status = N'Approved') AS pendingL2",
+    "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Registration') AS pendingRegistration",
+    "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Registered') AS registered",
+  ];
+  if (has.dt) parts.push("(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND DeedTargetDate < CAST(GETDATE() AS DATE)) AS deedOverdue");
+  if (has.dd) parts.push(
+    `${area("ownership")} AS pendingOwnership`,
+    `(SELECT COUNT(*) FROM dbo.LegalLand l WHERE ${PRE} AND (SELECT COUNT(*) FROM dbo.LegalDiligenceArea x WHERE x.LandId = l.LandId AND x.Status IN (N'Verified', N'Not Applicable')) < 4) AS pendingDiligence`,
+    `(SELECT COUNT(*) FROM dbo.LegalLand l WHERE ${PRE} AND EXISTS (SELECT 1 FROM dbo.LegalInheritance i WHERE i.LandId = l.LandId AND i.IsActive = 1)
+        AND NOT EXISTS (SELECT 1 FROM dbo.LegalDiligenceArea x WHERE x.LandId = l.LandId AND x.Area = N'inheritance' AND x.Status IN (N'Verified', N'Not Applicable'))) AS pendingInheritance`,
+    `(SELECT COUNT(*) FROM dbo.LegalLand l WHERE l.IsActive = 1 AND (SELECT TOP 1 v.Status FROM dbo.LegalReview v WHERE v.LandId = l.LandId ORDER BY v.CreatedAt DESC, v.ReviewId DESC)
+        IN (N'Pending', N'Under Review', N'Additional Information Required')) AS pendingReview`,
+    `(SELECT COUNT(*) FROM dbo.LegalLand l WHERE l.IsActive = 1 AND (SELECT TOP 1 r.RiskLevel FROM dbo.LegalRiskAssessment r WHERE r.LandId = l.LandId ORDER BY r.AssessedAt DESC, r.RiskId DESC) IN (N'High', N'Critical')) AS highRisk`);
+  if (has.pr) parts.push(`(SELECT COUNT(DISTINCT p.LandId) FROM dbo.LegalPropertyRestriction p JOIN dbo.LegalLand l ON l.LandId = p.LandId AND l.IsActive = 1
+        WHERE p.IsActive = 1 AND (p.Status = N'Transfer prohibited' OR (p.Status = N'Pending' AND p.PermissionRequired <> N'No'))) AS restricted`);
+  if (has.pt) parts.push(`(SELECT COUNT(*) FROM dbo.LegalPostRegTask t JOIN dbo.LegalLand l ON l.LandId = t.LandId AND l.IsActive = 1
+        WHERE t.Task = N'Mutation application' AND t.Status <> N'Completed') AS pendingMutation`);
+  return (await pool.request().query(`SELECT ${parts.join(",\n")}`)).recordset[0];
+}
+
 router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
   try {
     const r = await getPool().request().query(`
@@ -415,7 +445,7 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
         FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND DeedTargetDate < CAST(GETDATE() AS DATE)
         ORDER BY DeedTargetDate`)).recordset;
     }
-    res.json({ ...counts[0], ...more[0], recent, approvals, awaitingApproval, payments, cases, transfers, allLands, deedOverdue });
+    res.json({ ...counts[0], ...more[0], recent, approvals, awaitingApproval, payments, cases, transfers, allLands, deedOverdue, pipeline: await pipelineCounters(getPool()) });
   } catch (err) {
     console.error("[legal-land] stats:", err.message);
     res.status(500).json({ error: "Could not load land statistics" });
@@ -736,8 +766,9 @@ router.get("/:id/audit", requirePageRight(LAND_PAGE, "view"), async (req, res) =
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
+    const extra = !!(await getPool().request().query("SELECT COL_LENGTH('dbo.LegalRecordAudit', 'UserRole') AS c")).recordset[0].c;
     const r = await getPool().request().input("Id", sql.Int, id).query(`
-      SELECT TOP 300 a.EventId, a.Action, a.EntityType, a.EntityId, a.OldValue, a.NewValue, a.Remarks, a.CreatedAt,
+      SELECT TOP 300 a.EventId, a.Action, a.EntityType, a.EntityId, a.OldValue, a.NewValue, a.Remarks, a.CreatedAt, ${extra ? "a.UserRole, a.DocumentRef," : ""}
              (SELECT name FROM dbo.users WHERE id = a.UserId) AS UserName
       FROM dbo.LegalRecordAudit a WHERE a.LandId = @Id ORDER BY a.EventId DESC`);
     res.json(r.recordset);
@@ -1608,6 +1639,7 @@ const isoDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) 
 
 /** What is still missing before final verification (empty list = data entry complete). */
 async function missingForFinal(pool, id) {
+  const { diligenceGate } = require("./dueDiligence");
   const r = (await pool.request().input("Id", sql.Int, id).query(`
     SELECT l.DistrictId, l.MouzaId, l.Area,
       (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1 AND ValidTo IS NULL) AS owners,
@@ -1621,6 +1653,8 @@ async function missingForFinal(pool, id) {
   if (!r.owners) miss.push("Ownership History (current owners)");
   if (!r.records) miss.push("Land Records (an RS or LR record)");
   if (!r.documents) miss.push("Documents (at least one)");
+  // Legal due diligence (Due Diligence tab): every area checked, risk assessed, legal clearance where needed.
+  (await diligenceGate(pool, id)).forEach((b) => miss.push(`Due diligence — ${b}`));
   return miss;
 }
 
@@ -1813,7 +1847,7 @@ router.post("/:id/deed-process/approve", requirePageRight(LAND_PAGE, "view"), as
   const action = req.body?.action;
   const remarks = text(req.body?.remarks, 1000);
   if (!id || ![1, 2].includes(level) || !["Approve", "Reject", "Hold"].includes(action)) return res.status(400).json({ error: "Invalid request" });
-  if (action !== "Approve" && !remarks) return res.status(400).json({ error: "Give the reason" });
+  if (!remarks) return res.status(400).json({ error: action === "Approve" ? "Write the approval remarks" : "Give the reason" });
   const pool = getPool();
   try {
     const role = level === 1 ? "L1 Approver" : "L2 Approver";
@@ -1828,6 +1862,10 @@ router.post("/:id/deed-process/approve", requirePageRight(LAND_PAGE, "view"), as
     const own = ownWork(req, l.CreatedBy, "this land");
     if (own) return res.status(409).json({ error: own });
     if (action === "Approve" && l.DeedChangedAt) return res.status(409).json({ error: `${l.LandCode} was changed after verification — a verifier must re-verify it first` });
+    if (action === "Approve") {
+      const stops = await require("./dueDiligence").processingBlockers(pool, id);
+      if (stops.length) return res.status(409).json({ error: `Cannot approve: ${stops.join("; ")}` });
+    }
     const userId = req.user?.userId || null;
     const note = cols.c ? ", DeedApprovalNote = @R" : "";
     const q = pool.request().input("Id", sql.Int, id).input("U", sql.Int, userId).input("R", sql.NVarChar(1000), remarks);
@@ -1907,7 +1945,7 @@ router.get("/registry-search/lookup", requirePageRight(LAND_PAGE, "view"), async
   try {
     const pool = getPool();
     const l = (await pool.request().input("Q", sql.NVarChar(60), q).query(`
-      SELECT TOP 1 l.LandId, l.LandCode, l.LandName, e.EnquiryNo, d.DistrictName, m.MouzaName, m.JLNo, l.WorkflowStatus,
+      SELECT TOP 1 l.LandId, l.LandCode, l.LandName, e.EnquiryNo, l.DistrictId, d.DistrictName, m.MouzaName, m.JLNo, l.WorkflowStatus,
              l.RsDagNo, l.RsKhatianNo, l.LrDagNo, l.LrKhatianNo, CAST(l.Area AS FLOAT) AS Area, u.UnitName, l.LocationAddress,
              (SELECT STRING_AGG(o.OwnerName, N', ') FROM dbo.LegalOwnershipRecord o WHERE o.LandId = l.LandId AND o.IsActive = 1 AND o.ValidTo IS NULL) AS Owners
       FROM dbo.LegalLand l
@@ -1935,8 +1973,9 @@ router.get("/:id/registry-search", requirePageRight(LAND_PAGE, "view"), async (r
   try {
     const pool = getPool();
     if (!(await searchReady(pool))) return res.json([]);
+    const evid = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalRegistrySearch', 'SourceUrl') AS c")).recordset[0].c;
     const r = await pool.request().input("Id", sql.Int, id).query(`
-      SELECT s.SearchId, s.FinYear, o.OfficeName, s.RsDagNo, s.RsKhatianNo, s.LrDagNo, s.LrKhatianNo, s.SiteName, s.Result, s.DeedNoFound, s.Details,
+      SELECT s.SearchId, s.FinYear, o.OfficeName, ${evid ? "s.SourceUrl, s.CheckedAt, s.MatchResult," : ""} s.RsDagNo, s.RsKhatianNo, s.LrDagNo, s.LrKhatianNo, s.SiteName, s.Result, s.DeedNoFound, s.Details,
              s.FileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = s.FileId) AS FileName, s.CreatedAt,
              (SELECT name FROM dbo.users WHERE id = s.CreatedBy) AS CreatedByName
       FROM dbo.LegalRegistrySearch s LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = s.OfficeId
@@ -1963,16 +2002,28 @@ router.post("/:id/registry-search", requirePageRight(LAND_PAGE, "edit"), async (
   const pool = getPool();
   try {
     if (!(await searchReady(pool))) return res.status(503).json({ error: "Registry search is not set up yet (migration 647)" });
+    const evid = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalRegistrySearch', 'SourceUrl') AS c")).recordset[0].c;
     if (!(await pool.request().input("O", sql.Int, officeId).query("SELECT 1 AS x FROM dbo.LegalRegistrationOffice WHERE OfficeId = @O")).recordset[0]) return res.status(400).json({ error: "Registration office not found" });
+    // The same search (office, year, RS / LR numbers) with the same result is not saved twice — edit the saved one instead.
+    const dup = (await pool.request().input("Id", sql.Int, id).input("O", sql.Int, officeId).input("Fy", sql.NVarChar(20), fy).input("Res", sql.NVarChar(40), result)
+      .input("RsD", sql.NVarChar(30), text(b.rsDagNo, 30)).input("RsK", sql.NVarChar(30), text(b.rsKhatianNo, 30))
+      .input("LrD", sql.NVarChar(30), text(b.lrDagNo, 30)).input("LrK", sql.NVarChar(30), text(b.lrKhatianNo, 30)).query(`
+        SELECT TOP 1 SearchId FROM dbo.LegalRegistrySearch WHERE LandId = @Id AND OfficeId = @O AND FinYear = @Fy AND Result = @Res
+          AND ISNULL(RsDagNo, '') = ISNULL(@RsD, '') AND ISNULL(RsKhatianNo, '') = ISNULL(@RsK, '')
+          AND ISNULL(LrDagNo, '') = ISNULL(@LrD, '') AND ISNULL(LrKhatianNo, '') = ISNULL(@LrK, '')`)).recordset[0];
+    if (dup) return res.status(409).json({ error: "This search is already saved with the same result — edit the saved one instead" });
     const r = await pool.request().input("Id", sql.Int, id).input("O", sql.Int, officeId).input("Fy", sql.NVarChar(20), fy)
       .input("RsD", sql.NVarChar(30), text(b.rsDagNo, 30)).input("RsK", sql.NVarChar(30), text(b.rsKhatianNo, 30))
       .input("LrD", sql.NVarChar(30), text(b.lrDagNo, 30)).input("LrK", sql.NVarChar(30), text(b.lrKhatianNo, 30))
       .input("Site", sql.NVarChar(200), text(b.siteName, 200)).input("Res", sql.NVarChar(40), result)
       .input("Deed", sql.NVarChar(100), text(b.deedNoFound, 100)).input("Det", sql.NVarChar(2000), text(b.details, 2000))
-      .input("File", sql.Int, b.fileId ? idParam(b.fileId) : null).input("U", sql.Int, req.user?.userId || null).query(`
-        INSERT INTO dbo.LegalRegistrySearch (LandId, OfficeId, FinYear, RsDagNo, RsKhatianNo, LrDagNo, LrKhatianNo, SiteName, Result, DeedNoFound, Details, FileId, CreatedBy)
+      .input("File", sql.Int, b.fileId ? idParam(b.fileId) : null).input("U", sql.Int, req.user?.userId || null)
+      .input("Url", sql.NVarChar(500), /^https?:\/\//i.test(String(b.sourceUrl || "")) ? text(b.sourceUrl, 500) : null)
+      .input("Match", sql.NVarChar(40), ["Matches our records", "Partly matches", "Does not match"].includes(b.matchResult) ? b.matchResult : null).query(`
+        INSERT INTO dbo.LegalRegistrySearch (LandId, OfficeId, FinYear, RsDagNo, RsKhatianNo, LrDagNo, LrKhatianNo, SiteName, Result, DeedNoFound, Details, FileId, CreatedBy
+          ${evid ? ", SourceUrl, CheckedAt, MatchResult" : ""})
         OUTPUT INSERTED.SearchId
-        SELECT @Id, @O, @Fy, @RsD, @RsK, @LrD, @LrK, @Site, @Res, @Deed, @Det, @File, @U WHERE EXISTS (SELECT 1 FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1)`);
+        SELECT @Id, @O, @Fy, @RsD, @RsK, @LrD, @LrK, @Site, @Res, @Deed, @Det, @File, @U ${evid ? ", @Url, SYSUTCDATETIME(), @Match" : ""} WHERE EXISTS (SELECT 1 FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1)`);
     if (!r.recordset.length) return res.status(404).json({ error: "Land not found" });
     await writeAudit(pool, req, { action: "Registry search recorded", entityType: "Land Property", entityId: id, landId: id, newValue: { result, finYear: fy } });
     res.status(201).json({ message: "Search result saved" });
@@ -2011,10 +2062,114 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
     await pool.request().input("Id", sql.Int, id).input("U", sql.Int, userId).input("F", sql.Int, fileId).query(`
       UPDATE dbo.LegalLand SET RegDeedFileId = @F, RegCompletedBy = @U, RegCompletedAt = SYSUTCDATETIME(), WorkflowStatus = N'Registered',
              UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
-    await writeAudit(pool, req, { action: "Deed registered", entityType: "Land Property", entityId: id, landId: id, newValue: { fileId } });
+    await writeAudit(pool, req, { action: "Deed registered", entityType: "Land Property", entityId: id, landId: id, newValue: { fileId }, documentRef: `File ${fileId}` });
+    await createPostRegTasks(pool, req, id);
     res.json({ message: `${l.LandCode}: deed registered — now in Land & Projects` });
   } catch (err) {
     console.error("[legal-land] deed registration:", err.message);
+    res.status(500).json({ error: "Could not save" });
+  }
+});
+
+// PUT /registry-search/:searchId { result, deedNoFound, details, siteName } — correct a saved search.
+// DELETE /registry-search/:searchId — remove a wrong entry. Both need the land edit right.
+router.put("/registry-search/:searchId", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  const sid = idParam(req.params.searchId);
+  const b = req.body || {};
+  const result = SEARCH_RESULTS.includes(b.result) ? b.result : null;
+  if (!sid || !result) return res.status(400).json({ error: "Choose what was found" });
+  if (result !== "Clear — no other deed" && result !== "Record not found" && !text(b.details, 2000)) return res.status(400).json({ error: "Write the details found" });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("S", sql.Int, sid).input("Res", sql.NVarChar(40), result).input("Deed", sql.NVarChar(100), text(b.deedNoFound, 100))
+      .input("Det", sql.NVarChar(2000), text(b.details, 2000)).input("Site", sql.NVarChar(200), text(b.siteName, 200)).query(`
+        UPDATE dbo.LegalRegistrySearch SET Result = @Res, DeedNoFound = @Deed, Details = @Det, SiteName = @Site
+        OUTPUT DELETED.Result AS oldResult, INSERTED.LandId WHERE SearchId = @S`);
+    if (!r.recordset.length) return res.status(404).json({ error: "Search not found" });
+    await writeAudit(pool, req, { action: "Registry search edited", entityType: "Land Property", entityId: r.recordset[0].LandId, landId: r.recordset[0].LandId, oldValue: { result: r.recordset[0].oldResult }, newValue: { result } });
+    res.json({ message: "Search updated" });
+  } catch (err) {
+    console.error("[legal-land] registry edit:", err.message);
+    res.status(500).json({ error: "Could not save" });
+  }
+});
+
+router.delete("/registry-search/:searchId", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  const sid = idParam(req.params.searchId);
+  if (!sid) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("S", sql.Int, sid).query("DELETE FROM dbo.LegalRegistrySearch OUTPUT DELETED.LandId, DELETED.Result, DELETED.FinYear WHERE SearchId = @S");
+    if (!r.recordset.length) return res.status(404).json({ error: "Search not found" });
+    const d = r.recordset[0];
+    await writeAudit(pool, req, { action: "Registry search deleted", entityType: "Land Property", entityId: d.LandId, landId: d.LandId, oldValue: { result: d.Result, finYear: d.FinYear } });
+    res.json({ message: "Search deleted" });
+  } catch (err) {
+    console.error("[legal-land] registry delete:", err.message);
+    res.status(500).json({ error: "Could not delete" });
+  }
+});
+
+// ── Post-registration compliance (after Deed Registration → Submit) ───────────────────────────────────────────────
+const POST_REG_TASKS = ["Registered deed verification", "Mutation application", "Updated Khatian / RoR", "Updated land records",
+  "Land tax / revenue update", "Ownership record update", "Project mapping eligibility"];
+const POST_REG_STATUS = ["Not Started", "Application Submitted", "Under Processing", "Additional Documents Required", "Completed", "Rejected"];
+const postRegReady = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalPostRegTask', 'U') AS t")).recordset[0].t;
+
+async function createPostRegTasks(pool, req, landId) {
+  if (!(await postRegReady(pool))) return;
+  for (const [i, t] of POST_REG_TASKS.entries()) {
+    await pool.request().input("Id", sql.Int, landId).input("No", sql.Int, i + 1).input("T", sql.NVarChar(100), t).query(
+      "IF NOT EXISTS (SELECT 1 FROM dbo.LegalPostRegTask WHERE LandId = @Id AND Task = @T) INSERT INTO dbo.LegalPostRegTask (LandId, TaskNo, Task) VALUES (@Id, @No, @T)");
+  }
+  await writeAudit(pool, req, { action: "Post-registration tasks created", entityType: "Land Property", entityId: landId, landId });
+}
+
+// GET /post-registration/list — registered lands with their compliance tasks.
+router.get("/post-registration/list", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await postRegReady(pool))) return res.json({ lands: [], statuses: POST_REG_STATUS });
+    // Lands registered before this feature get their tasks the first time the list is opened.
+    const missing = (await pool.request().query(
+      "SELECT l.LandId FROM dbo.LegalLand l WHERE l.IsActive = 1 AND l.WorkflowStatus = N'Registered' AND NOT EXISTS (SELECT 1 FROM dbo.LegalPostRegTask t WHERE t.LandId = l.LandId)")).recordset;
+    for (const m of missing) await createPostRegTasks(pool, { user: { userId: null }, ip: "" }, m.LandId);
+    const lands = (await pool.request().query(`
+      SELECT l.LandId, l.LandCode, l.LandName, d.DistrictName, m.MouzaName, l.RegCompletedAt, l.RegDeedFileId,
+             (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = l.RegDeedFileId) AS RegDeedFileName
+      FROM dbo.LegalLand l LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      WHERE l.IsActive = 1 AND l.WorkflowStatus = N'Registered' ORDER BY l.RegCompletedAt DESC`)).recordset;
+    const tasks = (await pool.request().query(`
+      SELECT t.TaskId, t.LandId, t.TaskNo, t.Task, t.Status, t.RefNo, CONVERT(char(10), t.DueDate, 23) AS DueDate, t.Remarks, t.FileId,
+             (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = t.FileId) AS FileName, t.UpdatedAt, (SELECT name FROM dbo.users WHERE id = t.UpdatedBy) AS UpdatedByName
+      FROM dbo.LegalPostRegTask t JOIN dbo.LegalLand l ON l.LandId = t.LandId AND l.WorkflowStatus = N'Registered' ORDER BY t.LandId, t.TaskNo`)).recordset;
+    res.json({ lands: lands.map((l) => ({ ...l, tasks: tasks.filter((t) => t.LandId === l.LandId) })), statuses: POST_REG_STATUS });
+  } catch (err) {
+    console.error("[legal-land] post-reg list:", err.message);
+    res.status(500).json({ error: "Could not load post-registration tasks" });
+  }
+});
+
+// PUT /post-registration/task/:taskId { status, refNo, dueDate, remarks, fileId }
+router.put("/post-registration/task/:taskId", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  const tid = idParam(req.params.taskId);
+  const b = req.body || {};
+  if (!tid || !POST_REG_STATUS.includes(b.status)) return res.status(400).json({ error: "Choose the status" });
+  if (["Additional Documents Required", "Rejected"].includes(b.status) && !text(b.remarks, 1000)) return res.status(400).json({ error: "Write the remarks" });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("T", sql.Int, tid).input("S", sql.NVarChar(40), b.status).input("Ref", sql.NVarChar(100), text(b.refNo, 100))
+      .input("Due", sql.Date, /^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate || "")) ? b.dueDate : null).input("R", sql.NVarChar(1000), text(b.remarks, 1000))
+      .input("F", sql.Int, b.fileId ? idParam(b.fileId) : null).input("U", sql.Int, req.user?.userId || null).query(`
+        UPDATE dbo.LegalPostRegTask SET Status = @S, RefNo = @Ref, DueDate = @Due, Remarks = @R, FileId = ISNULL(@F, FileId), UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME()
+        OUTPUT DELETED.Status AS prev, INSERTED.LandId, INSERTED.Task WHERE TaskId = @T`);
+    if (!r.recordset.length) return res.status(404).json({ error: "Task not found" });
+    const t = r.recordset[0];
+    await writeAudit(pool, req, { action: "Post-registration task updated", entityType: "Land Property", entityId: t.LandId, landId: t.LandId,
+      oldValue: { task: t.Task, status: t.prev }, newValue: { task: t.Task, status: b.status }, remarks: text(b.remarks, 1000), documentRef: b.fileId ? `File ${b.fileId}` : null });
+    res.json({ message: `${t.Task}: ${b.status}` });
+  } catch (err) {
+    console.error("[legal-land] post-reg task:", err.message);
     res.status(500).json({ error: "Could not save" });
   }
 });

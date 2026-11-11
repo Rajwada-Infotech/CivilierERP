@@ -46,6 +46,9 @@ export const FinalVerifyBar: React.FC<{ landId: number }> = ({ landId }) => {
         <div className="mt-1 text-sm text-foreground">
           Complete the data entry first:
           <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">{data.missing.map((m) => <li key={m}>{m}</li>)}</ul>
+          {data.missing.some((m) => m.startsWith("Due diligence")) && (
+            <button className="mt-1 text-xs font-semibold underline" onClick={() => navigate(`/legal/land/properties/${landId}?tab=diligence`)}>Open the Due Diligence tab</button>
+          )}
         </div>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-3">

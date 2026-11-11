@@ -2,11 +2,12 @@ import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Copy, Search, Upload } from "lucide-react";
-import { lookupRegistryLand, getRegistrySearches, saveRegistrySearch, type RegistryLookup, type RegistrySearch } from "@/api/legalLandApi";
+import { lookupRegistryLand, getRegistrySearches, saveRegistrySearch, updateRegistrySearch, deleteRegistrySearch, type RegistryLookup, type RegistrySearch } from "@/api/legalLandApi";
 import { getLegalLookup, uploadLegalFile } from "@/api/legalMastersApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import { GovtSiteLinks } from "./GovtSiteLinks";
 import { LegalFileLink } from "./LegalDocumentPreview";
+import { askLegal } from "./LegalAsk";
 
 // Financial years (April–March) as "2026-27": the current one and the ten before it.
 const finYears = () => {
@@ -33,39 +34,83 @@ const CopyField: React.FC<{ name: string; value: string | null | undefined }> = 
   </div>
 );
 
-/** Saved registry searches of one land (used in the panel and under each land in the approved list). */
-export const RegistrySearchTable: React.FC<{ rows: RegistrySearch[] }> = ({ rows: history }) => (
-  <>
-    {!history.length ? <p className="mt-1 text-xs text-muted-foreground">None yet.</p> : (
-      <div className="mt-1 overflow-x-auto">
-        <table className="w-full text-left text-xs">
-          <thead className="text-muted-foreground"><tr><th className="py-1 pr-3">Date</th><th className="py-1 pr-3">Office · Year</th><th className="py-1 pr-3">RS / LR</th><th className="py-1 pr-3">Result</th><th className="py-1 pr-3">Details</th><th className="py-1">Copy</th></tr></thead>
-          <tbody>
-            {history.map((h) => (
-              <tr key={h.SearchId} className="border-t border-border/60 align-top">
-                <td className="py-1.5 pr-3 whitespace-nowrap">{fmt(h.CreatedAt)}<span className="block text-muted-foreground">{h.CreatedByName ?? ""}</span></td>
-                <td className="py-1.5 pr-3">{h.OfficeName ?? "—"} · {h.FinYear ?? "—"}</td>
-                <td className="py-1.5 pr-3 whitespace-nowrap">RS {h.RsDagNo ?? "—"}/{h.RsKhatianNo ?? "—"}<span className="block">LR {h.LrDagNo ?? "—"}/{h.LrKhatianNo ?? "—"}</span></td>
-                <td className="py-1.5 pr-3 font-semibold">{h.Result}{h.DeedNoFound ? <span className="block font-normal">Deed {h.DeedNoFound}</span> : null}</td>
-                <td className="py-1.5 pr-3">{h.Details ?? "—"}{h.SiteName ? <span className="block text-muted-foreground">{h.SiteName}</span> : null}</td>
-                <td className="py-1.5">{h.FileId ? <LegalFileLink id={h.FileId} name={h.FileName ?? "File"} /> : "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )}
-  </>
-);
+const RESULTS = ["Clear — no other deed", "Deed found", "Encumbrance / charge found", "Record not found", "Mismatch in records", "Other"];
+
+/** Saved registry searches of one land (used in the panel and under each land in the approved list), with Edit / Delete. */
+export const RegistrySearchTable: React.FC<{ rows: RegistrySearch[]; landId: number }> = ({ rows: history, landId }) => {
+  const qc = useQueryClient();
+  const canEdit = usePageRights("legal-land-master").canEdit;
+  const [editing, setEditing] = useState<{ id: number; result: string; deedNoFound: string; details: string; siteName: string } | null>(null);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["legal-registry-search", landId] });
+  const save = async () => {
+    if (!editing) return;
+    try { toast.success((await updateRegistrySearch(editing.id, editing)).message); setEditing(null); refresh(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
+  };
+  const remove = async (h: RegistrySearch) => {
+    if (!(await askLegal({ title: "Delete this search?", message: `${h.OfficeName ?? ""} · ${h.FinYear ?? ""} — ${h.Result}. This cannot be undone.`, confirmText: "Delete" }))) return;
+    try { toast.success((await deleteRegistrySearch(h.SearchId)).message); refresh(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Could not delete"); }
+  };
+  if (!history.length) return <p className="mt-1 text-xs text-muted-foreground">None yet.</p>;
+  return (
+    <div className="mt-1 overflow-x-auto">
+      <table className="w-full text-left text-xs">
+        <thead className="text-muted-foreground"><tr><th className="py-1 pr-3">Date</th><th className="py-1 pr-3">Office · Year</th><th className="py-1 pr-3">RS / LR</th><th className="py-1 pr-3">Result</th><th className="py-1 pr-3">Details</th><th className="py-1 pr-3">Copy</th>{canEdit && <th className="py-1" />}</tr></thead>
+        <tbody>
+          {history.map((h) => editing?.id === h.SearchId ? (
+            <tr key={h.SearchId} className="border-t border-border/60 bg-muted/30 align-top">
+              <td className="py-1.5 pr-3 whitespace-nowrap">{fmt(h.CreatedAt)}</td>
+              <td className="py-1.5 pr-3">{h.OfficeName ?? "—"} · {h.FinYear ?? "—"}</td>
+              <td className="py-1.5 pr-3 whitespace-nowrap">RS {h.RsDagNo ?? "—"}/{h.RsKhatianNo ?? "—"}<span className="block">LR {h.LrDagNo ?? "—"}/{h.LrKhatianNo ?? "—"}</span></td>
+              <td className="py-1.5 pr-3">
+                <select className={input} value={editing.result} onChange={(e) => setEditing({ ...editing, result: e.target.value })}>
+                  {RESULTS.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <input className={`${input} mt-1`} placeholder="Deed no. found" value={editing.deedNoFound} onChange={(e) => setEditing({ ...editing, deedNoFound: e.target.value })} />
+              </td>
+              <td className="py-1.5 pr-3" colSpan={2}>
+                <textarea className={input} rows={2} placeholder="Details" value={editing.details} onChange={(e) => setEditing({ ...editing, details: e.target.value })} />
+                <input className={`${input} mt-1`} placeholder="Site checked" value={editing.siteName} onChange={(e) => setEditing({ ...editing, siteName: e.target.value })} />
+              </td>
+              <td className="py-1.5 whitespace-nowrap">
+                <button className="rounded bg-foreground px-2 py-1 text-xs font-semibold text-card" onClick={save}>Save</button>
+                <button className="ml-2 text-xs underline" onClick={() => setEditing(null)}>Cancel</button>
+              </td>
+            </tr>
+          ) : (
+            <tr key={h.SearchId} className="border-t border-border/60 align-top">
+              <td className="py-1.5 pr-3 whitespace-nowrap">{fmt(h.CreatedAt)}<span className="block text-muted-foreground">{h.CreatedByName ?? ""}</span></td>
+              <td className="py-1.5 pr-3">{h.OfficeName ?? "—"} · {h.FinYear ?? "—"}</td>
+              <td className="py-1.5 pr-3 whitespace-nowrap">RS {h.RsDagNo ?? "—"}/{h.RsKhatianNo ?? "—"}<span className="block">LR {h.LrDagNo ?? "—"}/{h.LrKhatianNo ?? "—"}</span></td>
+              <td className="py-1.5 pr-3 font-semibold">{h.Result}{h.DeedNoFound ? <span className="block font-normal">Deed {h.DeedNoFound}</span> : null}</td>
+              <td className="py-1.5 pr-3">{h.Details ?? "—"}{h.SiteName ? <span className="block text-muted-foreground">{h.SiteName}</span> : null}
+                {h.MatchResult ? <span className={`block font-semibold ${h.MatchResult === "Does not match" ? "text-destructive" : h.MatchResult === "Partly matches" ? "text-amber-600" : "text-emerald-600"}`}>{h.MatchResult}</span> : null}
+                {h.SourceUrl ? <a className="block truncate text-muted-foreground underline" href={h.SourceUrl} target="_blank" rel="noopener noreferrer">{h.SourceUrl}</a> : null}</td>
+              <td className="py-1.5 pr-3">{h.FileId ? <LegalFileLink id={h.FileId} name={h.FileName ?? "File"} /> : "—"}</td>
+              {canEdit && (
+                <td className="py-1.5 whitespace-nowrap text-right">
+                  <button className="text-xs underline" onClick={() => setEditing({ id: h.SearchId, result: h.Result, deedNoFound: h.DeedNoFound ?? "", details: h.Details ?? "", siteName: h.SiteName ?? "" })}>Edit</button>
+                  <button className="ml-2 text-xs text-destructive underline" onClick={() => remove(h)}>Delete</button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 /** The saved searches of a land, loaded on its own (sub-row of the approved-lands table). */
 export const LandRegistrySearches: React.FC<{ landId: number }> = ({ landId }) => {
   const { data = [], isLoading } = useQuery({ queryKey: ["legal-registry-search", landId], queryFn: () => getRegistrySearches(landId) });
   if (isLoading) return <p className="text-xs text-muted-foreground">Loading searches…</p>;
   return (
-    <div>
+    <div className="space-y-2">
+      <GovtSiteLinks title="Government site links" hint="Opens in a new tab — check this land's RS / LR numbers there." />
       <p className={label}>Record searches ({data.length})</p>
-      <RegistrySearchTable rows={data} />
+      <RegistrySearchTable rows={data} landId={landId} />
     </div>
   );
 };
@@ -82,7 +127,9 @@ export const RegistrySearchPanel: React.FC = () => {
   const [found, setFound] = useState<RegistryLookup | null>(null);
   const [busy, setBusy] = useState(false);
   const years = useMemo(finYears, []);
-  const [f, setF] = useState({ officeId: "", finYear: years[0], rsDagNo: "", rsKhatianNo: "", lrDagNo: "", lrKhatianNo: "", siteName: "", result: "", deedNoFound: "", details: "", fileId: null as number | null, fileName: "" });
+  const [districtId, setDistrictId] = useState("");
+  const { data: districts = [] } = useQuery({ queryKey: ["legal-lookup", "district"], queryFn: () => getLegalLookup("district"), staleTime: 5 * 60_000 });
+  const [f, setF] = useState({ officeId: "", finYear: years[0], rsDagNo: "", rsKhatianNo: "", lrDagNo: "", lrKhatianNo: "", siteName: "", sourceUrl: "", matchResult: "", result: "", deedNoFound: "", details: "", fileId: null as number | null, fileName: "" });
   const set = (patch: Partial<typeof f>) => setF((x) => ({ ...x, ...patch }));
   const { data: offices = [] } = useQuery({ queryKey: ["legal-lookup", "registration-office"], queryFn: () => getLegalLookup("registration-office"), staleTime: 5 * 60_000 });
   const landId = found?.land.LandId ?? 0;
@@ -95,6 +142,7 @@ export const RegistrySearchPanel: React.FC = () => {
     try {
       const r = await lookupRegistryLand(q.trim());
       setFound(r);
+      setDistrictId(r.land.DistrictId ? String(r.land.DistrictId) : "");
       const rs = r.records.find((x) => x.Kind === "RS"), lr = r.records.find((x) => x.Kind === "LR");
       set({ rsDagNo: rs?.Dag ?? r.land.RsDagNo ?? "", rsKhatianNo: rs?.Khatian ?? r.land.RsKhatianNo ?? "", lrDagNo: lr?.Dag ?? r.land.LrDagNo ?? "", lrKhatianNo: lr?.Khatian ?? r.land.LrKhatianNo ?? "",
         result: "", deedNoFound: "", details: "", fileId: null, fileName: "" });
@@ -121,13 +169,14 @@ export const RegistrySearchPanel: React.FC = () => {
     setBusy(true);
     try {
       toast.success((await saveRegistrySearch(landId, { ...f, officeId: Number(f.officeId) || null })).message);
-      set({ result: "", deedNoFound: "", details: "", fileId: null, fileName: "" });
+      set({ result: "", deedNoFound: "", details: "", sourceUrl: "", matchResult: "", fileId: null, fileName: "" });
       qc.invalidateQueries({ queryKey: ["legal-registry-search", landId] });
     } catch (err) { toast.error(err instanceof Error ? err.message : "Could not save"); } finally { setBusy(false); }
   };
 
   const L = found?.land;
   const office = offices.find((o) => String(o.value) === f.officeId)?.label;
+  const districtOffices = offices.filter((o) => o.active !== false && districtId && String(o.DistrictId ?? "") === districtId);
   return (
     <div className="border border-border bg-card">
       <p className="border-b border-border px-4 py-3 text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">Search records</p>
@@ -148,11 +197,12 @@ export const RegistrySearchPanel: React.FC = () => {
               <p className="text-xs text-muted-foreground">{[L.MouzaName && `${L.MouzaName}${L.JLNo ? ` (J.L. ${L.JLNo})` : ""}`, L.DistrictName, L.Area != null && `${L.Area} ${L.UnitName ?? ""}`, L.Owners && `Owners: ${L.Owners}`].filter(Boolean).join(" · ")}</p>
             </div>
 
+            {/* District first, then the registration offices of that district to pick from. */}
             <div className="grid gap-3 sm:grid-cols-2">
-              <label><span className={label}>Registration office *</span>
-                <select className={`${input} mt-1`} value={f.officeId} onChange={(e) => set({ officeId: e.target.value })}>
+              <label><span className={label}>District *</span>
+                <select className={`${input} mt-1`} value={districtId} onChange={(e) => { setDistrictId(e.target.value); set({ officeId: "" }); }}>
                   <option value="">Select…</option>
-                  {offices.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  {districts.filter((d) => d.active !== false).map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
                 </select>
               </label>
               <label><span className={label}>Financial year *</span>
@@ -161,6 +211,33 @@ export const RegistrySearchPanel: React.FC = () => {
                 </select>
               </label>
             </div>
+            {districtId && (
+              <div>
+                <span className={label}>Registration office *</span>
+                {!districtOffices.length ? (
+                  <p className="mt-1 text-xs text-muted-foreground">No registration office set up for this district. Add one in Setup → Deed Registration Office.</p>
+                ) : (
+                  <div className="mt-1 overflow-x-auto border border-border">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-muted/50 text-muted-foreground"><tr><th className="w-8 px-2 py-1.5" /><th className="px-2 py-1.5">Office</th><th className="px-2 py-1.5">Type</th><th className="px-2 py-1.5">Jurisdiction</th></tr></thead>
+                      <tbody>
+                        {districtOffices.map((o) => {
+                          const on = f.officeId === String(o.value);
+                          return (
+                            <tr key={o.value} onClick={() => set({ officeId: String(o.value) })} className={`cursor-pointer border-t border-border ${on ? "bg-primary/10" : "hover:bg-muted/40"}`}>
+                              <td className="px-2 py-1.5"><input type="radio" name="reg-office" checked={on} onChange={() => set({ officeId: String(o.value) })} aria-label={o.label} /></td>
+                              <td className="px-2 py-1.5 font-semibold">{o.label}</td>
+                              <td className="px-2 py-1.5">{String(o.OfficeType ?? "—")}</td>
+                              <td className="px-2 py-1.5 text-muted-foreground">{String(o.Jurisdiction ?? "—")}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Filled from the land's records; copy them into the government site. */}
             <div className="grid grid-cols-2 gap-3 border border-border/70 p-3 sm:grid-cols-4">
@@ -193,6 +270,15 @@ export const RegistrySearchPanel: React.FC = () => {
                   <label><span className={label}>Site checked</span><input className={`${input} mt-1`} value={f.siteName} onChange={(e) => set({ siteName: e.target.value })} placeholder="e.g. WB Registration" /></label>
                   <label><span className={label}>Deed no. found</span><input className={`${input} mt-1`} value={f.deedNoFound} onChange={(e) => set({ deedNoFound: e.target.value })} /></label>
                 </div>
+                <div className="grid gap-3 sm:grid-cols-[1fr_14rem]">
+                  <label><span className={label}>Source URL (page checked)</span><input className={`${input} mt-1`} value={f.sourceUrl} onChange={(e) => set({ sourceUrl: e.target.value })} placeholder="https://…" /></label>
+                  <label><span className={label}>Compared with our records</span>
+                    <select className={`${input} mt-1`} value={f.matchResult} onChange={(e) => set({ matchResult: e.target.value })}>
+                      <option value="">Select…</option>{["Matches our records", "Partly matches", "Does not match"].map((m) => <option key={m}>{m}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <p className="text-[0.6875rem] text-muted-foreground">Government site data is a check, not conclusive proof of title — title is confirmed from the documents and records.</p>
                 <label className="block"><span className={label}>Details {f.result && !["Clear — no other deed", "Record not found"].includes(f.result) ? "*" : ""}</span>
                   <textarea className={`${input} mt-1`} rows={3} maxLength={2000} value={f.details} onChange={(e) => set({ details: e.target.value })} placeholder="Deed details, parties, dates, charges… as shown on the site" />
                 </label>
@@ -206,7 +292,7 @@ export const RegistrySearchPanel: React.FC = () => {
 
             <div>
               <p className={label}>Saved searches for this land ({history.length})</p>
-              <RegistrySearchTable rows={history} />
+              <RegistrySearchTable rows={history} landId={landId} />
             </div>
           </>
         )}

@@ -110,6 +110,40 @@ export default function LegalDashboard() {
             </div>
           </div>
 
+          {/* ── Where every land is along the legal flow ── */}
+          {land?.pipeline && (
+            <div className={`${card} p-4 sm:p-5`}>
+              <p className={eyebrow}>Legal pipeline</p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+                {([
+                  ["Land enquiries", "enquiries", "/legal/land/enquiries", false],
+                  ["Pending ownership verification", "pendingOwnership", "/legal/approvals", true],
+                  ["Pending due diligence", "pendingDiligence", "/legal/approvals", true],
+                  ["Pending inheritance verification", "pendingInheritance", "/legal/approvals", true],
+                  ["Pending lawyer review", "pendingReview", "/legal/approvals", true],
+                  ["High-risk properties", "highRisk", "/legal/approvals", true],
+                  ["Restricted properties", "restricted", "/legal/approvals", true],
+                  ["Pending final verification", "pendingFinal", "/legal/approvals", true],
+                  ["Pending L1 approval", "pendingL1", "/legal/land/deed-process", true],
+                  ["Pending L2 approval", "pendingL2", "/legal/land/deed-process", true],
+                  ["Pending deed registration", "pendingRegistration", "/legal/deed-registration", true],
+                  ["Overdue deed timeline", "deedOverdue", "/legal/land/deed-process", true],
+                  ["Pending mutation", "pendingMutation", "/legal/land/post-registration", true],
+                  ["Completed registrations", "registered", "/legal/land/projects", false],
+                ] as const).filter(([, k]) => land.pipeline![k] !== undefined).map(([label, k, path, warn]) => {
+                  const n = land.pipeline![k] ?? 0;
+                  const hot = warn && n > 0 && (k === "highRisk" || k === "restricted" || k === "deedOverdue");
+                  return (
+                    <button key={k} onClick={() => navigate(path)} className={`rounded-xl border p-3 text-left transition-transform hover:-translate-y-0.5 ${hot ? "border-destructive bg-destructive/10" : warn && n > 0 ? "border-amber-500/50 bg-amber-500/5" : "border-border bg-muted/30"}`}>
+                      <span className={`block text-xl font-heading font-bold tabular-nums leading-none ${hot ? "text-destructive" : "text-foreground"}`}>{n}</span>
+                      <span className="mt-1 block text-[0.6875rem] leading-tight text-muted-foreground">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* ── Deed Process past its timeline: highlighted at the top ── */}
           {!!land?.deedOverdue?.length && (
             <div className="border-2 border-destructive bg-destructive/10 p-4 sm:p-5">

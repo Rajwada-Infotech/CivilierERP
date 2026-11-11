@@ -153,6 +153,7 @@ function ReverifyPanel({ landId, st }: { landId: number; st: NonNullable<Awaited
 const FROM = {
   "deed-process": { label: "Deed Process", path: "/legal/land/deed-process" },
   "deed-registration": { label: "Deed Registration", path: "/legal/deed-registration" },
+  "post-registration": { label: "Post-Registration", path: "/legal/land/post-registration" },
 } as const;
 
 export default function LandDetailsPage({ verify = false, from }: { verify?: boolean; from?: keyof typeof FROM }) {

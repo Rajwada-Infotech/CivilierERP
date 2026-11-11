@@ -12,7 +12,7 @@ export interface PortalApiLink {
 export interface PortalApiSettings {
   IsEnabled: boolean; Method: "GET" | "POST"; UrlTemplate: string; AuthType: PortalAuthType; AuthHeader?: string; Username?: string; Secret?: string; BodyTemplate?: string;
 }
-export interface PortalResult { site?: string; status: number; ok: boolean; ms: number; truncated: boolean; data: unknown; text: string | null }
+export interface PortalResult { site?: string; sourceUrl?: string; status: number; ok: boolean; ms: number; truncated: boolean; data: unknown; text: string | null }
 /** Land details the {placeholders} are filled from. */
 export type PortalValues = Partial<Record<"district" | "mouza" | "jlNo" | "location" | "lat" | "lng" | "rsDag" | "lrDag" | "rsKhatian" | "lrKhatian" | "landCode" | "enquiryNo", string | number | null>>;
 
