@@ -1,4 +1,4 @@
--- 649: Legal due diligence before Final Verification (Phase 1). Schema only; safe to re-run.
+-- 654: Legal due diligence before Final Verification (Phase 1). Schema only; safe to re-run.
 --  • Ownership & seller details on the land (type, source, seller ID / authority, all owners' consent).
 --  • One due-diligence status per area (Ownership & Seller, Inheritance, Title, Documents), set by a Verifier.
 --  • Risk assessments (history) and legal reviews (history). Inheritance gets "dispute pending" and a family tree copy.

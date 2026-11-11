@@ -178,7 +178,7 @@ router.get("/:landId", requirePageRight(LAND_PAGE, "view"), async (req, res) => 
   if (!id) return res.status(400).json({ error: "Invalid land id" });
   const pool = getPool();
   try {
-    if (!(await ready(pool))) return res.status(503).json({ error: "Due diligence is not set up yet (migration 649)" });
+    if (!(await ready(pool))) return res.status(503).json({ error: "Due diligence is not set up yet (migration 654)" });
     const land = (await pool.request().input("Id", sql.Int, id).query(`
       SELECT LandId, LandCode, CreatedBy, OwnershipType, OwnershipSource, SellerIdStatus, SellerAuthority, OwnersConsent, SellerContact,
         (SELECT STRING_AGG(o.OwnerName + N' (' + CAST(CAST(o.SharePct AS DECIMAL(7,2)) AS NVARCHAR(10)) + N'%)', N', ') FROM dbo.LegalOwnershipRecord o WHERE o.LandId = l.LandId AND o.IsActive = 1 AND o.ValidTo IS NULL) AS CurrentOwners,
