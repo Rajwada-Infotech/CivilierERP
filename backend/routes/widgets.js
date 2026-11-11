@@ -682,7 +682,9 @@ router.get("/", async (req, res) => {
               (
                 SELECT COUNT(*)
                 FROM dbo.ChequeMaster
-                WHERE Status IN ('Draft','Pending') OR Status IS NULL
+                -- Status is an active flag (BIT) since migration 121; older databases still hold text ('Draft' = active).
+                -- Compared as text so it works on both — comparing a BIT to 'Pending' fails the whole query.
+                WHERE CAST(Status AS NVARCHAR(20)) IN ('1', 'Draft', 'Pending') OR Status IS NULL
               ) AS PendingCheques,
               (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType IN ('S', 'V')) AS SupplierCount,
               -- 'C' means Contractor, not Customer, in this schema — 'A' is
