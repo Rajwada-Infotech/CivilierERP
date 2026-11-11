@@ -368,10 +368,20 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (remarks) request.input("remarks", sql.NVarChar(200), `%${remarks}%`);
     if (chequeNo) request.input("chequeNo", sql.NVarChar(60), `%${chequeNo}%`);
 
+    // Totals over every payment matching the filters (not just this page) — the list's Total paid / By cheque / By cash.
     const countResult = await request.query(
-      `SELECT COUNT(*) AS total FROM dbo.NewPayment np ${SUPPLIER_JOINS_SQL} ${whereClause}`,
+      `SELECT COUNT(*) AS total,
+              ISNULL(SUM(np.PAmount), 0) AS totalAmount,
+              SUM(CASE WHEN np.PMode IN ('Cheque', 'Post-Dated Cheque') THEN 1 ELSE 0 END) AS chequeCount,
+              SUM(CASE WHEN np.PMode = 'Cash' THEN 1 ELSE 0 END) AS cashCount
+       FROM dbo.NewPayment np ${SUPPLIER_JOINS_SQL} ${whereClause}`,
     );
     const total = parseInt(countResult.recordset[0].total);
+    const summary = {
+      totalAmount: Number(countResult.recordset[0].totalAmount) || 0,
+      chequeCount: Number(countResult.recordset[0].chequeCount) || 0,
+      cashCount: Number(countResult.recordset[0].cashCount) || 0,
+    };
 
     const dataRequest = pool
       .request()
@@ -589,6 +599,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       limit,
       total,
       totalPages: Math.ceil(total / limit),
+      summary,
     });
   } catch (err) {
     console.error("PAYMENT GET ERROR:", err.message);
