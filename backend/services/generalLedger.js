@@ -978,11 +978,11 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   }
   let tdsPayableHeadId = null;
   if (tdsAmount > 0) {
-    // The GL head of the TDS picked on the payment (TDS Master), else the common TDS Payable A/c.
+    // TDS withheld on the payment is credited to TDS Payable A/c.
     const { getPaymentTdsHeadId } = require("./tds");
     tdsPayableHeadId = await getPaymentTdsHeadId(pool, sql, payment.TDSId);
     if (!tdsPayableHeadId) {
-      return { posted: false, reason: `Payment ${paymentId}: the TDS on this payment has no GL head, and the TDS Payable system ledger is not configured.` };
+      return { posted: false, reason: `Payment ${paymentId}: TDS Payable system ledger not configured.` };
     }
   }
   const bankAndTdsLegs = (bankId, bankNarration, tdsNarration) => [

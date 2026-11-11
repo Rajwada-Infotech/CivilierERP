@@ -3084,7 +3084,7 @@ router.get("/:id/posting", async (req, res) => {
       // TDS (migration 304) — only present when this payment actually
       // deducted TDS; Dr side (supplier/Expense Head) stays at the full
       // amount, the credit side splits into Bank + TDS Payable.
-      // credited to the TDS picked on the payment's own GL head (TDS Master), else TDS Payable A/c
+      // credited to TDS Payable A/c
       tdsPayable: tdsAmount > 0 ? await (async () => {
         const { getPaymentTdsHeadId } = require("../services/tds");
         const headId = await getPaymentTdsHeadId(pool, sql, pmt.TDSId);
@@ -3250,10 +3250,10 @@ router.post("/:id/post-to-gl", async (req, res) => {
     }
     let tdsPayableId = null;
     if (tdsAmount > 0) {
-      // The GL head of the TDS picked on the payment (TDS Master), else the common TDS Payable A/c.
+      // TDS withheld on the payment is credited to TDS Payable A/c.
       const { getPaymentTdsHeadId } = require("../services/tds");
       tdsPayableId = await getPaymentTdsHeadId(pool, sql, pmt.TDSId);
-      if (!tdsPayableId) return res.status(422).json({ error: "The TDS on this payment has no GL head, and the TDS Payable system ledger is not configured." });
+      if (!tdsPayableId) return res.status(422).json({ error: "TDS Payable system ledger not configured." });
     }
 
     // TDS (migration 304) — Dr Supplier/Creditor stays at the full amount;

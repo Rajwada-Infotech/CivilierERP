@@ -251,17 +251,11 @@ async function resolveInvoiceLinkedTds(pool, sql, { expenseRef, companyId, finYe
 }
 
 /**
- * The ledger a payment's own TDS is credited to: the GL head of the TDS picked on the payment (TDSMaster.GLHeadId,
- * e.g. "TDS 194C A/c"), or the common "TDS Payable A/c" when that TDS has no head set.
+ * The ledger a payment's own TDS is credited to: always the common "TDS Payable A/c" (the liability withheld and owed
+ * to the government). The TDS Master's own head (e.g. "TDS 194J A/c") is the nature head an invoice debits, not this.
+ * tdsId is accepted (and ignored) so callers stay unchanged.
  */
-async function getPaymentTdsHeadId(pool, sql, tdsId) {
-  if (tdsId) {
-    const r = await pool.request().input("TDSId", sql.Int, tdsId).query(`
-      SELECT TOP 1 tm.GLHeadId FROM dbo.TDSMaster tm
-      JOIN dbo.AccountHeadMaster h ON h.LHeadId = tm.GLHeadId
-      WHERE tm.TDSId = @TDSId`);
-    if (r.recordset[0]?.GLHeadId) return r.recordset[0].GLHeadId;
-  }
+async function getPaymentTdsHeadId(pool, _sql, _tdsId) {
   const { getGLHeadId } = require("./generalLedger");
   return getGLHeadId(pool, GL_ACCOUNTS.TDS_PAYABLE).catch(() => null);
 }
