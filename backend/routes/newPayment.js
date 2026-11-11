@@ -1470,13 +1470,45 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const existingLinkRes = await pool.request().input("id", sql.Int, id)
       .query("SELECT TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount FROM dbo.NewPayment WHERE PPaymentID = @id");
     const existingLink = existingLinkRes.recordset[0] || {};
-    const tdsSnapshotPut = {
+    let tdsSnapshotPut = {
       tdsId: existingLink.TDSId ?? null,
       tdsNature: existingLink.TDSNature ?? null,
       tdsName: existingLink.TDSName ?? null,
       tdsPercentage: existingLink.TDSPercentage ?? null,
       tdsAmount: existingLink.TDSAmount ?? null,
     };
+    // A direct payment (no invoice, JV line or merged invoices behind it — a party / Expense Head / contract payment)
+    // takes its TDS from the form, the same as on create, whenever the TDS picked, the amount or the party changed.
+    // Kept as it was otherwise, so a small edit (a UTR, a remark) never re-runs the TDS check. Without this, a TDS
+    // picked while editing was silently dropped and the payment posted its whole amount to the bank.
+    const contractIdPut = beforeSnapshot?.ContractId ?? null;
+    const isDirectForTds = !(PExpenseRef && !contractIdPut) && !nextJvLineId && nextInvoiceLinks.length === 0 && !oldJvLinks;
+    const pickedTdsId = req.body.TDSId ? parseInt(req.body.TDSId, 10) : null;
+    const tdsChanged = (pickedTdsId ?? null) !== (existingLink.TDSId ?? null)
+      || amountChanged
+      || (nextPartyId ?? null) !== (beforeSnapshot?.PPartyId ?? null);
+    if (isDirectForTds && "TDSId" in req.body && tdsChanged) {
+      try {
+        const { resolveTds } = require("../services/tds");
+        const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
+        const directPartyId = await resolvePaymentSupplierHeadId(pool, { ContractId: contractIdPut, PExpenseRef: null, PPartyId: nextPartyId });
+        const flags = directPartyId
+          ? (await pool.request().input("Id", sql.Int, directPartyId).query(
+              "SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")).recordset[0]
+          : null;
+        tdsSnapshotPut = await resolveTds(pool, sql, {
+          partyHeadId: directPartyId,
+          tdsApplicableFlag: !!flags?.IsTdsApplicable,
+          tdsLimitApplicable: !!flags?.TdsLimitApplicable,
+          billAmount: PAmount,
+          companyId: await resolvePaymentCompanyId(pool, PCompany),
+          finYearId: await resolveFinYearId(pool, PDate),
+          selectedTdsId: pickedTdsId,
+        });
+      } catch (tdsErr) {
+        return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
+      }
+    }
 
     // Re-resolve the Financial Year whenever the payment date is edited — it
     // always tracks the payment's own PDate, same as on create.
