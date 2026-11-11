@@ -594,7 +594,7 @@ export function openInModulePath(item: InboxItem, navPath: string): string {
   if (item.Module === "crm-credit-notes" || item.Module === "crm-credit-note-cancel") {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }
-  if (item.Module === "crm-ownership-changes") {
+  if (item.Module === "crm-ownership-changes" || item.Module === "crm-noc") {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }
   // The sale deed page opens one deed by ?deedId=, at its approvals.
