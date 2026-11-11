@@ -5704,7 +5704,7 @@ const Payment: React.FC = () => {
                                   {/* The posting shows (and is made) before approval — say so for the payment being viewed. */}
                                   {!isBounce && !isDebitNote && viewingRec && (entry.pmtId == null || String(entry.pmtId) === String(viewingRec.id))
                                     && viewingRec.status !== "Approved" && (
-                                    <span className="text-[0.5625rem] px-1.5 py-0.5 rounded-none border border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium">
+                                    <span className="text-[0.5625rem] px-1.5 py-0.5 rounded-none border border-destructive/40 bg-destructive/10 text-destructive font-medium">
                                       Not approved{viewingRec.status ? ` — ${viewingRec.status}` : ""}
                                     </span>
                                   )}
