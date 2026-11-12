@@ -16,6 +16,7 @@
 // What the two buyers agreed between themselves is recorded only — it is
 // never developer income. The developer's transfer fee is charged to the buyer.
 const { sql } = require("../db");
+const { REFUND_CLOSED_SQL } = require("../constants/crmStatuses");
 
 class ResaleError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -234,7 +235,7 @@ async function raiseBuyBackVoucher(tx, resale, { bankId, paymentMode = "", actor
   const refInList = ids.length ? ids.map((_, i) => `@refid${i}`).join(",") : "0";
   const claimed = (await refReq.query(`
     SELECT TOP 1 r.RefundNo FROM dbo.CrmRefund r
-    WHERE r.BookingId IN (${refInList}) AND r.Status NOT IN ('Paid', 'Rejected', 'Cancelled')`)).recordset[0];
+    WHERE r.BookingId IN (${refInList}) AND r.Status NOT IN ${REFUND_CLOSED_SQL}`)).recordset[0];
   if (claimed) throw new ResaleError(`Refund ${claimed.RefundNo} is open on this property's money — finish or reject it first`, 409);
   const transferClaimed = (await refReq.query(`
     SELECT TOP 1 rt.Id FROM dbo.CrmRebookingTransfer rt

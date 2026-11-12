@@ -58,7 +58,7 @@ const AlertPill: React.FC<{ tone: DeedAlertTone; label: string }> = ({ tone, lab
 );
 const NEW_DEED_FIELDS: [string, keyof typeof EMPTY_FORM, "number" | "date"][] = [
   ["Deed value", "DeedValue", "number"], ["Stamp duty", "StampDuty", "number"], ["Registration fee", "RegistrationFee", "number"],
-  ["AFS stamp duty credit", "StampDutyCredit", "number"], ["Deed date", "DeedDate", "date"], ["Registration deadline (RERA)", "RegistrationDeadline", "date"],
+  ["Agreement stamp duty credit", "StampDutyCredit", "number"], ["Deed date", "DeedDate", "date"], ["Registration deadline (RERA)", "RegistrationDeadline", "date"],
 ];
 
 /** The deed's nine steps as the shared bar, with the one it is on named. */
@@ -438,7 +438,7 @@ const CrmSalesDeed: React.FC = () => {
     else { next = "Every check has passed: record the execution"; action = { label: "Record Execution", run: startExec }; }
     if (!canWork) action = null;
     // When the next step is worked inside a section (stamp duty, registry, documents), the band takes you to it.
-    const SECTION_TITLE: Record<string, string> = { details: "Deed Details", legal: "Legal Work", documents: "Documents", stampDuty: "Stamp Duty", registry: "Registry" };
+    const SECTION_TITLE: Record<string, string> = { details: "Deed Details", legal: "Legal Work", documents: "Documents", stampDuty: "Registration Fees", registry: "Registry" };
     if (!action && focus && SECTION_TITLE[focus]) action = { label: `Go to ${SECTION_TITLE[focus]}`, run: () => document.getElementById(`deed-${focus}`)?.scrollIntoView({ block: "start" }) };
 
     const history = [
@@ -478,7 +478,7 @@ const CrmSalesDeed: React.FC = () => {
             { label: "Stamp duty", value: d.StampDuty ? fmtShort(d.StampDuty) : "—", exact: d.StampDuty ? fmtRupees(d.StampDuty) : undefined, note: d.RegistrationFee ? `Fee ${fmtShort(d.RegistrationFee)}` : "Fee not set" },
             { label: "Register by", dot: d.Status === "Overdue" ? BAND_DOT.overdue : undefined, value: fmtDate(d.RegistrationDeadline), note: d.Status === "Overdue" ? "Overdue" : "RERA deadline", alert: d.Status === "Overdue" },
             { label: "Papers", dot: papers.required && papers.uploaded === papers.required ? BAND_DOT.collected : BAND_DOT.finance, value: `${papers.uploaded} of ${papers.required}`, note: "Mandatory uploaded" },
-            { label: "Payable to government", value: payable > 0 ? fmtShort(payable) : "—", exact: payable > 0 ? fmtRupees(payable) : undefined, note: "Less AFS credit" },
+            { label: "Payable to government", value: payable > 0 ? fmtShort(payable) : "—", exact: payable > 0 ? fmtRupees(payable) : undefined, note: "Less agreement stamp duty" },
           ]}
           footer={<BandNext text={next} finished={d.Status === CrmStatus.REGISTERED || d.Status === CrmStatus.CANCELLED} action={action} />} />
 
@@ -675,7 +675,7 @@ const CrmSalesDeed: React.FC = () => {
               { label: "In preparation", dot: BAND_DOT.notDue, value: String(open - (counts.Executed ?? 0)), note: "Paperwork to execution" },
               { label: "Executed, to register", dot: BAND_DOT.finance, value: String(counts.Executed ?? 0), note: "With the Sub-Registrar" },
               { label: "Overdue", dot: (counts.Overdue ?? 0) > 0 ? BAND_DOT.overdue : undefined, value: String(counts.Overdue ?? 0), note: "Past the registration deadline", alert: (counts.Overdue ?? 0) > 0 },
-              { label: "Net payable to government", value: money ? fmtShort(money.netPayable) : "—", exact: money ? fmtRupees(money.netPayable) : undefined, note: "Stamp duty and fee, less AFS credit" },
+              { label: "Net payable to government", value: money ? fmtShort(money.netPayable) : "—", exact: money ? fmtRupees(money.netPayable) : undefined, note: "Stamp duty and fee, less agreement stamp duty" },
             ]} />
           <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
             <GridTabs label="Sale Deeds" active={s.status} onChange={s.setStatus} tabs={[ALL, ...STATUSES].map((k) => ({ key: k, label: k === ALL ? "All sale deeds" : k, count: listResult ? (k === ALL ? allCount : counts[k] ?? 0) : null }))} />
@@ -742,7 +742,7 @@ const CrmSalesDeed: React.FC = () => {
                   : <input type="number" min="0" className={cn(GRID_INPUT, "tabular-nums")} value={form[key]} onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} />}
               </GridFormField>
             ))}
-            <GridFormField label="Sub-Registrar office" wide hint={context?.agreement?.AfsStampDuty != null ? `AFS stamp duty ${fmtRupees(context.agreement.AfsStampDuty)} is pre-filled as credit: check it against the Sub-Registrar receipt before saving.` : undefined}>
+            <GridFormField label="Sub-Registrar office" wide hint={context?.agreement?.AfsStampDuty != null ? `Agreement stamp duty ${fmtRupees(context.agreement.AfsStampDuty)} is pre-filled as credit: check it against the Sub-Registrar receipt before saving.` : undefined}>
               <input className={GRID_INPUT} value={form.SubRegistrarOffice} onChange={(e) => setForm((f) => ({ ...f, SubRegistrarOffice: e.target.value }))} />
             </GridFormField>
           </GridFormSection>

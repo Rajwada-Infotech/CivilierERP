@@ -263,6 +263,17 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
 
     const bookingRows = bookings.recordset;
     const bookingIds = bookingRows.map((b) => b.Id);
+    // Legal: where the booking's legal journey stands, by the Legal Milestones page's own rules (the stored
+    // OverallStatus only follows the agreement, so it read "Completed" while the journey still had far to go).
+    if (bookingIds.length) {
+      const { journeySql } = require("./crmLegalMilestones");
+      const legal = (await pool.request().query(`SELECT y.BookingId, y.DoneCount, y.StepCount FROM (${journeySql(`WHERE m.BookingId IN (${bookingIds.map(Number).join(",")})`)}) y`)).recordset;
+      const byBooking = new Map(legal.map((x) => [x.BookingId, x]));
+      for (const b of bookingRows) {
+        const j = byBooking.get(b.Id);
+        b.LegalMilestoneStatus = !j ? null : j.DoneCount === j.StepCount ? "Journey complete" : `${j.DoneCount} of ${j.StepCount} steps`;
+      }
+    }
 
     let receiptsByBooking = {}, invoicesByBooking = {}, onAccountByBooking = {}, brokerageByBooking = {}, milestonesByBooking = {};
     if (bookingIds.length) {

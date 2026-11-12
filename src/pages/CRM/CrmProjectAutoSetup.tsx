@@ -186,7 +186,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         body: JSON.stringify({ ProjectId: parseInt(projectId), Names: blockNames }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to save blocks");
+      if (!res.ok) throw new Error(data.error || "Could not save blocks");
       toast.success(`${data.blocks.length} block(s) created`);
       setBlockNames(generateNames(Math.max(1, Math.min(100, parseInt(blockCount, 10) || 1)), namingScheme));
       setShowAddBlockForm(false);
@@ -213,7 +213,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         body: JSON.stringify({ ProjectId: parseInt(projectId), Blocks: payload }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to save floors");
+      if (!res.ok) throw new Error(data.error || "Could not save floors");
       toast.success("Floors generated");
       changed();
       return true;
@@ -237,7 +237,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         body: JSON.stringify({ BlockName: name }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to rename block");
+      if (!res.ok) throw new Error(data.error || "Could not rename block");
       toast.success("Block renamed");
       changed();
     } catch (e: any) {
@@ -253,7 +253,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     try {
       const res = await fetchWithAuth(`${API}/blocks/${b.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete block");
+      if (!res.ok) throw new Error(data.error || "Could not delete block");
       toast.success(data.message || "Block deleted");
       changed();
     } catch (e: any) {
@@ -266,7 +266,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     try {
       const res = await fetchWithAuth(`${API}/floors/${f.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete floor");
+      if (!res.ok) throw new Error(data.error || "Could not delete floor");
       toast.success(data.message || "Floor deleted");
       changed();
     } catch (e: any) {
@@ -283,7 +283,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         body: JSON.stringify({ ProjectId: parseInt(projectId) }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to generate units");
+      if (!res.ok) throw new Error(data.error || "Could not generate units");
       if (data.createdCount === 0) {
         toast.info("No eligible floors to generate — set a unit count on at least one floor first");
       } else {

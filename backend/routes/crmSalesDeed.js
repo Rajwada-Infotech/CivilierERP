@@ -781,7 +781,7 @@ router.post("/registry", requireAnyPageRight(["crm-registry", "crm-sales-deed"],
     const qp = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id, Status FROM dbo.CrmQueryPayment WHERE BookingId = @bid");
     if (!qp.recordset.length || qp.recordset[0].Status !== "Confirmed") {
-      return res.status(400).json({ error: "Registry requires Query Payment to be Confirmed first — the customer must have paid the government before the deed can be registered" });
+      return res.status(400).json({ error: "The Deed Registry needs the Deed Registration Fees confirmed first: the customer must pay the government before the deed is registered" });
     }
 
     const deed = await pool.request().input("bid", sql.Int, bookingId)
@@ -1400,7 +1400,7 @@ router.get("/query-payment/:id", requireAnyPageRight(["crm-query-payment", "crm-
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`${QP_SELECT} WHERE qp.Id = @id`);
-    if (!result.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
+    if (!result.recordset.length) return res.status(404).json({ error: "Deed registration fees not found" });
 
     const attachments = await pool.request().input("id", sql.Int, id).query(`
       SELECT AttachmentId, DocType, FileName, MimeType, FileSize, UploadedBy, UploadedAt
@@ -1432,15 +1432,15 @@ router.post("/query-payment", requireAnyPageRight(["crm-query-payment", "crm-sal
     const deed = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 Id, DirectorApprovalStatus, StampDuty, RegistrationFee FROM dbo.CrmSalesDeed WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Cancelled' ORDER BY CreatedAt DESC");
     if (!deed.recordset.length) {
-      return res.status(400).json({ error: "Query Payment requires a Sales Deed to exist for this booking first (that's where the stamp duty / registration fee comes from)" });
+      return res.status(400).json({ error: "Deed registration fees need a Sale Deed for this booking first: its stamp duty and fee come from there" });
     }
     if (deed.recordset[0].DirectorApprovalStatus !== "Approved") {
-      return res.status(400).json({ error: "Query Payment can only be started after the Sales Deed is Director Approved — the stamp duty amount must be finalised before communicating it to the customer" });
+      return res.status(400).json({ error: "Deed registration fees can start once the director approves the Sale Deed, so the stamp duty is final" });
     }
     const stamp = Number(deed.recordset[0].StampDuty) || 0;
     const regFee = Number(deed.recordset[0].RegistrationFee) || 0;
     if (stamp + regFee <= 0) {
-      return res.status(400).json({ error: "This Sales Deed has no Stamp Duty or Registration Fee amount recorded — enter it on the Sale Deed before starting Query Payment tracking." });
+      return res.status(400).json({ error: "This Sale Deed has no stamp duty or registration fee yet: enter them on the Sale Deed first" });
     }
 
     const qpNo = await getNextDocNumber(pool, "QP", "QP");
@@ -1457,7 +1457,7 @@ router.post("/query-payment", requireAnyPageRight(["crm-query-payment", "crm-sal
     res.status(201).json({ success: true, id: result.recordset[0].Id, QPNo: qpNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
-      return res.status(409).json({ error: "Query Payment tracking already started for this booking" });
+      return res.status(409).json({ error: "Deed registration fees are already started for this booking" });
     console.error("[crm-sales-deed/query-payment] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }
@@ -1472,7 +1472,7 @@ router.put("/query-payment/:id", requireAnyPageRight(["crm-query-payment", "crm-
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
+    if (!cur.recordset.length) return res.status(404).json({ error: "Deed registration fees not found" });
     const row = cur.recordset[0];
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -1520,7 +1520,7 @@ router.post("/query-payment/:id/info", requireAnyPageRight(["crm-query-payment",
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
+    if (!cur.recordset.length) return res.status(404).json({ error: "Deed registration fees not found" });
     const row = cur.recordset[0];
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -1592,7 +1592,7 @@ router.post("/query-payment/:id/confirm", requireAnyPageRight(["crm-query-paymen
 
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
+    if (!cur.recordset.length) return res.status(404).json({ error: "Deed registration fees not found" });
     const row = cur.recordset[0];
     if (row.Status === "Confirmed") return res.status(400).json({ error: "Already confirmed" });
     if (row.Status !== "InfoSent") {

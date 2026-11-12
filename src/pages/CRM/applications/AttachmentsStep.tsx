@@ -110,7 +110,7 @@ export const AttachmentsStep: React.FC<{
           </select>
           <button onClick={() => fileInputRef.current?.click()} disabled={uploading || !docType}
             className="px-3 py-1.5 text-xs bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 flex items-center gap-1 whitespace-nowrap">
-            <Upload size={12} /> {uploading ? "Uploading..." : "Upload"}
+            <Upload size={12} /> {uploading ? "Uploading…" : "Upload"}
           </button>
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleUploadFiles(e.target.files)} />
         </div>
@@ -160,14 +160,14 @@ export const AttachmentsStep: React.FC<{
               <div className="flex items-center gap-2 shrink-0">
                 <a href={previewBlobUrl || "#"} download={previewDoc.FileName}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border font-medium ${!previewBlobUrl ? "opacity-50 pointer-events-none" : "hover:bg-muted"}`}>
-                  <Download size={13} /> {previewBlobUrl ? "Download" : "Loading..."}
+                  <Download size={13} /> {previewBlobUrl ? "Download" : "Loading…"}
                 </a>
                 <button onClick={() => setPreviewDoc(null)} className="p-1 hover:bg-muted text-muted-foreground"><X size={16} /></button>
               </div>
             </div>
             <div className="flex-1 h-[76vh] bg-neutral-950 flex items-center justify-center">
               {previewLoading ? (
-                <div className="text-xs text-neutral-300">Loading preview...</div>
+                <div className="text-xs text-neutral-300">Loading preview…</div>
               ) : previewError ? (
                 <div className="text-center space-y-2 px-4">
                   <p className="text-sm text-neutral-100">{previewError}</p>

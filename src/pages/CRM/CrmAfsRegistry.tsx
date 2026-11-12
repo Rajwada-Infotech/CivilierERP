@@ -111,12 +111,12 @@ async function fetchAll(cpb?: AfsRegistryCpb): Promise<any[]> {
   if (cpb?.blockId) params.set("blockId", cpb.blockId);
   const qs = params.toString();
   const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load AFS Registry trackers");
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Could not load the registry.");
   return r.json();
 }
 async function fetchEligibleBookings(): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/eligible-bookings`);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load eligible bookings");
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Could not load eligible bookings");
   return r.json();
 }
 
@@ -316,12 +316,12 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
       if (embedded) {
-        toast.success("AFS Registry completed — now open the Agreement tab and Mark as Registered.");
+        toast.success("Registry completed: now mark the agreement registered above.");
         afterChange();
       } else {
         promptNextStep(
           navigate,
-          "AFS Registry visit completed. Next: open the Agreement and click Mark as Registered (enter the AFS Registration No + Date).",
+          "Registry completed. Next: Mark Registered on the agreement, with the registration no. and date.",
           completingBookingId != null ? `/crm/agreements?bookingId=${completingBookingId}` : "/crm/agreements",
           "Go to Agreement → Mark Registered",
         );
@@ -457,14 +457,14 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         ) : !r ? (
           <div className="border border-dashed border-border p-8 text-center space-y-3">
             <CalendarClock size={24} className="mx-auto text-muted-foreground" />
-            <p className="text-sm font-medium text-foreground">AFS Registry not started</p>
+            <p className="text-sm font-medium text-foreground">Registry not started</p>
             <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-              Both parties visit the Sub-Registrar's Office to register the Agreement for Sale. Requires this booking's AFS Query Payment to be <strong>Confirmed</strong> first.
+              Both parties visit the Sub-Registrar's Office to register the Agreement for Sale. The registration fees must be <strong>confirmed</strong> first.
             </p>
             {canCreate && (
               <button onClick={startEmbedded} disabled={startingEmbedded}
                 className={`${KEY_INK} h-8 px-3`}>
-                <Plus size={13} /> {startingEmbedded ? "Starting…" : "Start AFS Registry"}
+                <Plus size={13} /> {startingEmbedded ? "Starting…" : "Start Registry"}
               </button>
             )}
           </div>
@@ -487,7 +487,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                   <p className="font-heading tabular-nums font-medium mt-0.5">{r.AgreementNo || "—"}</p>
                 </div>
                 <div className="border border-border px-3 py-2">
-                  <p className="text-[0.625rem] text-muted-foreground">AFS Registration No</p>
+                  <p className="text-[0.625rem] text-muted-foreground">Agreement registration no.</p>
                   <p className="font-heading tabular-nums font-medium mt-0.5">{r.AfsRegistrationNo || "—"}</p>
                 </div>
               </div>
@@ -511,7 +511,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                 ) : (
                   <div className="flex items-start gap-2 text-sm text-foreground bg-card border border-border px-4 py-3">
                     <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-                    <span>Registry visit complete. Now switch to the <strong>Agreement</strong> tab and click <strong>Mark as Registered</strong> — enter the AFS Registration No and date from the Sub-Registrar receipt.</span>
+                    <span>Registry complete. Now click <strong>Mark Registered</strong> on the agreement above and enter the registration no. and date from the Sub-Registrar receipt.</span>
                   </div>
                 )
               )}
@@ -528,7 +528,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                 <div className="w-9 h-9 shrink-0 bg-emerald-500/5 border border-border flex items-center justify-center">
                   <CalendarClock size={16} className="text-foreground" />
                 </div>
-                <DialogTitle className="font-heading text-base">Schedule AFS Registration</DialogTitle>
+                <DialogTitle className="font-heading text-base">Schedule Registry</DialogTitle>
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
@@ -553,7 +553,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                 <div className="w-9 h-9 shrink-0 bg-emerald-500/5 border border-border flex items-center justify-center">
                   <CheckCircle2 size={16} className="text-foreground" />
                 </div>
-                <DialogTitle className="font-heading text-base">Mark AFS Registry Completed</DialogTitle>
+                <DialogTitle className="font-heading text-base">Mark Registry Completed</DialogTitle>
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
@@ -609,7 +609,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             <div className="relative flex-1 min-w-48">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input value={search} onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search name, AREG no, booking, unit..."
+                placeholder="Search name, AREG no, booking, unit…"
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:border-primary" />
             </div>
             <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
@@ -693,7 +693,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                 className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted font-medium">Cancel</button>
               <button onClick={handleStart} disabled={saving || !bookingId}
                 className={`${KEY_INK} h-8 px-3`}>
-                {saving ? "Starting..." : "Start"}
+                {saving ? "Starting…" : "Start"}
               </button>
             </div>
           </DialogContent>
@@ -707,7 +707,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                 <div className="w-9 h-9 shrink-0 bg-emerald-500/5 border border-border flex items-center justify-center">
                   <CalendarClock size={16} className="text-foreground" />
                 </div>
-                <DialogTitle className="font-heading text-base">Schedule AFS Registration</DialogTitle>
+                <DialogTitle className="font-heading text-base">Schedule Registry</DialogTitle>
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
@@ -732,7 +732,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                 <div className="w-9 h-9 shrink-0 bg-emerald-500/5 border border-border flex items-center justify-center">
                   <CheckCircle2 size={16} className="text-foreground" />
                 </div>
-                <DialogTitle className="font-heading text-base">Mark AFS Registry Completed</DialogTitle>
+                <DialogTitle className="font-heading text-base">Mark Registry Completed</DialogTitle>
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
@@ -792,7 +792,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                       <p className="font-heading tabular-nums font-medium mt-0.5">{detailRow.AgreementNo || "—"}</p>
                     </div>
                     <div className="border border-border px-3 py-2">
-                      <p className="text-[0.625rem] text-muted-foreground">AFS Registration No</p>
+                      <p className="text-[0.625rem] text-muted-foreground">Agreement registration no.</p>
                       <p className="font-heading tabular-nums font-medium mt-0.5">{detailRow.AfsRegistrationNo || "—"}</p>
                     </div>
                   </div>

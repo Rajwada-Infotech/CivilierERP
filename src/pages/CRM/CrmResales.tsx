@@ -51,7 +51,7 @@ interface Holding {
 
 const getJson = async (url: string) => {
   const r = await fetchWithAuth(url);
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load");
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Could not load");
   return r.json();
 };
 

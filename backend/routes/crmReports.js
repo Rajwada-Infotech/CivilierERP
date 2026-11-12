@@ -355,16 +355,16 @@ router.get("/legal-milestones", requirePageRight("crm-legal-milestones", "view")
     const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
+    // The same journey and step rules as the Legal Milestones page (routes/crmLegalMilestones.js journeySql).
+    const { journeySql, LM_PHASES } = require("./crmLegalMilestones");
+    const phasesDone = LM_PHASES.map((p) => `CASE WHEN y.P_${p} = 2 THEN 1 ELSE 0 END`).join(" + ");
     const result = await req0.query(`
-      SELECT b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, m.CurrentStep, m.OverallStatus,
-        CAST(m.CreatedAt AS DATE) AS CreatedDate, CAST(m.UpdatedAt AS DATE) AS LastUpdated
-      FROM dbo.CrmLegalMilestone m
-      JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-      ${cpb.clauses.length ? "WHERE " + cpb.clauses.join(" AND ") : ""}
-      ORDER BY m.UpdatedAt DESC
+      SELECT y.BookingNo, y.ProjectName, y.UnitNo, y.ApplicantName, y.AgreementNo, y.AgreementStatus,
+        y.DoneCount AS StepsDone, y.StepCount AS StepsTotal, (${phasesDone}) AS PhasesDone, ${LM_PHASES.length} AS PhasesTotal,
+        CASE WHEN y.DoneCount = y.StepCount THEN 'Complete' ELSE 'In progress' END AS JourneyStatus,
+        CAST(y.CreatedAt AS DATE) AS CreatedDate, CAST(y.UpdatedAt AS DATE) AS LastUpdated
+      FROM (${journeySql(cpb.clauses.length ? "WHERE " + cpb.clauses.join(" AND ") : "")}) y
+      ORDER BY y.UpdatedAt DESC
     `);
     res.json(result.recordset);
   } catch (err) { res.status(500).json({ error: err.message }); }

@@ -69,7 +69,7 @@ const PortalPayments: React.FC = () => {
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank");
     } catch (err) {
-      console.error("Failed to download receipt:", err);
+      console.error("Could not download receipt:", err);
     } finally {
       setDownloadingReceiptId(null);
     }

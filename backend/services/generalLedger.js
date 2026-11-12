@@ -10,6 +10,7 @@
 // Posting starts capturing from 2026-06-28 — no historical backfill.
 
 const { sql } = require("../db");
+const { REFUND_CLOSED_SQL } = require("../constants/crmStatuses");
 const { round2, sumMoney } = require("./bookingUnits");
 const { autoCreateFixedAssetsFromGRN } = require("./fixedAssetAutoAlloc");
 const { normalizePaymentDimensions } = require("./paymentDimensions");
@@ -1580,7 +1581,7 @@ async function postFundTransferApproval(pool, ftId, userEmail) {
     SELECT TOP 1 rt.Id, rt.Status, rt.Amount, oa.Amount AS SourceAmount, oa.AppliedAmount,
       ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
               WHERE r.SourceOnAccountId = rt.HeldOnAccountId
-                AND r.Status NOT IN ('Rejected', 'Paid')), 0) AS OtherRefundClaims,
+                AND r.Status NOT IN ${REFUND_CLOSED_SQL}), 0) AS OtherRefundClaims,
       ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
               WHERE t.HeldOnAccountId = rt.HeldOnAccountId
                 AND t.Status NOT IN ('Rejected', 'Applied') AND t.Id <> rt.Id), 0) AS OtherTransferClaims

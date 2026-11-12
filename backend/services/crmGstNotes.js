@@ -12,6 +12,7 @@
 // Cancellation charges kept by us get no document. One set per refund,
 // issued once (idempotent by RefundId); never fatal to the payout.
 const { sql } = require("../db");
+const { REFUND_DROPPED_SQL } = require("../constants/crmStatuses");
 const { getGstSplit } = require("./crmLedger");
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -765,7 +766,7 @@ async function assertAdjustmentReversible(pool, n) {
   const oa = (await pool.request().input("o", sql.Int, n.OnAccountId)
     .query("SELECT Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WHERE Id = @o")).recordset[0];
   const claimed = (await pool.request().input("o", sql.Int, n.OnAccountId)
-    .query("SELECT TOP 1 RefundNo FROM dbo.CrmRefund WHERE SourceOnAccountId = @o AND Status NOT IN (N'Rejected', N'Cancelled')")).recordset[0];
+    .query(`SELECT TOP 1 RefundNo FROM dbo.CrmRefund WHERE SourceOnAccountId = @o AND Status NOT IN ${REFUND_DROPPED_SQL}`)).recordset[0];
   if (claimed) throw new GstNoteError(`Its credit is being refunded (${claimed.RefundNo}) — it can't be cancelled`, 409);
   if (!oa || Number(oa.AppliedAmount || 0) > 0.005) throw new GstNoteError("Its credit has already been used on a milestone — it can't be cancelled; raise a new invoice instead", 409);
 }

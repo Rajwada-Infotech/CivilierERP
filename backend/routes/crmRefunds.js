@@ -15,7 +15,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { applyPagination } = require("../services/crmListPagination");
-const { transition: approvalTransition, recordGLPosting, isApproverFor } = require("../services/approvalService");
+const { transition: approvalTransition, recordGLPosting, isApproverFor, writeAuditLog } = require("../services/approvalService");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { bumpCacheVersion } = require("../redis");
 const {
@@ -24,7 +24,7 @@ const {
 } = require("../services/crmLedger");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { refundCreateSchema } = require("../validation/crmBookingSchemas");
-const { DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
+const { DEAD_BOOKING_STATUSES, REFUND_CLOSED_SQL, REFUND_DUE_STOPPED_SQL } = require("../constants/crmStatuses");
 
 router.use(authMiddleware);
 
@@ -93,7 +93,7 @@ async function getUnclaimedRemaining(pool, onAccountId, { excludeRefundId = null
         oa.Amount, oa.AppliedAmount,
         ISNULL((
           SELECT SUM(GrossAmount) FROM dbo.CrmRefund
-          WHERE SourceOnAccountId = @id AND Status NOT IN ('Rejected', 'Paid')
+          WHERE SourceOnAccountId = @id AND Status NOT IN ${REFUND_CLOSED_SQL}
             AND (@exRefund IS NULL OR Id <> @exRefund)
         ), 0) AS ReservedByRefunds,
         ISNULL((
@@ -188,7 +188,7 @@ async function rejectStaleClaimsOnSource(pool, onAccountId, { exceptRefundId = n
       .input("id", sql.Int, onAccountId).input("ex", sql.Int, exceptRefundId).input("n", sql.NVarChar(500), note)
       .query(`
         UPDATE dbo.CrmRefund SET Status = 'Rejected', RejectionNote = @n, UpdatedAt = SYSDATETIME()
-        WHERE SourceOnAccountId = @id AND Status NOT IN ('Rejected', 'Paid') AND (@ex IS NULL OR Id <> @ex)
+        WHERE SourceOnAccountId = @id AND Status NOT IN ${REFUND_CLOSED_SQL} AND (@ex IS NULL OR Id <> @ex)
       `);
     await pool.request()
       .input("id", sql.Int, onAccountId).input("ex", sql.Int, exceptTransferId)
@@ -219,11 +219,14 @@ const REFUND_SELECT = `
     cxl.CancellationNo,
     bank.LHeadName AS RefundBankName,
     rq.name AS RequestedByName, ap.name AS ApprovedByName, fc.name AS FinanceClearedByName,
-    CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status <> 'Paid'
+    CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status NOT IN ${REFUND_DUE_STOPPED_SQL}
               AND CAST(SYSDATETIME() AS DATE) > r.RefundDueDate
          THEN 1 ELSE 0 END AS IsOverdue,
-    CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status <> 'Paid'
-         THEN DATEDIFF(day, CAST(SYSDATETIME() AS DATE), r.RefundDueDate) ELSE NULL END AS DaysRemaining
+    CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status NOT IN ${REFUND_DUE_STOPPED_SQL}
+         THEN DATEDIFF(day, CAST(SYSDATETIME() AS DATE), r.RefundDueDate) ELSE NULL END AS DaysRemaining,
+    -- A transfer mode with no customer account: approval would refuse it until the account is added or the mode changed.
+    CASE WHEN r.PreferredPaymentMode IN (${[...TRANSFER_REFUND_MODES].map((m) => `'${m}'`).join(", ")}) AND NULLIF(LTRIM(r.CustomerAccountNo), '') IS NULL
+         THEN 1 ELSE 0 END AS NeedsAccount
   FROM dbo.CrmRefund r
   JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
   LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId
@@ -287,7 +290,7 @@ const REFUND_SORT = {
 };
 // The tabs that cover more than one status.
 const REFUND_QUEUES = { CRM: ["Draft", "Pending"], Voucher: ["Approved", "FinancePending"] };
-const REFUND_OVERDUE_SQL = "r.RefundDueDate IS NOT NULL AND r.Status <> 'Paid' AND CAST(SYSDATETIME() AS DATE) > r.RefundDueDate";
+const REFUND_OVERDUE_SQL = `r.RefundDueDate IS NOT NULL AND r.Status NOT IN ${REFUND_DUE_STOPPED_SQL} AND CAST(SYSDATETIME() AS DATE) > r.RefundDueDate`;
 
 router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
@@ -321,7 +324,7 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
     const SELECT_WITH_BLOCK = `${REFUND_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
     const ORDER = Object.hasOwn(REFUND_SORT, req.query.sortKey)
       ? `ORDER BY ${REFUND_SORT[req.query.sortKey]} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, r.Id DESC`
-      : "ORDER BY CASE WHEN r.Status IN ('Paid', 'Rejected') THEN 1 ELSE 0 END, r.CreatedAt DESC, r.Id DESC";
+      : `ORDER BY CASE WHEN r.Status IN ${REFUND_CLOSED_SQL} THEN 1 ELSE 0 END, r.CreatedAt DESC, r.Id DESC`;
 
     if (!req.query.page) {
       const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
@@ -361,7 +364,7 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
 // getUnclaimedRemaining's JS logic in SQL so this list-view figure agrees
 // with what the create/apply endpoints will actually accept.
 const RESERVED_SUBQUERY = `(
-  ISNULL((SELECT SUM(GrossAmount) FROM dbo.CrmRefund WHERE SourceOnAccountId = oa.Id AND Status NOT IN ('Rejected', 'Paid')), 0) +
+  ISNULL((SELECT SUM(GrossAmount) FROM dbo.CrmRefund WHERE SourceOnAccountId = oa.Id AND Status NOT IN ${REFUND_CLOSED_SQL}), 0) +
   ISNULL((SELECT SUM(Amount) FROM dbo.CrmRebookingTransfer WHERE HeldOnAccountId = oa.Id AND Status NOT IN ('Rejected', 'Applied')), 0)
 )`;
 
@@ -419,6 +422,55 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
 // ── GET /:id ─────────────────────────────────────────────────────────────
 // ── GST documents for money given back (services/crmGstNotes.js) ─────────────
 // Register: every credit note and refund voucher, for the GST return.
+// GET /payment-modes — the modes a refund can be paid by, and which of them need the customer's account (the forms' list).
+router.get("/payment-modes", requirePageRight("crm-refunds", "view"), (_req, res) => {
+  res.json({ modes: [...ALLOWED_REFUND_MODES], transfer: [...TRANSFER_REFUND_MODES] });
+});
+
+// GET /rebooking-transfers — every held credit moved onto a customer's new booking (New Refund → Apply to re-booking),
+// with where it stands and what is left to do: a cross-company one waits on its fund transfer (submitted for approval,
+// then approved in Fund Transfer); once Applied its ledger can be checked again (the retry is safe to repeat).
+router.get("/rebooking-transfers", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const rq = pool.request();
+    const conds = [];
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "fb.ProjectId", "").trim());
+    if (req.query.search) {
+      rq.input("search", sql.NVarChar(200), `%${req.query.search}%`);
+      conds.push("(cu.CustomerName LIKE @search OR cu.Mobile LIKE @search OR fb.BookingNo LIKE @search OR tb.BookingNo LIKE @search OR ft.DocNo LIKE @search)");
+    }
+    for (const [k, col] of [["companyId", "fb.CompanyId"], ["projectId", "fb.ProjectId"], ["blockId", "fb.BlockId"]]) {
+      const v = req.query[k] ? parseInt(req.query[k], 10) : null;
+      if (v) { rq.input(k, sql.Int, v); conds.push(`${col} = @${k}`); }
+    }
+    const rows = (await rq.query(`
+      SELECT rt.Id, rt.Amount, rt.IsCrossCompany, rt.Status, rt.Notes, rt.CreatedAt, rt.UpdatedAt,
+             rt.HeldOnAccountId, rt.ToBookingId, rt.FundTransferId, rt.NewOnAccountId,
+             fb.Id AS FromBookingId, fb.BookingNo AS FromBookingNo, tb.BookingNo AS ToBookingNo,
+             COALESCE(tbn.ProjectName, tb.ProjectName) AS ToProjectName, COALESCE(tbn.UnitNo, tb.UnitNo) AS ToUnitNo,
+             cu.CustomerName, cu.Mobile, cxl.CancellationNo,
+             ft.DocNo AS FundTransferNo, ft.Status AS FundTransferStatus,
+             u.name AS CreatedByName
+      FROM dbo.CrmRebookingTransfer rt
+      JOIN dbo.CrmOnAccountPayment hc ON hc.Id = rt.HeldOnAccountId
+      JOIN dbo.CrmBooking fb ON fb.Id = hc.BookingId
+      LEFT JOIN dbo.CrmBooking tb ON tb.Id = rt.ToBookingId
+      LEFT JOIN dbo.vw_CrmBookingDisplay tbn ON tbn.BookingId = tb.Id
+      LEFT JOIN dbo.CrmApplication fa ON fa.Id = fb.ApplicationId
+      LEFT JOIN dbo.CrmCustomer cu ON cu.Id = fa.CustomerId
+      LEFT JOIN dbo.CrmCancellation cxl ON cxl.Id = hc.HeldSourceRefId
+      LEFT JOIN dbo.FundTransfer ft ON ft.FTId = rt.FundTransferId
+      LEFT JOIN dbo.Users u ON u.id = rt.CreatedBy
+      ${conds.length ? `WHERE ${conds.join(" AND ")}` : ""}
+      ORDER BY CASE WHEN rt.Status IN ('Applied', 'Rejected') THEN 1 ELSE 0 END, rt.CreatedAt DESC, rt.Id DESC`)).recordset;
+    res.json(rows);
+  } catch (e) {
+    console.error("[crm-refunds] GET /rebooking-transfers error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 router.get("/gst-notes", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const gst = require("../services/crmGstNotes");
@@ -734,7 +786,7 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
   }
 });
 
-// ── PUT /:id — edit (Draft/Pending only) ─────────────────────────────────
+// ── PUT /:id — edit before approval (Draft, Pending, or Rejected so it can be corrected and sent again) ──
 router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -743,8 +795,15 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
     const b = req.body || {};
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRefund WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
-    if (!["Draft", "Pending"].includes(cur.recordset[0].Status)) {
+    if (!["Draft", "Pending", "Rejected"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot edit — refund is already ${cur.recordset[0].Status}` });
+    }
+    // The payment mode decides whether the customer's account is needed (approval checks it), so it can be corrected
+    // here too; sent only when it changes, empty to leave it to Finance.
+    const setMode = Object.hasOwn(b, "PreferredPaymentMode");
+    let mode = null;
+    if (setMode) {
+      try { mode = validatePaymentMode(b.PreferredPaymentMode); } catch (e) { return res.status(400).json({ error: e.message }); }
     }
     const updated = await pool.request()
       .input("id", sql.Int, id)
@@ -754,15 +813,18 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
       .input("cba", sql.NVarChar(50), b.CustomerAccountNo ?? null)
       .input("cbi", sql.NVarChar(20), b.CustomerIfscCode ?? null)
       .input("ub", sql.Int, actorId(req))
+      .input("setMode", sql.Bit, setMode ? 1 : 0)
+      .input("mode", sql.NVarChar(20), mode || null)
       .query(`
         UPDATE dbo.CrmRefund SET
           Reason = @reason,
+          PreferredPaymentMode = CASE WHEN @setMode = 1 THEN @mode ELSE PreferredPaymentMode END,
           RefundBankLHeadId = ISNULL(@bank, RefundBankLHeadId),
           CustomerBankName  = ISNULL(@cbn, CustomerBankName),
           CustomerAccountNo = ISNULL(@cba, CustomerAccountNo),
           CustomerIfscCode  = ISNULL(@cbi, CustomerIfscCode),
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id AND Status IN ('Draft', 'Pending')
+        WHERE Id = @id AND Status IN ('Draft', 'Pending', 'Rejected')
       `);
     if (updated.rowsAffected[0] !== 1) {
       return res.status(409).json({ error: "This refund changed status while you were editing it; reload before making further changes" });
@@ -939,6 +1001,44 @@ router.put("/:id/reject", requirePageRight("crm-refunds", "edit"), async (req, r
   } catch (e) {
     console.error("[crm-refunds] reject error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// ── PUT /:id/withdraw — take a refund back before it is approved (Draft, Pending or Rejected), with a reason ──
+// Final, and nothing is deleted: the refund stays on record as Withdrawn and stops claiming its money (constants
+// REFUND_DROPPED_STATUSES), so a new refund or a re-booking can use it. Nothing was posted yet (postings happen at Paid)
+// and no payout voucher exists before approval, so no money moves. It leaves the Approval Inbox (which lists Pending).
+const WITHDRAWABLE = ["Draft", "Pending", "Rejected"];
+router.put("/:id/withdraw", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) return res.status(400).json({ error: "Give the reason the refund is withdrawn." });
+  try {
+    const pool = getPool();
+    const cur = (await pool.request().input("id", sql.Int, id).query("SELECT Status, FinanceNewPaymentId FROM dbo.CrmRefund WHERE Id = @id")).recordset[0];
+    if (!cur) return res.status(404).json({ error: "Refund not found" });
+    if (!WITHDRAWABLE.includes(cur.Status) || cur.FinanceNewPaymentId != null) {
+      return res.status(409).json({ error: cur.Status === "Withdrawn" ? "This refund is already withdrawn." : `A refund that is ${cur.Status} can't be withdrawn: only before approval.` });
+    }
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const upd = await tx.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), `[Withdrawn] ${reason}`.slice(0, 500)).input("ub", sql.Int, actorId(req))
+        .query(`UPDATE dbo.CrmRefund SET Status = 'Withdrawn', RejectionNote = @n, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+                WHERE Id = @id AND Status IN (${WITHDRAWABLE.map((x) => `'${x}'`).join(", ")}) AND FinanceNewPaymentId IS NULL`);
+      if (upd.rowsAffected[0] !== 1) throw Object.assign(new Error("This refund changed while you were withdrawing it; reload and try again."), { status: 409 });
+      await writeAuditLog("CrmRefund", id, 0, req.user?.role, req.user?.email || req.user?.name || null, "Withdrawn", reason.slice(0, 500), tx, actorId(req));
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* rolled back */ }
+      throw txErr;
+    }
+    await bumpCacheVersion("crm-refunds");
+    res.json({ success: true, status: "Withdrawn" });
+  } catch (e) {
+    console.error("[crm-refunds] withdraw error:", e.message);
+    res.status(e.status || 500).json({ error: e.status ? e.message : "An internal error occurred. Please try again later." });
   }
 });
 

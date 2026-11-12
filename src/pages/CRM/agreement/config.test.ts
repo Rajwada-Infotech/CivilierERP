@@ -6,6 +6,8 @@ import {
 // The agreement's board, insights and alerts read the same step logic as its record page.
 const today = new Date(2026, 10, 5, 12); // 5 Nov 2026
 const base = { Status: "Draft", CreatedAt: "2026-10-01T10:00:00", MandatoryDocCount: 2, MandatoryUploadedCount: 2 };
+// The steps done, as the server's flags on the row (D_<key>, backend/services/crmWorkflowGuards.js).
+const done = (...keys: string[]) => Object.fromEntries(keys.map((k) => [`D_${k}`, 1]));
 
 describe("agreement steps from a list row", () => {
   it("the board's columns are the steps' plain names", () => {
@@ -15,17 +17,18 @@ describe("agreement steps from a list row", () => {
     ]);
   });
   it("a row with no legal executive is on that step, counted from when it was made", () => {
-    const a = { ...base, LegalExecutiveId: null };
+    const a = { ...base, LegalExecutiveId: null, ...done("agrInit") };
     expect(agreementCurrentIndex(a, rowFollowupProgress(a))).toBe(1);
     expect(agreementDaysAtStep(a, rowFollowupProgress(a), today)).toBe(35);
   });
   it("sent to the customer: waiting for their approval, counted from the day it was sent", () => {
-    const a = { ...base, LegalExecutiveId: 4, SeniorApprovalStatus: "Approved", SeniorApprovedAt: "2026-10-20", SentToCustomerAt: "2026-11-01T09:00:00" };
+    const a = { ...base, LegalExecutiveId: 4, SeniorApprovalStatus: "Approved", SeniorApprovedAt: "2026-10-20", SentToCustomerAt: "2026-11-01T09:00:00",
+      ...done("agrInit", "agrLegal", "agrPapers", "agrSenior", "agrSent") };
     expect(agreementCurrentStep(a, rowFollowupProgress(a))).toBe("Customer Approval");
     expect(agreementDaysAtStep(a, rowFollowupProgress(a), today)).toBe(4);
   });
   it("papers not all uploaded keep it on the follow-up step, with the percentage", () => {
-    const a = { ...base, LegalExecutiveId: 4, MandatoryUploadedCount: 1 };
+    const a = { ...base, LegalExecutiveId: 4, MandatoryUploadedCount: 1, ...done("agrInit", "agrLegal") };
     expect(agreementCurrentStep(a, rowFollowupProgress(a))).toBe("Agreement Followup (50%)");
   });
   it("registered is complete; cancelled is on no step", () => {

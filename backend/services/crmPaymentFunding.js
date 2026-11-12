@@ -1,9 +1,10 @@
 const { sql } = require("../db");
+const { REFUND_CLOSED_SQL } = require("../constants/crmStatuses");
 
 function onAccountAvailableSql(alias = "o") {
   const remaining = `${alias}.Amount - ISNULL(${alias}.AppliedAmount, 0)`;
   const reserved = `ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
-      WHERE r.SourceOnAccountId = ${alias}.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
+      WHERE r.SourceOnAccountId = ${alias}.Id AND r.Status NOT IN ${REFUND_CLOSED_SQL}), 0)
     + ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
       WHERE t.HeldOnAccountId = ${alias}.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0)`;
   return `CASE

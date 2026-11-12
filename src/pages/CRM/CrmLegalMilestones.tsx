@@ -1,39 +1,43 @@
+// CRM Legal Milestones: every booking's legal journey, from the agreement through both Sub-Registrar visits, NOC,
+// possession, sale deed and mutation. One list; one page per journey with the phases stacked, the phase it is on
+// highlighted and the one next action in the band. Each step's done/locked state is decided on the server.
 import { CERTIFICATE_TERMS, CERT_STATUS_LABEL } from "@/constants/crmStatuses";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Check, CircleDot, ExternalLink, Home, Info, Lock, Plus, RefreshCw, RotateCcw, Scale, ScrollText } from "lucide-react";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ArrowLeft, Check, ChevronDown, CircleDot, Download, ExternalLink, Home, Lock, Plus, RefreshCw, Scale, ScrollText } from "lucide-react";
+import { AGREEMENT_STEP_NAMES } from "./agreement/config";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import {
-  CrmAppPage, GridHighlights, GridProgress, GridRelated, GridSearch, GridSegment, GridStatusPill, GridTabs,
-  GridFooter, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_LABEL, GRID_PAGE_SIZES,
+  CrmGrid, GridDialog, GridFormField, GridFormSection, GridRelated, GridSearch, GridSegment, GridStatusPill, GridTabs, GridToneMark,
+  exportGrid, useGridPrefs, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_PAGE_SIZES, GRID_SHEET_KEYS, type GridCol,
 } from "@/components/crm/CrmDataTable";
 import { useCrmListState, useSticky, listParams } from "@/hooks/useCrmListState";
 import { SearchableSelect } from "@/components/SearchableSelect";
+import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, BandNext, CollectionBar, MoneyBand, StepBar, personName, type StepState } from "./payments/parts";
+
 
 const API = "/api/crm/legal-milestones";
 
-// Agreement workflow — 8 steps, most auto-synced from Agreement page actions.
-// DirectorMeeting is the only manual step (an in-person meeting with no digital trace).
-const AGREEMENT_STEPS = [
-  { key: "DocCollection",    label: "Document Collection",      hint: "Verify the customer's Identity Proof on the Agreement page" },
-  { key: "LegalReview",      label: "Legal Executive Assigned", hint: "Assign a Legal Executive to the agreement" },
-  { key: "Drafting",         label: "Drafting",                 hint: "Upload the Sale Agreement document" },
-  { key: "InternalApproval", label: "Internal Approval",        hint: "Get senior approval on the agreement" },
-  { key: "DocShared",        label: "Document Shared",          hint: "Send the agreement to the customer" },
-  { key: "MutualAgreement",  label: "Customer Approval",        hint: "Customer approves the agreement in their portal" },
-  { key: "DirectorMeeting",  label: "Director Meeting",         hint: "Hold the in-person director meeting, then mark it done here" },
-  { key: "FinalExecution",   label: "Final Execution",          hint: "Mark the agreement Executed" },
-] as const;
-const MANUAL_STEPS = new Set(["DirectorMeeting"]);
+// The agreement phase: the Agreement page's own steps up to execution (agreement/config.tsx, same names and order; the
+// server reads them off the agreement record as agr* flags). Its registration is the AFS registration phase. Each step
+// is worked on the Agreement page, in the part named here.
+const AGREEMENT_STEPS: { key: string; hint: string; tab: string }[] = [
+  { key: "agrInit", hint: "The agreement is made for the booking", tab: "overview" },
+  { key: "agrLegal", hint: "Assign the legal executive who prepares the paperwork", tab: "legal" },
+  { key: "agrPapers", hint: "Ask for and upload every mandatory paper", tab: "documents" },
+  { key: "agrSenior", hint: "An approver (Approval Setup: CRM Agreement) approves it", tab: "legal" },
+  { key: "agrSent", hint: "Share it with the customer's portal", tab: "legal" },
+  { key: "agrCustomer", hint: "The customer approves it, in the portal or recorded by staff", tab: "legal" },
+  { key: "agrDate", hint: "Both sides agree the signing date and it is approved", tab: "legal" },
+  { key: "agrExecuted", hint: "Every mandatory paper verified, then mark it executed", tab: "legal" },
+];
 
 async function fetchEligibleBookings(): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/eligible-bookings`);
@@ -59,10 +63,8 @@ async function fetchTrackerByBooking(bookingId: string): Promise<any | null> {
 // through Mutation, renders through the exact same StageRow component in one
 // continuous connected timeline, split only by light section headers.
 
-type StageAction =
-  | { kind: "navigate"; path: string }   // clicking routes to the owning feature page
-  | { kind: "manual"; onAction: () => void } // an in-app action with no dedicated page (e.g. Director Meeting)
-  | { kind: "auto" };                    // ticks itself from another page's action — nothing to click here
+// Every step is worked on the page that owns it; this page opens that page on the booking.
+type StageAction = { kind: "navigate"; path: string; label?: string };
 
 interface Stage {
   key: string;
@@ -120,45 +122,25 @@ interface WorkflowModel {
 // the Sale Deed is drafted — see isPhysicallyComplete below, used only for
 // that one informational note. It never gates Agreement, AFS, NOC, or
 // Pre-Possession.
-function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): WorkflowModel {
+function buildWorkflowModel(t: any): WorkflowModel {
   const isPhysicallyComplete = t.ProjectType === "ReadyToMove" || t.ProjectStatus === "Completed";
   // When each step is done and when it is locked is decided on the server (routes/crmLegalMilestones.js, LM_STAGES)
   // and comes on the row as D_<step> / L_<step>; this model only arranges and words them.
   const done = (key: string) => t[`D_${key}`] === 1;
   const locked = (key: string) => t[`L_${key}`] === 1;
 
-  const agreementDone = done("FinalExecution");
-  const agreementCurrentStep = t.CurrentStep ?? 1;
-
-  // Agreement's own 8 sub-steps, now expressed as ordinary Stage objects so
-  // they render through the exact same timeline row as everything after
-  // them — no more visually distinct "numbered circle" tracker bolted onto
-  // the front of a different-looking phase list.
-  const agreementStages: Stage[] = AGREEMENT_STEPS.map((s, idx) => {
-    const stepDone = t[`${s.key}Done`];
-    const isDone = done(s.key);
-    const isCurrent = agreementCurrentStep === idx + 1;
-    const isLocked = locked(s.key);
-    const isManual = MANUAL_STEPS.has(s.key);
-    const action: StageAction = isManual && isCurrent && !isDone
-      ? { kind: "manual", onAction: () => onManualStep?.(s.key) }
-      : !isManual && isCurrent && !isDone
-      ? { kind: "auto" }
-      : { kind: "navigate", path: "/crm/agreements" };
-    return {
-      key: s.key,
-      label: s.label,
-      sublabel: isDone
-        ? (stepDone ? `Completed ${String(stepDone).slice(0, 10)}` : "Completed")
-        : (s.hint || "Not started yet"),
-      no: null,
-      status: isDone ? "Completed" : null,
-      isDone,
-      isLocked,
-      unlockedHint: "Complete the previous step first",
-      action,
-    };
-  });
+  const agreementDone = done("agrExecuted");
+  const agreementStages: Stage[] = AGREEMENT_STEPS.map((st, i) => ({
+    key: st.key,
+    label: AGREEMENT_STEP_NAMES[i],
+    sublabel: done(st.key) ? "Done" : st.hint,
+    no: i === 0 ? t.AgreementNo || null : null,
+    status: null,
+    isDone: done(st.key),
+    isLocked: locked(st.key),
+    unlockedHint: `Waits for: ${AGREEMENT_STEP_NAMES[i - 1] ?? "the agreement"}`,
+    action: { kind: "navigate", path: `/crm/agreements?tab=${st.tab}`, label: "Open Agreement" },
+  }));
 
   // The AFS-registration gate that everything downstream keys off.
   const afsGate = done("afsReg");
@@ -185,7 +167,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
       key: "agreement",
       title: "Agreement Preparation & Signing",
       isApplicable: true,
-      description: "Internal 8-step process to prepare and get the Agreement for Sale signed by both parties.",
+      description: "Prepared, approved by a senior and the customer, dated and executed: the same steps as on the Agreement page.",
       stages: agreementStages,
     },
 
@@ -194,7 +176,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
       key: "afsVisit1",
       title: "Sub-Registrar Visit 1 — Registering the Agreement for Sale",
       isApplicable: true,
-      description: "The Agreement for Sale must be registered at the Sub-Registrar's Office before the deal is legally recognised. First the buyer confirms the stamp duty & registration fees (via the AFS Query Payment), then both parties attend in person to register the document.",
+      description: "The Agreement for Sale must be registered at the Sub-Registrar's Office before the deal is legally recognised. First the buyer pays the stamp duty and registration fee (Agreement Registration Fees), then both parties attend in person to register the document.",
       stages: [
         {
           key: "afsQP",
@@ -209,7 +191,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
         },
         {
           key: "afsReg",
-          label: "Agreement Registration Visit",
+          label: "Agreement Registry",
           sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 1) — Agreement becomes Registered",
           no: t.AfsRegNo || null,
           status: t.AfsRegistryStatus || null,
@@ -234,7 +216,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
           key: "noc",
           label: isLoanFinanced ? "No Objection Certificate — Bank" : "No Objection Certificate — Organisation",
           sublabel: isLoanFinanced
-            ? "Bank confirms it has no objection to the AFS registration (loan-case NOC)"
+            ? "Bank confirms it has no objection to the agreement's registration (loan-case NOC)"
             : "Developer confirms no outstanding dues or objections (self-funded case NOC)",
           no: nocNo || null,
           status: nocStatus || null,
@@ -251,12 +233,12 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
       key: "possession",
       title: "Possession & Key Handover",
       isApplicable: true,
-      description: "Once the AFS is registered and the project receives its Occupancy Certificate, the developer schedules a pre-possession inspection, issues a Possession Notice, and hands over keys.",
+      description: "Once the Agreement for Sale is registered and the project receives its Occupancy Certificate, the developer schedules a pre-possession inspection, issues a Possession Notice, and hands over keys.",
       stages: [
         {
           key: "ocCc",
           label: CERTIFICATE_TERMS.ONE,
-          sublabel: "Project's Occupancy or Completion Certificate from the authority — a project-level record, not gated on any single booking's progress (the backend has no per-booking gate on this)",
+          sublabel: "The project's certificate from the authority: one record for the whole project, not for each booking",
           no: null,
           status: null,
           isDone: done("ocCc"),
@@ -319,8 +301,8 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
       stages: [
         {
           key: "salesDeed",
-          label: "Sale Deed",
-          sublabel: "Ownership-transfer document — internal drafting, approvals, execution & registration",
+          label: "Sale Deed (director approved)",
+          sublabel: "The ownership-transfer document: drafted, then approved by the director (its registration is the next phase)",
           no: t.DeedNo || null,
           status: deedStatus,
           isDone: done("salesDeed"),
@@ -336,12 +318,12 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
       key: "afsVisit2",
       title: "Sub-Registrar Visit 2 — Registering the Sale Deed",
       isApplicable: true,
-      description: "Once the Sale Deed is Director Approved: confirm the stamp duty & registration fees (net of any AFS credit), then both parties attend in person to register the Sale Deed. After this, ownership is officially and permanently transferred.",
+      description: "Once the Sale Deed is Director Approved: confirm the stamp duty and registration fee (less the stamp duty already paid on the agreement), then both parties attend in person to register the Sale Deed. After this, ownership is officially and permanently transferred.",
       stages: [
         {
           key: "queryPayment",
-          label: "Query Payment (Stamp Duty & Reg. Fee)",
-          sublabel: "Net stamp duty & registration fee due before Visit 2 (AFS credit applied)",
+          label: "Deed Registration Fees",
+          sublabel: "Stamp duty and registration fee due before Visit 2, less the stamp duty already paid on the agreement",
           no: t.QPNo || null,
           status: t.QueryPaymentStatus || null,
           isDone: done("queryPayment"),
@@ -351,13 +333,13 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
         },
         {
           key: "registry",
-          label: "Registry (Sub-Registrar Visit)",
+          label: "Deed Registry",
           sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 2) — ownership transferred",
           no: t.RegNo || null,
           status: t.RegistryStatus || null,
           isDone: done("registry"),
           isLocked: locked("registry"),
-          unlockedHint: "Requires Query Payment to be Confirmed first",
+          unlockedHint: "Requires the Deed Registration Fees to be confirmed first",
           action: { kind: "navigate", path: "/crm/sales-deed?tab=Registry" },
         },
       ],
@@ -379,7 +361,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
           isDone: done("mutation"),
           isLocked: locked("mutation"),
 
-          unlockedHint: "Requires Sale Deed Registration Visit to be Completed first",
+          unlockedHint: "Requires the Deed Registry to be completed first",
           action: { kind: "navigate", path: "/crm/mutation" },
         },
       ],
@@ -414,13 +396,10 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
   return { isPhysicallyComplete, agreementDone, sections, progressChecks, journeyLabel, doneCount, totalCount };
 }
 
-// Today's date where the user is: toISOString gives the UTC date, a day behind before 05:30 IST.
-const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 // ─── Phase state ──────────────────────────────────────────────────────────────
-// Every view below (the gate summary, each booking's lane, the record's metro line) reads a phase's state from the same
-// WorkflowModel: done when all its steps are done, open when one of its steps can be worked now, waiting when every step
-// left is still locked behind another phase.
+// Every view below reads a phase's state from the same WorkflowModel: done when all its steps are done, open when one of
+// its steps can be worked now, waiting when every step left is still locked behind another phase.
 type PhaseState = "done" | "open" | "waiting";
 const phaseState = (sec: Section): PhaseState => {
   const st = sec.stages.filter((s) => s.isApplicable !== false);
@@ -429,211 +408,184 @@ const phaseState = (sec: Section): PhaseState => {
 };
 const phaseNext = (sec: Section) => sec.stages.find((s) => s.isApplicable !== false && !s.isDone && !s.isLocked);
 const PHASE_SHORT: Record<string, string> = {
-  agreement: "Agreement", afsVisit1: "AFS registration", noc: "NOC", possession: "Possession",
-  saleDeed: "Sale deed", afsVisit2: "Deed registration", mutation: "Mutation",
+  agreement: "Agreement", afsVisit1: "Agmt. reg.", noc: "NOC", possession: "Possession",
+  saleDeed: "Sale deed", afsVisit2: "Deed reg.", mutation: "Mutation",
 };
-const PHASE_CELL: Record<PhaseState, string> = {
-  done: "bg-emerald-500/15 border-emerald-500/30 text-emerald-800 dark:text-emerald-200",
-  open: "bg-primary/10 border-primary/40 text-foreground",
-  waiting: "bg-muted/50 border-border text-muted-foreground",
-};
-const SEG: Record<"done" | "open" | "locked", string> = { done: "bg-emerald-600", open: "bg-primary", locked: "bg-border" };
-const segOf = (s: Stage): "done" | "open" | "locked" => (s.isDone ? "done" : s.isLocked ? "locked" : "open");
+const { RULE_SOFT } = GRID_SHEET_KEYS;
+// The tabs have more room than the bar: a longer name where the short one is abbreviated.
+const PHASE_TAB_NAME: Partial<Record<string, string>> = { afsVisit1: "Agreement reg." };
+const PHASE_STEP: Record<PhaseState, StepState> = { done: "done", open: "active", waiting: "off" };
+const PHASE_WORD: Record<PhaseState, string> = { done: "Done", open: "In progress", waiting: "Waiting" };
+const phaseName = (sec: Section) => PHASE_SHORT[sec.key] ?? sec.title;
+const workableNow = (m: WorkflowModel) => m.sections.flatMap((sec) => { const n = phaseNext(sec); return n ? [{ sec, n }] : []; });
 
-/** One phase of a booking's lane: its steps as segments, and what can be worked now. */
-const PhaseCell: React.FC<{ sec: Section; onOpen: () => void }> = ({ sec, onOpen }) => {
-  const state = phaseState(sec);
-  const steps = sec.stages.filter((s) => s.isApplicable !== false);
-  const next = phaseNext(sec);
-  const done = steps.filter((s) => s.isDone).length;
-  return (
-    <button type="button" onClick={onOpen}
-      title={`${PHASE_SHORT[sec.key] ?? sec.title}: ${done} of ${steps.length} done${next ? ` · now: ${next.label}` : ""}`}
-      className={cn("w-full h-12 rounded-md border px-2 py-1.5 text-left flex flex-col justify-between transition-colors hover:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40", PHASE_CELL[state])}>
-      <span className="flex gap-0.5">
-        {steps.map((s) => <span key={s.key} className={cn("h-1.5 flex-1 rounded-full", SEG[segOf(s)])} />)}
-      </span>
-      <span className="text-[0.6875rem] leading-tight truncate font-medium">
-        {state === "done" ? <span className="inline-flex items-center gap-1"><Check size={11} /> Done</span>
-          : state === "open" ? (next?.label ?? "Open")
-          : <span className="inline-flex items-center gap-1"><Lock size={10} /> Waiting</span>}
-      </span>
-    </button>
-  );
-};
-
-/** A circular gauge: the share of journeys that have cleared a gate. */
-const Gauge: React.FC<{ value: number; total: number; label: string; tone: string; onClick?: () => void; active?: boolean }> = ({ value, total, label, tone, onClick, active }) => {
-  const pct = total ? Math.round((value / total) * 100) : 0;
-  const r = 22, c = 2 * Math.PI * r;
-  return (
-    <button type="button" onClick={onClick} aria-pressed={active}
-      className={cn("flex flex-col items-center gap-1.5 rounded-lg px-2 py-2 transition-colors hover:bg-muted/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40", active && "bg-primary/10 ring-1 ring-primary/30")}>
-      <svg width="56" height="56" viewBox="0 0 56 56" role="img" aria-label={`${label}: ${value} of ${total}`}>
-        <circle cx="28" cy="28" r={r} fill="none" stroke="hsl(var(--muted))" strokeWidth="6" />
-        <circle cx="28" cy="28" r={r} fill="none" strokeWidth="6" strokeLinecap="round" className={tone}
-          stroke="currentColor" strokeDasharray={`${(pct / 100) * c} ${c}`} transform="rotate(-90 28 28)" />
-        <text x="28" y="31" textAnchor="middle" className="fill-foreground" style={{ fontSize: 12, fontWeight: 700 }}>{pct}%</text>
-      </svg>
-      <span className="text-[0.6875rem] font-semibold text-center leading-tight">{label}</span>
-      <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{value.toLocaleString("en-IN")} of {total.toLocaleString("en-IN")}</span>
-    </button>
-  );
-};
+/** The journey's phases as the shared bar, with where it stands. */
+function journeyBar(m: WorkflowModel): { steps: { label: string; state: StepState }[]; caption: string } {
+  const steps = m.sections.map((sec) => ({ label: phaseName(sec), state: PHASE_STEP[phaseState(sec)] }));
+  const at = m.sections.filter((sec) => phaseState(sec) === "open").map(phaseName);
+  const caption = m.journeyLabel.done ? "Journey complete" : at.length ? `Now at ${at.join(" and ")}` : "Waiting";
+  return { steps, caption };
+}
+const pctOf = (m: WorkflowModel) => (m.totalCount ? Math.round((m.doneCount / m.totalCount) * 100) : 0);
 
 // ─── The record: one booking's journey ────────────────────────────────────────
-const StageLine: React.FC<{ stage: Stage; bookingId: number; navigate: (path: string) => void; canEdit: boolean; last: boolean }> = ({ stage, bookingId, navigate, canEdit, last }) => {
-  const { isDone, isLocked, action } = stage;
+// What a step's button does: opens the page that owns the step, on this booking.
+const stagePath = (stage: Stage, bookingId: number) => `${stage.action.path}${stage.action.path.includes("?") ? "&" : "?"}bookingId=${bookingId}`;
+function stageGo(stage: Stage, bookingId: number, navigate: (p: string) => void): { label: string; run: () => void } {
+  return { label: stage.action.label ?? (stage.status ? "Continue" : "Start"), run: () => navigate(stagePath(stage, bookingId)) };
+}
+
+/** One step inside a phase: a single line when done or waiting, a highlighted row with its button when it can be worked. */
+const StageLine: React.FC<{ stage: Stage; bookingId: number; navigate: (path: string) => void }> = ({ stage, bookingId, navigate }) => {
   const na = stage.isApplicable === false;
-  const isAuto = action.kind === "auto";
-  const isManual = action.kind === "manual";
-  const open = () => {
-    if (isLocked) return;
-    if (action.kind === "manual") { action.onAction(); return; }
-    if (action.kind === "navigate") navigate(`${action.path}${action.path.includes("?") ? "&" : "?"}bookingId=${bookingId}`);
-  };
-  const actionLabel = isManual ? "Mark done" : isAuto ? null : isDone ? "Open" : stage.status ? "Continue" : isLocked ? null : "Start";
-  const dot = na ? "border-dashed border-border bg-card" : isDone ? "bg-emerald-600 border-emerald-600 text-white" : isLocked ? "bg-muted border-border text-muted-foreground" : "bg-card border-primary border-2 text-primary";
+  const workable = !stage.isDone && !stage.isLocked && !na;
+  const go = workable ? stageGo(stage, bookingId, navigate) : null;
+  const path = stage.isDone ? stagePath(stage, bookingId) : null;
   return (
-    <li className="relative pl-9 pb-4 last:pb-0">
-      {!last && <span className={cn("absolute left-[11px] top-6 bottom-0 w-0.5 rounded-full", isDone ? "bg-emerald-500/60" : "bg-border")} />}
-      <span className={cn("absolute left-0 top-0.5 w-6 h-6 rounded-full border flex items-center justify-center", dot)}>
-        {isDone ? <Check size={13} /> : isLocked ? <Lock size={10} /> : na ? null : <span className="w-2 h-2 rounded-full bg-primary" />}
+    <li className={cn("flex items-start gap-3 px-4 py-2.5", workable && "bg-primary/5")}>
+      <span className={cn("mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 border",
+        stage.isDone ? "bg-emerald-600 border-emerald-600 text-white" : workable ? "border-2 border-primary bg-card" : "bg-muted border-border text-muted-foreground")}>
+        {stage.isDone ? <Check size={11} /> : workable ? <span className="w-1.5 h-1.5 rounded-full bg-primary" /> : <Lock size={9} />}
       </span>
-      <div className={cn("rounded-lg px-3 py-2.5", !isDone && !isLocked && !na ? "bg-primary/5 border border-primary/25" : "")}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0 flex flex-wrap items-center gap-2">
-            <span className={cn("text-[0.8125rem] font-semibold", (isLocked || na) && "text-muted-foreground", na && "line-through")}>{stage.label}</span>
-            {stage.no && <span className="text-[0.6875rem] tabular-nums text-muted-foreground">{stage.no}</span>}
-            {stage.status && <GridStatusPill status={stage.status} />}
-          </div>
-          {!na && (isAuto ? (
-            <span className="flex items-center gap-2">
-              <span className="text-[0.6875rem] text-muted-foreground" title="Ticks itself from the agreement's own actions">Automatic</span>
-              <button type="button" onClick={() => navigate(`/crm/agreements?bookingId=${bookingId}`)} className={cn(GRID_BTN, "h-7")}>Open agreement <ExternalLink size={11} /></button>
-            </span>
-          ) : (isManual && !canEdit) || actionLabel === null ? null : (
-            <button type="button" onClick={open} className={cn(isDone ? GRID_BTN : GRID_BTN_BRAND, "h-7")}>
-              {actionLabel} {!isManual && <ExternalLink size={11} />}
-            </button>
-          ))}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className={cn("text-[0.8125rem]", workable ? "font-semibold" : "font-medium", !stage.isDone && !workable && "text-muted-foreground", na && "line-through")}>{stage.label}</span>
+          {stage.no && <span className="text-[0.6875rem] tabular-nums text-muted-foreground">{stage.no}</span>}
+          {stage.status && !stage.isDone && <GridStatusPill status={stage.status} />}
         </div>
-        <p className={cn("text-xs mt-0.5", isDone ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground")}>
-          {na ? stage.notApplicableReason : isLocked ? stage.unlockedHint : stage.sublabel}
-        </p>
+        {!stage.isDone && <p className="text-xs text-muted-foreground mt-0.5">{na ? stage.notApplicableReason : stage.isLocked ? stage.unlockedHint : stage.sublabel}</p>}
       </div>
+      {stage.isDone ? (
+        <span className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-emerald-700 dark:text-emerald-300 tabular-nums">{stage.status || "Done"}</span>
+          {path && <button type="button" onClick={() => navigate(path)} className="text-muted-foreground hover:text-primary" title={`Open ${stage.label}`} aria-label={`Open ${stage.label}`}><ExternalLink size={12} /></button>}
+        </span>
+      ) : go ? (
+        <button type="button" onClick={go.run} className={cn(GRID_BTN_BRAND, "h-7 shrink-0")}>{go.label} <ExternalLink size={11} /></button>
+      ) : null}
     </li>
   );
 };
 
-const JourneyRecord: React.FC<{ t: any; model: WorkflowModel; canEdit: boolean; navigate: (p: string) => void }> = ({ t, model, canEdit, navigate }) => {
-  const pct = model.totalCount ? Math.round((model.doneCount / model.totalCount) * 100) : 0;
-  const nowOpen = model.sections.flatMap((sec) => { const n = phaseNext(sec); return n ? [{ sec, n }] : []; });
-  const jump = (key: string) => document.getElementById(`lm-phase-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+/** One phase: a single line (state, name, steps done); opened to show its steps. */
+const PhaseBlock: React.FC<{ sec: Section; open: boolean; onToggle: () => void; bookingId: number; navigate: (p: string) => void }> = ({ sec, open, onToggle, bookingId, navigate }) => {
+  const st = phaseState(sec);
+  const steps = sec.stages.filter((s) => s.isApplicable !== false);
+  const done = steps.filter((s) => s.isDone).length;
+  const now = phaseNext(sec);
+  return (
+    <section id={`lm-phase-${sec.key}`} className="scroll-mt-4" style={{ borderTop: RULE_SOFT }}>
+      <button type="button" onClick={onToggle} aria-expanded={open} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
+        <span className={cn("w-7 h-7 rounded-md flex items-center justify-center shrink-0", st === "done" ? "bg-emerald-600 text-white" : st === "open" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
+          {st === "done" ? <Check size={14} /> : st === "open" ? <CircleDot size={14} /> : <Lock size={12} />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[0.8125rem] font-semibold">{sec.title}</span>
+          <span className="block text-xs text-muted-foreground truncate">{st === "done" ? "All steps done" : st === "open" ? `Now: ${now?.label ?? "—"}` : sec.stages.find((s) => !s.isDone)?.unlockedHint || "Waiting on an earlier phase"}</span>
+        </span>
+        <span className="text-xs tabular-nums text-muted-foreground shrink-0">{done} of {steps.length}</span>
+        <GridToneMark text={PHASE_WORD[st]} tone={st === "done" ? "done" : st === "open" ? "moving" : "draft"} />
+        <ChevronDown size={15} className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="pb-2">
+          <p className="px-4 pb-2 text-xs text-muted-foreground">{sec.description}</p>
+          {sec.isApplicable
+            ? <ol className="divide-y divide-border/60 border-y border-border/60">{sec.stages.map((stage) => <StageLine key={stage.key} stage={stage} bookingId={bookingId} navigate={navigate} />)}</ol>
+            : <p className="px-4 py-2 text-xs text-muted-foreground">{sec.notApplicableReason}</p>}
+        </div>
+      )}
+    </section>
+  );
+};
+
+const JourneyRecord: React.FC<{ t: any; model: WorkflowModel; navigate: (p: string) => void; onBack: () => void; onRefresh: () => void; refreshing: boolean }> = ({ t, model, navigate, onBack, onRefresh, refreshing }) => {
+  const nowOpen = workableNow(model);
+  // Phases in progress start open; finished and waiting ones are one line each until opened.
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const isOpen = (sec: Section) => opened[sec.key] ?? phaseState(sec) === "open";
+  const toggle = (key: string, now: boolean) => setOpened((o) => ({ ...o, [key]: !now }));
+  // The band's next step: the first step that can be worked now. Possession and the sale deed can both be open at once;
+  // every open phase is unfolded below with its own button.
+  const first = nowOpen[0];
+  let next = ""; let action: { label: string; run: () => void } | null = null;
+  if (model.journeyLabel.done) next = "Every step of the legal journey is done.";
+  else if (!first) next = "Everything left is waiting on another phase.";
+  else {
+    next = `${first.n.label} (${phaseName(first.sec)})${nowOpen.length > 1 ? `, and ${nowOpen.length - 1} more open below` : ""}`;
+    const go = stageGo(first.n, t.BookingId, navigate);
+    action = { label: first.n.action.label ?? `${go.label}: ${first.n.label}`, run: go.run };
+  }
   return (
     <div className="space-y-4">
-      <GridHighlights icon={Scale} object="Legal journey"
-        title={<ApplicantNames name={t.ApplicantName} bookingId={t.BookingId} applicationId={t.ApplicationId} />}
-        status={model.journeyLabel.done ? <GridStatusPill status="Completed" label="Journey complete" /> : <GridStatusPill status="Pending" label={model.journeyLabel.text} />}
-        sub={<>{[t.BookingNo, [t.ProjectName, t.UnitNo].filter(Boolean).join(" · ")].filter(Boolean).join(" · ")}
-          {model.isPhysicallyComplete && <span title="The project is already complete (ready to move): Handover need not wait for the Sale Deed."> · project ready</span>}</>}
+      <MoneyBand eyebrow={`Legal journey · ${t.BookingNo ?? ""}`} title={<span className="capitalize">{personName(t.ApplicantName)}</span>}
+        status={<span className="inline-flex items-center h-5 px-2 rounded-full border border-white/30 text-[0.6875rem] font-semibold text-white">{model.journeyLabel.done ? "Journey complete" : "In progress"}</span>}
+        sub={[t.ProjectName, t.UnitNo && `Unit ${t.UnitNo}`, model.isPhysicallyComplete && "project ready to move"].filter(Boolean).join(" · ")}
         actions={<>
-          <button type="button" onClick={() => navigate(`/crm/agreements?bookingId=${t.BookingId}`)} className={GRID_BTN}><ScrollText size={13} /> Agreement</button>
-          <button type="button" onClick={() => navigate(`/crm/bookings?view=${t.BookingId}`)} className={GRID_BTN}><Home size={13} /> Booking</button>
+          <button type="button" onClick={onBack} className={BAND_KEY}><ArrowLeft size={13} /> All journeys</button>
+          <button type="button" onClick={() => navigate(`/crm/agreements?bookingId=${t.BookingId}`)} className={BAND_KEY}><ScrollText size={13} /> Agreement</button>
+          <button type="button" onClick={() => navigate(`/crm/bookings?view=${t.BookingId}`)} className={BAND_KEY}><Home size={13} /> Booking</button>
+          <button type="button" onClick={onRefresh} disabled={refreshing} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={refreshing ? "animate-spin" : ""} /></button>
         </>}
-        fields={[
-          { label: "Progress", value: <span className="inline-flex items-center gap-2"><GridProgress done={model.doneCount} total={model.totalCount} /><span className="text-xs text-muted-foreground">{pct}%</span></span> },
-          { label: "Phases done", value: `${model.progressChecks.filter((p) => p.done).length} of ${model.progressChecks.length}` },
-          { label: "Can be worked now", value: nowOpen.length ? nowOpen.map((x) => x.n.label).join(", ") : "—" },
-          { label: "Financing", value: t.NocResolvedType === "Bank" ? "Home loan (bank NOC)" : "Self-funded (developer NOC)" },
-          { label: CERTIFICATE_TERMS.ONE, value: t.OcCcReceived === 1 ? CERT_STATUS_LABEL.Received : "Not yet issued" },
-          { label: "Dues", value: t.HasOutstandingDues === 1 ? <span className="text-destructive font-semibold">Outstanding</span> : "Clear" },
-        ]} />
+        lead={`${pctOf(model)}%`} leadNote={`${model.doneCount} of ${model.totalCount} steps done`}
+        bar={<StepBar steps={journeyBar(model).steps} onDark />}
+        figures={[
+          { label: "Phases done", dot: BAND_DOT.collected, value: `${model.progressChecks.filter((p) => p.done).length} of ${model.progressChecks.length}`, note: model.journeyLabel.done ? "Complete" : `${nowOpen.length} step${nowOpen.length === 1 ? "" : "s"} open now` },
+          { label: "Financing", value: t.NocResolvedType === "Bank" ? "Home loan" : "Self-funded", note: t.NocResolvedType === "Bank" ? "Bank NOC" : "Developer NOC" },
+          { label: CERTIFICATE_TERMS.ONE, value: t.OcCcReceived === 1 ? CERT_STATUS_LABEL.Received : "Not yet", note: "For the project" },
+          { label: "Dues", dot: t.HasOutstandingDues === 1 ? BAND_DOT.overdue : undefined, value: t.HasOutstandingDues === 1 ? "Outstanding" : "Clear", note: "Needed for handover", alert: t.HasOutstandingDues === 1 },
+        ]}
+        footer={<BandNext text={next} finished={model.journeyLabel.done} action={action} />} />
 
-      {/* The metro line: every phase as a station; click one to go to it. */}
-      <section className={cn(GRID_CARD, "px-4 py-5 overflow-x-auto")}>
-        <ol className="flex items-start min-w-[44rem]" aria-label="Phases">
-          {model.sections.map((sec, i) => {
-            const st = phaseState(sec);
-            const steps = sec.stages.filter((s) => s.isApplicable !== false);
-            const done = steps.filter((s) => s.isDone).length;
-            return (
-              <li key={sec.key} className="flex-1 relative flex flex-col items-center text-center">
-                {i > 0 && <span className={cn("absolute top-[15px] right-1/2 w-full h-1 -z-0", phaseState(model.sections[i - 1]) === "done" ? "bg-emerald-500" : "bg-border")} />}
-                <button type="button" onClick={() => jump(sec.key)} title={sec.description}
-                  className={cn("relative z-10 w-8 h-8 rounded-full border-4 flex items-center justify-center bg-card focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                    st === "done" ? "border-emerald-500 bg-emerald-500 text-white" : st === "open" ? "border-primary text-primary" : "border-border text-muted-foreground")}>
-                  {st === "done" ? <Check size={14} /> : st === "waiting" ? <Lock size={11} /> : <span className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />}
-                </button>
-                <button type="button" onClick={() => jump(sec.key)} className="mt-2 text-xs font-semibold hover:text-primary">{PHASE_SHORT[sec.key] ?? sec.title}</button>
-                <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{done}/{steps.length}</span>
-              </li>
-            );
-          })}
-        </ol>
-      </section>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem] items-start">
-        <div className="space-y-4 min-w-0">
-          {model.sections.map((sec) => {
-            const st = phaseState(sec);
-            return (
-              <section key={sec.key} id={`lm-phase-${sec.key}`} className={cn(GRID_CARD, "overflow-hidden scroll-mt-4")}>
-                <header className={cn("px-4 py-3 border-b border-border flex items-start gap-3", st === "done" ? "bg-emerald-500/5" : st === "open" ? "bg-primary/5" : "")}>
-                  <span className={cn("w-7 h-7 rounded-md flex items-center justify-center shrink-0", st === "done" ? "bg-emerald-600 text-white" : st === "open" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
-                    {st === "done" ? <Check size={14} /> : st === "open" ? <CircleDot size={14} /> : <Lock size={12} />}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-[0.8125rem] font-bold">{sec.title}</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">{sec.description}</p>
-                  </div>
-                  <GridStatusPill status={st === "done" ? "Completed" : st === "open" ? "InProgress" : "Draft"} label={st === "done" ? "Done" : st === "open" ? "In progress" : "Waiting"} />
-                </header>
-                {sec.isApplicable ? (
-                  <ol className="px-4 py-4">
-                    {sec.stages.map((stage, idx) => (
-                      <StageLine key={stage.key} stage={stage} bookingId={t.BookingId} navigate={navigate} canEdit={canEdit} last={idx === sec.stages.length - 1} />
-                    ))}
-                  </ol>
-                ) : <p className="px-4 py-4 text-xs text-muted-foreground">{sec.notApplicableReason}</p>}
-              </section>
-            );
-          })}
+      <GridRelated icon={Scale} title="Journey" action={<span className="text-xs text-muted-foreground">Possession and the sale deed run side by side once the agreement for sale is registered.</span>}>
+        <div>
+          {model.sections.map((sec) => { const o = isOpen(sec); return <PhaseBlock key={sec.key} sec={sec} open={o} onToggle={() => toggle(sec.key, o)} bookingId={t.BookingId} navigate={navigate} />; })}
         </div>
-
-        <aside className="space-y-4 min-w-0 xl:sticky xl:top-4">
-          <GridRelated icon={CircleDot} title="Can be worked now" count={nowOpen.length}>
-            {nowOpen.length === 0 ? <p className="px-4 py-4 text-xs text-muted-foreground">{model.journeyLabel.done ? "Every step is done." : "Everything left is waiting on another phase."}</p> : (
-              <ul>
-                {nowOpen.map(({ sec, n }) => (
-                  <li key={n.key}>
-                    <button type="button" onClick={() => jump(sec.key)} className="w-full px-4 py-2.5 text-left hover:bg-muted/50 border-b border-border/70 last:border-0">
-                      <div className="text-xs font-semibold">{n.label}</div>
-                      <div className="text-[0.6875rem] text-muted-foreground">{PHASE_SHORT[sec.key] ?? sec.title}</div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </GridRelated>
-          <section className={cn(GRID_CARD, "px-4 py-3 text-xs text-muted-foreground flex gap-2")}>
-            <Info size={14} className="shrink-0 mt-0.5 text-primary" />
-            <p>Possession and the sale deed run side by side once the agreement for sale is registered. Most steps tick themselves from their own pages; the director meeting is marked here.</p>
-          </section>
-        </aside>
-      </div>
+      </GridRelated>
     </div>
   );
 };
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── The list ─────────────────────────────────────────────────────────────────
 const PHASE_KEYS = ["agreement", "afsVisit1", "noc", "possession", "saleDeed", "afsVisit2", "mutation"] as const;
 type Focus = "all" | "complete" | (typeof PHASE_KEYS)[number];
 // The server's orders (routes/crmLegalMilestones.js, LM_ORDER).
 type SortKey = "least" | "most" | "name" | "newest";
-interface JourneySummary { total: number; complete: number; manualDue: number; avgProgress: number; gates: Record<string, number>; atPhase: Record<string, number> }
+interface JourneySummary { total: number; complete: number; avgProgress: number; gates: Record<string, number>; atPhase: Record<string, number> }
 interface JourneyPage { rows: any[]; total: number; summary: JourneySummary }
-const EMPTY_SUMMARY: JourneySummary = { total: 0, complete: 0, manualDue: 0, avgProgress: 0, gates: {}, atPhase: {} };
+const EMPTY_SUMMARY: JourneySummary = { total: 0, complete: 0, avgProgress: 0, gates: {}, atPhase: {} };
+type Lane = { t: any; m: WorkflowModel };
+
+const COLS: GridCol<Lane>[] = [
+  { id: "customer", label: "Customer", locked: true, csv: ({ t }) => personName(t.ApplicantName), cell: ({ t }) => (
+    <span className="block py-1.5 min-w-0">
+      <span className="block font-semibold text-foreground capitalize truncate" title={t.ApplicantName}>{personName(t.ApplicantName)}</span>
+      <span className="block text-xs text-muted-foreground tabular-nums">{t.BookingNo}</span>
+    </span>
+  ) },
+  { id: "unit", label: "Project and unit", csv: ({ t }) => [t.ProjectName, t.UnitNo].filter(Boolean).join(" / "), cell: ({ t, m }) => (
+    <span className="block py-1.5 min-w-0">
+      <span className="block font-medium truncate">{[t.ProjectName, t.UnitNo].filter(Boolean).join(" · ") || "—"}</span>
+      <span className="block text-xs text-muted-foreground truncate">{[t.NocResolvedType === "Bank" ? "Home loan" : "Self-funded", m.isPhysicallyComplete && "project ready"].filter(Boolean).join(" · ")}</span>
+    </span>
+  ) },
+  { id: "progress", label: "Progress", csv: ({ m }) => journeyBar(m).caption, cell: ({ m }) => { const b = journeyBar(m); return <span className="block min-w-[16rem] py-1.5"><StepBar steps={b.steps} caption={b.caption} /></span>; } },
+  { id: "now", label: "Can be worked now", csv: ({ m }) => workableNow(m).map((x) => x.n.label).join("; "), cell: ({ m }) => {
+    const now = workableNow(m);
+    return now.length ? <span className="block py-1 text-xs space-y-0.5">{now.map(({ n }) => <span key={n.key} className="block truncate">{n.label}</span>)}</span>
+      : <span className="text-muted-foreground">{m.journeyLabel.done ? "Complete" : "Waiting"}</span>;
+  } },
+  { id: "done", label: "Done", align: "right", csv: ({ m }) => `${pctOf(m)}%`, cell: ({ m }) => (
+    <span className="block text-right">
+      <span className={cn("text-sm font-bold tabular-nums", pctOf(m) === 100 && "text-emerald-600")}>{pctOf(m)}%</span>
+      <span className="block text-[0.6875rem] text-muted-foreground tabular-nums">{m.doneCount}/{m.totalCount}</span>
+    </span>
+  ) },
+  // In the export only: each phase's state.
+  ...PHASE_KEYS.map((k): GridCol<Lane> => ({ id: `ph-${k}`, label: PHASE_SHORT[k], hiddenByDefault: true, cell: () => null,
+    csv: ({ m }) => { const sec = m.sections.find((x) => x.key === k); return sec ? PHASE_WORD[phaseState(sec)] : ""; } })),
+];
+const NO_SORT = { key: "", dir: "asc" as const };
 
 const CrmLegalMilestones: React.FC = () => {
   const rights = usePageRights("crm-legal-milestones");
@@ -643,18 +595,19 @@ const CrmLegalMilestones: React.FC = () => {
   const [newDialog, setNewDialog] = useState(false);
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
   const s = useCrmListState({ pageSize, defaultSort: { key: "CreatedAt", dir: "desc" } });
   const [focus, setFocusRaw] = useState<Focus>("all");
   const [sortKey, setSortKeyRaw] = useState<SortKey>("least");
   const setFocus = (f: Focus) => { setFocusRaw(f); s.setPage(1); };
   const setSortKey = (k: SortKey) => { setSortKeyRaw(k); s.setPage(1); };
+  const [prefs, setPrefs] = useGridPrefs("crm-legal-milestones-cols-v2", COLS);
   // The open journey lives in the address (?bookingId=), so a refresh or a shared link lands on it.
   const openBookingId = sp.get("bookingId");
 
   // One page of journeys from the server, filtered to where they are and in the asked order, with the summary across
-  // every journey under the search and filters (the gates and the tab counts): however many there are, the page only
-  // ever holds one page of them.
+  // every journey under the search and filters (the gates and the tab counts).
   const qs = useMemo(() => {
     const p = listParams(s.query, "All");
     ["status", "sortKey", "sortDir"].forEach((k) => p.delete(k));
@@ -671,22 +624,21 @@ const CrmLegalMilestones: React.FC = () => {
       return { rows: d?.rows || [], total: d?.total || 0, summary: d?.summary || EMPTY_SUMMARY };
     },
     staleTime: 30_000,
+    enabled: !openBookingId,
   });
   const result = useSticky(data);
   const summary = result?.summary ?? EMPTY_SUMMARY;
   const { data: bookings = [], isLoading: loadingBookings } = useQuery({
     queryKey: ["crm-legal-milestones-eligible-bookings"], queryFn: fetchEligibleBookings, staleTime: 60_000, enabled: newDialog,
   });
-  const { data: openTracker, refetch: refetchOpen } = useQuery({
+  const { data: openTracker, refetch: refetchOpen, isFetching: openFetching } = useQuery({
     queryKey: ["crm-legal-milestones", "booking", openBookingId],
     queryFn: () => fetchTrackerByBooking(openBookingId!),
     enabled: !!openBookingId,
     staleTime: 15_000,
   });
-  const lanes = useMemo(() => (result?.rows ?? []).map((t) => ({ t, m: buildWorkflowModel(t) })), [result]);
-  const pageTotal = result?.total ?? 0;
-  const { total, complete, manualDue } = summary;
-  const avgPct = summary.avgProgress;
+  const lanes = useMemo<Lane[]>(() => (result?.rows ?? []).map((t) => ({ t, m: buildWorkflowModel(t) })), [result]);
+  const { total, complete } = summary;
 
   const openJourney = (t: any) => setSp((p) => { p.set("bookingId", String(t.BookingId)); return p; }, { replace: false });
   const closeJourney = () => setSp((p) => { p.delete("bookingId"); return p; }, { replace: false });
@@ -697,12 +649,11 @@ const CrmLegalMilestones: React.FC = () => {
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ BookingId: parseInt(bookingId) }) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not start the legal workflow.");
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Could not start the legal workflow.");
       toast.success("Legal workflow started");
       setNewDialog(false);
       ["crm-legal-milestones", "crm-legal-milestones-eligible-bookings"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
-      // Open the journey just started.
       setSp((p) => { p.set("bookingId", bookingId); return p; });
       setBookingId("");
     } catch (e: any) {
@@ -712,161 +663,85 @@ const CrmLegalMilestones: React.FC = () => {
     }
   };
 
-  const handleStepUpdate = async (step: string, status: string) => {
-    if (!openTracker) return;
+  const openModel = openTracker ? buildWorkflowModel(openTracker) : null;
+
+  const handleExport = async () => {
+    setExporting(true);
     try {
-      const res = await fetchWithAuth(`${API}/${openTracker.Id}/${step}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Status: status, Done: status === "Completed" ? todayLocal() : undefined }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not update the step.");
-      toast.success("Step marked done");
-      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
-      refetchOpen();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
+      const p = new URLSearchParams(qs); ["page", "pageSize", "focus", "order"].forEach((k) => p.delete(k));
+      const r = await fetchWithAuth(`${API}?${p}`);
+      const rows = await r.json().catch(() => null);
+      if (!r.ok || !Array.isArray(rows)) throw new Error(rows?.error || `Could not export (${r.status}).`);
+      exportGrid(rows.map((t: any) => ({ t, m: buildWorkflowModel(t) })), COLS, "legal-journeys");
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setExporting(false); }
   };
-  const openModel = openTracker ? buildWorkflowModel(openTracker, (step) => handleStepUpdate(step, "Completed")) : null;
 
   const focusTabs = [
-    { key: "all" as Focus, label: "All journeys", count: total },
-    ...PHASE_KEYS.map((k) => ({ key: k as Focus, label: `At ${PHASE_SHORT[k]}`, count: summary.atPhase[k] ?? 0 })),
-    { key: "complete" as Focus, label: "Complete", count: complete },
+    { key: "all" as Focus, label: "All journeys", count: result ? total : null },
+    ...PHASE_KEYS.map((k) => ({ key: k as Focus, label: PHASE_TAB_NAME[k] ?? PHASE_SHORT[k], count: result ? summary.atPhase[k] ?? 0 : null })),
+    { key: "complete" as Focus, label: "Complete", count: result ? complete : null },
   ];
+  const listFiltered = s.hasFilters || focus !== "all";
 
   return (
-    <>
+    <div className="space-y-4">
       <Breadcrumbs items={openBookingId ? ["Dashboard", "CRM", "Legal Milestones", "Journey"] : ["Dashboard", "CRM", "Legal Milestones"]} />
-      <CrmAppPage icon={Scale} section="CRM · Legal & Possession" title="Legal Milestones"
-        subtitle={openBookingId ? undefined : "Every booking's legal journey on one map: agreement, both Sub-Registrar visits, NOC, possession, sale deed and mutation."}
-        actions={<>
-          {openBookingId && <button type="button" onClick={closeJourney} className={GRID_BTN}><ArrowLeft size={13} /> Journey map</button>}
-          {rights.canCreate && <button type="button" onClick={() => setNewDialog(true)} className={GRID_BTN_BRAND}><Plus size={13} /> Start workflow</button>}
-        </>}>
+      {openBookingId ? (
+        !openTracker || !openModel
+          ? <div className={cn(GRID_CARD, "py-16 text-center text-sm text-muted-foreground")}>
+              {openTracker === null ? <>This booking has no legal workflow yet. <button type="button" onClick={closeJourney} className="text-primary hover:underline ml-1">All journeys</button></> : "Loading…"}
+            </div>
+          : <JourneyRecord t={openTracker} model={openModel} navigate={navigate} onBack={closeJourney} onRefresh={() => refetchOpen()} refreshing={openFetching} />
+      ) : (
+        <>
+          <MoneyBand eyebrow="CRM" title="Legal Milestones" sub="Every booking's legal journey: agreement, both Sub-Registrar visits, NOC, possession, sale deed and mutation."
+            actions={<>
+              {rights.canCreate && <button type="button" onClick={() => setNewDialog(true)} className={BAND_KEY_MAIN}><Plus size={13} /> Start Workflow</button>}
+              <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            </>}
+            lead={`${complete} of ${total}`} leadNote="journeys complete"
+            bar={<CollectionBar onDark due={total} collected={complete} finance={0} recorded={0} />}
+            figures={[
+              { label: "Average progress", value: `${summary.avgProgress}%`, note: "Across every journey" },
+              { label: "Agreement executed", value: String(summary.gates.agreement ?? 0), note: "Agreement phase done" },
+              { label: "Agreement registered", dot: BAND_DOT.finance, value: String(summary.gates.afsVisit1 ?? 0), note: "Visit 1 done" },
+              { label: "Sale deed registered", dot: BAND_DOT.collected, value: String(summary.gates.afsVisit2 ?? 0), note: "Visit 2 done" },
+            ]} />
+          <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
+            <GridTabs<Focus> label="Where they are" active={focus} onChange={setFocus} tabs={focusTabs} />
+            <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b border-border">
+              <GridSearch value={s.searchInput} onChange={s.setSearchInput} placeholder="Customer or booking" />
+              <CrmCompanyProjectBlockFilter value={s.cpb} onChange={s.setCpb} />
+              <GridSegment<SortKey> label="Order" value={sortKey} onChange={setSortKey} options={[
+                { key: "least", label: "Least done" }, { key: "most", label: "Most done" }, { key: "name", label: "Name" }, { key: "newest", label: "Newest" },
+              ]} />
+              {listFiltered && <button type="button" onClick={() => { s.reset(); setFocus("all"); }} className={GRID_BTN}>Clear filters</button>}
+              <button type="button" onClick={handleExport} disabled={exporting || !total} className={cn(GRID_BTN, "ml-auto")} title="Export to Excel"><Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span></button>
+            </div>
+            <CrmGrid cols={COLS} prefs={prefs} onPrefs={setPrefs} rows={lanes} rowKey={({ t }) => t.Id} noRowNumbers
+              loading={isLoading} fetching={isFetching} error={error ? translateError((error as Error).message) : null} onRetry={() => refetch()}
+              sort={NO_SORT} onSort={() => {}} onRowClick={({ t }) => openJourney(t)}
+              empty={listFiltered ? "No journey matches these filters." : "No legal workflow started yet."}
+              page={s.page} pageSize={pageSize} total={result?.total ?? 0} onPage={s.setPage} onPageSize={(n) => { setPageSize(n); s.setPage(1); }} />
+          </div>
+        </>
+      )}
 
-        {!openBookingId && (
-          <>
-            {/* The gates: what share of journeys has cleared each phase. Click one to see who is on it now. */}
-            <section className={cn(GRID_CARD, "p-4")}>
-              <div className="flex flex-wrap items-end justify-between gap-3 mb-3">
-                <div>
-                  <h2 className="text-base font-bold leading-tight">Gates cleared</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Share of the {total.toLocaleString("en-IN")} journeys past each phase. Click a gate to see who is on it now.</p>
-                </div>
-                <div className="flex gap-6">
-                  <div className="text-right"><div className="text-2xl font-bold tabular-nums">{complete.toLocaleString("en-IN")}</div><div className="text-[0.6875rem] text-muted-foreground">complete</div></div>
-                  <div className="text-right"><div className="text-2xl font-bold tabular-nums">{avgPct}%</div><div className="text-[0.6875rem] text-muted-foreground">average progress</div></div>
-                  <div className="text-right"><div className={cn("text-2xl font-bold tabular-nums", manualDue > 0 && "text-primary")}>{manualDue.toLocaleString("en-IN")}</div><div className="text-[0.6875rem] text-muted-foreground">director meetings due</div></div>
-                </div>
-              </div>
-              {isLoading && !result ? <div className="h-28 rounded-lg bg-muted/40 animate-pulse" /> : (
-                <div className="grid grid-cols-4 sm:grid-cols-7 gap-1">
-                  {PHASE_KEYS.map((k, i) => (
-                    <Gauge key={k} value={summary.gates[k] ?? 0} total={total} label={PHASE_SHORT[k]} tone={["text-sky-500", "text-indigo-500", "text-violet-500", "text-amber-500", "text-teal-500", "text-cyan-600", "text-emerald-600"][i]}
-                      active={focus === k} onClick={() => setFocus(focus === k ? "all" : k)} />
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* The journey map: one lane per booking, one cell per phase. */}
-            <section className={cn(GRID_CARD, "overflow-hidden")}>
-              <GridTabs<Focus> label="Where they are" active={focus} onChange={setFocus} tabs={focusTabs} />
-              <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
-                <GridSearch value={s.searchInput} onChange={s.setSearchInput} placeholder="Search customer or booking" />
-                <CrmCompanyProjectBlockFilter value={s.cpb} onChange={s.setCpb} />
-                <GridSegment<SortKey> label="Order" value={sortKey} onChange={setSortKey} options={[
-                  { key: "least", label: "Least done" }, { key: "most", label: "Most done" }, { key: "name", label: "Name" }, { key: "newest", label: "Newest" },
-                ]} />
-                {(s.hasFilters || focus !== "all") && (
-                  <button type="button" onClick={() => { s.reset(); setFocus("all"); }} className="inline-flex items-center gap-1 h-8 px-2 text-xs text-primary hover:underline">
-                    <RotateCcw size={12} /> Clear
-                  </button>
-                )}
-                <div className="ml-auto flex items-center gap-3">
-                  <span className="hidden md:flex items-center gap-3 text-[0.6875rem] text-muted-foreground">
-                    <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-500/40 border border-emerald-500/40" /> Done</span>
-                    <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-primary/20 border border-primary/40" /> Workable now</span>
-                    <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-muted border border-border" /> Waiting</span>
-                  </span>
-                  <button type="button" className={cn(GRID_BTN, "w-9 px-0")} onClick={() => refetch()} aria-label="Refresh" title="Refresh">
-                    <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <div className={cn("min-w-[64rem] transition-opacity", isFetching && result && "opacity-60")}>
-                  <div className="grid grid-cols-[16rem_repeat(7,minmax(0,1fr))_4.5rem] gap-2 px-3 py-2 bg-muted text-xs font-semibold text-muted-foreground border-b border-border sticky top-0 z-10">
-                    <span>Booking</span>
-                    {PHASE_KEYS.map((k) => <span key={k} className="truncate">{PHASE_SHORT[k]}</span>)}
-                    <span className="text-right">Done</span>
-                  </div>
-                  {error ? (
-                    <p className="py-12 text-center text-sm text-destructive">{(error as Error).message} <button type="button" onClick={() => refetch()} className="underline ml-1">Retry</button></p>
-                  ) : isLoading && !result ? (
-                    <div className="p-3 space-y-2">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-12 rounded-md bg-muted/50 animate-pulse" />)}</div>
-                  ) : lanes.length === 0 ? (
-                    <p className="py-14 text-center text-sm text-muted-foreground">{s.hasFilters || focus !== "all" ? "No journey matches." : "No legal workflow started yet."}</p>
-                  ) : (
-                    <ul>
-                      {lanes.map(({ t, m }) => {
-                        const pct = m.totalCount ? Math.round((m.doneCount / m.totalCount) * 100) : 0;
-                        return (
-                          <li key={t.Id} className="grid grid-cols-[16rem_repeat(7,minmax(0,1fr))_4.5rem] gap-2 items-center px-3 py-2 border-b border-border/70 hover:bg-muted/30">
-                            <button type="button" onClick={() => openJourney(t)} className="min-w-0 text-left">
-                              <div className="text-[0.8125rem] font-semibold text-primary hover:underline truncate">{t.ApplicantName || "—"}</div>
-                              <div className="text-[0.6875rem] text-muted-foreground tabular-nums truncate">{[t.BookingNo, t.UnitNo].filter(Boolean).join(" · ")}{m.isPhysicallyComplete ? " · project ready" : ""}</div>
-                            </button>
-                            {PHASE_KEYS.map((k) => {
-                              const sec = m.sections.find((x) => x.key === k);
-                              return sec ? <PhaseCell key={k} sec={sec} onOpen={() => openJourney(t)} /> : <span key={k} />;
-                            })}
-                            <span className="text-right">
-                              <span className={cn("text-sm font-bold tabular-nums", pct === 100 && "text-emerald-600")}>{pct}%</span>
-                              <span className="block text-[0.6875rem] text-muted-foreground tabular-nums">{m.doneCount}/{m.totalCount}</span>
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-              </div>
-              <GridFooter page={s.page} pageSize={pageSize} total={pageTotal} onPage={s.setPage} onPageSize={(n) => { setPageSize(n); s.setPage(1); }} />
-            </section>
-          </>
-        )}
-
-        {openBookingId && (
-          !openTracker || !openModel
-            ? <div className={cn(GRID_CARD, "py-16 text-center text-sm text-muted-foreground")}>{openTracker === null ? "This booking has no legal workflow yet." : "Loading…"}</div>
-            : <JourneyRecord t={openTracker} model={openModel} canEdit={rights.canEdit} navigate={navigate} />
-        )}
-      </CrmAppPage>
-
-      <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
-        <DialogContent className="max-w-sm p-5 gap-4">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Scale size={16} className="text-primary" /> Start legal workflow</DialogTitle></DialogHeader>
-          <label className="block space-y-1">
-            <span className={cn("block font-medium", GRID_LABEL)}>Booking <span className="text-destructive">*</span></span>
-            <SearchableSelect value={bookingId} onChange={setBookingId}
-              placeholder={loadingBookings ? "Loading bookings…" : startableBookings.length ? "Select booking" : "No booking is eligible"}
-              searchPlaceholder="Search booking or customer…"
-              options={startableBookings.map((b: any) => ({ value: String(b.Id), label: `${b.BookingNo} · ${b.ApplicantName}` }))} />
-            {!loadingBookings && startableBookings.length === 0 && (
-              <span className="block text-xs text-muted-foreground pt-1">A booking needs to be approved, active, not frozen, have an agreement on file, and no legal workflow yet.</span>
-            )}
-          </label>
-          <DialogFooter className="gap-2">
-            <button type="button" onClick={() => setNewDialog(false)} className={GRID_BTN}>Cancel</button>
-            <button type="button" onClick={handleStart} disabled={saving || !bookingId} className={GRID_BTN_BRAND}>{saving ? "Starting…" : "Start workflow"}</button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+      {newDialog && (
+        <GridDialog onClose={() => setNewDialog(false)} icon={Scale} width="max-w-2xl" title="Start Legal Workflow" description="Tracks the booking's legal journey from the agreement to mutation."
+          footer={<><button type="button" onClick={() => setNewDialog(false)} className={GRID_BTN}>Cancel</button><button type="button" onClick={handleStart} disabled={saving || !bookingId} className={GRID_BTN_BRAND}>{saving ? "Starting…" : "Start Workflow"}</button></>}>
+          <GridFormSection>
+            <GridFormField label="Booking" required wide hint={!loadingBookings && startableBookings.length === 0 ? "No booking is eligible: it needs to be approved, active, not frozen, have an agreement on file, and no legal workflow yet." : undefined}>
+              <SearchableSelect value={bookingId} onChange={setBookingId}
+                placeholder={loadingBookings ? "Loading bookings…" : startableBookings.length ? "Select booking" : "No booking is eligible"}
+                searchPlaceholder="Search booking or customer…"
+                options={startableBookings.map((b: any) => ({ value: String(b.Id), label: `${b.BookingNo} · ${personName(b.ApplicantName)}` }))} />
+            </GridFormField>
+          </GridFormSection>
+        </GridDialog>
+      )}
+    </div>
   );
 };
 

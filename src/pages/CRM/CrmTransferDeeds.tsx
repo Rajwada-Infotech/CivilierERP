@@ -36,7 +36,7 @@ const CrmTransferDeeds: React.FC = () => {
     queryKey: ["crm-transfer-deeds"],
     queryFn: async () => {
       const r = await fetchWithAuth("/api/crm/transfer-deeds");
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load");
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Could not load");
       return r.json();
     },
   });

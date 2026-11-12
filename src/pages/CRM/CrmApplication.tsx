@@ -757,7 +757,7 @@ const CrmApplication: React.FC = () => {
       const res = await fetchWithAuth(`${API}/${id}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to load application");
+        throw new Error(data.error || "Could not load application");
       }
       const body = await res.json();
       const app = body.application;
@@ -903,7 +903,7 @@ const CrmApplication: React.FC = () => {
           body: JSON.stringify(step1Fields),
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "Failed to save changes");
+        if (!res.ok) throw new Error(data.error || "Could not save changes");
         setUnitLocked(true);
         toast.success("Project/Unit selection updated");
         window.dispatchEvent(new CustomEvent("approval-action"));
@@ -921,7 +921,7 @@ const CrmApplication: React.FC = () => {
         body: JSON.stringify({ CustomerId: parseInt(form.CustomerId), ...step1Fields }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create application");
+      if (!res.ok) throw new Error(data.error || "Could not create application");
       setApplicationId(data.id);
       setApplicationNo(data.ApplicationNo);
       setHasBooking(false);
@@ -1039,7 +1039,7 @@ const CrmApplication: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["unit-master"] });
       if (subData.booking?.BookingNo) {
           if (subData.booking.alreadyExists) {
-            toast.success("Application edits submitted successfully");
+            toast.success("Application changes saved");
           } else {
             toast.success(`Booking ${subData.booking.BookingNo} created — payment milestones auto-generated`);
           }
@@ -1084,7 +1084,7 @@ const CrmApplication: React.FC = () => {
         body: JSON.stringify({ Remarks: cancelRemarks.trim() || null }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to cancel application");
+      if (!res.ok) throw new Error(data.error || "Could not cancel application");
       toast.success("Application cancelled — any unit/parking hold has been released");
       const cancelledId = cancellingApp.Id;
       setCancellingApp(null);
@@ -1108,7 +1108,7 @@ const CrmApplication: React.FC = () => {
       try {
         const res = await fetchWithAuth(`${API}/${a.Id}`, { method: "DELETE" });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "Failed to delete application");
+        if (!res.ok) throw new Error(data.error || "Could not delete application");
         toast.success(data.message || "Application deleted");
         qc.invalidateQueries({ queryKey: ["crm-apps"] });
         qc.invalidateQueries({ queryKey: ["unit-master"] });
@@ -1140,7 +1140,7 @@ const CrmApplication: React.FC = () => {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create booking");
+      if (!res.ok) throw new Error(data.error || "Could not create booking");
       toast.success(`Booking ${data.BookingNo} created — payment milestones auto-generated`);
       qc.invalidateQueries({ queryKey: ["crm-apps"] });
       navigate(`/crm/bookings?applicationId=${a.Id}`);
@@ -1386,7 +1386,7 @@ const CrmApplication: React.FC = () => {
               )}
               {resumeOnRow && (
                 <button onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className={`${KEY_INK} h-7 px-2`}>
-                  <PlayCircle size={12} /> {loadingApplication ? "Loading..." : "Resume"}
+                  <PlayCircle size={12} /> {loadingApplication ? "Loading…" : "Resume"}
                 </button>
               )}
               {/* Legacy only: a Rejected application from old data gets its resubmit. */}
@@ -1418,7 +1418,7 @@ const CrmApplication: React.FC = () => {
                     )}
                     {canCreateBooking && (
                       <DropdownMenuItem onClick={() => handleCreateBooking(a)} disabled={creatingBookingId === a.Id} className="gap-2">
-                        <Building2 size={14} /> {creatingBookingId === a.Id ? "Creating..." : "Create booking"}
+                        <Building2 size={14} /> {creatingBookingId === a.Id ? "Creating…" : "Create booking"}
                       </DropdownMenuItem>
                     )}
                     {/* Application Form PDF — only once a live booking exists (backend enforces the same gate). */}
@@ -1613,7 +1613,7 @@ const CrmApplication: React.FC = () => {
                   onChange={(v) => setForm((f) => ({ ...f, CustomerId: v }))}
                   disabled={applicationId != null}
                   placeholder="Select customer"
-                  searchPlaceholder="Search name, mobile or customer no..."
+                  searchPlaceholder="Search name, mobile or customer no…"
                   options={(customers as any[]).map((c: any) => ({
                     value: String(c.Id),
                     label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · "),
@@ -1684,7 +1684,7 @@ const CrmApplication: React.FC = () => {
                           setForm((f) => ({ ...f, ProjectId: v, BlockId: "", FloorNo: "", PreferredUnitIds: [], PreferredPlotIds: [], PaymentPlanId: "" }));
                         }}
                         placeholder="Select project"
-                        searchPlaceholder="Search projects..."
+                        searchPlaceholder="Search projects…"
                         options={(projectsForCompany as any[]).map((p: any) => ({ value: String(p.Id), label: p.Name }))}
                       />
                     </div>
@@ -1752,7 +1752,7 @@ const CrmApplication: React.FC = () => {
                               }));
                             }}
                             placeholder="Select plots"
-                            searchPlaceholder="Search plots..."
+                            searchPlaceholder="Search plots…"
                             itemNoun="plot"
                           /></div>
                         ) : (
@@ -1916,7 +1916,7 @@ const CrmApplication: React.FC = () => {
                             value={form.BrokerId}
                             onChange={(v) => setForm((f) => ({ ...f, BrokerId: v }))}
                             placeholder="Select broker"
-                            searchPlaceholder="Search brokers..."
+                            searchPlaceholder="Search brokers…"
                             options={(brokers as any[]).map((b: any) => ({ value: String(b.LHeadId), label: b.LHeadName }))}
                           />
                         </div>
@@ -2228,7 +2228,7 @@ const CrmApplication: React.FC = () => {
               {step === 1 && (
                 <button onClick={handleCreateAndNext} disabled={saving}
                   className={`${KEY_INK} h-9 px-4`}>
-                  {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
+                  {saving ? "Saving…" : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 2 && (
@@ -2246,7 +2246,7 @@ const CrmApplication: React.FC = () => {
               {step === 4 && (
                 <button onClick={handleBankDetailsNext} disabled={saving}
                   className={`${KEY_INK} h-9 px-4`}>
-                  {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
+                  {saving ? "Saving…" : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 5 && (
@@ -2264,7 +2264,7 @@ const CrmApplication: React.FC = () => {
               {step === 7 && (
                 <button onClick={handleFinalSave} disabled={saving}
                   className={`${KEY_INK} h-9 px-4`}>
-                  {saving ? "Submitting..." : hasBooking ? "Submit Edits" : "Submit Application"}
+                  {saving ? "Submitting…" : hasBooking ? "Submit Edits" : "Submit Application"}
                 </button>
               )}
             </div>
@@ -2291,7 +2291,7 @@ const CrmApplication: React.FC = () => {
           </DialogHeader>
           <div className="px-6 py-5">
           {!viewingAppDetail ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">Loading...</div>
+            <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>
           ) : (() => {
             const a = viewingAppDetail.application;
             const booking = (viewingAppDetail.bookings || [])[0];
@@ -2643,7 +2643,7 @@ const CrmApplication: React.FC = () => {
                 className={`${KEY_INK} h-9 px-4`}
               >
                 {loadingApplication
-                  ? "Loading..."
+                  ? "Loading…"
                   : isResumable(viewingAppDetail.application)
                     ? "Resume"
                     : viewingAppDetail.application.Status === CrmStatus.REJECTED
@@ -2677,7 +2677,7 @@ const CrmApplication: React.FC = () => {
                   onChange={(e) => setCancelRemarks(e.target.value)}
                   rows={2}
                   className={`${inputCls} resize-none`}
-                  placeholder="e.g. Applied by mistake, customer changed their mind..."
+                  placeholder="e.g. Applied by mistake, customer changed their mind…"
                 />
               </div>
             </div>
@@ -2693,7 +2693,7 @@ const CrmApplication: React.FC = () => {
                 disabled={cancelling}
                 className={`${KEY_RED} h-9 px-4`}
               >
-                {cancelling ? "Cancelling..." : "Cancel Application"}
+                {cancelling ? "Cancelling…" : "Cancel Application"}
               </button>
             </div>
         </DialogContent>

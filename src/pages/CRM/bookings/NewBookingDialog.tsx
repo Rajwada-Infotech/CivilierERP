@@ -254,7 +254,7 @@ export function NewBookingDialog({ applicationId, onClose }: { applicationId: st
                       value={form.PlotIds}
                       onChange={handlePlotsChange}
                       placeholder="Select plots"
-                      searchPlaceholder="Search plots..."
+                      searchPlaceholder="Search plots…"
                       itemNoun="plot"
                     />
                   ) : (

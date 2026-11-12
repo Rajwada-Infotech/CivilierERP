@@ -243,7 +243,7 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
       .input("bid", sql.Int, parseInt(b.BookingId))
       .query(`SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC`);
     if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) {
-      return res.status(400).json({ error: "Handover requires the Agreement for Sale to be Registered (AFS registered at Sub-Registrar) first" });
+      return res.status(400).json({ error: "Handover needs the Agreement for Sale registered at the Sub-Registrar first" });
     }
 
     // Workflow guard: Possession Notice must be Acknowledged by the customer

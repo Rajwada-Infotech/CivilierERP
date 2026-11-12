@@ -67,4 +67,20 @@ const ResaleStatus = Object.freeze({
 const DEAD_BOOKING_STATUSES = Object.freeze(["Cancelled", "Rejected", "Expired", "Transferred"]);
 const DEAD_BOOKING_SQL = `(${DEAD_BOOKING_STATUSES.map((s) => `N'${s}'`).join(", ")})`;
 
-module.exports = { CrmStatus, LineStatus, ResaleStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL };
+// A refund (dbo.CrmRefund) in one of these statuses was dropped: it no longer claims the money it was raised against,
+// so a new refund or a re-booking can use that money. Withdrawn = taken back before approval (with a reason); Cancelled
+// is kept for older rows. Every "is this money still claimed" check reads these lists, so a status is added here once.
+const REFUND_DROPPED_STATUSES = Object.freeze(["Rejected", "Withdrawn", "Cancelled"]);
+// Dropped, or finished (Paid: the money is spent through AppliedAmount): no longer a live claim on the credit.
+const REFUND_CLOSED_STATUSES = Object.freeze([...REFUND_DROPPED_STATUSES, "Paid"]);
+// The RERA refund due date stops running once a refund is paid or withdrawn (a rejected one is still owed).
+const REFUND_DUE_STOPPED_STATUSES = Object.freeze(["Paid", "Withdrawn"]);
+const sqlList = (xs) => `(${xs.map((s) => `N'${s}'`).join(", ")})`;
+const REFUND_DROPPED_SQL = sqlList(REFUND_DROPPED_STATUSES);
+const REFUND_CLOSED_SQL = sqlList(REFUND_CLOSED_STATUSES);
+const REFUND_DUE_STOPPED_SQL = sqlList(REFUND_DUE_STOPPED_STATUSES);
+
+module.exports = {
+  CrmStatus, LineStatus, ResaleStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL,
+  REFUND_DROPPED_STATUSES, REFUND_CLOSED_STATUSES, REFUND_DUE_STOPPED_STATUSES, REFUND_DROPPED_SQL, REFUND_CLOSED_SQL, REFUND_DUE_STOPPED_SQL,
+};

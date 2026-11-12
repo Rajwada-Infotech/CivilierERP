@@ -8,7 +8,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { requireActiveBooking, requireApprovedBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, requireApprovedBooking, recomputeLegalMilestoneCurrentStep, agreementStepConditions } = require("../services/crmWorkflowGuards");
 const { applyPagination } = require("../services/crmListPagination");
 const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
@@ -34,9 +34,14 @@ const MANUAL_STEPS = new Set(["DirectorMeeting"]);
 // create/update logic on its dedicated page; this page only summarises +
 // links out so the team can see the entire journey in one place.
 const LM_SELECT = `
-  SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
+  SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, a.Mobile,
     -- Agreement status (Executed / Registered / etc.)
     ag.Status AS AgreementStatus, ag.AgreementNo,
+    -- The agreement's own steps (the Agreement page's: agreement/config.tsx agreementStepStates), read off the record.
+    ag.LegalExecutiveId AS AgrLegalExecutiveId, ag.SeniorApprovalStatus AS AgrSeniorStatus, ag.SentToCustomerAt AS AgrSentAt,
+    ag.CustomerApprovalStatus AS AgrCustomerStatus, ag.AgreementDate AS AgrDate,
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = ag.Id AND d.IsMandatory = 1) AS AgrPapersAsked,
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = ag.Id AND d.IsMandatory = 1 AND d.FileBase64 IS NOT NULL) AS AgrPapersIn,
     -- Sub-Registrar Visit 1: Agreement for Sale registration
     aqp.Id AS AfsQPId, aqp.AfsQPNo, aqp.Status AS AfsQPStatus,
     areg.Id AS AfsRegistryId, areg.AfsRegNo, areg.Status AS AfsRegistryStatus,
@@ -96,8 +101,8 @@ const LM_SELECT = `
   -- SELECT_WITH_BLOCK) so GET /booking/:bookingId gets it too.
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
   OUTER APPLY (
-    SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement
-    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+    SELECT TOP 1 Id, AgreementNo, Status, LegalExecutiveId, SeniorApprovalStatus, SentToCustomerAt, CustomerApprovalStatus, AgreementDate
+    FROM dbo.CrmAgreement WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) ag
   OUTER APPLY (
     SELECT TOP 1 Id, AfsQPNo, Status FROM dbo.CrmAfsQueryPayment
@@ -157,19 +162,21 @@ const LM_SELECT = `
 // result as D_<step> / L_<step> (1 = done / locked), which the page draws from. Columns are LM_SELECT's (alias x).
 const S = (col) => `ISNULL(x.${col}, '')`;
 const NOC_STATUS = `CASE WHEN x.NocResolvedType = 'Bank' THEN ${S("BankNocStatus")} ELSE ${S("OrgNocStatus")} END`;
-const AGREEMENT_DONE = `${S("FinalExecutionStatus")} = 'Completed'`;
+// The agreement phase: the agreement's own steps up to execution (services/crmWorkflowGuards.js, the one place they live,
+// also read by the Agreement page); its registration is the AFS registration phase.
+const AGREEMENT_STEPS = agreementStepConditions({
+  legal: "x.AgrLegalExecutiveId", senior: "x.AgrSeniorStatus", sent: "x.AgrSentAt", customer: "x.AgrCustomerStatus",
+  date: "x.AgrDate", status: "x.AgreementStatus", papersAsked: "x.AgrPapersAsked", papersIn: "x.AgrPapersIn",
+});
+const AGREEMENT_DONE = AGREEMENT_STEPS[AGREEMENT_STEPS.length - 1].done;
 const AFS_REGISTERED = `${S("AgreementStatus")} = 'Registered'`;
-const AGREEMENT_STEP_KEYS = ["DocCollection", "LegalReview", "Drafting", "InternalApproval", "DocShared", "MutualAgreement", "DirectorMeeting", "FinalExecution"];
 const LM_STAGES = [
-  ...AGREEMENT_STEP_KEYS.map((k, i) => ({
-    key: k, phase: "agreement", manual: k === "DirectorMeeting",
-    done: `${S(`${k}Status`)} = 'Completed'`,
-    locked: `${i + 1} > ISNULL(x.CurrentStep, 1)`,
-  })),
+  ...AGREEMENT_STEPS.map((st, i) => ({ key: st.key, phase: "agreement", done: st.done, locked: i === 0 ? "1 = 0" : `NOT (${AGREEMENT_STEPS[i - 1].done})` })),
   { key: "afsQP", phase: "afsVisit1", done: `${S("AfsQPStatus")} = 'Confirmed' OR ${AFS_REGISTERED}`, locked: `NOT (${AGREEMENT_DONE})` },
   { key: "afsReg", phase: "afsVisit1", done: AFS_REGISTERED, locked: `NOT (${AGREEMENT_DONE}) OR (${S("AfsQPStatus")} <> 'Confirmed' AND NOT (${AFS_REGISTERED}))` },
   { key: "noc", phase: "noc", done: `${NOC_STATUS} = 'Issued'`, locked: `NOT (${AFS_REGISTERED})` },
-  { key: "ocCc", phase: "possession", done: `ISNULL(x.OcCcReceived, 0) = 1`, locked: `1 = 0` },
+  // The project's certificate: worked on the OC/CC page for the whole project; on a journey it opens once the agreement is executed.
+  { key: "ocCc", phase: "possession", done: `ISNULL(x.OcCcReceived, 0) = 1`, locked: `NOT (${AGREEMENT_DONE})` },
   { key: "prePossession", phase: "possession", done: `${S("PrePossessionStatus")} = 'Ready'`, locked: `NOT (${AFS_REGISTERED}) OR ISNULL(x.OcCcReceived, 0) <> 1` },
   { key: "possessionNotice", phase: "possession", done: `${S("PossessionNoticeStatus")} = 'Acknowledged'`, locked: `${S("PrePossessionStatus")} <> 'Ready'` },
   {
@@ -177,11 +184,14 @@ const LM_STAGES = [
     // Handover's own four gates (crmHandover.js POST /).
     locked: `NOT (${AFS_REGISTERED}) OR ${S("PossessionNoticeStatus")} <> 'Acknowledged' OR ${NOC_STATUS} IN ('Pending', 'Approved') OR ISNULL(x.HasOutstandingDues, 0) = 1`,
   },
-  { key: "salesDeed", phase: "saleDeed", done: `x.SalesDeedId IS NOT NULL`, locked: `NOT (${AFS_REGISTERED})` },
-  { key: "queryPayment", phase: "afsVisit2", done: `${S("QueryPaymentStatus")} = 'Confirmed'`, locked: `x.SalesDeedId IS NULL OR ${S("DeedDirectorApprovalStatus")} <> 'Approved'` },
-  { key: "registry", phase: "afsVisit2", done: `${S("RegistryStatus")} = 'Completed'`, locked: `x.SalesDeedId IS NULL OR ${S("QueryPaymentStatus")} <> 'Confirmed'` },
+  // Done once the director approves it: that is what opens its registration (Query Payment).
+  { key: "salesDeed", phase: "saleDeed", done: `${S("DeedDirectorApprovalStatus")} = 'Approved'`, locked: `NOT (${AFS_REGISTERED})` },
+  { key: "queryPayment", phase: "afsVisit2", done: `${S("QueryPaymentStatus")} = 'Confirmed'`, locked: `NOT (${AGREEMENT_DONE}) OR x.SalesDeedId IS NULL OR ${S("DeedDirectorApprovalStatus")} <> 'Approved'` },
+  { key: "registry", phase: "afsVisit2", done: `${S("RegistryStatus")} = 'Completed'`, locked: `NOT (${AGREEMENT_DONE}) OR x.SalesDeedId IS NULL OR ${S("QueryPaymentStatus")} <> 'Confirmed'` },
   { key: "mutation", phase: "mutation", done: `${S("MutationStatus")} = 'Approved'`, locked: `${S("RegistryStatus")} <> 'Completed'` },
 ];
+// Every phase after the agreement opens once the agreement is executed (this page's display only: the pages that own
+// each step keep their own checks).
 const LM_PHASES = ["agreement", "afsVisit1", "noc", "possession", "saleDeed", "afsVisit2", "mutation"];
 const flag = (cond) => `CAST(CASE WHEN ${cond} THEN 1 ELSE 0 END AS INT)`;
 const phaseStages = (p) => LM_STAGES.filter((s) => s.phase === p);
@@ -196,12 +206,10 @@ function withJourneyFlags(innerSql) {
     return `CASE WHEN ${allDone} THEN 2 WHEN ${anyOpen} THEN 1 ELSE 0 END AS P_${p}`;
   }).join(",\n      ");
   const doneCount = LM_STAGES.map((s) => `f.D_${s.key}`).join(" + ");
-  const manualOpen = LM_STAGES.filter((s) => s.manual).map((s) => `(f.D_${s.key} = 0 AND f.L_${s.key} = 0)`).join(" OR ");
   return `
     SELECT f.*,
       ${phaseCols},
-      (${doneCount}) AS DoneCount, ${LM_STAGES.length} AS StepCount,
-      CAST(CASE WHEN ${manualOpen} THEN 1 ELSE 0 END AS INT) AS ManualDue
+      (${doneCount}) AS DoneCount, ${LM_STAGES.length} AS StepCount
     FROM (
       SELECT x.*,
       ${stepFlags}
@@ -249,7 +257,8 @@ router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, re
     const SELECT_WITH_BLOCK = LM_SELECT;
 
     if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY m.CreatedAt DESC`);
+      // Every journey (the export), each with its steps' flags like a page of them.
+      const result = await req0.query(`SELECT y.* FROM (${withJourneyFlags(`${SELECT_WITH_BLOCK} ${where}`)}) y ORDER BY y.CreatedAt DESC`);
       return res.json(result.recordset);
     }
 
@@ -268,13 +277,12 @@ router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, re
         SELECT COUNT(*) AS Total,
                SUM(CASE WHEN y.DoneCount = y.StepCount THEN 1 ELSE 0 END) AS Complete,
                AVG(CAST(y.DoneCount AS FLOAT) / y.StepCount) AS AvgProgress,
-               SUM(y.ManualDue) AS ManualDue,
                ${phaseSums}
         FROM (${FLAGGED}) y`),
     ]);
     const sm = summaryResult.recordset[0] || {};
     const summary = {
-      total: sm.Total || 0, complete: sm.Complete || 0, manualDue: sm.ManualDue || 0,
+      total: sm.Total || 0, complete: sm.Complete || 0,
       avgProgress: Math.round((sm.AvgProgress || 0) * 100),
       gates: Object.fromEntries(LM_PHASES.map((ph) => [ph, sm[`G_${ph}`] || 0])),
       atPhase: Object.fromEntries(LM_PHASES.map((ph) => [ph, sm[`O_${ph}`] || 0])),
@@ -417,3 +425,7 @@ router.put("/:id/:step", requirePageRight("crm-legal-milestones", "edit"), async
 });
 
 module.exports = router;
+// The journey with every step's flags (D_/L_), each phase's state (P_<phase>: 2 done, 1 open, 0 waiting) and DoneCount /
+// StepCount, for other screens that show a booking's legal progress (the report, Customer 360): one set of rules.
+module.exports.journeySql = (where = "") => withJourneyFlags(`${LM_SELECT} ${where}`);
+module.exports.LM_PHASES = LM_PHASES;

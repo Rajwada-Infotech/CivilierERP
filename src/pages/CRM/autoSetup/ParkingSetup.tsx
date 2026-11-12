@@ -157,7 +157,7 @@ const ParkingSetup: React.FC = () => {
         body: JSON.stringify({ Items: rows.map((r) => ({ ParkingType: r.ParkingType, Count: r.Count, Charge: r.Charge, GstRate: r.GstRate })) }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to save parking template");
+      if (!res.ok) throw new Error(data.error || "Could not save parking template");
       toast.success(`Saved — ${data.total} slot(s)`);
       setSavedMix((m) => ({ ...m, [blockId]: rows.map((r) => ({ ...r })) }));
       return true;
@@ -180,7 +180,7 @@ const ParkingSetup: React.FC = () => {
         body: JSON.stringify({ ProjectId: parseInt(projectId), ...(blockId ? { BlockIds: [blockId] } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to generate parking slots");
+      if (!res.ok) throw new Error(data.error || "Could not generate parking slots");
       // After a save that added nothing (a charge, GST or a lowered count), stay quiet.
       if (data.createdCount === 0) { if (!blockId) toast.info("Nothing to create — every block already has the slots its mix asks for"); }
       else toast.success(`${plural(data.createdCount, "parking slot")} created — e.g. ${data.sample.slice(0, 3).join(", ")}`);
@@ -200,7 +200,7 @@ const ParkingSetup: React.FC = () => {
     try {
       const res = await fetchWithAuth(`/api/parking-slot-master/${slot.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete parking slot");
+      if (!res.ok) throw new Error(data.error || "Could not delete parking slot");
       toast.success(data.message || "Parking slot deleted");
       setOpenSlotId(null);
       refetchAll();
@@ -224,7 +224,7 @@ const ParkingSetup: React.FC = () => {
         body: JSON.stringify({ ProjectId: slot.ProjectId, BlockId: slot.BlockId, SlotNo: slotNo, ParkingType: editingSlot.ParkingType, IsActive: slot.IsActive !== false }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to update parking slot");
+      if (!res.ok) throw new Error(data.error || "Could not update parking slot");
       toast.success(data.message || "Parking slot updated");
       setEditingSlot(null);
       refetchAll();

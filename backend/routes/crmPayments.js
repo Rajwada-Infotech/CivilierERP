@@ -2,7 +2,7 @@ const express = require("express");
 const { round2, sumMoney } = require("../services/bookingUnits");
 const { transition: approvalTransition } = require("../services/approvalService");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL, REFUND_CLOSED_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, { "/on-account/": crmViaBookingSql("CrmOnAccountPayment"), "/waivers/": crmViaBookingSql("CrmMilestoneWaiver"), "/waiver-reversals/": crmViaBookingSql("CrmMilestoneWaiver"), default: crmViaBookingSql("CrmPaymentMilestone") }); }
@@ -204,7 +204,7 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
     const claims = await tx.request().input("id", sql.Int, onAccountId).query(`
       SELECT
         ISNULL((SELECT SUM(GrossAmount) FROM dbo.CrmRefund
-          WHERE SourceOnAccountId = @id AND Status NOT IN ('Rejected', 'Paid')), 0) AS ReservedByRefunds,
+          WHERE SourceOnAccountId = @id AND Status NOT IN ${REFUND_CLOSED_SQL}), 0) AS ReservedByRefunds,
         ISNULL((SELECT SUM(Amount) FROM dbo.CrmRebookingTransfer
           WHERE HeldOnAccountId = @id AND Status NOT IN ('Rejected', 'Applied')), 0) AS ReservedByTransfers
     `);

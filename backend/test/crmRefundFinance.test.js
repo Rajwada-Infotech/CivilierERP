@@ -99,7 +99,8 @@ describe("the refunds list", () => {
   });
   test("open refunds come first unless someone picks a sort", async () => {
     await request(app).get("/?page=1&pageSize=25");
-    expect(listQuery()).toMatch(/ORDER BY CASE WHEN r\.Status IN \('Paid', 'Rejected'\) THEN 1 ELSE 0 END/);
+    // closed refunds (paid, rejected, withdrawn: constants REFUND_CLOSED_STATUSES) go last
+    expect(listQuery()).toMatch(/ORDER BY CASE WHEN r\.Status IN \(N'Rejected', N'Withdrawn', N'Cancelled', N'Paid'\) THEN 1 ELSE 0 END/);
   });
   test("only known columns can be sorted on", async () => {
     await request(app).get("/?page=1&pageSize=25&sortKey=NetAmount&sortDir=asc");

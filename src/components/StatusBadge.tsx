@@ -510,6 +510,13 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
   },
+  // A CRM refund taken back before approval, with a reason: final, and it no longer claims the customer's money.
+  Withdrawn: {
+    label: "Withdrawn",
+    icon: XCircle,
+    classes:
+      "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
   FinanceApproved: {
     label: "Finance Approved",
     icon: PackageCheck,

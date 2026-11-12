@@ -82,11 +82,11 @@ async function getJson(url: string, failure: string) {
   if (!res.ok) throw new Error(data?.error || failure);
   return data;
 }
-export const fetchLedger = (p: URLSearchParams): Promise<{ rows: LedgerRow[]; total: number }> => getJson(`${API}/ledger?${p}`, "Failed to load the bookings");
-export const fetchLedgerExport = (p: URLSearchParams): Promise<LedgerRow[]> => getJson(`${API}/ledger?${p}`, "Failed to export the bookings");
-export const fetchLedgerSummary = (p: URLSearchParams): Promise<LedgerSummary> => getJson(`${API}/ledger/summary?${p}`, "Failed to load the figures");
-export const fetchInvoiceRows = (p: URLSearchParams): Promise<{ rows: InvoiceRow[]; total: number }> => getJson(`${API}?${p}`, "Failed to load invoices");
-export const fetchInvoiceExport = (p: URLSearchParams): Promise<InvoiceRow[]> => getJson(`${API}?${p}`, "Failed to export invoices");
+export const fetchLedger = (p: URLSearchParams): Promise<{ rows: LedgerRow[]; total: number }> => getJson(`${API}/ledger?${p}`, "Could not load the bookings");
+export const fetchLedgerExport = (p: URLSearchParams): Promise<LedgerRow[]> => getJson(`${API}/ledger?${p}`, "Could not export the bookings");
+export const fetchLedgerSummary = (p: URLSearchParams): Promise<LedgerSummary> => getJson(`${API}/ledger/summary?${p}`, "Could not load the figures");
+export const fetchInvoiceRows = (p: URLSearchParams): Promise<{ rows: InvoiceRow[]; total: number }> => getJson(`${API}?${p}`, "Could not load invoices");
+export const fetchInvoiceExport = (p: URLSearchParams): Promise<InvoiceRow[]> => getJson(`${API}?${p}`, "Could not export invoices");
 async function postJson(url: string, body?: unknown) {
   const res = await fetchWithAuth(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
@@ -115,7 +115,7 @@ export async function downloadInvoicePdf(inv: Pick<InvoiceRow, "BookingId" | "Id
   a.click();
   URL.revokeObjectURL(url);
 }
-export const fetchBookingBilling = (id: string): Promise<BookingBilling> => getJson(`${API}/booking/${encodeURIComponent(id)}`, "Failed to load the booking");
+export const fetchBookingBilling = (id: string): Promise<BookingBilling> => getJson(`${API}/booking/${encodeURIComponent(id)}`, "Could not load the booking");
 
 export async function fetchInvoice(id: string): Promise<InvoiceRow> {
   const res = await fetchWithAuth(`${API}/${encodeURIComponent(id)}`);

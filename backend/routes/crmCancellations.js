@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_STATUSES, REFUND_DUE_STOPPED_SQL } = require("../constants/crmStatuses");
 const { returnLeadToPool } = require("../services/saHandoff");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -72,7 +72,7 @@ const LATEST_REFUND = `(
     ORDER BY r.Id DESC
   )`;
 const refundOverdue = (lr) =>
-  `${lr}.RefundDueDate IS NOT NULL AND ISNULL(${lr}.Status,'') <> 'Paid' AND CAST(SYSDATETIME() AS DATE) > ${lr}.RefundDueDate`;
+  `${lr}.RefundDueDate IS NOT NULL AND ISNULL(${lr}.Status,'') NOT IN ${REFUND_DUE_STOPPED_SQL} AND CAST(SYSDATETIME() AS DATE) > ${lr}.RefundDueDate`;
 const REFUND_OVERDUE_EXISTS = `EXISTS (SELECT 1 FROM ${LATEST_REFUND} lro WHERE ${refundOverdue("lro")})`;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 

@@ -31,7 +31,7 @@ function AuthDownloadLink({ url, filename, label }: { url: string; filename: str
     setLoading(true);
     try {
       const res = await fetchWithAuth(url);
-      if (!res.ok) throw new Error("Failed to load file");
+      if (!res.ok) throw new Error("Could not load file");
       const blob = await res.blob();
       const objectUrl = window.URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -445,7 +445,7 @@ const CrmBrokerMaster: React.FC = () => {
               data={filtered} columns={columns} loading={isLoading} searchable={false}
               getRowId={(row) => String(row.LHeadId)}
               // A failed load gives its reason; it used to read "Failed to load brokers." whatever went wrong.
-              emptyMessage={isError ? ((error as Error)?.message || "Failed to load brokers.") : brokers.length === 0 ? "No brokers yet." : "No broker matches."}
+              emptyMessage={isError ? ((error as Error)?.message || "Could not load brokers.") : brokers.length === 0 ? "No brokers yet." : "No broker matches."}
               exportConfig={rights.canExport ? { title: "Broker Master", filename: "broker-master", columns: EXPORT_COLUMNS } : undefined}
             />
           </div>

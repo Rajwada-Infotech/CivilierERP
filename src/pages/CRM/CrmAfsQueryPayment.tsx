@@ -168,12 +168,12 @@ async function fetchAll(cpb?: AfsQpCpb): Promise<any[]> {
   if (cpb?.blockId) params.set("blockId", cpb.blockId);
   const qs = params.toString();
   const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load AFS Query Payments");
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Could not load AFS Query Payments");
   return r.json();
 }
 async function fetchBookings(): Promise<any[]> {
   const r = await fetchWithAuth(BKG_API);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load bookings");
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Could not load bookings");
   return r.json();
 }
 // Used only for the "Start" dialog's dropdown — mirrors the real POST / gate
@@ -185,13 +185,13 @@ async function fetchBookings(): Promise<any[]> {
 // tracked, or Agreement not yet Executed), which this deliberately excludes.
 async function fetchEligibleBookings(): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/eligible-bookings`);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load eligible bookings");
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Could not load eligible bookings");
   return r.json();
 }
 async function fetchDetail(id: number | null): Promise<any> {
   if (!id) return null;
   const r = await fetchWithAuth(`${API}/${id}`);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load AFS Query Payment");
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Could not load the registration fees.");
   return r.json();
 }
 
@@ -562,7 +562,7 @@ const CrmAfsQueryPayment: React.FC<{
       const staged = await Promise.all(arr.map(fileToStaged));
       setPendingInfoFiles((prev) => [...prev, ...staged]);
     } catch {
-      toast.error("Failed to read one or more files");
+      toast.error("Could not read one or more files");
     } finally {
       if (infoInputRef.current) infoInputRef.current.value = "";
     }
@@ -583,7 +583,7 @@ const CrmAfsQueryPayment: React.FC<{
     try {
       setProofFile(await fileToStaged(file));
     } catch {
-      toast.error("Failed to read the file");
+      toast.error("Could not read the file");
     }
   };
 
@@ -637,16 +637,16 @@ const CrmAfsQueryPayment: React.FC<{
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
       if (embedded) {
-        toast.success("AFS Query Payment confirmed — now start the AFS Registry visit from that tab.");
+        toast.success("Registration fees confirmed: now start the registry below.");
         afterChange();
       } else {
         // Find the bookingId for the confirmed record so we can deep-link
         const confirmedRow = (rows as any[]).find((r: any) => r.Id === selectedId);
         promptNextStep(
           navigate,
-          "AFS Query Payment confirmed. Next step: start the AFS Registry visit (both parties at Sub-Registrar Office).",
+          "Registration fees confirmed. Next: start the registry (both parties at the Sub-Registrar's office).",
           confirmedRow?.BookingId != null ? `/crm/afs-registry?bookingId=${confirmedRow.BookingId}` : "/crm/afs-registry",
-          "Go to AFS Registry",
+          "Go to Registry",
         );
       }
     } catch (e: any) {
@@ -1010,7 +1010,7 @@ const CrmAfsQueryPayment: React.FC<{
             </div>
           </div>
         ) : (
-          <div className="p-8 text-center text-sm text-muted-foreground">No AFS Query Payment tracker for this booking.</div>
+          <div className="p-8 text-center text-sm text-muted-foreground">Registration fees not started for this booking.</div>
         )}
       </div>
     );
@@ -1124,7 +1124,7 @@ const CrmAfsQueryPayment: React.FC<{
                 <div className="relative flex-1 min-w-48">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <input value={search} onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search name, AQP no, booking, unit..."
+                    placeholder="Search name, AQP no, booking, unit…"
                     className="w-full pl-8 pr-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:border-primary" />
                 </div>
                 <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />

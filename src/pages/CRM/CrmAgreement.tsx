@@ -53,7 +53,7 @@ const KEY = "crm-agreements";
 const PAGE_PAPERS = "crm-documents";
 // Each step's work, as a section of the record (config.tsx names which part works each step).
 const SECTION_OF: Record<AgrTab, string> = { Timeline: "details", Overview: "details", "Legal & Approval": "legal", Documents: "documents", "AFS Payment": "afsPayment", "AFS Registry": "afsRegistry" };
-const SECTION_TITLE: Record<string, string> = { details: "Agreement Details", legal: "Legal Work", documents: "Documents", afsPayment: "AFS Payment", afsRegistry: "AFS Registry" };
+const SECTION_TITLE: Record<string, string> = { details: "Agreement Details", legal: "Legal Work", documents: "Documents", afsPayment: "Registration Fees", afsRegistry: "Registry" };
 
 const ALERT_INK: Record<AgreementAlertTone, string> = {
   stopped: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/25",
@@ -304,7 +304,7 @@ const CrmAgreement: React.FC = () => {
   // ── Actions ──
   const createAgreement = () => {
     if (!agrForm.BookingId) return void toast.error("Select a booking.");
-    if (agrForm.PanNo && !PAN_RE.test(agrForm.PanNo.trim())) return void toast.error("Invalid PAN format (e.g. ABCDE1234F)");
+    if (agrForm.PanNo && !PAN_RE.test(agrForm.PanNo.trim())) return void toast.error("Enter a valid PAN, e.g. ABCDE1234F");
     if (agrForm.AadhaarNo && !AADHAAR_RE.test(agrForm.AadhaarNo.trim())) return void toast.error("Aadhaar must be exactly 12 digits");
     run(() => send(API, "POST", { ...agrForm, BookingId: parseInt(agrForm.BookingId) }), (d) => `Agreement ${d.AgreementNo} created`, () => setAgrForm({ ...EMPTY_AGR_FORM, BookingId: "" }))
       .then((d) => { if (d?.id != null) selectAgreement(d.id); });
@@ -313,7 +313,7 @@ const CrmAgreement: React.FC = () => {
   const openPropose = (date: string) => { setSendDate(date); setDialog("propose"); };
   const acceptDate = () => run(() => send(`${API}/${selectedId}/date/accept`, "PUT"), "Date accepted: sent for approval of the date");
   const markExecuted = () => run(() => send(`${API}/${selectedId}/mark-executed`, "PUT"), (d) => `Agreement marked ${d.status || "Executed"}`,
-    () => toast.info("Executed: Legal Milestones and the AFS payment can go ahead.", { action: { label: "Go to Legal Milestones", onClick: () => navigate("/crm/legal-milestones") } }));
+    () => toast.info("Executed: the registration fees and Legal Milestones can go ahead.", { action: { label: "Go to Legal Milestones", onClick: () => navigate("/crm/legal-milestones") } }));
   const openRegister = (ag: any) => {
     // The fees come from the confirmed AFS payment when there is one, then its quote, then the agreement's own figures.
     let stamp = "", fee = "";
@@ -330,8 +330,8 @@ const CrmAgreement: React.FC = () => {
     setDialog("register");
   };
   const markRegistered = () => {
-    if (!regForm.AfsRegistrationNo.trim()) return void toast.error("AFS Registration No. is required");
-    if (!regForm.AfsRegistrationDate) return void toast.error("AFS Registration Date is required");
+    if (!regForm.AfsRegistrationNo.trim()) return void toast.error("Agreement registration no. is required");
+    if (!regForm.AfsRegistrationDate) return void toast.error("Registration date is required");
     run(() => send(`${API}/${selectedId}/mark-registered`, "PUT", {
       AfsRegistrationNo: regForm.AfsRegistrationNo.trim(), AfsRegistrationDate: regForm.AfsRegistrationDate,
       AfsStampDuty: regForm.AfsStampDuty !== "" ? regForm.AfsStampDuty : undefined, AfsRegistrationFee: regForm.AfsRegistrationFee !== "" ? regForm.AfsRegistrationFee : undefined,
@@ -354,7 +354,7 @@ const CrmAgreement: React.FC = () => {
     setDialog("edit");
   };
   const saveEdit = () => {
-    if (editForm.PanNo && !PAN_RE.test(editForm.PanNo.trim())) return void toast.error("Invalid PAN format (e.g. ABCDE1234F)");
+    if (editForm.PanNo && !PAN_RE.test(editForm.PanNo.trim())) return void toast.error("Enter a valid PAN, e.g. ABCDE1234F");
     if (editForm.AadhaarNo && !AADHAAR_RE.test(editForm.AadhaarNo.trim())) return void toast.error("Aadhaar must be exactly 12 digits");
     run(() => send(`${API}/${selectedId}`, "PUT", editForm), (d) => (d.versionBumped ? "Details updated: the earlier version is kept in the history" : "Details updated"));
   };
@@ -415,7 +415,7 @@ const CrmAgreement: React.FC = () => {
       : a.LegalExecutiveId == null ? "Assign a legal executive first"
       : pendingDocs.length ? `Mandatory papers not verified yet: ${pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ")}` : null;
     const regBlocked = bookingGone ? "The booking is cancelled: it can't be marked registered"
-      : a.AfsRegistryStatus !== "Completed" ? "Complete the AFS Registry (the Sub-Registrar visit) first" : null;
+      : a.AfsRegistryStatus !== "Completed" ? "Complete the Agreement Registry at the Sub-Registrar first" : null;
 
     // What the agreement waits on now, and the one action that moves it on.
     let next = ""; let action: { label: string; run: () => void } | null = null; let finished = false;
@@ -428,9 +428,9 @@ const CrmAgreement: React.FC = () => {
     else if (a.Status === CrmStatus.REGISTERED) { next = `Registered at the Sub-Registrar${a.AfsRegistrationDate ? ` on ${fmtDate(a.AfsRegistrationDate)}` : ""}${a.AfsRegistrationNo ? ` (doc no. ${a.AfsRegistrationNo})` : ""}.`; finished = true; }
     else if (a.Status === CrmStatus.EXECUTED) {
       const paid = a.AfsQpConfirmedAmount != null || !!a.AfsRegistryStatus;
-      next = !regBlocked ? "Executed and the AFS Registry is complete: record the registration"
-        : paid ? "Executed: complete the AFS Registry, then record the registration" : "Executed: confirm the customer paid the stamp duty (AFS Payment), then the AFS Registry";
-      action = !regBlocked ? { label: "Mark Registered", run: () => openRegister(a) } : paid ? { label: "Go to AFS Registry", run: go("afsRegistry") } : { label: "Go to AFS Payment", run: go("afsPayment") };
+      next = !regBlocked ? "Executed and the registry is complete: record the registration"
+        : paid ? "Executed: complete the registry, then record the registration" : "Executed: confirm the customer paid the registration fees, then the registry";
+      action = !regBlocked ? { label: "Mark Registered", run: () => openRegister(a) } : paid ? { label: "Go to Registry", run: go("afsRegistry") } : { label: "Go to Registration Fees", run: go("afsPayment") };
     } else if (a.LegalExecutiveId == null) { next = "Assign the legal executive who prepares the paperwork"; action = { label: "Go to Legal Work", run: go("legal") }; }
     else if (seniorStatus === CrmStatus.PENDING) next = "Waiting for senior approval (Approval Inbox)";
     else if (!senior) {
@@ -476,7 +476,7 @@ const CrmAgreement: React.FC = () => {
             { label: "Collected", dot: BAND_DOT.collected, value: fmtShort(collected), exact: fmtRupees(collected), note: grand ? `${Math.round((collected / grand) * 100)}% of the value` : "—" },
             { label: "Signing date", value: dated ? fmtDate(a.AgreementDate) : "—", note: dated ? "Agreed and approved" : a.ProposedDate ? `Proposed ${fmtDate(a.ProposedDate)}` : "Not set yet" },
             { label: "Papers", dot: papers.required && papers.uploaded === papers.required ? BAND_DOT.collected : BAND_DOT.finance, value: papers.required ? `${papers.uploaded} of ${papers.required}` : "—", note: papers.required ? "Mandatory uploaded" : "None asked for yet" },
-            { label: "AFS registration", value: a.AfsRegistrationNo || "—", note: a.AfsRegistrationNo ? `Registered ${fmtDate(a.AfsRegistrationDate)}` : `Registry: ${a.AfsRegistryStatus || "not started"}` },
+            { label: "Agreement registration", value: a.AfsRegistrationNo || "—", note: a.AfsRegistrationNo ? `Registered ${fmtDate(a.AfsRegistrationDate)}` : `Registry: ${a.AfsRegistryStatus || "not started"}` },
           ]}
           footer={<BandNext text={next} finished={finished} action={action} />} />
 
@@ -494,7 +494,7 @@ const CrmAgreement: React.FC = () => {
                 <span><span className="font-semibold tabular-nums">{fmtRupees(grand)}</span>
                   <span className="text-xs text-muted-foreground tabular-nums"> · {a.IsPlotSale ? "Land" : "Unit"} {fmtRupees(a.TotalValue)}{a.UnitGstAmount > 0 ? ` + GST ${fmtRupees(a.UnitGstAmount)}` : ""}{a.ParkingTotal > 0 ? ` + Parking ${fmtRupees(a.ParkingTotal)}` : ""}{a.ExtraChargesTotal > 0 ? ` + Extra ${fmtRupees(a.ExtraChargesTotal)}` : ""}</span></span>
               ) : null },
-              { label: "AFS registration no.", value: a.AfsRegistrationNo },
+              { label: "Agreement registration no.", value: a.AfsRegistrationNo },
               { label: "Registered on", value: a.AfsRegistrationDate ? fmtDate(a.AfsRegistrationDate) : null },
               { label: "Stamp duty paid", value: a.AfsStampDuty != null ? fmtRupees(a.AfsStampDuty) : null },
               { label: "Registration fee", value: a.AfsRegistrationFee != null ? fmtRupees(a.AfsRegistrationFee) : null },
@@ -643,7 +643,7 @@ const CrmAgreement: React.FC = () => {
         ))}
 
         {afsPayRights.canView && step("afsPayment", (
-          <GridRelated icon={ReceiptIndianRupee} title="AFS Stamp Duty Payment">
+          <GridRelated icon={ReceiptIndianRupee} title="Agreement Registration Fees">
             <div className="p-4">
               <CrmAfsQueryPayment embeddedBookingId={a.BookingId} agreementStatus={a.Status}
                 onChanged={() => { refreshAll(); qc.invalidateQueries({ queryKey: ["crm-afs-query-payment-booking", a.BookingId] }); qc.invalidateQueries({ queryKey: ["crm-afs-registry-booking", a.BookingId] }); }} />
@@ -651,7 +651,7 @@ const CrmAgreement: React.FC = () => {
           </GridRelated>
         ))}
         {afsRegRights.canView && step("afsRegistry", (
-          <GridRelated icon={Landmark} title="AFS Registry (Sub-Registrar)">
+          <GridRelated icon={Landmark} title="Agreement Registry (Sub-Registrar)">
             <div className="p-4">
               <CrmAfsRegistry embeddedBookingId={a.BookingId} onChanged={() => { refreshAll(); qc.invalidateQueries({ queryKey: ["crm-afs-registry-booking", a.BookingId] }); }} />
             </div>
@@ -692,7 +692,7 @@ const CrmAgreement: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "CRM", "Agreements"]} />
       {selectedId != null ? record() : (
         <>
-          <MoneyBand eyebrow="CRM" title="Agreements" sub="The Agreement for Sale: legal paperwork, senior and customer approval, the signing date, execution, then the AFS payment and registry."
+          <MoneyBand eyebrow="CRM" title="Agreements" sub="The Agreement for Sale: legal paperwork, senior and customer approval, the signing date, execution, then the registration fees and the registry."
             actions={<>
               {rights.canCreate && <button type="button" onClick={() => { setAgrForm({ ...EMPTY_AGR_FORM, BookingId: "" }); setDialog("new"); }} className={BAND_KEY_MAIN}><Plus size={13} /> New Agreement</button>}
               <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
@@ -779,13 +779,13 @@ const CrmAgreement: React.FC = () => {
         <GridDialog onClose={close} icon={Landmark} width="max-w-2xl" title="Mark Agreement Registered" description={`${dsub} · the details from the Sub-Registrar's office`}
           footer={<><button onClick={close} className={GRID_BTN}>Cancel</button><button onClick={markRegistered} disabled={saving || !regForm.AfsRegistrationNo.trim() || !regForm.AfsRegistrationDate} className={GRID_BTN_BRAND}>{saving ? "Saving…" : "Confirm Registration"}</button></>}>
           <GridFormSection title="Registration">
-            <GridFormField label="AFS registration no." required hint="The document no. the Sub-Registrar issued."><input value={regForm.AfsRegistrationNo} placeholder="e.g. SRO/WB/2026/001234" onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationNo: e.target.value }))} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
+            <GridFormField label="Agreement registration no." required hint="The document no. the Sub-Registrar issued."><input value={regForm.AfsRegistrationNo} placeholder="e.g. SRO/WB/2026/001234" onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationNo: e.target.value }))} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
             <GridFormField label="Registration date" required><DateInput value={regForm.AfsRegistrationDate} onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationDate: e.target.value }))} className={GRID_INPUT} /></GridFormField>
           </GridFormSection>
           <GridFormSection title="Government fees">
             <GridFormField label="Stamp duty (₹)"><input type="number" value={regForm.AfsStampDuty} readOnly={regFeesLocked} onChange={(e) => setRegForm((f) => ({ ...f, AfsStampDuty: e.target.value }))} className={cn(GRID_INPUT, "tabular-nums read-only:bg-muted/40")} /></GridFormField>
             <GridFormField label="Registration fee (₹)"><input type="number" value={regForm.AfsRegistrationFee} readOnly={regFeesLocked} onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationFee: e.target.value }))} className={cn(GRID_INPUT, "tabular-nums read-only:bg-muted/40")} /></GridFormField>
-            <GridFormField label="Amounts" wide hint={regFeesLocked ? "Filled from the confirmed AFS payment: check them against the Sub-Registrar's receipt." : "The stamp duty paid here is credited against the Sale Deed's stamp duty."}>
+            <GridFormField label="Amounts" wide hint={regFeesLocked ? "Filled from the confirmed registration fees: check them against the Sub-Registrar's receipt." : "The stamp duty paid here is credited against the Sale Deed's stamp duty."}>
               <button type="button" onClick={() => setRegFeesLocked((l) => !l)} className={cn(GRID_BTN, "h-9")}>{regFeesLocked ? <><Pencil size={12} /> Edit Amounts</> : <><Lock size={12} /> Lock Amounts</>}</button>
             </GridFormField>
           </GridFormSection>

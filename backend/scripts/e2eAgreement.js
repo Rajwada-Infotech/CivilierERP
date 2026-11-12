@@ -122,7 +122,7 @@ const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmAgreement) N, (SELECT COUNT(*
     expectCall("Registration no. required", await call("PUT", `/a/${AGR}/mark-registered`, { AfsRegistrationDate: DATE }), 400, "Registration No");
     await q(`UPDATE dbo.CrmAfsRegistry SET Status = 'InProgress' WHERE BookingId = ${BOOKING}`);
     const reg0 = await call("PUT", `/a/${AGR}/mark-registered`, { AfsRegistrationNo: "E2E/1", AfsRegistrationDate: DATE });
-    check("Refused until the AFS Registry is complete", reg0.status === 400 && /AFS Registry/i.test(reg0.json?.error || ""), `got ${reg0.status} ${reg0.json?.error}`);
+    check("Refused until the AFS Registry is complete", reg0.status === 400 && /Agreement Registry/i.test(reg0.json?.error || ""), `got ${reg0.status} ${reg0.json?.error}`);
     const hasRegistry = (await q(`SELECT COUNT(*) c FROM dbo.CrmAfsRegistry WHERE BookingId = ${BOOKING}`))[0].c > 0;
     if (hasRegistry) {
       await q(`UPDATE dbo.CrmAfsRegistry SET Status = 'Completed' WHERE BookingId = ${BOOKING}`);

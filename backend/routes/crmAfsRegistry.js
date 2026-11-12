@@ -114,7 +114,7 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
     const aqp = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id, Status FROM dbo.CrmAfsQueryPayment WHERE BookingId = @bid");
     if (!aqp.recordset.length || aqp.recordset[0].Status !== "Confirmed") {
-      return res.status(400).json({ error: "AFS Registry requires AFS Query Payment to be Confirmed first — the customer must have paid the AFS stamp duty before attending the Sub-Registrar Office" });
+      return res.status(400).json({ error: "The Agreement Registry needs the registration fees confirmed first: the customer must pay the stamp duty before the Sub-Registrar visit" });
     }
 
     const agr = await pool.request().input("bid", sql.Int, bookingId)
@@ -128,7 +128,7 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
       .query("SELECT TOP 1 Id, AfsRegNo FROM dbo.CrmAfsRegistry WHERE BookingId = @bid2");
     if (existingReg.recordset.length) {
       return res.status(409).json({
-        error: `AFS Registry tracking (${existingReg.recordset[0].AfsRegNo}) has already been started for this booking`,
+        error: `The Agreement Registry (${existingReg.recordset[0].AfsRegNo}) is already started for this booking`,
       });
     }
 
@@ -146,7 +146,7 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
     res.status(201).json({ success: true, id: result.recordset[0].Id, AfsRegNo: afsRegNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
-      return res.status(409).json({ error: "AFS Registry tracking already started for this booking" });
+      return res.status(409).json({ error: "The Agreement Registry is already started for this booking" });
     console.error("[crm-afs-registry] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }
@@ -162,7 +162,7 @@ router.put("/:id/schedule", requirePageRight("crm-afs-registry", "edit"), async 
     if (!b.ScheduledDate) return res.status(400).json({ error: "ScheduledDate is required" });
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmAfsRegistry WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "AFS Registry not found" });
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement Registry not found" });
     if (cur.recordset[0].Status === "Completed") return res.status(400).json({ error: "Already completed" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -195,10 +195,10 @@ router.put("/:id/complete", requirePageRight("crm-afs-registry", "edit"), async 
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmAfsRegistry WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "AFS Registry not found" });
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement Registry not found" });
     if (cur.recordset[0].Status === "Completed") return res.status(400).json({ error: "Already completed" });
     if (cur.recordset[0].Status !== "Scheduled") {
-      return res.status(400).json({ error: "AFS Registry must be Scheduled (appointment date recorded) before it can be marked Completed" });
+      return res.status(400).json({ error: "Schedule the registry appointment before marking it completed" });
     }
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -216,8 +216,8 @@ router.put("/:id/complete", requirePageRight("crm-afs-registry", "edit"), async 
 
     await logCommunication(pool, {
       bookingId: cur.recordset[0].BookingId, direction: "Outbound",
-      subject: "AFS registered at Sub-Registrar Office",
-      summary: "AFS Registry completed — the Agreement for Sale has been officially registered. Enter the AfsRegistrationNo on the Agreement record.",
+      subject: "Agreement for Sale registered at the Sub-Registrar's office",
+      summary: "Agreement Registry completed: the Agreement for Sale is registered. Enter its registration no. on the agreement.",
       createdBy: actorId(req),
     });
 

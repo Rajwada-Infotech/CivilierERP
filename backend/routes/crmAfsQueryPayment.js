@@ -124,7 +124,7 @@ router.get("/:id", requirePageRight("crm-afs-query-payment", "view"), async (req
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`${AQP_SELECT} WHERE aqp.Id = @id`);
-    if (!result.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
+    if (!result.recordset.length) return res.status(404).json({ error: "Agreement registration fees not found" });
 
     const attachments = await pool.request().input("id", sql.Int, id).query(`
       SELECT AttachmentId, DocType, FileName, MimeType, FileSize, UploadedBy, UploadedAt
@@ -159,11 +159,11 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
     const agreement = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 Id, Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
     if (!agreement.recordset.length) {
-      return res.status(400).json({ error: "AFS Query Payment requires an Agreement for Sale to exist for this booking first" });
+      return res.status(400).json({ error: "Registration fees need an Agreement for Sale for this booking first" });
     }
     const agr = agreement.recordset[0];
     if (![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.Status)) {
-      return res.status(400).json({ error: `AFS Query Payment requires the Agreement for Sale to be Executed or Registered first (current status: ${agr.Status})` });
+      return res.status(400).json({ error: `Registration fees can start once the Agreement for Sale is executed (it is ${agr.Status})` });
     }
 
     // The amount may be left blank at creation (the UI now lets staff open the
@@ -188,7 +188,7 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
     res.status(201).json({ success: true, id: result.recordset[0].Id, AfsQPNo: aqpNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
-      return res.status(409).json({ error: "AFS Query Payment tracking already started for this booking" });
+      return res.status(409).json({ error: "Registration fees are already started for this booking" });
     console.error("[crm-afs-query-payment] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }
@@ -205,7 +205,7 @@ router.put("/:id", requirePageRight("crm-afs-query-payment", "edit"), async (req
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement registration fees not found" });
     const row = cur.recordset[0];
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -242,7 +242,7 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status, StampDuty, RegistrationFee FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement registration fees not found" });
     const row = cur.recordset[0];
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -298,7 +298,7 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
 
       await logCommunication(tx, {
         bookingId: row.BookingId, direction: "Outbound",
-        subject: "AFS stamp duty / registration fee details sent to customer",
+        subject: "Agreement stamp duty and registration fee details sent to the customer",
         summary: hasAmount
           ? "Required government payment amount and paperwork for AFS registration shared with the customer."
           : "Paperwork for AFS registration shared with the customer; the exact stamp duty / registration fee amount was not yet known and will follow.",
@@ -330,7 +330,7 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
 
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status, StampDuty, RegistrationFee FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement registration fees not found" });
     const row = cur.recordset[0];
     if (row.Status === "Confirmed") return res.status(400).json({ error: "Already confirmed" });
     if (row.Status !== "InfoSent") {
@@ -395,8 +395,8 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
 
       await logCommunication(tx, {
         bookingId: row.BookingId, direction: "Inbound",
-        subject: "AFS government payment confirmed",
-        summary: "Staff confirmed the customer has remitted AFS stamp duty and registration fee to the Sub-Registrar Office.",
+        subject: "Agreement registration fees paid",
+        summary: "Staff confirmed the customer paid the agreement's stamp duty and registration fee to the Sub-Registrar's office.",
         createdBy: actor,
       });
 

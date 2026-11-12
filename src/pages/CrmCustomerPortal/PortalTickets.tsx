@@ -113,14 +113,14 @@ const PortalTickets: React.FC = () => {
             <div>
               <label className="text-xs block mb-1" style={{ color: TEXT_MUTED }}>Description</label>
               <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} rows={3}
-                className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none" placeholder="Describe your request..." style={{ border: `1px solid ${HAIRLINE}`, background: SURFACE_ALT, color: TEXT }} />
+                className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none" placeholder="Describe your request…" style={{ border: `1px solid ${HAIRLINE}`, background: SURFACE_ALT, color: TEXT }} />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setDialogOpen(false)} className="px-3 py-1.5 text-sm rounded-lg hover:opacity-80" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
             <button onClick={handleSubmit} disabled={saving}
               className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>
-              {saving ? "Submitting..." : "Submit"}
+              {saving ? "Submitting…" : "Submit"}
             </button>
           </div>
         </DialogContent>

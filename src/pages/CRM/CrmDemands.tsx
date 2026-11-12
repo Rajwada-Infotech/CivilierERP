@@ -60,7 +60,7 @@ const stateOf = (m: DemandRow): { label: string; tone: "done" | "waiting" | "sto
 async function fetchDemands(params: URLSearchParams): Promise<{ demands: DemandRow[]; total: number; summary: { tabs: Tabs } }> {
   const res = await fetchWithAuth(`${API}/demands?${params}`);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || "Failed to load demands");
+  if (!res.ok) throw new Error(data?.error || "Could not load demands");
   return data;
 }
 
@@ -160,7 +160,7 @@ const CrmDemands: React.FC = () => {
     try {
       const res = await fetchWithAuth(`${API}/${raiseRow.Id}/demand`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Notes: raiseNotes || undefined }) });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Failed to raise demand");
+      if (!res.ok) throw new Error(body.error || "Could not raise demand");
       toast.success(`Demand raised: ${body.DemandNo}`);
       setRaiseRow(null); setRaiseNotes("");
       changed();
@@ -173,7 +173,7 @@ const CrmDemands: React.FC = () => {
     try {
       const res = await fetchWithAuth(`${API}/${undoRow.Id}/demand/undo`, { method: "PATCH" });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Failed to undo demand");
+      if (!res.ok) throw new Error(body.error || "Could not undo demand");
       toast.success("Demand reverted");
       setUndoRow(null);
       changed();

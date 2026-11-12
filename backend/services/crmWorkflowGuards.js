@@ -1416,7 +1416,37 @@ async function refreshPrePossessionStatus(executor, bookingId = null) {
   return r.rowsAffected?.[0] || 0;
 }
 
-module.exports = { NOTICE_RESPONSE_OVERDUE_SQL, OC_CC_NOT_ISSUED, prePossessionStatusSql, refreshPrePossessionStatus, requireNotMidApproval, releaseBookingInventoryLines,
+
+// ── The agreement's steps: when each is done ─────────────────────────────────
+// The one place these rules live. The Agreement page (its bar, list and next step) and the Legal Milestones journey
+// both read the flags built here (D_<key> = 1 when done); each screen passes the column names it has. A step opens once
+// the one before it is done; an executed agreement has every step up to execution done, whatever an older record lacks.
+const AGREEMENT_STEP_KEYS = ["agrInit", "agrLegal", "agrPapers", "agrSenior", "agrSent", "agrCustomer", "agrDate", "agrExecuted"];
+/** c: { legal, senior, sent, customer, date, status, papersAsked, papersIn } — SQL expressions for those values.
+ *  Returns [{ key, done }] (SQL conditions) for the steps up to execution, in order. */
+function agreementStepConditions(c) {
+  const executed = `ISNULL(${c.status}, '') IN ('Executed', 'Registered')`;
+  const senior = `ISNULL(${c.senior}, '') = 'Approved'`;
+  const own = {
+    agrInit: "1 = 1",
+    agrLegal: `${c.legal} IS NOT NULL`,
+    agrPapers: `(ISNULL(${c.papersAsked}, 0) > 0 AND ISNULL(${c.papersIn}, 0) = ISNULL(${c.papersAsked}, 0)) OR ${senior}`,
+    agrSenior: senior,
+    agrSent: `${c.sent} IS NOT NULL`,
+    agrCustomer: `ISNULL(${c.customer}, '') = 'Approved'`,
+    agrDate: `${c.date} IS NOT NULL`,
+    agrExecuted: executed,
+  };
+  return AGREEMENT_STEP_KEYS.map((key) => ({ key, done: `(${own[key]}) OR ${executed}` }));
+}
+/** The same steps as SELECT columns (D_<key>, 1 = done), plus D_agrRegistered for the Agreement page's last step. */
+function agreementStepFlagsSql(c) {
+  const flag = (cond) => `CAST(CASE WHEN ${cond} THEN 1 ELSE 0 END AS INT)`;
+  return [...agreementStepConditions(c).map((st) => `${flag(st.done)} AS D_${st.key}`),
+    `${flag(`ISNULL(${c.status}, '') = 'Registered'`)} AS D_agrRegistered`].join(",\n    ");
+}
+
+module.exports = { AGREEMENT_STEP_KEYS, agreementStepConditions, agreementStepFlagsSql, NOTICE_RESPONSE_OVERDUE_SQL, OC_CC_NOT_ISSUED, prePossessionStatusSql, refreshPrePossessionStatus, requireNotMidApproval, releaseBookingInventoryLines,
   assertWelcomeChecklistUnlocked,
   resolveNocType,
   resolveOcCcGate,

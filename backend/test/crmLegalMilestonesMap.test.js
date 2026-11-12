@@ -13,7 +13,7 @@ jest.mock("../db", () => ({
         input(n, _t, v) { r.inputs[n] = v; return r; },
         async query(q) {
           mockQueries.push({ q, inputs: r.inputs });
-          if (/AS Complete/.test(q)) return { recordset: [{ Total: 120, Complete: 9, AvgProgress: 0.4567, ManualDue: 4, G_agreement: 80, O_agreement: 40, G_noc: 30, O_noc: 12 }] };
+          if (/AS Complete/.test(q)) return { recordset: [{ Total: 120, Complete: 9, AvgProgress: 0.4567, G_agreement: 80, O_agreement: 40, G_noc: 30, O_noc: 12 }] };
           return { recordset: [{ Id: 1, BookingId: 5, D_noc: 1 }] };
         },
       };
@@ -43,7 +43,7 @@ test("a page carries every step's done / locked flags, each phase's state and th
   const res = await request(app).get("/?page=1&pageSize=25");
   expect(res.status).toBe(200);
   const q = pageQuery().q;
-  for (const k of ["DocCollection", "DirectorMeeting", "FinalExecution", "afsQP", "afsReg", "noc", "ocCc", "prePossession", "possessionNotice", "handover", "salesDeed", "queryPayment", "registry", "mutation"]) {
+  for (const k of ["agrInit", "agrLegal", "agrPapers", "agrSenior", "agrSent", "agrCustomer", "agrDate", "agrExecuted", "afsQP", "afsReg", "noc", "ocCc", "prePossession", "possessionNotice", "handover", "salesDeed", "queryPayment", "registry", "mutation"]) {
     expect(q).toContain(`AS D_${k}`);
     expect(q).toContain(`AS L_${k}`);
   }
@@ -51,11 +51,20 @@ test("a page carries every step's done / locked flags, each phase's state and th
   expect(q).toMatch(/AS DoneCount, 19 AS StepCount/);
   // nulls never count as a match: every status is read through ISNULL
   expect(q).toMatch(/ISNULL\(x\.HandoverStatus, ''\) = 'Completed'/);
+  // the agreement's steps are its own record's (no director meeting); the sale deed counts once director-approved
+  expect(q).not.toMatch(/DirectorMeeting/);
+  expect(q).toContain("CASE WHEN ISNULL(x.DeedDirectorApprovalStatus, '') = 'Approved' THEN 1 ELSE 0 END AS INT) AS D_salesDeed");
 });
 
-test("the summary gives the gates, the tab counts, the average and the director meetings due", async () => {
+test("the export (no page) carries the same flags", async () => {
+  const res = await request(app).get("/");
+  expect(res.status).toBe(200);
+  expect(mockQueries[0].q).toMatch(/AS D_agrExecuted/);
+});
+
+test("the summary gives the gates, the tab counts, and the average", async () => {
   const res = await request(app).get("/?page=1&pageSize=25");
-  expect(res.body.summary).toMatchObject({ total: 120, complete: 9, manualDue: 4, avgProgress: 46 });
+  expect(res.body.summary).toMatchObject({ total: 120, complete: 9, avgProgress: 46 });
   expect(res.body.summary.gates.agreement).toBe(80);
   expect(res.body.summary.atPhase.noc).toBe(12);
   expect(res.body.total).toBe(120);

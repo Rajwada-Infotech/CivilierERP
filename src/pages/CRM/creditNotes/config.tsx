@@ -27,7 +27,7 @@ export const DIALOG = "rounded-none p-5 gap-4";
 export async function getJson(url: string, init?: RequestInit) {
   const r = await fetchWithAuth(url, init);
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || "Something went wrong");
+  if (!r.ok) throw new Error(j.error || "The request could not be completed. Please try again.");
   return j;
 }
 

@@ -66,31 +66,29 @@ export function rowFollowupProgress(a: any): { required: number; uploaded: numbe
   const uploaded = Number(a?.MandatoryUploadedCount) || 0;
   return { required, uploaded, percent: required > 0 ? Math.round((uploaded / required) * 100) : 0 };
 }
-/** Each step of the agreement and where it stands. Takes the agreement's papers (its record) or, for a list row, the
- *  paper counts already worked out. */
+// The agreement's steps in order: the name shown, the server's flag for it (D_<key>, the one set of rules in
+// backend/services/crmWorkflowGuards.js, also behind the Legal Milestones journey) and the part of the page that works it.
+const STEP_DEFS: { label: string; key: string; tab: AgrTab }[] = [
+  { label: "Initialisation", key: "agrInit", tab: "Overview" },
+  { label: "Legal Exec. Assigned", key: "agrLegal", tab: "Legal & Approval" },
+  { label: "Agreement Followup", key: "agrPapers", tab: "Documents" },
+  { label: "Senior Approval", key: "agrSenior", tab: "Legal & Approval" },
+  { label: "Sent to Customer", key: "agrSent", tab: "Legal & Approval" },
+  { label: "Customer Approval", key: "agrCustomer", tab: "Legal & Approval" },
+  { label: "Date Agreed", key: "agrDate", tab: "Legal & Approval" },
+  { label: "Execution Follow-ups", key: "agrExecuted", tab: "Documents" },
+  { label: "Registered", key: "agrRegistered", tab: "Overview" },
+];
+/** Each step of the agreement and where it stands, read from the server's flags on the agreement (list row or record):
+ *  done, current (the one after the last done), or upcoming. The papers only add the follow-up step's percentage. */
 export function agreementStepStates(a: any, documents: any[] | undefined | { required: number; uploaded: number; percent: number }): { label: string; state: StepState; tab: AgrTab }[] {
-  const legalAssigned = a?.LegalExecutiveId != null;
   const followup = documents && !Array.isArray(documents) ? documents : followupProgress(documents as any[] | undefined);
-  const senior = a?.SeniorApprovalStatus === CrmStatus.APPROVED;
-  // Every paper asked for is in, or the agreement has already moved past this step (none asked, yet senior-approved).
-  const followupDone = (followup.required > 0 && followup.percent === 100) || senior;
-  const sent = !!a?.SentToCustomerAt;
-  const custApproved = a?.CustomerApprovalStatus === CrmStatus.APPROVED;
-  const dated = !!a?.AgreementDate;
-  const executed = a?.Status === CrmStatus.EXECUTED || a?.Status === CrmStatus.REGISTERED;
-  const registered = a?.Status === CrmStatus.REGISTERED;
-  return [
-    { label: "Initialisation",       state: "done" as StepState,                                                    tab: "Overview" as AgrTab },
-    { label: "Legal Exec. Assigned", state: (legalAssigned ? "done" : "current") as StepState,                      tab: "Legal & Approval" as AgrTab },
-    { label: `Agreement Followup${followup.required > 0 ? ` (${followup.percent}%)` : ""}`,
-      state: (followupDone ? "done" : legalAssigned ? "current" : "upcoming") as StepState,                         tab: "Documents" as AgrTab },
-    { label: "Senior Approval",      state: (senior ? "done" : followupDone ? "current" : "upcoming") as StepState,       tab: "Legal & Approval" as AgrTab },
-    { label: "Sent to Customer",     state: (sent ? "done" : senior ? "current" : "upcoming") as StepState,               tab: "Legal & Approval" as AgrTab },
-    { label: "Customer Approval",    state: (custApproved ? "done" : sent ? "current" : "upcoming") as StepState,         tab: "Legal & Approval" as AgrTab },
-    { label: "Date Agreed",          state: (dated ? "done" : custApproved ? "current" : "upcoming") as StepState,        tab: "Legal & Approval" as AgrTab },
-    { label: "Execution Follow-ups", state: (executed ? "done" : dated ? "current" : "upcoming") as StepState,            tab: "Documents" as AgrTab },
-    { label: "Registered",           state: (registered ? "done" : executed ? "current" : "upcoming") as StepState,       tab: "Overview" as AgrTab },
-  ];
+  const done = STEP_DEFS.map((d) => a?.[`D_${d.key}`] === 1);
+  return STEP_DEFS.map((d, i) => ({
+    label: d.key === "agrPapers" && followup.required > 0 ? `${d.label} (${followup.percent}%)` : d.label,
+    state: (done[i] ? "done" : i === 0 || done[i - 1] ? "current" : "upcoming") as StepState,
+    tab: d.tab,
+  }));
 }
 /** The step an agreement is on now ("Complete" once registered); the list's Stage column. */
 export function agreementCurrentStep(a: any, documents: Parameters<typeof agreementStepStates>[1]): string {
@@ -103,7 +101,7 @@ export function agreementCurrentStep(a: any, documents: Parameters<typeof agreem
 // ── Board, insights and alerts: all read off agreementStepStates, so they never disagree with the record's own path ──
 type StepProgress = Parameters<typeof agreementStepStates>[1];
 /** The steps' plain names, in order (the follow-up step without its percentage): the board's columns. */
-export const AGREEMENT_STEP_NAMES: string[] = agreementStepStates(null, { required: 0, uploaded: 0, percent: 0 }).map((s) => s.label);
+export const AGREEMENT_STEP_NAMES: string[] = STEP_DEFS.map((d) => d.label);
 /** Where the agreement stands: the index of its current step, or -1 when none is (registered, or cancelled). */
 export function agreementCurrentIndex(a: any, progress: StepProgress): number {
   // The status settles it first: an executed agreement is waiting to be registered, whatever an older record lacks.
