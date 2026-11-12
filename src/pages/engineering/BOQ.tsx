@@ -11,7 +11,7 @@ import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { type DbItem } from "@/api/itemMasterApi";
 import { type DbActivity } from "@/api/engineeringActivityMasterApi";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { FileText, FileSpreadsheet, Search, Eye, Plus, RefreshCw, Edit3, Printer } from "lucide-react";
+import { FileText, FileSpreadsheet, Search, Eye, Plus, RefreshCw, Edit3, Printer, ChevronDown, ChevronRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -109,6 +109,9 @@ export default function BOQ() {
   const PAGE_LIMIT = 10;
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("All");
+  // Project filter + collapsible project groups (same pattern as Material Request / PO).
+  const [projectFilter, setProjectFilter] = useState("");
+  const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Record<string, boolean>>({});
   const searchRef = useRef<ReturnType<typeof setTimeout>>();
 
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -132,12 +135,13 @@ export default function BOQ() {
     isLoading: loading,
     refetch: loadList,
   } = useQuery({
-    queryKey: ["boqs", page, search, filterStatus],
+    queryKey: ["boqs", page, search, filterStatus, projectFilter],
     queryFn: () => {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(PAGE_LIMIT),
         ...(search ? { search } : {}),
+        ...(projectFilter ? { projectId: projectFilter } : {}),
         ...(filterStatus && filterStatus !== "All"
           ? { status: filterStatus }
           : {}),
@@ -156,10 +160,25 @@ export default function BOQ() {
         page: String(p),
         limit: String(limit),
         ...(search ? { search } : {}),
+        ...(projectFilter ? { projectId: projectFilter } : {}),
         ...(filterStatus && filterStatus !== "All" ? { status: filterStatus } : {}),
       })}`),
     );
-  const filterNote = [filterStatus !== "All" ? `Status: ${filterStatus}` : "", search ? `Search: ${search}` : ""].filter(Boolean).join(" · ");
+  const projectFilterName = projectFilter ? (projects.find((p) => String(p.id) === projectFilter)?.name || projects.find((p) => String(p.id) === projectFilter)?.label || "") : "";
+  const filterNote = [projectFilterName ? `Project: ${projectFilterName}` : "", filterStatus !== "All" ? `Status: ${filterStatus}` : "", search ? `Search: ${search}` : ""].filter(Boolean).join(" · ");
+
+  // Grouped by project in the order rows arrive (newest first from the server), so the project with the most
+  // recent BOQ is on top — the same collapsible grouping Material Request and PO use.
+  const groupedByProject = (() => {
+    const groups = new Map<string, { key: string; projectName: string | null; rows: BoqRecord[] }>();
+    for (const r of rows) {
+      const name = (r as { ProjectName?: string | null }).ProjectName || null;
+      const key = name || "no-project";
+      if (!groups.has(key)) groups.set(key, { key, projectName: name, rows: [] });
+      groups.get(key)!.rows.push(r);
+    }
+    return Array.from(groups.values());
+  })();
   const [printing, setPrinting] = useState(false);
   const handlePrintList = async () => {
     setPrinting(true);
@@ -709,6 +728,22 @@ export default function BOQ() {
                     className="w-full h-9 pl-9 pr-3 text-sm bg-card border border-foreground/40 focus:outline-none focus:border-foreground"
                   />
                 </div>
+                <select
+                  value={projectFilter}
+                  onChange={(e) => {
+                    setProjectFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  aria-label="Project"
+                  className="h-9 w-full md:w-52 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground outline-none"
+                >
+                  <option value="">All projects</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={String(p.id)}>
+                      {p.name || p.label}
+                    </option>
+                  ))}
+                </select>
                 <div className="flex gap-2 flex-wrap">
                   {statuses.map((s) => (
                     <button
@@ -731,14 +766,46 @@ export default function BOQ() {
                 </div>
               ) : (
                 <>
-                  <DataTable
-                    data={rows}
-                    columns={enrichedColumns}
-                    searchable={false}
-                    paginated={false}
-                    emptyMessage="No BOQs found. Adjust your filters or create a new one."
-                    getRowId={(r: any) => String(r.BoqID)}
-                  />
+                  {rows.length === 0 ? (
+                    <p className="text-center text-muted-foreground text-sm py-10">No BOQs found. Adjust your filters or create a new one.</p>
+                  ) : (
+                    groupedByProject.map((group) => {
+                      const collapsed = !!collapsedProjectGroups[group.key];
+                      return (
+                        <div key={group.key} className="border-b border-foreground/20 last:border-0">
+                          <button
+                            type="button"
+                            aria-expanded={!collapsed}
+                            onClick={() => setCollapsedProjectGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                            className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-primary/5 transition-colors text-left"
+                            style={{ borderBottom: collapsed ? undefined : "1px solid hsl(var(--foreground) / 0.2)" }}
+                          >
+                            {collapsed ? (
+                              <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                            ) : (
+                              <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                            )}
+                            <span className="font-heading text-sm font-bold tracking-tight text-foreground">
+                              {group.projectName || "No project"}
+                            </span>
+                            <span className="ml-auto font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground border border-foreground/30 px-1.5 py-0.5">
+                              {group.rows.length} BOQ{group.rows.length !== 1 ? "s" : ""}
+                            </span>
+                          </button>
+                          {!collapsed && (
+                            <DataTable
+                              data={group.rows}
+                              columns={enrichedColumns}
+                              searchable={false}
+                              paginated={false}
+                              emptyMessage="No BOQs found."
+                              getRowId={(r: any) => String(r.BoqID)}
+                            />
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
                   {totalPages > 1 && (
                     <div className="flex items-center justify-between px-5 py-3" style={{ borderTop: RULE }}>
                       <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground tabular-nums">
