@@ -31,14 +31,14 @@ export const mrStatusTone = (status: string | null | undefined) => {
     case "Approved":
     case "Ordered":
     case "Completed":
-      return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400";
+      return "bg-primary/10 text-primary";
     case "Rejected":
       return "bg-destructive/10 text-destructive";
     case "Partially Ordered":
     case "Partially Fulfilled":
-      return "bg-sky-500/10 text-sky-700 dark:text-sky-400";
+      return "bg-foreground/5 text-foreground";
     default:
-      return "bg-amber-500/10 text-amber-700 dark:text-amber-400";
+      return "bg-muted text-muted-foreground";
   }
 };
 
@@ -299,7 +299,7 @@ export const WorkOrderDetailPanel: React.FC<{
                   className="flex items-center gap-1.5 px-3 py-1.5 border border-foreground/40 text-foreground text-xs font-medium hover:bg-primary/5 transition-colors disabled:opacity-60"
                 >
                   {creatingMR ? (
-                    <span className="w-3 h-3 border border-foreground/40 border-t-emerald-500 animate-spin" />
+                    <span className="w-3 h-3 border border-foreground/40 border-t-foreground rounded-full animate-spin" />
                   ) : (
                     <ShoppingCart size={12} />
                   )}
@@ -482,7 +482,7 @@ export const WorkOrderDetailPanel: React.FC<{
                 {
                   label: "Total Certified",
                   value: fmt(chainStatus.totalCertified ?? 0),
-                  cls: "text-blue-600 dark:text-blue-400",
+                  cls: "text-foreground",
                 },
                 {
                   label: "Total Booked",
@@ -491,14 +491,15 @@ export const WorkOrderDetailPanel: React.FC<{
                       chainStatus.latestExpenseAmount ??
                       0,
                   ),
-                  cls: "text-amber-600 dark:text-amber-400",
+                  cls: "text-foreground",
                 },
                 {
                   label: "Total Paid",
                   value: fmt(chainStatus.totalPaid ?? 0),
+                  // Paid in full: blue (settled); otherwise ink, or graphite when nothing is paid yet.
                   cls: chainStatus.isPaid
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-muted-foreground",
+                    ? "text-primary"
+                    : (chainStatus.totalPaid ?? 0) > 0 ? "text-foreground" : "text-muted-foreground",
                 },
               ].map(({ label, value, cls }) => (
                 <div
@@ -508,7 +509,7 @@ export const WorkOrderDetailPanel: React.FC<{
                   <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                     {label}
                   </p>
-                  <p className={`text-sm font-bold ${cls}`}>{value}</p>
+                  <p className={`font-heading tabular-nums text-sm font-bold ${cls}`}>{value}</p>
                 </div>
               ))}
             </div>
