@@ -5,8 +5,10 @@ import { UserTick } from "iconsax-react";
 import { Pencil, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrError, HrSkeleton, hrCard } from "@/components/hrpayroll/HrUi";
-import { HrPayrollShell, HR_PAYROLL_ACCENT, HR_PAYROLL_ACCENT as ACCENT } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton, hrCard, HR_FIELD, HR_HEAD, HR_LBL, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { KEY_INK, KEY_LINE, TONE } from "@/components/sheet/sheetParts";
+import { SheetMark, type MarkTone } from "@/components/sheet/Sheet";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { getEmployeeCompanyOptions, type EmployeeCompanyOption } from "@/api/employeeMasterApi";
@@ -23,14 +25,19 @@ import {
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
-const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
-const inputCls = "w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
+// Sheet fields, table heads and row actions (docs/DESIGN.md).
+const labelCls = `block ${HR_LBL} mb-1.5`;
+const inputCls = HR_FIELD;
+const TH = `${HR_LBL} px-4 py-2.5 font-semibold`;
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
 
-const STATUS_META: Record<InterviewStatus, { label: string; className: string }> = {
-  PENDING: { label: "Pending", className: "bg-muted text-muted-foreground border-border" },
-  SELECTED: { label: "Selected", className: "bg-primary/10 text-primary border-primary/30" },
-  REJECTED: { label: "Rejected", className: "bg-destructive/10 text-destructive border-destructive/30" },
-  HOLD: { label: "Hold", className: "bg-foreground/5 text-foreground border-foreground/30" },
+// Each outcome's word, its colour on the sheet and its status mark: selected settled (blue), rejected stopped (red),
+// on hold waiting (ink), pending not yet decided (graphite).
+const STATUS_META: Record<InterviewStatus, { label: string; color: string; tone: MarkTone }> = {
+  PENDING: { label: "Pending", color: TONE.graphite, tone: "draft" },
+  SELECTED: { label: "Selected", color: TONE.blue, tone: "done" },
+  REJECTED: { label: "Rejected", color: TONE.red, tone: "stopped" },
+  HOLD: { label: "Hold", color: TONE.ink, tone: "waiting" },
 };
 
 interface FormState {
@@ -164,25 +171,28 @@ const InterviewPage: React.FC = () => {
     remarks: r.Remarks || "",
   }));
 
-  if (isLoading) return <HrSkeleton rows={2} />;
-  if (error) return <HrError text="Failed to load interviews." />;
-
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Interview"]} />
-      <HrPayrollShell title="Interview" subtitle="Schedule interviews and record their outcome" icon={UserTick}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Interviews"]} />
+      <HrPayrollShell title="Interviews" subtitle="Schedule interviews and record their outcome" icon={UserTick}>
+        {isLoading ? (
+          <HrSkeleton rows={2} />
+        ) : error ? (
+          <HrError text="Failed to load interviews." />
+        ) : (
         <div className="space-y-6">
-          {/* ── Hiring pipeline: tap a stage to filter the list below ── */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 rounded-none border p-3" style={{ background: `hsl(var(--foreground) / 0.04)`, borderColor: `hsl(var(--foreground) / 0.18)` }}>
-            {([["ALL", "All interviews", ACCENT] as const, ...(["PENDING", "HOLD", "SELECTED", "REJECTED"] as InterviewStatus[]).map((st) => [st, STATUS_META[st].label, st === "SELECTED" ? "hsl(var(--primary))" : st === "REJECTED" ? "hsl(var(--destructive))" : st === "HOLD" ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))"] as const)]).map(([key, label, color]) => {
+          {/* ── Hiring pipeline: ruled cells, open one to filter the list below ── */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 bg-card" style={{ border: HR_RULE }}>
+            {([["ALL", "All interviews", TONE.ink] as const, ...(["PENDING", "HOLD", "SELECTED", "REJECTED"] as InterviewStatus[]).map((st) => [st, STATUS_META[st].label, STATUS_META[st].color] as const)]).map(([key, label, color], i) => {
               const n = key === "ALL" ? rows.length : rows.filter((r) => r.Status === key).length;
               const on = stageFilter === key;
               return (
-                <button key={key} type="button" onClick={() => setStageFilter(key as InterviewStatus | "ALL")}
-                  className={`rounded-none border px-3.5 py-2.5 text-left transition-all ${on ? "bg-card" : "bg-card border-border hover:bg-card"}`}
-                  style={on ? { borderColor: color, boxShadow: `0 0 0 1.5px ${color}` } : undefined}>
-                  <p className="text-xl font-heading font-bold tabular-nums leading-tight" style={{ color }}>{n}</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">{label}</p>
+                <button key={key} type="button" onClick={() => setStageFilter(key as InterviewStatus | "ALL")} aria-pressed={on}
+                  className={`relative px-4 py-3 text-left transition-colors ${on ? "bg-primary/5" : "hover:bg-primary/5"}`}
+                  style={{ borderLeft: i ? "1px solid hsl(var(--foreground) / 0.15)" : undefined }}>
+                  <p className={HR_LBL} style={{ color: on ? "hsl(var(--foreground))" : undefined }}>{label}</p>
+                  <p className={`${HR_NUM} mt-1.5 text-xl font-bold leading-tight`} style={{ color }}>{n}</p>
+                  <span className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: on ? "hsl(var(--foreground))" : "transparent" }} />
                 </button>
               );
             })}
@@ -190,165 +200,164 @@ const InterviewPage: React.FC = () => {
 
           {/* ── Form ── */}
           {(rights.canCreate || (editingId && rights.canEdit)) && (
-            <form onSubmit={handleSubmit} className={`${hrCard} p-5 space-y-5`}>
-              <div className="flex items-center justify-between">
-                <h3 className="font-heading font-semibold text-foreground text-sm">
-                  {editingId ? "Edit Interview" : "Schedule Interview"}
-                </h3>
+            <form onSubmit={handleSubmit} className={hrCard}>
+              <div className="flex items-center justify-between gap-3 px-5 py-3.5" style={{ borderBottom: HR_RULE }}>
+                <h3 className={HR_HEAD}>{editingId ? "Edit interview" : "Schedule interview"}</h3>
                 {editingId && (
-                  <button type="button" onClick={resetForm} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                    <X size={13} /> Cancel edit
+                  <button type="button" onClick={resetForm} className={`${KEY_LINE} h-8 px-3`}>
+                    <X size={12} /> Cancel edit
                   </button>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className={labelCls}>Candidate *</label>
-                  <SearchableNativeSelect className={inputCls} value={form.candidateId} onChange={(e) => setField("candidateId", e.target.value)}>
-                    <option value="">Select...</option>
-                    {candidates.map((c) => (
-                      <option key={c.CandidateId} value={c.CandidateId}>
-                        {c.CandidateCode} — {c.CandidateName}
-                      </option>
-                    ))}
-                  </SearchableNativeSelect>
-                </div>
-                <div>
-                  <label className={labelCls}>Document Number</label>
-                  <input className={`${inputCls} font-mono opacity-70`} value={editingId ? rows.find((r) => r.InterviewId === editingId)?.DocNo || "" : "(auto-generated on save)"} readOnly disabled />
-                </div>
-              </div>
-
-              {/* ── Candidate detail (read-only, from Candidate Master) ── */}
-              {selectedCandidate && (
-                <div className="rounded-none border p-4" style={{ borderColor: `hsl(var(--foreground) / 0.20)`, backgroundColor: `hsl(var(--foreground) / 0.05)` }}>
-                  <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `hsl(var(--foreground) / 0.20)` }}>
-                    Candidate Details
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs">
-                    {[
-                      ["Contact", selectedCandidate.Contact || "—"],
-                      ["Email", selectedCandidate.Email || "—"],
-                      ["Qualification", selectedCandidate.Qualification || "—"],
-                      ["Experience", selectedCandidate.Experience || "—"],
-                      ["Expected Salary", selectedCandidate.ExpectedSalary != null ? String(selectedCandidate.ExpectedSalary) : "—"],
-                      ["Current Salary", selectedCandidate.CurrentSalary != null ? String(selectedCandidate.CurrentSalary) : "—"],
-                      ["Notice Period", selectedCandidate.NoticePeriod || "—"],
-                      ["Interview Status", selectedCandidate.InterviewStatus || "—"],
-                    ].map(([label, value]) => (
-                      <div key={label} className="flex items-center justify-between gap-2">
-                        <span className="text-muted-foreground">{label}</span>
-                        <span className="font-medium text-right truncate">{value}</span>
-                      </div>
-                    ))}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Resume</span>
-                      {selectedCandidate.ResumeBase64 ? (
-                        <a href={selectedCandidate.ResumeBase64} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline truncate">
-                          {selectedCandidate.ResumeFileName || "View"}
-                        </a>
-                      ) : (
-                        <span className="font-medium text-right">—</span>
-                      )}
+              <div className="p-5 space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelCls}>Candidate *</label>
+                    <SearchableNativeSelect className={inputCls} value={form.candidateId} onChange={(e) => setField("candidateId", e.target.value)}>
+                      <option value="">Select...</option>
+                      {candidates.map((c) => (
+                        <option key={c.CandidateId} value={c.CandidateId}>
+                          {c.CandidateCode} — {c.CandidateName}
+                        </option>
+                      ))}
+                    </SearchableNativeSelect>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Document Number</label>
+                    <div className={`w-full h-9 px-2.5 flex items-center border border-foreground/20 bg-foreground/5 text-sm text-muted-foreground ${editingId ? HR_NUM : ""}`}>
+                      {editingId ? rows.find((r) => r.InterviewId === editingId)?.DocNo || "" : "Auto-generated on save"}
                     </div>
                   </div>
                 </div>
-              )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <label className={labelCls}>Company</label>
-                  <select className={inputCls} value={form.companyId} onChange={(e) => setField("companyId", e.target.value)}>
-                    <option value="">Select...</option>
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.id}>{c.label}</option>
-                    ))}
-                  </select>
+                {/* ── Candidate detail (read-only, from Candidate Master) ── */}
+                {selectedCandidate && (
+                  <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground) / 0.25)" }}>
+                    <p className={`${HR_LBL} px-4 py-2.5`} style={{ borderBottom: "1px solid hsl(var(--foreground) / 0.15)" }}>Candidate details</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 px-4 py-3 text-xs">
+                      {[
+                        ["Contact", selectedCandidate.Contact || "—"],
+                        ["Email", selectedCandidate.Email || "—"],
+                        ["Qualification", selectedCandidate.Qualification || "—"],
+                        ["Experience", selectedCandidate.Experience || "—"],
+                        ["Expected Salary", selectedCandidate.ExpectedSalary != null ? `₹${Number(selectedCandidate.ExpectedSalary).toLocaleString("en-IN")}` : "—"],
+                        ["Current Salary", selectedCandidate.CurrentSalary != null ? `₹${Number(selectedCandidate.CurrentSalary).toLocaleString("en-IN")}` : "—"],
+                        ["Notice Period", selectedCandidate.NoticePeriod || "—"],
+                        ["Interview Status", selectedCandidate.InterviewStatus || "—"],
+                      ].map(([label, value]) => (
+                        <div key={label} className="flex items-center justify-between gap-2 py-0.5" style={{ borderBottom: "1px solid hsl(var(--foreground) / 0.08)" }}>
+                          <span className="text-muted-foreground">{label}</span>
+                          <span className={`font-medium text-right truncate ${/Salary/.test(label) ? HR_NUM : ""}`}>{value}</span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-2 py-0.5" style={{ borderBottom: "1px solid hsl(var(--foreground) / 0.08)" }}>
+                        <span className="text-muted-foreground">Resume</span>
+                        {selectedCandidate.ResumeBase64 ? (
+                          <a href={selectedCandidate.ResumeBase64} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline truncate">
+                            {selectedCandidate.ResumeFileName || "View"}
+                          </a>
+                        ) : (
+                          <span className="font-medium text-right">—</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <label className={labelCls}>Company</label>
+                    <select className={inputCls} value={form.companyId} onChange={(e) => setField("companyId", e.target.value)}>
+                      <option value="">Select...</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>{c.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Date *</label>
+                    <DateInput className={inputCls} value={form.interviewDate} onChange={(e) => setField("interviewDate", e.target.value)} />
+                  </div>
                 </div>
+
                 <div>
-                  <label className={labelCls}>Date *</label>
-                  <DateInput className={inputCls} value={form.interviewDate} onChange={(e) => setField("interviewDate", e.target.value)} />
+                  <label className={labelCls}>Remarks</label>
+                  <textarea className={`${inputCls} !h-auto py-2`} rows={2} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} />
                 </div>
               </div>
 
-              <div>
-                <label className={labelCls}>Remarks</label>
-                <textarea className={inputCls} rows={2} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} />
-              </div>
-
-              <div className="flex justify-end gap-2">
-                <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-none bg-foreground text-card hover:opacity-90 transition-opacity">
-                  {editingId ? "Update Interview" : "Save Interview"}
+              <div className="flex justify-end gap-2 px-5 py-3" style={{ borderTop: HR_RULE }}>
+                <button type="submit" className={`${KEY_INK} h-9 px-5`}>
+                  {editingId ? "Update interview" : "Save interview"}
                 </button>
               </div>
             </form>
           )}
 
           {/* ── Records ── */}
-          <div className="bg-card border border-border rounded-none overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-              <div>
-                <h3 className="font-heading font-semibold text-foreground text-sm">Interview Records</h3>
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{rows.length} record{rows.length !== 1 ? "s" : ""}</p>
+          <div className={`${hrCard} overflow-hidden`}>
+            <div className="flex items-center justify-between gap-3 px-5 py-3.5" style={{ borderBottom: HR_RULE }}>
+              <div className="flex items-baseline gap-2.5">
+                <h3 className={HR_HEAD}>Interview records</h3>
+                <span className={`${HR_NUM} text-[0.6875rem] text-muted-foreground`}>{shownRows.length}{stageFilter !== "ALL" ? ` of ${rows.length}` : ""}</span>
               </div>
               <ExportMenu data={exportData} columns={exportColumns} title="Interview" filename="interview" disabled={rows.length === 0} />
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
-                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
-                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
-                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Date</th>
-                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
-                    <th className="px-4 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
+                  <tr style={{ borderBottom: HR_RULE }}>
+                    <th className={`${TH} text-left`}>Doc No</th>
+                    <th className={`${TH} text-left`}>Candidate</th>
+                    <th className={`${TH} text-left hidden sm:table-cell`}>Company</th>
+                    <th className={`${TH} text-left`}>Date</th>
+                    <th className={`${TH} text-left`}>Status</th>
+                    <th className={`${TH} text-right`}>Actions</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-foreground/15">
                   {shownRows.length === 0 && (
                     <tr>
                       <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No records yet. Schedule one above.</td>
                     </tr>
                   )}
                   {shownRows.map((r) => (
-                    <tr key={r.InterviewId} className="border-b border-border/60 hover:bg-muted/20">
-                      <td className="px-4 py-2.5 font-mono text-xs">{r.DocNo}</td>
+                    <tr key={r.InterviewId} className={`transition-colors ${editingId === r.InterviewId ? "bg-primary/5" : "hover:bg-primary/5"}`}>
+                      <td className={`px-4 py-2.5 text-xs ${HR_NUM}`}>{r.DocNo}</td>
                       <td className="px-4 py-2.5">
                         <div className="font-medium">{r.CandidateName}</div>
-                        <div className="text-[0.6875rem] text-muted-foreground">{r.CandidateCode}</div>
+                        <div className={`text-[0.6875rem] text-muted-foreground ${HR_NUM}`}>{r.CandidateCode}</div>
                       </td>
-                      <td className="px-4 py-2.5 hidden sm:table-cell">{r.CompanyName || "-"}</td>
-                      <td className="px-4 py-2.5">{r.InterviewDate ? r.InterviewDate.slice(0, 10) : "-"}</td>
+                      <td className="px-4 py-2.5 hidden sm:table-cell">{r.CompanyName || "—"}</td>
+                      <td className={`px-4 py-2.5 ${HR_NUM}`}>{r.InterviewDate ? r.InterviewDate.slice(0, 10) : "—"}</td>
                       <td className="px-4 py-2.5">
                         {rights.canEdit ? (
                           <select
                             value={r.Status}
                             disabled={statusMutation.isPending}
                             onChange={(e) => statusMutation.mutate({ id: r.InterviewId, status: e.target.value as InterviewStatus })}
-                            className={`text-xs px-2 py-1 rounded-none border font-medium ${STATUS_META[r.Status]?.className}`}
+                            className="h-8 px-2 border bg-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] outline-none"
+                            style={{ color: STATUS_META[r.Status]?.color, borderColor: STATUS_META[r.Status]?.color }}
                           >
                             {(Object.keys(STATUS_META) as InterviewStatus[]).map((s) => (
                               <option key={s} value={s}>{STATUS_META[s].label}</option>
                             ))}
                           </select>
                         ) : (
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-none text-[0.6875rem] font-medium border ${STATUS_META[r.Status]?.className}`}>
-                            {STATUS_META[r.Status]?.label}
-                          </span>
+                          <SheetMark text={STATUS_META[r.Status]?.label || r.Status} tone={STATUS_META[r.Status]?.tone ?? "waiting"} />
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        <div className="inline-flex items-center gap-2">
+                        <div className="inline-flex items-center gap-1">
                           {rights.canEdit && (
-                            <button onClick={() => handleEdit(r)} className="text-muted-foreground hover:text-foreground" title="Edit">
-                              <Pencil size={14} />
+                            <button onClick={() => handleEdit(r)} className={ACT} title="Edit">
+                              <Pencil size={13} />
                             </button>
                           )}
                           {rights.canDelete && (
-                            <button onClick={() => handleDelete(r)} className="text-muted-foreground hover:text-destructive" title="Delete">
-                              <Trash2 size={14} />
+                            <button onClick={() => handleDelete(r)} className={`${ACT} hover:text-destructive hover:border-destructive`} title="Delete">
+                              <Trash2 size={13} />
                             </button>
                           )}
                         </div>
@@ -360,6 +369,7 @@ const InterviewPage: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
       </HrPayrollShell>
     </>
   );

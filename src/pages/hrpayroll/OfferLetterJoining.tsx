@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { DocumentText1, Printer, UserTick, Edit2 } from "iconsax-react";
+import { DocumentText1, Printer } from "iconsax-react";
 import { Pencil, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell, HR_PAYROLL_ACCENT, HR_GRADIENT } from "@/components/hrpayroll/HrPayrollShell";
-import { HrError, HrSkeleton, HrStatStrip } from "@/components/hrpayroll/HrUi";
+import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton, HrStatStrip, hrCard, HR_FIELD, HR_HEAD, HR_LBL, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { KEY_INK, KEY_LINE, TONE } from "@/components/sheet/sheetParts";
+import { SheetMark } from "@/components/sheet/Sheet";
 import { ExportMenu } from "@/components/ExportMenu";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { safeHtml, escapeHtml, raw } from "@/utils/escapeHtml";
@@ -28,8 +30,15 @@ import {
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
-const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
-const inputCls = "w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
+// Sheet fields, table heads and row actions (docs/DESIGN.md).
+const labelCls = `block ${HR_LBL} mb-1.5`;
+const inputCls = HR_FIELD;
+const areaCls = `${HR_FIELD} !h-auto py-2`;
+const TH = `${HR_LBL} px-4 py-2.5 font-semibold`;
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+// A field inside a table row: the in-row height.
+const ROW_FIELD = "h-8 px-2 border border-foreground/40 focus:border-foreground bg-card text-xs text-foreground outline-none rounded-none";
+const READONLY = "w-full h-9 px-2.5 flex items-center border border-foreground/20 bg-foreground/5 text-sm text-muted-foreground";
 
 const TEMPLATE_PLACEHOLDERS = [
   "CandidateName", "CandidateCode", "CandidateAddress", "Company", "Designation", "FinYear",
@@ -130,39 +139,37 @@ const JoiningRow: React.FC<{
   });
 
   return (
-    <tr className="border-b border-border/60 hover:bg-muted/20">
-      <td className="px-4 py-2.5 font-mono text-xs">{offer.DocNo}</td>
+    <tr className="hover:bg-primary/5 transition-colors">
+      <td className={`px-4 py-2.5 text-xs ${HR_NUM}`}>{offer.DocNo}</td>
       <td className="px-4 py-2.5">
         <div className="font-medium">{offer.CandidateName}</div>
-        <div className="text-[0.6875rem] text-muted-foreground">{offer.CandidateCode}</div>
+        <div className={`text-[0.6875rem] text-muted-foreground ${HR_NUM}`}>{offer.CandidateCode}</div>
       </td>
       <td className="px-4 py-2.5 hidden sm:table-cell">{offer.CompanyName || "-"}</td>
-      <td className="px-4 py-2.5 hidden sm:table-cell">{offer.DateOfJoin ? offer.DateOfJoin.slice(0, 10) : "-"}</td>
+      <td className={`px-4 py-2.5 hidden sm:table-cell ${HR_NUM}`}>{offer.DateOfJoin ? offer.DateOfJoin.slice(0, 10) : "—"}</td>
       <td className="px-4 py-2.5">
         {canEdit ? (
-          <DateInput value={date} onChange={(e) => setDate(e.target.value)} className="px-2 py-1 rounded-none text-xs bg-muted border border-border" />
+          <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={ROW_FIELD} />
         ) : (
           date || "-"
         )}
       </td>
       <td className="px-4 py-2.5 hidden lg:table-cell">
         {canEdit ? (
-          <input type="text" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Remarks" className="px-2 py-1 rounded-none text-xs bg-muted border border-border w-full" />
+          <input type="text" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Remarks" className={`${ROW_FIELD} w-full`} />
         ) : (
           remarks || "-"
         )}
       </td>
       <td className="px-4 py-2.5">
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-none text-[0.6875rem] font-medium border ${offer.JoiningConfirmed ? "bg-primary/10 text-primary border-primary/30" : "bg-muted text-muted-foreground border-border"}`}>
-          {offer.JoiningConfirmed ? "Joined" : "Pending"}
-        </span>
+        <SheetMark text={offer.JoiningConfirmed ? "Joined" : "Pending"} tone={offer.JoiningConfirmed ? "done" : "waiting"} />
       </td>
       {canEdit && (
         <td className="px-4 py-2.5 text-right">
           <button
             onClick={() => date && mutation.mutate()}
             disabled={!date || mutation.isPending}
-            className="text-xs font-semibold px-3 py-1.5 rounded-none bg-foreground text-card disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            className={`${KEY_INK} h-8 px-3`}
           >
             {offer.JoiningConfirmed ? "Update" : "Confirm"}
           </button>
@@ -193,39 +200,44 @@ const LetterBodyTab: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
     onError: (err: any) => toast.error(err?.message || "Failed to save letter body"),
   });
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading letter body...</div>;
+  if (isLoading) return <div className="mt-4"><HrSkeleton /></div>;
 
   return (
-    <div className="bg-card border border-border rounded-none p-5 space-y-4 mt-4">
-      <div>
-        <h3 className="font-heading font-semibold text-foreground text-sm">Offer Letter Body</h3>
+    <div className={`${hrCard} mt-4`}>
+      <div className="px-5 py-3.5" style={{ borderBottom: HR_RULE }}>
+        <h3 className={HR_HEAD}>Offer letter body</h3>
         <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
           This text is merged with each offer's data (via the placeholders below) when you click "Generate" on a record.
         </p>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {TEMPLATE_PLACEHOLDERS.map((p) => (
-          <span key={p} className="text-[0.6875rem] font-mono px-2 py-0.5 rounded-none border" style={{ borderColor: `hsl(var(--foreground) / 0.20)`, color: HR_PAYROLL_ACCENT, backgroundColor: `hsl(var(--foreground) / 0.05)` }}>
-            {`{{${p}}}`}
-          </span>
-        ))}
+      <div className="p-5 space-y-4">
+      <div>
+        <p className={`${HR_LBL} mb-2`}>Placeholders</p>
+        <div className="flex flex-wrap gap-1.5">
+          {TEMPLATE_PLACEHOLDERS.map((p) => (
+            <span key={p} className="text-[0.6875rem] font-mono px-2 py-0.5 border border-foreground/30 text-foreground bg-foreground/5">
+              {`{{${p}}}`}
+            </span>
+          ))}
+        </div>
       </div>
       <textarea
-        className={`${inputCls} font-mono`}
+        className={`${areaCls} font-mono`}
         rows={16}
         value={currentBody}
         onChange={(e) => setBody(e.target.value)}
         disabled={!canEdit}
       />
+      </div>
       {canEdit && (
-        <div className="flex justify-end">
+        <div className="flex justify-end px-5 py-3" style={{ borderTop: HR_RULE }}>
           <button
             type="button"
             onClick={() => mutation.mutate(currentBody)}
             disabled={mutation.isPending || !currentBody.trim()}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-none bg-foreground text-card hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className={`${KEY_INK} h-9 px-5`}
           >
-            {mutation.isPending ? "Saving…" : "Save Letter Body"}
+            {mutation.isPending ? "Saving…" : "Save letter body"}
           </button>
         </div>
       )}
@@ -384,34 +396,39 @@ const OfferLetterJoining: React.FC = () => {
     remarks: r.Remarks || "",
   }));
 
-  if (isLoading) return <HrSkeleton rows={2} />;
-  if (error) return <HrError text="Failed to load offer letters." />;
   const joinedCount = rows.filter((r) => r.JoiningConfirmed).length;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Offer Letter & Joining"]} />
-      <HrPayrollShell title="Offer Letter & Joining" subtitle="Generate offers for selected candidates and confirm joining" icon={DocumentText1}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Offers & Joining"]} />
+      <HrPayrollShell title="Offers & Joining" subtitle="Generate offers for selected candidates and confirm joining" icon={DocumentText1}>
+        {isLoading ? (
+          <HrSkeleton rows={2} />
+        ) : error ? (
+          <HrError text="Failed to load offer letters." />
+        ) : (
+        <>
         <div className="mb-5">
           <HrStatStrip items={[
-            { label: "Offer letters", value: rows.length, tone: HR_PAYROLL_ACCENT },
-            { label: "Joined", value: joinedCount, tone: "hsl(var(--primary))" },
-            { label: "Awaiting joining", value: rows.length - joinedCount, tone: "hsl(var(--foreground))" },
+            { label: "Offer letters", value: rows.length },
+            { label: "Joined", value: joinedCount, tone: TONE.blue },
+            { label: "Awaiting joining", value: rows.length - joinedCount },
           ]} />
         </div>
         <Tabs defaultValue="offer">
-          <TabsList className="!h-auto !bg-transparent !p-0 grid w-full grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+          {/* The three parts as ruled tab cells, the open one underlined in ink. */}
+          <TabsList className="!h-auto !bg-transparent !p-0 !rounded-none grid w-full grid-cols-1 sm:grid-cols-3 gap-0 mb-5 bg-card" style={{ border: HR_RULE }}>
             {([
-              ["offer", "Offer Letter", "Generate offers for selected candidates", DocumentText1],
-              ["joining", "Joining", "Confirm each candidate's joining date", UserTick],
-              ["body", "Letter Body", "The template text used for offers", Edit2],
-            ] as const).map(([v, label, hint, Icon]) => (
-              <TabsTrigger key={v} value={v} className="group !justify-start gap-3 rounded-none border border-border bg-card px-4 py-3.5 text-left transition-all data-[state=active]:border-transparent hr-tab-card">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-none text-card" style={{ background: HR_GRADIENT }}><Icon size={18} /></span>
+              ["offer", "Offer letter", "Generate offers for selected candidates"],
+              ["joining", "Joining", "Confirm each candidate's joining date"],
+              ["body", "Letter body", "The template text used for offers"],
+            ] as const).map(([v, label, hint], i) => (
+              <TabsTrigger key={v} value={v} className={`group relative !justify-start !items-start !rounded-none !shadow-none bg-card px-4 py-3.5 text-left transition-colors data-[state=active]:!bg-primary/5 ${i ? "sm:border-l sm:border-foreground/20 border-t sm:border-t-0 border-foreground/20" : ""}`}>
                 <span className="min-w-0">
-                  <span className="block text-sm font-heading font-semibold text-foreground">{label}</span>
-                  <span className="block text-[0.6875rem] text-muted-foreground truncate">{hint}</span>
+                  <span className={`block ${HR_LBL} group-data-[state=active]:text-foreground`}>{label}</span>
+                  <span className="block text-[0.6875rem] text-muted-foreground truncate mt-1 font-normal normal-case tracking-normal">{hint}</span>
                 </span>
+                <span className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-transparent group-data-[state=active]:bg-foreground" />
               </TabsTrigger>
             ))}
           </TabsList>
@@ -420,17 +437,16 @@ const OfferLetterJoining: React.FC = () => {
           <TabsContent value="offer">
             <div className="space-y-6 mt-4">
               {(rights.canCreate || (editingId && rights.canEdit)) && (
-                <form onSubmit={handleSubmit} className="bg-card border border-border rounded-none p-5 space-y-5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-heading font-semibold text-foreground text-sm">
-                      {editingId ? "Edit Offer Letter" : "Generate Offer Letter"}
-                    </h3>
+                <form onSubmit={handleSubmit} className={hrCard}>
+                  <div className="flex items-center justify-between gap-3 px-5 py-3.5" style={{ borderBottom: HR_RULE }}>
+                    <h3 className={HR_HEAD}>{editingId ? "Edit offer letter" : "Generate offer letter"}</h3>
                     {editingId && (
-                      <button type="button" onClick={resetForm} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                        <X size={13} /> Cancel edit
+                      <button type="button" onClick={resetForm} className={`${KEY_LINE} h-8 px-3`}>
+                        <X size={12} /> Cancel edit
                       </button>
                     )}
                   </div>
+                  <div className="p-5 space-y-5">
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -449,27 +465,25 @@ const OfferLetterJoining: React.FC = () => {
                     </div>
                     <div>
                       <label className={labelCls}>Document Number</label>
-                      <input className={`${inputCls} font-mono opacity-70`} value={editingId ? rows.find((r) => r.OfferId === editingId)?.DocNo || "" : "(auto-generated on save)"} readOnly disabled />
+                      <div className={`${READONLY} ${editingId ? HR_NUM : ""}`}>{editingId ? rows.find((r) => r.OfferId === editingId)?.DocNo || "" : "Auto-generated on save"}</div>
                     </div>
                   </div>
 
                   {selectedCandidate && (
-                    <div className="rounded-none border p-4" style={{ borderColor: `hsl(var(--foreground) / 0.20)`, backgroundColor: `hsl(var(--foreground) / 0.05)` }}>
-                      <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `hsl(var(--foreground) / 0.20)` }}>
-                        Candidate Details
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs">
+                    <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground) / 0.25)" }}>
+                      <p className={`${HR_LBL} px-4 py-2.5`} style={{ borderBottom: "1px solid hsl(var(--foreground) / 0.15)" }}>Candidate details</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 px-4 py-3 text-xs">
                         {[
                           ["Contact", selectedCandidate.Contact || "—"],
                           ["Email", selectedCandidate.Email || "—"],
                           ["Qualification", selectedCandidate.Qualification || "—"],
                           ["Experience", selectedCandidate.Experience || "—"],
-                          ["Expected Salary", selectedCandidate.ExpectedSalary != null ? String(selectedCandidate.ExpectedSalary) : "—"],
-                          ["Current Salary", selectedCandidate.CurrentSalary != null ? String(selectedCandidate.CurrentSalary) : "—"],
+                          ["Expected Salary", selectedCandidate.ExpectedSalary != null ? `₹${Number(selectedCandidate.ExpectedSalary).toLocaleString("en-IN")}` : "—"],
+                          ["Current Salary", selectedCandidate.CurrentSalary != null ? `₹${Number(selectedCandidate.CurrentSalary).toLocaleString("en-IN")}` : "—"],
                         ].map(([label, value]) => (
-                          <div key={label} className="flex items-center justify-between gap-2">
+                          <div key={label} className="flex items-center justify-between gap-2 py-0.5" style={{ borderBottom: "1px solid hsl(var(--foreground) / 0.08)" }}>
                             <span className="text-muted-foreground">{label}</span>
-                            <span className="font-medium text-right truncate">{value}</span>
+                            <span className={`font-medium text-right truncate ${/Salary/.test(label) ? HR_NUM : ""}`}>{value}</span>
                           </div>
                         ))}
                       </div>
@@ -513,71 +527,72 @@ const OfferLetterJoining: React.FC = () => {
 
                   <div>
                     <label className={labelCls}>Candidate Address</label>
-                    <textarea className={inputCls} rows={2} value={form.candidateAddress} onChange={(e) => setField("candidateAddress", e.target.value)} />
+                    <textarea className={areaCls} rows={2} value={form.candidateAddress} onChange={(e) => setField("candidateAddress", e.target.value)} />
                   </div>
 
                   <div>
                     <label className={labelCls}>Remarks</label>
-                    <textarea className={inputCls} rows={2} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} />
+                    <textarea className={areaCls} rows={2} value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} />
                   </div>
 
-                  <div className="flex justify-end gap-2">
-                    <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-none bg-foreground text-card hover:opacity-90 transition-opacity">
-                      {editingId ? "Update Offer Letter" : "Save Offer Letter"}
+                  </div>
+                  <div className="flex justify-end gap-2 px-5 py-3" style={{ borderTop: HR_RULE }}>
+                    <button type="submit" className={`${KEY_INK} h-9 px-5`}>
+                      {editingId ? "Update offer letter" : "Save offer letter"}
                     </button>
                   </div>
                 </form>
               )}
 
-              <div className="bg-card border border-border rounded-none overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-                  <div>
-                    <h3 className="font-heading font-semibold text-foreground text-sm">Offer Letter Records</h3>
-                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{rows.length} record{rows.length !== 1 ? "s" : ""}</p>
+              <div className={`${hrCard} overflow-hidden`}>
+                <div className="flex items-center justify-between gap-3 px-5 py-3.5" style={{ borderBottom: HR_RULE }}>
+                  <div className="flex items-baseline gap-2.5">
+                    <h3 className={HR_HEAD}>Offer letter records</h3>
+                    <span className={`${HR_NUM} text-[0.6875rem] text-muted-foreground`}>{rows.length}</span>
                   </div>
                   <ExportMenu data={offerExportData} columns={offerExportColumns} title="Offer Letter" filename="offer-letter" disabled={rows.length === 0} />
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border bg-muted/30">
-                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
-                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
-                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
-                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Fin Year</th>
-                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Date of Join</th>
-                        <th className="px-4 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
+                      <tr style={{ borderBottom: HR_RULE }}>
+                        <th className={`${TH} text-left`}>Doc No</th>
+                        <th className={`${TH} text-left`}>Candidate</th>
+                        <th className={`${TH} text-left hidden sm:table-cell`}>Company</th>
+                        <th className={`${TH} text-left hidden sm:table-cell`}>Fin Year</th>
+                        <th className={`${TH} text-left`}>Date of Join</th>
+                        <th className={`${TH} text-right`}>Actions</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-foreground/15">
                       {rows.length === 0 && (
                         <tr>
                           <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No offer letters yet.</td>
                         </tr>
                       )}
                       {rows.map((r) => (
-                        <tr key={r.OfferId} className="border-b border-border/60 hover:bg-muted/20">
-                          <td className="px-4 py-2.5 font-mono text-xs">{r.DocNo}</td>
+                        <tr key={r.OfferId} className="hover:bg-primary/5 transition-colors">
+                          <td className={`px-4 py-2.5 text-xs ${HR_NUM}`}>{r.DocNo}</td>
                           <td className="px-4 py-2.5">
                             <div className="font-medium">{r.CandidateName}</div>
-                            <div className="text-[0.6875rem] text-muted-foreground">{r.CandidateCode}</div>
+                            <div className={`text-[0.6875rem] text-muted-foreground ${HR_NUM}`}>{r.CandidateCode}</div>
                           </td>
                           <td className="px-4 py-2.5 hidden sm:table-cell">{r.CompanyName || "-"}</td>
                           <td className="px-4 py-2.5 hidden sm:table-cell">{r.FinYearName || "-"}</td>
-                          <td className="px-4 py-2.5">{r.DateOfJoin ? r.DateOfJoin.slice(0, 10) : "-"}</td>
+                          <td className={`px-4 py-2.5 ${HR_NUM}`}>{r.DateOfJoin ? r.DateOfJoin.slice(0, 10) : "—"}</td>
                           <td className="px-4 py-2.5 text-right">
-                            <div className="inline-flex items-center gap-2">
-                              <button onClick={() => handleGenerate(r)} className="text-muted-foreground hover:text-foreground" title="Generate Offer Letter">
-                                <Printer size={14} />
+                            <div className="inline-flex items-center gap-1">
+                              <button onClick={() => handleGenerate(r)} className={ACT} title="Generate offer letter">
+                                <Printer size={13} />
                               </button>
                               {rights.canEdit && (
-                                <button onClick={() => handleEdit(r)} className="text-muted-foreground hover:text-foreground" title="Edit">
-                                  <Pencil size={14} />
+                                <button onClick={() => handleEdit(r)} className={ACT} title="Edit">
+                                  <Pencil size={13} />
                                 </button>
                               )}
                               {rights.canDelete && (
-                                <button onClick={() => handleDelete(r)} className="text-muted-foreground hover:text-destructive" title="Delete">
-                                  <Trash2 size={14} />
+                                <button onClick={() => handleDelete(r)} className={`${ACT} hover:text-destructive hover:border-destructive`} title="Delete">
+                                  <Trash2 size={13} />
                                 </button>
                               )}
                             </div>
@@ -593,26 +608,26 @@ const OfferLetterJoining: React.FC = () => {
 
           {/* ── Joining tab ── */}
           <TabsContent value="joining">
-            <div className="bg-card border border-border rounded-none overflow-hidden mt-4">
-              <div className="px-5 py-3.5 border-b border-border">
-                <h3 className="font-heading font-semibold text-foreground text-sm">Joining</h3>
+            <div className={`${hrCard} overflow-hidden mt-4`}>
+              <div className="px-5 py-3.5" style={{ borderBottom: HR_RULE }}>
+                <h3 className={HR_HEAD}>Joining</h3>
                 <p className="text-[0.6875rem] text-muted-foreground mt-0.5">Confirm each candidate's actual date of joining</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border bg-muted/30">
-                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
-                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
-                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
-                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Offered Date</th>
-                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Actual Date of Joining</th>
-                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell">Remarks</th>
-                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
-                      {rights.canEdit && <th className="px-4 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Action</th>}
+                    <tr style={{ borderBottom: HR_RULE }}>
+                      <th className={`${TH} text-left`}>Doc No</th>
+                      <th className={`${TH} text-left`}>Candidate</th>
+                      <th className={`${TH} text-left hidden sm:table-cell`}>Company</th>
+                      <th className={`${TH} text-left hidden sm:table-cell`}>Offered Date</th>
+                      <th className={`${TH} text-left`}>Actual Date of Joining</th>
+                      <th className={`${TH} text-left hidden lg:table-cell`}>Remarks</th>
+                      <th className={`${TH} text-left`}>Status</th>
+                      {rights.canEdit && <th className={`${TH} text-right`}>Action</th>}
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-foreground/15">
                     {rows.length === 0 && (
                       <tr>
                         <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground">No offer letters yet — generate one first.</td>
@@ -632,6 +647,8 @@ const OfferLetterJoining: React.FC = () => {
             <LetterBodyTab canEdit={rights.canEdit} />
           </TabsContent>
         </Tabs>
+        </>
+        )}
       </HrPayrollShell>
     </>
   );

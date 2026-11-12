@@ -5,6 +5,7 @@ import { UserSquare } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton } from "@/components/hrpayroll/HrUi";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -109,13 +110,16 @@ const DesignationMaster: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading designations...</div>;
-  if (error) return <div className="p-6 text-destructive">Failed to load designations.</div>;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Designation Master"]} />
-      <HrPayrollShell title="Designation Master" subtitle="Designations, DG codes & department mapping" icon={UserSquare}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Designations"]} />
+      <HrPayrollShell title="Designations" subtitle="Designations, DG codes & department mapping" icon={UserSquare}>
+        {isLoading ? (
+          <HrSkeleton />
+        ) : error ? (
+          <HrError text="Failed to load designations." />
+        ) : (
         <MasterPage
           title="Designation"
           canCreate={rights.canCreate}
@@ -140,6 +144,7 @@ const DesignationMaster: React.FC = () => {
             ],
           }}
         />
+        )}
       </HrPayrollShell>
     </>
   );

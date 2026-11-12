@@ -17,7 +17,9 @@
  * This separation is intentional: PDF/Excel don't need renderers, sort fns, etc.
  */
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import { useInSheet } from "@/components/sheet/useInSheet";
+import { KEY_LINE } from "@/components/sheet/sheetParts";
 import {
   FileDown,
   FileSpreadsheet,
@@ -99,6 +101,9 @@ export function ExportMenu({
   onPrint,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
+  // On a drawing-sheet page the trigger is a sheet key (h-9 outline, docs/DESIGN.md) and the menu a square ruled box.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const sheet = useInSheet(triggerRef);
   const [loading, setLoading] = useState<"pdf" | "xlsx" | "csv" | null>(null);
 
   const base = filename ?? title.toLowerCase().replace(/\s+/g, "-");
@@ -166,8 +171,9 @@ export function ExportMenu({
       {/* Trigger */}
       <DropdownMenu.Trigger asChild>
         <button
+          ref={triggerRef}
           disabled={disabled || isBusy}
-          className={`
+          className={sheet ? `${KEY_LINE} h-9 px-3` : `
             inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium
             transition-colors select-none outline-none
             ${
@@ -195,11 +201,13 @@ export function ExportMenu({
         <DropdownMenu.Content
           align="end"
           sideOffset={6}
-          className="
+          className={sheet
+            ? "z-[80] w-56 rounded-none border border-foreground bg-card overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
+            : `
             z-[80] w-56 rounded-xl border border-border bg-card shadow-lg
             overflow-hidden
             animate-in fade-in slide-in-from-top-2 duration-150
-          "
+          `}
         >
           <div className="px-3 py-2 border-b border-border">
             <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
@@ -226,7 +234,7 @@ export function ExportMenu({
                     "
                   >
                     <span
-                      className={`flex items-center justify-center w-7 h-7 rounded-lg bg-muted ${opt.color}`}
+                      className={sheet ? "flex items-center justify-center w-7 h-7 border border-foreground/30 text-foreground" : `flex items-center justify-center w-7 h-7 rounded-lg bg-muted ${opt.color}`}
                     >
                       {busy ? (
                         <Loader2 size={14} className="animate-spin" />

@@ -2,15 +2,16 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Calculator } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { HrPayrollShell, HR_PAYROLL_ACCENT as ACCENT } from "@/components/hrpayroll/HrPayrollShell";
-import { HrAvatar, HrBreakup, HrEmpty, HrStepHead, hrCard, hrPrimaryBtn, hrPrimaryStyle } from "@/components/hrpayroll/HrUi";
+import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrAvatar, HrBreakup, HrEmpty, HrStepHead, hrCard, HR_FIELD, HR_LBL, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { KEY_INK } from "@/components/sheet/sheetParts";
 import { getEmployees, getEmployeeSalaryBreakup, type SalaryBreakupResult } from "@/api/employeeMasterApi";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
-const inputBase =
-  "w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelBase = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+// Sheet fields and labels (docs/DESIGN.md): square h-9 fields, small-capital labels.
+const inputBase = HR_FIELD;
+const labelBase = `block ${HR_LBL} mb-1.5`;
 
 // Standalone version of the "Employee Salary Details" calculation --
 // same endpoint Employee Master's modal uses, but as its own page so it
@@ -71,38 +72,46 @@ const SalaryCalculation: React.FC = () => {
                 <label className={labelBase}>As Of Date</label>
                 <DateInput value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className={inputBase} />
               </div>
-              <button onClick={handleCalculate} disabled={!employeeId || loading} className={`${hrPrimaryBtn} h-10`} style={hrPrimaryStyle}>
-                <Calculator size={15} /> {loading ? "Calculating..." : "Calculate"}
+              <button onClick={handleCalculate} disabled={!employeeId || loading} className={`${KEY_INK} h-9 px-4`}>
+                <Calculator size={13} /> {loading ? "Calculating…" : "Calculate"}
               </button>
             </div>
 
             {selectedEmployee && (
-              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-none border p-3" style={{ background: `hsl(var(--foreground) / 0.04)`, borderColor: `hsl(var(--foreground) / 0.18)` }}>
-                <HrAvatar name={selectedEmployee.EmployeeName} size={38} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-foreground truncate">{selectedEmployee.EmployeeName}</p>
-                  <p className="text-[0.6875rem] text-muted-foreground font-mono">{selectedEmployee.EmployeeCode}</p>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto_auto] bg-card" style={{ border: HR_RULE }}>
+                <div className="flex items-center gap-3 px-3.5 py-3 min-w-0">
+                  <HrAvatar name={selectedEmployee.EmployeeName} size={34} />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{selectedEmployee.EmployeeName}</p>
+                    <p className={`text-[0.6875rem] text-muted-foreground ${HR_NUM}`}>{selectedEmployee.EmployeeCode}</p>
+                  </div>
                 </div>
-                <span className="rounded-none bg-card border border-border px-2.5 py-1 text-[0.6875rem]">
-                  CTC <b className="tabular-nums">{selectedEmployee.CTCAmount != null ? `₹${Number(selectedEmployee.CTCAmount).toLocaleString("en-IN")}` : "Not set"}</b>
-                  {selectedEmployee.CTCAmount != null && <span className="text-muted-foreground"> / {selectedEmployee.CTCFrequency}</span>}
-                </span>
-                <span className="rounded-none bg-card border border-border px-2.5 py-1 text-[0.6875rem]">
-                  Structure <b>{selectedEmployee.SalaryStructureCode || "Not assigned"}</b>
-                </span>
+                <div className="px-3.5 py-3 border-t sm:border-t-0 sm:border-l border-foreground/20">
+                  <p className={HR_LBL}>CTC</p>
+                  <p className={`${HR_NUM} text-sm font-bold mt-1 ${selectedEmployee.CTCAmount == null ? "text-destructive" : "text-foreground"}`}>
+                    {selectedEmployee.CTCAmount != null ? `₹${Number(selectedEmployee.CTCAmount).toLocaleString("en-IN")}` : "Not set"}
+                    {selectedEmployee.CTCAmount != null && <span className="font-normal text-muted-foreground"> / {selectedEmployee.CTCFrequency}</span>}
+                  </p>
+                </div>
+                <div className="px-3.5 py-3 border-t sm:border-t-0 sm:border-l border-foreground/20">
+                  <p className={HR_LBL}>Structure</p>
+                  <p className={`${HR_NUM} text-sm font-bold mt-1 ${selectedEmployee.SalaryStructureCode ? "text-foreground" : "text-destructive"}`}>
+                    {selectedEmployee.SalaryStructureCode || "Not assigned"}
+                  </p>
+                </div>
               </div>
             )}
           </div>
 
           {errorMsg && (
-            <div className="rounded-none border border-destructive/30 bg-destructive/5 p-4">
+            <div className="border border-destructive bg-destructive/5 p-4">
               <p className="text-sm text-destructive">{errorMsg}</p>
             </div>
           )}
 
           {result && !result.valid && (
-            <div className="rounded-none border border-destructive/30 bg-destructive/5 p-4 space-y-1">
-              <p className="text-xs font-heading font-semibold text-destructive">This Salary Structure has validation issues</p>
+            <div className="border border-destructive bg-destructive/5 p-4 space-y-1">
+              <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-destructive">This salary structure has validation issues</p>
               {result.errors.map((e, i) => (
                 <p key={i} className="text-sm text-destructive">{e.message}</p>
               ))}

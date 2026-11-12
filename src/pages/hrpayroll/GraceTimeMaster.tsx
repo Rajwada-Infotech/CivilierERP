@@ -5,6 +5,7 @@ import { Timer1 } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton } from "@/components/hrpayroll/HrUi";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -97,13 +98,16 @@ const GraceTimeMaster: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading grace time rules...</div>;
-  if (error) return <div className="p-6 text-destructive">Failed to load grace time rules.</div>;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Grace Time Master"]} />
-      <HrPayrollShell title="Grace Time Master" subtitle="Late-attendance grace period rules" icon={Timer1}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Grace Time"]} />
+      <HrPayrollShell title="Grace Time" subtitle="Late-attendance grace period rules" icon={Timer1}>
+        {isLoading ? (
+          <HrSkeleton />
+        ) : error ? (
+          <HrError text="Failed to load grace time rules." />
+        ) : (
         <MasterPage
           title="Grace Time"
           canCreate={rights.canCreate}
@@ -129,6 +133,7 @@ const GraceTimeMaster: React.FC = () => {
             ],
           }}
         />
+        )}
       </HrPayrollShell>
     </>
   );

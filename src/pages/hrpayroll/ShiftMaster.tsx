@@ -5,6 +5,7 @@ import { Clock } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton, HR_FIELD } from "@/components/hrpayroll/HrUi";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -28,7 +29,7 @@ const TimeField: React.FC<{
     type="time"
     value={(value as string) || ""}
     onChange={(e) => onChange(e.target.value)}
-    className={`w-full px-3 py-2 rounded-none text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${error ? "border-destructive" : "border-border"}`}
+    className={`${HR_FIELD} font-heading tabular-nums [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer dark:[&::-webkit-calendar-picker-indicator]:invert ${error ? "!border-destructive" : ""}`}
   />
 );
 
@@ -136,13 +137,16 @@ const ShiftMaster: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading shifts...</div>;
-  if (error) return <div className="p-6 text-destructive">Failed to load shifts.</div>;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Shift Master"]} />
-      <HrPayrollShell title="Shift Master" subtitle="Work shifts, timings & weekly off" icon={Clock}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Shifts"]} />
+      <HrPayrollShell title="Shifts" subtitle="Work shifts, timings & weekly off" icon={Clock}>
+        {isLoading ? (
+          <HrSkeleton />
+        ) : error ? (
+          <HrError text="Failed to load shifts." />
+        ) : (
         <MasterPage
           title="Shift"
           canCreate={rights.canCreate}
@@ -169,6 +173,7 @@ const ShiftMaster: React.FC = () => {
             ],
           }}
         />
+        )}
       </HrPayrollShell>
     </>
   );

@@ -4,8 +4,9 @@ import { toast } from "sonner";
 import { Coffee, Loader2, LogIn, LogOut, Timer, AlertTriangle, PlayCircle, StopCircle } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell, HR_PAYROLL_ACCENT as ACCENT, HR_GRADIENT } from "@/components/hrpayroll/HrPayrollShell";
-import { HrAvatar, HrEmpty, HrSkeleton, HrStepHead, hrCard } from "@/components/hrpayroll/HrUi";
+import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrAvatar, HrEmpty, HrSkeleton, HrStepHead, hrCard, HR_FIELD, HR_HEAD, HR_LBL, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { SheetMark, type MarkTone } from "@/components/sheet/Sheet";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import {
@@ -14,42 +15,45 @@ import {
 } from "@/api/employeeAttendanceApi";
 import { fmtClock, fmtDateIst, fmtDuration, fmtTimeIst } from "@/lib/attendanceFormat";
 
-const STATE_LABEL: Record<MyState, { text: string; cls: string }> = {
-  NOT_STARTED: { text: "Not clocked in", cls: "bg-muted text-muted-foreground  " },
-  WORKING: { text: "Working", cls: "bg-primary/10 text-primary  " },
-  ON_BREAK: { text: "On break", cls: "bg-foreground/10 text-foreground  " },
-  COMPLETED: { text: "Day complete", cls: "bg-primary/10 text-primary  " },
+// Status on the sheet is a SheetMark (docs/DESIGN.md): solid = settled, half = under way, hatched = waiting,
+// red = stopped, empty = not started.
+const STATE_LABEL: Record<MyState, { text: string; tone: MarkTone }> = {
+  NOT_STARTED: { text: "Not clocked in", tone: "draft" },
+  WORKING: { text: "Working", tone: "moving" },
+  ON_BREAK: { text: "On break", tone: "waiting" },
+  COMPLETED: { text: "Day complete", tone: "done" },
 };
 
-const STATUS_CLS: Record<string, string> = {
-  Present: "bg-primary/10 text-primary  ",
-  Working: "bg-primary/10 text-primary  ",
-  "On Break": "bg-foreground/10 text-foreground  ",
-  Incomplete: "bg-destructive/10 text-destructive  ",
+const STATUS_TONE: Record<string, MarkTone> = {
+  Present: "done",
+  Working: "moving",
+  "On Break": "waiting",
+  Incomplete: "stopped",
 };
 
+const TH = "px-4 py-2.5 font-semibold";
+
+// The punch pad's keys: large ruled cells in the sheet's key type. The natural next step is filled (and says
+// "Next"); the rest are outlines; what can't be pressed now is faded. Out Time is drawn in red.
 function PunchButton({
-  label, icon: Icon, tone, enabled, busy, onClick,
-}: { label: string; icon: React.ElementType; tone: string; enabled: boolean; busy: boolean; onClick: () => void }) {
+  label, icon: Icon, next, red, enabled, busy, onClick,
+}: { label: string; icon: React.ElementType; next: boolean; red?: boolean; enabled: boolean; busy: boolean; onClick: () => void }) {
+  const ink = red ? "border-destructive" : "border-foreground";
+  const look = next
+    ? `${red ? "bg-destructive text-white" : "bg-foreground text-card"} ${ink}`
+    : `bg-card ${red ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-primary/10"} ${ink}`;
   return (
     <button
       onClick={onClick}
       disabled={!enabled || busy}
-      className={`flex flex-col items-center justify-center gap-2 rounded-none px-4 py-5 text-sm font-semibold text-card transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${tone}`}
+      className={`relative w-full flex flex-col items-center justify-center gap-2 border px-4 py-5 font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.1em] transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${look}`}
     >
-      {busy ? <Loader2 size={24} className="animate-spin" /> : <Icon size={24} />}
+      {next && <span className="absolute top-1.5 right-2 text-[0.5625rem] tracking-[0.12em] opacity-80">Next</span>}
+      {busy ? <Loader2 size={22} className="animate-spin" /> : <Icon size={22} />}
       {label}
     </button>
   );
 }
-
-const Stat = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
-  <div className="rounded-none border border-border bg-card p-3 text-center">
-    <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">{label}</p>
-    <p className="mt-1 text-lg font-bold tabular-nums">{value}</p>
-    {sub && <p className="text-[0.625rem] text-muted-foreground">{sub}</p>}
-  </div>
-);
 
 export default function EmployeeAttendance() {
   const rights = usePageRights("employee-attendance");
@@ -111,19 +115,18 @@ export default function EmployeeAttendance() {
 
   // Which button is the natural next step (display only — `allowed` still decides what's clickable).
   const nextKind = data?.allowed.in ? "in" : data?.allowed.breakStop ? "break-stop" : data?.allowed.out ? "out" : null;
-  const stateDot: Record<MyState, string> = { NOT_STARTED: "hsl(var(--muted-foreground))", WORKING: "hsl(var(--primary))", ON_BREAK: "hsl(var(--foreground))", COMPLETED: "hsl(var(--primary))" };
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Attendance"]} />
-      <HrPayrollShell title="Attendance" subtitle="Record your In Time, breaks and Out Time" icon={Timer}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "My Attendance"]} />
+      <HrPayrollShell title="My Attendance" subtitle="Record your In Time, breaks and Out Time" icon={Timer}>
         {isLoading ? (
           <HrSkeleton rows={2} />
         ) : error || !data ? (
-          <div className="rounded-none border border-foreground/40 bg-foreground/10 p-5 text-sm flex gap-3">
-            <AlertTriangle size={18} className="text-foreground shrink-0 mt-0.5" />
+          <div className="bg-card p-5 text-sm flex gap-3" style={{ border: HR_RULE }}>
+            <AlertTriangle size={16} className="text-destructive shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold">Attendance isn't available for this login</p>
+              <p className={HR_HEAD}>Attendance isn't available for this login</p>
               <p className="text-muted-foreground mt-1">{(error as Error)?.message}</p>
             </div>
           </div>
@@ -131,29 +134,24 @@ export default function EmployeeAttendance() {
           <div className="space-y-5">
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-5">
               {/* ── Clock ── */}
-              <div className={`${hrCard} p-5 sm:p-6 flex flex-col justify-between gap-5`} style={{ background: `hsl(var(--foreground) / 0.04)` }}>
+              <div className={`${hrCard} p-5 sm:p-6 flex flex-col justify-between gap-5`}>
                 <div className="flex items-center gap-3">
-                  <HrAvatar name={data.employee.name} size={44} />
+                  <HrAvatar name={data.employee.name} size={40} />
                   <div className="min-w-0">
                     <p className="text-base font-heading font-semibold text-foreground truncate">{data.employee.name}</p>
                     <p className="text-xs text-muted-foreground truncate">
-                      ID {data.employee.code}
+                      <span className={HR_NUM}>{data.employee.code}</span>
                       {data.employee.department ? ` · ${data.employee.department}` : ""}
                       {data.employee.companyName ? ` · ${data.employee.companyName}` : ""}
                     </p>
                   </div>
                 </div>
-                <div>
-                  <p className="text-4xl sm:text-5xl font-heading font-bold tabular-nums tracking-tight text-foreground">{istClock}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{fmtDateIst(data.today)} · IST</p>
+                <div style={{ borderTop: "1px solid hsl(var(--foreground) / 0.15)", paddingTop: 16 }}>
+                  <p className={HR_LBL}>Time now · IST</p>
+                  <p className={`${HR_NUM} mt-2 text-4xl sm:text-5xl font-bold tracking-tight text-foreground`}>{istClock}</p>
+                  <p className="mt-1.5 text-sm text-muted-foreground">{fmtDateIst(data.today)}</p>
                 </div>
-                <span className={`inline-flex w-fit items-center gap-2 rounded-none px-3 py-1 text-xs font-semibold ${STATE_LABEL[data.state].cls}`}>
-                  <span className="relative flex h-2 w-2">
-                    {(data.state === "WORKING" || data.state === "ON_BREAK") && <span className="absolute inline-flex h-full w-full animate-ping rounded-none opacity-60" style={{ background: stateDot[data.state] }} />}
-                    <span className="relative inline-flex h-2 w-2 rounded-none" style={{ background: stateDot[data.state] }} />
-                  </span>
-                  {STATE_LABEL[data.state].text}
-                </span>
+                <SheetMark text={STATE_LABEL[data.state].text} tone={STATE_LABEL[data.state].tone} />
               </div>
 
               {/* ── Punch pad ── */}
@@ -163,8 +161,8 @@ export default function EmployeeAttendance() {
                   <div className="space-y-3">
                     {data.allowed.in && projects.length > 0 && (
                       <div className="max-w-sm">
-                        <label className="block text-xs font-medium text-muted-foreground mb-1">Project (optional)</label>
-                        <SearchableNativeSelect value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-full h-10 px-3 text-sm rounded-none border border-border bg-background" searchPlaceholder="Search project…">
+                        <label className={`block ${HR_LBL} mb-1.5`}>Project (optional)</label>
+                        <SearchableNativeSelect value={projectId} onChange={(e) => setProjectId(e.target.value)} className={HR_FIELD} searchPlaceholder="Search project…">
                           <option value="">— None —</option>
                           {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                         </SearchableNativeSelect>
@@ -172,17 +170,12 @@ export default function EmployeeAttendance() {
                     )}
                     <div className="grid grid-cols-2 gap-3">
                       {([
-                        ["in", "In Time", LogIn, "bg-primary hover:bg-primary", data.allowed.in],
-                        ["break-start", "Break Start", Coffee, "bg-foreground hover:bg-foreground", data.allowed.breakStart],
-                        ["break-stop", "Break Stop", StopCircle, "bg-primary hover:bg-primary", data.allowed.breakStop],
-                        ["out", "Out Time", LogOut, "bg-destructive hover:bg-destructive", data.allowed.out],
-                      ] as const).map(([kind, label, Icon, tone, enabled]) => (
-                        <div key={kind} className="relative">
-                          {nextKind === kind && (
-                            <span className="absolute -top-2 right-3 z-10 rounded-none px-2 py-0.5 text-[0.625rem] font-bold text-card" style={{ background: HR_GRADIENT }}>Next</span>
-                          )}
-                          <PunchButton label={label} icon={Icon} tone={`${tone} w-full ${nextKind === kind ? "ring-4 ring-offset-2 ring-offset-background ring-foreground/20" : ""}`} enabled={enabled} busy={busy === kind} onClick={() => punch.mutate(kind)} />
-                        </div>
+                        ["in", "In Time", LogIn, false, data.allowed.in],
+                        ["break-start", "Break Start", Coffee, false, data.allowed.breakStart],
+                        ["break-stop", "Break Stop", StopCircle, false, data.allowed.breakStop],
+                        ["out", "Out Time", LogOut, true, data.allowed.out],
+                      ] as const).map(([kind, label, Icon, red, enabled]) => (
+                        <PunchButton key={kind} label={label} icon={Icon} next={nextKind === kind} red={red} enabled={enabled} busy={busy === kind} onClick={() => punch.mutate(kind)} />
                       ))}
                     </div>
                   </div>
@@ -200,25 +193,33 @@ export default function EmployeeAttendance() {
               ) : (
                 <>
                   {c.flags.length > 0 && (
-                    <p className="flex items-center gap-2 rounded-none border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"><AlertTriangle size={14} /> This record is incomplete (Out Time or Break Stop missing) and has been flagged for HR review.</p>
+                    <p className="flex items-center gap-2 border border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive"><AlertTriangle size={14} /> This record is incomplete (Out Time or Break Stop missing) and has been flagged for HR review.</p>
                   )}
-                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-                    <Stat label="In Time" value={fmtTimeIst(c.inTime)} />
-                    <Stat label="Out Time" value={c.outTime ? fmtTimeIst(c.outTime) : "—"} />
-                    <Stat label="Total Breaks" value={String(c.breakCount)} />
-                    <Stat label="Break Duration" value={live ? fmtClock(live.brk) : fmtDuration(c.breakSeconds)} />
-                    <Stat label="Working Duration" sub="before deducting breaks" value={live ? fmtClock(live.session) : fmtDuration(c.totalSeconds)} />
-                    <Stat label="Net Working Hours" sub="after deducting breaks" value={live ? fmtClock(live.net) : fmtDuration(c.netSeconds)} />
+                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 bg-card" style={{ border: HR_RULE }}>
+                    {([
+                      ["In Time", fmtTimeIst(c.inTime), undefined],
+                      ["Out Time", c.outTime ? fmtTimeIst(c.outTime) : "—", undefined],
+                      ["Total Breaks", String(c.breakCount), undefined],
+                      ["Break Duration", live ? fmtClock(live.brk) : fmtDuration(c.breakSeconds), undefined],
+                      ["Working Duration", live ? fmtClock(live.session) : fmtDuration(c.totalSeconds), "before breaks"],
+                      ["Net Working Hours", live ? fmtClock(live.net) : fmtDuration(c.netSeconds), "after breaks"],
+                    ] as const).map(([label, value, sub], i) => (
+                      <div key={label} className="px-3.5 py-3" style={{ borderLeft: i ? "1px solid hsl(var(--foreground) / 0.15)" : undefined }}>
+                        <p className={HR_LBL}>{label}</p>
+                        <p className={`${HR_NUM} mt-1.5 text-lg font-bold text-foreground`}>{value}</p>
+                        {sub && <p className="text-[0.625rem] text-muted-foreground mt-0.5">{sub}</p>}
+                      </div>
+                    ))}
                   </div>
                   {c.breaks.length > 0 && (
                     <div>
-                      <p className="mb-2 text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">Breaks</p>
+                      <p className={`${HR_LBL} mb-2`}>Breaks</p>
                       <div className="flex flex-wrap gap-2">
                         {c.breaks.map((b) => (
-                          <div key={b.breakId} className={`flex items-center gap-2 rounded-none border px-3 py-2 text-xs ${b.end ? "border-border bg-card" : "border-foreground/40 bg-foreground/10"}`}>
-                            <span className="flex h-5 w-5 items-center justify-center rounded-none bg-muted text-[0.625rem] font-bold">{b.no}</span>
-                            <span className="tabular-nums">{fmtTimeIst(b.start)} → {b.end ? fmtTimeIst(b.end) : <span className="inline-flex items-center gap-1 font-semibold text-foreground"><PlayCircle size={12} /> running</span>}</span>
-                            <span className="font-semibold tabular-nums">{b.end ? fmtDuration(b.seconds) : live ? fmtClock((nowMs - new Date(b.start).getTime()) / 1000) : "—"}</span>
+                          <div key={b.breakId} className={`flex items-center gap-2 border px-3 py-2 text-xs ${b.end ? "border-foreground/30 bg-card" : "border-foreground bg-primary/5"}`}>
+                            <span className={`flex h-5 w-5 items-center justify-center border border-foreground text-[0.625rem] font-bold ${HR_NUM}`}>{b.no}</span>
+                            <span className={HR_NUM}>{fmtTimeIst(b.start)} → {b.end ? fmtTimeIst(b.end) : <span className="inline-flex items-center gap-1 font-semibold text-primary"><PlayCircle size={12} /> running</span>}</span>
+                            <span className={`${HR_NUM} font-semibold`}>{b.end ? fmtDuration(b.seconds) : live ? fmtClock((nowMs - new Date(b.start).getTime()) / 1000) : "—"}</span>
                           </div>
                         ))}
                       </div>
@@ -230,29 +231,37 @@ export default function EmployeeAttendance() {
 
             {/* ── History ── */}
             <div className={`${hrCard} overflow-x-auto`}>
-              <div className="px-5 py-3.5 border-b border-border"><p className="font-heading font-semibold text-sm">Last 30 days</p></div>
+              <div className="px-5 py-3.5 flex items-baseline gap-2.5" style={{ borderBottom: HR_RULE }}>
+                <p className={HR_HEAD}>Last 30 days</p>
+                <span className={`${HR_NUM} text-[0.6875rem] text-muted-foreground`}>{data.history.length}</span>
+              </div>
               {data.history.length === 0 ? (
                 <HrEmpty icon={Timer} title="No attendance recorded yet" />
               ) : (
                 <table className="w-full text-sm">
-                  <thead className="text-xs uppercase tracking-wide text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-left">In</th><th className="px-4 py-3 text-left">Out</th>
-                      <th className="px-4 py-3 text-right">Breaks</th><th className="px-4 py-3 text-right">Break Time</th>
-                      <th className="px-4 py-3 text-right">Working</th><th className="px-4 py-3 text-right">Net Hours</th><th className="px-4 py-3 text-left">Status</th>
+                  <thead>
+                    <tr className={HR_LBL} style={{ borderBottom: HR_RULE }}>
+                      <th className={`${TH} text-left`}>Date</th>
+                      <th className={`${TH} text-left`}>In</th>
+                      <th className={`${TH} text-left`}>Out</th>
+                      <th className={`${TH} text-right`}>Breaks</th>
+                      <th className={`${TH} text-right`}>Break Time</th>
+                      <th className={`${TH} text-right`}>Working</th>
+                      <th className={`${TH} text-right`}>Net Hours</th>
+                      <th className={`${TH} text-left`}>Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border/60">
+                  <tbody className="divide-y divide-foreground/15">
                     {data.history.map((r) => (
-                      <tr key={r.attendanceId}>
-                        <td className="px-4 py-3 whitespace-nowrap font-medium">{fmtDateIst(r.attendanceDate)}</td>
-                        <td className="px-4 py-3 tabular-nums">{fmtTimeIst(r.inTime)}</td>
-                        <td className="px-4 py-3 tabular-nums">{r.outTime ? fmtTimeIst(r.outTime) : "—"}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{r.breakCount}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{fmtDuration(r.breakSeconds)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{fmtDuration(r.totalSeconds)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums font-semibold">{fmtDuration(r.netSeconds)}</td>
-                        <td className="px-4 py-3"><span className={`rounded-none px-2.5 py-0.5 text-xs font-semibold ${STATUS_CLS[r.status]}`}>{r.status}</span></td>
+                      <tr key={r.attendanceId} className="hover:bg-primary/5 transition-colors">
+                        <td className={`px-4 py-2.5 whitespace-nowrap ${HR_NUM}`}>{fmtDateIst(r.attendanceDate)}</td>
+                        <td className={`px-4 py-2.5 ${HR_NUM}`}>{fmtTimeIst(r.inTime)}</td>
+                        <td className={`px-4 py-2.5 ${HR_NUM}`}>{r.outTime ? fmtTimeIst(r.outTime) : "—"}</td>
+                        <td className={`px-4 py-2.5 text-right ${HR_NUM}`}>{r.breakCount}</td>
+                        <td className={`px-4 py-2.5 text-right ${HR_NUM}`}>{fmtDuration(r.breakSeconds)}</td>
+                        <td className={`px-4 py-2.5 text-right ${HR_NUM}`}>{fmtDuration(r.totalSeconds)}</td>
+                        <td className={`px-4 py-2.5 text-right font-semibold ${HR_NUM}`}>{fmtDuration(r.netSeconds)}</td>
+                        <td className="px-4 py-2.5"><SheetMark text={r.status} tone={STATUS_TONE[r.status] ?? "waiting"} /></td>
                       </tr>
                     ))}
                   </tbody>
