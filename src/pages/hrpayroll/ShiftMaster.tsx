@@ -28,7 +28,7 @@ const TimeField: React.FC<{
     type="time"
     value={(value as string) || ""}
     onChange={(e) => onChange(e.target.value)}
-    className={`w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${error ? "border-destructive" : "border-border"}`}
+    className={`w-full px-3 py-2 rounded-none text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${error ? "border-destructive" : "border-border"}`}
   />
 );
 
@@ -137,7 +137,7 @@ const ShiftMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading shifts...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load shifts.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load shifts.</div>;
 
   return (
     <>

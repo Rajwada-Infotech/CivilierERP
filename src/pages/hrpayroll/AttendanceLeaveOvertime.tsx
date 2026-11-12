@@ -289,14 +289,14 @@ const AttendanceLeaveOvertime: React.FC = () => {
               <TabsTrigger
                 key={v}
                 value={v}
-                className="group !justify-start gap-3 rounded-2xl border border-border bg-card/80 px-4 py-3.5 text-left shadow-sm transition-all data-[state=active]:!shadow-md data-[state=active]:border-transparent hr-tab-card"
+                className="group !justify-start gap-3 rounded-none border border-border bg-card px-4 py-3.5 text-left transition-all data-[state=active]:border-transparent hr-tab-card"
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: HR_GRADIENT }}><Icon size={18} /></span>
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-none text-card" style={{ background: HR_GRADIENT }}><Icon size={18} /></span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-heading font-semibold text-foreground">{label}</span>
                   <span className="block text-[0.6875rem] text-muted-foreground truncate">{hint}</span>
                 </span>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold tabular-nums text-foreground">{n}</span>
+                <span className="rounded-none bg-muted px-2 py-0.5 text-xs font-bold tabular-nums text-foreground">{n}</span>
               </TabsTrigger>
             ))}
           </TabsList>

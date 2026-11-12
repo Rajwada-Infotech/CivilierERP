@@ -9,7 +9,7 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const inputBase =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
+  "w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
 const labelBase = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 
 // Standalone version of the "Employee Salary Details" calculation --
@@ -77,17 +77,17 @@ const SalaryCalculation: React.FC = () => {
             </div>
 
             {selectedEmployee && (
-              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border p-3" style={{ background: `${ACCENT}0a`, borderColor: `${ACCENT}2e` }}>
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-none border p-3" style={{ background: `hsl(var(--foreground) / 0.04)`, borderColor: `hsl(var(--foreground) / 0.18)` }}>
                 <HrAvatar name={selectedEmployee.EmployeeName} size={38} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-foreground truncate">{selectedEmployee.EmployeeName}</p>
                   <p className="text-[0.6875rem] text-muted-foreground font-mono">{selectedEmployee.EmployeeCode}</p>
                 </div>
-                <span className="rounded-full bg-card border border-border px-2.5 py-1 text-[0.6875rem]">
+                <span className="rounded-none bg-card border border-border px-2.5 py-1 text-[0.6875rem]">
                   CTC <b className="tabular-nums">{selectedEmployee.CTCAmount != null ? `₹${Number(selectedEmployee.CTCAmount).toLocaleString("en-IN")}` : "Not set"}</b>
                   {selectedEmployee.CTCAmount != null && <span className="text-muted-foreground"> / {selectedEmployee.CTCFrequency}</span>}
                 </span>
-                <span className="rounded-full bg-card border border-border px-2.5 py-1 text-[0.6875rem]">
+                <span className="rounded-none bg-card border border-border px-2.5 py-1 text-[0.6875rem]">
                   Structure <b>{selectedEmployee.SalaryStructureCode || "Not assigned"}</b>
                 </span>
               </div>
@@ -95,13 +95,13 @@ const SalaryCalculation: React.FC = () => {
           </div>
 
           {errorMsg && (
-            <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+            <div className="rounded-none border border-destructive/30 bg-destructive/5 p-4">
               <p className="text-sm text-destructive">{errorMsg}</p>
             </div>
           )}
 
           {result && !result.valid && (
-            <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 space-y-1">
+            <div className="rounded-none border border-destructive/30 bg-destructive/5 p-4 space-y-1">
               <p className="text-xs font-heading font-semibold text-destructive">This Salary Structure has validation issues</p>
               {result.errors.map((e, i) => (
                 <p key={i} className="text-sm text-destructive">{e.message}</p>

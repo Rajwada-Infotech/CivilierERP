@@ -15,13 +15,13 @@ import {
 } from "@/api/employeeAttendanceApi";
 import { fmtDateIst, fmtDateTimeIst, fmtDuration, fmtTimeIst, fromIstInput, toIstInput, todayIstDate } from "@/lib/attendanceFormat";
 
-const inputCls = "h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30";
+const inputCls = "h-9 px-3 text-sm rounded-none border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30";
 const labelCls = "block text-xs font-medium text-muted-foreground mb-1";
 const STATUS_CLS: Record<string, string> = {
-  Present: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-  Working: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300",
-  "On Break": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-  Incomplete: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  Present: "bg-primary/10 text-primary  ",
+  Working: "bg-primary/10 text-primary  ",
+  "On Break": "bg-foreground/10 text-foreground  ",
+  Incomplete: "bg-destructive/10 text-destructive  ",
 };
 const FLAG_TEXT: Record<string, string> = { MISSING_OUT: "Out Time missing", OPEN_BREAK: "Break not stopped" };
 
@@ -44,9 +44,9 @@ function periodRange(period: Period, anchor: string): { from: string; to: string
 function StatusBadge({ r }: { r: AttendanceRecord }) {
   return (
     <div className="flex flex-col gap-1 items-start">
-      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_CLS[r.status]}`}>{r.status}</span>
+      <span className={`rounded-none px-2.5 py-0.5 text-xs font-medium ${STATUS_CLS[r.status]}`}>{r.status}</span>
       {r.flags.map((f) => (
-        <span key={f} className="text-[0.625rem] text-red-600 flex items-center gap-1"><AlertTriangle size={10} /> {FLAG_TEXT[f]}</span>
+        <span key={f} className="text-[0.625rem] text-destructive flex items-center gap-1"><AlertTriangle size={10} /> {FLAG_TEXT[f]}</span>
       ))}
       {r.hrEdited && <span className="text-[0.625rem] text-muted-foreground">HR corrected</span>}
     </div>
@@ -118,7 +118,7 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                 ["In Time", fmtTimeIst(rec.inTime)], ["Out Time", rec.outTime ? fmtTimeIst(rec.outTime) : "—"], ["Breaks", String(rec.breakCount)],
                 ["Break Duration", fmtDuration(rec.breakSeconds)], ["Working Duration", fmtDuration(rec.totalSeconds)], ["Net Working Hours", fmtDuration(rec.netSeconds)],
               ].map(([k, v]) => (
-                <div key={k} className="rounded-lg bg-muted/40 p-3"><p className="text-[0.6875rem] uppercase text-muted-foreground">{k}</p><p className="font-semibold tabular-nums">{v}</p></div>
+                <div key={k} className="rounded-none bg-muted/40 p-3"><p className="text-[0.6875rem] uppercase text-muted-foreground">{k}</p><p className="font-semibold tabular-nums">{v}</p></div>
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -127,7 +127,7 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
             </div>
 
             {canEdit && (
-              <div className="rounded-xl border border-border p-4 space-y-3">
+              <div className="rounded-none border border-border p-4 space-y-3">
                 <p className="font-semibold">HR correction <span className="text-xs font-normal text-muted-foreground">— every change is recorded in the audit trail</span></p>
                 <div>
                   <label className={labelCls}>Reason (required) *</label>
@@ -136,7 +136,7 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
                   <div><label className={labelCls}>In Time (IST)</label><DateTimeInput value={inV} onChange={(e) => setInV(e.target.value)} className={`${inputCls} w-full`} /></div>
                   <div><label className={labelCls}>Out Time (IST) — clear to reopen</label><DateTimeInput value={outV} onChange={(e) => setOutV(e.target.value)} className={`${inputCls} w-full`} /></div>
-                  <button onClick={() => needReason() && saveTimes.mutate()} disabled={saveTimes.isPending} className="h-9 px-4 rounded-lg text-sm font-semibold text-white btn-module inline-flex items-center gap-1.5 disabled:opacity-50">
+                  <button onClick={() => needReason() && saveTimes.mutate()} disabled={saveTimes.isPending} className="h-9 px-4 rounded-none text-sm font-semibold text-card bg-foreground inline-flex items-center gap-1.5 disabled:opacity-50">
                     {saveTimes.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
                   </button>
                 </div>
@@ -148,19 +148,19 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
               {rec.breaks.length === 0 && <p className="text-muted-foreground">No breaks recorded.</p>}
               <div className="space-y-2">
                 {rec.breaks.map((b) => (
-                  <div key={b.breakId} className="rounded-lg border border-border p-3">
+                  <div key={b.breakId} className="rounded-none border border-border p-3">
                     {canEdit && edits[b.breakId] ? (
                       <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr_1fr_auto_auto] gap-2 items-center">
                         <span className="font-medium">#{b.no}</span>
                         <DateTimeInput value={edits[b.breakId].start} onChange={(e) => setEdits((p) => ({ ...p, [b.breakId]: { ...p[b.breakId], start: e.target.value } }))} className={inputCls} />
                         <DateTimeInput value={edits[b.breakId].end} onChange={(e) => setEdits((p) => ({ ...p, [b.breakId]: { ...p[b.breakId], end: e.target.value } }))} className={inputCls} />
-                        <button onClick={() => needReason() && saveBreak.mutate({ id: b.breakId, ...edits[b.breakId] })} className="h-9 px-3 rounded-lg border border-border hover:bg-muted inline-flex items-center gap-1"><Save size={13} /> Save</button>
-                        <button onClick={() => needReason() && delBreak.mutate(b.breakId)} className="h-9 px-3 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 inline-flex items-center gap-1"><Trash2 size={13} /></button>
+                        <button onClick={() => needReason() && saveBreak.mutate({ id: b.breakId, ...edits[b.breakId] })} className="h-9 px-3 rounded-none border border-border hover:bg-muted inline-flex items-center gap-1"><Save size={13} /> Save</button>
+                        <button onClick={() => needReason() && delBreak.mutate(b.breakId)} className="h-9 px-3 rounded-none border border-destructive text-destructive hover:bg-destructive/10 inline-flex items-center gap-1"><Trash2 size={13} /></button>
                       </div>
                     ) : (
                       <div className="flex flex-wrap gap-x-6 gap-y-1">
                         <span className="font-medium">#{b.no}</span>
-                        <span>{fmtTimeIst(b.start)} → {b.end ? fmtTimeIst(b.end) : <b className="text-red-600">not stopped</b>}</span>
+                        <span>{fmtTimeIst(b.start)} → {b.end ? fmtTimeIst(b.end) : <b className="text-destructive">not stopped</b>}</span>
                         <span className="text-muted-foreground">{b.end ? fmtDuration(b.seconds) : "—"}</span>
                       </div>
                     )}
@@ -171,14 +171,14 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
                   <div><label className={labelCls}>Add a missed break — start (IST)</label><DateTimeInput value={newStart} onChange={(e) => setNewStart(e.target.value)} className={`${inputCls} w-full`} /></div>
                   <div><label className={labelCls}>Stop (IST)</label><DateTimeInput value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className={`${inputCls} w-full`} /></div>
-                  <button onClick={() => newStart && needReason() && addBreak.mutate()} disabled={!newStart || addBreak.isPending} className="h-9 px-3 rounded-lg border border-border hover:bg-muted inline-flex items-center gap-1 disabled:opacity-50"><Plus size={13} /> Add</button>
+                  <button onClick={() => newStart && needReason() && addBreak.mutate()} disabled={!newStart || addBreak.isPending} className="h-9 px-3 rounded-none border border-border hover:bg-muted inline-flex items-center gap-1 disabled:opacity-50"><Plus size={13} /> Add</button>
                 </div>
               )}
             </div>
 
             <div>
               <p className="font-semibold mb-2">Audit trail</p>
-              <div className="rounded-lg border border-border divide-y divide-border max-h-56 overflow-y-auto">
+              <div className="rounded-none border border-border divide-y divide-border max-h-56 overflow-y-auto">
                 {(data?.audit ?? []).map((a) => (
                   <div key={a.AuditId} className="px-3 py-2 text-xs">
                     <span className="font-semibold">{a.Action.replace(/_/g, " ")}</span> · {fmtDateTimeIst(a.ChangedAt)} · {a.ChangedBy}
@@ -278,7 +278,7 @@ export default function HrAttendanceManagement() {
         }
       >
         {/* Filters */}
-        <div className="rounded-xl border border-border bg-card p-4 mb-5 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="rounded-none border border-border bg-card p-4 mb-5 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
           <div><label className={labelCls}>From</label><DateInput value={from} max={to} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} w-full`} /></div>
           <div><label className={labelCls}>To</label><DateInput value={to} min={from} onChange={(e) => setTo(e.target.value)} className={`${inputCls} w-full`} /></div>
           <div><label className={labelCls}>Employee</label>
@@ -297,7 +297,7 @@ export default function HrAttendanceManagement() {
 
         <div className="flex gap-1 mb-4 border-b border-border">
           {([["records", "Attendance Records"], ["summary", "Daily / Weekly / Monthly Summary"], ["missing", "Not Marked (Missing In Time)"]] as const).map(([k, label]) => (
-            <button key={k} onClick={() => setTab(k)} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tab === k ? "border-yellow-500 text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{label}</button>
+            <button key={k} onClick={() => setTab(k)} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tab === k ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{label}</button>
           ))}
         </div>
 
@@ -306,9 +306,9 @@ export default function HrAttendanceManagement() {
             <p className="text-xs text-muted-foreground mb-2 flex items-center gap-3">
               {isFetching ? <Loader2 size={12} className="animate-spin" /> : null}
               {records.length} record{records.length === 1 ? "" : "s"}
-              {flagged > 0 && <span className="text-red-600 font-medium flex items-center gap-1"><AlertTriangle size={12} /> {flagged} incomplete — needs HR review</span>}
+              {flagged > 0 && <span className="text-destructive font-medium flex items-center gap-1"><AlertTriangle size={12} /> {flagged} incomplete — needs HR review</span>}
             </p>
-            <div className="rounded-xl border border-border bg-card overflow-x-auto">
+            <div className="rounded-none border border-border bg-card overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
@@ -321,13 +321,13 @@ export default function HrAttendanceManagement() {
                 <tbody className="divide-y divide-border">
                   {records.length === 0 && <tr><td colSpan={11} className="p-8 text-center text-muted-foreground">No attendance records for these filters.</td></tr>}
                   {records.map((r) => (
-                    <tr key={r.attendanceId} onClick={() => setOpenId(r.attendanceId)} className={`cursor-pointer hover:bg-muted/40 ${r.flags.length ? "bg-red-500/[0.04]" : ""}`}>
+                    <tr key={r.attendanceId} onClick={() => setOpenId(r.attendanceId)} className={`cursor-pointer hover:bg-muted/40 ${r.flags.length ? "bg-destructive/[0.04]" : ""}`}>
                       <td className="px-4 py-3"><p className="font-medium">{r.employeeName}</p><p className="text-xs text-muted-foreground">{r.employeeCode}</p></td>
                       <td className="px-4 py-3 text-xs">{r.companyName || "—"}<br /><span className="text-muted-foreground">{r.department || "—"}</span></td>
                       <td className="px-4 py-3 text-xs">{r.projectName || "—"}</td>
                       <td className="px-4 py-3 whitespace-nowrap">{fmtDateIst(r.attendanceDate)}</td>
                       <td className="px-4 py-3">{fmtTimeIst(r.inTime)}</td>
-                      <td className="px-4 py-3">{r.outTime ? fmtTimeIst(r.outTime) : <span className="text-red-600">—</span>}</td>
+                      <td className="px-4 py-3">{r.outTime ? fmtTimeIst(r.outTime) : <span className="text-destructive">—</span>}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{r.breakCount}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{fmtDuration(r.breakSeconds)}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{fmtDuration(r.totalSeconds)}</td>
@@ -344,9 +344,9 @@ export default function HrAttendanceManagement() {
         {tab === "summary" && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-end gap-3">
-              <div className="inline-flex rounded-lg border border-border p-0.5 text-sm">
+              <div className="inline-flex rounded-none border border-border p-0.5 text-sm">
                 {(["daily", "weekly", "monthly"] as const).map((p) => (
-                  <button key={p} onClick={() => setPeriod(p)} className={`px-3 py-1.5 rounded-md capitalize ${period === p ? "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 font-semibold" : "text-muted-foreground"}`}>{p}</button>
+                  <button key={p} onClick={() => setPeriod(p)} className={`px-3 py-1.5 rounded-none capitalize ${period === p ? "bg-foreground/20 text-foreground  font-semibold" : "text-muted-foreground"}`}>{p}</button>
                 ))}
               </div>
               <div><label className={labelCls}>{period === "daily" ? "Date" : period === "weekly" ? "Any day of the week" : "Any day of the month"}</label>
@@ -359,10 +359,10 @@ export default function HrAttendanceManagement() {
                   ["Employees", String(summary.totals.employees)], ["Working Duration", fmtDuration(summary.totals.totalSeconds)],
                   ["Break Duration", fmtDuration(summary.totals.breakSeconds)], ["Net Working Hours", fmtDuration(summary.totals.netSeconds)],
                   ["Incomplete Days", String(summary.totals.incompleteDays)],
-                ].map(([k, v]) => <div key={k} className="rounded-xl border border-border bg-card p-3 text-center"><p className="text-[0.6875rem] uppercase text-muted-foreground">{k}</p><p className="text-lg font-bold tabular-nums">{v}</p></div>)}
+                ].map(([k, v]) => <div key={k} className="rounded-none border border-border bg-card p-3 text-center"><p className="text-[0.6875rem] uppercase text-muted-foreground">{k}</p><p className="text-lg font-bold tabular-nums">{v}</p></div>)}
               </div>
             )}
-            <div className="rounded-xl border border-border bg-card overflow-x-auto">
+            <div className="rounded-none border border-border bg-card overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr><th className="px-4 py-3 text-left">Employee</th><th className="px-4 py-3 text-left">Department</th><th className="px-4 py-3 text-right">Days</th><th className="px-4 py-3 text-right">Incomplete</th>
@@ -375,7 +375,7 @@ export default function HrAttendanceManagement() {
                       <td className="px-4 py-3"><p className="font-medium">{s.employeeName}</p><p className="text-xs text-muted-foreground">{s.employeeCode}</p></td>
                       <td className="px-4 py-3 text-xs">{s.department || "—"}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{s.days}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{s.incompleteDays ? <span className="text-red-600 font-medium">{s.incompleteDays}</span> : 0}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{s.incompleteDays ? <span className="text-destructive font-medium">{s.incompleteDays}</span> : 0}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{s.breakCount}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{fmtDuration(s.breakSeconds)}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{fmtDuration(s.totalSeconds)}</td>
@@ -392,7 +392,7 @@ export default function HrAttendanceManagement() {
         {tab === "missing" && (
           <div className="space-y-3">
             <div className="max-w-[200px]"><label className={labelCls}>Date</label><DateInput value={missingDate} max={today} onChange={(e) => e.target.value && setMissingDate(e.target.value)} className={`${inputCls} w-full`} /></div>
-            <div className="rounded-xl border border-border bg-card overflow-x-auto">
+            <div className="rounded-none border border-border bg-card overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-4 py-3 text-left">Employee</th><th className="px-4 py-3 text-left">Employee ID</th><th className="px-4 py-3 text-left">Company</th><th className="px-4 py-3 text-left">Department</th></tr></thead>
                 <tbody className="divide-y divide-border">

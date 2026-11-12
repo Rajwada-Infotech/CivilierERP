@@ -98,7 +98,7 @@ const GraceTimeMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading grace time rules...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load grace time rules.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load grace time rules.</div>;
 
   return (
     <>
