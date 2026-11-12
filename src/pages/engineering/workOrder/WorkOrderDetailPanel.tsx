@@ -225,7 +225,7 @@ export const WorkOrderDetailPanel: React.FC<{
           <ArrowLeft size={15} />
           <span>All Work Orders</span>
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {confirmDelete && rights.canDelete ? (
             <>
               <span className="text-xs text-destructive font-medium">
@@ -234,7 +234,7 @@ export const WorkOrderDetailPanel: React.FC<{
               <button
                 onClick={handleDelete}
                 disabled={deleting}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-destructive/10 text-white text-xs font-semibold hover:bg-destructive/10 transition-colors disabled:opacity-60"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-destructive text-white text-xs font-semibold hover:bg-destructive/90 transition-colors disabled:opacity-60"
               >
                 {deleting ? (
                   <span className="w-3 h-3 border border-white/30 border-t-white animate-spin" />

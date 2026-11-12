@@ -261,7 +261,7 @@ export const MaterialBreakdownModal: React.FC<{
                             </select>
                           </div>
                         )}
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           <div>
                             <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                               Item Qty (total)

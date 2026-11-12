@@ -597,7 +597,7 @@ const WorkOrderMaster: React.FC = () => {
             {/* ── Unified Work Order Header Card ── */}
             <div className="border border-foreground/30 bg-card mb-5">
               {/* Card Header */}
-              <div className="px-5 py-4 border-b border-foreground/30 bg-card flex items-center justify-between">
+              <div className="px-5 py-4 border-b border-foreground/30 bg-card flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 bg-primary/10 flex items-center justify-center shrink-0">
                     <FileText size={15} className="text-primary" />

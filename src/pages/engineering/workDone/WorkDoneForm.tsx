@@ -367,13 +367,13 @@ export function WorkDoneForm({
           </Field>
         </div>
 
-        <div className="grid grid-cols-3" style={{ border: RULE }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3" style={{ border: RULE }}>
           {[
             { label: "Gross", value: fmt(gross), note: "quantity × rate" },
             { label: "Deductions", value: deductions ? `− ${fmt(deductions)}` : fmt(0) },
             { label: "Certified", value: fmt(certified), red: leftToCertify != null && certified > leftToCertify + 0.5 },
           ].map((x, i) => (
-            <div key={x.label} className="px-4 py-3" style={i ? { borderLeft: "1px solid hsl(var(--foreground) / 0.2)" } : undefined}>
+            <div key={x.label} className={`px-4 py-3 ${i ? "border-t sm:border-t-0 sm:border-l border-foreground/20" : ""}`}>
               <p className={LBL}>{x.label}</p>
               <p className={`font-heading text-lg font-bold tabular-nums mt-0.5 ${x.red ? "text-destructive" : "text-foreground"}`}>{x.value}</p>
               {x.red ? <p className="text-[0.6875rem] text-destructive">More than is left to certify on the work order</p> : x.note ? <p className="text-[0.6875rem] text-muted-foreground">{x.note}</p> : null}

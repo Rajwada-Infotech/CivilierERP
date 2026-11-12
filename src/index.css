@@ -734,6 +734,13 @@
 
 /* Engineering — orange */
 [data-module="engineering"]       { --ring: 24 80% 50%; --accent-foreground: 24 80% 36%; }
+/* Engineering on a phone: thinner sheet frame and padding, the title block's action under the title at full width. */
+@media (max-width: 640px) {
+  [data-module="engineering"] main .sheet-frame { margin: 0; outline: 0; }
+  [data-module="engineering"] main .sheet-frame > div:first-child { padding: 14px 12px 12px !important; }
+  [data-module="engineering"] main .sheet-frame > div:first-child > div:last-child:not(:first-child) { width: 100%; }
+  [data-module="engineering"] main .sheet-frame > .cell { padding: 12px 10px 16px !important; gap: 14px !important; }
+}
 .dark [data-module="engineering"] { --ring: 24 80% 56%; --accent-foreground: 24 80% 80%; }
 
 /* Follow-up — teal */
