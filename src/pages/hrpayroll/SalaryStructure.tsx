@@ -94,7 +94,7 @@ const emptyHeader = () => ({
 });
 
 const inputBase =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
+  "w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
 const labelBase = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const smallInput = inputBase + " py-1.5 text-xs";
 
@@ -251,7 +251,7 @@ const SalaryStructure: React.FC = () => {
     try {
       const res = await validateSalaryStructure(buildPayload());
       setValidationErrors(res.errors || []);
-      if (!res.errors?.length) toast.success("No validation errors found ✓");
+      if (!res.errors?.length) toast.success("No validation errors found");
       else toast.error(`${res.errors.length} validation issue(s) found`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Validation failed");
@@ -288,11 +288,11 @@ const SalaryStructure: React.FC = () => {
     try {
       if (editingId !== null) {
         const res = await updateSalaryStructure(editingId, buildPayload());
-        toast.success("Salary structure updated successfully ✓");
+        toast.success("Salary structure updated successfully");
         if (res.warnings?.length) setValidationErrors(res.warnings);
       } else {
         const res = await addSalaryStructure(buildPayload());
-        toast.success("Salary structure saved successfully ✓");
+        toast.success("Salary structure saved successfully");
         if (res.warnings?.length) setValidationErrors(res.warnings);
         else setValidationErrors([]);
         if (andCalculate) {
@@ -330,7 +330,7 @@ const SalaryStructure: React.FC = () => {
   const handleActivate = async (id: number) => {
     try {
       await activateSalaryStructure(id);
-      toast.success("Salary structure activated ✓");
+      toast.success("Salary structure activated");
       await refresh();
     } catch (err) {
       const e = err as Error & { errors?: ValidationError[] };
@@ -355,7 +355,7 @@ const SalaryStructure: React.FC = () => {
     if (copyTargetId === null || !copyCode.trim()) return;
     try {
       await copySalaryStructure(copyTargetId, copyCode.trim().toUpperCase(), copyName.trim() || undefined);
-      toast.success("Salary structure copied successfully ✓");
+      toast.success("Salary structure copied successfully");
       setCopyTargetId(null);
       setCopyCode("");
       setCopyName("");
@@ -377,10 +377,10 @@ const SalaryStructure: React.FC = () => {
 
   // ── Presentation helpers (display only) ────────────────────────────────
   const TYPE_TONE: Record<string, { bar: string; chip: string; label: string }> = {
-    Earning: { bar: "#10b981", chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400", label: "Earning" },
-    Deduction: { bar: "#ef4444", chip: "bg-red-500/10 text-red-600 dark:text-red-400", label: "Deduction" },
-    "Employer Contribution": { bar: "#3b82f6", chip: "bg-blue-500/10 text-blue-600 dark:text-blue-400", label: "Employer" },
-    Informational: { bar: "#94a3b8", chip: "bg-slate-500/10 text-slate-600 dark:text-slate-300", label: "Info" },
+    Earning: { bar: "hsl(var(--primary))", chip: "bg-primary/10 text-primary ", label: "Earning" },
+    Deduction: { bar: "hsl(var(--destructive))", chip: "bg-destructive/10 text-destructive ", label: "Deduction" },
+    "Employer Contribution": { bar: "hsl(var(--primary))", chip: "bg-primary/10 text-primary ", label: "Employer" },
+    Informational: { bar: "hsl(var(--muted-foreground))", chip: "bg-muted text-muted-foreground ", label: "Info" },
   };
   const toneOf = (t?: string) => TYPE_TONE[t || ""] ?? TYPE_TONE.Informational;
   const [libSearch, setLibSearch] = useState("");
@@ -388,10 +388,10 @@ const SalaryStructure: React.FC = () => {
     const q = libSearch.trim().toLowerCase();
     return !q || [r.Name, r.Code, r.CompanyName].some((v) => (v || "").toLowerCase().includes(q));
   });
-  const card = "rounded-2xl bg-card/80 backdrop-blur-lg border border-border shadow-sm";
+  const card = "rounded-none bg-card border border-border";
   const StepHead = ({ n, title, hint }: { n: number; title: string; hint: string }) => (
     <div className="flex items-center gap-3 mb-4">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm" style={{ background: HR_GRADIENT }}>{n}</span>
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-none text-xs font-bold text-card" style={{ background: HR_GRADIENT }}>{n}</span>
       <div>
         <p className="text-sm font-heading font-semibold text-foreground leading-tight">{title}</p>
         <p className="text-[0.6875rem] text-muted-foreground">{hint}</p>
@@ -402,7 +402,7 @@ const SalaryStructure: React.FC = () => {
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[0.6875rem] font-medium transition-colors ${on ? "text-white border-transparent shadow-sm" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+      className={`inline-flex items-center gap-1 rounded-none border px-2.5 py-1 text-[0.6875rem] font-medium transition-colors ${on ? "text-card border-transparent" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
       style={on ? { background: HR_GRADIENT } : undefined}
     >
       {on && <TickCircle size={11} />} {label}
@@ -413,12 +413,12 @@ const SalaryStructure: React.FC = () => {
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 xl:grid-cols-[22rem_minmax(0,1fr)] gap-5 p-1">
-        <div className="h-96 rounded-2xl bg-muted/50 animate-pulse" />
-        <div className="h-[32rem] rounded-2xl bg-muted/40 animate-pulse" />
+        <div className="h-96 rounded-none bg-muted/50 animate-pulse" />
+        <div className="h-[32rem] rounded-none bg-muted/40 animate-pulse" />
       </div>
     );
   }
-  if (error) return <div className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">Failed to load Salary Structure.</div>;
+  if (error) return <div className="m-6 rounded-none border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">Failed to load Salary Structure.</div>;
 
   const canWrite = editingId === null ? rights.canCreate : rights.canEdit;
   const t = previewResult?.totals;
@@ -436,7 +436,7 @@ const SalaryStructure: React.FC = () => {
                 <p className="text-[0.6875rem] text-muted-foreground">{structures.length} template{structures.length !== 1 ? "s" : ""}</p>
               </div>
               {(rights.canCreate || rights.canEdit) && (
-                <button type="button" onClick={resetForm} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-heading font-semibold text-white shadow-sm" style={{ background: HR_GRADIENT }}>
+                <button type="button" onClick={resetForm} className="inline-flex items-center gap-1 rounded-none px-2.5 py-1.5 text-xs font-heading font-semibold text-card" style={{ background: HR_GRADIENT }}>
                   <Add size={14} /> New
                 </button>
               )}
@@ -450,8 +450,8 @@ const SalaryStructure: React.FC = () => {
                 return (
                   <div
                     key={row.SalaryStructureId}
-                    className={`group rounded-xl border p-3 transition-all ${sel ? "shadow-md" : "border-border hover:border-border hover:shadow-sm bg-background/40"}`}
-                    style={sel ? { borderColor: `${ACCENT}66`, background: `${ACCENT}0d` } : undefined}
+                    className={`group rounded-none border p-3 transition-all ${sel ? "" : "border-border hover:border-border bg-card"}`}
+                    style={sel ? { borderColor: `hsl(var(--foreground) / 0.40)`, background: `hsl(var(--foreground) / 0.05)` } : undefined}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <button type="button" onClick={() => rights.canEdit && startEdit(row)} className="min-w-0 text-left" disabled={!rights.canEdit}>
@@ -461,32 +461,32 @@ const SalaryStructure: React.FC = () => {
                         </p>
                         {row.CompanyName && <p className="text-[0.6875rem] text-muted-foreground truncate">{row.CompanyName}</p>}
                       </button>
-                      <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${row.IsActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+                      <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-none text-[0.625rem] font-semibold ${row.IsActive ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
                         {row.IsActive ? "Active" : "Draft"}
                       </span>
                     </div>
                     <div className="mt-2.5 flex items-center gap-1 border-t border-border/60 pt-2">
                       {rights.canEdit && (
-                        <button onClick={() => startEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"><Edit2 size={14} /></button>
+                        <button onClick={() => startEdit(row)} title="Edit" className="p-1.5 rounded-none hover:bg-muted text-muted-foreground hover:text-foreground"><Edit2 size={14} /></button>
                       )}
                       {rights.canEdit && !row.IsActive && (
-                        <button onClick={() => handleActivate(row.SalaryStructureId)} title="Activate" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.6875rem] font-medium text-emerald-600 hover:bg-emerald-500/10"><TickCircle size={13} /> Activate</button>
+                        <button onClick={() => handleActivate(row.SalaryStructureId)} title="Activate" className="inline-flex items-center gap-1 px-2 py-1 rounded-none text-[0.6875rem] font-medium text-primary hover:bg-primary/10"><TickCircle size={13} /> Activate</button>
                       )}
                       {rights.canEdit && row.IsActive && (
-                        <button onClick={() => handleDeactivate(row.SalaryStructureId)} title="Deactivate" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.6875rem] font-medium text-amber-600 hover:bg-amber-500/10"><CloseCircle size={13} /> Deactivate</button>
+                        <button onClick={() => handleDeactivate(row.SalaryStructureId)} title="Deactivate" className="inline-flex items-center gap-1 px-2 py-1 rounded-none text-[0.6875rem] font-medium text-foreground hover:bg-foreground/10"><CloseCircle size={13} /> Deactivate</button>
                       )}
                       <span className="flex-1" />
                       {rights.canCreate && (
-                        <button onClick={() => { setCopyTargetId(row.SalaryStructureId); setCopyCode(""); setCopyName(`${row.Name} Copy`); }} title="Copy Structure" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"><Copy size={14} /></button>
+                        <button onClick={() => { setCopyTargetId(row.SalaryStructureId); setCopyCode(""); setCopyName(`${row.Name} Copy`); }} title="Copy Structure" className="p-1.5 rounded-none hover:bg-muted text-muted-foreground hover:text-foreground"><Copy size={14} /></button>
                       )}
                       {rights.canDelete && (
                         deleteConfirmId === row.SalaryStructureId ? (
                           <span className="flex items-center gap-1">
-                            <button onClick={() => handleDelete(row.SalaryStructureId)} className="px-2 py-1 rounded-md text-[0.6875rem] font-medium bg-destructive text-destructive-foreground">Confirm</button>
-                            <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded-md text-[0.6875rem] font-medium border border-border">Cancel</button>
+                            <button onClick={() => handleDelete(row.SalaryStructureId)} className="px-2 py-1 rounded-none text-[0.6875rem] font-medium bg-destructive text-destructive-foreground">Confirm</button>
+                            <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded-none text-[0.6875rem] font-medium border border-border">Cancel</button>
                           </span>
                         ) : (
-                          <button onClick={() => setDeleteConfirmId(row.SalaryStructureId)} title="Delete" className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 size={14} /></button>
+                          <button onClick={() => setDeleteConfirmId(row.SalaryStructureId)} title="Delete" className="p-1.5 rounded-none hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 size={14} /></button>
                         )
                       )}
                     </div>
@@ -500,14 +500,14 @@ const SalaryStructure: React.FC = () => {
           <div className="space-y-5 min-w-0">
             {(rights.canCreate || rights.canEdit) && (
               <div className={`${card} overflow-hidden`}>
-                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border" style={{ background: `${ACCENT}0a` }}>
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border" style={{ background: `hsl(var(--foreground) / 0.04)` }}>
                   <div>
                     <p className="text-[0.625rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">{editingId !== null ? "Editing" : "New template"}</p>
                     <h2 className="font-heading font-semibold text-foreground">
                       {editingId !== null ? (header.name || "Salary structure") : "Build a salary structure"}
                     </h2>
                   </div>
-                  <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold ${header.isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+                  <span className={`inline-flex items-center px-2.5 py-1 rounded-none text-[0.6875rem] font-semibold ${header.isActive ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
                     {header.isActive ? "Active" : "Draft / Inactive"}
                   </span>
                 </div>
@@ -544,10 +544,10 @@ const SalaryStructure: React.FC = () => {
                       </div>
                       <div>
                         <label className={labelBase}>CTC Frequency</label>
-                        <div className="flex rounded-lg border border-border bg-muted p-0.5">
+                        <div className="flex rounded-none border border-border bg-muted p-0.5">
                           {(["Monthly", "Annual"] as CTCFrequency[]).map((f) => (
                             <button key={f} type="button" onClick={() => setHeader((h) => ({ ...h, ctcFrequency: f }))}
-                              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${header.ctcFrequency === f ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                              className={`flex-1 rounded-none px-3 py-1.5 text-xs font-semibold transition-colors ${header.ctcFrequency === f ? "bg-card text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                               {f}
                             </button>
                           ))}
@@ -564,7 +564,7 @@ const SalaryStructure: React.FC = () => {
                   <section>
                     <div className="flex items-start justify-between gap-3">
                       <StepHead n={2} title="Salary components" hint="Each line is one salary head and how it's calculated, in order" />
-                      <button type="button" onClick={addLine} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors">
+                      <button type="button" onClick={addLine} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors">
                         <Add size={14} /> Add component
                       </button>
                     </div>
@@ -573,20 +573,20 @@ const SalaryStructure: React.FC = () => {
                         const head = heads.find((h) => String(h.Id) === line.deductionAdditionId);
                         const tone = toneOf(head?.Type);
                         return (
-                          <div key={idx} className={`relative rounded-xl border bg-background/50 p-3.5 pl-5 ${line.isActive ? "border-border" : "border-dashed border-border opacity-70"}`}>
-                            <span className="absolute left-0 top-3 bottom-3 w-1 rounded-full" style={{ background: tone.bar }} />
+                          <div key={idx} className={`relative rounded-none border bg-card p-3.5 pl-5 ${line.isActive ? "border-border" : "border-dashed border-border opacity-70"}`}>
+                            <span className="absolute left-0 top-3 bottom-3 w-1 rounded-none" style={{ background: tone.bar }} />
                             <div className="flex flex-wrap items-center gap-2 mb-3">
-                              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-[0.6875rem] font-bold text-muted-foreground">{idx + 1}</span>
+                              <span className="flex h-6 w-6 items-center justify-center rounded-none bg-muted text-[0.6875rem] font-bold text-muted-foreground">{idx + 1}</span>
                               {head ? (
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${tone.chip}`}>{tone.label}</span>
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-none text-[0.625rem] font-semibold ${tone.chip}`}>{tone.label}</span>
                               ) : (
                                 <span className="text-[0.6875rem] text-muted-foreground">Pick a salary head</span>
                               )}
-                              {line.isBalancing && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold text-white" style={{ background: HR_GRADIENT }}>★ Balancing</span>}
+                              {line.isBalancing && <span className="inline-flex items-center px-2 py-0.5 rounded-none text-[0.625rem] font-semibold text-card" style={{ background: HR_GRADIENT }}>Balancing</span>}
                               <span className="flex-1" />
-                              <button type="button" onClick={() => moveLine(idx, -1)} disabled={idx === 0} title="Move up" className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 text-muted-foreground"><ArrowUp2 size={14} /></button>
-                              <button type="button" onClick={() => moveLine(idx, 1)} disabled={idx === lines.length - 1} title="Move down" className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 text-muted-foreground"><ArrowDown2 size={14} /></button>
-                              <button type="button" onClick={() => removeLine(idx)} disabled={lines.length === 1} title="Remove" className="p-1.5 rounded-lg hover:bg-destructive/10 disabled:opacity-30 text-muted-foreground hover:text-destructive"><Trash2 size={14} /></button>
+                              <button type="button" onClick={() => moveLine(idx, -1)} disabled={idx === 0} title="Move up" className="p-1.5 rounded-none hover:bg-muted disabled:opacity-30 text-muted-foreground"><ArrowUp2 size={14} /></button>
+                              <button type="button" onClick={() => moveLine(idx, 1)} disabled={idx === lines.length - 1} title="Move down" className="p-1.5 rounded-none hover:bg-muted disabled:opacity-30 text-muted-foreground"><ArrowDown2 size={14} /></button>
+                              <button type="button" onClick={() => removeLine(idx)} disabled={lines.length === 1} title="Remove" className="p-1.5 rounded-none hover:bg-destructive/10 disabled:opacity-30 text-muted-foreground hover:text-destructive"><Trash2 size={14} /></button>
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_auto_minmax(0,1.2fr)] gap-3 items-end">
@@ -601,10 +601,10 @@ const SalaryStructure: React.FC = () => {
                               </div>
                               <div>
                                 <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Calculated as</label>
-                                <div className="flex rounded-lg border border-border bg-muted p-0.5">
+                                <div className="flex rounded-none border border-border bg-muted p-0.5">
                                   {CALCULATION_TYPES.map((ct) => (
                                     <button key={ct} type="button" onClick={() => updateLine(idx, { calculationType: ct })}
-                                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${line.calculationType === ct ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                                      className={`rounded-none px-2.5 py-1 text-xs font-semibold transition-colors ${line.calculationType === ct ? "bg-card text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                                       {ct === "Percentage" ? "%" : ct}
                                     </button>
                                   ))}
@@ -637,7 +637,7 @@ const SalaryStructure: React.FC = () => {
                                     <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Formula</label>
                                     <div className="flex gap-1.5">
                                       <input type="text" value={line.formula} onChange={(e) => updateLine(idx, { formula: e.target.value })} className={smallInput + " font-mono"} placeholder="e.g. GROSS - BASIC - HRA" />
-                                      <button type="button" onClick={() => setFormulaBuilderIdx(idx)} className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white whitespace-nowrap shadow-sm" style={{ background: HR_GRADIENT }}>
+                                      <button type="button" onClick={() => setFormulaBuilderIdx(idx)} className="px-2.5 py-1.5 rounded-none text-xs font-semibold text-card whitespace-nowrap" style={{ background: HR_GRADIENT }}>
                                         ƒ Builder
                                       </button>
                                     </div>
@@ -669,7 +669,7 @@ const SalaryStructure: React.FC = () => {
                               <Flag on={line.includeInNet} label="In Net" onClick={() => updateLine(idx, { includeInNet: !line.includeInNet })} />
                               <Flag on={line.taxable} label="Taxable" onClick={() => updateLine(idx, { taxable: !line.taxable })} />
                               <Flag on={line.isActive} label="Active" onClick={() => updateLine(idx, { isActive: !line.isActive })} />
-                              <Flag on={line.isBalancing} label="★ Balancing" onClick={() => setBalancing(idx)} />
+                              <Flag on={line.isBalancing} label="Balancing" onClick={() => setBalancing(idx)} />
                             </div>
                             {head && (
                               <p className="text-[0.625rem] text-muted-foreground mt-2">
@@ -683,7 +683,7 @@ const SalaryStructure: React.FC = () => {
                   </section>
 
                   {validationErrors.length > 0 && (
-                    <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 space-y-1">
+                    <div className="rounded-none border border-destructive/30 bg-destructive/5 p-3.5 space-y-1">
                       <p className="text-xs font-heading font-semibold text-destructive">Validation issues</p>
                       {validationErrors.map((e, i) => (
                         <p key={i} className="text-xs text-destructive flex items-start gap-1.5">
@@ -695,21 +695,21 @@ const SalaryStructure: React.FC = () => {
                 </div>
 
                 {/* Pinned action bar */}
-                <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 px-5 py-3 border-t border-border bg-card/95 backdrop-blur">
-                  <span className={`text-[0.6875rem] font-medium ${canSave ? "text-emerald-600" : "text-muted-foreground"}`}>
+                <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 px-5 py-3 border-t border-border bg-card">
+                  <span className={`text-[0.6875rem] font-medium ${canSave ? "text-primary" : "text-muted-foreground"}`}>
                     {canSave ? "● Ready to save" : "Name, code and at least one component are required"}
                   </span>
                   <span className="flex-1" />
-                  <button type="button" onClick={handleValidate} disabled={validating || !canSave} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
+                  <button type="button" onClick={handleValidate} disabled={validating || !canSave} className="px-3 py-1.5 rounded-none text-xs font-heading border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
                     {validating ? "Validating…" : "Validate Formula"}
                   </button>
-                  <button type="button" onClick={runPreview} disabled={previewLoading || !canSave} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
+                  <button type="button" onClick={runPreview} disabled={previewLoading || !canSave} className="px-3 py-1.5 rounded-none text-xs font-heading border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
                     Preview
                   </button>
-                  <button onClick={() => handleSave(false)} disabled={!canSave || saving || !canWrite} className="px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
+                  <button onClick={() => handleSave(false)} disabled={!canSave || saving || !canWrite} className="px-3 py-1.5 rounded-none text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
                     Save
                   </button>
-                  <button onClick={() => handleSave(true)} disabled={!canSave || saving || !canWrite} className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm disabled:opacity-40" style={{ background: HR_GRADIENT }}>
+                  <button onClick={() => handleSave(true)} disabled={!canSave || saving || !canWrite} className="px-4 py-1.5 rounded-none text-xs font-heading font-semibold text-card disabled:opacity-40" style={{ background: HR_GRADIENT }}>
                     {saving ? "Saving…" : editingId !== null ? "Update & Calculate" : "Save & Calculate"}
                   </button>
                 </div>
@@ -726,22 +726,22 @@ const SalaryStructure: React.FC = () => {
                 </div>
                 <div>
                   <label className={labelBase}>Frequency</label>
-                  <div className="flex rounded-lg border border-border bg-muted p-0.5">
+                  <div className="flex rounded-none border border-border bg-muted p-0.5">
                     {(["Monthly", "Annual"] as CTCFrequency[]).map((f) => (
                       <button key={f} type="button" onClick={() => setTestCtcFrequency(f)}
-                        className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${testCtcFrequency === f ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                        className={`rounded-none px-3 py-1.5 text-xs font-semibold transition-colors ${testCtcFrequency === f ? "bg-card text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                         {f}
                       </button>
                     ))}
                   </div>
                 </div>
-                <button type="button" onClick={runPreview} disabled={previewLoading} className="h-10 px-5 rounded-lg text-sm font-heading font-semibold text-white shadow-sm disabled:opacity-40" style={{ background: HR_GRADIENT }}>
+                <button type="button" onClick={runPreview} disabled={previewLoading} className="h-10 px-5 rounded-none text-sm font-heading font-semibold text-card disabled:opacity-40" style={{ background: HR_GRADIENT }}>
                   {previewLoading ? "Calculating..." : "Calculate"}
                 </button>
               </div>
 
               {previewResult && !previewResult.valid && (
-                <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-1">
+                <div className="mt-4 rounded-none border border-destructive/30 bg-destructive/5 p-3 space-y-1">
                   {previewResult.errors.map((e, i) => (
                     <p key={i} className="text-xs text-destructive">{e.message}</p>
                   ))}
@@ -753,37 +753,37 @@ const SalaryStructure: React.FC = () => {
                   <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
                     {([
                       ["Gross", t.GrossSalary, "text-foreground"],
-                      ["Employee deduction", t.TotalEmployeeDeduction, "text-red-500"],
-                      ["Net salary", t.NetSalary, "text-emerald-600 dark:text-emerald-400"],
-                      ["Employer contribution", t.TotalEmployerContribution, "text-blue-600 dark:text-blue-400"],
+                      ["Employee deduction", t.TotalEmployeeDeduction, "text-destructive"],
+                      ["Net salary", t.NetSalary, "text-primary "],
+                      ["Employer contribution", t.TotalEmployerContribution, "text-primary "],
                     ] as const).map(([l, v, c]) => (
-                      <div key={l} className="rounded-xl border border-border bg-background/50 px-3.5 py-2.5">
+                      <div key={l} className="rounded-none border border-border bg-card px-3.5 py-2.5">
                         <p className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">{l}</p>
                         <p className={`text-lg font-heading font-bold tabular-nums ${c}`}>{inr(v)}</p>
                       </div>
                     ))}
-                    <div className="rounded-xl px-3.5 py-2.5 text-white shadow-sm col-span-2 lg:col-span-1" style={{ background: HR_GRADIENT }}>
-                      <p className="text-[0.625rem] uppercase tracking-wider text-white/80">Total CTC</p>
+                    <div className="rounded-none px-3.5 py-2.5 text-card col-span-2 lg:col-span-1" style={{ background: HR_GRADIENT }}>
+                      <p className="text-[0.625rem] uppercase tracking-wider text-card/80">Total CTC</p>
                       <p className="text-lg font-heading font-bold tabular-nums">{inr(t.TotalCTC)}</p>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-border divide-y divide-border/60 overflow-hidden">
+                  <div className="rounded-none border border-border divide-y divide-border/60 overflow-hidden">
                     {previewResult.lines.map((l) => {
                       const tone = toneOf(l.HeadType);
                       const pct = t.TotalCTC ? Math.min(100, (Math.abs(l.Amount) / t.TotalCTC) * 100) : 0;
                       return (
                         <div key={l.DeductionAdditionId} className="px-4 py-2.5">
                           <div className="flex items-center gap-3">
-                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: tone.bar }} />
+                            <span className="h-2 w-2 shrink-0 rounded-none" style={{ background: tone.bar }} />
                             <span className="min-w-0 flex-1">
                               <span className="text-sm font-medium text-foreground">{l.HeadName}</span>
                               <span className="ml-2 text-[0.6875rem] text-muted-foreground">{l.Calculation}</span>
                             </span>
-                            <span className={`hidden sm:inline-flex px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${tone.chip}`}>{tone.label}</span>
+                            <span className={`hidden sm:inline-flex px-2 py-0.5 rounded-none text-[0.625rem] font-semibold ${tone.chip}`}>{tone.label}</span>
                             <span className="w-28 text-right text-sm font-semibold tabular-nums">{inr(l.Amount)}</span>
                           </div>
-                          <div className="mt-1.5 ml-5 h-1 rounded-full bg-muted overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: tone.bar }} />
+                          <div className="mt-1.5 ml-5 h-1 rounded-none bg-muted overflow-hidden">
+                            <div className="h-full rounded-none" style={{ width: `${pct}%`, background: tone.bar }} />
                           </div>
                         </div>
                       );
@@ -808,8 +808,8 @@ const SalaryStructure: React.FC = () => {
       )}
 
       {copyTargetId !== null && (
-        <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCopyTargetId(null)}>
-          <div className="bg-card border border-border rounded-xl shadow-lg p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={() => setCopyTargetId(null)}>
+          <div className="bg-card border border-border rounded-none p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-heading font-semibold text-foreground text-sm mb-3">Copy Structure</h3>
             <div className="space-y-3">
               <div>
@@ -822,8 +822,8 @@ const SalaryStructure: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 mt-4">
-              <button onClick={() => setCopyTargetId(null)} className="px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
-              <button onClick={handleCopy} disabled={!copyCode.trim()} className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm disabled:opacity-40" style={{ background: HR_GRADIENT }}>Copy</button>
+              <button onClick={() => setCopyTargetId(null)} className="px-4 py-1.5 rounded-none text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
+              <button onClick={handleCopy} disabled={!copyCode.trim()} className="px-4 py-1.5 rounded-none text-xs font-heading font-semibold text-card disabled:opacity-40" style={{ background: HR_GRADIENT }}>Copy</button>
             </div>
           </div>
         </div></BodyPortal>

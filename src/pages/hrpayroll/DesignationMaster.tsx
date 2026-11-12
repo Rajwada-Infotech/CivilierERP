@@ -110,7 +110,7 @@ const DesignationMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading designations...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load designations.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load designations.</div>;
 
   return (
     <>

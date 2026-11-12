@@ -134,7 +134,7 @@ const PhotoField: React.FC<{
   const inputId = "employee-photo-input";
   return (
     <div className="flex items-center gap-3">
-      <div className="w-16 h-16 rounded-xl border border-border bg-muted/40 flex items-center justify-center overflow-hidden shrink-0">
+      <div className="w-16 h-16 rounded-none border border-border bg-muted/40 flex items-center justify-center overflow-hidden shrink-0">
         {photo ? (
           <img src={photo} alt="Employee" className="w-full h-full object-cover" />
         ) : (
@@ -144,7 +144,7 @@ const PhotoField: React.FC<{
       <div className="flex items-center gap-2">
         <label
           htmlFor={inputId}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
         >
           <Camera size={13} /> {photo ? "Change Photo" : "Upload Photo"}
         </label>
@@ -194,8 +194,8 @@ const SalaryBreakupModal: React.FC<{
   const result = data as SalaryBreakupResult | undefined;
 
   return (
-    <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-xl shadow-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-none w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div>
             <h3 className="font-heading font-semibold text-foreground text-sm">Salary Details</h3>
@@ -218,7 +218,7 @@ const SalaryBreakupModal: React.FC<{
               <p className="text-[0.6875rem] text-muted-foreground">
                 Structure: {result.SalaryStructureName} (v{result.SalaryStructureVersion})
               </p>
-              <div className="rounded-lg border border-border overflow-hidden">
+              <div className="rounded-none border border-border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-muted/30 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
@@ -385,12 +385,12 @@ export default function EmployeeMaster() {
         const isExistingRecord = !!p.formData._id;
         if (isExistingRecord) {
           return p.formData.candidateId ? (
-            <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground">
+            <div className="w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border text-foreground">
               {(p.formData.candidateCode as string) || "-"} {(p.formData.candidateName as string) ? `— ${p.formData.candidateName}` : ""}
               <span className="ml-2 text-[0.6875rem] text-muted-foreground">(auto-linked from Offer Letter &amp; Joining)</span>
             </div>
           ) : (
-            <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-muted-foreground">
+            <div className="w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border text-muted-foreground">
               Not linked to a candidate — created directly in Employee Master
             </div>
           );
@@ -403,7 +403,7 @@ export default function EmployeeMaster() {
                 p.onChange(e.target.value);
                 handlePickCandidate(e.target.value);
               }}
-              className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             >
               <option value="">— Not linked (fill in manually) —</option>
               {unlinkedCandidates.map((c) => (
@@ -502,17 +502,17 @@ export default function EmployeeMaster() {
   ];
 
   const initials = (name: string) => (name || "?").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-  const chip = "inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium";
+  const chip = "inline-flex items-center px-2 py-0.5 rounded-none text-[0.6875rem] font-medium";
 
   const columnRenderers: Record<string, (value: unknown, row: RecordWithId) => React.ReactNode> = {
     employeeCode: (value) => (
-      <span className="font-mono text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `${ACCENT}14`, color: ACCENT }}>
+      <span className="font-mono text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded-none" style={{ background: `hsl(var(--foreground) / 0.08)`, color: ACCENT }}>
         {String(value || "-")}
       </span>
     ),
     employeeName: (value, row) => (
       <div className="flex items-center gap-2.5 min-w-0">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[0.6875rem] font-bold text-white shadow-sm" style={{ background: HR_GRADIENT }}>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-none text-[0.6875rem] font-bold text-card" style={{ background: HR_GRADIENT }}>
           {initials(String(value || ""))}
         </span>
         <div className="min-w-0">
@@ -528,7 +528,7 @@ export default function EmployeeMaster() {
       value ? <span className={`${chip} bg-muted text-foreground border border-border`}>{String(value)}</span> : <span className="text-xs text-muted-foreground">-</span>,
     employmentType: (value) =>
       value ? (
-        <span className={chip} style={{ background: `${ACCENT}14`, color: ACCENT }}>{String(value)}</span>
+        <span className={chip} style={{ background: `hsl(var(--foreground) / 0.08)`, color: ACCENT }}>{String(value)}</span>
       ) : <span className="text-xs text-muted-foreground">-</span>,
     candidateCode: (value, row) =>
       value ? (
@@ -539,13 +539,13 @@ export default function EmployeeMaster() {
     isActive: (value) => (
       <span
         className={
-          "inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border " +
+          "inline-flex items-center px-2 py-0.5 rounded-none text-[0.6875rem] font-heading border " +
           (value
-            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
-            : "bg-red-500/10 border-red-500/20 text-red-600")
+            ? "bg-primary/10 border-primary/20 text-primary"
+            : "bg-destructive/10 border-destructive/20 text-destructive")
         }
       >
-        <span className={"w-1.5 h-1.5 rounded-full mr-1.5 " + (value ? "bg-emerald-500" : "bg-red-500")} />
+        <span className={"w-1.5 h-1.5 rounded-none mr-1.5 " + (value ? "bg-primary" : "bg-destructive")} />
         {value ? "Active" : "Inactive"}
       </span>
     ),
@@ -555,8 +555,8 @@ export default function EmployeeMaster() {
         onClick={() =>
           setDocsFor({ id: Number(row._id), name: (row.employeeName as string) || "" })
         }
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[0.6875rem] font-medium transition-colors hover:brightness-95"
-        style={{ borderColor: `${ACCENT}40`, background: `${ACCENT}0f`, color: ACCENT }}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-none border text-[0.6875rem] font-medium transition-colors hover:brightness-95"
+        style={{ borderColor: `hsl(var(--foreground) / 0.25)`, background: `hsl(var(--foreground) / 0.06)`, color: ACCENT }}
         title="Documents"
       >
         <FileText size={12} /> {Number(row.documentCount || 0)}
@@ -567,7 +567,7 @@ export default function EmployeeMaster() {
         <button
           type="button"
           onClick={() => setBreakupFor({ id: Number(row._id), name: (row.employeeName as string) || "" })}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-semibold text-white shadow-sm hover:shadow-md transition-shadow"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-none text-[0.6875rem] font-semibold text-card"
           style={{ background: HR_GRADIENT }}
         >
           <Wallet3 size={12} /> View
@@ -580,12 +580,12 @@ export default function EmployeeMaster() {
   if (isLoading) {
     return (
       <div className="space-y-4 p-1">
-        <div className="h-24 rounded-2xl bg-muted/60 animate-pulse" />
-        <div className="h-72 rounded-2xl bg-muted/40 animate-pulse" />
+        <div className="h-24 rounded-none bg-muted/60 animate-pulse" />
+        <div className="h-72 rounded-none bg-muted/40 animate-pulse" />
       </div>
     );
   }
-  if (error) return <div className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">Failed to load Employee Master.</div>;
+  if (error) return <div className="m-6 rounded-none border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">Failed to load Employee Master.</div>;
 
   // Display-only summary from the rows already loaded.
   const summary = (() => {
@@ -605,10 +605,10 @@ export default function EmployeeMaster() {
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "HR and Payroll", path: "/hr-payroll" }, { label: "Employee Master" }]} />
       <HrPayrollShell title="Employee Master" subtitle="Employees, roles, statutory & bank details" icon={Profile2User}>
-        <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 rounded-2xl border p-3" style={{ background: `${ACCENT}0a`, borderColor: `${ACCENT}2e` }}>
+        <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 rounded-none border p-3" style={{ background: `hsl(var(--foreground) / 0.04)`, borderColor: `hsl(var(--foreground) / 0.18)` }}>
           {summary.map(([label, n], i) => (
-            <div key={label} className="rounded-xl bg-card/80 border border-border px-3.5 py-2.5 shadow-sm">
-              <p className="text-xl font-heading font-bold tabular-nums leading-tight" style={{ color: i === 0 ? ACCENT : i === 1 ? "#059669" : i === 2 ? "#dc2626" : undefined }}>{n}</p>
+            <div key={label} className="rounded-none bg-card border border-border px-3.5 py-2.5">
+              <p className="text-xl font-heading font-bold tabular-nums leading-tight" style={{ color: i === 0 ? ACCENT : i === 1 ? "hsl(var(--primary))" : i === 2 ? "hsl(var(--destructive))" : undefined }}>{n}</p>
               <p className="text-[0.6875rem] text-muted-foreground">{label}</p>
             </div>
           ))}

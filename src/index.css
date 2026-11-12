@@ -2548,64 +2548,22 @@ select[aria-hidden="true"] {
 [role="option"] [data-radix-select-item-indicator] svg,
 [role="option"] .lucide-check { color: var(--mod-from, hsl(var(--primary))) !important; }
 
-/* ═══════════ HR & Payroll — module design layer (scoped: only inside this module) ═══════════
-   Same markup every HR page already renders (cards, MasterPage forms & tables, badges, inputs);
-   this only restyles it — softer, rounder cards, module-tinted tables, focus and controls. */
-[data-module="hr-payroll"] main :is(.rounded-xl.border, .rounded-lg.border):is([class*="bg-card"]) {
-    border-radius: 1rem;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -14px color-mix(in srgb, var(--mod-from) 40%, transparent);
-}
-/* Card headers (border-b strips at the top of a card) get a faint module tint */
-[data-module="hr-payroll"] main [class*="bg-card"] > :first-child:is(.border-b) {
-    background: color-mix(in srgb, var(--mod-from) 5%, transparent) !important;
-}
-/* Tables: tinted header, module-coloured row hover, comfortable rows */
-[data-module="hr-payroll"] main table thead tr {
-    background: color-mix(in srgb, var(--mod-from) 6%, transparent) !important;
-}
-[data-module="hr-payroll"] main table thead th {
-    color: color-mix(in srgb, var(--mod-from) 55%, hsl(var(--muted-foreground))) !important;
-    letter-spacing: 0.08em;
-}
-[data-module="hr-payroll"] main table tbody tr { transition: background-color .15s ease; }
-[data-module="hr-payroll"] main table tbody tr:hover {
-    background: color-mix(in srgb, var(--mod-from) 5%, transparent) !important;
-}
-/* Inputs / selects / textareas: module focus ring, rounder */
-[data-module="hr-payroll"] main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select, textarea) {
-    border-radius: 0.65rem;
-}
-[data-module="hr-payroll"] main :is(input, select, textarea, button[role="combobox"]):focus-visible {
-    outline: none !important;
-    border-color: color-mix(in srgb, var(--mod-from) 55%, transparent) !important;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--mod-from) 18%, transparent) !important;
-}
-/* Checkboxes, radios and switches in the module colour */
+/* ═══════════ HR & Payroll — on the drawing sheet (scoped: only inside this module) ═══════════
+   HR pages sit on the sheet like Finance, Legal and Follow-Up: ink on paper, no module colour inside the page (the
+   orchid stays only as the module's mark in the sidebar). This keeps the few controls the sheet doesn't draw in ink. */
 [data-module="hr-payroll"] :is(main, [role="dialog"]) :is(input[type="checkbox"], input[type="radio"], input[type="range"]) {
-    accent-color: var(--mod-from);
+    accent-color: hsl(var(--foreground));
 }
 [data-module="hr-payroll"] [role="switch"][data-state="checked"],
 [data-module="hr-payroll"] button[role="checkbox"][data-state="checked"] {
-    background-color: var(--mod-from) !important;
-    border-color: var(--mod-from) !important;
+    background-color: hsl(var(--foreground)) !important;
+    border-color: hsl(var(--foreground)) !important;
 }
-/* Section labels inside forms (MasterPage "section" headers) */
-[data-module="hr-payroll"] main [data-section-label],
-[data-module="hr-payroll"] main .text-\[0\.625rem\].uppercase.tracking-widest.font-heading {
-    color: color-mix(in srgb, var(--mod-from) 65%, hsl(var(--muted-foreground)));
-}
-/* Status pills: rounder, a touch bolder */
-[data-module="hr-payroll"] main :is(span, div).rounded-full.border.text-\[0\.6875rem\] { font-weight: 600; padding-inline: 0.6rem; }
-/* Empty-state rows read as a calm placeholder, not a blank strip */
-[data-module="hr-payroll"] main table tbody td[colspan] {
-    padding-block: 2.5rem !important;
-    color: hsl(var(--muted-foreground));
-    background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--mod-from) 3%, transparent) 10px 20px);
-}
-/* HR tab cards: active card gets a module-coloured outline */
+/* HR tab cards: the active card is outlined in ink */
 [data-module="hr-payroll"] .hr-tab-card[data-state="active"] {
-    box-shadow: 0 0 0 2px var(--mod-from), 0 10px 24px -14px var(--mod-from) !important;
-    background: color-mix(in srgb, var(--mod-from) 6%, hsl(var(--card))) !important;
+    box-shadow: inset 0 0 0 1px hsl(var(--foreground)) !important;
+    border-color: hsl(var(--foreground)) !important;
+    background: hsl(var(--primary) / 0.06) !important;
 }
 
 /* BW: the module sidebar is a dark matte brick wall. The panel and

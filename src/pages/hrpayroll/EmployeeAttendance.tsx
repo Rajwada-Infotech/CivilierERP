@@ -15,17 +15,17 @@ import {
 import { fmtClock, fmtDateIst, fmtDuration, fmtTimeIst } from "@/lib/attendanceFormat";
 
 const STATE_LABEL: Record<MyState, { text: string; cls: string }> = {
-  NOT_STARTED: { text: "Not clocked in", cls: "bg-slate-200 text-slate-700 dark:bg-slate-700/40 dark:text-slate-300" },
-  WORKING: { text: "Working", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
-  ON_BREAK: { text: "On break", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
-  COMPLETED: { text: "Day complete", cls: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300" },
+  NOT_STARTED: { text: "Not clocked in", cls: "bg-muted text-muted-foreground  " },
+  WORKING: { text: "Working", cls: "bg-primary/10 text-primary  " },
+  ON_BREAK: { text: "On break", cls: "bg-foreground/10 text-foreground  " },
+  COMPLETED: { text: "Day complete", cls: "bg-primary/10 text-primary  " },
 };
 
 const STATUS_CLS: Record<string, string> = {
-  Present: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-  Working: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300",
-  "On Break": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-  Incomplete: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  Present: "bg-primary/10 text-primary  ",
+  Working: "bg-primary/10 text-primary  ",
+  "On Break": "bg-foreground/10 text-foreground  ",
+  Incomplete: "bg-destructive/10 text-destructive  ",
 };
 
 function PunchButton({
@@ -35,7 +35,7 @@ function PunchButton({
     <button
       onClick={onClick}
       disabled={!enabled || busy}
-      className={`flex flex-col items-center justify-center gap-2 rounded-2xl px-4 py-5 text-sm font-semibold text-white shadow-sm transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none ${tone}`}
+      className={`flex flex-col items-center justify-center gap-2 rounded-none px-4 py-5 text-sm font-semibold text-card transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${tone}`}
     >
       {busy ? <Loader2 size={24} className="animate-spin" /> : <Icon size={24} />}
       {label}
@@ -44,7 +44,7 @@ function PunchButton({
 }
 
 const Stat = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
-  <div className="rounded-xl border border-border bg-background/50 p-3 text-center">
+  <div className="rounded-none border border-border bg-card p-3 text-center">
     <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">{label}</p>
     <p className="mt-1 text-lg font-bold tabular-nums">{value}</p>
     {sub && <p className="text-[0.625rem] text-muted-foreground">{sub}</p>}
@@ -111,7 +111,7 @@ export default function EmployeeAttendance() {
 
   // Which button is the natural next step (display only — `allowed` still decides what's clickable).
   const nextKind = data?.allowed.in ? "in" : data?.allowed.breakStop ? "break-stop" : data?.allowed.out ? "out" : null;
-  const stateDot: Record<MyState, string> = { NOT_STARTED: "#94a3b8", WORKING: "#10b981", ON_BREAK: "#f59e0b", COMPLETED: "#0ea5e9" };
+  const stateDot: Record<MyState, string> = { NOT_STARTED: "hsl(var(--muted-foreground))", WORKING: "hsl(var(--primary))", ON_BREAK: "hsl(var(--foreground))", COMPLETED: "hsl(var(--primary))" };
 
   return (
     <>
@@ -120,8 +120,8 @@ export default function EmployeeAttendance() {
         {isLoading ? (
           <HrSkeleton rows={2} />
         ) : error || !data ? (
-          <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 p-5 text-sm flex gap-3">
-            <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+          <div className="rounded-none border border-foreground/40 bg-foreground/10 p-5 text-sm flex gap-3">
+            <AlertTriangle size={18} className="text-foreground shrink-0 mt-0.5" />
             <div>
               <p className="font-semibold">Attendance isn't available for this login</p>
               <p className="text-muted-foreground mt-1">{(error as Error)?.message}</p>
@@ -131,7 +131,7 @@ export default function EmployeeAttendance() {
           <div className="space-y-5">
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-5">
               {/* ── Clock ── */}
-              <div className={`${hrCard} p-5 sm:p-6 flex flex-col justify-between gap-5`} style={{ background: `${ACCENT}0a` }}>
+              <div className={`${hrCard} p-5 sm:p-6 flex flex-col justify-between gap-5`} style={{ background: `hsl(var(--foreground) / 0.04)` }}>
                 <div className="flex items-center gap-3">
                   <HrAvatar name={data.employee.name} size={44} />
                   <div className="min-w-0">
@@ -147,10 +147,10 @@ export default function EmployeeAttendance() {
                   <p className="text-4xl sm:text-5xl font-heading font-bold tabular-nums tracking-tight text-foreground">{istClock}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{fmtDateIst(data.today)} · IST</p>
                 </div>
-                <span className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${STATE_LABEL[data.state].cls}`}>
+                <span className={`inline-flex w-fit items-center gap-2 rounded-none px-3 py-1 text-xs font-semibold ${STATE_LABEL[data.state].cls}`}>
                   <span className="relative flex h-2 w-2">
-                    {(data.state === "WORKING" || data.state === "ON_BREAK") && <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" style={{ background: stateDot[data.state] }} />}
-                    <span className="relative inline-flex h-2 w-2 rounded-full" style={{ background: stateDot[data.state] }} />
+                    {(data.state === "WORKING" || data.state === "ON_BREAK") && <span className="absolute inline-flex h-full w-full animate-ping rounded-none opacity-60" style={{ background: stateDot[data.state] }} />}
+                    <span className="relative inline-flex h-2 w-2 rounded-none" style={{ background: stateDot[data.state] }} />
                   </span>
                   {STATE_LABEL[data.state].text}
                 </span>
@@ -164,7 +164,7 @@ export default function EmployeeAttendance() {
                     {data.allowed.in && projects.length > 0 && (
                       <div className="max-w-sm">
                         <label className="block text-xs font-medium text-muted-foreground mb-1">Project (optional)</label>
-                        <SearchableNativeSelect value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-full h-10 px-3 text-sm rounded-lg border border-border bg-background" searchPlaceholder="Search project…">
+                        <SearchableNativeSelect value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-full h-10 px-3 text-sm rounded-none border border-border bg-background" searchPlaceholder="Search project…">
                           <option value="">— None —</option>
                           {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                         </SearchableNativeSelect>
@@ -172,16 +172,16 @@ export default function EmployeeAttendance() {
                     )}
                     <div className="grid grid-cols-2 gap-3">
                       {([
-                        ["in", "In Time", LogIn, "bg-emerald-600 hover:bg-emerald-700", data.allowed.in],
-                        ["break-start", "Break Start", Coffee, "bg-amber-500 hover:bg-amber-600", data.allowed.breakStart],
-                        ["break-stop", "Break Stop", StopCircle, "bg-sky-600 hover:bg-sky-700", data.allowed.breakStop],
-                        ["out", "Out Time", LogOut, "bg-rose-600 hover:bg-rose-700", data.allowed.out],
+                        ["in", "In Time", LogIn, "bg-primary hover:bg-primary", data.allowed.in],
+                        ["break-start", "Break Start", Coffee, "bg-foreground hover:bg-foreground", data.allowed.breakStart],
+                        ["break-stop", "Break Stop", StopCircle, "bg-primary hover:bg-primary", data.allowed.breakStop],
+                        ["out", "Out Time", LogOut, "bg-destructive hover:bg-destructive", data.allowed.out],
                       ] as const).map(([kind, label, Icon, tone, enabled]) => (
                         <div key={kind} className="relative">
                           {nextKind === kind && (
-                            <span className="absolute -top-2 right-3 z-10 rounded-full px-2 py-0.5 text-[0.625rem] font-bold text-white shadow" style={{ background: HR_GRADIENT }}>Next</span>
+                            <span className="absolute -top-2 right-3 z-10 rounded-none px-2 py-0.5 text-[0.625rem] font-bold text-card" style={{ background: HR_GRADIENT }}>Next</span>
                           )}
-                          <PunchButton label={label} icon={Icon} tone={`${tone} w-full ${nextKind === kind ? "ring-4 ring-offset-2 ring-offset-background ring-black/5 shadow-lg" : ""}`} enabled={enabled} busy={busy === kind} onClick={() => punch.mutate(kind)} />
+                          <PunchButton label={label} icon={Icon} tone={`${tone} w-full ${nextKind === kind ? "ring-4 ring-offset-2 ring-offset-background ring-foreground/20" : ""}`} enabled={enabled} busy={busy === kind} onClick={() => punch.mutate(kind)} />
                         </div>
                       ))}
                     </div>
@@ -200,7 +200,7 @@ export default function EmployeeAttendance() {
               ) : (
                 <>
                   {c.flags.length > 0 && (
-                    <p className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-600"><AlertTriangle size={14} /> This record is incomplete (Out Time or Break Stop missing) and has been flagged for HR review.</p>
+                    <p className="flex items-center gap-2 rounded-none border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"><AlertTriangle size={14} /> This record is incomplete (Out Time or Break Stop missing) and has been flagged for HR review.</p>
                   )}
                   <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
                     <Stat label="In Time" value={fmtTimeIst(c.inTime)} />
@@ -215,9 +215,9 @@ export default function EmployeeAttendance() {
                       <p className="mb-2 text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">Breaks</p>
                       <div className="flex flex-wrap gap-2">
                         {c.breaks.map((b) => (
-                          <div key={b.breakId} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${b.end ? "border-border bg-background/50" : "border-amber-500/40 bg-amber-500/10"}`}>
-                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[0.625rem] font-bold">{b.no}</span>
-                            <span className="tabular-nums">{fmtTimeIst(b.start)} → {b.end ? fmtTimeIst(b.end) : <span className="inline-flex items-center gap-1 font-semibold text-amber-600"><PlayCircle size={12} /> running</span>}</span>
+                          <div key={b.breakId} className={`flex items-center gap-2 rounded-none border px-3 py-2 text-xs ${b.end ? "border-border bg-card" : "border-foreground/40 bg-foreground/10"}`}>
+                            <span className="flex h-5 w-5 items-center justify-center rounded-none bg-muted text-[0.625rem] font-bold">{b.no}</span>
+                            <span className="tabular-nums">{fmtTimeIst(b.start)} → {b.end ? fmtTimeIst(b.end) : <span className="inline-flex items-center gap-1 font-semibold text-foreground"><PlayCircle size={12} /> running</span>}</span>
                             <span className="font-semibold tabular-nums">{b.end ? fmtDuration(b.seconds) : live ? fmtClock((nowMs - new Date(b.start).getTime()) / 1000) : "—"}</span>
                           </div>
                         ))}
@@ -252,7 +252,7 @@ export default function EmployeeAttendance() {
                         <td className="px-4 py-3 text-right tabular-nums">{fmtDuration(r.breakSeconds)}</td>
                         <td className="px-4 py-3 text-right tabular-nums">{fmtDuration(r.totalSeconds)}</td>
                         <td className="px-4 py-3 text-right tabular-nums font-semibold">{fmtDuration(r.netSeconds)}</td>
-                        <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_CLS[r.status]}`}>{r.status}</span></td>
+                        <td className="px-4 py-3"><span className={`rounded-none px-2.5 py-0.5 text-xs font-semibold ${STATUS_CLS[r.status]}`}>{r.status}</span></td>
                       </tr>
                     ))}
                   </tbody>

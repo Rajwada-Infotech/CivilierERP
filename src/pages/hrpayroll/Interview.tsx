@@ -24,13 +24,13 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
-const inputCls = "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
+const inputCls = "w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
 
 const STATUS_META: Record<InterviewStatus, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-muted text-muted-foreground border-border" },
-  SELECTED: { label: "Selected", className: "bg-green-500/10 text-green-600 border-green-500/30" },
-  REJECTED: { label: "Rejected", className: "bg-red-500/10 text-red-600 border-red-500/30" },
-  HOLD: { label: "Hold", className: "bg-[#ffe2021a] text-amber-600 border-amber-500/30" },
+  SELECTED: { label: "Selected", className: "bg-primary/10 text-primary border-primary/30" },
+  REJECTED: { label: "Rejected", className: "bg-destructive/10 text-destructive border-destructive/30" },
+  HOLD: { label: "Hold", className: "bg-foreground/5 text-foreground border-foreground/30" },
 };
 
 interface FormState {
@@ -173,13 +173,13 @@ const InterviewPage: React.FC = () => {
       <HrPayrollShell title="Interview" subtitle="Schedule interviews and record their outcome" icon={UserTick}>
         <div className="space-y-6">
           {/* ── Hiring pipeline: tap a stage to filter the list below ── */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 rounded-2xl border p-3" style={{ background: `${ACCENT}0a`, borderColor: `${ACCENT}2e` }}>
-            {([["ALL", "All interviews", ACCENT] as const, ...(["PENDING", "HOLD", "SELECTED", "REJECTED"] as InterviewStatus[]).map((st) => [st, STATUS_META[st].label, st === "SELECTED" ? "#16a34a" : st === "REJECTED" ? "#dc2626" : st === "HOLD" ? "#d97706" : "#64748b"] as const)]).map(([key, label, color]) => {
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 rounded-none border p-3" style={{ background: `hsl(var(--foreground) / 0.04)`, borderColor: `hsl(var(--foreground) / 0.18)` }}>
+            {([["ALL", "All interviews", ACCENT] as const, ...(["PENDING", "HOLD", "SELECTED", "REJECTED"] as InterviewStatus[]).map((st) => [st, STATUS_META[st].label, st === "SELECTED" ? "hsl(var(--primary))" : st === "REJECTED" ? "hsl(var(--destructive))" : st === "HOLD" ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))"] as const)]).map(([key, label, color]) => {
               const n = key === "ALL" ? rows.length : rows.filter((r) => r.Status === key).length;
               const on = stageFilter === key;
               return (
                 <button key={key} type="button" onClick={() => setStageFilter(key as InterviewStatus | "ALL")}
-                  className={`rounded-xl border px-3.5 py-2.5 text-left transition-all ${on ? "shadow-md bg-card" : "bg-card/70 border-border hover:bg-card"}`}
+                  className={`rounded-none border px-3.5 py-2.5 text-left transition-all ${on ? "bg-card" : "bg-card border-border hover:bg-card"}`}
                   style={on ? { borderColor: color, boxShadow: `0 0 0 1.5px ${color}` } : undefined}>
                   <p className="text-xl font-heading font-bold tabular-nums leading-tight" style={{ color }}>{n}</p>
                   <p className="text-[0.6875rem] text-muted-foreground">{label}</p>
@@ -222,8 +222,8 @@ const InterviewPage: React.FC = () => {
 
               {/* ── Candidate detail (read-only, from Candidate Master) ── */}
               {selectedCandidate && (
-                <div className="rounded-lg border p-4" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
-                  <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `${HR_PAYROLL_ACCENT}33` }}>
+                <div className="rounded-none border p-4" style={{ borderColor: `hsl(var(--foreground) / 0.20)`, backgroundColor: `hsl(var(--foreground) / 0.05)` }}>
+                  <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `hsl(var(--foreground) / 0.20)` }}>
                     Candidate Details
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs">
@@ -278,7 +278,7 @@ const InterviewPage: React.FC = () => {
               </div>
 
               <div className="flex justify-end gap-2">
-                <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg btn-module text-white hover:opacity-90 transition-opacity">
+                <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-none bg-foreground text-card hover:opacity-90 transition-opacity">
                   {editingId ? "Update Interview" : "Save Interview"}
                 </button>
               </div>
@@ -286,7 +286,7 @@ const InterviewPage: React.FC = () => {
           )}
 
           {/* ── Records ── */}
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="bg-card border border-border rounded-none overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
               <div>
                 <h3 className="font-heading font-semibold text-foreground text-sm">Interview Records</h3>
@@ -327,14 +327,14 @@ const InterviewPage: React.FC = () => {
                             value={r.Status}
                             disabled={statusMutation.isPending}
                             onChange={(e) => statusMutation.mutate({ id: r.InterviewId, status: e.target.value as InterviewStatus })}
-                            className={`text-xs px-2 py-1 rounded-full border font-medium ${STATUS_META[r.Status]?.className}`}
+                            className={`text-xs px-2 py-1 rounded-none border font-medium ${STATUS_META[r.Status]?.className}`}
                           >
                             {(Object.keys(STATUS_META) as InterviewStatus[]).map((s) => (
                               <option key={s} value={s}>{STATUS_META[s].label}</option>
                             ))}
                           </select>
                         ) : (
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${STATUS_META[r.Status]?.className}`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-none text-[0.6875rem] font-medium border ${STATUS_META[r.Status]?.className}`}>
                             {STATUS_META[r.Status]?.label}
                           </span>
                         )}

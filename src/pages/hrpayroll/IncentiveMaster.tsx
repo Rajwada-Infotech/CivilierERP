@@ -40,7 +40,7 @@ const fields: FieldDef[] = [
     label: "Document Number",
     type: "custom",
     render: ({ value }) => (
-      <div className="w-full px-3 py-2 rounded-lg text-sm font-mono bg-muted/60 border border-border text-muted-foreground">
+      <div className="w-full px-3 py-2 rounded-none text-sm font-mono bg-muted/60 border border-border text-muted-foreground">
         {value ? String(value) : "Auto-generated on save"}
       </div>
     ),
@@ -123,7 +123,7 @@ const IncentiveMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading incentives...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load Incentive.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load Incentive.</div>;
 
   return (
     <>

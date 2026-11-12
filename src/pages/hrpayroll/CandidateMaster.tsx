@@ -28,9 +28,9 @@ import {
 // both write the same CandidateMaster.InterviewStatus column, so it only
 // ever needs these 3 states, plus "no result yet".
 const INTERVIEW_RESULT_META: Record<string, { label: string; className: string }> = {
-  Selected: { label: "Selected", className: "bg-green-500/10 text-green-600 border-green-500/30" },
-  Rejected: { label: "Rejected", className: "bg-red-500/10 text-red-600 border-red-500/30" },
-  "On Hold": { label: "Hold", className: "bg-[#ffe2021a] text-amber-600 border-amber-500/30" },
+  Selected: { label: "Selected", className: "bg-primary/10 text-primary border-primary/30" },
+  Rejected: { label: "Rejected", className: "bg-destructive/10 text-destructive border-destructive/30" },
+  "On Hold": { label: "Hold", className: "bg-foreground/5 text-foreground border-foreground/30" },
 };
 const DEFAULT_RESULT_CLASS = "bg-muted text-muted-foreground border-border";
 
@@ -55,7 +55,7 @@ const InterviewResultSelect: React.FC<{ candidateId: number; value: string }> = 
   if (!rights.canEdit) {
     if (!INTERVIEW_RESULT_META[value]) return <span className="text-xs text-muted-foreground">-</span>;
     return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${className}`}>
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-none text-[0.6875rem] font-medium border ${className}`}>
         {INTERVIEW_RESULT_META[value].label}
       </span>
     );
@@ -69,7 +69,7 @@ const InterviewResultSelect: React.FC<{ candidateId: number; value: string }> = 
         const next = e.target.value;
         if (next) mutation.mutate(next as InterviewResult);
       }}
-      className={`text-xs px-2 py-1 rounded-full border font-medium ${className}`}
+      className={`text-xs px-2 py-1 rounded-none border font-medium ${className}`}
     >
       <option value="">Select...</option>
       <option value="Selected">Selected</option>
@@ -183,7 +183,7 @@ const CandidateIdField: React.FC<{
   formData: Record<string, unknown>;
 }> = ({ value, formData }) => (
   <input
-    className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border font-mono opacity-70 text-foreground"
+    className="w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border font-mono opacity-70 text-foreground"
     value={formData._id ? (value as string) || "" : "(auto-generated on save)"}
     readOnly
     disabled
@@ -223,7 +223,7 @@ const ResumeField: React.FC<{
           type="button"
           onClick={handleOpen}
           disabled={opening}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors max-w-[220px] disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors max-w-[220px] disabled:opacity-50"
         >
           <DocumentText size={13} className="shrink-0" /> <span className="truncate">{opening ? "Opening…" : resume.name}</span>
         </button>
@@ -232,7 +232,7 @@ const ResumeField: React.FC<{
       )}
       <label
         htmlFor={inputId}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
       >
         {resume ? "Replace" : "Upload Resume"}
       </label>
@@ -390,7 +390,7 @@ const CandidateMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading candidates...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load candidates.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load candidates.</div>;
 
   return (
     <>

@@ -125,7 +125,7 @@ const DeductionAdditionMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading deductions & additions...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load Deduction and Addition Master.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load Deduction and Addition Master.</div>;
 
   return (
     <>

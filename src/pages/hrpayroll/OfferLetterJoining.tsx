@@ -29,7 +29,7 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
-const inputCls = "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
+const inputCls = "w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
 
 const TEMPLATE_PLACEHOLDERS = [
   "CandidateName", "CandidateCode", "CandidateAddress", "Company", "Designation", "FinYear",
@@ -140,20 +140,20 @@ const JoiningRow: React.FC<{
       <td className="px-4 py-2.5 hidden sm:table-cell">{offer.DateOfJoin ? offer.DateOfJoin.slice(0, 10) : "-"}</td>
       <td className="px-4 py-2.5">
         {canEdit ? (
-          <DateInput value={date} onChange={(e) => setDate(e.target.value)} className="px-2 py-1 rounded-lg text-xs bg-muted border border-border" />
+          <DateInput value={date} onChange={(e) => setDate(e.target.value)} className="px-2 py-1 rounded-none text-xs bg-muted border border-border" />
         ) : (
           date || "-"
         )}
       </td>
       <td className="px-4 py-2.5 hidden lg:table-cell">
         {canEdit ? (
-          <input type="text" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Remarks" className="px-2 py-1 rounded-lg text-xs bg-muted border border-border w-full" />
+          <input type="text" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Remarks" className="px-2 py-1 rounded-none text-xs bg-muted border border-border w-full" />
         ) : (
           remarks || "-"
         )}
       </td>
       <td className="px-4 py-2.5">
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${offer.JoiningConfirmed ? "bg-green-500/10 text-green-600 border-green-500/30" : "bg-muted text-muted-foreground border-border"}`}>
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-none text-[0.6875rem] font-medium border ${offer.JoiningConfirmed ? "bg-primary/10 text-primary border-primary/30" : "bg-muted text-muted-foreground border-border"}`}>
           {offer.JoiningConfirmed ? "Joined" : "Pending"}
         </span>
       </td>
@@ -162,7 +162,7 @@ const JoiningRow: React.FC<{
           <button
             onClick={() => date && mutation.mutate()}
             disabled={!date || mutation.isPending}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            className="text-xs font-semibold px-3 py-1.5 rounded-none bg-foreground text-card disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
           >
             {offer.JoiningConfirmed ? "Update" : "Confirm"}
           </button>
@@ -196,7 +196,7 @@ const LetterBodyTab: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading letter body...</div>;
 
   return (
-    <div className="bg-card border border-border rounded-xl p-5 space-y-4 mt-4">
+    <div className="bg-card border border-border rounded-none p-5 space-y-4 mt-4">
       <div>
         <h3 className="font-heading font-semibold text-foreground text-sm">Offer Letter Body</h3>
         <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
@@ -205,7 +205,7 @@ const LetterBodyTab: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
       </div>
       <div className="flex flex-wrap gap-1.5">
         {TEMPLATE_PLACEHOLDERS.map((p) => (
-          <span key={p} className="text-[0.6875rem] font-mono px-2 py-0.5 rounded-full border" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, color: HR_PAYROLL_ACCENT, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
+          <span key={p} className="text-[0.6875rem] font-mono px-2 py-0.5 rounded-none border" style={{ borderColor: `hsl(var(--foreground) / 0.20)`, color: HR_PAYROLL_ACCENT, backgroundColor: `hsl(var(--foreground) / 0.05)` }}>
             {`{{${p}}}`}
           </span>
         ))}
@@ -223,7 +223,7 @@ const LetterBodyTab: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
             type="button"
             onClick={() => mutation.mutate(currentBody)}
             disabled={mutation.isPending || !currentBody.trim()}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg btn-module text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-none bg-foreground text-card hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {mutation.isPending ? "Saving…" : "Save Letter Body"}
           </button>
@@ -395,8 +395,8 @@ const OfferLetterJoining: React.FC = () => {
         <div className="mb-5">
           <HrStatStrip items={[
             { label: "Offer letters", value: rows.length, tone: HR_PAYROLL_ACCENT },
-            { label: "Joined", value: joinedCount, tone: "#059669" },
-            { label: "Awaiting joining", value: rows.length - joinedCount, tone: "#d97706" },
+            { label: "Joined", value: joinedCount, tone: "hsl(var(--primary))" },
+            { label: "Awaiting joining", value: rows.length - joinedCount, tone: "hsl(var(--foreground))" },
           ]} />
         </div>
         <Tabs defaultValue="offer">
@@ -406,8 +406,8 @@ const OfferLetterJoining: React.FC = () => {
               ["joining", "Joining", "Confirm each candidate's joining date", UserTick],
               ["body", "Letter Body", "The template text used for offers", Edit2],
             ] as const).map(([v, label, hint, Icon]) => (
-              <TabsTrigger key={v} value={v} className="group !justify-start gap-3 rounded-2xl border border-border bg-card/80 px-4 py-3.5 text-left shadow-sm transition-all data-[state=active]:border-transparent hr-tab-card">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: HR_GRADIENT }}><Icon size={18} /></span>
+              <TabsTrigger key={v} value={v} className="group !justify-start gap-3 rounded-none border border-border bg-card px-4 py-3.5 text-left transition-all data-[state=active]:border-transparent hr-tab-card">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-none text-card" style={{ background: HR_GRADIENT }}><Icon size={18} /></span>
                 <span className="min-w-0">
                   <span className="block text-sm font-heading font-semibold text-foreground">{label}</span>
                   <span className="block text-[0.6875rem] text-muted-foreground truncate">{hint}</span>
@@ -420,7 +420,7 @@ const OfferLetterJoining: React.FC = () => {
           <TabsContent value="offer">
             <div className="space-y-6 mt-4">
               {(rights.canCreate || (editingId && rights.canEdit)) && (
-                <form onSubmit={handleSubmit} className="bg-card border border-border rounded-xl p-5 space-y-5">
+                <form onSubmit={handleSubmit} className="bg-card border border-border rounded-none p-5 space-y-5">
                   <div className="flex items-center justify-between">
                     <h3 className="font-heading font-semibold text-foreground text-sm">
                       {editingId ? "Edit Offer Letter" : "Generate Offer Letter"}
@@ -454,8 +454,8 @@ const OfferLetterJoining: React.FC = () => {
                   </div>
 
                   {selectedCandidate && (
-                    <div className="rounded-lg border p-4" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
-                      <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `${HR_PAYROLL_ACCENT}33` }}>
+                    <div className="rounded-none border p-4" style={{ borderColor: `hsl(var(--foreground) / 0.20)`, backgroundColor: `hsl(var(--foreground) / 0.05)` }}>
+                      <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `hsl(var(--foreground) / 0.20)` }}>
                         Candidate Details
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs">
@@ -522,14 +522,14 @@ const OfferLetterJoining: React.FC = () => {
                   </div>
 
                   <div className="flex justify-end gap-2">
-                    <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg btn-module text-white hover:opacity-90 transition-opacity">
+                    <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-none bg-foreground text-card hover:opacity-90 transition-opacity">
                       {editingId ? "Update Offer Letter" : "Save Offer Letter"}
                     </button>
                   </div>
                 </form>
               )}
 
-              <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <div className="bg-card border border-border rounded-none overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
                   <div>
                     <h3 className="font-heading font-semibold text-foreground text-sm">Offer Letter Records</h3>
@@ -593,7 +593,7 @@ const OfferLetterJoining: React.FC = () => {
 
           {/* ── Joining tab ── */}
           <TabsContent value="joining">
-            <div className="bg-card border border-border rounded-xl overflow-hidden mt-4">
+            <div className="bg-card border border-border rounded-none overflow-hidden mt-4">
               <div className="px-5 py-3.5 border-b border-border">
                 <h3 className="font-heading font-semibold text-foreground text-sm">Joining</h3>
                 <p className="text-[0.6875rem] text-muted-foreground mt-0.5">Confirm each candidate's actual date of joining</p>

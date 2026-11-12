@@ -41,9 +41,9 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
   };
 
   const chipClass =
-    "px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium border border-border bg-muted hover:bg-muted/70 text-foreground transition-colors";
+    "px-2.5 py-1.5 rounded-none text-xs font-heading font-medium border border-border bg-muted hover:bg-muted/70 text-foreground transition-colors";
   const opClass =
-    "w-9 h-9 flex items-center justify-center rounded-lg text-sm font-heading font-semibold border border-border bg-muted hover:bg-muted/70 text-foreground transition-colors";
+    "w-9 h-9 flex items-center justify-center rounded-none text-sm font-heading font-semibold border border-border bg-muted hover:bg-muted/70 text-foreground transition-colors";
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -61,7 +61,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
               value={formula}
               onChange={(e) => setFormula(e.target.value)}
               rows={3}
-              className="w-full px-3 py-2 rounded-lg text-sm font-mono bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
+              className="w-full px-3 py-2 rounded-none text-sm font-mono bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
               placeholder="e.g. BASIC * 40 / 100"
             />
             <p className="text-[0.6875rem] text-muted-foreground mt-1">
@@ -116,7 +116,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="px-4 py-1.5 rounded-none text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             Cancel
           </button>
@@ -126,7 +126,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
               onApply(formula.trim());
               onClose();
             }}
-            className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm"
+            className="px-4 py-1.5 rounded-none text-xs font-heading font-semibold bg-foreground text-card"
           >
             Apply
           </button>

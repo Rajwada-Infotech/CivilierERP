@@ -105,11 +105,11 @@ export const EmployeeDocumentsModal: React.FC<{
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 bw-modal-topmost"
+      className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center bg-black/60 p-0 sm:p-4 bw-modal-topmost"
       onClick={onClose}
     >
       <div
-        className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-y-auto"
+        className="bg-card border border-border rounded-none sm:rounded-none w-full max-w-lg h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
@@ -122,7 +122,7 @@ export const EmployeeDocumentsModal: React.FC<{
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+            className="p-2 rounded-none hover:bg-muted transition-colors text-muted-foreground"
           >
             <X size={16} />
           </button>
@@ -130,11 +130,11 @@ export const EmployeeDocumentsModal: React.FC<{
 
         <div className="p-5 space-y-4">
           {rights.canEdit && (
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-muted/30 p-3">
+            <div className="flex flex-wrap items-center gap-2 rounded-none border border-border/60 bg-muted/30 p-3">
               <select
                 value={docType}
                 onChange={(e) => setDocType(e.target.value)}
-                className="rounded-lg border border-border bg-background text-foreground text-xs px-2.5 py-2 h-9 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="rounded-none border border-border bg-background text-foreground text-xs px-2.5 py-2 h-9 focus:outline-none focus:ring-2 focus:ring-primary/30"
               >
                 {EMPLOYEE_DOC_TYPES.map((t) => (
                   <option key={t} value={t}>{t}</option>
@@ -144,7 +144,7 @@ export const EmployeeDocumentsModal: React.FC<{
                 type="button"
                 disabled={uploading}
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 px-3 py-2 h-9 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-2 h-9 rounded-none border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors disabled:opacity-50"
               >
                 {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 {uploading ? "Uploading..." : "Upload"}
@@ -169,9 +169,9 @@ export const EmployeeDocumentsModal: React.FC<{
               {docs.map((d) => (
                 <div
                   key={d.AttachmentId}
-                  className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2.5"
+                  className="flex items-center gap-3 rounded-none border border-border/60 px-3 py-2.5"
                 >
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                  <div className="w-8 h-8 rounded-none bg-primary/10 flex items-center justify-center shrink-0">
                     <FileText size={14} className="text-primary" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -184,7 +184,7 @@ export const EmployeeDocumentsModal: React.FC<{
                   <button
                     type="button"
                     onClick={() => openDocument(d.AttachmentId, d.FileName)}
-                    className="p-1.5 rounded text-primary hover:bg-primary/10 transition-colors shrink-0"
+                    className="p-1.5 rounded-none text-primary hover:bg-primary/10 transition-colors shrink-0"
                     title="View or download"
                   >
                     <Download size={14} />
@@ -193,7 +193,7 @@ export const EmployeeDocumentsModal: React.FC<{
                     <button
                       type="button"
                       onClick={() => handleDelete(d.AttachmentId)}
-                      className="p-1.5 rounded text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                      className="p-1.5 rounded-none text-destructive hover:bg-destructive/10 transition-colors shrink-0"
                       title="Remove"
                     >
                       <Trash2 size={14} />

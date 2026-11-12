@@ -111,7 +111,7 @@ const HolidayMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading holidays...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load holidays.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load holidays.</div>;
 
   return (
     <>
