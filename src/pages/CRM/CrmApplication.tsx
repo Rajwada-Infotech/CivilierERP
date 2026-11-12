@@ -41,7 +41,6 @@ import { AttachmentsStep } from "./applications/AttachmentsStep";
 
 import { useUrlParam } from "@/hooks/useUrlParam";
 import { readCrmDraft, writeCrmDraft, clearCrmDraft } from "@/lib/crmDraftStore";
-import { isPrivilegedRole } from "@/contexts/auth.utils";
 // The status filter's choices: the application's own statuses, then its booking sent back / resubmitted.
 const SENT_BACK_FILTERS = ["SentBack", "Resubmitted"] as const;
 const STATUS_FILTERS: readonly string[] = ["All", ...STATUSES, ...SENT_BACK_FILTERS];
@@ -51,7 +50,8 @@ const CrmApplication: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { currentUser, canDoAction } = useAuth();
-  const isAdmin = isPrivilegedRole(currentUser?.role);
+  // Delete follows the page's Delete right (role rights, each user's own rights overriding), as the server does.
+  const canDeleteApplications = canDoAction("crm-applications", "delete");
   const canEditApplications = canDoAction("crm-applications", "edit");
   const canCreateApplications = canDoAction("crm-applications", "create");
   const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");
@@ -467,7 +467,7 @@ const CrmApplication: React.FC = () => {
   // history; the backend rejects deletes in that state, so don't offer the
   // button either (misleading to show a destructive action that will always fail).
   // Until its booking is fully approved; a not-yet-approved booking is deleted with it.
-  const canDeleteApplication = (app: any) => !!app && isAdmin && !(app.Stage === "Converted" && app.BookingStatus === CrmStatus.APPROVED);
+  const canDeleteApplication = (app: any) => !!app && canDeleteApplications && !(app.Stage === "Converted" && app.BookingStatus === CrmStatus.APPROVED);
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.

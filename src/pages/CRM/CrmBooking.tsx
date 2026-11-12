@@ -35,17 +35,17 @@ import {
 import { NewBookingDialog } from "./bookings/NewBookingDialog";
 import { ChangeUnitDialog } from "./bookings/ChangeUnitDialog";
 
-import { isPrivilegedRole } from "@/contexts/auth.utils";
 const CrmBooking: React.FC = () => {
   const ask = useSheetAsk();
   const qc = useQueryClient();
-  const { canDoAction, currentUser } = useAuth();
+  const { canDoAction } = useAuth();
   // The server creates a booking under the create right; it was offered under edit, so a user with one but not the
   // other either saw a button that was refused or never saw it.
   const canCreate = canDoAction("crm-bookings", "create");
   const canEdit = canDoAction("crm-bookings", "edit");
   const canRequestCancellation = canDoAction("crm-cancellations", "create");
-  const isAdmin = isPrivilegedRole(currentUser?.role);
+  // Delete follows the page's Delete right (role rights, each user's own rights overriding), as the server does.
+  const canDeleteBookings = canDoAction("crm-bookings", "delete");
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
@@ -116,7 +116,7 @@ const CrmBooking: React.FC = () => {
   }, [appFilter, viewFilter, bookings, deepLinkOpened, isLoading, canCreate, navigate]);
 
   const canDeleteBooking = (b: any) =>
-    isAdmin
+    canDeleteBookings
     // Until fully approved (the server has the final word, incl. money checks).
     && b.Status !== CrmStatus.APPROVED
     && b.WorkflowStage !== "Confirmed"

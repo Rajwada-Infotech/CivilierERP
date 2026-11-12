@@ -2217,19 +2217,13 @@ router.get("/:id/invoices/:invoiceId/pdf", requireAnyPageRight(["crm-bookings", 
 // OnAccountPaymentId / BillingPeriod slot (migration 325's re-scoped unique
 // indexes + the Status <> 'Void' guards above) so a corrected invoice can be
 // generated in its place. Gated tighter than plain "crm-bookings edit" —
-// same approver set as Money Receipt approval (crmMoneyReceiptWorkflow.js's
-// APPROVER_ROLES) since this is a financial-document correction, not routine
-// booking editing.
-// Mirrored (not shared — frontend can't import backend code) in
-// src/pages/CRM/CrmInvoices.tsx's own INVOICE_VOID_ROLES, purely to hide/
-// show the Void button — that copy is advisory only, this list is the real
-// enforcement. If this list ever changes, update the frontend copy too or
-// the button's visibility will silently drift from what the server allows.
-const INVOICE_VOID_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
+// it is a financial-document correction, not routine booking editing.
+// Who may void is set in Approval Setup (CRM Invoice Void, migration 638): super admin always, everyone else when the
+// entry names their role or them. The screen shows the Void button by the same check (can-act).
 router.put("/:id/invoices/:invoiceId/void", requireAnyPageRight(["crm-bookings", "crm-invoices"], "edit"), async (req, res) => {
   try {
-    if (!INVOICE_VOID_ROLES.includes(normalizeRole(req.user?.role))) {
-      return res.status(403).json({ error: "Only Finance / Accounts Head can void an invoice" });
+    if (!(await require("../services/approvalService").isApproverFor("crm-invoice-void", req.user?.userId ?? req.user?.id, req.user?.role))) {
+      return res.status(403).json({ error: "You are not named in Approval Setup (CRM Invoice Void) to void an invoice." });
     }
     const pool = getPool();
     const bookingId = parseId(req.params.id);

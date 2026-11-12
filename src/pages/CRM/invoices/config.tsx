@@ -9,10 +9,6 @@ import { GridToneMark } from "@/components/crm/CrmDataTable";
 import { cn } from "@/lib/utils";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 
-// Same approver set the backend's INVOICE_VOID_ROLES enforces
-// (crmBookings.js PUT /:id/invoices/:invoiceId/void) — this only controls
-// button visibility, the server re-checks independently.
-export const INVOICE_VOID_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 
 export const API = "/api/crm/invoices";
 export const BKG_API = "/api/crm/bookings";

@@ -337,6 +337,18 @@ export const MODULE_OPTIONS = [
     desc: "Sees and manages every Sales Automation record (leads, tasks, commissions, reports, teams); changes a booking's unit, escalates overdue milestones, runs the SLA engine and sees all service tickets; told when a booking is ready and when a milestone is overdue",
   },
   {
+    id: "crm-invoice-void",
+    label: "CRM Invoice Void",
+    icon: "🧾",
+    desc: "Voids a CRM invoice so a corrected one can be generated in its place.",
+  },
+  {
+    id: "crm-parking-release",
+    label: "CRM Parking Release",
+    icon: "🅿️",
+    desc: "Releases an allotted parking slot back to inventory; the booking's total and milestones are recalculated.",
+  },
+  {
     id: "crm-sales-deed-docs",
     label: "Upload sale deed documents",
     icon: "📎",
@@ -412,6 +424,8 @@ export const MODULE_GROUPS = [
     icon: "🏠",
     modules: [
       "crm-applications",
+      "crm-invoice-void",
+      "crm-parking-release",
       "crm-booking-verification",
       "crm-bookings",
       "crm-booking-amendment",

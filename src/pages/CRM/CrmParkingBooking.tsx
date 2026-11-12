@@ -1,5 +1,6 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import { sumMoney } from "@/lib/crmPriceQuote";
+import { useCanApprove } from "@/hooks/useCanApprove";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -8,7 +9,6 @@ import { translateError } from "@/lib/translateError";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ExternalLink, X, CheckCircle2, RefreshCw, ShieldAlert } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
@@ -20,7 +20,6 @@ import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 import { localDay } from "./salesDeed/config";
 
-import { isSuperAdminRole } from "@/contexts/auth.utils";
 const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
 const EMPTY_FORM = { ApplicationId: "", BlockId: "", ParkingMasterId: "", ParkingSlotId: "", Notes: "", RateOverride: "" };
@@ -210,8 +209,8 @@ const CrmParkingBooking: React.FC = () => {
   const rights = usePageRights("crm-parking-booking");
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
-  const canRelease = isSuperAdminRole(currentUser?.role);
+  // Who may release is set in Approval Setup (CRM Parking Release); the server checks the same.
+  const canRelease = useCanApprove("crm-parking-release");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "Pending" | "Paid">("");
