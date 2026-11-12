@@ -346,7 +346,7 @@ export const MODULE_OPTIONS = [
     id: "account-heads",
     label: "Account Head",
     icon: "📒",
-    desc: "A new account head before it can be used",
+    desc: "A new account head before it can be used (vendors have no approval step)",
   },
   {
     id: "activity-master",
