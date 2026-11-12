@@ -15,12 +15,13 @@ function safeArray<T>(raw: unknown): T[] {
 
 // ── Header CRUD ───────────────────────────────────────────────────────────────
 
-export const getWorkOrders = async (params?: { page?: number; limit?: number; search?: string; status?: string }) => {
+export const getWorkOrders = async (params?: { page?: number; limit?: number; search?: string; status?: string; projectId?: number | null }) => {
   const qs = new URLSearchParams();
   if (params?.page) qs.set("page", String(params.page));
   if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.search?.trim()) qs.set("search", params.search.trim());
   if (params?.status && params.status !== "all") qs.set("status", params.status);
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
   const s = qs.toString();
   const res = await fetchWithAuth(s ? `${BASE_URL}?${s}` : BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);

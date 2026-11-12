@@ -1,7 +1,8 @@
 // The work order register.
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronRight, Building2, User, Layers, AlertCircle, Eye, Search, RefreshCw, ChevronLeft, List, ClipboardList, TrendingUp, Boxes, BadgeCheck, Clock } from "lucide-react";
-import { getWorkOrders } from "@/api/workOrderApi";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronRight, ChevronDown, Building2, User, Layers, AlertCircle, Eye, Search, RefreshCw, ChevronLeft, List, ClipboardList, TrendingUp, Boxes, BadgeCheck, Clock } from "lucide-react";
+import { getWorkOrders, fetchProjects } from "@/api/workOrderApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -40,6 +41,10 @@ export const WorkOrdersList: React.FC<{
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  // Project filter + collapsible project groups (same pattern as Material Request / PO / BOQ).
+  const [projectFilter, setProjectFilter] = useState<number | null>(null);
+  const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Record<string, boolean>>({});
+  const { data: projectOptions = [] } = useQuery({ queryKey: ["projects-wd"], queryFn: fetchProjects, staleTime: 5 * 60 * 1000 });
   const [page, setPage] = useState(1);
   const [filteredTotal, setFilteredTotal] = useState(0);
   const [stats, setStats] = useState({ total: 0, approved: 0, pending: 0, count: 0 });
@@ -57,7 +62,7 @@ export const WorkOrdersList: React.FC<{
     setLoading(true);
     setError(null);
     try {
-      const res = await getWorkOrders({ page, limit: LIMIT, search: debouncedSearch, status: statusFilter });
+      const res = await getWorkOrders({ page, limit: LIMIT, search: debouncedSearch, status: statusFilter, projectId: projectFilter });
       if (id !== reqId.current) return; // a newer request superseded this one
       setWorkOrders(ensureArray<WorkOrderListItem>(res));
       setFilteredTotal(Number(res?.total ?? 0));
@@ -68,7 +73,7 @@ export const WorkOrdersList: React.FC<{
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [page, debouncedSearch, statusFilter]);
+  }, [page, debouncedSearch, statusFilter, projectFilter]);
 
   useEffect(() => {
     load();
@@ -80,8 +85,21 @@ export const WorkOrdersList: React.FC<{
   // a time), not just the page in view.
   const rights = usePageRights("work-order");
   const fetchAllWorkOrders = () =>
-    fetchAllPages<Record<string, unknown>>((p, limit) => getWorkOrders({ page: p, limit, search: debouncedSearch, status: statusFilter }));
-  const filterNote = [statusFilter !== "all" ? `Status: ${statusFilter}` : "", debouncedSearch ? `Search: ${debouncedSearch}` : ""].filter(Boolean).join(" · ");
+    fetchAllPages<Record<string, unknown>>((p, limit) => getWorkOrders({ page: p, limit, search: debouncedSearch, status: statusFilter, projectId: projectFilter }));
+  const projectFilterName = projectFilter ? projectOptions.find((x) => x.id === projectFilter)?.name ?? "" : "";
+  const filterNote = [projectFilterName ? `Project: ${projectFilterName}` : "", statusFilter !== "all" ? `Status: ${statusFilter}` : "", debouncedSearch ? `Search: ${debouncedSearch}` : ""].filter(Boolean).join(" · ");
+
+  // Grouped by project in the order rows arrive (newest first), so the project with the latest work order is on top.
+  const groupedByProject = (() => {
+    const groups = new Map<string, { key: string; projectName: string | null; rows: WorkOrderListItem[] }>();
+    for (const wo of workOrders) {
+      const name = wo.ProjectName || null;
+      const key = name || "no-project";
+      if (!groups.has(key)) groups.set(key, { key, projectName: name, rows: [] });
+      groups.get(key)!.rows.push(wo);
+    }
+    return Array.from(groups.values());
+  })();
   const filteredPages = Math.ceil(filteredTotal / LIMIT);
 
   // One request for every visible row's approval trail instead of one per
@@ -141,6 +159,20 @@ export const WorkOrdersList: React.FC<{
           <option value="pending">Pending</option>
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>
+        </select>
+        <select
+          value={projectFilter ?? ""}
+          onChange={(e) => {
+            setProjectFilter(e.target.value ? Number(e.target.value) : null);
+            setPage(1);
+          }}
+          aria-label="Project"
+          className="text-sm border border-foreground/30 pl-3 pr-8 py-2 bg-card text-foreground focus:outline-none transition wo-select-arrow max-w-[14rem]"
+        >
+          <option value="">All projects</option>
+          {projectOptions.map((pr) => (
+            <option key={pr.id} value={pr.id}>{pr.name}</option>
+          ))}
         </select>
         <button
           onClick={load}
@@ -210,15 +242,16 @@ export const WorkOrdersList: React.FC<{
               <ClipboardList size={24} className="text-muted-foreground/40" />
             </div>
             <p className="text-sm font-medium text-muted-foreground">
-              {search || statusFilter !== "all"
+              {search || statusFilter !== "all" || projectFilter
                 ? "No work orders match your filters"
                 : "No work orders yet"}
             </p>
-            {(search || statusFilter !== "all") && (
+            {(search || statusFilter !== "all" || projectFilter) && (
               <button
                 onClick={() => {
                   setSearch("");
                   setStatusFilter("all");
+                  setProjectFilter(null);
                   setPage(1);
                 }}
                 className="mt-2 text-xs text-primary underline"
@@ -228,8 +261,27 @@ export const WorkOrdersList: React.FC<{
             )}
           </div>
         ) : (
+          <div>
+            {groupedByProject.map((group) => {
+              const collapsed = !!collapsedProjectGroups[group.key];
+              return (
+                <div key={group.key} className="border-b border-foreground/20 last:border-0">
+                  <button
+                    type="button"
+                    aria-expanded={!collapsed}
+                    onClick={() => setCollapsedProjectGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-primary/5 transition-colors text-left"
+                    style={{ borderBottom: collapsed ? undefined : "1px solid hsl(var(--foreground) / 0.2)" }}
+                  >
+                    {collapsed ? <ChevronRight size={14} className="text-muted-foreground shrink-0" /> : <ChevronDown size={14} className="text-muted-foreground shrink-0" />}
+                    <span className="font-heading text-sm font-bold tracking-tight text-foreground">{group.projectName || "No project"}</span>
+                    <span className="ml-auto font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground border border-foreground/30 px-1.5 py-0.5">
+                      {group.rows.length} work order{group.rows.length !== 1 ? "s" : ""}
+                    </span>
+                  </button>
+                  {!collapsed && (
           <div className="divide-y divide-foreground/10">
-            {paginated.map((wo) => {
+            {group.rows.map((wo) => {
               const statusCfg = getStatusConfig(wo.Status);
               const dateStr = wo.DocumentDate
                 ? new Date(wo.DocumentDate).toLocaleDateString("en-IN", {
@@ -386,6 +438,11 @@ export const WorkOrdersList: React.FC<{
                       />
                     </div>
                   </div>
+                </div>
+              );
+            })}
+          </div>
+                  )}
                 </div>
               );
             })}

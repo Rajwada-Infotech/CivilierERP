@@ -49,6 +49,19 @@ const fillFor = (status: string): React.CSSProperties => {
   return tone === "done" ? { background: "var(--blue)" } : tone === "stopped" ? { background: "var(--red)" } : {};
 };
 
+// "Right now" tiles: one ruled box per document, three figure cells inside; a cell opens its records.
+const PIPE_TILE_CSS = `
+.crm-sheet .pipe-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.crm-sheet .pipe-tile { border: 1px solid var(--ink); background: var(--sheet); display: flex; flex-direction: column; min-width: 0; }
+.crm-sheet .pipe-tile-head { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-bottom: 1px solid var(--ink); }
+.crm-sheet .pipe-step { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ink); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+.crm-sheet .pipe-tile-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex: 1; }
+.crm-sheet .pipe-cell { text-align: left; min-width: 0; padding: 14px; transition: background .15s; }
+.crm-sheet .pipe-cell + .pipe-cell { border-left: 1px solid var(--rule-soft); }
+.crm-sheet .pipe-cell:hover, .crm-sheet .pipe-cell:focus-visible { background: var(--blue-wash); outline: none; }
+@media (max-width: 1100px) { .crm-sheet .pipe-tiles { grid-template-columns: minmax(0, 1fr); } }
+`;
+
 export default function MaterialDashboard() {
   usePageRights("material-dashboard");
   const navigate = useNavigate();
@@ -131,7 +144,7 @@ export default function MaterialDashboard() {
 
   return (
     <div>
-      <style>{SHEET_CSS}</style>
+      <style>{SHEET_CSS + PIPE_TILE_CSS}</style>
       <Breadcrumbs items={["Dashboard", "Material"]} />
       <div className="crm-sheet sheet-in">
         {/* Title block */}
@@ -173,30 +186,33 @@ export default function MaterialDashboard() {
           ) : !d?.pipeline ? (
             <p style={{ fontSize: 13, color: "var(--red)" }}>These figures could not be worked out. Use Re-read to try again.</p>
           ) : (
-            // A compact matrix: a document per row, the three states as columns, headed once.
-            <div style={{ overflowX: "auto" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(110px, 0.8fr) repeat(3, minmax(130px, 1fr))", minWidth: 520 }}>
-                <span />
-                {pipelineRows[0].figures.map((f) => (
-                  <span key={f.label} className="label" style={{ paddingBottom: 10, fontSize: 11, color: f.late ? "var(--red)" : undefined }}>{f.label}</span>
-                ))}
-                {pipelineRows.map((row) => (
-                  <React.Fragment key={row.doc}>
-                    <span className="label" style={{ color: "var(--ink)", fontSize: 11.5, padding: "16px 0", borderTop: "1px solid var(--rule-soft)", alignSelf: "stretch", display: "flex", alignItems: "center" }}>{row.doc}</span>
-                    {row.figures.map((f) => {
-                      const n = d.pipeline![f.key] ?? 0;
-                      const red = !!f.late && n > 0;
-                      return (
-                        <button key={f.key} onClick={() => setDrill(f.key)} className="pipe-cell"
-                          style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 12, textAlign: "left", minWidth: 0, padding: "16px 8px 16px 0", borderTop: "1px solid var(--rule-soft)" }}>
-                          <span className="figure link" style={{ fontSize: "clamp(28px, 2.8vw, 38px)", lineHeight: 1, color: red ? "var(--red)" : undefined, textDecoration: "underline dotted", textUnderlineOffset: 4, textDecorationThickness: 1 }}><Tick value={n} /></span>
-                          <span style={{ fontSize: 13, color: "var(--graphite)" }}>{f.sub}</span>
-                        </button>
-                      );
-                    })}
-                  </React.Fragment>
-                ))}
-              </div>
+            // A tile per document, in the order the work flows (MR → PO → GRN): its three states as figure cells.
+            <div className="pipe-tiles">
+              {pipelineRows.map((row, ri) => {
+                const lateN = d.pipeline![row.figures[2].key] ?? 0;
+                return (
+                  <div key={row.doc} className="pipe-tile">
+                    <div className="pipe-tile-head">
+                      <span className="pipe-step">{ri + 1}</span>
+                      <span className="label" style={{ color: "var(--ink)", fontSize: 11.5 }}>{row.doc}</span>
+                      {lateN > 0 && <span className="label" style={{ marginLeft: "auto", color: "var(--red)" }}>{lateN} late</span>}
+                    </div>
+                    <div className="pipe-tile-cells">
+                      {row.figures.map((f) => {
+                        const n = d.pipeline![f.key] ?? 0;
+                        const red = !!f.late && n > 0;
+                        return (
+                          <button key={f.key} onClick={() => setDrill(f.key)} className="pipe-cell" aria-label={`${row.doc}: ${f.label} ${n}`}>
+                            <span className="label" style={{ color: red ? "var(--red)" : undefined }}>{f.label}</span>
+                            <span className="figure" style={{ display: "block", fontSize: "clamp(26px, 2.6vw, 34px)", lineHeight: 1, marginTop: 10, color: red ? "var(--red)" : undefined }}><Tick value={n} /></span>
+                            <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 8 }}>{f.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </Detail>

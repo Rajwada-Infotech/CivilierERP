@@ -201,6 +201,8 @@ router.get("/", cache("boq", 300), async (req, res) => {
     // companyId is an optional narrowing — without it the list spans every company (still within the
     // caller's project scope).
     const companyId = parseInt(req.query.companyId, 10) || null;
+    // projectId: the page's project filter (list grouped by project, like Material Request / PO).
+    const projectId = parseInt(req.query.projectId, 10) || null;
 
     const pool = getPool();
     const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -210,6 +212,7 @@ router.get("/", cache("boq", 300), async (req, res) => {
     const status = (req.query.status || "").toString().trim();
     const where = [];
     if (companyId) where.push("b.CompanyId = @companyId");
+    if (projectId) where.push("b.ProjectId = @projectId");
     if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
 
     if (search) {
@@ -229,6 +232,7 @@ router.get("/", cache("boq", 300), async (req, res) => {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const bindFilters = (request) => {
       if (companyId) request.input("companyId", sql.Int, companyId);
+      if (projectId) request.input("projectId", sql.Int, projectId);
       if (search) request.input("search", sql.NVarChar(100), `%${search}%`);
       if (status && status !== "All") {
         request.input("status", sql.NVarChar(50), status);

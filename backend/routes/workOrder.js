@@ -258,13 +258,15 @@ router.get(
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
       const offset = (page - 1) * limit;
       const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+      // The page's project filter: narrows the list and the figures, like the company scope does.
+      const projectId = parseInt(req.query.projectId, 10) || null;
       // List filters (the View All page): status as the page shows it (blank = Draft), and free text over
       // document no., company, project and contractor - the same fields its search box always covered.
       const status = String(req.query.status || "").trim().toLowerCase();
       const search = String(req.query.search || "").trim();
 
       // Scope only (company + project rights) - the base for the summary figures, which ignore the list filters.
-      const scopeWhere = `${companyId ? "WHERE h.CompanyId = @companyId" : "WHERE 1=1"}${projectPredicate(req.projectScope, "h.ProjectId")}`;
+      const scopeWhere = `${companyId ? "WHERE h.CompanyId = @companyId" : "WHERE 1=1"}${projectId ? " AND h.ProjectId = @projectId" : ""}${projectPredicate(req.projectScope, "h.ProjectId")}`;
       const filterWhere =
         (status && status !== "all" ? ` AND LOWER(ISNULL(NULLIF(h.Status, ''), 'Draft')) = @status` : "") +
         (search
@@ -274,6 +276,7 @@ router.get(
 
       const bind = (r) => {
         if (companyId) r.input("companyId", sql.Int, companyId);
+        if (projectId) r.input("projectId", sql.Int, projectId);
         if (status && status !== "all") r.input("status", sql.NVarChar(50), status);
         if (search) r.input("search", sql.NVarChar(260), `%${search.replace(/[\\%_[]/g, (c) => "\\" + c)}%`);
         return r;

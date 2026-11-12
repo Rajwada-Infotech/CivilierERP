@@ -82,8 +82,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   return (
     <div
       style={{
-        border: "1px solid hsl(var(--border))",
-        borderRadius: "calc(var(--radius) + 2px)",
+        border: "1px solid hsl(var(--foreground))",
         overflow: "hidden",
         background: "hsl(var(--background))",
       }}
@@ -95,18 +94,16 @@ export const LineEditor: React.FC<LineEditorProps> = ({
           alignItems: "center",
           justifyContent: "space-between",
           padding: "8px 12px",
-          background: "hsl(var(--muted))",
-          borderBottom: "1px solid hsl(var(--border))",
+          background: "hsl(var(--card))",
+          borderBottom: "1px solid hsl(var(--foreground) / 0.2)",
           gap: 12,
         }}
       >
         <div
           style={{
             display: "flex",
-            gap: 2,
-            background: "hsl(var(--border))",
-            borderRadius: 8,
-            padding: 3,
+            gap: 0,
+            border: "1px solid hsl(var(--foreground))",
           }}
         >
           {(["activities", "items"] as const).map((t) => {
@@ -119,18 +116,17 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 5,
-                  padding: "4px 14px",
-                  borderRadius: 6,
+                  padding: "0 14px",
+                  height: 30,
                   border: "none",
                   cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  transition: "all 0.1s",
-                  background: active ? "hsl(var(--background))" : "transparent",
-                  color: active
-                    ? "hsl(var(--primary))"
-                    : "hsl(var(--muted-foreground))",
-                  boxShadow: active ? "0 0 0 0.5px hsl(var(--border))" : "none",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  transition: "background 0.1s",
+                  background: active ? "hsl(var(--foreground))" : "transparent",
+                  color: active ? "hsl(var(--card))" : "hsl(var(--muted-foreground))",
                 }}
               >
                 {t === "items" ? (
@@ -151,13 +147,15 @@ export const LineEditor: React.FC<LineEditorProps> = ({
               display: "inline-flex",
               alignItems: "center",
               gap: 5,
-              padding: "5px 12px",
-              border: "1px solid hsl(var(--primary) / 0.35)",
-              borderRadius: 6,
-              background: "hsl(var(--primary) / 0.08)",
-              color: "hsl(var(--primary))",
-              fontSize: 12,
-              fontWeight: 500,
+              padding: "0 12px",
+              height: 32,
+              border: "1px solid hsl(var(--foreground))",
+              background: "hsl(var(--card))",
+              color: "hsl(var(--foreground))",
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
               cursor: "pointer",
               transition: "background 0.1s",
             }}
@@ -198,8 +196,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
           <thead>
             <tr
               style={{
-                background: "hsl(var(--muted))",
-                borderBottom: "1px solid hsl(var(--border))",
+                background: "hsl(var(--card))",
+                borderBottom: "1px solid hsl(var(--foreground) / 0.2)",
               }}
             >
               {(
@@ -232,7 +230,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     letterSpacing: "0.07em",
                     textTransform: "uppercase",
                     color: "hsl(var(--muted-foreground))",
-                    borderRight: "1px solid hsl(var(--border))",
+                    borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                   }}
@@ -275,9 +273,9 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   <tr
                     key={row._key ?? row.Id ?? idx}
                     style={{
-                      borderBottom: "1px solid hsl(var(--border))",
+                      borderBottom: "1px solid hsl(var(--foreground) / 0.2)",
                       background: isEven
-                        ? "hsl(var(--muted) / 0.4)"
+                        ? "hsl(var(--foreground) / 0.03)"
                         : "hsl(var(--background))",
                     }}
                   >
@@ -285,7 +283,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     <td
                       style={{
                         textAlign: "center",
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 6px",
                         height: 40,
                       }}
@@ -305,7 +303,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {!isItem && (
                       <td
                         style={{
-                          borderRight: "1px solid hsl(var(--border))",
+                          borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                           padding: "4px 6px",
                         }}
                       >
@@ -356,7 +354,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Name select */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 6px",
                       }}
                     >
@@ -459,7 +457,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {isItem && (
                       <td
                         style={{
-                          borderRight: "1px solid hsl(var(--border))",
+                          borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                           padding: "4px 6px",
                         }}
                       >
@@ -512,7 +510,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Code */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 6px",
                       }}
                     >
@@ -522,9 +520,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           fontVariantNumeric: "tabular-nums",
                           fontSize: 10,
                           color: "hsl(var(--muted-foreground))",
-                          background: "hsl(var(--muted))",
-                          border: "0.5px solid hsl(var(--border))",
-                          borderRadius: 3,
+                          background: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--foreground) / 0.3)",
                           padding: "2px 5px",
                           display: "inline-block",
                           maxWidth: "100%",
@@ -540,7 +537,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Spec/Notes */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 6px",
                       }}
                     >
@@ -567,8 +564,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           style={{
                             width: "100%",
                             height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -584,7 +580,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {isItem && (
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 6px",
                       }}
                     >
@@ -610,8 +606,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           style={{
                             width: "100%",
                             height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -630,7 +625,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Per Unit Qty (items) / Total Area (activities) */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 6px",
                         textAlign: "right",
                       }}
@@ -664,7 +659,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                                 fontVariantNumeric: "tabular-nums",
                                 fontSize: 12.5,
                                 fontWeight: 600,
-                                color: "hsl(var(--primary))",
+                                color: "hsl(var(--foreground))",
                               }}
                             >
                               {fmtQty(q / basis.value)}
@@ -694,8 +689,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           style={{
                             width: "100%",
                             height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -712,7 +706,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* UOM */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 6px",
                       }}
                     >
@@ -752,7 +746,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Rate */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 6px",
                       }}
                     >
@@ -778,8 +772,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           style={{
                             width: "100%",
                             height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -796,7 +789,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Tax % */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 6px",
                       }}
                     >
@@ -824,8 +817,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           style={{
                             width: "100%",
                             height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -842,7 +834,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Amount */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                         padding: "4px 10px",
                         textAlign: "right",
                       }}
@@ -853,7 +845,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           fontVariantNumeric: "tabular-nums",
                           fontSize: 12.5,
                           fontWeight: 700,
-                          color: "hsl(var(--primary))",
+                          color: "hsl(var(--foreground))",
                         }}
                       >
                         {fmt(amt)}
@@ -864,7 +856,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {!isItem && (
                       <td
                         style={{
-                          borderRight: "1px solid hsl(var(--border))",
+                          borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                           padding: "4px 10px",
                           textAlign: "right",
                         }}
@@ -898,7 +890,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     <td
                       style={{
                         borderRight: !readOnly
-                          ? "1px solid hsl(var(--border))"
+                          ? "1px solid hsl(var(--foreground) / 0.2)"
                           : "none",
                         padding: "4px 10px",
                         textAlign: "right",
@@ -928,7 +920,6 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                             cursor: "pointer",
                             width: 26,
                             height: 26,
-                            borderRadius: 4,
                             display: "inline-flex",
                             alignItems: "center",
                             justifyContent: "center",
@@ -967,8 +958,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
             <tfoot>
               <tr
                 style={{
-                  background: "hsl(var(--muted))",
-                  borderTop: "1px solid hsl(var(--border))",
+                  background: "hsl(var(--card))",
+                  borderTop: "1px solid hsl(var(--foreground) / 0.2)",
                 }}
               >
                 <td
@@ -981,7 +972,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     letterSpacing: "0.07em",
                     textTransform: "uppercase",
                     color: "hsl(var(--muted-foreground))",
-                    borderRight: "1px solid hsl(var(--border))",
+                    borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                   }}
                 >
                   {isItem ? "Items" : "Activities"} subtotal
@@ -993,7 +984,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                       fontVariantNumeric: "tabular-nums",
                       fontSize: 13,
                       fontWeight: 700,
-                      color: "hsl(var(--primary))",
+                      color: "hsl(var(--foreground))",
                     }}
                   >
                     {fmt(subtotal)}
@@ -1013,8 +1004,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
           alignItems: "center",
           justifyContent: "space-between",
           padding: "10px 16px",
-          borderTop: "1px solid hsl(var(--border))",
-          background: "hsl(var(--muted))",
+          borderTop: "1px solid hsl(var(--foreground) / 0.2)",
+          background: "hsl(var(--card))",
           flexWrap: "wrap",
           gap: 12,
         }}
@@ -1044,7 +1035,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
               {fmt(itemsTotal)}
             </span>
           </div>
-          <span style={{ color: "hsl(var(--border))", fontSize: 16 }}>+</span>
+          <span style={{ color: "hsl(var(--foreground) / 0.2)", fontSize: 16 }}>+</span>
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <span
               style={{
@@ -1088,7 +1079,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
               fontVariantNumeric: "tabular-nums",
               fontSize: 20,
               fontWeight: 700,
-              color: "hsl(var(--primary))",
+              color: "hsl(var(--foreground))",
               letterSpacing: "-0.5px",
             }}
           >

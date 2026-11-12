@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { Trash2, Edit3, Printer, ArrowLeft, Send, FilePenLine } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { KEY_INK, KEY_LINE, KEY_RED } from "@/components/sheet/sheetParts";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -99,32 +99,26 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             alignItems: "center",
             justifyContent: "space-between",
             padding: "14px 20px",
-            borderBottom: "1px solid hsl(var(--border))",
-            background: "hsl(var(--muted))",
+            borderBottom: "1px solid hsl(var(--foreground))",
+            background: "hsl(var(--card))",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="gap-1.5 text-muted-foreground hover:text-foreground hover:bg-primary/5 px-2 font-semibold text-sm border border-foreground/30 bg-transparent"
-            >
-              <ArrowLeft size={15} /> Back
-            </Button>
+            <button type="button" onClick={onClose} className={`${KEY_LINE} h-8 px-3`}>
+              <ArrowLeft size={12} /> Back
+            </button>
             <div
-              style={{ width: 1, height: 28, background: "hsl(var(--border))" }}
+              style={{ width: 1, height: 28, background: "hsl(var(--foreground) / 0.2)" }}
             />
             <span
               style={{
                 fontSize: 16,
-                fontWeight: 600,
-                color: "hsl(var(--primary))",
-                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                fontWeight: 700,
+                color: "hsl(var(--foreground))",
                 fontVariantNumeric: "tabular-nums",
               }}
             >
-              {record.BoqNo || record.DocNo}
+              <span className="font-heading">{record.BoqNo || record.DocNo}</span>
             </span>
             <ApprovalStatusChain table="BOQ" recordId={record.BoqID} fallback={<SheetMark text={record.Status || "Draft"} tone={statusTone(record.Status || "Draft")} />} />
           </div>
@@ -132,34 +126,19 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           {/* Right-side actions */}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {canDelete && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={acting}
-                onClick={() => setConfirmDelete(true)}
-                className="text-destructive hover:bg-destructive/10 border-destructive/30"
-              >
-                <Trash2 size={13} className="mr-1.5" /> Delete
-              </Button>
+              <button type="button" disabled={acting} onClick={() => setConfirmDelete(true)} className={`${KEY_RED} h-8 px-3`}>
+                <Trash2 size={12} /> Delete
+              </button>
             )}
             {canEdit && (record.Status === "Draft" || record.Status === "Approved" || record.Status === "Rejected") && (
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={acting}
-                onClick={onEdit}
-              >
-                <Edit3 size={13} className="mr-1.5" /> Edit
-              </Button>
+              <button type="button" disabled={acting} onClick={onEdit} className={`${KEY_LINE} h-8 px-3`}>
+                <Edit3 size={12} /> Edit
+              </button>
             )}
             {record.Status === "Draft" && (
-              <Button
-                size="sm"
-                disabled={acting}
-                onClick={() => doTransition("submit")}
-              >
-                Submit for Approval <Send size={12} className="ml-1.5" />
-              </Button>
+              <button type="button" disabled={acting} onClick={() => doTransition("submit")} className={`${KEY_INK} h-8 px-3`}>
+                <Send size={12} /> Submit for approval
+              </button>
             )}
           </div>
         </div>
@@ -176,34 +155,24 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           {record.Status !== "Draft" && (
             <div
               style={{
-                padding: "12px 16px",
-                borderRadius: 8,
+                padding: "10px 14px",
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
-                background:
-                  record.Status === "Pending"
-                    ? "hsl(38 90% 95%)"
-                    : record.Status === "Approved"
-                      ? "hsl(142 70% 95%)"
-                      : "hsl(0 80% 96%)",
-                border: `1px solid ${record.Status === "Pending" ? "hsl(38 80% 85%)" : record.Status === "Approved" ? "hsl(142 60% 85%)" : "hsl(0 70% 88%)"}`,
-                color:
-                  record.Status === "Pending"
-                    ? "hsl(38 80% 35%)"
-                    : record.Status === "Approved"
-                      ? "hsl(142 60% 30%)"
-                      : "hsl(0 70% 38%)",
+                border: `1px solid ${record.Status === "Approved" ? "hsl(var(--primary))" : record.Status === "Rejected" ? "hsl(var(--destructive))" : "hsl(var(--foreground))"}`,
+                background: record.Status === "Approved" ? "hsl(var(--primary) / 0.06)" : record.Status === "Rejected" ? "hsl(var(--destructive) / 0.06)" : "hsl(var(--foreground) / 0.04)",
+                color: record.Status === "Rejected" ? "hsl(var(--destructive))" : "hsl(var(--foreground))",
               }}
             >
+              <SheetMark text={record.Status || "Draft"} tone={statusTone(record.Status || "Draft")} />
               <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>
                 {record.Status === "Pending"
                   ? "Awaiting admin approval from the Approval Inbox."
                   : null}
                 {record.Status === "Approved" &&
-                  `✓ Approved${record.ApprovedBy ? ` by ${record.ApprovedBy}` : ""}.`}
+                  `Approved${record.ApprovedBy ? ` by ${record.ApprovedBy}` : ""}.`}
                 {record.Status === "Rejected" &&
-                  `✕ Rejected${record.RejectedBy ? ` by ${record.RejectedBy}` : ""}${record.RejectionNote ? ` — ${record.RejectionNote}` : ""}.`}
+                  `Rejected${record.RejectedBy ? ` by ${record.RejectedBy}` : ""}${record.RejectionNote ? ` — ${record.RejectionNote}` : ""}.`}
               </span>
             </div>
           )}
@@ -215,13 +184,13 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             <DetailRow label="BOQ Date" value={fmtDate(record.BoqDate)} />
             <DetailRow
               label="Document No"
-              value={<span className="tabular-nums">{record.DocNo}</span>}
+              value={<span className="font-heading tabular-nums">{record.DocNo}</span>}
             />
             <DetailRow label="Created By" value={record.CreatedBy} />
             <DetailRow
               label="Total Amount"
               value={
-                <span className="tabular-nums text-primary font-bold">
+                <span className="font-heading tabular-nums text-foreground font-bold">
                   {fmt(record.TotalAmount)}
                 </span>
               }
@@ -231,9 +200,8 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           {record.Description && (
             <div
               style={{
-                background: "hsl(var(--muted))",
-                borderLeft: "3px solid hsl(var(--primary))",
-                borderRadius: "0 6px 6px 0",
+                background: "hsl(var(--foreground) / 0.04)",
+                borderLeft: "3px solid hsl(var(--foreground))",
                 padding: "10px 14px",
                 fontSize: 13,
               }}
@@ -263,38 +231,33 @@ export const DetailModal: React.FC<DetailModalProps> = ({
         <div
           style={{
             padding: "12px 20px",
-            borderTop: "1px solid hsl(var(--border))",
+            borderTop: "1px solid hsl(var(--foreground))",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
             gap: 10,
-            background: "hsl(var(--muted) / 0.5)",
+            background: "hsl(var(--card))",
             flexShrink: 0,
           }}
         >
           {canDelete && (
-            <Button
-              variant="outline"
-              disabled={acting}
-              onClick={() => setConfirmDelete(true)}
-              className="text-destructive hover:bg-destructive/10 border-destructive/30"
-            >
-              <Trash2 size={14} className="mr-1.5" /> Delete
-            </Button>
+            <button type="button" disabled={acting} onClick={() => setConfirmDelete(true)} className={`${KEY_RED} h-9 px-4`}>
+              <Trash2 size={13} /> Delete
+            </button>
           )}
           <div style={{ display: "flex", gap: 8 }}>
             {canPrint && (
-              <Button variant="outline" onClick={onPrint} className="gap-1.5">
-                <Printer size={14} /> Print
-              </Button>
+              <button type="button" onClick={onPrint} className={`${KEY_LINE} h-9 px-4`}>
+                <Printer size={13} /> Print
+              </button>
             )}
-            <Button variant="outline" onClick={onClose}>
+            <button type="button" onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>
               Close
-            </Button>
+            </button>
             {canEdit && canEditBoq(record.Status) && (
-              <Button variant="secondary" disabled={acting} onClick={onEdit}>
-                <Edit3 size={14} className="mr-1.5" /> Edit
-              </Button>
+              <button type="button" disabled={acting} onClick={onEdit} className={`${KEY_LINE} h-9 px-4`}>
+                <Edit3 size={13} /> Edit
+              </button>
             )}
             {canEditBoq(record.Status) && (
               <>
@@ -308,14 +271,14 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               </>
             )}
             {canEdit && record.Status === "Approved" && (
-              <Button variant="secondary" disabled={acting} onClick={onEdit}>
-                <Edit3 size={14} className="mr-1.5" /> Edit
-              </Button>
+              <button type="button" disabled={acting} onClick={onEdit} className={`${KEY_LINE} h-9 px-4`}>
+                <Edit3 size={13} /> Edit
+              </button>
             )}
             {canEdit && onAmend && record.Status === "Approved" && (
-              <Button variant="secondary" disabled={acting} onClick={onAmend} title="Amend — change it with a reason; applies once approved">
-                <FilePenLine size={14} className="mr-1.5" /> Amend
-              </Button>
+              <button type="button" disabled={acting} onClick={onAmend} title="Amend — change it with a reason; applies once approved" className={`${KEY_INK} h-9 px-5`}>
+                <FilePenLine size={13} /> Amend
+              </button>
             )}
           </div>
         </div>
