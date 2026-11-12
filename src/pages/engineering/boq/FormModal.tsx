@@ -1,5 +1,5 @@
 // New / edit BOQ: header, lines, totals and save.
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { FileText, Save, RefreshCw, Edit3, ArrowLeft, Calendar as CalendarIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -70,10 +70,42 @@ export const FormModal: React.FC<FormModalProps> = ({
     setErrors((p) => ({ ...p, [k]: "" }));
   };
 
-  // When company changes, reset the project selection
+  // Where the estimation is for: Block → Floor → Room, each list narrowed by the one before.
+  const clearLocation = () => setForm((p) => ({ ...p, BlockId: "", FloorNo: "", RoomId: "" }));
+  const [locOpts, setLocOpts] = useState<{ blocks: { id: number; name: string }[]; floors: string[]; rooms: { id: number; name: string }[] }>({ blocks: [], floors: [], rooms: [] });
+  useEffect(() => {
+    if (!form.ProjectId) { setLocOpts({ blocks: [], floors: [], rooms: [] }); return; }
+    let live = true;
+    const q = new URLSearchParams({ projectId: form.ProjectId });
+    if (form.BlockId) q.set("blockId", form.BlockId);
+    if (form.BlockId && form.FloorNo) q.set("floorNo", form.FloorNo);
+    apiFetch(`/boq/location-options?${q}`)
+      .then((d: any) => { if (live) setLocOpts({ blocks: d?.blocks ?? [], floors: d?.floors ?? [], rooms: d?.rooms ?? [] }); })
+      .catch(() => { if (live) setLocOpts({ blocks: [], floors: [], rooms: [] }); });
+    return () => { live = false; };
+  }, [form.ProjectId, form.BlockId, form.FloorNo]);
+
+  // Activities already estimated on another BOQ for this exact place — they can't be added here.
+  const [usedActivities, setUsedActivities] = useState<{ activityId: string; activityName: string; boqNo: string }[]>([]);
+  useEffect(() => {
+    if (!form.ProjectId || !form.BlockId || !form.FloorNo || !form.RoomId) { setUsedActivities([]); return; }
+    let live = true;
+    const q = new URLSearchParams({ projectId: form.ProjectId, blockId: form.BlockId, floorNo: form.FloorNo, roomId: form.RoomId });
+    if (record?.BoqID) q.set("excludeId", String(record.BoqID));
+    apiFetch(`/boq/used-activities?${q}`)
+      .then((d: any) => { if (live) setUsedActivities(Array.isArray(d) ? d : []); })
+      .catch(() => { if (live) setUsedActivities([]); });
+    return () => { live = false; };
+  }, [form.ProjectId, form.BlockId, form.FloorNo, form.RoomId, record?.BoqID]);
+  const usedIds = new Set(usedActivities.map((u) => String(u.activityId)));
+  const pickableActivities = activityOptions.filter((o) => !usedIds.has(String(o.id)));
+  const clashing = usedActivities.filter((u) => activities.some((a) => String(a.activityId) === String(u.activityId)));
+
+  // When company changes, reset the project selection (and the location under it)
   const handleCompanyChange = (v: string) => {
     set("CompanyId", v);
     set("ProjectId", "");
+    clearLocation();
   };
 
   // When an Activity line is added, auto-fetch the items linked to that
@@ -148,6 +180,14 @@ export const FormModal: React.FC<FormModalProps> = ({
     await refreshBoqNo(value, form.FinYear);
   };
 
+  // On the BOQ page the document type is the BOQ one: with a single BOQ type it's picked on its own (which also
+  // fetches the BOQ No) and shown locked; the picker only appears if more than one BOQ type exists.
+  const onlyDocType = docTypes.length === 1 ? docTypes[0] : null;
+  useEffect(() => {
+    if (onlyDocType && !form.DocTypeId) void handleDocTypeChange(String(onlyDocType.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlyDocType?.id, form.FinYear]);
+
   const handleFinYearChange = async (value: string) => {
     set("FinYear", value);
     if (form.DocTypeId) {
@@ -162,7 +202,14 @@ export const FormModal: React.FC<FormModalProps> = ({
     if (!form.ProjectId) e.ProjectId = "Project is required";
     if (!form.DocTypeId) e.DocTypeId = "Document type is required";
     if (!form.FinYear) e.FinYear = "Financial year is required";
+    if (!form.BlockId) e.BlockId = "Block is required";
+    if (!form.FloorNo) e.FloorNo = "Floor is required";
+    if (!form.RoomId) e.RoomId = "Room is required";
     setErrors(e);
+    if (Object.keys(e).length === 0 && clashing.length) {
+      toast.error(`Already estimated for this block, floor and room: ${clashing.map((c) => `${c.activityName || c.activityId} (${c.boqNo})`).join(", ")}`);
+      return false;
+    }
     return Object.keys(e).length === 0;
   };
 
@@ -215,22 +262,19 @@ export const FormModal: React.FC<FormModalProps> = ({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            flexWrap: "wrap",
+            rowGap: 10,
             padding: "14px 20px",
-            borderBottom: "1px solid hsl(var(--border))",
-            background: "hsl(var(--muted))",
+            borderBottom: "1px solid hsl(var(--foreground))",
+            background: "hsl(var(--card))",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="gap-1.5 text-muted-foreground hover:text-foreground hover:bg-primary/5 px-2 font-semibold text-sm border border-foreground/30 bg-transparent"
-            >
-              <ArrowLeft size={15} /> Back
-            </Button>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", minWidth: 0 }}>
+            <button type="button" onClick={onClose} className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 h-8 px-3 bg-card border border-foreground text-foreground hover:bg-primary/10 transition-colors">
+              <ArrowLeft size={12} /> Back
+            </button>
             <div
-              style={{ width: 1, height: 28, background: "hsl(var(--border))" }}
+              style={{ width: 1, height: 28, background: "hsl(var(--foreground) / 0.2)" }}
             />
             <div>
               <h2
@@ -267,15 +311,15 @@ export const FormModal: React.FC<FormModalProps> = ({
               </p>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button
-              variant="outline"
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button
+              type="button"
               onClick={onClose}
               disabled={saving}
-              className="font-semibold text-sm px-5 py-2 h-auto"
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center h-9 px-4 bg-card border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-40"
             >
               Cancel
-            </Button>
+            </button>
             <Button
               onClick={handleSave}
               disabled={saving}
@@ -368,6 +412,14 @@ export const FormModal: React.FC<FormModalProps> = ({
               </Field>
 
               <Field label="Document Type" required error={errors.DocTypeId}>
+                {onlyDocType ? (
+                  <Input
+                    value={`${onlyDocType.code}${onlyDocType.description ? ` — ${onlyDocType.description}` : ""}`}
+                    readOnly
+                    aria-readonly="true"
+                    className="h-10 bg-card text-muted-foreground cursor-not-allowed"
+                  />
+                ) : (
                 <Select
                   value={form.DocTypeId}
                   onValueChange={handleDocTypeChange}
@@ -386,6 +438,7 @@ export const FormModal: React.FC<FormModalProps> = ({
                     ))}
                   </SelectContent>
                 </Select>
+                )}
               </Field>
 
               <Field label="BOQ No">
@@ -436,7 +489,7 @@ export const FormModal: React.FC<FormModalProps> = ({
               <Field label="Project" required error={errors.ProjectId}>
                 <Select
                   value={form.ProjectId}
-                  onValueChange={(v) => set("ProjectId", v)}
+                  onValueChange={(v) => { set("ProjectId", v); clearLocation(); }}
                 >
                   <SelectTrigger
                     className={`h-10 ${errors.ProjectId ? "border-destructive" : ""}`}
@@ -459,6 +512,50 @@ export const FormModal: React.FC<FormModalProps> = ({
                 </Select>
               </Field>
             </div>
+
+            {/* Where this estimation is for — an activity can be estimated once per block + floor + room. */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <Field label="Block" required error={errors.BlockId}>
+                <Select value={form.BlockId} onValueChange={(v) => setForm((p) => ({ ...p, BlockId: v, FloorNo: "", RoomId: "" }))} disabled={!form.ProjectId}>
+                  <SelectTrigger className={`h-10 ${errors.BlockId ? "border-destructive" : ""}`}>
+                    <SelectValue placeholder={form.ProjectId ? (locOpts.blocks.length ? "— Select block —" : "No blocks in this project") : "— Select project first —"} />
+                  </SelectTrigger>
+                  <SelectContent className="z-[300]">
+                    {locOpts.blocks.map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Floor" required error={errors.FloorNo}>
+                <Select value={form.FloorNo} onValueChange={(v) => setForm((p) => ({ ...p, FloorNo: v, RoomId: "" }))} disabled={!form.BlockId}>
+                  <SelectTrigger className={`h-10 ${errors.FloorNo ? "border-destructive" : ""}`}>
+                    <SelectValue placeholder={form.BlockId ? (locOpts.floors.length ? "— Select floor —" : "No floors in this block") : "— Select block first —"} />
+                  </SelectTrigger>
+                  <SelectContent className="z-[300]">
+                    {locOpts.floors.map((f) => <SelectItem key={f} value={f}>Floor {f}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Room" required error={errors.RoomId}>
+                <Select value={form.RoomId} onValueChange={(v) => set("RoomId", v)} disabled={!form.FloorNo}>
+                  <SelectTrigger className={`h-10 ${errors.RoomId ? "border-destructive" : ""}`}>
+                    <SelectValue placeholder={form.FloorNo ? (locOpts.rooms.length ? "— Select room —" : "No rooms on this floor") : "— Select floor first —"} />
+                  </SelectTrigger>
+                  <SelectContent className="z-[300]">
+                    {locOpts.rooms.map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+            {clashing.length > 0 ? (
+              <p className="border border-destructive bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                Already estimated for this block, floor and room — remove {clashing.length === 1 ? "it" : "them"} or pick another location:{" "}
+                {clashing.map((c) => `${c.activityName || c.activityId} (${c.boqNo})`).join(", ")}
+              </p>
+            ) : usedActivities.length > 0 ? (
+              <p className="text-[0.6875rem] text-muted-foreground">
+                {usedActivities.length} {usedActivities.length === 1 ? "activity is" : "activities are"} already estimated for this location and left out of the activity list.
+              </p>
+            ) : null}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field label="Scope / Description">
@@ -527,7 +624,7 @@ export const FormModal: React.FC<FormModalProps> = ({
               rows={lineTab === "items" ? items : activities}
               uoms={uoms}
               itemOptions={itemOptions}
-              activityOptions={activityOptions}
+              activityOptions={pickableActivities}
               activityGroups={activityGroups}
               boqActivities={activities}
               itemsTotal={itemsTotal}
