@@ -2,7 +2,7 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { unitPrice, rateSqlType, sumMoney, round2 } = require("../services/bookingUnits");
 const { returnLeadToPool } = require("../services/saHandoff");
-const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_STATUSES, CANCELLATION_DROPPED_SQL } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -1413,7 +1413,7 @@ async function softDeleteBooking(pool, id, actor) {
       }
       const openCancellation = (await tx.request().input("bid", sql.Int, id).query(`
         SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation
-        WHERE BookingId = @bid AND Status NOT IN ('Rejected', 'Cancelled')
+        WHERE BookingId = @bid AND Status NOT IN ${CANCELLATION_DROPPED_SQL}
       `)).recordset[0];
       if (openCancellation) {
         throw Object.assign(new Error(`Cannot delete this booking while cancellation ${openCancellation.CancellationNo} is open.`), { status: 409 });

@@ -1,4 +1,5 @@
 const express = require("express");
+const { REFUND_TRANSFER_MODES } = require("../constants/crmStatuses");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -1892,7 +1893,7 @@ router.put("/:id/approve", async (req, res) => {
         });
       }
       // A transfer pays into the customer's account — it must be on the refund.
-      if (["NEFT", "RTGS", "IMPS", "UPI"].includes(String(refundRow.PMode).trim()) && !String(refundRow.CustomerAccountNo || "").trim()) {
+      if (REFUND_TRANSFER_MODES.includes(String(refundRow.PMode).trim()) && !String(refundRow.CustomerAccountNo || "").trim()) {
         return res.status(400).json({
           error: `A ${refundRow.PMode} refund needs the customer's bank account — add it on refund ${refundRow.RefundNo}, or pay by Cheque.`,
         });
@@ -1931,7 +1932,7 @@ router.put("/:id/approve", async (req, res) => {
             if (!live.PDate || !String(live.PMode || "").trim() || !normalizeBankId(live.PBankID)) {
               throw Object.assign(new Error("Complete refund payment date, payment mode, and bank before approval."), { status: 400 });
             }
-            if (["NEFT", "RTGS", "IMPS", "UPI"].includes(String(live.PMode).trim()) && !String(live.CustomerAccountNo || "").trim()) {
+            if (REFUND_TRANSFER_MODES.includes(String(live.PMode).trim()) && !String(live.CustomerAccountNo || "").trim()) {
               throw Object.assign(new Error(`A ${live.PMode} refund needs the customer's bank account, or pay by Cheque.`), { status: 400 });
             }
             const liveNet = Number(live.NetAmount) || 0;

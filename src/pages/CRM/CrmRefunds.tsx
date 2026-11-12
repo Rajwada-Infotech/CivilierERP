@@ -362,8 +362,8 @@ const COLS: GridCol<any>[] = [
 ];
 
 // ── One refund ──────────────────────────────────────────────────────────────
-function RefundRecord({ id, canEdit, onBack, onEdit, onFinance, onSendBack, onSubmit, onWithdraw, busy }: {
-  id: string; canEdit: boolean; onBack: () => void; onEdit: (r: any, thenSubmit?: boolean) => void; onFinance: (r: any) => void; onSendBack: (r: any) => void; onSubmit: (r: any) => void; onWithdraw: (r: any) => void; busy: boolean;
+function RefundRecord({ id, canEdit, onBack, onEdit, onFinance, onSendBack, onSubmit, onWithdraw, onPayoutReturned, busy }: {
+  id: string; canEdit: boolean; onBack: () => void; onEdit: (r: any, thenSubmit?: boolean) => void; onFinance: (r: any) => void; onSendBack: (r: any) => void; onSubmit: (r: any) => void; onWithdraw: (r: any) => void; onPayoutReturned: (r: any) => void; busy: boolean;
 }) {
   const navigate = useNavigate();
   const { data: r, isLoading, isError, error, isFetching, refetch } = useQuery({ queryKey: ["crm-refunds", "record", id], queryFn: () => fetchRefund(id), retry: false });
@@ -391,9 +391,11 @@ function RefundRecord({ id, canEdit, onBack, onEdit, onFinance, onSendBack, onSu
   else if (r.Status === "Pending") { next = fromFinance ? `Finance sent it back: ${note}. Correct it if needed; the CRM approver approves it again` : "Waiting for CRM approval. No money has moved"; action = { label: "Go to Approval", run: go("approval") }; }
   else if (r.Status === "Rejected") { next = `Rejected${note ? `: ${note}` : ""}. Correct it, then send it again`; action = editable ? { label: "Correct and Send Again", run: () => onEdit(r, true) } : null; }
   else if (VOUCHER_NOT_RAISED.includes(r.Status)) {
-    next = note ? `Approved, but the payout voucher wasn't raised: ${note}` : "Approved: Finance raises the payout voucher";
+    // A payout that came back (reverseRefundPayout on the server marks it "[Payout returned]").
+    const returned = /^\[Payout returned\]/.test(r.RejectionNote || "");
+    next = returned ? `The payout came back: ${note}. Finance raises a new payout voucher.` : note ? `Approved, but the payout voucher wasn't raised: ${note}` : "Approved: Finance raises the payout voucher";
     action = financeCan ? { label: "Raise Payout Voucher", run: () => onFinance(r) } : null;
-    if (!financeCan) next += " (Approval Setup: CRM Refunds Finance)";
+    if (!financeCan && !returned) next += " (Approval Setup: CRM Refunds Finance)";
   } else if (r.Status === "FinanceApproved") { next = "The payout voucher is with Finance in Payments. It is marked Paid once Finance approves the voucher"; action = r.FinanceNewPaymentId != null ? { label: "Open in Payments", run: () => navigate(`/payments?view=${r.FinanceNewPaymentId}`) } : null; }
 
   const trail = [
@@ -413,6 +415,7 @@ function RefundRecord({ id, canEdit, onBack, onEdit, onFinance, onSendBack, onSu
           {r.BookingId != null && <Link to={`/crm/bookings?view=${r.BookingId}`} className={BAND_KEY}><ExternalLink size={13} /> Open Booking</Link>}
           {editable && <button type="button" onClick={() => onEdit(r)} className={BAND_KEY}><PenLine size={13} /> Edit Details</button>}
           {editable && r.FinanceNewPaymentId == null && <button type="button" onClick={() => onWithdraw(r)} className={cn(BAND_KEY, "!text-rose-300")}><XCircle size={13} /> Withdraw</button>}
+          {canEdit && r.Status === "Paid" && <button type="button" onClick={() => onPayoutReturned(r)} className={cn(BAND_KEY, "!text-rose-300")}><Undo2 size={13} /> Payout Returned</button>}
           <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
         </>}
         lead={fmtShort(r.NetAmount)} leadNote={Number(r.DeductionAmount) > 0 ? `net payout · ${fmtShort(r.GrossAmount)} less ${r.DeductionPercent}%` : "net payout"}
@@ -634,6 +637,8 @@ const CrmRefunds: React.FC = () => {
   const [sendBackNote, setSendBackNote] = useState("");
   const [withdrawing, setWithdrawing] = useState<any | null>(null);
   const [withdrawReason, setWithdrawReason] = useState("");
+  const [returning, setReturning] = useState<any | null>(null);
+  const [returnReason, setReturnReason] = useState("");
   const [busy, setBusy] = useState(false);
   const { data: payModes } = usePayModes();
 
@@ -676,6 +681,7 @@ const CrmRefunds: React.FC = () => {
   const raiseVoucher = () => run(() => put(`${API}/${financeDialog.Id}/finance-approve`, { RefundBankLHeadId: financeBank || undefined, PaymentMode: financeMode || undefined }),
     (d) => `Payout voucher ${d.docNo || ""} raised: with Finance in Payments`, closeFinance);
   const doWithdraw = () => run(() => put(`${API}/${withdrawing.Id}/withdraw`, { reason: withdrawReason.trim() }), () => `${withdrawing.RefundNo} withdrawn: its money is free again`, () => setWithdrawing(null));
+  const doPayoutReturned = () => run(() => put(`${API}/${returning.Id}/payout-returned`, { reason: returnReason.trim() }), () => "Payout Returned", () => setReturning(null));
   const doSendBack = () => run(() => put(`${API}/${sendBack.Id}/finance-reject`, { note: sendBackNote.trim() }), () => "Sent back to CRM", () => setSendBack(null));
 
   const [prefs, setPrefs] = useGridPrefs(PREFS_KEY, COLS);
@@ -705,7 +711,7 @@ const CrmRefunds: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "CRM", "Refunds"]} />
       {openId ? (
         <RefundRecord id={openId} canEdit={rights.canEdit} onBack={closeRefund} busy={busy}
-          onEdit={(r, thenSubmit) => setEditing({ r, thenSubmit: !!thenSubmit })} onFinance={openFinance} onWithdraw={(r) => { setWithdrawing(r); setWithdrawReason(""); }} onSendBack={(r) => { setSendBack(r); setSendBackNote(""); }} onSubmit={submitRefund} />
+          onEdit={(r, thenSubmit) => setEditing({ r, thenSubmit: !!thenSubmit })} onFinance={openFinance} onWithdraw={(r) => { setWithdrawing(r); setWithdrawReason(""); }} onPayoutReturned={(r) => { setReturning(r); setReturnReason(""); }} onSendBack={(r) => { setSendBack(r); setSendBackNote(""); }} onSubmit={submitRefund} />
       ) : (
         <>
           <MoneyBand eyebrow="CRM · Finance" title="Refunds" sub="Money given back: a cancelled booking's held credit or an overpayment, approved by CRM and paid through Finance."
@@ -755,6 +761,16 @@ const CrmRefunds: React.FC = () => {
           <p className="mb-3 text-sm text-muted-foreground">The refund stays on record as Withdrawn and can't be sent or approved again. Nothing has been paid; the money it claims becomes free for a new refund or a re-booking.</p>
           <GridFormField label="Why it is withdrawn" required wide hint="Kept with the refund and in its approval history.">
             <textarea value={withdrawReason} onChange={(e) => setWithdrawReason(e.target.value)} rows={3} autoFocus placeholder="e.g. The customer chose to move the credit to a new booking" className={cn(GRID_INPUT, "h-auto py-2 resize-none")} />
+          </GridFormField>
+        </GridDialog>
+      )}
+
+      {returning && (
+        <GridDialog onClose={() => setReturning(null)} icon={Undo2} width="max-w-xl" title="Payout Returned" description={`${returning.RefundNo} · ${personName(returning.CustomerName)} · net ${fmt(returning.NetAmount)}`}
+          footer={<><button type="button" onClick={() => setReturning(null)} className={GRID_BTN}>Keep It</button><button type="button" onClick={doPayoutReturned} disabled={busy || !returnReason.trim()} className={cn(GRID_BTN_BRAND, "!bg-destructive !border-destructive")}>{busy ? "Saving…" : "Mark Payout Returned"}</button></>}>
+          <p className="mb-3 text-sm text-muted-foreground">Use this when the bank transfer came back or the payout was approved by mistake. The payout voucher is cancelled and its ledger reversed; the refund goes back to Finance to pay again, and the customer's credit is restored.</p>
+          <GridFormField label="What happened" required wide>
+            <textarea value={returnReason} onChange={(e) => setReturnReason(e.target.value)} rows={3} autoFocus className={cn(GRID_INPUT, "h-auto py-2 resize-none")} />
           </GridFormField>
         </GridDialog>
       )}

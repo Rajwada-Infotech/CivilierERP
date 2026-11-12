@@ -18,13 +18,14 @@ const { applyPagination } = require("../services/crmListPagination");
 const { transition: approvalTransition, recordGLPosting, isApproverFor, writeAuditLog } = require("../services/approvalService");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { bumpCacheVersion } = require("../redis");
+const { reversePostingBySource } = require("../services/generalLedger");
 const {
   ensureCrmCustomerLedgerHead, postCrmRefundPaid,
   postCrmHeldCreditReallocateLedgerOnly, postCrmHeldCreditCrossCompanyMirror,
 } = require("../services/crmLedger");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { refundCreateSchema } = require("../validation/crmBookingSchemas");
-const { DEAD_BOOKING_STATUSES, REFUND_CLOSED_SQL, REFUND_DUE_STOPPED_SQL } = require("../constants/crmStatuses");
+const { REFUND_PAYMENT_MODES, REFUND_TRANSFER_MODES, DEAD_BOOKING_STATUSES, REFUND_CLOSED_SQL, REFUND_DUE_STOPPED_SQL, CANCELLATION_DROPPED_SQL } = require("../constants/crmStatuses");
 
 router.use(authMiddleware);
 
@@ -33,11 +34,11 @@ router.use(authMiddleware);
 // Card are never valid here. Post-Dated Cheque is excluded too since this is
 // only ever a same-day mode preference, not a dated instrument. Optional
 // everywhere it's used — never required to raise or approve a refund.
-const ALLOWED_REFUND_MODES = new Set(["Cheque", "NEFT", "RTGS", "IMPS", "UPI"]);
+const ALLOWED_REFUND_MODES = new Set(REFUND_PAYMENT_MODES);
 // Like a money receipt, the payment mode decides what a payout needs: a
 // transfer needs the customer's account; a cheque is written to their name
 // and needs none. No mode yet = Finance chooses it on the voucher.
-const TRANSFER_REFUND_MODES = new Set(["NEFT", "RTGS", "IMPS", "UPI"]);
+const TRANSFER_REFUND_MODES = new Set(REFUND_TRANSFER_MODES);
 const needsCustomerAccount = (mode) => TRANSFER_REFUND_MODES.has(String(mode || "").trim());
 function validatePaymentMode(raw) {
   if (raw != null && raw !== "" && !ALLOWED_REFUND_MODES.has(raw)) {
@@ -143,7 +144,7 @@ async function reserveRebookingTransfer(pool, { heldId, amount, fromCompanyId, t
     }
     const openCancellation = (await tx.request().input("bid", sql.Int, toBookingId).query(`
       SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WITH (UPDLOCK, HOLDLOCK)
-      WHERE BookingId = @bid AND Status NOT IN ('Rejected', 'Cancelled')
+      WHERE BookingId = @bid AND Status NOT IN ${CANCELLATION_DROPPED_SQL}
     `)).recordset[0];
     if (openCancellation) {
       throw Object.assign(new Error(`Target booking has open cancellation ${openCancellation.CancellationNo}`), { status: 409 });
@@ -1784,7 +1785,85 @@ router.put("/rebooking-transfer/:transferId/retry-ledger", requirePageRight("crm
   }
 });
 
+// ── reverseRefundPayout — a paid refund's payout was undone ─────────────────
+// Its cheque was cancelled in Finance (chequeCancellation.js), or a bank transfer came back (PUT /:id/payout-returned).
+// The payout voucher itself is cancelled and its ledger reversed by the caller. Here, in one transaction: the refund
+// goes back to "voucher not raised" with the reason, the credit it used is restored to its source (a cancellation's
+// held credit is Held again), and the refund's own ledger adjustment is reversed. Then its GST documents are
+// cancelled. Finance raises a new voucher; approving it pays the refund again and issues fresh GST documents.
+// Idempotent: a refund that is not Paid is left alone.
+async function reverseRefundPayout(pool, refundId, { reason, userEmail, newPaymentId = null }) {
+  const why = String(reason || "").trim();
+  const tx = pool.transaction();
+  await tx.begin();
+  let rf;
+  try {
+    rf = (await tx.request().input("id", sql.Int, refundId).query(`
+      SELECT Id, RefundNo, Status, GrossAmount, SourceOnAccountId, FinanceNewPaymentId
+      FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id`)).recordset[0];
+    if (!rf || rf.Status !== "Paid" || (newPaymentId != null && rf.FinanceNewPaymentId != null && rf.FinanceNewPaymentId !== newPaymentId)) {
+      await tx.rollback();
+      return { ok: false, reason: !rf ? "refund not found" : rf.Status !== "Paid" ? `refund is ${rf.Status}, not Paid` : "a different voucher pays this refund" };
+    }
+    await tx.request().input("id", sql.Int, refundId).input("n", sql.NVarChar(500), `[Payout returned] ${why}`.slice(0, 500))
+      .query(`UPDATE dbo.CrmRefund SET Status = 'FinancePending', FinanceNewPaymentId = NULL, PaidAt = NULL, RejectionNote = @n, UpdatedAt = SYSDATETIME()
+              WHERE Id = @id AND Status = 'Paid'`);
+    if (rf.SourceOnAccountId) {
+      await tx.request().input("oid", sql.Int, rf.SourceOnAccountId).input("g", sql.Decimal(18, 2), Number(rf.GrossAmount) || 0).input("rid", sql.Int, refundId)
+        .query(`
+          UPDATE dbo.CrmOnAccountPayment SET
+            AppliedAmount = CASE WHEN AppliedAmount - @g > 0 THEN AppliedAmount - @g ELSE 0 END,
+            Status = CASE WHEN HeldSourceType = 'Cancellation' THEN 'Held'
+                          WHEN AppliedAmount - @g > 0.005 THEN 'PartiallyApplied' ELSE 'Unapplied' END,
+            Notes = ISNULL(Notes, '') + char(10) + 'Payout of CrmRefund #' + CAST(@rid AS NVARCHAR(20)) + ' returned: credit restored'
+          WHERE Id = @oid`);
+      await require("../services/crmLedger").syncCrmOnAccountLedger(tx, rf.SourceOnAccountId, userEmail, `Payout of CrmRefund #${refundId} returned`);
+    }
+    await reversePostingBySource(tx, "CrmRefund", refundId);
+    await writeAuditLog("CrmRefund", refundId, 0, null, userEmail || null, "PayoutReturned", why.slice(0, 500), tx, null);
+    await tx.commit();
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* rolled back */ }
+    throw e;
+  }
+  const gst = require("../services/crmGstNotes");
+  const live = (await pool.request().input("r", sql.Int, refundId)
+    .query("SELECT TOP 1 Id FROM dbo.CrmGstNote WHERE RefundId = @r AND Status <> N'Cancelled'")).recordset[0];
+  if (live) await gst.cancel(pool, live.Id, `Payout of ${rf.RefundNo} returned: ${why}`, userEmail);
+  await bumpCacheVersion("crm-refunds");
+  return { ok: true };
+}
+
+// PUT /:id/payout-returned — a paid refund's bank transfer came back (or its payout was approved by mistake). The payout
+// voucher is cancelled and its ledger reversed, as Cheque Cancellation does for a cheque, then the refund is reversed
+// (reverseRefundPayout above) so Finance can pay it again.
+router.put("/:id/payout-returned", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) return res.status(400).json({ error: "Give the reason the payout came back." });
+  try {
+    const pool = getPool();
+    const rf = (await pool.request().input("id", sql.Int, id).query("SELECT Status, FinanceNewPaymentId FROM dbo.CrmRefund WHERE Id = @id")).recordset[0];
+    if (!rf) return res.status(404).json({ error: "Refund not found" });
+    if (rf.Status !== "Paid") return res.status(409).json({ error: `Only a paid refund's payout can be returned (this one is ${rf.Status}).` });
+    if (rf.FinanceNewPaymentId != null) {
+      await pool.request().input("np", sql.Int, rf.FinanceNewPaymentId)
+        .query("UPDATE dbo.NewPayment SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE PPaymentID = @np");
+      for (const st of ["NewPayment", "PaymentPosting", "BounceChargePosting"]) await reversePostingBySource(pool, st, rf.FinanceNewPaymentId);
+      await bumpCacheVersion("new-payment");
+    }
+    const out = await reverseRefundPayout(pool, id, { reason, userEmail: req.user?.email || req.user?.name || null, newPaymentId: rf.FinanceNewPaymentId });
+    if (!out.ok) return res.status(409).json({ error: out.reason });
+    res.json({ success: true, status: "FinancePending" });
+  } catch (e) {
+    console.error("[crm-refunds] payout-returned error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 module.exports = router;
 module.exports.markCrmRefundPaid = markCrmRefundPaid;
+module.exports.reverseRefundPayout = reverseRefundPayout;
 module.exports.applyRebookingTransferToBooking = applyRebookingTransferToBooking;
 module.exports.settlePaidRefunds = settlePaidRefunds;

@@ -595,7 +595,7 @@ export function openInModulePath(item: InboxItem, navPath: string): string {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }
   // The refunds page opens one refund by ?id= (its approval and its payout voucher step are on it).
-  if (item.Module === "crm-ownership-changes" || item.Module === "crm-noc" || item.Module === "crm-refunds" || item.Module === "crm-refunds-finance") {
+  if (item.Module === "crm-ownership-changes" || item.Module === "crm-noc" || item.Module === "crm-refunds" || item.Module === "crm-refunds-finance" || item.Module === "crm-cancellations") {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }
   // The sale deed page opens one deed by ?deedId=, at its approvals.

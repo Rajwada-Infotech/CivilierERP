@@ -80,7 +80,25 @@ const REFUND_DROPPED_SQL = sqlList(REFUND_DROPPED_STATUSES);
 const REFUND_CLOSED_SQL = sqlList(REFUND_CLOSED_STATUSES);
 const REFUND_DUE_STOPPED_SQL = sqlList(REFUND_DUE_STOPPED_STATUSES);
 
+// A cancellation request (dbo.CrmCancellation) in one of these statuses is closed without cancelling the booking:
+// rejected by the approver, withdrawn by staff (with a reason), or Cancelled on older rows. Every "is a cancellation
+// open on this booking" check reads this list.
+const CANCELLATION_DROPPED_STATUSES = Object.freeze(["Rejected", "Withdrawn", "Cancelled"]);
+const CANCELLATION_DROPPED_SQL = sqlList(CANCELLATION_DROPPED_STATUSES);
+
+// The modes a refund can be paid by, and those that are bank transfers (they need the customer's account). Read by
+// Refunds and by Payments when Finance approves a refund payout.
+const REFUND_PAYMENT_MODES = Object.freeze(["Cheque", "NEFT", "RTGS", "IMPS", "UPI"]);
+const REFUND_TRANSFER_MODES = Object.freeze(["NEFT", "RTGS", "IMPS", "UPI"]);
+
+// Days after a cancellation is approved that its refund falls due (RERA s.18), when its policy slab sets none
+// (dbo.CrmCancellationPolicy.RefundDueDays; migration 637).
+const REFUND_DUE_DAYS_DEFAULT = 45;
+
 module.exports = {
+  REFUND_DUE_DAYS_DEFAULT,
+  REFUND_PAYMENT_MODES, REFUND_TRANSFER_MODES,
+  CANCELLATION_DROPPED_STATUSES, CANCELLATION_DROPPED_SQL,
   CrmStatus, LineStatus, ResaleStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL,
   REFUND_DROPPED_STATUSES, REFUND_CLOSED_STATUSES, REFUND_DUE_STOPPED_STATUSES, REFUND_DROPPED_SQL, REFUND_CLOSED_SQL, REFUND_DUE_STOPPED_SQL,
 };

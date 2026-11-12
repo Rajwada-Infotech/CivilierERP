@@ -96,8 +96,15 @@ const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmRefund) R, (SELECT COUNT(*) F
 
     section("Re-booking credits: made, then visible and followed up");
     // Dev has no held credit: park one on the ZZTEST cancelled booking BKG-2026-00130 (inside the rolled-back transaction).
-    if (!sources.some((x) => x.SourceType === "CancellationHeldCredit")) await q("INSERT INTO dbo.CrmOnAccountPayment (BookingId, Amount, Status) VALUES (210, 100, 'Held')");
-    const held = (await call("GET", "/r/eligible-sources")).json.find((x) => x.SourceType === "CancellationHeldCredit" && Number(x.Remaining) >= 1);
+    // Always this test's own held credit (a real one on dev may already be committed elsewhere).
+    // ...on a ZZTEST booking that no buy-back has committed (a committed one is rightly refused).
+    const heldBooking = (await q(`SELECT TOP 1 b.Id FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE a.CustomerId = (SELECT a2.CustomerId FROM dbo.CrmBooking b2 JOIN dbo.CrmApplication a2 ON a2.Id = b2.ApplicationId WHERE b2.Id = 210)
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmUnitResale r WHERE r.IsActive = 1 AND r.Kind = 'BuyBack' AND r.Status IN ('Approved', 'Completed')
+          AND (r.FromBookingId = b.Id OR CHARINDEX(',' + CAST(b.Id AS VARCHAR(20)) + ',', ',' + ISNULL(r.BookingIds, '') + ',') > 0))
+      ORDER BY b.Id`))[0];
+    const heldId = (await q(`INSERT INTO dbo.CrmOnAccountPayment (BookingId, Amount, Status) OUTPUT INSERTED.Id VALUES (${heldBooking.Id}, 100, 'Held')`))[0].Id;
+    const held = (await call("GET", "/r/eligible-sources")).json.find((x) => x.OnAccountId === heldId);
     const target = held && (await q(`SELECT TOP 1 b.Id FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE a.CustomerId = ${held.CustomerId} AND b.Id <> ${held.BookingId} AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmCancellation c WHERE c.BookingId = b.Id AND c.Status NOT IN ('Rejected', 'Cancelled'))

@@ -56,6 +56,8 @@ async function openHarness({ mounts, count }) {
 
   const app = express();
   app.use(express.json());
+  // Every request carries the test user, as the server's own auth does before routes that rely on it (e.g. Payments).
+  app.use((req, _r, n) => { req.user = actor; n(); });
   for (const [at, file] of Object.entries(mounts)) app.use(at, require(`../routes/${file}`));
   const srv = http.createServer(app);
   await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));

@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus, DEAD_BOOKING_SQL, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL, DEAD_BOOKING_STATUSES, CANCELLATION_DROPPED_SQL } = require("../constants/crmStatuses");
 const { round2 } = require("../services/bookingUnits");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -997,7 +997,7 @@ router.put("/registry/:id/complete", requireAnyPageRight(["crm-registry", "crm-s
       }
       const pendingCancellation = (await tx.request().input("bid", sql.Int, booking.Id).query(`
         SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation
-        WHERE BookingId = @bid AND Status NOT IN ('Rejected', 'Cancelled')
+        WHERE BookingId = @bid AND Status NOT IN ${CANCELLATION_DROPPED_SQL}
       `)).recordset[0];
       if (pendingCancellation) {
         throw Object.assign(new Error(`Cannot complete registry while cancellation ${pendingCancellation.CancellationNo} is open; resolve it first.`), { status: 409 });
