@@ -12,8 +12,10 @@ const { requirePageRight } = require("../../middleware/requirePageRight");
 const { canAct, ownWork } = require("./approvalAuthority");
 const { writeAudit } = require("./legalAudit");
 const { suggestShares, differs } = require("../../services/successionShares");
+const apiRateLimit = require("../../middleware/apiRateLimit");
 
 const router = express.Router();
+router.use(apiRateLimit);
 const LAND_PAGE = "legal-land-master";
 
 const AREAS = {
