@@ -141,6 +141,9 @@ export default function LandDeedProcessPage() {
                           </>}
                           {!data?.canL1 && !data?.canL2 && <span className="text-xs text-muted-foreground">{l.L1Status === "Approved" ? "Waiting for L2" : "Waiting for L1"}</span>}
                         </span>
+                        {/* Why approval is not open yet (shown, not only on hover). */}
+                        {(data?.canL1 || data?.canL2) && l.L1Status !== "Approved" && !l.DeedFileId && <span className="mt-1 block text-[0.6875rem] text-amber-600">Upload the deed copy to approve</span>}
+                        {(data?.canL1 || data?.canL2) && l.DeedChangedAt && <span className="mt-1 block text-[0.6875rem] text-amber-600">Re-verify the changes to approve</span>}
                       </td>
                     </tr>
                   );

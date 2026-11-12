@@ -1479,7 +1479,8 @@ const MASTERS = {
     unique: [["Stage", "ApproverId"], "This user already has this approval role"],
     fields: [
       { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "L1 Approver", "L2 Approver", "Legal Reviewer"] },
-      { name: "ApproverId", label: "User", type: "ref", ref: "user", required: true },
+      // Several users can be picked when adding (one row each); a row is edited one user at a time.
+      { name: "ApproverId", label: "Users", type: "ref", ref: "user", required: true, multi: true },
       { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
       ACTIVE,
     ],

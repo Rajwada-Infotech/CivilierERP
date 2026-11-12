@@ -1,6 +1,7 @@
 import { askLegal } from "@/components/legal/LegalAsk";
 import { setUserWhatsApp } from "@/api/legalLandApi";
 import React, { useMemo, useRef, useState } from "react";
+import { ApprovalControlPanel } from "@/components/legal/ApprovalControlPanel";
 import { FileText, Upload, X } from "lucide-react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -148,6 +149,60 @@ const Combo: React.FC<{ id: string; value: unknown; options: { value: string; la
   );
 };
 
+/** Dropdown with checkboxes and search: several values when adding, one when editing an existing row. */
+const MultiPick: React.FC<{ options: { value: string; label: string }[]; value: unknown; editing: boolean; onChange: (v: unknown) => void; error: boolean }> = ({ options, value, editing, onChange, error }) => {
+  const [q, setQ] = React.useState("");
+  const [open, setOpen] = React.useState(false);
+  const box = React.useRef<HTMLDivElement>(null);
+  // Close on a click outside the dropdown.
+  React.useEffect(() => {
+    if (!open) return;
+    const off = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", off);
+    return () => document.removeEventListener("mousedown", off);
+  }, [open]);
+  if (editing) {
+    return (
+      <select className={`w-full border bg-background px-3 py-2 text-sm ${error ? "border-destructive" : "border-border"}`} value={String(Array.isArray(value) ? value[0] ?? "" : value ?? "")} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Select…</option>{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    );
+  }
+  const picked = new Set((Array.isArray(value) ? value : value ? [value] : []).map(String));
+  const toggle = (v: string) => { const n = new Set(picked); if (n.has(v)) n.delete(v); else n.add(v); onChange([...n]); };
+  const shown = options.filter((o) => o.label.toLowerCase().includes(q.trim().toLowerCase()));
+  const names = options.filter((o) => picked.has(o.value)).map((o) => o.label);
+  return (
+    <div ref={box} className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className={`flex w-full items-center justify-between gap-2 border bg-background px-3 py-2 text-left text-sm ${error ? "border-destructive" : "border-border"}`}>
+        <span className={`truncate ${names.length ? "" : "text-muted-foreground"}`}>{names.length ? names.join(", ") : "Select users…"}</span>
+        <span className="text-xs text-muted-foreground">{names.length ? `${names.length} selected` : ""} ▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 z-30 mt-1 border border-border bg-background shadow-lg">
+          <div className="flex items-center gap-2 border-b border-border px-2 py-1.5">
+            <input autoFocus className="min-w-0 flex-1 bg-transparent text-sm outline-none" placeholder="Search users…" value={q} onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }} />
+            {picked.size > 0 && <button type="button" className="text-xs underline" onClick={() => onChange([])}>Clear</button>}
+          </div>
+          <div className="max-h-56 overflow-y-auto py-1">
+            {shown.map((o) => (
+              <label key={o.value} className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm hover:bg-muted/50">
+                <input type="checkbox" checked={picked.has(o.value)} onChange={() => toggle(o.value)} /> {o.label}
+              </label>
+            ))}
+            {!shown.length && <p className="px-2 py-1 text-xs text-muted-foreground">No match</p>}
+          </div>
+          <div className="flex justify-end border-t border-border px-2 py-1.5">
+            <button type="button" className="bg-foreground px-3 py-1 text-xs font-semibold text-card" onClick={() => setOpen(false)}>Done</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 function toFieldDef(f: LegalFieldMeta, lookups: Record<string, LegalOption[]>, defaults: Record<string, string>): FieldDef {
   const base = { name: f.name, label: f.label, required: f.required };
   if (f.auto) {
@@ -181,6 +236,15 @@ function toFieldDef(f: LegalFieldMeta, lookups: Record<string, LegalOption[]>, d
         <Combo id={`dl-${f.name}`} value={p.value} asRef onChange={p.onChange} error={p.error}
           options={refOptions(f, lookups, p.formData).map((o) => ({ value: String(o.value), label: nameOf(o.label) }))} />
       ),
+    };
+  }
+  // Pick several (e.g. users for an approval role) when adding — one row each; an existing row keeps one value.
+  if (f.type === "ref" && f.multi) {
+    return {
+      ...base,
+      type: "custom",
+      render: (p) => <MultiPick options={refOptions(f, lookups, p.formData ?? {}).map((o) => ({ value: String(o.value), label: o.label }))}
+        value={p.value} editing={false} onChange={p.onChange} error={p.error} />,
     };
   }
   switch (f.type) {
@@ -457,7 +521,8 @@ export default function LegalMasterPage({ entry }: { entry: LegalMasterEntry }) 
       <LegalShell title={entry.label} subtitle={master?.desc ?? entry.desc} icon={entry.icon}>
         {/* Approval routes & SLA (the "approval-workflow" master) are kept in the database for Registration Task
             Type, but not shown until SLA and escalation are actually used. */}
-        <LegalMasterTable entry={entry} />
+        {/* Approval Control: one row per role, its users side by side. */}
+        {entry.key === "approval-authority" ? <ApprovalControlPanel /> : <LegalMasterTable entry={entry} />}
       </LegalShell>
     </>
   );

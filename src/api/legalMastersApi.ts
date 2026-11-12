@@ -32,6 +32,8 @@ export interface LegalFieldMeta {
   party?: string;
   /** Kept by the server (e.g. the matched party's id): not in the form or the table. */
   hidden?: boolean;
+  /** Several values can be picked when adding (one row each). */
+  multi?: boolean;
   /** workflow status (verification / L1 / L2): shown in lists, never in the entry form */
   system?: boolean;
   /** A "ref" whose list takes a plain name: a new name can be typed and is added to that list on save. */
@@ -141,3 +143,9 @@ export const getLegalPortalLinks = async (): Promise<LegalPortalLink[]> => {
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   return data as LegalPortalLink[];
 };
+
+// Approval Control by role (one entry per role with all its users).
+export interface ApprovalRole { stage: string; users: { id: number; name: string | null; active: boolean }[]; remarks: string | null }
+export const getApprovalRoles = async () => handle<ApprovalRole[]>(await fetchWithAuth(`${BASE}/approval-authority/by-role`));
+export const saveApprovalRole = async (stage: string, userIds: number[], remarks: string) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/approval-authority/by-role`, json("PUT", { stage, userIds, remarks })));

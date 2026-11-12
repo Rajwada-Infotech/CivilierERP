@@ -288,8 +288,8 @@ router.get("/meta", (req, res) => {
   res.json(PAGED.map(([key, m]) => ({
     key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, adminOnly: !!m.adminOnly,
     extras: (m.extras || []).map(({ name, label, whatsapp, after }) => ({ name, label, whatsapp: !!whatsapp, after })),
-    fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden, system }) =>
-      ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden, system: !!system,
+    fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden, system, multi }) =>
+      ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden, system: !!system, multi: !!multi,
         creatable: type === "ref" && creatableRef(ref) })),
   })));
 });
@@ -489,6 +489,92 @@ async function resolveParties(pool, cfg, body, userId, added = []) {
   }
 }
 
+// Approval Control by role: one entry per role with all its users (stored one row per user — the checks read that).
+const STAGES = () => MASTERS["approval-authority"].fields.find((f) => f.name === "Stage").options;
+router.get("/approval-authority/by-role", requirePageRight("legal-approval-authority-master", "view"), async (_req, res) => {
+  try {
+    const rows = (await getPool().request().query(`
+      SELECT a.AuthorityId, a.Stage, a.ApproverId, u.name AS UserName, a.Remarks, a.IsActive, a.UpdatedAt, a.CreatedAt
+      FROM dbo.LegalApprovalAuthority a LEFT JOIN dbo.users u ON u.id = a.ApproverId ORDER BY a.Stage, u.name`)).recordset;
+    res.json(STAGES().map((stage) => {
+      const r = rows.filter((x) => x.Stage === stage);
+      return { stage, users: r.map((x) => ({ id: x.ApproverId, name: x.UserName, active: !!x.IsActive })), remarks: r.find((x) => x.Remarks)?.Remarks ?? null };
+    }));
+  } catch (err) {
+    console.error("[legal-masters] approval by role:", err.message);
+    res.status(500).json({ error: "Could not load Approval Control" });
+  }
+});
+
+// PUT /approval-authority/by-role { stage, userIds, remarks } — the role's users become exactly these (admin only).
+router.put("/approval-authority/by-role", requirePageRight("legal-approval-authority-master", "edit"), async (req, res) => {
+  if (!isAdmin(req)) return res.status(403).json({ error: "Only an administrator can change Approval Control" });
+  const stage = req.body?.stage;
+  if (!STAGES().includes(stage)) return res.status(400).json({ error: "Choose the approval role" });
+  const ids = [...new Set((Array.isArray(req.body?.userIds) ? req.body.userIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const remarks = String(req.body?.remarks ?? "").trim().slice(0, 500) || null;
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+    const before = (await tx.request().input("S", sql.NVarChar(20), stage).query("SELECT AuthorityId, ApproverId FROM dbo.LegalApprovalAuthority WITH (UPDLOCK) WHERE Stage = @S")).recordset;
+    const removed = before.filter((b) => !ids.includes(b.ApproverId));
+    for (const r of removed) await tx.request().input("A", sql.Int, r.AuthorityId).query("DELETE FROM dbo.LegalApprovalAuthority WHERE AuthorityId = @A");
+    const added = [];
+    for (const uid of ids) {
+      const r = await tx.request().input("S", sql.NVarChar(20), stage).input("U", sql.Int, uid).input("R", sql.NVarChar(500), remarks).input("By", sql.Int, req.user?.userId || null).query(`
+        IF EXISTS (SELECT 1 FROM dbo.LegalApprovalAuthority WHERE Stage = @S AND ApproverId = @U)
+          UPDATE dbo.LegalApprovalAuthority SET Remarks = @R, IsActive = 1, UpdatedBy = @By, UpdatedAt = SYSUTCDATETIME() WHERE Stage = @S AND ApproverId = @U;
+        ELSE IF EXISTS (SELECT 1 FROM dbo.users WHERE id = @U)
+          INSERT INTO dbo.LegalApprovalAuthority (Stage, ApproverId, Remarks, IsActive, CreatedBy) OUTPUT INSERTED.ApproverId VALUES (@S, @U, @R, 1, @By);`);
+      if (r.recordset?.length) added.push(uid);
+    }
+    await tx.commit();
+    await writeAudit(pool, req, { action: "Updated", entityType: "Approval Control", entityId: null,
+      oldValue: { stage, users: before.map((b) => b.ApproverId) }, newValue: { stage, users: ids }, remarks });
+    res.json({ message: `${stage}: ${ids.length} user(s)${added.length ? `, ${added.length} added` : ""}${removed.length ? `, ${removed.length} removed` : ""}` });
+  } catch (err) {
+    try { await tx.rollback(); } catch { /* rolled back */ }
+    console.error("[legal-masters] approval by role save:", err.message);
+    res.status(500).json({ error: "Could not save" });
+  }
+});
+
+// Approval Control: several users picked at once → one row per user (users who already hold the role are skipped).
+router.post("/:master", withRight("create"), async (req, res, next) => {
+  const cfg = MASTERS[req.params.master];
+  if (req.params.master !== "approval-authority" || !Array.isArray(req.body?.ApproverId)) return next();
+  const ids = [...new Set(req.body.ApproverId.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const stage = req.body.Stage;
+  const stageField = cfg.fields.find((f) => f.name === "Stage");
+  if (!stageField.options.includes(stage)) return res.status(400).json({ error: "Choose the approval role" });
+  if (!ids.length) return res.status(400).json({ error: "Choose at least one user" });
+  const remarks = String(req.body.Remarks ?? "").trim().slice(0, 500) || null;
+  const active = req.body.IsActive === false || req.body.IsActive === 0 || req.body.IsActive === "0" ? 0 : 1;
+  try {
+    const pool = getPool();
+    const added = [], skipped = [];
+    for (const uid of ids) {
+      const u = (await pool.request().input("U", sql.Int, uid).query("SELECT name FROM dbo.users WHERE id = @U")).recordset[0];
+      if (!u) return res.status(400).json({ error: `User ${uid} not found` });
+      const r = await pool.request().input("S", sql.NVarChar(20), stage).input("U", sql.Int, uid).input("R", sql.NVarChar(500), remarks)
+        .input("A", sql.Bit, active).input("By", sql.Int, req.user?.userId || null).query(`
+          INSERT INTO dbo.LegalApprovalAuthority (Stage, ApproverId, Remarks, IsActive, CreatedBy)
+          OUTPUT INSERTED.AuthorityId
+          SELECT @S, @U, @R, @A, @By WHERE NOT EXISTS (SELECT 1 FROM dbo.LegalApprovalAuthority WHERE Stage = @S AND ApproverId = @U)`);
+      if (r.recordset.length) {
+        added.push(u.name);
+        await writeAudit(pool, req, { action: "Created", entityType: cfg.title, entityId: r.recordset[0].AuthorityId, newValue: { Stage: stage, ApproverId: uid, user: u.name } });
+      } else skipped.push(u.name);
+    }
+    if (!added.length) return res.status(409).json({ error: `Already ${stage}: ${skipped.join(", ")}` });
+    res.status(201).json({ message: `${stage}: ${added.join(", ")} added${skipped.length ? ` (already: ${skipped.join(", ")})` : ""}` });
+  } catch (err) {
+    console.error("[legal-masters] approval-authority multi:", err.message);
+    res.status(500).json({ error: "Could not save" });
+  }
+});
+
 router.post("/:master", withRight("create"), async (req, res) => {
   const cfg = MASTERS[req.params.master];
   try {
@@ -538,6 +624,33 @@ router.post("/:master", withRight("create"), async (req, res) => {
     res.status(201).json({ id, message: code ? `${cfg.title} ${row[code.name]} added` : `${cfg.title} added` });
   } catch (err) {
     sendDbError(res, cfg, err, "add");
+  }
+});
+
+// Approval Control edited with several users picked: the row keeps the first user, the others get rows of their own
+// for the same role (users who already hold it are skipped); then the normal update runs for the row.
+router.put("/:master/:id", withRight("edit"), async (req, res, next) => {
+  if (req.params.master !== "approval-authority" || !Array.isArray(req.body?.ApproverId)) return next();
+  const ids = [...new Set(req.body.ApproverId.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) return res.status(400).json({ error: "Choose at least one user" });
+  const stage = req.body.Stage;
+  if (!MASTERS["approval-authority"].fields.find((f) => f.name === "Stage").options.includes(stage)) return res.status(400).json({ error: "Choose the approval role" });
+  try {
+    const pool = getPool();
+    const remarks = String(req.body.Remarks ?? "").trim().slice(0, 500) || null;
+    for (const uid of ids.slice(1)) {
+      const r = await pool.request().input("S", sql.NVarChar(20), stage).input("U", sql.Int, uid).input("R", sql.NVarChar(500), remarks).input("By", sql.Int, req.user?.userId || null).query(`
+        INSERT INTO dbo.LegalApprovalAuthority (Stage, ApproverId, Remarks, IsActive, CreatedBy)
+        OUTPUT INSERTED.AuthorityId
+        SELECT @S, @U, @R, 1, @By WHERE EXISTS (SELECT 1 FROM dbo.users WHERE id = @U)
+          AND NOT EXISTS (SELECT 1 FROM dbo.LegalApprovalAuthority WHERE Stage = @S AND ApproverId = @U)`);
+      if (r.recordset.length) await writeAudit(pool, req, { action: "Created", entityType: "Approval Control", entityId: r.recordset[0].AuthorityId, newValue: { Stage: stage, ApproverId: uid } });
+    }
+    req.body.ApproverId = ids[0];
+    next();
+  } catch (err) {
+    console.error("[legal-masters] approval-authority multi edit:", err.message);
+    res.status(500).json({ error: "Could not save" });
   }
 });
 
