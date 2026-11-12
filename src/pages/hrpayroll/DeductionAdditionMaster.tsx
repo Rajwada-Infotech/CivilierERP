@@ -5,6 +5,7 @@ import { MoneyChange } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton } from "@/components/hrpayroll/HrUi";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -124,13 +125,16 @@ const DeductionAdditionMaster: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading deductions & additions...</div>;
-  if (error) return <div className="p-6 text-destructive">Failed to load Deduction and Addition Master.</div>;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Deduction and Addition Master"]} />
-      <HrPayrollShell title="Deduction and Addition Master" subtitle="Salary components mapped to a General Ledger account" icon={MoneyChange}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Deductions & Additions"]} />
+      <HrPayrollShell title="Deductions & Additions" subtitle="Salary components mapped to a General Ledger account" icon={MoneyChange}>
+        {isLoading ? (
+          <HrSkeleton />
+        ) : error ? (
+          <HrError text="Failed to load deductions & additions." />
+        ) : (
         <MasterPage
           title="Deduction/Addition"
           canCreate={rights.canCreate}
@@ -156,6 +160,7 @@ const DeductionAdditionMaster: React.FC = () => {
             ],
           }}
         />
+        )}
       </HrPayrollShell>
     </>
   );

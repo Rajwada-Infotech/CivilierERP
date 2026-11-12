@@ -5,6 +5,7 @@ import { Calendar } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton } from "@/components/hrpayroll/HrUi";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -110,13 +111,16 @@ const HolidayMaster: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading holidays...</div>;
-  if (error) return <div className="p-6 text-destructive">Failed to load holidays.</div>;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Holiday Master"]} />
-      <HrPayrollShell title="Holiday Master" subtitle="Company holidays by financial year" icon={Calendar}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Holidays"]} />
+      <HrPayrollShell title="Holidays" subtitle="Company holidays by financial year" icon={Calendar}>
+        {isLoading ? (
+          <HrSkeleton />
+        ) : error ? (
+          <HrError text="Failed to load holidays." />
+        ) : (
         <MasterPage
           title="Holiday"
           canCreate={rights.canCreate}
@@ -141,6 +145,7 @@ const HolidayMaster: React.FC = () => {
             ],
           }}
         />
+        )}
       </HrPayrollShell>
     </>
   );

@@ -5,6 +5,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { HR_HEAD, HR_LBL } from "@/components/hrpayroll/HrUi";
+import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 
 const OPERATORS = ["+", "-", "*", "/", "%", "(", ")"];
 
@@ -40,28 +42,29 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
     setFormula((prev) => (prev ? `${prev.trim()} ${token}` : token));
   };
 
+  // Tokens on the sheet: square ruled chips, inked on hover (docs/DESIGN.md).
   const chipClass =
-    "px-2.5 py-1.5 rounded-none text-xs font-heading font-medium border border-border bg-muted hover:bg-muted/70 text-foreground transition-colors";
+    "h-8 px-2.5 border border-foreground/30 bg-card hover:border-foreground hover:bg-primary/10 font-heading text-xs font-semibold text-foreground transition-colors";
   const opClass =
-    "w-9 h-9 flex items-center justify-center rounded-none text-sm font-heading font-semibold border border-border bg-muted hover:bg-muted/70 text-foreground transition-colors";
+    "w-9 h-9 flex items-center justify-center border border-foreground/30 bg-card hover:border-foreground hover:bg-primary/10 text-sm font-heading font-semibold text-foreground transition-colors";
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
         <DialogHeader>
-          <DialogTitle>Formula Builder</DialogTitle>
+          <DialogTitle className={HR_HEAD}>Formula builder</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
-            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className={`block ${HR_LBL} mb-1.5`}>
               Formula
             </label>
             <textarea
               value={formula}
               onChange={(e) => setFormula(e.target.value)}
               rows={3}
-              className="w-full px-3 py-2 rounded-none text-sm font-mono bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
+              className="w-full px-2.5 py-2 border border-foreground/40 focus:border-foreground bg-card text-sm font-mono text-foreground outline-none rounded-none"
               placeholder="e.g. BASIC * 40 / 100"
             />
             <p className="text-[0.6875rem] text-muted-foreground mt-1">
@@ -70,7 +73,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className={`block ${HR_LBL} mb-1.5`}>
               Operators
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -83,7 +86,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className={`block ${HR_LBL} mb-1.5`}>
               Salary Heads in this structure
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -99,7 +102,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className={`block ${HR_LBL} mb-1.5`}>
               Reserved Variables
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -112,11 +115,11 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 pt-4 mt-2 border-t border-border">
+        <div className="flex items-center justify-end gap-2 pt-4 mt-2" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-none text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className={`${KEY_LINE} h-9 px-4`}
           >
             Cancel
           </button>
@@ -126,7 +129,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
               onApply(formula.trim());
               onClose();
             }}
-            className="px-4 py-1.5 rounded-none text-xs font-heading font-semibold bg-foreground text-card"
+            className={`${KEY_INK} h-9 px-5`}
           >
             Apply
           </button>

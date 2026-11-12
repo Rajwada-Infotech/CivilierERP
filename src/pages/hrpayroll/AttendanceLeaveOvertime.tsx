@@ -1,12 +1,12 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CalendarTick, Calendar1, Timer1 } from "iconsax-react";
+import { CalendarTick } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell, HR_GRADIENT } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { HrSkeleton } from "@/components/hrpayroll/HrUi";
+import { HrSkeleton, HR_RULE, HR_LBL, HR_NUM } from "@/components/hrpayroll/HrUi";
 import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent, type RecordWithId } from "@/components/MasterPage";
 import { getEmployeeOptions } from "@/api/employeeMasterApi";
 import {
@@ -276,27 +276,27 @@ const AttendanceLeaveOvertime: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Attendance / Leave / Overtime"]} />
-      <HrPayrollShell title="Attendance / Leave / Overtime" subtitle="Daily attendance, leave requests, and overtime hours per employee" icon={CalendarTick}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Attendance Records"]} />
+      <HrPayrollShell title="Attendance Records" subtitle="Daily attendance, leave requests, and overtime hours per employee" icon={CalendarTick}>
         <Tabs defaultValue="attendance">
-          {/* Big tab cards: what each list is + how many records it has */}
-          <TabsList className="!h-auto !bg-transparent !p-0 grid w-full grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+          {/* The three lists as ruled tab cells: what each holds and how many records it has. */}
+          <TabsList className="!h-auto !bg-transparent !p-0 !rounded-none grid w-full grid-cols-1 sm:grid-cols-3 gap-0 mb-5 bg-card" style={{ border: HR_RULE }}>
             {([
-              ["attendance", "Attendance", "Daily check-in / check-out", attendanceRows.length, CalendarTick],
-              ["leave", "Leave", "Leave requests & days", leaveRows.length, Calendar1],
-              ["overtime", "Overtime", "Extra hours per employee", overtimeRows.length, Timer1],
-            ] as const).map(([v, label, hint, n, Icon]) => (
+              ["attendance", "Attendance", "Daily check-in and check-out", attendanceRows.length],
+              ["leave", "Leave", "Leave requests and days", leaveRows.length],
+              ["overtime", "Overtime", "Extra hours per employee", overtimeRows.length],
+            ] as const).map(([v, label, hint, n], i) => (
               <TabsTrigger
                 key={v}
                 value={v}
-                className="group !justify-start gap-3 rounded-none border border-border bg-card px-4 py-3.5 text-left transition-all data-[state=active]:border-transparent hr-tab-card"
+                className={`group relative !justify-between !items-end gap-3 !rounded-none !shadow-none bg-card px-4 py-3.5 text-left transition-colors data-[state=active]:!bg-primary/5 ${i ? "sm:border-l sm:border-foreground/20 border-t sm:border-t-0 border-foreground/20" : ""}`}
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-none text-card" style={{ background: HR_GRADIENT }}><Icon size={18} /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-heading font-semibold text-foreground">{label}</span>
-                  <span className="block text-[0.6875rem] text-muted-foreground truncate">{hint}</span>
+                <span className="min-w-0">
+                  <span className={`block ${HR_LBL} group-data-[state=active]:text-foreground`}>{label}</span>
+                  <span className="block text-[0.6875rem] text-muted-foreground truncate mt-1 font-normal normal-case tracking-normal">{hint}</span>
                 </span>
-                <span className="rounded-none bg-muted px-2 py-0.5 text-xs font-bold tabular-nums text-foreground">{n}</span>
+                <span className={`${HR_NUM} text-xl font-bold text-foreground leading-none`}>{n}</span>
+                <span className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-transparent group-data-[state=active]:bg-foreground" />
               </TabsTrigger>
             ))}
           </TabsList>

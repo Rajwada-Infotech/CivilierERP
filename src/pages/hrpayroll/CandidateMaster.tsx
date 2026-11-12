@@ -5,6 +5,9 @@ import { ProfileAdd, DocumentText } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton, HR_NUM } from "@/components/hrpayroll/HrUi";
+import { KEY_LINE, KEY_RED, TONE } from "@/components/sheet/sheetParts";
+import { SheetMark, type MarkTone } from "@/components/sheet/Sheet";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -27,12 +30,11 @@ import {
 // Interview page's own status sync (see backend/routes/interview.js) --
 // both write the same CandidateMaster.InterviewStatus column, so it only
 // ever needs these 3 states, plus "no result yet".
-const INTERVIEW_RESULT_META: Record<string, { label: string; className: string }> = {
-  Selected: { label: "Selected", className: "bg-primary/10 text-primary border-primary/30" },
-  Rejected: { label: "Rejected", className: "bg-destructive/10 text-destructive border-destructive/30" },
-  "On Hold": { label: "Hold", className: "bg-foreground/5 text-foreground border-foreground/30" },
+const INTERVIEW_RESULT_META: Record<string, { label: string; color: string; tone: MarkTone }> = {
+  Selected: { label: "Selected", color: TONE.blue, tone: "done" },
+  Rejected: { label: "Rejected", color: TONE.red, tone: "stopped" },
+  "On Hold": { label: "Hold", color: TONE.ink, tone: "waiting" },
 };
-const DEFAULT_RESULT_CLASS = "bg-muted text-muted-foreground border-border";
 
 // Inline editable dropdown for the "Interview Result" column -- calls its
 // own usePageRights so it can fall back to a read-only badge for viewers
@@ -50,15 +52,11 @@ const InterviewResultSelect: React.FC<{ candidateId: number; value: string }> = 
     onError: (err: any) => toast.error(err?.message || "Failed to update interview result"),
   });
 
-  const className = INTERVIEW_RESULT_META[value]?.className || DEFAULT_RESULT_CLASS;
+  const color = INTERVIEW_RESULT_META[value]?.color || TONE.graphite;
 
   if (!rights.canEdit) {
-    if (!INTERVIEW_RESULT_META[value]) return <span className="text-xs text-muted-foreground">-</span>;
-    return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-none text-[0.6875rem] font-medium border ${className}`}>
-        {INTERVIEW_RESULT_META[value].label}
-      </span>
-    );
+    if (!INTERVIEW_RESULT_META[value]) return <span className="text-xs text-muted-foreground">—</span>;
+    return <SheetMark text={INTERVIEW_RESULT_META[value].label} tone={INTERVIEW_RESULT_META[value].tone} />;
   }
 
   return (
@@ -69,7 +67,9 @@ const InterviewResultSelect: React.FC<{ candidateId: number; value: string }> = 
         const next = e.target.value;
         if (next) mutation.mutate(next as InterviewResult);
       }}
-      className={`text-xs px-2 py-1 rounded-none border font-medium ${className}`}
+      // In-row control: an h-8 square in the sheet's key type, outlined in the result's colour.
+      className="h-8 px-2 border bg-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] outline-none"
+      style={{ color, borderColor: color }}
     >
       <option value="">Select...</option>
       <option value="Selected">Selected</option>
@@ -182,12 +182,9 @@ const CandidateIdField: React.FC<{
   value: unknown;
   formData: Record<string, unknown>;
 }> = ({ value, formData }) => (
-  <input
-    className="w-full px-3 py-2 rounded-none text-sm font-body bg-muted border border-border font-mono opacity-70 text-foreground"
-    value={formData._id ? (value as string) || "" : "(auto-generated on save)"}
-    readOnly
-    disabled
-  />
+  <div className={`w-full h-9 px-2.5 flex items-center border border-foreground/20 bg-foreground/5 text-sm text-muted-foreground ${formData._id ? HR_NUM : ""}`}>
+    {formData._id ? (value as string) || "" : "Auto-generated on save"}
+  </div>
 );
 
 // Resume upload for the "custom" FieldDef slot — stores a gzip-compressed
@@ -223,7 +220,7 @@ const ResumeField: React.FC<{
           type="button"
           onClick={handleOpen}
           disabled={opening}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors max-w-[220px] disabled:opacity-50"
+          className={`${KEY_LINE} h-9 px-3 max-w-[220px] normal-case tracking-normal`}
         >
           <DocumentText size={13} className="shrink-0" /> <span className="truncate">{opening ? "Opening…" : resume.name}</span>
         </button>
@@ -232,7 +229,7 @@ const ResumeField: React.FC<{
       )}
       <label
         htmlFor={inputId}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+        className={`${KEY_LINE} h-9 px-3 cursor-pointer`}
       >
         {resume ? "Replace" : "Upload Resume"}
       </label>
@@ -240,7 +237,7 @@ const ResumeField: React.FC<{
         <button
           type="button"
           onClick={() => onChange(null)}
-          className="text-xs text-destructive hover:underline"
+          className={`${KEY_RED} h-9 px-3`}
         >
           Remove
         </button>
@@ -334,6 +331,7 @@ const columns: ColumnDef[] = [
 ];
 
 const columnRenderers: Record<string, (value: unknown, row: RecordWithId) => React.ReactNode> = {
+  candidateCode: (value) => <span className={HR_NUM}>{String(value ?? "")}</span>,
   interviewStatus: (value, row) => (
     <InterviewResultSelect candidateId={Number(row._id)} value={(value as string) || ""} />
   ),
@@ -389,13 +387,15 @@ const CandidateMaster: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading candidates...</div>;
-  if (error) return <div className="p-6 text-destructive">Failed to load candidates.</div>;
-
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Candidate Master"]} />
-      <HrPayrollShell title="Candidate Master" subtitle="Recruitment pipeline & interview tracking" icon={ProfileAdd}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Candidates"]} />
+      <HrPayrollShell title="Candidates" subtitle="Recruitment pipeline & interview tracking" icon={ProfileAdd}>
+        {isLoading ? (
+          <HrSkeleton />
+        ) : error ? (
+          <HrError text="Failed to load candidates." />
+        ) : (
         <MasterPage
           title="Candidate"
           canCreate={rights.canCreate}
@@ -429,6 +429,7 @@ const CandidateMaster: React.FC = () => {
             ],
           }}
         />
+        )}
       </HrPayrollShell>
     </>
   );

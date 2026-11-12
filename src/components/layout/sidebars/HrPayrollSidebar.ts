@@ -11,12 +11,11 @@ export const hrPayrollNavItems: NavItem[] = [
     label: "Payroll",
     icon: MoneyRecive,
     children: [
-      { label: "Employee Master", path: "/hr-payroll/employees", pageKey: "employee-master" },
-      // Salary Structure is a master/config item — lives in the Setup dropdown (hrPayrollSetupItems), not duplicated here.
-      { label: "Attendance", path: "/hr-payroll/attendance", pageKey: "employee-attendance" },
-      { label: "Attendance / Leave / Overtime", path: "/hr-payroll/attendance-leave-overtime", pageKey: "attendance-leave-overtime" },
+      // Employees and Salary Structures are setup records — they live in the Setup dropdown (hrPayrollSetupItems).
+      { label: "My Attendance", path: "/hr-payroll/attendance", pageKey: "employee-attendance" },
+      { label: "Attendance Records", path: "/hr-payroll/attendance-leave-overtime", pageKey: "attendance-leave-overtime" },
       { label: "Salary Calculation", path: "/hr-payroll/salary-calculation", pageKey: "salary-calculation" },
-      { label: "Incentive", path: "/hr-payroll/incentive", pageKey: "incentive" },
+      { label: "Incentives", path: "/hr-payroll/incentive", pageKey: "incentive" },
       { label: "Payroll Run", path: "/hr-payroll/payroll-run", pageKey: "payroll-run" },
     ],
   },
@@ -26,9 +25,9 @@ export const hrPayrollNavItems: NavItem[] = [
     label: "HR",
     icon: UserSquare,
     children: [
-      { label: "Interview", path: "/hr-payroll/interviews", pageKey: "interview" },
-      { label: "Offer Letter & Joining", path: "/hr-payroll/offer-letter-joining", pageKey: "offer-letter-joining" },
-      { label: "HR Attendance Management", path: "/hr-payroll/hr-attendance", pageKey: "hr-attendance-management" },
+      { label: "Interviews", path: "/hr-payroll/interviews", pageKey: "interview" },
+      { label: "Offers & Joining", path: "/hr-payroll/offer-letter-joining", pageKey: "offer-letter-joining" },
+      { label: "Team Attendance", path: "/hr-payroll/hr-attendance", pageKey: "hr-attendance-management" },
     ],
   },
 ];

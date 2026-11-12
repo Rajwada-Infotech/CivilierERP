@@ -4,6 +4,11 @@ import { toast } from "sonner";
 import { X, Upload, FileText, Trash2, Download, Loader2 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
+import { HR_HEAD, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { KEY_LINE } from "@/components/sheet/sheetParts";
+
+// Square row actions (docs/DESIGN.md): 7x7, outlined on hover.
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors shrink-0";
 import {
   getEmployeeDocuments,
   uploadEmployeeDocument,
@@ -109,32 +114,32 @@ export const EmployeeDocumentsModal: React.FC<{
       onClick={onClose}
     >
       <div
-        className="bg-card border border-border rounded-none sm:rounded-none w-full max-w-lg h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-y-auto"
+        className="bg-card w-full max-w-lg h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-y-auto"
+        style={{ border: HR_RULE }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-3.5" style={{ borderBottom: HR_RULE }}>
           <div className="min-w-0">
-            <h2 className="text-sm font-heading font-semibold text-foreground flex items-center gap-2">
-              <FileText size={15} /> Documents
-            </h2>
+            <h2 className={HR_HEAD}>Documents</h2>
             <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate">{employeeName}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-none hover:bg-muted transition-colors text-muted-foreground"
+            aria-label="Close"
+            className={ACT}
           >
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
 
         <div className="p-5 space-y-4">
           {rights.canEdit && (
-            <div className="flex flex-wrap items-center gap-2 rounded-none border border-border/60 bg-muted/30 p-3">
+            <div className="flex flex-wrap items-center gap-2 border border-foreground/30 p-3">
               <select
                 value={docType}
                 onChange={(e) => setDocType(e.target.value)}
-                className="rounded-none border border-border bg-background text-foreground text-xs px-2.5 py-2 h-9 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="h-9 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground outline-none rounded-none"
               >
                 {EMPLOYEE_DOC_TYPES.map((t) => (
                   <option key={t} value={t}>{t}</option>
@@ -144,7 +149,7 @@ export const EmployeeDocumentsModal: React.FC<{
                 type="button"
                 disabled={uploading}
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 px-3 py-2 h-9 rounded-none border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                className={`${KEY_LINE} h-9 px-3`}
               >
                 {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 {uploading ? "Uploading..." : "Upload"}
@@ -169,14 +174,14 @@ export const EmployeeDocumentsModal: React.FC<{
               {docs.map((d) => (
                 <div
                   key={d.AttachmentId}
-                  className="flex items-center gap-3 rounded-none border border-border/60 px-3 py-2.5"
+                  className="flex items-center gap-3 border border-foreground/30 px-3 py-2.5"
                 >
-                  <div className="w-8 h-8 rounded-none bg-primary/10 flex items-center justify-center shrink-0">
-                    <FileText size={14} className="text-primary" />
+                  <div className="w-8 h-8 border border-foreground/40 flex items-center justify-center shrink-0">
+                    <FileText size={14} className="text-foreground" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium text-foreground truncate">{d.FileName}</p>
-                    <p className="text-[0.625rem] text-muted-foreground">
+                    <p className={`text-[0.625rem] text-muted-foreground ${HR_NUM}`}>
                       {d.DocType} - {formatSize(d.FileSize)}
                       {d.UploadedAt ? " - " + new Date(d.UploadedAt).toLocaleDateString("en-IN") : ""}
                     </p>
@@ -184,19 +189,19 @@ export const EmployeeDocumentsModal: React.FC<{
                   <button
                     type="button"
                     onClick={() => openDocument(d.AttachmentId, d.FileName)}
-                    className="p-1.5 rounded-none text-primary hover:bg-primary/10 transition-colors shrink-0"
+                    className={ACT}
                     title="View or download"
                   >
-                    <Download size={14} />
+                    <Download size={13} />
                   </button>
                   {rights.canDelete && (
                     <button
                       type="button"
                       onClick={() => handleDelete(d.AttachmentId)}
-                      className="p-1.5 rounded-none text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                      className={`${ACT} hover:text-destructive hover:border-destructive`}
                       title="Remove"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={13} />
                     </button>
                   )}
                 </div>

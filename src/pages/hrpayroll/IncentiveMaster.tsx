@@ -5,6 +5,7 @@ import { MoneyRecive } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton, HR_NUM } from "@/components/hrpayroll/HrUi";
 import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent, type RecordWithId } from "@/components/MasterPage";
 import { getEmployeeOptions } from "@/api/employeeMasterApi";
 import {
@@ -40,7 +41,8 @@ const fields: FieldDef[] = [
     label: "Document Number",
     type: "custom",
     render: ({ value }) => (
-      <div className="w-full px-3 py-2 rounded-none text-sm font-mono bg-muted/60 border border-border text-muted-foreground">
+      // Read-only on the sheet: a faint square field, the number in the figures face.
+      <div className={`w-full h-9 px-2.5 flex items-center border border-foreground/20 bg-foreground/5 text-sm text-muted-foreground ${value ? HR_NUM : ""}`}>
         {value ? String(value) : "Auto-generated on save"}
       </div>
     ),
@@ -77,6 +79,13 @@ const columns: ColumnDef[] = [
   { key: "amount", label: "Amount" },
   { key: "status", label: "Status" },
 ];
+
+// Figures in the table: document numbers and amounts in the figures face, amounts in rupees.
+const columnRenderers = {
+  documentNo: (v: unknown) => <span className={HR_NUM}>{String(v ?? "")}</span>,
+  amount: (v: unknown) => <span className={`${HR_NUM} font-semibold`}>₹{(Number(v) || 0).toLocaleString("en-IN")}</span>,
+  incentiveDate: (v: unknown) => <span className={HR_NUM}>{String(v ?? "")}</span>,
+};
 
 const toPayload = (r: Record<string, any>) => ({
   EmployeeId: Number(r.employeeId),
@@ -122,13 +131,15 @@ const IncentiveMaster: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading incentives...</div>;
-  if (error) return <div className="p-6 text-destructive">Failed to load Incentive.</div>;
-
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Incentive"]} />
-      <HrPayrollShell title="Incentive" subtitle="Performance, sales, festival, and other incentive payments per employee" icon={MoneyRecive}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Incentives"]} />
+      <HrPayrollShell title="Incentives" subtitle="Performance, sales, festival, and other incentive payments per employee" icon={MoneyRecive}>
+        {isLoading ? (
+          <HrSkeleton />
+        ) : error ? (
+          <HrError text="Failed to load incentives." />
+        ) : (
         <MasterPage
           title="Incentive"
           canCreate={rights.canCreate}
@@ -138,8 +149,10 @@ const IncentiveMaster: React.FC = () => {
           columns={columns}
           initialData={rows}
           onDataEvent={handleDataEvent}
+          columnRenderers={columnRenderers}
           collapsibleAddForm
         />
+        )}
       </HrPayrollShell>
     </>
   );
