@@ -63,8 +63,12 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("expense-type", "Expense Type", "Legal & Financial", Receipt1, "Advocate fee, commission, survey fee"),
   S("payment-mode", "Payment Mode", "Legal & Financial", Wallet, "Cash, bank transfer, cheque, UPI"),
   // ── Setup: Deed & Registration ──
+  S("registration-office-type", "Registration Office Types", "Deed & Registration", Building4, "Office types per state, deed search time limit and start year"),
   S("registration-office", "Deed Registration Office", "Deed & Registration", Building4, "ADSR / DSR / ARA offices"),
   S("deed-type", "Deed Type", "Deed & Registration", Book1, "Sale, gift, partition, POA…"),
+  S("registration-mode", "Registration Mode", "Deed & Registration", Book1, "Physical, e-Registration, commission"),
+  S("igr-status", "IGR Status", "Deed & Registration", ClipboardTick, "Deed status on the IGR site"),
+  S("deed-location", "Deed Location", "Deed & Registration", Building4, "Where the physical deed is kept"),
   S("document-type", "Legal Document Type", "Deed & Registration", DocumentCopy, "Evidence catalogue & retention"),
   S("checklist-template", "Document Checklist Template", "Deed & Registration", ClipboardTick, "Versioned document requirements"),
   S("checklist-item", "Checklist Item", "Deed & Registration", ClipboardTick, "Required / conditional / optional rules"),

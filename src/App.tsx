@@ -138,6 +138,8 @@ const LegalApprovalsInboxPage = lazy(() => import("./pages/legal/LegalApprovalsI
 const LegalActiveLandPage = lazy(() => import("./pages/legal/LegalActiveLandPage"));
 const LegalPendingQueuePage = lazy(() => import("./pages/legal/LegalPendingQueuePage"));
 const LandEnquiryPage = lazy(() => import("./pages/legal/land/LandEnquiryPage"));
+const LandDeedRegistrationPage = lazy(() => import("./pages/legal/land/LandDeedRegistrationPage"));
+const LandDeedSearchPage = lazy(() => import("./pages/legal/land/LandDeedSearchPage"));
 const LandPropertyListPage = lazy(() => import("./pages/legal/land/LandPropertyListPage"));
 const LandReportsPage = lazy(() => import("./pages/legal/land/LandReportsPage"));
 const LandDetailsPage = lazy(() => import("./pages/legal/land/LandDetailsPage"));
@@ -1057,7 +1059,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route path="/legal/deed-registration" element={<ProtectedRoute pageKey="legal-approvals"><LegalApprovalsInboxPage view="deed" /></ProtectedRoute>} />
+      <Route path="/legal/deed-registration" element={<ProtectedRoute pageKey="legal-approvals"><LandDeedRegistrationPage /></ProtectedRoute>} />
       <Route
         path="/legal/active-land"
         element={
@@ -1076,6 +1078,7 @@ function AppRoutes() {
       />
       {/* Company Land Record Management System: Central Land Register and complete Land Details profile */}
       <Route path="/legal/land/enquiries" element={<ProtectedRoute pageKey="legal-land-enquiry"><LandEnquiryPage /></ProtectedRoute>} />
+      <Route path="/legal/land/deed-search" element={<ProtectedRoute pageKey="legal-land-enquiry"><LandDeedSearchPage /></ProtectedRoute>} />
       <Route path="/legal/land/properties" element={<ProtectedRoute pageKey="legal-land-master"><LandPropertyListPage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandProfilePage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id/profile" element={<ProtectedRoute pageKey="legal-land-master"><LandProfilePage /></ProtectedRoute>} />

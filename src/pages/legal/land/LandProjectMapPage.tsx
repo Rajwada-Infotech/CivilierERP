@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 // Which company land serves which project. Only land whose deed is registered (Deed Registration → Submit) is listed;
 // each sits under one project or "Not mapped yet". A project that does not exist yet can be created from here.
 
-const NONE = "Not mapped to a project yet";
+const NONE = "Existing land — project not set";
 
 const areaText = (rows: ProjectLand[]) => {
   const byUnit = new Map<string, number>();
@@ -91,7 +91,7 @@ export default function LandProjectMapPage() {
   const tiles: [string, string][] = [
     ["Registered land", String(lands.length)],
     ["Projects with land", String(new Set(lands.filter((l) => l.ProjectId).map((l) => l.ProjectId)).size)],
-    ["Not mapped yet", String(lands.filter((l) => !l.ProjectId).length)],
+    ["Existing land, project not set", String(lands.filter((l) => !l.ProjectId).length)],
   ];
 
   return (
@@ -99,7 +99,7 @@ export default function LandProjectMapPage() {
       <Breadcrumbs items={["Dashboard", "Legal", "Land & Projects"]} />
       <LegalShell
         title="Land & Projects"
-        subtitle="Which registered company land is under which project. Pick a project, or create a new one for the land."
+        subtitle="Registered company land by project. Land from an enquiry takes the enquiry's project; only existing land without an enquiry needs its project set here."
         icon={Building}
       >
         <div className="mb-4 grid grid-cols-3 gap-3">
@@ -161,14 +161,21 @@ export default function LandProjectMapPage() {
                           </span>
                         </td>
                         <td className="px-3 py-2">
-                          {l.ProjectId ? (
+                          {l.EnquiryNo ? (
+                            // Project set on the enquiry (Land Enquiries are raised per project).
+                            <span className="flex flex-col">
+                              <span className="w-fit rounded bg-primary/10 px-1.5 py-0.5 font-semibold text-foreground">{l.ProjectName ?? "—"}</span>
+                              <span className="text-[0.6875rem] text-muted-foreground">from enquiry {l.EnquiryNo}</span>
+                            </span>
+                          ) : l.ProjectId ? (
                             <span className="flex flex-wrap items-center gap-2">
                               <span className="rounded bg-primary/10 px-1.5 py-0.5 font-semibold text-foreground">{l.ProjectName}</span>
                               <button className="text-xs text-muted-foreground underline hover:text-foreground" onClick={() => setCreating({ land: l, name: "", companyId: "", pick: String(l.ProjectId) })}>Change</button>
                             </span>
                           ) : (
                             <button disabled={saving === l.LandId} onClick={() => setCreating({ land: l, name: "", companyId: "", pick: "" })}
-                              className="rounded-md bg-foreground px-3 py-1.5 text-xs font-semibold text-card hover:opacity-90 disabled:opacity-40">Map to project</button>
+                              title="Existing land (no enquiry): set its project here"
+                              className="rounded-md border border-foreground px-3 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-40">Set project</button>
                           )}
                         </td>
                       </tr>

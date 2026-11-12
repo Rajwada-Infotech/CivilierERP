@@ -248,6 +248,8 @@ interface MasterPageProps {
    * (existing always-open behavior, unchanged for every other page).
    */
   collapsibleAddForm?: boolean;
+  /** Label of the button that opens a collapsed add form (default "New Entry"). */
+  addButtonLabel?: string;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -300,6 +302,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   isRowLocked,
   isDeleteLocked,
   collapsibleAddForm = false,
+  addButtonLabel = "New Entry",
   statusTabs = false,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
@@ -719,7 +722,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               {editingId !== null
                 ? "Modify the details below and save."
                 : !formOpen
-                  ? 'Click "New Entry" to add a record.'
+                  ? `Click "${addButtonLabel}" to add a record.`
                   : fields.some((f) => f.required)
                     ? <>Fields marked <span className="text-destructive">*</span> are required</>
                     : "Fill in the details to create a new record."}
@@ -737,7 +740,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               }`}
             >
               {formOpen ? <X size={12} /> : <Plus size={12} />}
-              {formOpen ? "Close" : "New Entry"}
+              {formOpen ? "Close" : addButtonLabel}
             </button>
           )}
         </div>

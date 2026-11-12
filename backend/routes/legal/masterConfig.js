@@ -67,6 +67,19 @@ const LAND_ID = { name: "LandId", label: "Land property", type: "ref", ref: "lan
 const landChild = (title, table, pk, desc, rest) => ({
   title, group: "Land Management", pageKey: "legal-land-master", table, pk, parent: "LandId", desc, ...rest,
 });
+// Enquiry RS / LR records: a converted enquiry is read-only (its land holds the records now).
+const enquiryOpen = async (pool, values) => {
+  const e = values?.EnquiryId && (await pool.request().input("E", values.EnquiryId).query("SELECT LandId FROM dbo.LegalLandEnquiry WHERE EnquiryId = @E")).recordset[0];
+  return e?.LandId ? "This enquiry is converted — edit the RS / LR records on its land" : null;
+};
+// Keep the enquiry's Dag / Khatian summary (list and search) in step with its RS / LR records.
+const syncEnquiryPlots = async (pool, _req, row) => {
+  const agg = (t, c) => `(SELECT STRING_AGG(v, N', ') FROM (SELECT DISTINCT ${c} AS v FROM dbo.${t} WHERE EnquiryId = e.EnquiryId AND IsActive = 1) x)`;
+  await pool.request().input("E", row.EnquiryId).query(`UPDATE e SET
+      RsDagNo = ${agg("LegalEnquiryRsRecord", "RsDagNo")}, RsKhatianNo = ${agg("LegalEnquiryRsRecord", "RsKhatianNo")},
+      LrDagNo = ${agg("LegalEnquiryLrRecord", "LrDagNo")}, LrKhatianNo = ${agg("LegalEnquiryLrRecord", "LrKhatianNo")}
+    FROM dbo.LegalLandEnquiry e WHERE e.EnquiryId = @E`);
+};
 const MORTGAGE_STATUSES = ["No Mortgage Found", "Mortgage Active", "Loan Outstanding", "Loan Closed", "Release Pending", "Release Verified", "Needs Investigation"];
 const VERIFICATION_CHECKS = ["Encumbrance Search", "Court Case Verification", "Land Dispute Verification", "Government Acquisition Check",
   "Land Classification Verification", "Boundary Verification", "Co-owner Consent Verification", "Title Search", "Ownership Chain Verification"];
@@ -345,10 +358,19 @@ const MASTERS = {
     noDelete: true,
     extras: [
       { name: "LandCode", label: "Land conversion", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" },
+      // Deed Registry Search: offices still open (the enquiry's actions open once every office's search is complete).
+      { name: "OfficesPending", label: "Deed search offices open", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND x.Status = N'Pending')" },
+      { name: "OfficesTotal", label: "Deed search offices", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId)" },
+      { name: "OfficesOverdue", label: "Deed search offices overdue", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND t.EnquiryStatus <> N'Rejected' AND x.Status = N'Pending' AND x.DueDate < CAST(GETDATE() AS DATE))" },
       // Who raised the enquiry, with a WhatsApp link so anyone can talk to them about it.
       { name: "EnquiryBy", label: "Entry by", after: "EnquiryNo", sql: "(SELECT u.name FROM dbo.users u WHERE u.id = t.CreatedBy)",
         whatsapp: "(SELECT u.WhatsAppNo FROM dbo.users u WHERE u.id = t.CreatedBy)", userId: "t.CreatedBy" },
     ],
+    // Deed Registry Search timelines start here: one per office type (ADSR, DSR, RA Calcutta, BLRO), due = enquiry date
+    // + that office's time limit.
+    afterWrite: async (pool, _req, row) => {
+      await require("./enquirySearch").ensureOfficeTimelines(pool, row.EnquiryId);
+    },
     guard: async (pool, id, values) => {
       const r = await pool.request().input("Id", id).query("SELECT EnquiryStatus, (SELECT LandCode FROM dbo.LegalLand l WHERE l.LandId = e.LandId) AS LandCode FROM dbo.LegalLandEnquiry e WHERE EnquiryId = @Id");
       const row = r.recordset[0];
@@ -357,6 +379,8 @@ const MASTERS = {
       return null;
     },
     fields: [
+      // Picked first: every enquiry belongs to a project (Land Enquiries is opened per project).
+      { name: "ProjectId", label: "Project", type: "ref", ref: "project", required: true },
       { name: "EnquiryNo", label: "Enquiry number", type: "text", max: 30, auto: "ENQ" },
       // Recorded as the save date by itself (not in the form).
       { name: "EnquiryDate", label: "Enquiry date", type: "date", system: true, default: "today" },
@@ -369,9 +393,15 @@ const MASTERS = {
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true, filterBy: "DistrictId", blankOk: true, fill: { JLNo: "JLNo" } },
       { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
+      // Plot references: kept from the enquiry's RS / LR records (below the enquiry), shown in the list and used by search.
+      { name: "RsDagNo", label: "RS Dag", type: "text", max: 400, system: true },
+      { name: "RsKhatianNo", label: "RS Khatian", type: "text", max: 400, system: true },
+      { name: "LrDagNo", label: "LR Dag", type: "text", max: 400, system: true },
+      { name: "LrKhatianNo", label: "LR Khatian", type: "text", max: 400, system: true },
       { name: "GpsLatitude", label: "GPS latitude", type: "decimal", signed: true, min: -90, maxValue: 90 },
       { name: "GpsLongitude", label: "GPS longitude", type: "decimal", signed: true, min: -180, maxValue: 180 },
-      { name: "ApproxArea", label: "Area", type: "decimal" },
+      { name: "ApproxArea", label: "Total area", type: "decimal" },
+      { name: "DeedArea", label: "Deed area", type: "decimal" },
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "ApproxArea" },
       { name: "ContactPerson", label: "Seller / contact person", type: "text", max: 200 },
       { name: "ContactNumber", label: "Contact number", type: "text", max: 15, pattern: "^[+]?[0-9 -]{8,15}$", patternMsg: "Enter a valid phone number" },
@@ -385,18 +415,70 @@ const MASTERS = {
       ACTIVE,
     ],
   },
+  // An enquiry's RS and LR records (several Dags per enquiry). Saving one refreshes the enquiry's Dag / Khatian summary;
+  // Land Conversion copies them to the land's RS / LR records.
+  "enquiry-rs-record": {
+    title: "Enquiry RS Record", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalEnquiryRsRecord", pk: "RsRecordId", parent: "EnquiryId",
+    desc: "Revisional Survey Khatian / Dag of this enquiry land.",
+    label: "'RS Kh ' + RsKhatianNo + ' / Dag ' + RsDagNo", orderBy: "RsKhatianNo, RsDagNo",
+    unique: [["EnquiryId", "RsKhatianNo", "RsDagNo"], "This RS Khatian and Dag are already on this enquiry"],
+    check: enquiryOpen, afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
+    fields: [
+      { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
+      { name: "RsKhatianNo", label: "RS Khatian number", type: "text", required: true, max: 30 },
+      { name: "RsDagNo", label: "RS Dag number", type: "text", required: true, max: 30 },
+      { name: "RecordedHolder", label: "Recorded holder", type: "text", max: 200 },
+      { name: "Area", label: "Area", type: "decimal" },
+      { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "Area" },
+      { name: "Share", label: "Share", type: "text", max: 30 },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+      ACTIVE,
+    ],
+  },
+  "enquiry-lr-record": {
+    title: "Enquiry LR Record", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalEnquiryLrRecord", pk: "LrRecordId", parent: "EnquiryId",
+    desc: "Land Reforms Khatian / Dag (RoR) of this enquiry land.",
+    label: "'LR Kh ' + LrKhatianNo + ' / Dag ' + LrDagNo", orderBy: "LrKhatianNo, LrDagNo",
+    unique: [["EnquiryId", "LrKhatianNo", "LrDagNo"], "This LR Khatian and Dag are already on this enquiry"],
+    check: enquiryOpen, afterWrite: syncEnquiryPlots, afterDelete: syncEnquiryPlots,
+    fields: [
+      { name: "EnquiryId", label: "Enquiry", type: "ref", ref: "land-enquiry", required: true },
+      { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
+      { name: "LrKhatianNo", label: "LR Khatian number", type: "text", required: true, max: 30 },
+      { name: "LrDagNo", label: "LR Dag number", type: "text", required: true, max: 30 },
+      { name: "MatchingRsRecordId", label: "Matching RS record (optional)", type: "ref", ref: "enquiry-rs-record", filterBy: "EnquiryId" },
+      { name: "RecordedHolder", label: "Recorded holder", type: "text", max: 200 },
+      { name: "Area", label: "Area", type: "decimal" },
+      { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "Area" },
+      { name: "Share", label: "Share", type: "text", max: 30 },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+      ACTIVE,
+    ],
+  },
   // One land property's RS and LR records and its parties (opened from the property's page).
   "land-rs-record": {
     title: "RS Record", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandRsRecord", pk: "RsRecordId", parent: "LandId", review: REVIEW,
+    afterWrite: async (pool, _req, row) => {
+      await pool.request().input("Id", row.RsRecordId).query(`
+        UPDATE r SET RsKhatianId = k.RsKhatianId, RsPlotId = p.RsPlotId,
+          RecordedHolder = ISNULL(r.RecordedHolder, k.HolderName), Share = ISNULL(r.Share, k.Share),
+          Area = ISNULL(r.Area, p.Area), AreaUnitId = CASE WHEN r.Area IS NULL THEN p.AreaUnitId ELSE r.AreaUnitId END
+        FROM dbo.LegalLandRsRecord r
+        OUTER APPLY (SELECT TOP 1 * FROM dbo.LegalRsKhatian x WHERE x.MouzaId = r.MouzaId AND x.KhatianNo = r.RsKhatianNo) k
+        OUTER APPLY (SELECT TOP 1 * FROM dbo.LegalRsPlot x WHERE x.MouzaId = r.MouzaId AND x.PlotNo = r.RsDagNo) p
+        WHERE r.RsRecordId = @Id`);
+    },
     desc: "Revisional Survey Khatian / Dag references of this land.",
     label: "'RS Kh ' + RsKhatianNo + ' / Dag ' + RsDagNo", orderBy: "RsKhatianNo, RsDagNo",
     unique: [["LandId", "MouzaId", "RsKhatianNo", "RsDagNo"], "This RS Khatian and Dag are already recorded for this land"],
     fields: [
       { name: "LandId", label: "Land property", type: "ref", ref: "land", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true },
-      // Optional links to the registers: picking one fills the numbers, holder and area below.
-      { name: "RsKhatianId", label: "Pick RS Khatian from register (optional)", type: "ref", ref: "rs-khatian", filterBy: "MouzaId", fill: { RsKhatianNo: "KhatianNo", RecordedHolder: "HolderName", Share: "Share" } },
-      { name: "RsPlotId", label: "Pick RS plot from register (optional)", type: "ref", ref: "rs-plot", filterBy: "MouzaId", fill: { RsDagNo: "PlotNo", Area: "Area", AreaUnitId: "AreaUnitId", RsKhatianId: "RsKhatianId" } },
+      // Links to the RS registers are not asked for: on save the Khatian / Dag typed below is matched to the register
+      // (same mouza) and linked, and an empty holder / area / share is filled from it.
+      { name: "RsKhatianId", label: "RS Khatian (register)", type: "ref", ref: "rs-khatian", hidden: true, system: true },
+      { name: "RsPlotId", label: "RS plot (register)", type: "ref", ref: "rs-plot", hidden: true, system: true },
       { name: "RsKhatianNo", label: "RS Khatian number", type: "text", required: true, max: 30 },
       { name: "RsDagNo", label: "RS Dag number", type: "text", required: true, max: 30 },
       { name: "RecordedHolder", label: "Recorded holder", type: "text", max: 200 },
@@ -415,13 +497,23 @@ const MASTERS = {
   },
   "land-lr-record": {
     title: "LR Record of Rights", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandLrRecord", pk: "LrRecordId", parent: "LandId", review: REVIEW,
+    afterWrite: async (pool, _req, row) => {
+      await pool.request().input("Id", row.LrRecordId).query(`
+        UPDATE r SET LrRorId = o.LrRorId, RecordedHolder = ISNULL(r.RecordedHolder, o.HolderName), GuardianName = ISNULL(r.GuardianName, o.GuardianName),
+          Share = ISNULL(r.Share, o.Share), RorDate = ISNULL(r.RorDate, o.RorDate),
+          Area = ISNULL(r.Area, o.Area), AreaUnitId = CASE WHEN r.Area IS NULL THEN o.AreaUnitId ELSE r.AreaUnitId END
+        FROM dbo.LegalLandLrRecord r
+        OUTER APPLY (SELECT TOP 1 * FROM dbo.LegalLrRor x WHERE x.MouzaId = r.MouzaId AND x.LrKhatianNo = r.LrKhatianNo AND x.LrPlotNo = r.LrDagNo) o
+        WHERE r.LrRecordId = @Id`);
+    },
     desc: "Land Reforms Khatian / Dag (RoR) references of this land, optionally matched to an RS record.",
     label: "'LR Kh ' + LrKhatianNo + ' / Dag ' + LrDagNo", orderBy: "LrKhatianNo, LrDagNo",
     unique: [["LandId", "MouzaId", "LrKhatianNo", "LrDagNo"], "This LR Khatian and Dag are already recorded for this land"],
     fields: [
       { name: "LandId", label: "Land property", type: "ref", ref: "land", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true },
-      { name: "LrRorId", label: "Pick LR RoR from register (optional)", type: "ref", ref: "lr-ror", filterBy: "MouzaId", fill: { LrKhatianNo: "LrKhatianNo", LrDagNo: "LrPlotNo", RecordedHolder: "HolderName", GuardianName: "GuardianName", Area: "Area", AreaUnitId: "AreaUnitId", Share: "Share", RorDate: "RorDate" } },
+      // Matched to the LR RoR register on save (like the RS record), not picked.
+      { name: "LrRorId", label: "LR RoR (register)", type: "ref", ref: "lr-ror", hidden: true, system: true },
       { name: "LrKhatianNo", label: "LR Khatian number", type: "text", required: true, max: 30 },
       { name: "LrDagNo", label: "LR Dag number", type: "text", required: true, max: 30 },
       // Optional: an LR plot need not carry the RS number, and the two numbers are never assumed equal.
@@ -1350,6 +1442,25 @@ const MASTERS = {
   },
 
   // ── Registration ────────────────────────────────────────────────────────────────────────────────
+  // Office types (ADSR, DSR, Sub-Registrar…) per state: each has its deed-search time limit and first year. Types
+  // marked "On every enquiry" get a search timeline on each new enquiry in that state (blank state = all of India).
+  "registration-office-type": {
+    title: "Registration Office Type", group: "Registration", pageKey: "legal-registration-office-type-master", table: "LegalRegistrationOfficeType", pk: "OfficeTypeId",
+    desc: "Kinds of registration office, state by state, with the Deed Registry Search time limit for each.",
+    label: "TypeName + ISNULL(' (' + StateName + ')', '')", orderBy: "StateName, SortOrder, TypeName",
+    unique: [["TypeName", "StateName"], "This office type already exists for this state"],
+    fields: [
+      { name: "TypeName", label: "Office type", type: "text", required: true, max: 60 },
+      { name: "Code", label: "Code", type: "text", max: 20, upper: true },
+      { name: "StateName", label: "State (blank = all India)", type: "text", max: 100 },
+      { name: "SlaDays", label: "Deed search time limit (days)", type: "int", required: true, min: 1, maxValue: 365, default: 7 },
+      { name: "FromYear", label: "Search from calendar year", type: "int", required: true, min: 1800, maxValue: 2100, default: 1956 },
+      { name: "OnEnquiry", label: "Timeline on every new enquiry", type: "bit", default: true },
+      { name: "Description", label: "Full name / notes", type: "textarea", max: 500 },
+      { name: "SortOrder", label: "Display order", type: "int", min: 0, default: 0 },
+      ACTIVE,
+    ],
+  },
   "registration-office": {
     title: "Deed Registration Office", group: "Registration", pageKey: "legal-registration-office-master", table: "LegalRegistrationOffice", pk: "OfficeId",
     desc: "Government offices where deeds and other registrable documents are registered.",
@@ -1358,12 +1469,14 @@ const MASTERS = {
     derived: [
       { name: "District", from: "DistrictId", column: "DistrictName" },
       { name: "State", from: "DistrictId", column: "State" },
+      { name: "OfficeType", from: "OfficeTypeId", column: "TypeName" },
     ],
     unique: [["OfficeCode"], "This office code already exists"],
     fields: [
       { name: "OfficeCode", label: "Office code", type: "text", required: true, max: 30, upper: true },
       { name: "OfficeName", label: "Official name", type: "text", required: true, max: 200 },
-      { name: "OfficeType", label: "Office type", type: "select", required: true, options: ["ADSR", "DSR", "ARA", "Registrar", "Sub-Registrar", "Other"] },
+      // From Setup → Registration Office Type; the type's name is kept in OfficeType for older screens.
+      { name: "OfficeTypeId", label: "Office type", type: "ref", ref: "registration-office-type", required: true },
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "Jurisdiction", label: "Jurisdiction (blocks / areas it covers)", type: "textarea", max: 500 },
       { name: "Address", label: "Address", type: "textarea", max: 500 },
@@ -1550,6 +1663,9 @@ const MASTERS = {
   "expense-type": lookup("expense-type", "Expense Type", "Legal & Financial", "Advocate fee, commission, survey fee…"),
   "payment-mode": lookup("payment-mode", "Payment Mode", "Legal & Financial", "Cash, bank transfer, cheque, UPI…"),
   "fee-type": lookup("fee-type", "Registration Fee Type", "Registration", "Stamp duty, registration, scanning fee…"),
+  "registration-mode": lookup("registration-mode", "Registration Mode", "Registration", "Physical at office, e-Registration, commission…"),
+  "igr-status": lookup("igr-status", "IGR Status", "Registration", "Where the deed stands on the IGR site: applied, registered, ready, delivered…"),
+  "deed-location": lookup("deed-location", "Deed Location", "Registration", "Where the physical deed is: registration office, advocate, company office…"),
 
   // ── Parties ─────────────────────────────────────────────────────────────────────────────────────
   buyer: person("Buyer", "Buyer", "Buyers of land: identity, PAN / Aadhaar and their land record documents."),

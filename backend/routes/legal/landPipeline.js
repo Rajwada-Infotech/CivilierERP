@@ -358,6 +358,9 @@ async function pipelineCounters(pool) {
     "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Registered') AS registered",
   ];
   if (has.dt) parts.push("(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND DeedTargetDate < CAST(GETDATE() AS DATE)) AS deedOverdue");
+  if ((await pool.request().query("SELECT OBJECT_ID('dbo.LegalEnquiryOfficeSearch','U') AS t")).recordset[0].t) parts.push(
+    "(SELECT COUNT(DISTINCT o.EnquiryId) FROM dbo.LegalEnquiryOfficeSearch o JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = o.EnquiryId WHERE e.IsActive = 1 AND e.LandId IS NULL AND e.EnquiryStatus <> N'Rejected' AND o.Status = N'Pending') AS pendingDeedSearch",
+    "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch o JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = o.EnquiryId WHERE e.IsActive = 1 AND e.LandId IS NULL AND e.EnquiryStatus <> N'Rejected' AND o.Status = N'Pending' AND o.DueDate < CAST(GETDATE() AS DATE)) AS deedSearchOverdue");
   if (has.dd) parts.push(
     `${area("ownership")} AS pendingOwnership`,
     `(SELECT COUNT(*) FROM dbo.LegalLand l WHERE ${PRE} AND (SELECT COUNT(*) FROM dbo.LegalDiligenceArea x WHERE x.LandId = l.LandId AND x.Status IN (N'Verified', N'Not Applicable')) < 4) AS pendingDiligence`,
@@ -459,6 +462,7 @@ router.get("/project-map", requirePageRight(LAND_PAGE, "view"), async (_req, res
     const pool = getPool();
     const lands = (await pool.request().query(`
       SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, p.name AS ProjectName, m.MouzaName, d.DistrictName,
+             (SELECT TOP 1 e.EnquiryNo FROM dbo.LegalLandEnquiry e WHERE e.LandId = l.LandId) AS EnquiryNo,
              CAST(l.Area AS DECIMAL(18,4)) AS Area, u.UnitName, l.EntryType, l.LandStatus, l.WorkflowStatus,
              l.VerificationStatus, l.L1Status, l.L2Status, l.IsOnHold,
              CAST(1 AS BIT) AS IsComplete,
@@ -490,8 +494,12 @@ router.put("/:id/project", requirePageRight(LAND_PAGE, "edit"), async (req, res)
       const ok = await pool.request().input("p", sql.Int, projectId).query("SELECT 1 AS x FROM dbo.enterprise WHERE id = @p AND business_type = 'P'");
       if (!ok.recordset.length) return res.status(400).json({ error: "Project not found" });
     }
-    const old = (await pool.request().input("id", sql.Int, id).query("SELECT ProjectId, L2Status, WorkflowStatus FROM dbo.LegalLand WHERE LandId = @id AND IsActive = 1")).recordset[0];
+    const old = (await pool.request().input("id", sql.Int, id).query(`SELECT ProjectId, L2Status, WorkflowStatus,
+        (SELECT TOP 1 e.EnquiryNo FROM dbo.LegalLandEnquiry e WHERE e.LandId = l.LandId AND e.ProjectId IS NOT NULL) AS EnquiryNo
+      FROM dbo.LegalLand l WHERE LandId = @id AND IsActive = 1`)).recordset[0];
     if (!old) return res.status(404).json({ error: "Land not found" });
+    // Land from an enquiry takes the enquiry's project; change it on the enquiry's project, not here.
+    if (old.EnquiryNo) return res.status(409).json({ error: `This land's project comes from enquiry ${old.EnquiryNo}` });
     // Only fully approved land (L2) goes under a project; taking a land off its project is always allowed.
     if (projectId && old.WorkflowStatus !== "Registered") return res.status(400).json({ error: "Only land with a registered deed can be mapped to a project" });
     await pool.request().input("id", sql.Int, id).input("p", sql.Int, projectId).input("u", sql.Int, req.user?.userId || null)
@@ -1589,6 +1597,12 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
     if (!e) return refuse(404, "Enquiry not found");
     if (e.LandId || e.EnquiryStatus === "Converted to Land Record") return refuse(409, "This enquiry is already converted");
     if (e.EnquiryStatus === "Rejected" || e.EnquiryStatus === "On Hold") return refuse(409, `This enquiry is ${e.EnquiryStatus.toLowerCase()}; resume it before converting.`);
+    // Deed Registry Search comes first: every registration office's search must be complete.
+    if ((await tx.request().query("SELECT OBJECT_ID('dbo.LegalEnquiryOfficeSearch','U') AS t")).recordset[0].t) {
+      const open = (await tx.request().input("Id", sql.Int, id).query(
+        "SELECT STRING_AGG(OfficeType, ', ') AS t FROM dbo.LegalEnquiryOfficeSearch WHERE EnquiryId = @Id AND Status = N'Pending'")).recordset[0].t;
+      if (open) return refuse(409, `Finish the Deed Registry Search first — still open: ${open}.`);
+    }
 
     // Land ID = <address prefix>/<running no>/<financial year>, e.g. KOL/00001/2026-27. The prefix is the land's
     // district code (Setup → District), else the first letters of the district name; the number runs per prefix and year.
@@ -1608,15 +1622,32 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
       .input("Address", sql.NVarChar(1000), e.LandLocation).input("EnquiryId", sql.Int, id)
       .input("Lat", sql.Decimal(10, 7), e.GpsLatitude ?? null).input("Lng", sql.Decimal(10, 7), e.GpsLongitude ?? null)
       .input("UserId", sql.Int, req.user?.userId || null)
+      // The project comes from the enquiry (enquiries are raised under a project).
+      .input("ProjectId", sql.Int, e.ProjectId ?? null)
       .query(`
         INSERT INTO dbo.LegalLand (LandCode, LandName, DistrictId, MouzaId, Area, AreaUnitId, LocationAddress, GpsLatitude, GpsLongitude, EnquiryId, LandStatus, IsOnHold, IsActive, CreatedBy, CreatedAt,
-                                     EntryType, VerificationStatus, L1Status, L2Status, WorkflowStatus)
+                                     EntryType, VerificationStatus, L1Status, L2Status, WorkflowStatus, ProjectId)
         OUTPUT INSERTED.LandId AS id, INSERTED.LandCode AS code
         SELECT @Prefix + RIGHT('00000' + CAST(ISNULL((
                  SELECT MAX(TRY_CAST(SUBSTRING(LandCode, LEN(@Prefix) + 1, LEN(LandCode) - LEN(@Prefix) - LEN(@Fy)) AS INT))
                  FROM dbo.LegalLand WITH (UPDLOCK, HOLDLOCK) WHERE LandCode LIKE @Prefix + '%' AND RIGHT(LandCode, LEN(@Fy)) = @Fy), 0) + 1 AS VARCHAR(10)), 5) + @Fy, @Name, @DistrictId, @MouzaId, @Area, @AreaUnitId, @Address, @Lat, @Lng, @EnquiryId, N'Identified', 0, 1, @UserId, SYSUTCDATETIME(),
-               N'New Acquisition', N'Draft', N'Pending', N'Pending', N'Draft (Verification Pending)'`);
+               N'New Acquisition', N'Draft', N'Pending', N'Pending', N'Draft (Verification Pending)', @ProjectId`);
     const land = ins.recordset[0];
+    // The enquiry's RS / LR records become the land's (migration 661).
+    if ((await tx.request().query("SELECT OBJECT_ID('dbo.LegalEnquiryRsRecord','U') AS t")).recordset[0].t) {
+      await tx.request().input("Id", sql.Int, id).input("LandId", sql.Int, land.id).input("MouzaId", sql.Int, e.MouzaId).input("UserId", sql.Int, req.user?.userId || null).query(`
+        INSERT INTO dbo.LegalLandRsRecord (LandId, MouzaId, RsKhatianNo, RsDagNo, RecordedHolder, Area, AreaUnitId, Share, Remarks, IsActive, CreatedBy)
+        SELECT @LandId, ISNULL(r.MouzaId, @MouzaId), r.RsKhatianNo, r.RsDagNo, r.RecordedHolder, r.Area, r.AreaUnitId, r.Share, r.Remarks, 1, @UserId
+        FROM dbo.LegalEnquiryRsRecord r WHERE r.EnquiryId = @Id AND r.IsActive = 1;
+        INSERT INTO dbo.LegalLandLrRecord (LandId, MouzaId, LrKhatianNo, LrDagNo, RecordedHolder, Area, AreaUnitId, Share, Remarks, IsActive, CreatedBy)
+        SELECT @LandId, ISNULL(r.MouzaId, @MouzaId), r.LrKhatianNo, r.LrDagNo, r.RecordedHolder, r.Area, r.AreaUnitId, r.Share, r.Remarks, 1, @UserId
+        FROM dbo.LegalEnquiryLrRecord r WHERE r.EnquiryId = @Id AND r.IsActive = 1;
+        UPDATE dbo.LegalLand SET RsDagNo = LEFT((SELECT TOP 1 RsDagNo FROM dbo.LegalEnquiryRsRecord WHERE EnquiryId = @Id AND IsActive = 1 ORDER BY RsRecordId), 30),
+          RsKhatianNo = LEFT((SELECT TOP 1 RsKhatianNo FROM dbo.LegalEnquiryRsRecord WHERE EnquiryId = @Id AND IsActive = 1 ORDER BY RsRecordId), 30),
+          LrDagNo = LEFT((SELECT TOP 1 LrDagNo FROM dbo.LegalEnquiryLrRecord WHERE EnquiryId = @Id AND IsActive = 1 ORDER BY LrRecordId), 30),
+          LrKhatianNo = LEFT((SELECT TOP 1 LrKhatianNo FROM dbo.LegalEnquiryLrRecord WHERE EnquiryId = @Id AND IsActive = 1 ORDER BY LrRecordId), 30)
+        WHERE LandId = @LandId;`);
+    }
     await tx.request().input("Id", sql.Int, id).input("LandId", sql.Int, land.id).input("UserId", sql.Int, req.user?.userId || null)
       .query(`UPDATE dbo.LegalLandEnquiry SET EnquiryStatus = N'Converted to Land Record', LandId = @LandId, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE EnquiryId = @Id`);
     await writeAudit(tx, req, { action: "Land created", entityType: "Land Property", entityId: land.id, landId: land.id, newValue: { landCode: land.code, fromEnquiry: e.EnquiryNo } });
@@ -2056,6 +2087,11 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
       return res.json({ message: `${l.LandCode}: applied for deed registration` });
     }
     if (!l.RegAppliedAt) return res.status(409).json({ error: "Apply for registration first" });
+    // Final Registration (date, office, mode) comes before the registered deed is uploaded (migration 659).
+    if ((await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'RegFinalDate') AS c")).recordset[0].c) {
+      const f = (await pool.request().input("Id", sql.Int, id).query("SELECT RegFinalDate, RegOfficeId, RegModeId FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
+      if (!f.RegFinalDate || !f.RegOfficeId || !f.RegModeId) return res.status(409).json({ error: "Fill Final Registration (date, office, mode) before submitting the registered deed" });
+    }
     const fileId = idParam(req.body?.fileId);
     if (!fileId) return res.status(400).json({ error: "Upload the registered deed copy" });
     if (!(await pool.request().input("F", sql.Int, fileId).query("SELECT 1 AS x FROM dbo.LegalMasterFile WHERE FileId = @F")).recordset[0]) return res.status(400).json({ error: "File not found" });

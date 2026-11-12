@@ -103,7 +103,7 @@ export interface LandStats {
   /** Lands in Deed Process whose timeline has passed. */
   /** Counters along the legal flow (Legal dashboard). */
   pipeline?: Partial<Record<"enquiries" | "pendingOwnership" | "pendingDiligence" | "pendingInheritance" | "pendingReview" | "highRisk" | "restricted" | "pendingFinal"
-    | "pendingL1" | "pendingL2" | "pendingRegistration" | "deedOverdue" | "pendingMutation" | "registered", number>>;
+    | "pendingL1" | "pendingL2" | "pendingRegistration" | "deedOverdue" | "pendingMutation" | "registered" | "pendingDeedSearch" | "deedSearchOverdue", number>>;
   deedOverdue?: { LandId: number; LandCode: string; LandName: string; DeedTargetDate: string; DaysOver: number }[];
   pendingRegistration: number;
   mutationPending: number;
@@ -260,7 +260,7 @@ export const deleteLand = async (id: number, confirmCode: string) =>
 
 /** Land ↔ project map: every company land with the project it serves. Complete = fully approved (L2). */
 export interface ProjectLand {
-  LandId: number; LandCode: string; LandName: string; ProjectId: number | null; ProjectName: string | null;
+  LandId: number; LandCode: string; LandName: string; ProjectId: number | null; ProjectName: string | null; EnquiryNo?: string | null;
   MouzaName: string | null; DistrictName: string | null; Area: number | null; UnitName: string | null;
   EntryType: string | null; LandStatus: string; WorkflowStatus: string | null; VerificationStatus: string | null;
   L1Status: string | null; L2Status: string | null; IsOnHold: boolean; IsComplete: boolean; Documents: number; CurrentOwners: string | null;

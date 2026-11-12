@@ -1,9 +1,10 @@
-import { Judge, Global, Note1, DocumentText, MessageQuestion, MoneySend, ClipboardTick, Building } from "iconsax-react";
+import { Judge, Global, Note1, DocumentText, MessageQuestion, MoneySend, ClipboardTick, Building, SearchStatus } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Company Land Record Management System navigation:
 // - Dashboard
-// - Land Enquiries (prospects & leads)
+// - Land Enquiries (prospects & leads), under a project
+// - Deed Registry Search (enquiry land, office and calendar year; per-office time limits)
 // - Land Register (all company properties)
 // - Pending Verification (lands waiting for final verification)
 // - Deed Process (verified lands, with the verifier's deed timeline)
@@ -18,6 +19,7 @@ export const legalNavItems: NavItem[] = [
 
   // ── Company Land Records & Verification / Approvals ───────────────────────
   { label: "Land Enquiries", icon: MessageQuestion, path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
+  { label: "Deed Registry Search", icon: SearchStatus, path: "/legal/land/deed-search", pageKey: "legal-land-enquiry" },
   { label: "Land Register", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
   { label: "Pending Verification", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
   { label: "Deed Process", icon: Note1, path: "/legal/land/deed-process", pageKey: "legal-land-master" },

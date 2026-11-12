@@ -727,6 +727,7 @@ router.delete("/:master/:id", withRight("delete"), async (req, res) => {
       .query(`DELETE FROM dbo.${cfg.table} OUTPUT DELETED.* WHERE ${cfg.pk} = @Id${scopeSql(cfg)}`);
     if (!result.recordset.length) return res.status(404).json({ error: `${cfg.title} not found` });
     const row = result.recordset[0];
+    if (cfg.afterDelete) await cfg.afterDelete(pool, req, row);
     await writeAudit(pool, req, { action: "Deleted", entityType: cfg.title, entityId: id, landId: landOf(cfg, id, row), oldValue: auditCopy(cfg, row) });
     res.json({ message: `${cfg.title} deleted` });
   } catch (err) {

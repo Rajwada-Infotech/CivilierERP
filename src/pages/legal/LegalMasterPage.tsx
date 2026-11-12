@@ -334,6 +334,8 @@ interface TableProps {
   requestEditId?: string | null;
   /** Hide the "Add" form: rows are created elsewhere (e.g. the ownership chain) and only edited / verified here. */
   noAdd?: boolean;
+  /** Keep the add form closed behind a button with this label. */
+  addButton?: string;
   /** Extra classes for a row from its raw values (e.g. a tint by status). */
   rowClassName?: (raw: LegalRow) => string | undefined;
   /** Show only the rows this returns true for (a dashboard tile's filter). */
@@ -346,7 +348,7 @@ interface TableProps {
   fixed?: Record<string, string>;
 }
 
-export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName, rowFilter, onCreated, fixed, rowLock }: TableProps) {
+export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, addButton, rowClassName, rowFilter, onCreated, fixed, rowLock }: TableProps) {
   const rights = usePageRights(entry.pageKey);
   const { currentUser } = useAuth();
   const isAdminTier = isPrivilegedRole(currentUser?.role);
@@ -487,7 +489,8 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
     <MasterPage
       title={master.title}
       canCreate={rights.canCreate && !noAdd && !locked}
-      collapsibleAddForm={noAdd || !!parentId}
+      collapsibleAddForm={noAdd || !!parentId || !!addButton}
+      addButtonLabel={addButton}
       statusTabs
       canEdit={rights.canEdit && !locked}
       canDelete={rights.canDelete && !master.noDelete && !locked}

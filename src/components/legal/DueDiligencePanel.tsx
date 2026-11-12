@@ -221,8 +221,8 @@ export const DueDiligencePanel: React.FC<{ landId: number; onGoTab: (tab: string
       {/* 6. Litigation & encumbrance — open cases / stay orders need a legal officer's clearance */}
       <section className={card}>
         <h3 className="text-sm font-heading font-bold uppercase tracking-[0.1em]">Litigation & encumbrance</h3>
-        <p className="mt-1 text-xs text-muted-foreground">Court cases (with stay order / injunction) are entered in Legal Information; loans, mortgages, encumbrance certificate and attachment orders in Loan & Mortgage.
-          {" "}<button className="text-xs underline" onClick={() => onGoTab("legal")}>Open Legal Information</button> · <button className="text-xs underline" onClick={() => onGoTab("loans")}>Open Loan & Mortgage</button></p>
+        <p className="mt-1 text-xs text-muted-foreground">Court cases (with stay order / injunction) are entered in Legal Dispute Information; loans, mortgages, encumbrance certificate and attachment orders in Loan & Mortgage.
+          {" "}<button className="text-xs underline" onClick={() => onGoTab("legal")}>Open Legal Dispute Information</button> · <button className="text-xs underline" onClick={() => onGoTab("loans")}>Open Loan & Mortgage</button></p>
         {!(d.cases ?? []).length ? <p className="mt-2 text-xs text-muted-foreground">No open court case or stay order.</p> : (
           <ul className="mt-2 space-y-1.5 text-xs">
             {(d.cases ?? []).map((c) => (

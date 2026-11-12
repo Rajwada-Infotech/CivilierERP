@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getOverdueSearches } from "@/api/legalEnquirySearchApi";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Global, MessageQuestion, Timer1, PauseCircle, ShieldTick, Judge, Map1, Grid5, DocumentText, Building4, Profile2User, Link21, Note1, Chart, MoneySend } from "iconsax-react";
 import { ArrowRight, ChevronRight, CheckCircle2, CircleAlert, ExternalLink, Search, Trash2, AlertTriangle, Eye } from "lucide-react";
@@ -37,6 +38,8 @@ export default function LegalDashboard() {
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-summary"], queryFn: getLegalSummary, staleTime: 60 * 1000 });
   const landRights = usePageRights("legal-land-master");
   const { data: land } = useQuery({ queryKey: ["legal-land-stats"], queryFn: getLandStats, staleTime: 60 * 1000, enabled: landRights.canView });
+  const enquiryRights = usePageRights("legal-land-enquiry");
+  const { data: searchOverdue = [] } = useQuery({ queryKey: ["legal-enq-search-overdue"], queryFn: getOverdueSearches, staleTime: 60 * 1000, enabled: enquiryRights.canView, retry: false });
 
   const [landSearch, setLandSearch] = useState("");
   const [landToDelete, setLandToDelete] = useState<LandSummaryItem | null>(null);
@@ -117,6 +120,8 @@ export default function LegalDashboard() {
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
                 {([
                   ["Land enquiries", "enquiries", "/legal/land/enquiries", false],
+                  ["Pending deed registry search", "pendingDeedSearch", "/legal/land/deed-search", true],
+                  ["Overdue deed registry searches", "deedSearchOverdue", "/legal/land/deed-search", true],
                   ["Pending ownership verification", "pendingOwnership", "/legal/approvals", true],
                   ["Pending due diligence", "pendingDiligence", "/legal/approvals", true],
                   ["Pending inheritance verification", "pendingInheritance", "/legal/approvals", true],
@@ -132,7 +137,7 @@ export default function LegalDashboard() {
                   ["Completed registrations", "registered", "/legal/land/projects", false],
                 ] as const).filter(([, k]) => land.pipeline![k] !== undefined).map(([label, k, path, warn]) => {
                   const n = land.pipeline![k] ?? 0;
-                  const hot = warn && n > 0 && (k === "highRisk" || k === "restricted" || k === "deedOverdue");
+                  const hot = warn && n > 0 && (k === "highRisk" || k === "restricted" || k === "deedOverdue" || k === "deedSearchOverdue");
                   return (
                     <button key={k} onClick={() => navigate(path)} className={`rounded-xl border p-3 text-left transition-transform hover:-translate-y-0.5 ${hot ? "border-destructive bg-destructive/10" : warn && n > 0 ? "border-amber-500/50 bg-amber-500/5" : "border-border bg-muted/30"}`}>
                       <span className={`block text-xl font-heading font-bold tabular-nums leading-none ${hot ? "text-destructive" : "text-foreground"}`}>{n}</span>
@@ -141,6 +146,25 @@ export default function LegalDashboard() {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* ── Deed Registry Search past its office's time limit ── */}
+          {!!searchOverdue.length && (
+            <div className="border-2 border-destructive bg-destructive/10 p-4 sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-heading font-bold uppercase tracking-[0.12em] text-destructive">Deed search overdue · {searchOverdue.length}</p>
+                <button onClick={() => navigate("/legal/land/deed-search")} className="inline-flex items-center gap-1 text-xs font-semibold text-destructive hover:underline">Open Deed Registry Search <ChevronRight size={13} /></button>
+              </div>
+              <ul className="mt-2 space-y-1 text-sm">
+                {searchOverdue.map((s) => (
+                  <li key={s.OfficeSearchId}>
+                    <button className="text-left hover:underline" onClick={() => navigate(`/legal/land/deed-search?q=${encodeURIComponent(s.EnquiryNo)}`)}>
+                      <b className="font-mono">{s.EnquiryNo}</b>{s.ProjectName ? ` · ${s.ProjectName}` : ""} — {s.OfficeType}, due {fmtDate(s.DueDate)}, <b className="text-destructive">{s.DaysOver} day{s.DaysOver > 1 ? "s" : ""} overdue</b>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
