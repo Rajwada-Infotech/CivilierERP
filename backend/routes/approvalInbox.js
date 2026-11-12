@@ -1296,6 +1296,31 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
+    if (!module || module === "crm-unit-change") {
+      queries.push(`
+        SELECT
+          'crm-unit-change'                     AS Module,
+          'CRM Unit Change'                     AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                AS RecordId,
+          r.RequestNo                           AS Reference,
+          r.CreatedAt                           AS RecordDate,
+          r.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          r.TargetEstimateAtRequest             AS Amount,
+          ${NULL_EXTRA}
+          CAST(r.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(r.Reason AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(r.UpdatedAt, r.CreatedAt)      AS LastModified
+        FROM dbo.CrmPropertyChangeRequest r
+        JOIN dbo.CrmApplication a ON a.Id = r.SourceApplicationId
+        WHERE r.Status = 'Pending'${pp("r.SourceProjectId")}
+      `);
+    }
+
     if (!module || module === "crm-noc") {
       queries.push(`
         SELECT

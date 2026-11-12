@@ -11,7 +11,7 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { downloadAuthFile } from "@/components/crm/AuthFilePreview";
 import { useAuth } from "@/contexts/AuthContext";
-import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X } from "lucide-react";
+import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X, Repeat } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
@@ -26,6 +26,8 @@ import { ExtraWorkGstPreview, PdfPreviewDialog, ParkingVcSection } from "./booki
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, bookingTone } from "./bookings/config";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { Link, useNavigate } from "react-router-dom";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ChangeUnitDialog } from "./bookings/ChangeUnitDialog";
 import { checklistStep } from "./applications/config";
 import { useSentBack, sinceLabel } from "@/components/crm/CrmListToolbar";
 
@@ -79,6 +81,14 @@ async function fetchChecklist(id: number): Promise<any> {
 async function fetchInvoices(id: number): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/${id}/invoices`);
   return r.ok ? r.json() : [];
+}
+async function fetchUnitChangeLog(id: number): Promise<any[]> {
+  const r = await fetchWithAuth(`${API}/${id}/unit-change-log`);
+  return r.ok ? r.json() : [];
+}
+async function fetchUnitChange(id: number): Promise<any | null> {
+  const r = await fetchWithAuth(`${API}/${id}/unit-change`);
+  return r.ok ? r.json() : null;
 }
 async function fetchMoneyReceipts(bookingId: number): Promise<any[]> {
   const r = await fetchWithAuth(`/api/crm/money-receipts?bookingId=${bookingId}`);
@@ -235,6 +245,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [payForm, setPayForm] = useState({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [planEditOpen, setPlanEditOpen] = useState(false);
+  const [unitChangeOpen, setUnitChangeOpen] = useState(false);
   const [planEditValue, setPlanEditValue] = useState("");
   const [planSaving, setPlanSaving] = useState(false);
 
@@ -250,6 +261,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { data: checklistData, refetch: refetchChecklist } = useQuery({
     queryKey: ["crm-booking-checklist", bookingId],
     queryFn: () => fetchChecklist(bookingId),
+  });
+  const { data: unitChangeLog = [] } = useQuery({
+    queryKey: ["crm-booking-unit-change-log", bookingId],
+    queryFn: () => fetchUnitChangeLog(bookingId),
+    enabled: tab === "Booking",
+  });
+  const { data: unitChange } = useQuery({
+    queryKey: ["crm-booking-unit-change", bookingId],
+    queryFn: () => fetchUnitChange(bookingId),
+    enabled: tab === "Booking",
   });
   const checklistItems: any[] = checklistData?.items || [];
   // One refresh after any step of the chain (send, tick / flag, approve, send
@@ -1167,6 +1188,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   };
 
   return (<>
+    {unitChangeOpen && booking && <ChangeUnitDialog booking={booking} onClose={() => setUnitChangeOpen(false)} />}
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto thin-scroll rounded-none p-5" style={{ border: RULE }}>
         <DialogHeader>
@@ -1186,7 +1208,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               )}
               {/* Offered only to those who may raise a cancellation (the server checks the same right).
                   Kept in a menu: a red button beside the title read as the page's main action. */}
-              {booking && booking.Status !== 'Cancelled' && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit) && (
+              {booking && !isBookingClosed(booking.Status) && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit) && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button className={`${KEY_LINE} h-9 w-9 shrink-0`} title="More actions" aria-label="More actions"><MoreHorizontal size={15} /></button>
@@ -1195,6 +1217,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <DropdownMenuItem onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className="gap-2 text-destructive focus:text-destructive">
                       <AlertTriangle size={14} /> Request cancellation
                     </DropdownMenuItem>
+                    {canEdit && !isPlotSale && (
+                      <DropdownMenuItem onClick={() => setUnitChangeOpen(true)} className="gap-2 text-destructive focus:text-destructive">
+                        <Repeat size={14} /> Change unit
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
@@ -1586,6 +1613,45 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     for why there's no longer a separate Confirm button
                     here. */}
                 {renderTabChecklist("Booking")}
+                {unitChange && <section className="border border-border p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Unit change {unitChange.RequestNo}</h3>
+                    <StatusBadge status={unitChange.Status} />
+                  </div>
+                  <p className="text-xs">{[unitChange.SourceProjectName, unitChange.SourceUnitName].filter(Boolean).join(" · ") || "Old unit"} → {[unitChange.TargetProjectName, unitChange.TargetUnitName].filter(Boolean).join(" · ") || "New unit"}</p>
+                  <p className="text-xs text-muted-foreground">{Number(unitChange.SourceBookingId) === Number(booking.Id)
+                    ? (unitChange.TargetBookingNo ? `The sale moved to booking ${unitChange.TargetBookingNo}.` : "A new booking opens on the new unit once this is approved.")
+                    : `Opened from booking ${unitChange.SourceBookingNo || ""} by this unit change.`}</p>
+                  <Link to={`/crm/unit-changes?id=${unitChange.Id}`} className="inline-flex text-xs underline underline-offset-2">Open Unit Change</Link>
+                </section>}
+                {unitChangeLog.length > 0 && <section className="border border-border p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Unit change history</h3>
+                    <span className="text-[0.65rem] text-muted-foreground">{unitChangeLog.length} change{unitChangeLog.length === 1 ? "" : "s"}</span>
+                  </div>
+                  {unitChangeLog.map((entry: any) => (
+                    <div key={entry.Id} className="border-t border-border pt-3 space-y-2 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <strong>{entry.OldUnitName || "Previous unit"} → {entry.NewUnitName || "New unit"}</strong>
+                        <span className="text-muted-foreground">{fmtIstDateTime(entry.ChangedAt)} · {entry.ChangedByName || "User"}</span>
+                      </div>
+                      <p className="text-muted-foreground">{entry.Reason}</p>
+                      {entry.OldTotalValue != null && <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-muted-foreground">
+                        <span>Booking value: {fmt(entry.OldTotalValue)} → {fmt(entry.NewTotalValue)}</span>
+                        <span>Grand total: {fmt(entry.OldGrandTotal)} → {fmt(entry.NewGrandTotal)}</span>
+                        <span>Area (sq ft): {entry.OldAreaSqFt != null ? Number(entry.OldAreaSqFt).toLocaleString("en-IN") : "—"} → {entry.NewAreaSqFt != null ? Number(entry.NewAreaSqFt).toLocaleString("en-IN") : "—"}</span>
+                        <span>Rate/sq ft: {fmt(entry.OldRatePerSqFt)} → {fmt(entry.NewRatePerSqFt)}</span>
+                        <span>Booking amount: {fmt(entry.OldBookingAmount)} → {fmt(entry.NewBookingAmount)}</span>
+                        <span>Milestone-cleared at change: {fmt(entry.ClearedAtChange)}</span>
+                        <span>Available credit: {fmt(entry.AvailableCreditAtChange)}</span>
+                        <span>Held credit: {fmt(entry.HeldCreditAtChange)}</span>
+                        <span>Pending Finance: {fmt(entry.PendingFinanceAtChange)}</span>
+                        <span>Pending CRM receipts: {fmt(entry.PendingCrmReceiptAtChange)}</span>
+                        <span>Contractual due: {fmt(entry.ContractualDueAtChange)}</span>
+                      </div>}
+                    </div>
+                  ))}
+                </section>}
               </div>
             )}
 

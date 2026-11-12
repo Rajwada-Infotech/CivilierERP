@@ -5,6 +5,8 @@ const CrmStatus = {
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
   CANCELLED: 'Cancelled',
+  // A booking closed by an approved Unit Change (the buyer's money and sale moved to the new booking).
+  UNIT_CHANGED: 'UnitChanged',
   
   // Bookings / Units
   ACTIVE: 'Active',
@@ -61,11 +63,24 @@ const ResaleStatus = Object.freeze({
 
 // A booking in one of these statuses no longer counts: it holds no inventory,
 // owes no dues, gets no deed or possession, and is not a sale in any report.
-// Expired (never confirmed) and Transferred (resold to a new owner) are as
-// dead as Cancelled and Rejected — every "live booking" filter uses this one
+// Expired (never confirmed), Transferred (resold to a new owner) and UnitChanged (the buyer moved to another unit:
+// an approved Unit Change closed this booking and opened a new one) are as dead as Cancelled and Rejected — every "live booking" filter uses this one
 // list, so a new terminal status is added here once instead of in 60 queries.
-const DEAD_BOOKING_STATUSES = Object.freeze(["Cancelled", "Rejected", "Expired", "Transferred"]);
+const DEAD_BOOKING_STATUSES = Object.freeze(["Cancelled", "Rejected", "Expired", "Transferred", "UnitChanged"]);
 const DEAD_BOOKING_SQL = `(${DEAD_BOOKING_STATUSES.map((s) => `N'${s}'`).join(", ")})`;
+
+// A Unit Change request (dbo.CrmPropertyChangeRequest). Pending = waiting for approval; Approved = approved and being
+// carried out (a moment); MovingMoney = approved, the
+// money is on its way to the new booking through a Fund Transfer (another company); Failed = approved but a step did
+// not finish (retried from the request); the rest are over. Must stay in step with UX_CrmPropertyChangeRequest_OpenSource
+// (migration 656).
+const UnitChangeStatus = Object.freeze({
+  PENDING: "Pending", APPROVED: "Approved", MOVING_MONEY: "MovingMoney", FAILED: "Failed",
+  COMPLETED: "Completed", REJECTED: "Rejected", WITHDRAWN: "Withdrawn",
+});
+// A request in one of these is over: it no longer locks its old or new booking.
+const PROPERTY_CHANGE_CLOSED_STATUSES = Object.freeze([UnitChangeStatus.COMPLETED, UnitChangeStatus.REJECTED, UnitChangeStatus.WITHDRAWN]);
+const PROPERTY_CHANGE_CLOSED_SQL = `(${PROPERTY_CHANGE_CLOSED_STATUSES.map((s) => `N'${s}'`).join(", ")})`;
 
 // A refund (dbo.CrmRefund) in one of these statuses was dropped: it no longer claims the money it was raised against,
 // so a new refund or a re-booking can use that money. Withdrawn = taken back before approval (with a reason); Cancelled
@@ -97,6 +112,7 @@ const REFUND_DUE_DAYS_DEFAULT = 45;
 
 module.exports = {
   REFUND_DUE_DAYS_DEFAULT,
+  UnitChangeStatus, PROPERTY_CHANGE_CLOSED_STATUSES, PROPERTY_CHANGE_CLOSED_SQL,
   REFUND_PAYMENT_MODES, REFUND_TRANSFER_MODES,
   CANCELLATION_DROPPED_STATUSES, CANCELLATION_DROPPED_SQL,
   CrmStatus, LineStatus, ResaleStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL,

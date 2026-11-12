@@ -2,7 +2,7 @@
 // is approved; New Booking is the manual fallback. The booking itself opens in CrmBookingDetail (?view=<id>).
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { round2, sumMoney } from "@/lib/crmPriceQuote";
-import { CrmStatus } from "@/constants/crmStatuses";
+import { CrmStatus, isBookingClosed } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -260,7 +260,7 @@ const CrmBooking: React.FC = () => {
                   <MoreHorizontal size={15} />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 rounded-none">
+              <DropdownMenuContent align="end" className="w-56 rounded-none" onClick={(e) => e.stopPropagation()}>
                 <DropdownMenuItem onClick={() => openBooking(b.Id)}>Open booking</DropdownMenuItem>
                 {approved && (
                   <>
@@ -276,13 +276,13 @@ const CrmBooking: React.FC = () => {
                     <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)} className="gap-2"><Landmark size={14} /> Bank details</DropdownMenuItem>
                   </>
                 )}
-                {b.Status !== CrmStatus.CANCELLED && b.DeedStatus !== "Registered" && (canRequestCancellation || canEdit) && (
+                {!isBookingClosed(b.Status) && b.DeedStatus !== "Registered" && (canRequestCancellation || canEdit) && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => navigate(`/crm/cancellations?bookingId=${b.Id}`)} className="gap-2 text-destructive focus:text-destructive">
                       <AlertTriangle size={14} /> Request cancellation
                     </DropdownMenuItem>
-                    {canEdit && !b.IsPlotSale && (
+                    {canEdit && !b.IsPlotSale && Number(b.ActiveUnitCount || 0) <= 1 && (
                       <DropdownMenuItem onClick={() => setUnitChangeBooking(b)} className="gap-2 text-destructive focus:text-destructive">
                         <Repeat size={14} /> Change unit
                       </DropdownMenuItem>

@@ -11,7 +11,7 @@ const UNIT_API = "/api/unit-master";
 const PLOT_API = "/api/plot-master";
 const PLAN_API = "/api/crm/payment-plans";
 
-export const STATUSES = ["Pending", "Approved", "Rejected", "Cancelled", "Transferred"];
+export const STATUSES = ["Pending", "Approved", "Rejected", "Cancelled", "Transferred", "UnitChanged"];
 export const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 export const TOKEN_TYPES = ["Percentage", "Amount"];
 
@@ -19,7 +19,7 @@ export const workflowStageLabel = bookingWorkflowStageLabel;
 
 // Transferred (closed by a resale: the sale stands, the land / villa has a new owner) counts as settled.
 export const bookingTone = (status: string): "done" | "waiting" | "stopped" =>
-  status === "Transferred" ? "done" : statusTone(status);
+  status === "Transferred" || status === "UnitChanged" ? "done" : statusTone(status);
 
 // Manual/direct Booking creation: the fallback when an Application was approved without a booking being made
 // (e.g. no unit preselected). Still requires picking a real Application.

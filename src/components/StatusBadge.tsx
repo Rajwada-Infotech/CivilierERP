@@ -310,6 +310,12 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
   },
+  UnitChanged: {
+    label: "Unit Changed",
+    icon: SendHorizonal,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
   Transferred: {
     label: "Transferred",
     icon: SendHorizonal,
@@ -511,6 +517,13 @@ const STATUS_CONFIG: Record<
       "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
   },
   // A CRM refund taken back before approval, with a reason: final, and it no longer claims the customer's money.
+  // A Unit Change whose money is on its way to the new booking (a Fund Transfer awaiting Finance).
+  MovingMoney: {
+    label: "Money on its way",
+    icon: SendHorizonal,
+    classes:
+      "bg-sky-500/10 text-sky-600 border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-400 dark:border-sky-500/25",
+  },
   Withdrawn: {
     label: "Withdrawn",
     icon: XCircle,

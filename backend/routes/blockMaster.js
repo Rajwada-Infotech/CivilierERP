@@ -85,7 +85,7 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         SELECT TOP 1 bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
         FROM dbo.UnitMaster u
         LEFT JOIN dbo.CrmBooking bk
-          ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+          ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
         LEFT JOIN dbo.CrmInventoryHold h
           ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
         WHERE u.BlockId = b.Id AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)
@@ -531,7 +531,7 @@ router.put("/:id/unit-type-specs", requirePageRight(PAGE, "edit"), async (req, r
             UpdatedAt            = SYSDATETIME()
           FROM dbo.UnitMaster u
           WHERE u.BlockId = @blockId AND u.UnitType = @unitType AND u.IsActive = 1
-            AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred'))
+            AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL})
             AND NOT EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME())
             AND NOT EXISTS (SELECT 1 FROM dbo.CrmApplication app WHERE app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Converted'))
         `);
@@ -541,7 +541,7 @@ router.put("/:id/unit-type-specs", requirePageRight(PAGE, "edit"), async (req, r
         .query(`SELECT COUNT(*) AS n FROM dbo.UnitMaster u
           WHERE u.BlockId = @blockId AND u.UnitType = @unitType AND u.IsActive = 1
             AND (
-              EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred'))
+              EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL})
               OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME())
               OR EXISTS (SELECT 1 FROM dbo.CrmApplication app WHERE app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Converted'))
             )`);

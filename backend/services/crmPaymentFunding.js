@@ -77,4 +77,16 @@ async function getBookingFunding(pool, bookingId) {
   };
 }
 
-module.exports = { getBookingFunding, bookingFundingApplySql, bookingFullyFundedSql, onAccountAvailableSql, recordedMoneySql, onAccountWithAvailableSql };
+// A booking's Held credit (a cancelled booking's money set aside, dbo.CrmOnAccountPayment Status 'Held') that is still
+// free: what is left of each held row after the refunds and re-booking transfers that claim it. One SQL expression for
+// every screen and check that shows or uses it; param is the booking id parameter, e.g. "@bid".
+function heldCreditAvailableSql(param) {
+  const { REFUND_CLOSED_SQL } = require("../constants/crmStatuses");
+  const free = `oa.Amount - ISNULL(oa.AppliedAmount, 0)
+          - ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r WHERE r.SourceOnAccountId = oa.Id AND r.Status NOT IN ${REFUND_CLOSED_SQL}), 0)
+          - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t WHERE t.HeldOnAccountId = oa.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0)`;
+  return `ISNULL((SELECT SUM(CASE WHEN ${free} > 0 THEN ${free} ELSE 0 END)
+          FROM dbo.CrmOnAccountPayment oa WHERE oa.BookingId = ${param} AND oa.Status = 'Held'), 0)`;
+}
+
+module.exports = { heldCreditAvailableSql, getBookingFunding, bookingFundingApplySql, bookingFullyFundedSql, onAccountAvailableSql, recordedMoneySql, onAccountWithAvailableSql };

@@ -185,7 +185,7 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
       const sourceBooking = (await tx.request().input("bid", sql.Int, resale.FromBookingId).query(`
         SELECT Id, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
       `)).recordset[0];
-      if (!sourceBooking || !sourceBooking.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(sourceBooking.Status)) {
+      if (!sourceBooking || !sourceBooking.IsActive || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(sourceBooking.Status)) {
         throw Object.assign(new Error("The seller booking is no longer active; refresh the resale before completing it."), { status: 409 });
       }
     }
@@ -267,7 +267,7 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
     if (resale.FromBookingId != null) {
       const closed = await tx.request().input("b", sql.Int, resale.FromBookingId).input("rid", sql.Int, id).input("by", sql.Int, actorId(req))
         .query(`UPDATE dbo.CrmBooking SET Status = N'Transferred', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-                WHERE Id = @b AND IsActive = 1 AND Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
+                WHERE Id = @b AND IsActive = 1 AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
                   AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = @b AND bp.Status = N'${LineStatus.ACTIVE}')
                   AND (UnitId IS NULL OR UnitId = (SELECT r.UnitId FROM dbo.CrmUnitResale r WHERE r.Id = @rid))`);
       if (closed.rowsAffected[0]) await releaseBookingInventoryLines(tx, resale.FromBookingId, "Transferred");
@@ -386,7 +386,7 @@ router.get("/holdings", requirePageRight("crm-resales", "view"), async (req, res
   try {
     const pool = getPool();
     const r0 = pool.request();
-    const conds = ["b.IsActive = 1", "b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')"];
+    const conds = ["b.IsActive = 1", "b.Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL];
     if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (req.query.projectId) { r0.input("pid", sql.Int, parseInt(req.query.projectId, 10)); conds.push("b.ProjectId = @pid"); }
     const rows = (await r0.query(`
@@ -492,7 +492,7 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
         WHERE Id IN (${sourceInList}) ORDER BY Id
       `)).recordset;
       if (lockedBookings.length !== ids.length || lockedBookings.some((bk) =>
-        !bk.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(bk.Status))) {
+        !bk.IsActive || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(bk.Status))) {
         throw Object.assign(new Error("That property is no longer live; refresh before opening a resale case."), { status: 409 });
       }
       const existingOpen = await openResaleOn(createTx, ids);

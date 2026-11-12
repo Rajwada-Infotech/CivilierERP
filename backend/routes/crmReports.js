@@ -630,7 +630,7 @@ router.get("/aging-analysis", requirePageRight("crm-payments", "view"), async (r
       WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}', 'Expired','Transferred')
+        AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
         ${cpb.clauses.length ? "AND " + cpb.clauses.join(" AND ") : ""}
       ORDER BY DaysOverdue DESC
     `);

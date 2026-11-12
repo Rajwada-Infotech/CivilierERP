@@ -159,7 +159,7 @@ router.get("/bookings", requirePageRight("crm-service-tickets", "create"), async
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')${projectPredicate(req.projectScope, "b.ProjectId")}
+      WHERE b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}${projectPredicate(req.projectScope, "b.ProjectId")}
       ORDER BY b.CreatedAt DESC`);
     res.json(r.recordset);
   } catch (e) {

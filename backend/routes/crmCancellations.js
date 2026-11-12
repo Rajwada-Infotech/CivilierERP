@@ -377,7 +377,7 @@ router.get("/bookings", requirePageRight("crm-cancellations", "create"), async (
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+      WHERE b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmCancellation c WHERE c.BookingId = b.Id AND c.Status IN ('Pending', 'FinancePending', 'Approved'))${projectPredicate(req.projectScope, "b.ProjectId")}
       ORDER BY b.CreatedAt DESC`);
     res.json(r.recordset);
@@ -498,6 +498,9 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
       if (incomingTransfer) {
         throw Object.assign(new Error(`Cannot request cancellation while incoming re-booking transfer #${incomingTransfer.Id} is open; finish or reject it first.`), { status: 409 });
       }
+      // A unit change still open on this booking (as its old or its new booking) is finished or withdrawn first.
+      const openChange = await require("../services/crmEntityCreation").openUnitChangeOn(createTx, bookingId);
+      if (openChange) throw Object.assign(new Error(`Unit change ${openChange.RequestNo} is open on this booking. Withdraw or finish it first.`), { status: 409 });
       const duplicate = (await createTx.request().input("bid", sql.Int, bookingId).query(`
         SELECT TOP 1 CancellationNo, Status FROM dbo.CrmCancellation WITH (UPDLOCK, HOLDLOCK)
         WHERE BookingId = @bid AND Status NOT IN ${CANCELLATION_DROPPED_SQL}
@@ -723,6 +726,9 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       if (!lockedBooking || !lockedBooking.IsActive || DEAD_BOOKING_STATUSES.includes(lockedBooking.Status)) {
         throw Object.assign(new Error(`Cannot cancel this booking because it is no longer active${lockedBooking ? ` (status: ${lockedBooking.Status})` : ""}.`), { status: 409 });
       }
+      // A unit change still open on this booking (as its old or its new booking) is finished or withdrawn first.
+      const openChange = await require("../services/crmEntityCreation").openUnitChangeOn(tx, bookingId);
+      if (openChange) throw Object.assign(new Error(`Unit change ${openChange.RequestNo} is open on this booking. Withdraw or finish it first.`), { status: 409 });
       const lockedVillaOnLand = await require("../services/villaLand").villaBookedOnLandOf(tx, bookingId);
       if (lockedVillaOnLand) {
         throw Object.assign(new Error(`The villa built on this land is booked (${lockedVillaOnLand}). Cancel the villa booking first — the land can't be cancelled from under it.`), { status: 409 });
@@ -851,69 +857,12 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       // never onto the dead booking's milestones. A refund cannot go for
       // approval while any of them is still with Finance (crmRefunds.js).
 
-      await releaseAllParkingForBooking(tx, bookingId);
-
-      // Orphaned Brokerage Clawback
-      // Void any unpaid brokerage tranches for this cancelled booking, and flag paid ones for clawback.
-      // An Approved tranche (accrued, not yet paid) is voided too and its accrual reversed — left
-      // Approved, its rejected voucher let 'retry finance hand-off' raise a fresh payout for a
-      // cancelled booking.
-      const accrued = (await tx.request().input("bid", sql.Int, bookingId)
-        .query(`SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid AND Status = '${CrmStatus.APPROVED}'`)).recordset;
-      for (const a of accrued) await reversePostingBySource(tx, "CrmBrokerage", a.Id);
-      await tx.request().input("bid", sql.Int, bookingId).query(`
-        UPDATE dbo.CrmBrokerageMaster
-        SET Status = '${CrmStatus.VOIDED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided due to booking cancellation.'
-        WHERE BookingId = @bid AND Status IN ('${CrmStatus.PENDING}', '${CrmStatus.APPROVED}');
-
-        UPDATE dbo.CrmBrokerageMaster
-        SET Status = '${CrmStatus.CLAWBACK_REQUIRED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Clawback required due to booking cancellation.'
-        WHERE BookingId = @bid AND Status = '${CrmStatus.PAID}';
-      `);
-
-      // Void any finance payment vouchers (NewPayment) linked to brokerage
-      // tranches that were just voided above. Without this, Finance can still
-      // see — and process — a live PAY document for a cancelled deal, which is
-      // a real cash-outflow risk.
-      await tx.request().input("bid", sql.Int, bookingId).query(`
-        UPDATE dbo.NewPayment
-        SET Status = 'Rejected', UpdatedAt = SYSDATETIME()
-        WHERE SourceCrmBrokerageId IN (
-          SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid
-        )
-        AND Status IN ('Draft', 'Pending')   -- unpaid only: a paid voucher is Status 'Approved' (the old
-                                            -- NOT IN ('Paid', ...) rejected real, already-paid payouts)
-      `);
-
-      // guardAndConvertHold() closes the Unit's hold to 'Converted' the moment
-      // a Booking is created from it — but if an Active hold on this same unit
-      // still lingers for any reason (e.g. legacy data from before that
-      // conversion existed), a Cancelled booking must not leave it standing:
-      // that would keep blocking every other genuinely current applicant for
-      // a unit that just became free again.
-      const unitRow = await tx.request().input("bid", sql.Int, bookingId)
-        .query("SELECT UnitId FROM dbo.CrmBooking WHERE Id = @bid");
-      const unitId = unitRow.recordset[0]?.UnitId;
-      if (unitId) {
-        const stuckHold = await findActiveHold(tx, "Unit", unitId);
-        if (stuckHold) await releaseHold(tx, stuckHold.Id, actorId(req));
-      }
-
-      const pendingAmendments = await tx.request().input("bid", sql.Int, bookingId)
-        .query("SELECT Id, RequestedBy FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status = 'Pending'");
-      for (const amend of pendingAmendments.recordset) {
-        await tx.request().input("id", sql.Int, amend.Id).input("rb", sql.Int, actorId(req))
-          .query(`
-            UPDATE dbo.CrmBookingAmendmentRequest SET
-              Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(),
-              ReviewNotes = 'Auto-rejected — the booking was cancelled'
-            WHERE Id = @id
-          `);
+      // Parking, brokerage, holds and open amendments of the closed booking (shared with an approved Unit Change).
+      const { amendments } = await releaseClosedBookingSideEffects(tx, bookingId, { actorUserId: actorId(req), why: "cancelled" });
+      for (const amend of amendments) {
         // Defer websocket notification until after commit — emitNotification is
         // a pure outbound push (no DB write) and must not run inside a tx.
-        if (amend.RequestedBy) {
-          pendingNotifications.push({ userId: amend.RequestedBy, amendId: amend.Id });
-        }
+        if (amend.RequestedBy) pendingNotifications.push({ userId: amend.RequestedBy, amendId: amend.Id });
       }
 
       // ── Park the money as HELD on-account credit ─────────────────────────
@@ -1052,6 +1001,80 @@ router.put("/:id/withdraw", requirePageRight("crm-cancellations", "edit"), async
   }
 });
 
+// What closing a booking for good releases, beyond its own status and lines: its parking (back to inventory), its
+// brokerage (on a cancellation), any lingering hold on its unit, and its open
+// amendment requests. Shared by an approved Cancellation (why "cancelled") and an approved Unit Change (why "moved to
+// another unit": the sale carries on, so its brokerage moves with it and is left alone here). Returns the rejected
+// amendments so the caller notifies their requesters after commit.
+async function releaseClosedBookingSideEffects(tx, bookingId, { actorUserId = null, why = "cancelled" } = {}) {
+  const cancelled = why === "cancelled";
+  await releaseAllParkingForBooking(tx, bookingId);
+
+  // Brokerage: a cancelled sale voids what is unpaid (its accrual reversed, its payout vouchers rejected) and claws
+  // paid brokerage back. A Unit Change carries the sale on: its brokerage moves to the new booking as it stands (paid
+  // parts stay closed, unpaid parts carry on) and is not touched here (crmEntityCreation.executeUnitChange).
+  if (cancelled) {
+    // Orphaned Brokerage Clawback
+    // Void any unpaid brokerage tranches for this cancelled booking, and flag paid ones for clawback.
+    // An Approved tranche (accrued, not yet paid) is voided too and its accrual reversed — left
+    // Approved, its rejected voucher let 'retry finance hand-off' raise a fresh payout for a
+    // cancelled booking.
+    const accrued = (await tx.request().input("bid", sql.Int, bookingId)
+      .query(`SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid AND Status = '${CrmStatus.APPROVED}'`)).recordset;
+    for (const a of accrued) await reversePostingBySource(tx, "CrmBrokerage", a.Id);
+    await tx.request().input("bid", sql.Int, bookingId).query(`
+      UPDATE dbo.CrmBrokerageMaster
+      SET Status = '${CrmStatus.VOIDED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided due to booking cancellation.'
+      WHERE BookingId = @bid AND Status IN ('${CrmStatus.PENDING}', '${CrmStatus.APPROVED}');
+
+      UPDATE dbo.CrmBrokerageMaster
+      SET Status = '${CrmStatus.CLAWBACK_REQUIRED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Clawback required due to booking cancellation.'
+      WHERE BookingId = @bid AND Status = '${CrmStatus.PAID}';
+    `);
+
+    // Void any finance payment vouchers (NewPayment) linked to brokerage
+    // tranches that were just voided above. Without this, Finance can still
+    // see — and process — a live PAY document for a cancelled deal, which is
+    // a real cash-outflow risk.
+    await tx.request().input("bid", sql.Int, bookingId).query(`
+      UPDATE dbo.NewPayment
+      SET Status = 'Rejected', UpdatedAt = SYSDATETIME()
+      WHERE SourceCrmBrokerageId IN (
+        SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid
+      )
+      AND Status IN ('Draft', 'Pending')   -- unpaid only: a paid voucher is Status 'Approved' (the old
+                                          -- NOT IN ('Paid', ...) rejected real, already-paid payouts)
+    `);
+  }
+
+  // guardAndConvertHold() closes the Unit's hold to 'Converted' the moment
+  // a Booking is created from it — but if an Active hold on this same unit
+  // still lingers for any reason (e.g. legacy data from before that
+  // conversion existed), a Cancelled booking must not leave it standing:
+  // that would keep blocking every other genuinely current applicant for
+  // a unit that just became free again.
+  const unitRow = await tx.request().input("bid", sql.Int, bookingId)
+    .query("SELECT UnitId FROM dbo.CrmBooking WHERE Id = @bid");
+  const unitId = unitRow.recordset[0]?.UnitId;
+  if (unitId) {
+    const stuckHold = await findActiveHold(tx, "Unit", unitId);
+    if (stuckHold) await releaseHold(tx, stuckHold.Id, actorUserId);
+  }
+
+  const pendingAmendments = await tx.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id, RequestedBy FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status = 'Pending'");
+  for (const amend of pendingAmendments.recordset) {
+    await tx.request().input("id", sql.Int, amend.Id).input("rb", sql.Int, actorUserId).input("note", sql.NVarChar(300), `Auto-rejected — the booking was ${why}`)
+      .query(`
+        UPDATE dbo.CrmBookingAmendmentRequest SET
+          Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(),
+          ReviewNotes = @note
+        WHERE Id = @id
+      `);
+  }
+  return { amendments: pendingAmendments.recordset };
+}
+
 // ── Held credit + draft refund for a cancellation ──────────────────────────
 // The one place a cancelled booking's money is set aside for the buyer: ONE
 // Held on-account credit keyed to the cancellation (no GL — the receipts
@@ -1149,3 +1172,4 @@ async function holdCancellationCredit(tx, { cancellationId, bookingId, amount, a
 
 module.exports = router;
 module.exports.holdCancellationCredit = holdCancellationCredit;
+module.exports.releaseClosedBookingSideEffects = releaseClosedBookingSideEffects;

@@ -9,7 +9,7 @@
 // CrmApplication/CrmBooking's real constraints (Unit Master mandatory,
 // milestones required, etc.).
 const { sql } = require("../db");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, REFUND_CLOSED_SQL, PROPERTY_CHANGE_CLOSED_SQL, UnitChangeStatus } = require("../constants/crmStatuses");
 const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
@@ -100,7 +100,7 @@ async function validatePlotSelection(pool, plotIds, { projectId = null, applicat
           SELECT 1 FROM dbo.CrmBookingPlot bp
           JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
           WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-            AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
+            AND b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
         )
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmApplicationPlot ap
@@ -1358,7 +1358,20 @@ async function applicationEditsClosedReason(pool, bookingId) {
  *                  (if exactly one) when nothing is paid yet
  *   checkOnly      run every check, change nothing
  */
-async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = null, paymentPlanId, checkOnly = false }) {
+// The rate a booking takes when it moves to another unit (decided 2026-11-12): the rate typed in for the change, else
+// the new unit's own rate, else the booking's rate (a unit with no rate). Used by the preview, the same-project change
+// and the linked move to another project, so all three price alike.
+function unitChangeRate({ typedRate = null, unitRate = null, bookingRate = null }) {
+  if (typedRate != null && typedRate !== "") {
+    const r = Number(typedRate);
+    if (!(r > 0)) throw unitChangeError(400, "Rate per sq ft must be more than 0");
+    return r;
+  }
+  if (unitRate != null && Number(unitRate) > 0) return Number(unitRate);
+  return bookingRate != null ? Number(bookingRate) : null;
+}
+
+async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = null, actorEmail = null, paymentPlanId, ratePerSqFt = null, checkOnly = false }) {
   const { requireActiveBooking, recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered } = require("./crmWorkflowGuards");
   const { recalculateBookingGst, assertCommercialGstReady, GstSetupError } = require("./crmGst");
   const id = bookingId;
@@ -1374,8 +1387,13 @@ async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = n
   if (activeErr) throw unitChangeError(400, activeErr);
 
   const booking = (await pool.request().input("id", sql.Int, id)
-    .query("SELECT UnitId, Status, WorkflowStage, RatePerSqFt, TotalValue, BookingAmount, ApplicationId FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1")).recordset[0];
+    .query("SELECT UnitId, ProjectId, CompanyId, AreaSqFt, Status, WorkflowStage, RatePerSqFt, TotalValue, GrandTotal, ParkingTotal, ExtraChargesTotal, BookingAmount, PaymentPlanId, ApplicationId FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1")).recordset[0];
   if (!booking) throw unitChangeError(404, "Booking not found");
+  const activeUnitCount = (await pool.request().input("id", sql.Int, id)
+    .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmBookingUnit WHERE BookingId = @id AND Status = N'Active'")).recordset[0]?.Cnt || 0;
+  if (activeUnitCount > 1) {
+    throw unitChangeError(409, "This booking contains multiple active units. Change-unit is available for single-unit bookings; use a split transfer for multi-unit bookings.");
+  }
   // Once the Agreement for Sale is signed (or the deed registered) the unit is
   // named in a legal document — the ERP can't quietly swap it.
   if (await isSaleDeedRegistered(pool, id)) {
@@ -1429,37 +1447,98 @@ async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = n
     throw unitChangeError(400, `${unitRow.UnitName} has no saleable area — set it in Unit Master first, so the booking can be re-priced.`);
   }
   const taken = await pool.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id)
-    .query(`SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())
+    .query(`SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL} AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())
             UNION SELECT BookingId FROM dbo.CrmBookingUnit WHERE UnitId = @uid AND BookingId <> @id AND Status = N'Active'`);
   if (taken.recordset.length) throw unitChangeError(409, "This unit is already booked");
   if (checkOnly) return { unitNo: unitRow.UnitName };
 
-  await require("./crmHoldService").guardAndConvertHold(pool, "Unit", newUnitId, booking.ApplicationId);
-
-  const paid = await pool.request().input("bid", sql.Int, id).query(`
-    SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
-    WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('${CrmStatus.PAID}', 'Waived'))`);
-  const canRegenerateSchedule = paid.recordset[0]?.Cnt === 0;
+  // The schedule is built afresh only when nothing points at its milestones (no money ever settled on one, none
+  // waived, no receipt, payment or invoice on one): deleting a milestone a payment waiting for Finance points at would
+  // leave that payment nowhere to land. Otherwise the unpaid milestones follow the new price and keep their ids.
+  // An issued invoice on an open milestone stops the change: its amount would move under the invoice.
+  const canRegenerateSchedule = !(await scheduleHasLinks(pool, id));
+  await assertNoOpenMilestoneInvoice(pool, id);
   let newPlanId = null;
   if (canRegenerateSchedule) {
     try {
       // Given a plan, it is checked against the new unit's plans; without one,
       // only a unit with exactly one tagged plan resolves (no guessing).
       newPlanId = await resolveApplicationPaymentPlan(pool, { preferredUnitId: unitRow.Id, paymentPlanId: paymentPlanId ?? null });
-    } catch {
-      newPlanId = null;
+    } catch (e) {
+      throw unitChangeError(409, `Choose a payment plan for the new unit before changing it: ${e.message}`);
     }
   }
-  // Keep the booking's rate; fall back to the new unit's list rate.
-  const rate = booking.RatePerSqFt != null ? Number(booking.RatePerSqFt)
-    : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
+  const rate = unitChangeRate({ typedRate: ratePerSqFt, unitRate: unitRow.RatePerSqFt, bookingRate: booking.RatePerSqFt });
   const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;
   const total = area && rate ? unitPrice(area, rate) : booking.TotalValue;
+  const replacementBookingAmount = newPlanId != null
+    ? (await pool.request().input("pid", sql.Int, newPlanId).query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid")).recordset[0]?.BookingAmount
+    : booking.BookingAmount;
+  if (newPlanId != null && !(Number(replacementBookingAmount) >= 0)) {
+    throw unitChangeError(409, "The selected payment plan has no valid booking amount. Update the plan before changing this unit.");
+  }
+  if (newPlanId != null && Number(replacementBookingAmount) > Number(total)) {
+    throw unitChangeError(409, "The selected plan's booking amount exceeds the new unit price. Update the plan or choose another one.");
+  }
 
   // Unit, price, GST, schedule, change log and audit are one event.
+  let backOnAccount = 0;
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Serialize changes and receipt creation against this booking, then recheck
+    // target availability under the transaction before moving its reservation.
+    await tx.request().input("id", sql.Int, id).query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id");
+    const txPropertyChange = (await tx.request().input("bid", sql.Int, id).query(`
+      SELECT TOP 1 Id FROM dbo.CrmPropertyChangeRequest WITH (UPDLOCK, HOLDLOCK)
+      WHERE (SourceBookingId = @bid OR TargetBookingId = @bid)
+        AND Status NOT IN ${PROPERTY_CHANGE_CLOSED_SQL}
+    `)).recordset[0];
+    if (txPropertyChange) throw unitChangeError(409, `Linked property change #${txPropertyChange.Id} is already in progress for this booking. Complete or cancel it before changing this unit.`);
+    // Rechecked under the booking lock: a link that appeared since stops the rebuild, an invoice stops the change.
+    if (newPlanId != null && (await scheduleHasLinks(tx, id))) {
+      throw unitChangeError(409, "A payment or invoice was linked to this booking's schedule while the change was being prepared. Refresh and try again.");
+    }
+    await assertNoOpenMilestoneInvoice(tx, id);
+    const financialSnapshot = (await tx.request().input("bid", sql.Int, id).query(`
+      SELECT
+        ISNULL((SELECT SUM(m.AmountPaid) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = @bid), 0) AS Cleared,
+        ISNULL((SELECT SUM(m.AmountDue) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = @bid
+          AND (m.Status IN ('${CrmStatus.PAID}', 'Waived') OR ISNULL(m.AmountPaid, 0) > 0 OR m.ExtraChargeId IS NOT NULL OR m.ParkingAllotmentId IS NOT NULL)), 0) AS FixedScheduleAmount,
+        ISNULL((SELECT SUM(CASE WHEN m.Status IN ('${CrmStatus.PAID}', 'Waived') THEN 0
+          WHEN m.AmountDue > ISNULL(m.AmountPaid, 0) THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END)
+          FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = @bid), 0) AS ContractualDue,
+        ISNULL((SELECT SUM(oa.AvailableAmount) FROM ${require("./crmPaymentFunding").onAccountWithAvailableSql("oa")} WHERE oa.BookingId = @bid), 0) AS AvailableCredit,
+        ISNULL((SELECT SUM(rp.RPAmount) FROM dbo.ReceivedPayment rp WHERE rp.CrmBookingId = @bid AND rp.RPStatus = 'Pending'), 0) AS PendingFinance,
+        ISNULL((SELECT SUM(mr.Amount) FROM dbo.CrmMoneyReceipt mr WHERE mr.BookingId = @bid AND mr.Status = N'Pending' AND mr.ReceivedPaymentId IS NULL), 0) AS PendingCrmReceipt,
+        ${require("./crmPaymentFunding").heldCreditAvailableSql("@bid")} AS HeldCredit`)).recordset[0] || {};
+    // Money settled on the old price goes back on account (the full-booking hold: nothing stays settled unless the whole
+    // price is in). It settles again on the new price after the change (the usual full-payment sweep below), and what
+    // the new price doesn't need stays on account as the customer's credit (decided 2026-11-12: never block on it).
+    const changeNo = Number((await tx.request().input("bid", sql.Int, id)
+      .query("SELECT COUNT(*) + 1 AS n FROM dbo.CrmUnitChangeLog WHERE BookingId = @bid")).recordset[0].n);
+    const backNote = `Back on account: unit changed to ${unitRow.UnitName}`;
+    const unwound = await require("./crmOnAccountCoverage").unapplyBookingAllocations(tx, id, {
+      actorUserId: actor, note: backNote, receiptNo: (a) => `UC-${id}-${changeNo}-${a.OnAccountPaymentId}-${a.MilestoneId}`,
+    });
+    for (const oaId of new Set(unwound.allocs.map((a) => a.OnAccountPaymentId))) {
+      await require("./crmLedger").syncCrmOnAccountLedger(tx, oaId, actorEmail || "system", backNote, { onlyDown: false });
+    }
+    // Waived milestones, parking and extra charges keep their amounts; the new price must at least cover them.
+    const fixedNow = Number((await tx.request().input("bid", sql.Int, id).query(`
+      SELECT ISNULL(SUM(AmountDue), 0) AS a FROM dbo.CrmPaymentMilestone
+      WHERE BookingId = @bid AND (Status = 'Waived' OR ExtraChargeId IS NOT NULL OR ParkingAllotmentId IS NOT NULL)`)).recordset[0].a) || 0;
+    const targetGrandTotal = Number(total || 0) + Number(booking.ParkingTotal || 0) + Number(booking.ExtraChargesTotal || 0);
+    if (fixedNow > targetGrandTotal + 0.009) {
+      throw unitChangeError(409, "The new unit's price is less than the waived milestones, parking and extra charges on this booking. Reverse the waiver or release the parking or charge first.");
+    }
+    const txTaken = await tx.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id).query(`
+      SELECT TOP 1 Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK)
+      WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
+        AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())
+      UNION SELECT TOP 1 BookingId FROM dbo.CrmBookingUnit WITH (UPDLOCK, HOLDLOCK) WHERE UnitId = @uid AND BookingId <> @id AND Status = N'Active'`);
+    if (txTaken.recordset.length) throw unitChangeError(409, "This unit is already booked");
+    await require("./crmHoldService").guardAndConvertHold(tx, "Unit", newUnitId, booking.ApplicationId);
     await tx.request()
       .input("id", sql.Int, id).input("uid", sql.Int, newUnitId)
       .input("pid", sql.Int, unitRow.ProjectId != null ? unitRow.ProjectId : null)
@@ -1475,6 +1554,7 @@ async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = n
       .input("openTerraceArea", sql.Decimal(18, 2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
       .input("rate", rateSqlType(), rate)
       .input("tot", sql.Decimal(18, 2), total)
+      .input("bookingAmount", sql.Decimal(18, 2), replacementBookingAmount)
       .input("ppid", sql.Int, newPlanId)
       .input("ub", sql.Int, actor)
       .query(`
@@ -1484,6 +1564,7 @@ async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = n
           CarpetAreaSqFt = @carpetArea, BuiltUpAreaSqFt = @builtUpArea, SuperBuiltUpAreaSqFt = @superBuiltUpArea, OpenTerraceAreaSqFt = @openTerraceArea,
           RatePerSqFt = ISNULL(@rate, RatePerSqFt),
           TotalValue = @tot,
+          BookingAmount = @bookingAmount,
           PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
           GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
@@ -1514,7 +1595,7 @@ async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = n
       // belong to their own rows.
       await tx.request().input("bid", sql.Int, id).query(`
         DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL`);
-      await generateMilestonesForBooking(tx, id, total, newPlanId, null, actor, booking.BookingAmount);
+      await generateMilestonesForBooking(tx, id, total, newPlanId, null, actor, replacementBookingAmount);
     } else {
       // Same plan, new price: the unpaid steps follow it.
       await recalculateRemainingMilestones(tx, id);
@@ -1523,18 +1604,77 @@ async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = n
     await tx.request()
       .input("bid", sql.Int, id).input("oldUid", sql.Int, oldUnitId != null ? oldUnitId : null).input("newUid", sql.Int, newUnitId)
       .input("reason", sql.NVarChar(sql.MAX), String(reason || "").trim()).input("cb", sql.Int, actor)
-      .query(`INSERT INTO dbo.CrmUnitChangeLog (BookingId, OldUnitId, NewUnitId, Reason, ChangedBy, ChangedAt)
-              VALUES (@bid, @oldUid, @newUid, @reason, @cb, SYSDATETIME())`);
+      .input("oldProject", sql.Int, booking.ProjectId).input("newProject", sql.Int, unitRow.ProjectId)
+      .input("oldCompany", sql.Int, booking.CompanyId).input("newCompany", sql.Int, unitRow.CompanyId)
+      .input("oldArea", sql.Decimal(18, 2), booking.AreaSqFt).input("newArea", sql.Decimal(18, 2), area)
+      .input("oldRate", rateSqlType(), booking.RatePerSqFt).input("newRate", rateSqlType(), rate)
+      .input("oldTotal", sql.Decimal(18, 2), booking.TotalValue).input("newTotal", sql.Decimal(18, 2), total)
+      .input("oldGrand", sql.Decimal(18, 2), booking.GrandTotal).input("newGrand", sql.Decimal(18, 2), Number(total || 0) + Number(booking.ParkingTotal || 0) + Number(booking.ExtraChargesTotal || 0))
+      .input("oldBookingAmount", sql.Decimal(18, 2), booking.BookingAmount).input("newBookingAmount", sql.Decimal(18, 2), replacementBookingAmount)
+      .input("oldPlan", sql.Int, booking.PaymentPlanId).input("newPlan", sql.Int, newPlanId != null ? newPlanId : booking.PaymentPlanId)
+      .input("cleared", sql.Decimal(18, 2), financialSnapshot.Cleared || 0)
+      .input("availableCredit", sql.Decimal(18, 2), financialSnapshot.AvailableCredit || 0)
+      .input("heldCredit", sql.Decimal(18, 2), financialSnapshot.HeldCredit || 0)
+      .input("pendingFinance", sql.Decimal(18, 2), financialSnapshot.PendingFinance || 0)
+      .input("pendingCrm", sql.Decimal(18, 2), financialSnapshot.PendingCrmReceipt || 0)
+      .input("contractualDue", sql.Decimal(18, 2), financialSnapshot.ContractualDue || 0)
+      .query(`INSERT INTO dbo.CrmUnitChangeLog
+                (BookingId, OldUnitId, NewUnitId, Reason, ChangedBy, ChangedAt,
+                 OldProjectId, NewProjectId, OldCompanyId, NewCompanyId, OldTotalValue, NewTotalValue,
+                 OldAreaSqFt, NewAreaSqFt, OldRatePerSqFt, NewRatePerSqFt,
+                 OldGrandTotal, NewGrandTotal, OldBookingAmount, NewBookingAmount, OldPaymentPlanId, NewPaymentPlanId,
+                 ClearedAtChange, AvailableCreditAtChange, HeldCreditAtChange, PendingFinanceAtChange, PendingCrmReceiptAtChange, ContractualDueAtChange)
+              VALUES
+                (@bid, @oldUid, @newUid, @reason, @cb, SYSDATETIME(),
+                 @oldProject, @newProject, @oldCompany, @newCompany, @oldTotal, @newTotal,
+                 @oldArea, @newArea, @oldRate, @newRate,
+                 @oldGrand, @newGrand, @oldBookingAmount, @newBookingAmount, @oldPlan, @newPlan,
+                 @cleared, @availableCredit, @heldCredit, @pendingFinance, @pendingCrm, @contractualDue)`);
     await require("./crmAudit").logCrmAudit(tx, "Booking", id, actor, [{ field: "UnitId", oldVal: oldUnitId, newVal: newUnitId }]);
     await tx.commit();
+    backOnAccount = unwound.amount;
   } catch (txErr) {
     try { await tx.rollback(); } catch { /* already rolled back */ }
     throw txErr;
   }
+  // The money on account settles on the new price when it covers it; what is left over stays as the customer's credit.
+  await require("../routes/crmPayments").autoApplyOnAccountIfFullyFunded(pool, id, actor, actorEmail || "system");
+  const funding = await require("./crmPaymentFunding").getBookingFunding(pool, id);
   return {
-    unitNo: unitRow.UnitName, paymentPlanUpdated: newPlanId != null,
+    unitNo: unitRow.UnitName, paymentPlanUpdated: newPlanId != null, ratePerSqFt: rate, backOnAccount,
+    due: funding.shortfall, credit: Math.max(0, Math.round((funding.totalFunded - funding.requiredAmount) * 100) / 100),
     parkingWarning: await parkingOutsideUnitBlock(pool, { bookingId: id, applicationId: booking.ApplicationId, unitId: newUnitId }),
   };
+}
+
+// Anything that points at a booking's schedule milestones (not parking or extra-charge rows): money settled or waived
+// on one, a receipt row, a payment entered against one, a waiver or an invoice. With any of these the schedule is kept
+// (and only re-spread over a new price), never deleted and rebuilt.
+async function scheduleHasLinks(q, bookingId) {
+  const r = await q.request().input("bid", sql.Int, bookingId).query(`
+    SELECT CASE WHEN EXISTS (
+      SELECT 1 FROM dbo.CrmPaymentMilestone m
+      WHERE m.BookingId = @bid AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL
+        AND (ISNULL(m.AmountPaid, 0) > 0 OR m.Status IN ('${CrmStatus.PAID}', 'Waived')
+          OR EXISTS (SELECT 1 FROM dbo.CrmPaymentReceipt r WHERE r.MilestoneId = m.Id)
+          OR EXISTS (SELECT 1 FROM dbo.ReceivedPayment rp WHERE rp.CrmMilestoneId = m.Id)
+          OR EXISTS (SELECT 1 FROM dbo.CrmMilestoneWaiver w WHERE w.MilestoneId = m.Id)
+          OR EXISTS (SELECT 1 FROM dbo.CrmInvoice i WHERE i.MilestoneId = m.Id AND i.Status <> 'Void'))
+    ) THEN 1 ELSE 0 END AS Linked`);
+  return Boolean(r.recordset[0]?.Linked);
+}
+
+// An issued (not void) invoice on a milestone that is not yet paid: the change would move that milestone's amount
+// under the invoice, so the invoice is voided first (CRM Invoice Void).
+async function openMilestoneInvoiceNos(q, bookingId) {
+  return (await q.request().input("bid", sql.Int, bookingId).query(`
+    SELECT i.InvoiceNo FROM dbo.CrmInvoice i JOIN dbo.CrmPaymentMilestone m ON m.Id = i.MilestoneId
+    WHERE m.BookingId = @bid AND i.Status <> 'Void' AND m.Status NOT IN ('${CrmStatus.PAID}', 'Waived')
+      AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL`)).recordset.map((x) => x.InvoiceNo);
+}
+async function assertNoOpenMilestoneInvoice(q, bookingId) {
+  const nos = await openMilestoneInvoiceNos(q, bookingId);
+  if (nos.length) throw unitChangeError(409, `Invoice ${nos.join(", ")} is issued on a milestone whose amount would change. Void it first, then change the unit.`);
 }
 
 
@@ -1566,9 +1706,364 @@ async function parkingOutsideUnitBlock(pool, { applicationId = null, bookingId =
   return `Parking ${slots} is in another block than the new unit (Block ${rows[0].UnitBlock}) — check the parking and change it if needed.`;
 }
 
+// ── Unit Change ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// A buyer moves from a booking's unit to another unit, in this project or another one (decided 2026-11-12). One flow:
+// a request (dbo.CrmPropertyChangeRequest: the new unit, its rate and plan, and for each parking slot and extra charge
+// whether it stays the same or is changed) → approval in Approval Setup ("CRM Unit Change", module crm-unit-change;
+// super admin always) → executeUnitChange: the old booking closes as UnitChanged, a new booking opens on the new unit
+// for the same buyer (confirmed by this approval), the add-ons kept move to it, and every rupee received moves to it in
+// full with no charge. Between companies the money goes through a Fund Transfer that Finance approves (MovingMoney).
+// Every step can run again: a request whose approval stopped part-way (Failed) is retried and picks up where it was.
+
+// The open request on a booking, as its old (source) or its new (target) booking.
+async function openUnitChangeOn(q, bookingId) {
+  return (await q.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 Id, RequestNo, Status, SourceBookingId, TargetBookingId FROM dbo.CrmPropertyChangeRequest
+    WHERE (SourceBookingId = @bid OR TargetBookingId = @bid) AND Status NOT IN ${PROPERTY_CHANGE_CLOSED_SQL}
+    ORDER BY Id DESC`)).recordset[0] || null;
+}
+
+// What is left of a unit change's held credit to move: the held amount less what reached the new booking already and
+// what a transfer on its way (a Fund Transfer awaiting approval) has reserved.
+async function unitChangeCreditToMove(q, requestId) {
+  return (await q.request().input("rid", sql.Int, requestId).query(`
+    SELECT TOP 1 oa.Id AS HeldId,
+      oa.Amount - ISNULL(oa.AppliedAmount, 0)
+        - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t WHERE t.HeldOnAccountId = oa.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0) AS ToMove
+    FROM dbo.CrmOnAccountPayment oa
+    WHERE oa.HeldSourceType = N'UnitChange' AND oa.HeldSourceRefId = @rid AND oa.Status = 'Held'
+    ORDER BY oa.Id`)).recordset[0] || null;
+}
+
+// Adds money to a unit change's held credit (one Held row per request, created on first use). No GL: the receipts
+// already carry the liability; the ledgers move when the credit is applied to the new booking.
+async function holdUnitChangeCredit(tx, { requestId, requestNo, bookingId, amount, actorUserId }) {
+  const amt = Math.round((Number(amount) || 0) * 100) / 100;
+  if (!(amt > 0)) return null;
+  const held = (await tx.request().input("rid", sql.Int, requestId).query(`
+    SELECT TOP 1 Id FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK)
+    WHERE HeldSourceType = N'UnitChange' AND HeldSourceRefId = @rid ORDER BY Id`)).recordset[0];
+  if (held) {
+    await tx.request().input("id", sql.Int, held.Id).input("amt", sql.Decimal(18, 2), amt)
+      .query("UPDATE dbo.CrmOnAccountPayment SET Amount = Amount + @amt, Status = 'Held' WHERE Id = @id");
+    return held.Id;
+  }
+  return (await tx.request()
+    .input("no", sql.NVarChar(30), `${requestNo}-HOLD`.slice(0, 30)).input("bid", sql.Int, bookingId)
+    .input("amt", sql.Decimal(18, 2), amt).input("rid", sql.Int, requestId).input("cb", sql.Int, actorUserId ?? null)
+    .query(`
+      INSERT INTO dbo.CrmOnAccountPayment
+        (ReceiptNo, BookingId, Amount, AppliedAmount, Status, ReceivedDate, PaymentMode,
+         Notes, HeldFromBookingId, HeldSourceType, HeldSourceRefId, HeldAt, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.Id
+      VALUES (@no, @bid, @amt, 0, 'Held', CAST(SYSDATETIME() AS DATE), 'HeldCredit',
+              'Moving to the new booking of an approved unit change.', @bid, N'UnitChange', @rid, SYSDATETIME(), @cb, SYSDATETIME())`)).recordset[0].Id;
+}
+
+// Every free rupee of a booking (verified money on account, after taking settled money back off its milestones) rolled
+// into the unit change's held credit, ready to move. Returns the amount rolled.
+async function rollBookingMoneyIntoUnitChange(tx, { requestId, requestNo, bookingId, actorUserId, actorEmail }) {
+  const note = `Moved with unit change ${requestNo}`;
+  const unwound = await require("./crmOnAccountCoverage").unapplyBookingAllocations(tx, bookingId, {
+    actorUserId, note, receiptNo: (a) => `UC-${requestId}-${a.OnAccountPaymentId}-${a.MilestoneId}`,
+  });
+  const { syncCrmOnAccountLedger } = require("./crmLedger");
+  for (const oaId of new Set(unwound.allocs.map((a) => a.OnAccountPaymentId))) {
+    await syncCrmOnAccountLedger(tx, oaId, actorEmail || "system", note, { onlyDown: false });
+  }
+  const rolled = (await tx.request().input("bid", sql.Int, bookingId).input("n", sql.NVarChar(300), note).query(`
+    UPDATE dbo.CrmOnAccountPayment
+    SET AppliedAmount = Amount, Status = 'Applied', Notes = ISNULL(Notes, '') + CHAR(10) + @n
+    OUTPUT INSERTED.Id, INSERTED.Amount - ISNULL(DELETED.AppliedAmount, 0) AS Freed
+    WHERE BookingId = @bid AND ISNULL(Status, '') IN ('Unapplied', 'PartiallyApplied') AND Amount > ISNULL(AppliedAmount, 0)`)).recordset;
+  let total = 0;
+  for (const r of rolled) {
+    await syncCrmOnAccountLedger(tx, r.Id, actorEmail || "system", note);
+    total += Number(r.Freed) || 0;
+  }
+  total = Math.round(total * 100) / 100;
+  await holdUnitChangeCredit(tx, { requestId, requestNo, bookingId, amount: total, actorUserId });
+  return total;
+}
+
+// Sends what is left of a unit change's held credit to its new booking. Same company: applied there at once (the
+// request completes in applyRebookingTransferToBooking). Another company: a Fund Transfer goes for approval and the
+// request waits as MovingMoney. Returns the transfer outcome, or null when nothing is left to move.
+async function moveUnitChangeCredit(pool, requestId, { actorUserId = null, userEmail = "system", userRole = null } = {}) {
+  const r = (await pool.request().input("rid", sql.Int, requestId)
+    .query("SELECT Id, TargetBookingId, Status FROM dbo.CrmPropertyChangeRequest WHERE Id = @rid")).recordset[0];
+  if (!r?.TargetBookingId) return null;
+  const left = await unitChangeCreditToMove(pool, requestId);
+  const amount = Math.round((Number(left?.ToMove) || 0) * 100) / 100;
+  if (!(amount > 0.009)) {
+    // Nothing (left) to move: done, unless a Fund Transfer is still on its way.
+    await pool.request().input("rid", sql.Int, requestId).query(`
+      UPDATE dbo.CrmPropertyChangeRequest SET Status = N'${UnitChangeStatus.COMPLETED}', CompletedAt = ISNULL(CompletedAt, SYSDATETIME()), UpdatedAt = SYSDATETIME()
+      WHERE Id = @rid AND Status IN (N'${UnitChangeStatus.APPROVED}', N'${UnitChangeStatus.FAILED}', N'${UnitChangeStatus.MOVING_MONEY}')
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRebookingTransfer t JOIN dbo.CrmOnAccountPayment oa ON oa.Id = t.HeldOnAccountId
+                        WHERE oa.HeldSourceType = N'UnitChange' AND oa.HeldSourceRefId = @rid AND t.Status NOT IN ('Rejected', 'Applied'))`);
+    return null;
+  }
+  await pool.request().input("rid", sql.Int, requestId)
+    .query(`UPDATE dbo.CrmPropertyChangeRequest SET Status = N'${UnitChangeStatus.MOVING_MONEY}', UpdatedAt = SYSDATETIME() WHERE Id = @rid`);
+  const out = await require("../routes/crmRefunds").startRebookingTransfer(pool, {
+    heldId: left.HeldId, toBookingId: r.TargetBookingId, amount, actorUserId, userEmail, userRole,
+  });
+  if (out.crossCompany) {
+    await pool.request().input("rid", sql.Int, requestId).input("n", sql.NVarChar(1000), out.message || null)
+      .query("UPDATE dbo.CrmPropertyChangeRequest SET Note = @n, UpdatedAt = SYSDATETIME() WHERE Id = @rid");
+  }
+  return out;
+}
+
+// Carries out an approved Unit Change. Runs again safely: each step checks whether it is already done.
+async function executeUnitChange(pool, requestId, { actorUserId = null, userEmail = "system", userRole = null } = {}) {
+  const load = async () => (await pool.request().input("rid", sql.Int, requestId).query(`
+    SELECT r.*, sb.BookingNo AS SourceBookingNo, sb.Status AS SourceBookingStatus, sb.AssignedTo AS SourceAssignedTo,
+           ta.Status AS TargetApplicationStatus
+    FROM dbo.CrmPropertyChangeRequest r
+    JOIN dbo.CrmBooking sb ON sb.Id = r.SourceBookingId
+    LEFT JOIN dbo.CrmApplication ta ON ta.Id = r.TargetApplicationId
+    WHERE r.Id = @rid`)).recordset[0];
+  let r = await load();
+  if (!r) throw unitChangeError(404, "Unit change not found");
+  if (![UnitChangeStatus.APPROVED, UnitChangeStatus.FAILED].includes(r.Status)) {
+    throw unitChangeError(409, `This unit change is ${r.Status}; only an approved one is carried out.`);
+  }
+  try {
+    const { requireActiveBooking, isLegalWorkStarted, isSaleDeedRegistered } = require("./crmWorkflowGuards");
+    const sourceClosed = r.SourceBookingStatus === CrmStatus.UNIT_CHANGED;
+    if (!sourceClosed) {
+      const activeErr = await requireActiveBooking(pool, r.SourceBookingId);
+      if (activeErr) throw unitChangeError(409, activeErr);
+      if (await isSaleDeedRegistered(pool, r.SourceBookingId)) throw unitChangeError(409, "The Sale Deed is registered: the unit can't be changed in the ERP.");
+      if (await isLegalWorkStarted(pool, r.SourceBookingId)) throw unitChangeError(409, "The Agreement for Sale is signed and names this unit: cancel the agreement first.");
+    }
+
+    // 1. The new booking, for the same buyer, confirmed by this approval (no separate booking approval, and no
+    //    booking-amount receipt: the buyer's money comes across from the old booking).
+    if (!r.TargetBookingId) {
+      if (r.TargetApplicationStatus === CrmStatus.DRAFT) {
+        await require("./approvalService").transition("crm-applications", r.TargetApplicationId, CrmStatus.PENDING, userEmail, userRole);
+      }
+      const bk = await createCrmBookingRecord(pool, {
+        ApplicationId: r.TargetApplicationId, UnitIds: [r.TargetUnitId], RatePerSqFt: r.RatePerSqFt,
+        PaymentPlanId: r.PaymentPlanId, AssignedTo: r.SourceAssignedTo, TokenType: "Amount", TokenValue: 0,
+        Notes: `Unit change ${r.RequestNo} from booking ${r.SourceBookingNo}. ${r.Reason}`,
+      }, actorUserId);
+      await pool.request().input("rid", sql.Int, requestId).input("bid", sql.Int, bk.id).input("u", sql.Int, actorUserId)
+        .query(`UPDATE dbo.CrmPropertyChangeRequest SET TargetBookingId = @bid, UpdatedBy = @u, UpdatedAt = SYSDATETIME() WHERE Id = @rid;
+                UPDATE dbo.CrmBooking SET Status = '${CrmStatus.APPROVED}', WorkflowStage = 'Confirmed',
+                  ConfirmedAt = ISNULL(ConfirmedAt, SYSDATETIME()), ConfirmedBy = ISNULL(ConfirmedBy, @u), UpdatedAt = SYSDATETIME()
+                WHERE Id = @bid`);
+      const stage = require("./crmBookingStageService");
+      await stage.logStageAction(pool, bk.id, stage.STAGE_CONFIRMED, "Confirmed", `Confirmed by unit change ${r.RequestNo}`, actorUserId);
+      try { await require("./crmPortalProvision").ensurePortalUser(pool, r.TargetApplicationId); } catch (e) { console.error("[unit-change] portal:", e.message); }
+      r = await load();
+    }
+
+    // 1b. The same buyer on the new booking: co-applicants, KYC documents, bank and nominee details, home loan and
+    //     bank preferences are copied over (the old booking keeps its own as history); the sales lead follows.
+    await copyBuyerDetails(pool, { fromBookingId: r.SourceBookingId, toBookingId: r.TargetBookingId, toApplicationId: r.TargetApplicationId });
+
+    // 2. The old booking closes as UnitChanged: its settled money back on account and rolled into the held credit,
+    //    its money receipts not yet with Finance moved to the new booking, its unit, parking and open items released.
+    if (r.SourceBookingStatus !== CrmStatus.UNIT_CHANGED) {
+      const tx = pool.transaction();
+      await tx.begin();
+      let amendments = [];
+      try {
+        const locked = (await tx.request().input("bid", sql.Int, r.SourceBookingId)
+          .query("SELECT Status, ApplicationId FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid")).recordset[0];
+        if (locked.Status !== CrmStatus.UNIT_CHANGED) {
+          const moved = await rollBookingMoneyIntoUnitChange(tx, { requestId, requestNo: r.RequestNo, bookingId: r.SourceBookingId, actorUserId, actorEmail: userEmail });
+          await tx.request().input("old", sql.Int, r.SourceBookingId).input("new", sql.Int, r.TargetBookingId).query(`
+            UPDATE dbo.CrmMoneyReceipt SET BookingId = @new, UpdatedAt = SYSDATETIME()
+            WHERE BookingId = @old AND Status = 'Pending' AND ReceivedPaymentId IS NULL`);
+          await tx.request().input("bid", sql.Int, r.SourceBookingId).input("rid", sql.Int, requestId)
+            .query(`UPDATE dbo.CrmBooking SET Status = '${CrmStatus.UNIT_CHANGED}', ClosedByUnitChangeId = @rid, UpdatedAt = SYSDATETIME() WHERE Id = @bid`);
+          const { releaseBookingInventoryLines } = require("./crmWorkflowGuards");
+          await releaseBookingInventoryLines(tx, r.SourceBookingId);
+          const target = (await tx.request().input("bid", sql.Int, r.TargetBookingId).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+          await require("./crmApplicationWorkflow").advanceApplicationStatus(tx, locked.ApplicationId, CrmStatus.CANCELLED, "BookingCancelled",
+            `Unit changed: the sale moved to booking ${target?.BookingNo || r.TargetBookingId} (${r.RequestNo})`, actorUserId, { force: true });
+          ({ amendments } = await require("../routes/crmCancellations").releaseClosedBookingSideEffects(tx, r.SourceBookingId, { actorUserId, why: "moved to another unit" }));
+          // The sale carries on, so its brokerage moves with it as it stands: what is paid stays closed, what is unpaid
+          // carries on, and the new booking never raises brokerage again (maybeAutoCreateBrokerage finds these rows).
+          await tx.request().input("old", sql.Int, r.SourceBookingId).input("new", sql.Int, r.TargetBookingId)
+            .input("n", sql.NVarChar(300), `Moved with unit change ${r.RequestNo}`).query(`
+            UPDATE dbo.CrmBrokerageMaster SET BookingId = @new, UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + CHAR(10) + @n
+            WHERE BookingId = @old AND Status <> '${CrmStatus.VOIDED}'`);
+          await tx.request().input("rid", sql.Int, requestId).input("m", sql.Decimal(18, 2), moved)
+            .query("UPDATE dbo.CrmPropertyChangeRequest SET MovedAmount = MovedAmount + @m, UpdatedAt = SYSDATETIME() WHERE Id = @rid");
+        }
+        await tx.commit();
+      } catch (e) {
+        try { await tx.rollback(); } catch { /* already rolled back */ }
+        throw e;
+      }
+      for (const a of amendments) {
+        if (!a.RequestedBy) continue;
+        try {
+          await require("./notify").emitNotification(pool, a.RequestedBy, "crm_booking_amendment_rejected", "Amendment Request Auto-Rejected",
+            "Your requested change was auto-rejected because the booking moved to another unit.", a.Id, "crm_booking_amendment");
+        } catch (e) { console.error("[unit-change] amendment notification failed:", e.message); }
+      }
+      r = await load();
+    }
+
+    // 2b. The old booking's invoices are credited in full: its sale moved to the new booking, which invoices its own.
+    {
+      const tb = (await pool.request().input("bid", sql.Int, r.TargetBookingId).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+      await require("./crmGstNotes").creditForUnitChange(pool, { bookingId: r.SourceBookingId, requestNo: r.RequestNo, newBookingNo: tb?.BookingNo || String(r.TargetBookingId), userEmail });
+    }
+
+    // 3. Parking and extra charges the request keeps: allotted again on the new booking, at the same price.
+    const addOns = (() => { try { return JSON.parse(r.AddOnsJson || "[]"); } catch { return []; } })();
+    for (const a of addOns) {
+      if (!a.keep || a.done) continue;
+      if (a.kind === "Parking") {
+        const p = (await pool.request().input("id", sql.Int, a.id).query(
+          "SELECT ParkingMasterId, ParkingSlotId, Quantity, RateSnapshot, Notes FROM dbo.CrmParkingAllotment WHERE Id = @id")).recordset[0];
+        if (p) await require("../routes/crmParking").applyAddParking(pool, r.TargetBookingId, {
+          ParkingMasterId: p.ParkingMasterId, ParkingSlotId: p.ParkingSlotId, Quantity: p.Quantity, RateOverride: p.RateSnapshot,
+          Notes: [p.Notes, `Kept from booking ${r.SourceBookingNo} (${r.RequestNo})`].filter(Boolean).join(" · "),
+        }, actorUserId);
+      } else if (a.kind === "ExtraCharge") {
+        const c = (await pool.request().input("id", sql.Int, a.id).query(
+          "SELECT ExtraChargeMasterId, Description, Amount FROM dbo.CrmExtraCharge WHERE Id = @id")).recordset[0];
+        if (c) {
+          const tx = pool.transaction();
+          await tx.begin();
+          try {
+            await require("../routes/crmExtraCharges").applyAddExtraCharge(tx, r.TargetBookingId, {
+              ExtraChargeMasterId: c.ExtraChargeMasterId, Description: c.Description, Amount: c.Amount,
+            }, actorUserId);
+            await tx.commit();
+          } catch (e) { try { await tx.rollback(); } catch { /* already rolled back */ } throw e; }
+        }
+      }
+      a.done = true;
+      await pool.request().input("rid", sql.Int, requestId).input("j", sql.NVarChar(sql.MAX), JSON.stringify(addOns))
+        .query("UPDATE dbo.CrmPropertyChangeRequest SET AddOnsJson = @j, UpdatedAt = SYSDATETIME() WHERE Id = @rid");
+    }
+
+    // 4. The money: every rupee to the new booking.
+    await pool.request().input("rid", sql.Int, requestId)
+      .query(`UPDATE dbo.CrmPropertyChangeRequest SET Note = NULL, UpdatedAt = SYSDATETIME() WHERE Id = @rid AND Status = N'${UnitChangeStatus.FAILED}'`);
+    await moveUnitChangeCredit(pool, requestId, { actorUserId, userEmail, userRole });
+    for (const k of ["crm-bookings", "crm-applications", "unit-master", "crm-refunds"]) await bumpCacheVersion(k).catch(() => {});
+    return await load();
+  } catch (e) {
+    await pool.request().input("rid", sql.Int, requestId).input("n", sql.NVarChar(1000), String(e.message || "Stopped").slice(0, 1000))
+      .query(`UPDATE dbo.CrmPropertyChangeRequest SET Status = N'${UnitChangeStatus.FAILED}', Note = @n, UpdatedAt = SYSDATETIME()
+              WHERE Id = @rid AND Status <> N'${UnitChangeStatus.COMPLETED}'`).catch(() => {});
+    throw e;
+  }
+}
+
+// The tables that describe the buyer of a booking (not the unit): copied to the new booking of a Unit Change. Each is
+// copied once (skipped when the new booking already has rows of it), every column as it is, with the new booking's ids.
+const BUYER_TABLES = ["CrmCoApplicant", "CrmBookingDocument", "CrmCustomerBankDetail", "CrmLoanDetail", "CrmWelcomeCallBankPreference"];
+async function copyBuyerDetails(pool, { fromBookingId, toBookingId, toApplicationId }) {
+  for (const table of BUYER_TABLES) {
+    const cols = (await pool.request().input("t", sql.NVarChar(128), table).query(`
+      SELECT c.name FROM sys.columns c WHERE c.object_id = OBJECT_ID('dbo.' + @t) AND c.is_identity = 0 AND c.is_computed = 0
+      ORDER BY c.column_id`)).recordset.map((c) => c.name);
+    if (!cols.includes("BookingId")) continue;
+    const pick = (c) => (c === "BookingId" ? "@to" : c === "ApplicationId" ? "@app" : `[${c}]`);
+    const live = cols.includes("IsActive") ? " AND ISNULL(IsActive, 1) = 1" : "";
+    await pool.request().input("from", sql.Int, fromBookingId).input("to", sql.Int, toBookingId).input("app", sql.Int, toApplicationId).query(`
+      IF NOT EXISTS (SELECT 1 FROM dbo.[${table}] WHERE BookingId = @to)
+        INSERT INTO dbo.[${table}] (${cols.map((c) => `[${c}]`).join(", ")})
+        SELECT ${cols.map(pick).join(", ")} FROM dbo.[${table}] WHERE BookingId = @from${live}`);
+  }
+  await pool.request().input("from", sql.Int, fromBookingId).input("to", sql.Int, toBookingId).input("app", sql.Int, toApplicationId)
+    .query("UPDATE dbo.SaLead SET CrmBookingId = @to, CrmApplicationId = @app WHERE CrmBookingId = @from");
+}
+
+// A payment bounces after its booking's unit was changed: the money had moved to the new booking, so it comes off
+// there — first what has not moved yet (the held credit), then the credit that reached the new booking (its settled
+// money goes back on account first, the full-booking hold). Runs inside the bounce's transaction (crmBouncedPayment).
+async function bounceAfterUnitChange(tx, { bookingId, amount, note, actorUserId = null, actorEmail = "system" }) {
+  const r = (await tx.request().input("bid", sql.Int, bookingId).query(`
+    SELECT r.Id, r.RequestNo, r.TargetBookingId FROM dbo.CrmBooking b JOIN dbo.CrmPropertyChangeRequest r ON r.Id = b.ClosedByUnitChangeId
+    WHERE b.Id = @bid AND b.Status = '${CrmStatus.UNIT_CHANGED}'`)).recordset[0];
+  if (!r) return null;
+  let left = Math.round((Number(amount) || 0) * 100) / 100;
+  const { syncCrmOnAccountLedger } = require("./crmLedger");
+  // Not moved yet: off the held credit.
+  const held = await unitChangeCreditToMove(tx, r.Id);
+  if (held && Number(held.ToMove) > 0.009 && left > 0) {
+    const cut = Math.min(left, Number(held.ToMove));
+    await tx.request().input("id", sql.Int, held.HeldId).input("c", sql.Decimal(18, 2), cut)
+      .query("UPDATE dbo.CrmOnAccountPayment SET Amount = Amount - @c, Status = CASE WHEN ISNULL(AppliedAmount, 0) >= Amount - @c - 0.009 THEN 'Applied' ELSE Status END WHERE Id = @id");
+    left = Math.round((left - cut) * 100) / 100;
+  }
+  let takenOffNew = 0;
+  if (left > 0.009 && r.TargetBookingId) {
+    const unwound = await require("./crmOnAccountCoverage").unapplyBookingAllocations(tx, r.TargetBookingId, {
+      actorUserId, note, receiptNo: (a) => `UCB-${r.Id}-${a.OnAccountPaymentId}-${a.MilestoneId}`,
+    });
+    for (const oaId of new Set(unwound.allocs.map((a) => a.OnAccountPaymentId))) await syncCrmOnAccountLedger(tx, oaId, actorEmail, note, { onlyDown: false });
+    // The credit that came across with this change, newest first.
+    const moved = (await tx.request().input("rid", sql.Int, r.Id).query(`
+      SELECT n.Id, n.Amount - ISNULL(n.AppliedAmount, 0) AS Free FROM dbo.CrmRebookingTransfer t
+      JOIN dbo.CrmOnAccountPayment h ON h.Id = t.HeldOnAccountId AND h.HeldSourceType = N'UnitChange' AND h.HeldSourceRefId = @rid
+      JOIN dbo.CrmOnAccountPayment n ON n.Id = t.NewOnAccountId
+      WHERE t.Status = 'Applied' ORDER BY n.Id DESC`)).recordset;
+    for (const m of moved) {
+      if (left <= 0.009) break;
+      const cut = Math.min(left, Number(m.Free));
+      if (!(cut > 0)) continue;
+      await tx.request().input("id", sql.Int, m.Id).input("c", sql.Decimal(18, 2), cut).input("n", sql.NVarChar(300), note)
+        .query("UPDATE dbo.CrmOnAccountPayment SET Amount = Amount - @c, Notes = ISNULL(Notes, '') + CHAR(10) + @n WHERE Id = @id");
+      await syncCrmOnAccountLedger(tx, m.Id, actorEmail, note, { onlyDown: false });
+      left = Math.round((left - cut) * 100) / 100;
+      takenOffNew = Math.round((takenOffNew + cut) * 100) / 100;
+    }
+  }
+  await tx.request().input("rid", sql.Int, r.Id).input("a", sql.Decimal(18, 2), Number(amount)).input("c", sql.Decimal(18, 2), takenOffNew)
+    .input("n", sql.NVarChar(1000), note)
+    .query(`UPDATE dbo.CrmPropertyChangeRequest SET MovedAmount = MovedAmount - @a, CreditCarriedAmount = CreditCarriedAmount - @c,
+              Note = LEFT(ISNULL(Note + CHAR(10), '') + @n, 1000), UpdatedAt = SYSDATETIME() WHERE Id = @rid`);
+  return { targetBookingId: r.TargetBookingId, notTakenBack: left };
+}
+
+// A payment Finance verifies after its booking's unit was changed (it was still with Finance then): the money is real,
+// so it is recorded as any receipt, then rolled into the unit change's held credit and sent on to the new booking.
+// Returns true when it did that.
+async function forwardIfUnitChanged(pool, bookingId, onAccountId, actorUserId, actorEmail) {
+  const r = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT r.Id, r.RequestNo FROM dbo.CrmBooking b JOIN dbo.CrmPropertyChangeRequest r ON r.Id = b.ClosedByUnitChangeId
+    WHERE b.Id = @bid AND b.Status = '${CrmStatus.UNIT_CHANGED}'`)).recordset[0];
+  if (!r) return false;
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const rolled = await tx.request().input("id", sql.Int, onAccountId).input("n", sql.NVarChar(300), `Verified after unit change ${r.RequestNo}: moved to the new booking`).query(`
+      UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = Amount, Status = 'Applied', Notes = ISNULL(Notes, '') + CHAR(10) + @n
+      OUTPUT INSERTED.Amount
+      WHERE Id = @id AND ISNULL(Status, 'Unapplied') = 'Unapplied' AND ISNULL(AppliedAmount, 0) = 0`);
+    if (rolled.recordset.length) {
+      await require("./crmLedger").syncCrmOnAccountLedger(tx, onAccountId, actorEmail || "system", `Moved with unit change ${r.RequestNo}`);
+      const amt = Number(rolled.recordset[0].Amount);
+      await holdUnitChangeCredit(tx, { requestId: r.Id, requestNo: r.RequestNo, bookingId, amount: amt, actorUserId });
+      await tx.request().input("rid", sql.Int, r.Id).input("m", sql.Decimal(18, 2), amt)
+        .query(`UPDATE dbo.CrmPropertyChangeRequest SET MovedAmount = MovedAmount + @m, CompletedAt = NULL, UpdatedAt = SYSDATETIME() WHERE Id = @rid`);
+    }
+    await tx.commit();
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* already rolled back */ }
+    throw e;
+  }
+  await moveUnitChangeCredit(pool, r.Id, { actorUserId, userEmail: actorEmail || "system" });
+  return true;
+}
+
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  changeBookingUnit, applicationEditsClosedReason, parkingOutsideUnitBlock, assertNoBookingForApplicationLocked,
+  changeBookingUnit, unitChangeRate, openMilestoneInvoiceNos, openUnitChangeOn, executeUnitChange, moveUnitChangeCredit, forwardIfUnitChanged, bounceAfterUnitChange, copyBuyerDetails, applicationEditsClosedReason, parkingOutsideUnitBlock, assertNoBookingForApplicationLocked,
   generateMilestonesForBooking, planSchedule, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

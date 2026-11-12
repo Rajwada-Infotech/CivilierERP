@@ -22,7 +22,7 @@ class ResaleError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
 }
 
-const LIVE = "b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')";
+const LIVE = "b.IsActive = 1 AND b.Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL;
 
 /** The live bookings that move together with this one (itself first if alone). */
 async function movingBookings(db, bookingId) {
@@ -315,7 +315,7 @@ async function completeBuyBack(pool, resaleId, newPaymentId, actorUserId, actorE
     const { syncApplicationOnBookingTerminal } = require("./crmApplicationWorkflow");
     for (const id of ids) {
       await tx.request().input("b", sql.Int, id).input("by", sql.Int, actorUserId)
-        .query(`UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @b AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')`);
+        .query(`UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @b AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`);
       await releaseBookingInventoryLines(tx, id);
       // What sat on account was counted in the price paid back — use it up,
       // so it can't be refunded or transferred a second time.

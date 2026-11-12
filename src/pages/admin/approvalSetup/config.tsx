@@ -334,7 +334,13 @@ export const MODULE_OPTIONS = [
     id: "marketing-head",
     label: "Marketing Head",
     icon: "📣",
-    desc: "Sees and manages every Sales Automation record (leads, tasks, commissions, reports, teams); changes a booking's unit, escalates overdue milestones, runs the SLA engine and sees all service tickets; told when a booking is ready and when a milestone is overdue",
+    desc: "Sees and manages every Sales Automation record (leads, tasks, commissions, reports, teams); escalates overdue milestones, runs the SLA engine and sees all service tickets; told when a booking is ready and when a milestone is overdue",
+  },
+  {
+    id: "crm-unit-change",
+    label: "CRM Unit Change",
+    icon: "🔁",
+    desc: "Approves moving a buyer to another unit (same or another project). On approval the old booking closes, a new booking opens on the new unit and the money moves to it.",
   },
   {
     id: "crm-invoice-void",
@@ -425,6 +431,7 @@ export const MODULE_GROUPS = [
     modules: [
       "crm-applications",
       "crm-invoice-void",
+      "crm-unit-change",
       "crm-parking-release",
       "crm-booking-verification",
       "crm-bookings",

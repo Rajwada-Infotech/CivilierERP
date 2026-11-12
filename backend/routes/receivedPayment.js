@@ -556,7 +556,7 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
           'Draft', @RPCreatedBy, GETDATE() ${extraVals}
         FROM dbo.CrmBooking crmBooking WITH (UPDLOCK, HOLDLOCK)
         WHERE crmBooking.Id = @CrmBookingId AND crmBooking.IsActive = 1
-          AND crmBooking.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+          AND crmBooking.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
       ` : `
         VALUES (
           @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode,

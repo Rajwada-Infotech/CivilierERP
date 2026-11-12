@@ -29,6 +29,7 @@ import { findBank } from "@/components/crm/SelectedBankCard";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { useUrlParam } from "@/hooks/useUrlParam";
+import { isBookingClosed } from "@/constants/crmStatuses";
 
 const API = "/api/crm/refunds";
 const BKG_API = "/api/crm/bookings";
@@ -154,7 +155,7 @@ function CustomerAccount({ bookingId, name, acc, ifsc, onChange, transfer }: {
 // ── New refund / re-booking credit ─────────────────────────────────────────
 
 /** `bookingId`: opened from a booking with excess money, so only that booking's money is offered. */
-function NewRefundDialog({ onClose, onDone, bookingId }: { onClose: () => void; onDone: (id?: number) => void; bookingId?: string | null }) {
+function NewRefundDialog({ onClose, onDone, bookingId, targetBookingId }: { onClose: () => void; onDone: (id?: number) => void; bookingId?: string | null; targetBookingId?: string | null }) {
   const [mode, setMode] = useState<"refund" | "rebook">("refund");
   const [picked, setPicked] = useState<any | null>(null);
   const [amount, setAmount] = useState("");
@@ -181,8 +182,28 @@ function NewRefundDialog({ onClose, onDone, bookingId }: { onClose: () => void; 
   const dedPct = picked?.SourceType === "CancellationHeldCredit" ? Number(picked.DeductionPercent || 0) : 0;
   const deduction = mode === "refund" ? Math.round(((amt * dedPct) / 100) * 100) / 100 : 0;
   const net = Math.max(0, amt - deduction);
-  const rebookTargets = (bookings as any[]).filter((b) => picked && String(b.CustomerId ?? "") === String(picked.CustomerId ?? "") && !["Cancelled", "Rejected"].includes(b.Status));
+  const rebookTargets = (bookings as any[]).filter((b) => picked && b.IsActive !== false
+    && String(b.CustomerId ?? "") === String(picked.CustomerId ?? "")
+    && (!targetBookingId || String(b.Id) === String(targetBookingId))
+    && !isBookingClosed(b.Status));
+  const selectedTarget = rebookTargets.find((b) => String(b.Id) === String(toBookingId));
+  const targetGrandTotal = Number(selectedTarget?.GrandTotal ?? selectedTarget?.TotalValue ?? 0);
+  const targetClearedAndCredit = Number(selectedTarget?.TotalCleared || 0) + Number(selectedTarget?.ApprovedOnAccount || 0);
+  const targetBalanceBeforeCarry = Math.max(0, targetGrandTotal - targetClearedAndCredit);
+  const targetBalanceAfterCarry = Math.max(0, targetBalanceBeforeCarry - amt);
+  const carryExcess = Math.max(0, amt - targetBalanceBeforeCarry);
   const canRebook = picked?.SourceType === "CancellationHeldCredit";
+  useEffect(() => {
+    if (!bookingId || picked) return;
+    const held = offered.find((x) => x.SourceType === "CancellationHeldCredit");
+    if (!held) return;
+    setPicked(held);
+    setAmount(String(Number(held.Remaining)));
+    setMode("rebook");
+  }, [bookingId, offered, picked]);
+  useEffect(() => {
+    if (targetBookingId && (bookings as any[]).some((b) => String(b.Id) === String(targetBookingId))) setToBookingId(String(targetBookingId));
+  }, [targetBookingId, bookings]);
   useEffect(() => { if (!canRebook && mode === "rebook") setMode("refund"); }, [canRebook, mode]);
   const transfer = !!payModes?.transfer.includes(paymentMode);
 
@@ -265,12 +286,21 @@ function NewRefundDialog({ onClose, onDone, bookingId }: { onClose: () => void; 
       </GridFormSection>
       {mode === "rebook" ? (
         <GridFormSection title="Apply to booking">
-          <GridFormField label="Booking (same customer)" required wide hint="A booking under another company raises an inter-company fund transfer for Finance to approve; the credit lands afterwards.">
+          <GridFormField label="Booking (same customer)" required wide hint="For another company, this records an inter-company transfer for Finance approval. Your team moves the money outside the ERP; no bank transfer is initiated here. The request stays pending until Finance confirms it.">
             <SearchableNativeSelect value={toBookingId} onChange={(e) => setToBookingId(e.target.value)} className={GRID_INPUT}>
               <option value="">Select the booking…</option>
               {rebookTargets.map((b) => <option key={b.Id} value={String(b.Id)}>{`${b.BookingNo} · ${b.ProjectName || b.UnitNo || ""} · ${b.CompanyId === picked?.CompanyId ? "same company" : "another company"}`}</option>)}
             </SearchableNativeSelect>
           </GridFormField>
+          {selectedTarget && <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-border bg-muted/20 p-3 text-xs">
+            <span className="text-muted-foreground">Destination booking total</span><strong>{fmt(targetGrandTotal)}</strong>
+            <span className="text-muted-foreground">Cleared plus available account credit</span><strong>{fmt(targetClearedAndCredit)}</strong>
+            <span className="text-muted-foreground">Estimated balance before carry</span><strong>{fmt(targetBalanceBeforeCarry)}</strong>
+            <span className="text-muted-foreground">Credit amount selected</span><strong>{fmt(amt)}</strong>
+            <span className="text-muted-foreground">Estimated balance after carry</span><strong>{fmt(targetBalanceAfterCarry)}</strong>
+            {carryExcess > 0.009 && <><span className="text-amber-700">Excess stays as destination account credit</span><strong className="text-amber-700">{fmt(carryExcess)}</strong></>}
+            <p className="col-span-2 pt-1 text-muted-foreground">Finance-pending receipts are excluded. The carry creates destination on-account credit; it does not automatically apply that credit to milestones or refund any excess. Lower the amount if you want the unused source balance to remain available for a separate refund decision.</p>
+          </div>}
         </GridFormSection>
       ) : (
         <GridFormSection title="Payout">
@@ -752,7 +782,7 @@ const CrmRefunds: React.FC = () => {
         </>
       )}
 
-      {showNew && rights.canCreate && <NewRefundDialog bookingId={sp.get("newForBooking")} onClose={() => setShowNew(false)} onDone={(id) => { invalidate(); if (id) openRefund(id); }} />}
+      {showNew && rights.canCreate && <NewRefundDialog bookingId={sp.get("newForBooking")} targetBookingId={sp.get("targetBookingId")} onClose={() => setShowNew(false)} onDone={(id) => { invalidate(); if (id) openRefund(id); }} />}
       {editing && <EditDialog r={editing.r} thenSubmit={editing.thenSubmit} onClose={() => setEditing(null)} onDone={invalidate} />}
 
       {withdrawing && (

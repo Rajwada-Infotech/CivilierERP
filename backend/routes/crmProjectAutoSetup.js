@@ -1497,7 +1497,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
             FROM dbo.CrmUnitPaymentPlan upp
             WHERE upp.UnitId = u.Id AND upp.IsActive = 1
           ) tags
-          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
           LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Converted')
           WHERE u.BlockId = @bid AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1) AND u.IsActive = 1
@@ -1516,7 +1516,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
             FROM dbo.CrmUnitPaymentPlan upp
             WHERE upp.UnitId = u.Id AND upp.IsActive = 1
           ) tags
-          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
           LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Converted')
           WHERE u.BlockId = @bid AND u.FloorNo = @fno AND u.IsActive = 1
@@ -2426,7 +2426,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
                   JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
                   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
                  WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-                   AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')) AS OwnerCustomerId
+                   AND b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}) AS OwnerCustomerId
         FROM dbo.PlotMaster p WITH (UPDLOCK, HOLDLOCK)
         WHERE p.Id IN (${plotIds.join(",")})
           AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
@@ -2438,7 +2438,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
               -- An application that already became a booking is ownership,
               -- not an open claim.
               AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking ab WHERE ab.ApplicationId = a.Id AND ab.IsActive = 1
-                                AND ab.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred'))
+                                AND ab.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL})
           )
           AND NOT EXISTS (
             SELECT 1 FROM dbo.CrmInventoryHold h
@@ -2876,7 +2876,7 @@ router.get("/projects/:projectId/plot-summary", requirePageRight("crm-auto-proje
           CASE
             WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
                          WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND b.IsActive = 1
-                           AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')) THEN 'Sold'
+                           AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}) THEN 'Sold'
             WHEN EXISTS (SELECT 1 FROM dbo.CrmApplicationPlot ap JOIN dbo.CrmApplication a ON a.Id = ap.ApplicationId
                          WHERE ap.PlotId = p.Id AND ap.Status = N'Active' AND a.IsActive = 1
                            AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted'))

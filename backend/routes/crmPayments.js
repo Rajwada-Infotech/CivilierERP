@@ -1054,6 +1054,22 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
   try {
     await tx.begin();
     try {
+      // Serialize receipt submission with unit/schedule changes. The unit
+      // change locks this same booking before checking references and deleting
+      // milestones, so a stale pre-transaction lookup cannot create an orphan.
+      await tx.request().input("bid", sql.Int, targetRow.BookingId)
+        .query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid");
+      const liveMilestone = await tx.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, targetRow.BookingId)
+        .query("SELECT Id, MilestoneNo, MilestoneName, AmountDue FROM dbo.CrmPaymentMilestone WITH (UPDLOCK, HOLDLOCK) WHERE Id = @mid AND BookingId = @bid");
+      const liveMilestoneRow = liveMilestone.recordset[0];
+      if (!liveMilestoneRow || Number(liveMilestoneRow.MilestoneNo) !== Number(targetRow.MilestoneNo)
+        || liveMilestoneRow.MilestoneName !== targetRow.MilestoneName
+        || Number(liveMilestoneRow.AmountDue) !== Number(targetRow.AmountDue)) {
+        throw new ReceiptError("Milestone changed while the receipt was being prepared. Refresh and try again.", 409);
+      }
+      if (!(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, liveMilestoneRow.MilestoneNo, { withPendingVerification: true }))) {
+        throw new ReceiptError("An earlier milestone became due while this receipt was being prepared. Refresh the payment schedule and try again.", 409);
+      }
       rp = await createReceivedPaymentInternal(tx, {
       RPReceivedFrom: targetRow.ApplicantName,
       RPCustomerName: targetRow.ApplicantName,
@@ -1144,11 +1160,11 @@ async function holdIfBookingCancelled(pool, bookingId, onAccountId, actorUserId,
   return true;
 }
 
-// A cancelled booking's later-verified payment goes to its refund, so it does
-// not wait on the old schedule's milestone order.
+// A cancelled booking's later-verified payment goes to its refund, and a unit-changed booking's to its new booking,
+// so neither waits on the old schedule's milestone order.
 async function isBookingCancelled(pool, bookingId) {
   return !!(await pool.request().input("bid", sql.Int, bookingId)
-    .query(`SELECT 1 AS x FROM dbo.CrmBooking WHERE Id = @bid AND Status = '${CrmStatus.CANCELLED}'`)).recordset.length;
+    .query(`SELECT 1 AS x FROM dbo.CrmBooking WHERE Id = @bid AND Status IN ('${CrmStatus.CANCELLED}', '${CrmStatus.UNIT_CHANGED}')`)).recordset.length;
 }
 
 async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmail) {
@@ -1222,7 +1238,8 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
   // Otherwise it stays in On Account unless this deposit was the one that
   // tipped the booking's total over its full GrandTotal — then every eligible
   // milestone is auto-adjusted right now, in order (autoApplyOnAccountIfFullyFunded).
-  if (!(await holdIfBookingCancelled(pool, targetRow.BookingId, onAccountId, actorUserId, actorEmail))) {
+  if (!(await holdIfBookingCancelled(pool, targetRow.BookingId, onAccountId, actorUserId, actorEmail))
+    && !(await require("../services/crmEntityCreation").forwardIfUnitChanged(pool, targetRow.BookingId, onAccountId, actorUserId, actorEmail))) {
     await autoApplyOnAccountIfFullyFunded(pool, targetRow.BookingId, actorUserId, actorEmail);
   }
 
@@ -1297,7 +1314,8 @@ async function applyCrmOnAccountPaymentApproval(pool, rp, actorUserId, actorEmai
   // Booking cancelled meanwhile: the money goes to its refund. Otherwise it
   // stays in On Account unless this deposit tipped the booking's total over
   // its full GrandTotal (autoApplyOnAccountIfFullyFunded).
-  if (!(await holdIfBookingCancelled(pool, rp.CrmBookingId, onAccountId, actorUserId, actorEmail))) {
+  if (!(await holdIfBookingCancelled(pool, rp.CrmBookingId, onAccountId, actorUserId, actorEmail))
+    && !(await require("../services/crmEntityCreation").forwardIfUnitChanged(pool, rp.CrmBookingId, onAccountId, actorUserId, actorEmail))) {
     await autoApplyOnAccountIfFullyFunded(pool, rp.CrmBookingId, actorUserId, actorEmail);
   }
 
@@ -1351,7 +1369,7 @@ router.post("/escalate-overdue", requirePageRight("crm-payments", "edit"), async
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
-        AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
+        AND b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
     `);
 
     // The people the Marketing Head switch names in Approval Setup (not a role name).
