@@ -12,7 +12,8 @@ const num = (v: unknown) => Number(v) || 0;
 type Line = Record<string, any>;
 
 function tableRows(rows: Line[], kind: "item" | "activity") {
-  if (!rows.length) return `<tr><td colspan="6" class="empty">No ${kind === "item" ? "items" : "activities"}</td></tr>`;
+  const cols = kind === "item" ? 7 : 6;
+  if (!rows.length) return `<tr><td colspan="${cols}" class="empty">No ${kind === "item" ? "items" : "activities"}</td></tr>`;
   return rows.map((row, i) => {
     const name = kind === "item" ? row.itemName ?? row.ItemName : row.activityName ?? row.ActivityName;
     const code = kind === "item" ? row.itemCode ?? row.ItemCode : row.activityCode ?? row.ActivityCode;
@@ -21,9 +22,11 @@ function tableRows(rows: Line[], kind: "item" | "activity") {
     const uom = row.uomName ?? row.UomName ?? "";
     const rate = num(row.rate ?? row.Rate);
     const amount = num(row.amount ?? row.LineAmount ?? row.Amount);
+    const forActivity = row.activityName ?? row.ActivityName ?? "";
     return `<tr>
       <td class="c">${i + 1}</td>
       <td><b>${e(name)}</b>${code ? ` <span class="code">${escapeHtml(String(code))}</span>` : ""}${desc ? `<div class="desc">${escapeHtml(String(desc))}</div>` : ""}</td>
+      ${kind === "item" ? `<td class="act">${forActivity ? escapeHtml(String(forActivity)) : "—"}</td>` : ""}
       <td class="r">${escapeHtml(String(qty))}</td>
       <td class="c">${escapeHtml(String(uom))}</td>
       <td class="r">${fmt(rate)}</td>
@@ -44,6 +47,7 @@ export function printBoq(record: BoqRecord) {
   const company = record.CompanyName || "Company";
   const mark = escapeHtml(company.trim().charAt(0).toUpperCase());
   const printed = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const itemHead = `<tr class="th"><th class="c">SL.</th><th>DESCRIPTION</th><th>FOR ACTIVITY</th><th class="r">QTY</th><th class="c">UOM</th><th class="r">RATE</th><th class="r">AMOUNT</th></tr>`;
   const head = `<tr class="th"><th class="c">SL.</th><th>DESCRIPTION</th><th class="r">QTY</th><th class="c">UOM</th><th class="r">RATE</th><th class="r">AMOUNT</th></tr>`;
 
   openPrintWindow(`<!DOCTYPE html>
@@ -80,6 +84,7 @@ export function printBoq(record: BoqRecord) {
   tbody tr:nth-child(even) td { background: #fdeede; }
   .c { text-align: center; } .r { text-align: right; white-space: nowrap; }
   th.c { text-align: center; } th.r { text-align: right; }
+  .act { color: #9a4a12; font-weight: 700; font-size: 9.5px; }
   .code { color: #9a4a12; font-size: 9px; margin-left: 4px; }
   .desc { color: #6b6b6b; font-size: 9.5px; margin-top: 2px; }
   .empty { text-align: center; color: #8a8a8a; }
@@ -120,8 +125,8 @@ export function printBoq(record: BoqRecord) {
     ${record.Description ? `<div class="note" style="margin:0 0 6mm"><b>Description</b>${escapeHtml(String(record.Description))}</div>` : ""}
 
     <h3 class="sec">Items <b>· ${items.length}</b></h3>
-    <table class="t"><thead><tr class="spacer"><td colspan="6"></td></tr>${head}</thead><tbody>${tableRows(items, "item")}</tbody>
-      <tfoot><tr class="sub"><td class="k" colspan="5">Items total</td><td>${fmt(itemTotal)}</td></tr></tfoot></table>
+    <table class="t"><thead><tr class="spacer"><td colspan="7"></td></tr>${itemHead}</thead><tbody>${tableRows(items, "item")}</tbody>
+      <tfoot><tr class="sub"><td class="k" colspan="6">Items total</td><td>${fmt(itemTotal)}</td></tr></tfoot></table>
 
     <h3 class="sec" style="margin-top:8mm">Activities <b>· ${activities.length}</b></h3>
     <table class="t"><thead><tr class="spacer"><td colspan="6"></td></tr>${head}</thead><tbody>${tableRows(activities, "activity")}</tbody>
