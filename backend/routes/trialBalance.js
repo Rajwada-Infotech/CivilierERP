@@ -449,7 +449,10 @@ router.get("/:lheadId/transactions", async (req, res) => {
           lrp.RPPaymentID  AS LPRPID,
           lnp.PPaymentID   AS LPNPID,
           plo.PaymentMode  AS LoanPostMode,
-          COALESCE(lpl.LoanNo, plo.LoanNo, dln.LoanNo) AS LoanRefNo
+          COALESCE(lpl.LoanNo, plo.LoanNo, dln.LoanNo) AS LoanRefNo,
+
+          -- The date written on the source document itself (shown instead of the posting date)
+          CONVERT(varchar(10), COALESCE(np.PDate, rp.RPDocDate, eb.EDocDate, jv.JVDate, grn.GRNDate, plo.LoanDate), 23) AS SourceDocDate
 
         FROM dbo.GeneralLedgerEntry gle
 
@@ -721,7 +724,7 @@ router.get("/:lheadId/transactions", async (req, res) => {
       }
 
       // Loans: a repayment shows its receipt / payment form (date, mode); every loan row's Ref Doc is the loan.
-      let date = r.VoucherDate || null;
+      let date = r.SourceDocDate || r.VoucherDate || null;
       if (st === "loanrepayment" && r.LPFormDocNo) {
         date = r.LPFormDate || date;
         mode = r.LPFormMode || mode;
