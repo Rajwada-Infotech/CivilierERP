@@ -357,31 +357,34 @@ export default function EmployeeMaster() {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
+      // A failed save must REACH the page (rethrow): MasterPage only adds the row to its list and says "saved" when
+      // this handler doesn't throw — swallowing the error here showed an employee that was never stored.
       try {
         await addEmployee(toPayload(event.record));
-        toast.success("Employee added");
-        await refresh();
       } catch (err: any) {
-        toast.error("Save failed: " + (err?.message || "Unknown error"));
+        throw new Error("Save failed: " + (err?.message || "Unknown error"));
       }
+      toast.success("Employee added");
+      await refresh();
     }
     if (event.action === "update") {
       try {
         await updateEmployee(Number(event.id), toPayload(event.record));
-        toast.success("Employee updated");
-        await refresh();
       } catch (err: any) {
-        toast.error("Update failed: " + (err?.message || "Unknown error"));
+        throw new Error("Update failed: " + (err?.message || "Unknown error"));
       }
+      toast.success("Employee updated");
+      await refresh();
     }
     if (event.action === "delete") {
+      let res: { message?: string } | undefined;
       try {
-        const res = await deleteEmployee(Number(event.id));
-        toast.success(res?.message || "Employee removed");
-        await refresh();
+        res = await deleteEmployee(Number(event.id));
       } catch (err: any) {
-        toast.error("Delete failed: " + (err?.message || "Unknown error"));
+        throw new Error("Delete failed: " + (err?.message || "Unknown error"));
       }
+      toast.success(res?.message || "Employee removed");
+      await refresh();
     }
   };
 

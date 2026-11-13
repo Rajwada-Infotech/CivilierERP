@@ -18,6 +18,14 @@ const headFields = (body) => ({
 
 const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, cand.CandidateCode AS CandidateCode, cand.CandidateName AS CandidateName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.CTCAmount, e.CTCFrequency, e.SalaryStructureCode, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
 
+
+// Rolls a transaction back without letting a failed rollback replace the ORIGINAL error: when SQL Server has already
+// aborted the transaction (a deadlock victim, say) rollback() throws "Transaction has been aborted", which used to be
+// the only thing the user ever saw.
+async function safeRollback(tx) {
+  try { await tx.rollback(); } catch { /* already aborted */ }
+}
+
 router.get("/", cache("employee-master", 300), async (req, res) => {
   try {
     const pool = getPool();
@@ -120,7 +128,7 @@ router.post("/", requirePageRight("employee-master", "create"), async (req, res)
     newId = result.recordset[0].EmployeeId;
     await createEmployeeAccountHead(tx, newId, headFields(req.body), actor);
     await tx.commit();
-    } catch (e) { await tx.rollback(); throw e; }
+    } catch (e) { await safeRollback(tx); throw e; }
     await bumpCacheVersion("employee-master");
     await bumpCacheVersion("account-head-master");
     res.json({ message: "Employee added", id: newId });
@@ -171,7 +179,7 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
       );
     if (upd.rowsAffected[0] > 0) await syncEmployeeAccountHead(tx, id, headFields(req.body), actor);
     await tx.commit();
-    } catch (e) { await tx.rollback(); throw e; }
+    } catch (e) { await safeRollback(tx); throw e; }
     await bumpCacheVersion("employee-master");
     await bumpCacheVersion("account-head-master");
     res.json({ message: "Employee updated" });
@@ -191,12 +199,32 @@ router.delete("/:id", requirePageRight("employee-master", "delete"), async (req,
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
     const pool = getPool();
+    // Removing the employee's Account Head touches many tables' foreign keys, so under load this transaction can be
+    // chosen as a deadlock victim (1205) — that is "run it again", not a failure: retry a few times.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await deleteEmployeeOnce(pool, id, res);
+      } catch (e) {
+        if (e.number === 1205 && attempt < 4) { await new Promise((r) => setTimeout(r, 150 * attempt)); continue; }
+        throw e;
+      }
+    }
+  } catch (err) {
+    if (err.number === 547) {
+      return res.status(409).json({ error: "This employee can't be deleted — their account head is already used in ledger, payroll or payment entries." });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function deleteEmployeeOnce(pool, id, res) {
+  {
     const tx = pool.transaction();
     await tx.begin();
     try {
       const cur = await tx.request().input("EmployeeId", sql.Int, id)
         .query("SELECT AccountHeadId FROM dbo.EmployeeMaster WHERE EmployeeId = @EmployeeId");
-      if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ error: "Employee not found" }); }
+      if (!cur.recordset.length) { await safeRollback(tx); return res.status(404).json({ error: "Employee not found" }); }
       const headId = cur.recordset[0].AccountHeadId;
       await tx.request().input("EmployeeId", sql.Int, id)
         .query("UPDATE dbo.EmployeeMaster SET ReportingManagerId = NULL WHERE ReportingManagerId = @EmployeeId");
@@ -207,17 +235,12 @@ router.delete("/:id", requirePageRight("employee-master", "delete"), async (req,
       // whole delete instead of leaving an orphan or a dangling reference.
       await deleteAccountHeadById(tx, headId);
       await tx.commit();
-    } catch (e) { await tx.rollback(); throw e; }
+    } catch (e) { await safeRollback(tx); throw e; }
     await bumpCacheVersion("employee-master");
     await bumpCacheVersion("account-head-master");
-    res.json({ message: "Employee deleted" });
-  } catch (err) {
-    if (err.number === 547) {
-      return res.status(409).json({ error: "This employee can't be deleted — their account head is already used in ledger, payroll or payment entries." });
-    }
-    res.status(500).json({ error: err.message });
+    return res.json({ message: "Employee deleted" });
   }
-});
+}
 
 router.get("/:id/documents", requirePageRight("employee-master", "view"), async (req, res) => {
   const employeeId = parseInt(req.params.id, 10);
