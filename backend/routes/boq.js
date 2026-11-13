@@ -13,6 +13,7 @@ const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { floorsForBlock } = require("../services/projectFloors");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
@@ -53,13 +54,15 @@ const safeJson = (str) => {
   }
 };
 
-// Compute total from both Items and Activities (Quantity * Rate)
+// Wastage % on a BOQ item line, clamped to 0–100.
+const wastageOf = (it) => Math.min(100, Math.max(0, parseFloat(it?.wastage ?? it?.wastagePct ?? it?.WastagePct) || 0));
+// Compute total from both Items (Quantity * (1 + Wastage %) * Rate) and Activities (Quantity * Rate)
 const computeTotal = (items, activities) => {
   let sum = 0;
   if (Array.isArray(items)) {
     sum += items.reduce(
       (s, it) =>
-        s + (parseFloat(it.quantity) || 0) * (parseFloat(it.rate) || 0),
+        s + (parseFloat(it.quantity) || 0) * (1 + wastageOf(it) / 100) * (parseFloat(it.rate) || 0),
       0,
     );
   }
@@ -105,7 +108,9 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
 
     const qty = parseFloat(it.quantity) || 0;
     const rate = parseFloat(it.rate) || 0;
-    const amount = parseFloat(it.amount) || qty * rate;
+    const wastage = wastageOf(it);
+    // Wastage is added on top of the quantity: Amount = Qty × (1 + Wastage %) × Rate.
+    const amount = qty * (1 + wastage / 100) * rate || parseFloat(it.amount) || 0;
     const uomName = String(it.unit || it.uomName || it.uom || "").substring(
       0,
       50,
@@ -126,14 +131,15 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
       .input("UomName", sqlRef.NVarChar(50), uomName || null)
       .input("Rate", sqlRef.Decimal(18, 4), rate)
       .input("TaxPct", sqlRef.Decimal(5, 2), parseFloat(it.tax) || 0)
+      .input("WastagePct", sqlRef.Decimal(5, 2), wastage)
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
       .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqItems
           (BoqID, ActivityId, ActivityName, ItemId, ItemName, ItemCode, Description,
-           Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
+           Quantity, WastagePct, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
         VALUES
           (@BoqID, @ActivityId, @ActivityName, @ItemId, @ItemName, @ItemCode, @Description,
-           @Quantity, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
+           @Quantity, @WastagePct, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
       `);
   }
 };
@@ -311,9 +317,10 @@ router.get("/", cache("boq", 300), async (req, res) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
-// ── Location (Block / Floor / Room) ─────────────────────────────────────────────────────────────────────
-// A BOQ is an estimation for one Block, Floor and Room of its project. An activity can be estimated only
-// once per project + block + floor + room: a second BOQ (not rejected) for the same place can't carry it again.
+// ── Location (Block / Floor) ─────────────────────────────────────────────────────────────────────────────
+// A BOQ is an estimation for one Block and Floor of its project. An activity can be estimated only once per
+// project + block + floor: a second BOQ (not rejected) for the same place can't carry it again. (Older BOQs
+// may still carry a RoomId from when the form asked for a room; it no longer narrows the check.)
 const locOf = (v) => ({
   blockId: parseInt(v?.BlockId, 10) || null,
   floorNo: v?.FloorNo != null && String(v.FloorNo).trim() !== "" ? String(v.FloorNo).trim().slice(0, 20) : null,
@@ -323,11 +330,11 @@ const activityIdsOf = (activities) =>
   [...new Set((activities || []).map((a) => (a?.activityId ?? a?.ActivityId ?? "").toString().trim()).filter(Boolean))];
 
 // Activities of the given list already on another live BOQ for the same place: [{ ActivityId, ActivityName, BoqNo }].
-async function activitiesAlreadyEstimated(pool, { projectId, blockId, floorNo, roomId, excludeBoqId, activityIds }) {
-  if (!projectId || !blockId || !floorNo || !roomId) return [];
+async function activitiesAlreadyEstimated(pool, { projectId, blockId, floorNo, excludeBoqId, activityIds }) {
+  if (!projectId || !blockId || !floorNo) return [];
   const r = pool.request()
     .input("P", sql.Int, projectId).input("Bl", sql.Int, blockId)
-    .input("F", sql.NVarChar(20), floorNo).input("R", sql.Int, roomId)
+    .input("F", sql.NVarChar(20), floorNo)
     .input("X", sql.Int, excludeBoqId || 0);
   let idFilter = "";
   if (activityIds) {
@@ -339,48 +346,38 @@ async function activitiesAlreadyEstimated(pool, { projectId, blockId, floorNo, r
     SELECT ba.ActivityId, MAX(ba.ActivityName) AS ActivityName, MAX(COALESCE(b.DocNo, b.BoqNo)) AS BoqNo
     FROM dbo.BoqActivities ba
     JOIN dbo.BOQ b ON b.BoqID = ba.BoqID
-    WHERE b.ProjectId = @P AND b.BlockId = @Bl AND b.FloorNo = @F AND b.RoomId = @R
+    WHERE b.ProjectId = @P AND b.BlockId = @Bl AND b.FloorNo = @F
       AND b.BoqID <> @X AND ISNULL(b.Status, '') NOT IN ('Rejected', 'Cancelled')
       AND ISNULL(ba.ActivityId, '') <> ''${idFilter}
     GROUP BY ba.ActivityId`)).recordset;
 }
 
-// GET /location-options?projectId=&blockId=&floorNo= — the chained dropdowns: blocks of the project, floors of the
-// block (from its units), rooms on that floor (with their unit).
+// GET /location-options?projectId=&blockId= — the chained dropdowns: blocks of the project, then the floors of
+// the block. Floors come from the Floor Master (services/projectFloors.js): Auto Project Setup's floors for the
+// block, floors added for the project in Civil Work DPR, floors already used by its units — always with Ground.
 router.get("/location-options", async (req, res) => {
   const projectId = parseInt(req.query.projectId, 10) || null;
   const blockId = parseInt(req.query.blockId, 10) || null;
-  const floorNo = req.query.floorNo != null && String(req.query.floorNo).trim() !== "" ? String(req.query.floorNo).trim() : null;
-  if (!projectId) return res.json({ blocks: [], floors: [], rooms: [] });
+  if (!projectId) return res.json({ blocks: [], floors: [] });
   try {
     const pool = getPool();
     const blocks = (await pool.request().input("P", sql.Int, projectId).query(
       "SELECT Id AS id, BlockName AS name FROM dbo.BlockMaster WHERE ProjectId = @P AND IsActive = 1 ORDER BY BlockName")).recordset;
-    const floors = blockId ? (await pool.request().input("B", sql.Int, blockId).query(`
-      SELECT DISTINCT CAST(FloorNo AS NVARCHAR(20)) AS FloorNo FROM dbo.UnitMaster
-      WHERE BlockId = @B AND IsActive = 1 AND FloorNo IS NOT NULL`)).recordset
-      .map((r) => r.FloorNo)
-      .sort((a, b) => (Number(a) - Number(b)) || String(a).localeCompare(String(b), undefined, { numeric: true })) : [];
-    const rooms = blockId && floorNo ? (await pool.request().input("B", sql.Int, blockId).input("F", sql.NVarChar(20), floorNo).query(`
-      SELECT r.Id AS id, r.RoomName AS roomName, u.UnitName AS unitName
-      FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId
-      WHERE r.BlockId = @B AND CAST(u.FloorNo AS NVARCHAR(20)) = @F AND r.IsActive = 1
-      ORDER BY u.UnitName, r.RoomName`)).recordset
-      .map((r) => ({ id: r.id, name: r.unitName ? `${r.roomName} (${r.unitName})` : r.roomName })) : [];
-    res.json({ blocks, floors, rooms });
+    const floors = blockId ? await floorsForBlock(pool, projectId, blockId) : [];
+    res.json({ blocks, floors });
   } catch (err) {
     console.error("BOQ location options error:", err.message);
-    res.status(500).json({ error: "Could not load blocks / floors / rooms" });
+    res.status(500).json({ error: "Could not load blocks / floors" });
   }
 });
 
-// GET /used-activities?projectId=&blockId=&floorNo=&roomId=&excludeId= — activities already estimated for that place,
+// GET /used-activities?projectId=&blockId=&floorNo=&excludeId= — activities already estimated for that place,
 // so the form can leave them out of the activity picker.
 router.get("/used-activities", async (req, res) => {
   try {
     const rows = await activitiesAlreadyEstimated(getPool(), {
       projectId: parseInt(req.query.projectId, 10) || null,
-      ...locOf({ BlockId: req.query.blockId, FloorNo: req.query.floorNo, RoomId: req.query.roomId }),
+      ...locOf({ BlockId: req.query.blockId, FloorNo: req.query.floorNo }),
       excludeBoqId: parseInt(req.query.excludeId, 10) || null,
       activityIds: null,
     });
@@ -392,7 +389,7 @@ router.get("/used-activities", async (req, res) => {
 });
 
 const duplicateMessage = (dups) =>
-  `Already estimated for this block, floor and room: ${dups.slice(0, 5).map((d) => `${d.ActivityName || d.ActivityId} (${d.BoqNo})`).join(", ")}${dups.length > 5 ? ` and ${dups.length - 5} more` : ""}. Remove ${dups.length === 1 ? "it" : "them"} or pick another location.`;
+  `Already estimated for this block and floor: ${dups.slice(0, 5).map((d) => `${d.ActivityName || d.ActivityId} (${d.BoqNo})`).join(", ")}${dups.length > 5 ? ` and ${dups.length - 5} more` : ""}. Remove ${dups.length === 1 ? "it" : "them"} or pick another location.`;
 
 router.get("/:id", async (req, res) => {
   try {
@@ -488,8 +485,8 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
-    if (!loc.blockId || !loc.floorNo || !loc.roomId) {
-      return res.status(400).json({ error: "Select the Block, Floor and Room this BOQ is for." });
+    if (!loc.blockId || !loc.floorNo) {
+      return res.status(400).json({ error: "Select the Block and Floor this BOQ is for." });
     }
     const dupsNew = await activitiesAlreadyEstimated(pool, {
       projectId: ProjectId ? parseInt(ProjectId, 10) : null, ...loc, excludeBoqId: null, activityIds: activityIdsOf(activitiesArray),
@@ -644,7 +641,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     const effectiveStatus = wasApproved || wasPending ? "Pending" : Status || "Draft";
     // The form always sends the location; an amendment or an older BOQ edited without one keeps what is saved.
     const saved = (await pool.request().input("Id", sql.Int, id).query("SELECT BlockId, FloorNo, RoomId FROM dbo.BOQ WHERE BoqID = @Id")).recordset[0] || {};
-    const loc = locSent.blockId || locSent.floorNo || locSent.roomId ? locSent : locOf(saved);
+    const loc = locSent.blockId || locSent.floorNo ? locSent : locOf(saved);
     const dupsEdit = await activitiesAlreadyEstimated(pool, {
       projectId: ProjectId ? parseInt(ProjectId, 10) : null, ...loc, excludeBoqId: id, activityIds: activityIdsOf(activitiesArray),
     });

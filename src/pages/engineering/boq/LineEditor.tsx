@@ -80,8 +80,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
       // (Per Activity Price = Total Rate / Total Area is shown separately).
       if (!isItem) {
         if (field === "rate") updated.amount = parseFloat(val) || 0;
-      } else if (field === "quantity" || field === "rate") {
-        updated.amount = calcAmount(updated.quantity, updated.rate);
+      } else if (field === "quantity" || field === "rate" || field === "wastage") {
+        updated.amount = calcAmount(updated.quantity, updated.rate, updated.wastage);
       }
       return updated;
     });
@@ -102,7 +102,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
   // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
   // Activities also get a leading "Activity Group" column.
-  const colCount = 12 + (readOnly ? 0 : 1);
+  const colCount = (isItem ? 13 : 12) + (readOnly ? 0 : 1);
 
   return (
     <div
@@ -228,6 +228,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
             <col style={{ width: 100 }} />
             <col style={{ width: 160 }} />
             {isItem && <col style={{ width: 96 }} />}
+            {isItem && <col style={{ width: 92 }} />}
             <col style={{ width: isItem ? 140 : 110 }} />
             <col style={{ width: 108 }} />
             <col style={{ width: 120 }} />
@@ -253,7 +254,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   ...(isItem ? [["For Activity", "left"]] : []),
                   ["Code", "left"],
                   ["Spec / Notes", "left"],
-                  ...(isItem ? [["Item Qty", "right"]] : []),
+                  ...(isItem ? [["Item Qty", "right"], ["Wastage %", "right"]] : []),
                   [isItem ? "Per Unit Qty" : "Total Area", "right"],
                   ["UOM", "left"],
                   [isItem ? "Rate (₹)" : "Total Rate (₹)", "right"],
@@ -665,6 +666,54 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                       )}
                     </td>
 
+                    )}
+
+                    {/* Wastage % (items only) — added on top of the quantity in the amount */}
+                    {isItem && (
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
+                      }}
+                    >
+                      {readOnly ? (
+                        <span
+                          style={{
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
+                            fontSize: 12.5,
+                            display: "block",
+                            textAlign: "right",
+                          }}
+                        >
+                          {row.wastage ? `${row.wastage}%` : "—"}
+                        </span>
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.01"
+                          value={row.wastage ?? ""}
+                          placeholder="0"
+                          title="Wastage on top of the item quantity — Amount = Qty × (1 + Wastage %) × Rate"
+                          onChange={(e) => upd(idx, "wastage", e.target.value)}
+                          style={{
+                            width: "100%",
+                            height: 34,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
+                            background: "hsl(var(--background))",
+                            padding: "0 7px",
+                            fontSize: 12,
+                            color: "hsl(var(--foreground))",
+                            outline: "none",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
+                            textAlign: "right",
+                          }}
+                        />
+                      )}
+                    </td>
                     )}
 
                     {/* Per Unit Qty (items) / Total Area (activities) */}

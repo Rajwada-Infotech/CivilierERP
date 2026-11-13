@@ -196,6 +196,7 @@ const CivilWorkDprWorkTransfer = lazy(
 );
 const CivilWorkDprQuery = lazy(() => import("./pages/civilworkdpr/Query"));
 const DprTagMaster = lazy(() => import("./pages/civilworkdpr/DprTagMaster"));
+const FloorMaster = lazy(() => import("./pages/civilworkdpr/FloorMaster"));
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
 );
@@ -1391,6 +1392,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="dpr-tag-master">
             <DprTagMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/floor-master"
+        element={
+          <ProtectedRoute pageKey="dpr-floor-master">
+            <FloorMaster />
           </ProtectedRoute>
         }
       />
