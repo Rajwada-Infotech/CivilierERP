@@ -35,6 +35,7 @@ import type { MainStackParamList } from "./MainStack";
 const MODULE_ROUTES: Partial<Record<string, keyof MainStackParamList>> = {
   finance: "FinanceDashboard",
   material: "MaterialDashboard",
+  engineering: "Boq",
 };
 
 /** The module a screen belongs to: its dashboard, or any page in its menu tree (null for neither). */
@@ -120,9 +121,13 @@ const MATERIAL_NAV_TREE: NavTree = [
 /** Pages that are forms: the menu key is hidden there. */
 const FORM_ROUTES = new Set<string>(["PaymentForm", "ReceivedPaymentForm", "JournalVoucherForm", "NewContract", "NewInvoice", "MaterialRequestForm", "QuotationForm", "DebitNoteForm", "StockTransferForm", "IssueReturnForm", "MaterialIssueForm", "GRNForm", "VehicleInOutForm", "PurchaseOrderForm"]);
 
+// Engineering on the phone is just the BOQ register (view + invoice-style PDF).
+const ENGINEERING_NAV_TREE: NavTree = [{ kind: "leaf", label: "BOQ", icon: ClipboardList, nav: "Boq" }];
+
 const MODULE_NAV_TREES: Partial<Record<string, NavTree>> = {
   finance: FINANCE_NAV_TREE,
   material: MATERIAL_NAV_TREE,
+  engineering: ENGINEERING_NAV_TREE,
 };
 
 export function NavSheet() {
