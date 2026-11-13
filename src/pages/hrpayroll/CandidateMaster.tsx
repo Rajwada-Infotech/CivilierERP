@@ -2,6 +2,8 @@ import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ProfileAdd, DocumentText } from "iconsax-react";
+import { Upload } from "lucide-react";
+import { CandidateImportDialog } from "./CandidateImportDialog";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
@@ -355,6 +357,7 @@ const exportColumns: ExportColumn[] = [
 const CandidateMaster: React.FC = () => {
   const rights = usePageRights("candidate-master");
   const queryClient = useQueryClient();
+  const [importOpen, setImportOpen] = React.useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["candidate-master"],
@@ -406,6 +409,15 @@ const CandidateMaster: React.FC = () => {
           columnRenderers={columnRenderers}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          toolbarExtra={rights.canCreate ? (
+            <button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-semibold border border-foreground/40 hover:bg-muted whitespace-nowrap"
+            >
+              <Upload size={13} /> Import Excel
+            </button>
+          ) : null}
           exportConfig={{
             title: "Candidate Master",
             filename: "candidate-master",
@@ -430,6 +442,7 @@ const CandidateMaster: React.FC = () => {
           }}
         />
         )}
+        <CandidateImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       </HrPayrollShell>
     </>
   );

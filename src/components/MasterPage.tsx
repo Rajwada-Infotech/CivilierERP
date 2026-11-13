@@ -174,6 +174,8 @@ interface MasterPageProps {
    *   ],
    * }}
    */
+  /** Extra buttons placed in the table toolbar, just before Export (e.g. an Import button). */
+  toolbarExtra?: React.ReactNode;
   exportConfig?: {
     title: string;
     filename?: string;
@@ -286,6 +288,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   externalFormPatchKey,
   requestEditId,
   requestEditKey,
+  toolbarExtra,
   exportConfig,
   hideTable,
   viewConfig,
@@ -1107,6 +1110,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </div>
             )}
             <div className={fluid ? "flex w-full min-w-0 items-center justify-end gap-2 sm:w-auto sm:min-w-[15rem] sm:flex-1" : "flex items-center gap-2 w-full sm:w-auto"}>
+              {toolbarExtra}
               {exportConfig && canExport && (
                 <ExportMenu
                   data={sorted as Record<string, unknown>[]}
