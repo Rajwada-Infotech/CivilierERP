@@ -923,6 +923,13 @@ const MASTERS = {
   payment: landChild("Payment", "LegalPayment", "PaymentId",
     "Each payment or receipt on its own record, verified separately. Editing a verified payment sends it back for verification.", {
       label: "CONVERT(NVARCHAR(10), r.PaymentDate, 105) + ' ₹' + CONVERT(NVARCHAR(30), r.Amount)", orderBy: "PaymentDate, PaymentId", review: REVIEW,
+      // The chain: a land bought through the module pays at Deed Registration → Payments (with its balance and date
+      // checks); this form is for existing / backlog land's earlier purchase. No payment is dated in the future.
+      check: async (pool, values) => {
+        if (values.PaymentDate && String(values.PaymentDate).slice(0, 10) > new Date().toISOString().slice(0, 10)) return "A payment cannot be dated in the future";
+        const l = (await pool.request().input("L", values.LandId).query("SELECT EntryType FROM dbo.LegalLand WHERE LandId = @L")).recordset[0];
+        return l?.EntryType === "New Acquisition" ? "This land is bought through the Legal module — record its payments at Deed Registration → Payments" : null;
+      },
       fields: [
         LAND_ID,
         // Optional: payments of older (backlog) purchases are recorded without a purchase entered here.
@@ -1663,6 +1670,30 @@ const MASTERS = {
   "expense-type": lookup("expense-type", "Expense Type", "Legal & Financial", "Advocate fee, commission, survey fee…"),
   "payment-mode": lookup("payment-mode", "Payment Mode", "Legal & Financial", "Cash, bank transfer, cheque, UPI…"),
   "fee-type": lookup("fee-type", "Registration Fee Type", "Registration", "Stamp duty, registration, scanning fee…"),
+  // Instalment schedule templates: one row per line; lines with the same template name form one template. The lines
+  // of a template may not add up to more than 100%.
+  "instalment-template": {
+    title: "Instalment Schedule Template", group: "Legal & Financial", pageKey: "legal-instalment-template-master", table: "LegalInstalmentTemplate", pk: "LineId",
+    desc: "Payment plans for Deed Registration: each line is a % of the consideration, due a number of days after the consideration date.",
+    label: "TemplateName + ' · ' + Label", orderBy: "TemplateName, SeqNo",
+    unique: [["TemplateName", "SeqNo"], "This line number is already in the template"],
+    check: async (pool, values, id) => {
+      const r = (await pool.request().input("N", values.TemplateName).input("Id", id ?? 0)
+        .query("SELECT ISNULL(SUM(SharePct), 0) AS s FROM dbo.LegalInstalmentTemplate WHERE TemplateName = @N AND IsActive = 1 AND LineId <> @Id")).recordset[0];
+      const total = Number(r.s) + (values.IsActive === false || values.IsActive === 0 ? 0 : Number(values.SharePct || 0));
+      return total > 100.0001 ? `The lines of "${values.TemplateName}" would add up to ${total}% — at most 100%` : null;
+    },
+    fields: [
+      { name: "TemplateName", label: "Template name", type: "text", required: true, max: 100 },
+      { name: "SeqNo", label: "Order", type: "int", required: true, min: 1, default: 1 },
+      { name: "Label", label: "Instalment", type: "text", required: true, max: 100 },
+      { name: "SharePct", label: "% of consideration", type: "decimal", required: true, min: 0.0001, maxValue: 100 },
+      { name: "DueDays", label: "Due — days after consideration date", type: "int", required: true, min: 0, maxValue: 3650, default: 0 },
+      { name: "TxnTypeId", label: "Purpose", type: "ref", ref: "txn-type" },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
+      ACTIVE,
+    ],
+  },
   "registration-mode": lookup("registration-mode", "Registration Mode", "Registration", "Physical at office, e-Registration, commission…"),
   "igr-status": lookup("igr-status", "IGR Status", "Registration", "Where the deed stands on the IGR site: applied, registered, ready, delivered…"),
   "deed-location": lookup("deed-location", "Deed Location", "Registration", "Where the physical deed is: registration office, advocate, company office…"),

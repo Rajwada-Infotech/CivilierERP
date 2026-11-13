@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Copy, Search, Upload } from "lucide-react";
@@ -102,28 +102,16 @@ export const RegistrySearchTable: React.FC<{ rows: RegistrySearch[]; landId: num
   );
 };
 
-/** The saved searches of a land, loaded on its own (sub-row of the approved-lands table). */
-export const LandRegistrySearches: React.FC<{ landId: number }> = ({ landId }) => {
-  const { data = [], isLoading } = useQuery({ queryKey: ["legal-registry-search", landId], queryFn: () => getRegistrySearches(landId) });
-  if (isLoading) return <p className="text-xs text-muted-foreground">Loading searches…</p>;
-  return (
-    <div className="space-y-2">
-      <GovtSiteLinks title="Government site links" hint="Opens in a new tab — check this land's RS / LR numbers there." />
-      <p className={label}>Record searches ({data.length})</p>
-      <RegistrySearchTable rows={data} landId={landId} />
-    </div>
-  );
-};
-
 /**
  * Deed Registration → Search records: find the land (Land ID or enquiry number), choose the registration office and
  * financial year; its RS / LR references fill in by themselves. Check them on the government site, then record what
- * was found here — it is stored against the land.
+ * was found here — it is stored against the land. `landCode`: open on that land straight away (Deed Registration page);
+ * the Find box is then not shown.
  */
-export const RegistrySearchPanel: React.FC = () => {
+export const RegistrySearchPanel: React.FC<{ landCode?: string }> = ({ landCode }) => {
   const qc = useQueryClient();
   const canEdit = usePageRights("legal-land-master").canEdit;
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(landCode ?? "");
   const [found, setFound] = useState<RegistryLookup | null>(null);
   const [busy, setBusy] = useState(false);
   const years = useMemo(finYears, []);
@@ -152,6 +140,9 @@ export const RegistrySearchPanel: React.FC = () => {
     } finally { setBusy(false); }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (landCode) find(); }, [landCode]);
+
   const attach = () => {
     const el = document.createElement("input");
     el.type = "file"; el.accept = "application/pdf,image/*";
@@ -179,16 +170,16 @@ export const RegistrySearchPanel: React.FC = () => {
   const districtOffices = offices.filter((o) => o.active !== false && districtId && String(o.DistrictId ?? "") === districtId);
   return (
     <div className="border border-border bg-card">
-      <p className="border-b border-border px-4 py-3 text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">Search records</p>
+      {!landCode && <p className="border-b border-border px-4 py-3 text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">Search records</p>}
       <div className="space-y-4 p-4">
-        <form onSubmit={find} className="flex flex-wrap items-end gap-2">
+        {!landCode && <form onSubmit={find} className="flex flex-wrap items-end gap-2">
           <label className="min-w-[220px] flex-1"><span className={label}>Land ID or enquiry number</span>
             <input className={`${input} mt-1`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. N24P/00001/2026-27 or ENQ-2026-00001" />
           </label>
           <button type="submit" disabled={busy || !q.trim()} className="inline-flex items-center gap-1.5 bg-foreground px-4 py-2 text-xs font-heading font-semibold uppercase tracking-[0.08em] text-card disabled:opacity-40">
             <Search size={13} /> Find
           </button>
-        </form>
+        </form>}
 
         {L && (
           <>

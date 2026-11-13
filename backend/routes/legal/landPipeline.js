@@ -358,6 +358,13 @@ async function pipelineCounters(pool) {
     "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Registered') AS registered",
   ];
   if (has.dt) parts.push("(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND DeedTargetDate < CAST(GETDATE() AS DATE)) AS deedOverdue");
+  // Deed Registration lands with an instalment past its due date and not covered by the payments made (migration 662).
+  if ((await pool.request().query("SELECT OBJECT_ID('dbo.LegalPaymentSchedule','U') AS t")).recordset[0].t) parts.push(
+    `(SELECT COUNT(DISTINCT s.LandId) FROM dbo.LegalPaymentSchedule s JOIN dbo.LegalLand l ON l.LandId = s.LandId AND l.IsActive = 1 AND l.WorkflowStatus = N'Deed Registration'
+      WHERE s.DueDate < CAST(GETDATE() AS DATE)
+        AND (SELECT SUM(s2.Amount) FROM dbo.LegalPaymentSchedule s2 WHERE s2.LandId = s.LandId AND s2.DueDate <= s.DueDate)
+          > ISNULL((SELECT SUM(CASE WHEN tt.Name = N'Refund' THEN -p.Amount WHEN tt.Name IN (N'Sale Receipt', N'Expense') THEN 0 ELSE p.Amount END) FROM dbo.LegalPayment p
+                    LEFT JOIN dbo.LegalLookupValue tt ON tt.LookupId = p.TxnTypeId WHERE p.LandId = s.LandId AND p.IsActive = 1), 0)) AS paymentOverdue`);
   if ((await pool.request().query("SELECT OBJECT_ID('dbo.LegalEnquiryOfficeSearch','U') AS t")).recordset[0].t) parts.push(
     "(SELECT COUNT(DISTINCT o.EnquiryId) FROM dbo.LegalEnquiryOfficeSearch o JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = o.EnquiryId WHERE e.IsActive = 1 AND e.LandId IS NULL AND e.EnquiryStatus <> N'Rejected' AND o.Status = N'Pending') AS pendingDeedSearch",
     "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch o JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = o.EnquiryId WHERE e.IsActive = 1 AND e.LandId IS NULL AND e.EnquiryStatus <> N'Rejected' AND o.Status = N'Pending' AND o.DueDate < CAST(GETDATE() AS DATE)) AS deedSearchOverdue");
@@ -1602,6 +1609,9 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
       const open = (await tx.request().input("Id", sql.Int, id).query(
         "SELECT STRING_AGG(OfficeType, ', ') AS t FROM dbo.LegalEnquiryOfficeSearch WHERE EnquiryId = @Id AND Status = N'Pending'")).recordset[0].t;
       if (open) return refuse(409, `Finish the Deed Registry Search first — still open: ${open}.`);
+      // No timeline at all = no office type set up for the enquiry's state: the search cannot be skipped that way.
+      const n = (await tx.request().input("Id", sql.Int, id).query("SELECT COUNT(*) AS n FROM dbo.LegalEnquiryOfficeSearch WHERE EnquiryId = @Id")).recordset[0].n;
+      if (!n) return refuse(409, "No registration office type is set up for this enquiry's state (Setup → Registration Office Types), so its Deed Registry Search cannot be done yet.");
     }
 
     // Land ID = <address prefix>/<running no>/<financial year>, e.g. KOL/00001/2026-27. The prefix is the land's
@@ -1932,39 +1942,6 @@ router.post("/:id/deed-process/approve", requirePageRight(LAND_PAGE, "view"), as
   }
 });
 
-// GET /deed-registration/list — lands approved (L1 + L2) on the Deed Process page, ready for deed registration.
-router.get("/deed-registration/list", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
-  try {
-    const pool = getPool();
-    if (!(await deedReady(pool))) return res.json([]);
-    const copy = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedFileId') AS c")).recordset[0].c;
-    const reg = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'RegAppliedAt') AS c")).recordset[0].c;
-    const r = await pool.request().query(`
-      SELECT l.LandId, l.LandCode, l.LandName, d.DistrictName, m.MouzaName, m.JLNo, l.L2ApprovedAt,
-             (SELECT name FROM dbo.users WHERE id = l.L1ReviewerId) AS L1By, (SELECT name FROM dbo.users WHERE id = l.L2ApproverId) AS L2By,
-             -- What the registration application needs: plot references, area, the sellers (current owners), value, timeline.
-             l.RsDagNo, l.RsKhatianNo, l.LrDagNo, l.LrKhatianNo, CAST(l.Area AS FLOAT) AS Area, u.UnitName,
-             (SELECT STRING_AGG(o.OwnerName + N' (' + CAST(CAST(o.SharePct AS DECIMAL(7,2)) AS NVARCHAR(10)) + N'%)', N', ')
-                FROM dbo.LegalOwnershipRecord o WHERE o.LandId = l.LandId AND o.IsActive = 1 AND o.ValidTo IS NULL) AS Owners,
-             (SELECT TOP 1 v.GovernmentValuation FROM dbo.LegalValuation v WHERE v.LandId = l.LandId AND v.IsActive = 1 ORDER BY v.ValuationDate DESC) AS GovtValue,
-             (SELECT TOP 1 v.EstimatedMarketValue FROM dbo.LegalValuation v WHERE v.LandId = l.LandId AND v.IsActive = 1 ORDER BY v.ValuationDate DESC) AS MarketValue,
-             CONVERT(char(10), l.DeedTargetDate, 23) AS DeedTargetDate
-             ${reg ? `, l.RegAppliedAt, (SELECT name FROM dbo.users WHERE id = l.RegAppliedBy) AS RegAppliedByName, DATEDIFF(day, l.RegAppliedAt, SYSUTCDATETIME()) AS RegDaysOpen,
-                       l.RegDeedFileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = l.RegDeedFileId) AS RegDeedFileName` : ""}
-             ${copy ? ", l.DeedFileId, (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = l.DeedFileId) AS DeedFileName" : ""}
-      FROM dbo.LegalLand l
-      LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
-      LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
-      LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
-      WHERE l.IsActive = 1 AND l.WorkflowStatus = N'Deed Registration'
-      ORDER BY l.L2ApprovedAt DESC`);
-    res.json({ lands: r.recordset, canApply: (await canAct(req, "L1 Approver", LAND_PAGE)) || (await canAct(req, "L2 Approver", LAND_PAGE)) });
-  } catch (err) {
-    console.error("[legal-land] deed-registration list:", err.message);
-    res.status(500).json({ error: "Could not load the Deed Registration list" });
-  }
-});
-
 // ── Registry search (Deed Registration page) ──────────────────────────────────────────────────────────────────────
 const SEARCH_RESULTS = ["Clear — no other deed", "Deed found", "Encumbrance / charge found", "Record not found", "Mismatch in records", "Other"];
 const searchReady = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalRegistrySearch', 'U') AS t")).recordset[0].t;
@@ -2091,6 +2068,14 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
     if ((await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'RegFinalDate') AS c")).recordset[0].c) {
       const f = (await pool.request().input("Id", sql.Int, id).query("SELECT RegFinalDate, RegOfficeId, RegModeId FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
       if (!f.RegFinalDate || !f.RegOfficeId || !f.RegModeId) return res.status(409).json({ error: "Fill Final Registration (date, office, mode) before submitting the registered deed" });
+      // The consideration must be fully paid (migration 662: payments are the land's Payment History).
+      if ((await pool.request().query("SELECT OBJECT_ID('dbo.LegalPaymentSchedule','U') AS t")).recordset[0].t) {
+        const pay = (await pool.request().input("Id", sql.Int, id).query(`SELECT l.ConsTotalAmount AS Total,
+            ISNULL((SELECT SUM(CASE WHEN tt.Name = N'Refund' THEN -p.Amount WHEN tt.Name IN (N'Sale Receipt', N'Expense') THEN 0 ELSE p.Amount END) FROM dbo.LegalPayment p
+              LEFT JOIN dbo.LegalLookupValue tt ON tt.LookupId = p.TxnTypeId WHERE p.LandId = l.LandId AND p.IsActive = 1), 0) AS Paid
+          FROM dbo.LegalLand l WHERE l.LandId = @Id`)).recordset[0];
+        if (pay.Total == null || Number(pay.Paid) + 0.001 < Number(pay.Total)) return res.status(409).json({ error: "The consideration is not fully paid yet" });
+      }
     }
     const fileId = idParam(req.body?.fileId);
     if (!fileId) return res.status(400).json({ error: "Upload the registered deed copy" });

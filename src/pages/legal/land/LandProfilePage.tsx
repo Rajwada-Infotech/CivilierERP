@@ -184,6 +184,12 @@ export default function LandProfilePage() {
     </button>
   );
   const land = data?.land;
+  // The chain: a land bought through the module (New Acquisition) gets its consideration and payments at Deed
+  // Registration, after L1 / L2 approval — not here. Here (the land's history) they are kept only for existing / backlog
+  // land the company bought before, from its old file.
+  const ownPurchaseHere = !!land && land.EntryType !== "New Acquisition";
+  const tabs = TABS.filter((t) => t.key !== "payments" || ownPurchaseHere);
+  const quickSections = QUICK_SECTIONS.filter((s) => s.tab !== "payments" || ownPurchaseHere);
   const { currentUser } = useAuth();
   const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
   const c = data?.counts;
@@ -244,7 +250,7 @@ export default function LandProfilePage() {
             </Dialog>
             {/* 14 tabs: one swipeable row on phones, wrapped on wider screens */}
             <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible" role="tablist">
-              {TABS.map((t) => (
+              {tabs.map((t) => (
                 <button
                   key={t.key}
                   role="tab"
@@ -338,12 +344,12 @@ export default function LandProfilePage() {
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <p className="label">Land Information Sections — Complete Property Record</p>
                     <p className="text-xs text-muted-foreground">
-                      {QUICK_SECTIONS.filter((s) => c[s.count] > 0).length} of {QUICK_SECTIONS.length} sections have records · enter
+                      {quickSections.filter((s) => c[s.count] > 0).length} of {quickSections.length} sections have records · enter
                       information gradually in any order
                     </p>
                   </div>
                   <ol className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {QUICK_SECTIONS.map((s, i) => {
+                    {quickSections.map((s, i) => {
                       const done = c[s.count] > 0;
                       return (
                         <li key={s.tab}>
@@ -464,13 +470,26 @@ export default function LandProfilePage() {
                 >
                   <LegalMasterTable entry={table("ownership-event", "Ownership Transfer")} parentId={landId} onSaved={refresh} />
                 </Section>
-                <Section
-                  title="Purchase & Consideration Details"
-                  note="Financial and contract details of property purchases: consideration price, advance amount, settlement, and payment proofs."
-                >
-                  <LegalMasterTable entry={table("land-purchase", "Purchase / Acquisition")} parentId={landId} onSaved={refresh}
-                    rowActions={(raw) => childButton({ key: "payment", field: "TransactionId", id: Number(raw.TransactionId), title: `Payments · ${String(raw.TransactionNo ?? "purchase")}`, label: "Payments" }, payRows)} />
-                </Section>
+                {ownPurchaseHere ? (
+                  <Section
+                    title="Purchase & Consideration Details"
+                    note="The company's earlier purchase of this land (from its old file): consideration price, advance, settlement and payment proofs."
+                  >
+                    <LegalMasterTable entry={table("land-purchase", "Purchase / Acquisition")} parentId={landId} onSaved={refresh}
+                      rowActions={(raw) => childButton({ key: "payment", field: "TransactionId", id: Number(raw.TransactionId), title: `Payments · ${String(raw.TransactionNo ?? "purchase")}`, label: "Payments" }, payRows)} />
+                  </Section>
+                ) : (
+                  <div className="border border-dashed border-border bg-muted/20 p-4 text-sm">
+                    <p className="font-semibold">The company's own purchase is handled at Deed Registration</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      This page holds the land's history (earlier owners and transfers). Consideration, instalments and payments for this purchase are entered at
+                      Deed Registration once the land is approved in Deed Process (L1 / L2).
+                    </p>
+                    {land && ["Deed Registration", "Registered"].includes(String(land.WorkflowStatus)) && (
+                      <button onClick={() => navigate("/legal/deed-registration")} className="mt-2 border border-foreground px-3 py-1.5 text-xs font-semibold hover:bg-muted">Open Deed Registration — consideration & payments</button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -555,7 +574,7 @@ export default function LandProfilePage() {
             )}
 
             {/* TAB 10: PAYMENT HISTORY */}
-            {tab === "payments" && (
+            {tab === "payments" && ownPurchaseHere && (
               <Section
                 title="Payment & Transaction History"
                 note="Historical financial payments for this land: advances, installments, and final settlements with payment modes and references."

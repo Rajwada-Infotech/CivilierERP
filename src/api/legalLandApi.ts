@@ -103,7 +103,7 @@ export interface LandStats {
   /** Lands in Deed Process whose timeline has passed. */
   /** Counters along the legal flow (Legal dashboard). */
   pipeline?: Partial<Record<"enquiries" | "pendingOwnership" | "pendingDiligence" | "pendingInheritance" | "pendingReview" | "highRisk" | "restricted" | "pendingFinal"
-    | "pendingL1" | "pendingL2" | "pendingRegistration" | "deedOverdue" | "pendingMutation" | "registered" | "pendingDeedSearch" | "deedSearchOverdue", number>>;
+    | "pendingL1" | "pendingL2" | "pendingRegistration" | "deedOverdue" | "pendingMutation" | "registered" | "pendingDeedSearch" | "deedSearchOverdue" | "paymentOverdue", number>>;
   deedOverdue?: { LandId: number; LandCode: string; LandName: string; DeedTargetDate: string; DaysOver: number }[];
   pendingRegistration: number;
   mutationPending: number;
@@ -237,14 +237,6 @@ export const reverifyDeedChanges = async (id: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/reverify`, post({})));
 export const approveDeedProcess = async (id: number, level: 1 | 2, action: "Approve" | "Reject" | "Hold", remarks?: string) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/approve`, post({ level, action, remarks })));
-export interface DeedRegistrationLand {
-  LandId: number; LandCode: string; LandName: string; DistrictName: string | null; MouzaName: string | null; L2ApprovedAt: string | null;
-  JLNo?: string | null; RsDagNo?: string | null; RsKhatianNo?: string | null; LrDagNo?: string | null; LrKhatianNo?: string | null;
-  Area?: number | null; UnitName?: string | null; Owners?: string | null; GovtValue?: number | null; MarketValue?: number | null; DeedTargetDate?: string | null;
-  RegAppliedAt?: string | null; RegAppliedByName?: string | null; RegDaysOpen?: number | null; RegDeedFileId?: number | null; RegDeedFileName?: string | null;
-  L1By: string | null; L2By: string | null; DeedFileId?: number | null; DeedFileName?: string | null;
-}
-export const getDeedRegistrationLands = async () => handle<{ lands: DeedRegistrationLand[]; canApply: boolean }>(await fetchWithAuth(`${BASE}/deed-registration/list`));
 export const deedRegistrationAction = async (id: number, action: "apply" | "submit", fileId?: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-registration`, post({ action, fileId })));
 export const getDeedProcessLands = async () => handle<{ lands: DeedProcessLand[]; canEditTimeline: boolean; canL1?: boolean; canL2?: boolean }>(await fetchWithAuth(`${BASE}/deed-process/list`));

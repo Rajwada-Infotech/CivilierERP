@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getOverdueSearches } from "@/api/legalEnquirySearchApi";
+import { DeedSearchReport } from "@/components/legal/DeedSearchReport";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Global, MessageQuestion, Timer1, PauseCircle, ShieldTick, Judge, Map1, Grid5, DocumentText, Building4, Profile2User, Link21, Note1, Chart, MoneySend } from "iconsax-react";
 import { ArrowRight, ChevronRight, CheckCircle2, CircleAlert, ExternalLink, Search, Trash2, AlertTriangle, Eye } from "lucide-react";
@@ -120,8 +121,6 @@ export default function LegalDashboard() {
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
                 {([
                   ["Land enquiries", "enquiries", "/legal/land/enquiries", false],
-                  ["Pending deed registry search", "pendingDeedSearch", "/legal/land/deed-search", true],
-                  ["Overdue deed registry searches", "deedSearchOverdue", "/legal/land/deed-search", true],
                   ["Pending ownership verification", "pendingOwnership", "/legal/approvals", true],
                   ["Pending due diligence", "pendingDiligence", "/legal/approvals", true],
                   ["Pending inheritance verification", "pendingInheritance", "/legal/approvals", true],
@@ -132,12 +131,13 @@ export default function LegalDashboard() {
                   ["Pending L1 approval", "pendingL1", "/legal/land/deed-process", true],
                   ["Pending L2 approval", "pendingL2", "/legal/land/deed-process", true],
                   ["Pending deed registration", "pendingRegistration", "/legal/deed-registration", true],
+                  ["Deed payment overdue", "paymentOverdue", "/legal/deed-registration", true],
                   ["Overdue deed timeline", "deedOverdue", "/legal/land/deed-process", true],
                   ["Pending mutation", "pendingMutation", "/legal/land/post-registration", true],
                   ["Completed registrations", "registered", "/legal/land/projects", false],
                 ] as const).filter(([, k]) => land.pipeline![k] !== undefined).map(([label, k, path, warn]) => {
                   const n = land.pipeline![k] ?? 0;
-                  const hot = warn && n > 0 && (k === "highRisk" || k === "restricted" || k === "deedOverdue" || k === "deedSearchOverdue");
+                  const hot = warn && n > 0 && (k === "highRisk" || k === "restricted" || k === "deedOverdue" || k === "paymentOverdue");
                   return (
                     <button key={k} onClick={() => navigate(path)} className={`rounded-xl border p-3 text-left transition-transform hover:-translate-y-0.5 ${hot ? "border-destructive bg-destructive/10" : warn && n > 0 ? "border-amber-500/50 bg-amber-500/5" : "border-border bg-muted/30"}`}>
                       <span className={`block text-xl font-heading font-bold tabular-nums leading-none ${hot ? "text-destructive" : "text-foreground"}`}>{n}</span>
@@ -149,6 +149,9 @@ export default function LegalDashboard() {
             </div>
           )}
 
+          {/* ── Deed Registry Search report: all projects / per project ── */}
+          {enquiryRights.canView && <DeedSearchReport />}
+
           {/* ── Deed Registry Search past its office's time limit ── */}
           {!!searchOverdue.length && (
             <div className="border-2 border-destructive bg-destructive/10 p-4 sm:p-5">
@@ -159,7 +162,7 @@ export default function LegalDashboard() {
               <ul className="mt-2 space-y-1 text-sm">
                 {searchOverdue.map((s) => (
                   <li key={s.OfficeSearchId}>
-                    <button className="text-left hover:underline" onClick={() => navigate(`/legal/land/deed-search?q=${encodeURIComponent(s.EnquiryNo)}`)}>
+                    <button className="text-left hover:underline" onClick={() => navigate(`/legal/land/deed-search?view=all&q=${encodeURIComponent(s.EnquiryNo ?? "")}&project=${s.ProjectId ?? "all"}&office=${encodeURIComponent(s.OfficeType)}`)}>
                       <b className="font-mono">{s.EnquiryNo}</b>{s.ProjectName ? ` · ${s.ProjectName}` : ""} — {s.OfficeType}, due {fmtDate(s.DueDate)}, <b className="text-destructive">{s.DaysOver} day{s.DaysOver > 1 ? "s" : ""} overdue</b>
                     </button>
                   </li>
