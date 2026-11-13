@@ -130,6 +130,7 @@ export const FormModal: React.FC<FormModalProps> = ({
             itemCode: li.itemCode || "",
             description: "",
             quantity: "",
+            wastage: "",
             uomName: li.uom || "",
             rate: "",
             tax: "18",
