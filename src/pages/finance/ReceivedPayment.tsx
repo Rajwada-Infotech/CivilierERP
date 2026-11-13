@@ -906,7 +906,7 @@ export default function ReceivedPaymentPage() {
       RPCustomerName: form.customerName.trim(),
       RPProjectName: form.projectName,
       RPProjectId: Number(form.projectId) || null,
-      RPDocDate: date!.toISOString().slice(0, 10),
+      RPDocDate: format(date!, "yyyy-MM-dd"),
       RPFinYear: form.finYear || activeFinYear,
       RPDocTypeId: recDocTypeId,
       RPMode: form.mode,
@@ -941,7 +941,7 @@ export default function ReceivedPaymentPage() {
               receivedPaymentId: created.RPPaymentID,
               emiIds: loanPayMode === "emis" ? selectedLoanEmiIds : undefined,
               lumpSumAmount: loanPayMode === "lumpsum" ? loanLumpSumAmount : undefined,
-              paymentDate: date!.toISOString().slice(0, 10),
+              paymentDate: format(date!, "yyyy-MM-dd"),
               lateFee: loanLateFee || undefined,
               notes: loanPaymentNotes || `Received via Received Payment — ${payload.RPDocDate}`,
             });

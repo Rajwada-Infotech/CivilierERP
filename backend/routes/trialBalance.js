@@ -440,7 +440,16 @@ router.get("/:lheadId/transactions", async (req, res) => {
           ccx.Id           AS CrmCancellationId,
           ccx.CancellationNo AS CrmCancellationNo,
           ccx.RefundMode   AS CrmCancellationMode,
-          ccx.BookingId    AS CrmCancellationBookingId
+          ccx.BookingId    AS CrmCancellationBookingId,
+
+          -- Loans: the receipt / payment form behind a repayment, and the loan each row belongs to
+          COALESCE(lrp.RPDocNo, lnp.DocNo) AS LPFormDocNo,
+          COALESCE(CONVERT(varchar(10), lrp.RPDocDate, 23), CONVERT(varchar(10), lnp.PDate, 23)) AS LPFormDate,
+          COALESCE(lrp.RPMode, lnp.PMode) AS LPFormMode,
+          lrp.RPPaymentID  AS LPRPID,
+          lnp.PPaymentID   AS LPNPID,
+          plo.PaymentMode  AS LoanPostMode,
+          COALESCE(lpl.LoanNo, plo.LoanNo, dln.LoanNo) AS LoanRefNo
 
         FROM dbo.GeneralLedgerEntry gle
 
@@ -468,6 +477,18 @@ router.get("/:lheadId/transactions", async (req, res) => {
           ON cbm.Id = cbp.BrokerageId
         LEFT JOIN dbo.CrmCancellation ccx
           ON gle.SourceType = 'CrmCancellation' AND ccx.Id = gle.SourceId
+        LEFT JOIN dbo.LoanPayment lp
+          ON gle.SourceType = 'LoanRepayment' AND lp.PaymentId = gle.SourceId
+        LEFT JOIN dbo.ReceivedPayment lrp ON lrp.RPPaymentID = lp.ReceivedPaymentId
+        LEFT JOIN dbo.NewPayment lnp ON lnp.PPaymentID = lp.NewPaymentId
+        LEFT JOIN dbo.LoanSanction lpl ON lpl.LoanId = lp.LoanId
+        LEFT JOIN dbo.LoanSanction plo
+          ON gle.SourceType = 'LoanPosting' AND plo.LoanId = gle.SourceId
+        OUTER APPLY (
+          SELECT TOP 1 d.LoanNo FROM dbo.LoanSanction d
+          WHERE gle.SourceType IN ('NewPayment', 'ReceivedPayment')
+            AND d.DisbursementPaymentType = gle.SourceType AND d.DisbursementPaymentId = gle.SourceId
+        ) dln
 
         WHERE gle.LHeadId = @LHeadId
           AND gle.IsReversed = 0
@@ -699,10 +720,24 @@ router.get("/:lheadId/transactions", async (req, res) => {
         sourceRef = { id: r.CrmCancellationId, docNo: r.CrmCancellationNo, type: "CrmCancellation", bookingId: r.CrmCancellationBookingId };
       }
 
+      // Loans: a repayment shows its receipt / payment form (date, mode); every loan row's Ref Doc is the loan.
+      let date = r.VoucherDate || null;
+      if (st === "loanrepayment" && r.LPFormDocNo) {
+        date = r.LPFormDate || date;
+        mode = r.LPFormMode || mode;
+        docNo = r.LPFormDocNo;
+        sourceRef = r.LPRPID
+          ? { id: r.LPRPID, docNo: r.LPFormDocNo, type: "ReceivedPayment" }
+          : { id: r.LPNPID, docNo: r.LPFormDocNo, type: "NewPayment" };
+      } else if (st === "loanposting") {
+        mode = r.LoanPostMode || mode;
+      }
+      if (r.LoanRefNo) invoiceNo = r.LoanRefNo;
+
       return {
         entryId: r.EntryId,
         voucherNo: r.VoucherNo,
-        date: r.VoucherDate || null,
+        date,
         debit: Number(r.DebitAmount) || 0,
         credit: Number(r.CreditAmount) || 0,
         narration: r.Narration,
