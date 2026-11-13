@@ -192,7 +192,6 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             <DetailRow label="Created By" value={record.CreatedBy} />
             <DetailRow label="Block" value={record.BlockName} />
             <DetailRow label="Floor" value={record.FloorNo == null || record.FloorNo === "" ? null : String(record.FloorNo) === "0" ? "Ground floor" : `Floor ${record.FloorNo}`} />
-            <DetailRow label="Room" value={record.RoomName} />
             <DetailRow
               label="Total Amount"
               value={
