@@ -93,7 +93,7 @@ export default function LandEnquiryPage() {
       <LegalShell title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and Land Profile." icon={MessageQuestion}>
         <ProjectPicker value={projectId} onChange={setProjectId} />
         {projectId && (
-          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-10">
+          <div className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
             {FILTERS.map(([k, label, test, edge]) => {
               const n = rows.filter(test).length;
               const hot = (k === "overdue" && n > 0);

@@ -113,9 +113,9 @@ export default function LandDeedSearchPage() {
           </form>
         </ProjectPicker>
         {projectId && (
-          <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
+          <div className="legal-cq"><div className="legal-split">
             {/* ── Queue ── */}
-            <aside className="border border-border bg-card lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:overflow-hidden lg:flex lg:flex-col">
+            <aside className="legal-queue border border-border bg-card">
               <div className="space-y-2 border-b border-border p-3">
                 {term && <p className="text-xs text-muted-foreground">Filtered by “{q.trim()}” · {list.length} shown</p>}
                 <div className="grid grid-cols-3 border border-border text-[0.6875rem] font-semibold uppercase tracking-wider">
@@ -133,7 +133,7 @@ export default function LandDeedSearchPage() {
                 )}
               </div>
               {error && <p className="p-3 text-sm text-destructive">{(error as Error).message}</p>}
-              <ul className="divide-y divide-border lg:overflow-y-auto">
+              <ul className="divide-y divide-border">
                 {list.map((h) => {
                   const done = isDone(h);
                   const pct = h.OfficesTotal ? Math.round((h.OfficesDone / h.OfficesTotal) * 100) : 0;
@@ -161,11 +161,11 @@ export default function LandDeedSearchPage() {
             </aside>
 
             {/* ── Work area ── */}
-            <section className="min-w-0">
+            <section className="legal-cq min-w-0">
               {current ? <EnquiryWork key={current.EnquiryId} enquiry={current} canEdit={rights.canEdit && !current.LandId} onOpenEnquiries={() => navigate("/legal/land/enquiries")} />
                 : <div className="flex h-48 items-center justify-center border border-dashed border-border text-sm text-muted-foreground">Pick an enquiry from the list to search its registration offices</div>}
             </section>
-          </div>
+          </div></div>
         )}
       </LegalShell>
     </>
@@ -303,7 +303,7 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
   return (
     <div className="space-y-4 p-4">
       {/* Timeline + office */}
-      <div className="grid gap-3 md:grid-cols-[1fr_1.4fr]">
+      <div className="legal-g2">
         <div className={`border p-3 ${done ? "border-emerald-600/40 bg-emerald-600/5" : o.DaysOver > 0 ? "border-destructive bg-destructive/10" : "border-amber-500/50 bg-amber-500/5"}`}>
           <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Timeline</p>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-sm"><b>Due {o.DueDate}</b><Counter due={o.DueDate} done={done} /></p>
@@ -427,8 +427,8 @@ function YearPanel({ year, r, editable, onSave, onDelete, onClose }: {
         <p className="text-sm font-bold">{year}{r ? <span className="ml-2 text-xs font-normal text-muted-foreground">recorded{r.RecordedByName ? ` by ${r.RecordedByName}` : ""}</span> : <span className="ml-2 text-xs font-normal text-muted-foreground">not searched yet</span>}</p>
         <button className="text-xs underline" onClick={onClose}>Close</button>
       </div>
-      <fieldset disabled={!editable} className="grid gap-2 sm:grid-cols-2">
-        <div className="flex gap-2 sm:col-span-2">
+      <fieldset disabled={!editable} className="legal-g2">
+        <div className="flex gap-2 legal-span">
           {(["Found", "Not Found"] as const).map((x) => (
             <button key={x} type="button" onClick={() => setResult(x)}
               className={`border px-4 py-1.5 text-sm font-semibold ${result === x ? (x === "Found" ? "border-emerald-700 bg-emerald-600 text-white" : "border-foreground bg-foreground text-card") : "border-border"}`}>{x}</button>
@@ -438,11 +438,11 @@ function YearPanel({ year, r, editable, onSave, onDelete, onClose }: {
           <>
             <label className="text-xs">Deed number *<input className={field} value={deedNo} maxLength={100} onChange={(e) => setDeedNo(e.target.value)} autoFocus /></label>
             <label className="text-xs">Deed date<input type="date" className={field} value={deedDate} onChange={(e) => setDeedDate(e.target.value)} /></label>
-            <label className="text-xs sm:col-span-2">Parties (seller → buyer)<input className={field} value={parties} maxLength={500} onChange={(e) => setParties(e.target.value)} /></label>
+            <label className="text-xs legal-span">Parties (seller → buyer)<input className={field} value={parties} maxLength={500} onChange={(e) => setParties(e.target.value)} /></label>
           </>
         )}
-        <label className="text-xs sm:col-span-2">Details<input className={field} value={details} maxLength={2000} onChange={(e) => setDetails(e.target.value)} /></label>
-        <label className="text-xs sm:col-span-2">Government site checked<input className={field} value={siteName} maxLength={200} placeholder="e.g. WB Registration (igr.wb.gov.in)" onChange={(e) => setSiteName(e.target.value)} /></label>
+        <label className="text-xs legal-span">Details<input className={field} value={details} maxLength={2000} onChange={(e) => setDetails(e.target.value)} /></label>
+        <label className="text-xs legal-span">Government site checked<input className={field} value={siteName} maxLength={200} placeholder="e.g. WB Registration (igr.wb.gov.in)" onChange={(e) => setSiteName(e.target.value)} /></label>
       </fieldset>
       {editable && (
         <div className="mt-3 flex flex-wrap gap-2">

@@ -2660,3 +2660,21 @@ html[data-anim-pages="off"] .sheet-in .cell > header > span:nth-child(3),
 html[data-anim-pages="off"] .crm-sheet .grow,
 html[data-anim-pages="off"] .crm-sheet .draw,
 html[data-anim-pages="off"] .animate-in { animation: none !important; }
+
+/* ── Legal module: layouts sized by the space the page really has (container queries), not by the window —
+   the ERP sidebars and the docked document / site panel can leave a wide window with a narrow page. ── */
+.legal-cq { container-type: inline-size; }
+.legal-split { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
+.legal-split > .legal-queue { max-height: 20rem; overflow-y: auto; }
+@container (min-width: 1000px) {
+  .legal-split { grid-template-columns: 19rem minmax(0, 1fr); }
+  .legal-split > .legal-queue { position: sticky; top: 1rem; max-height: calc(100vh - 8rem); }
+}
+@container (min-width: 1400px) { .legal-split { grid-template-columns: 22rem minmax(0, 1fr); } }
+.legal-g2, .legal-g3, .legal-g4 { display: grid; gap: 0.75rem; grid-template-columns: minmax(0, 1fr); align-items: end; }
+@container (min-width: 480px) {
+  .legal-g2, .legal-g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .legal-g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container (min-width: 900px) { .legal-g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.legal-span { grid-column: 1 / -1; }

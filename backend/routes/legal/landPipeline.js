@@ -2084,6 +2084,7 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
       UPDATE dbo.LegalLand SET RegDeedFileId = @F, RegCompletedBy = @U, RegCompletedAt = SYSUTCDATETIME(), WorkflowStatus = N'Registered',
              UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
     await writeAudit(pool, req, { action: "Deed registered", entityType: "Land Property", entityId: id, landId: id, newValue: { fileId }, documentRef: `File ${fileId}` });
+    await recordCompanyTransfer(pool, req, id, fileId);
     await createPostRegTasks(pool, req, id);
     res.json({ message: `${l.LandCode}: deed registered — now in Land & Projects` });
   } catch (err) {
@@ -2136,6 +2137,39 @@ const POST_REG_TASKS = ["Registered deed verification", "Mutation application", 
   "Land tax / revenue update", "Ownership record update", "Project mapping eligibility"];
 const POST_REG_STATUS = ["Not Started", "Application Submitted", "Under Processing", "Additional Documents Required", "Completed", "Rejected"];
 const postRegReady = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalPostRegTask', 'U') AS t")).recordset[0].t;
+
+/**
+ * The company's own acquisition, written into the land's ownership chain when the registered deed is submitted (New
+ * Acquisition land only): a Sale transfer from the current owners to the company (deed no., office, date, value from
+ * Deed Registration), the current owners' records closed on that date, and the company recorded as owner (100%).
+ * Nothing is typed again; Post-Registration's "Ownership record update" task is where it is checked.
+ */
+async function recordCompanyTransfer(pool, req, landId, fileId) {
+  const l = (await pool.request().input("Id", sql.Int, landId).query(`
+    SELECT l.EntryType, l.Area, l.AreaUnitId, l.ConsTotalAmount, l.RegDeedNo, l.RegOfficeId,
+           CONVERT(char(10), ISNULL(l.RegFinalDate, CAST(GETDATE() AS DATE)), 23) AS RegDate,
+           COALESCE((SELECT c.name FROM dbo.enterprise c WHERE c.id = p.company_id), (SELECT c.name FROM dbo.enterprise c WHERE c.id = p.belongs_to), N'Company') AS Company,
+           (SELECT STRING_AGG(o.OwnerName, N', ') FROM dbo.LegalOwnershipRecord o WHERE o.LandId = l.LandId AND o.IsActive = 1 AND o.ValidTo IS NULL) AS Sellers
+    FROM dbo.LegalLand l LEFT JOIN dbo.enterprise p ON p.id = l.ProjectId WHERE l.LandId = @Id`)).recordset[0];
+  if (!l || l.EntryType !== "New Acquisition") return;
+  const has = (await pool.request().input("Id", sql.Int, landId).input("N", sql.NVarChar(200), l.Company)
+    .query("SELECT 1 AS x FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND OwnerName = @N AND IsActive = 1 AND ValidTo IS NULL")).recordset[0];
+  if (has) return;
+  const userId = req.user?.userId || null;
+  const ev = (await pool.request().input("Id", sql.Int, landId).input("D", sql.Date, l.RegDate).input("From", sql.NVarChar(200), (l.Sellers || "").slice(0, 200) || null)
+    .input("To", sql.NVarChar(200), l.Company).input("Deed", sql.NVarChar(60), l.RegDeedNo).input("Off", sql.Int, l.RegOfficeId)
+    .input("Area", sql.Decimal(18, 6), l.Area).input("Unit", sql.Int, l.AreaUnitId).input("Val", sql.Decimal(18, 2), l.ConsTotalAmount).input("F", sql.Int, fileId).input("U", sql.Int, userId)
+    .query(`INSERT INTO dbo.LegalOwnershipEvent (LandId, TransferTypeId, EventDate, PreviousOwnerName, NewOwnerName, DeedNo, RegistrationOfficeId, RegistrationDate,
+        TransferArea, AreaUnitId, TransferSharePct, TransferValue, DocFileId, Remarks, IsActive, CreatedBy)
+      OUTPUT INSERTED.EventId
+      VALUES (@Id, (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'transfer-type' AND Name = N'Sale'), @D, @From, @To, @Deed, @Off, @D,
+        @Area, @Unit, 100, @Val, @F, N'Company purchase — added at deed registration', 1, @U)`)).recordset[0];
+  await pool.request().input("Id", sql.Int, landId).input("D", sql.Date, l.RegDate).input("N", sql.NVarChar(200), l.Company).input("E", sql.Int, ev.EventId).input("U", sql.Int, userId)
+    .query(`UPDATE dbo.LegalOwnershipRecord SET ValidTo = @D, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id AND IsActive = 1 AND ValidTo IS NULL;
+      INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnershipTypeId, SharePct, ValidFrom, EventId, IsActive, CreatedBy)
+      VALUES (@Id, @N, (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Company'), 100, @D, @E, 1, @U);`);
+  await writeAudit(pool, req, { action: "Company acquisition recorded in ownership chain", entityType: "Land Property", entityId: landId, landId, newValue: { company: l.Company, from: l.Sellers, date: l.RegDate } });
+}
 
 async function createPostRegTasks(pool, req, landId) {
   if (!(await postRegReady(pool))) return;
@@ -2196,3 +2230,4 @@ router.put("/post-registration/task/:taskId", requirePageRight(LAND_PAGE, "edit"
 });
 
 module.exports = router;
+module.exports.recordCompanyTransfer = recordCompanyTransfer;

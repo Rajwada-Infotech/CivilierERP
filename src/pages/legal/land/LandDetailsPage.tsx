@@ -248,7 +248,7 @@ export default function LandDetailsPage({ verify = false, from }: { verify?: boo
             <Section title="Survey & valuation" {...at("survey")}>
               <Table rows={data.valuations ?? []} cols={[["ValuationDate", "Valuation date"], ["EstimatedMarketValue", "Market value ₹"], ["GovernmentValuation", "Govt. value ₹"], ["ValuationSource", "Source"], ["Surveyor", "Surveyor"], ["SurveyDate", "Survey date"], ["DocFileId", "Valuation report"]]} />
             </Section>
-            {(!backlog || data.transactions.length > 0) && <Section title="Purchase & sale" {...at("transfers")}>
+            {(!backlog || data.transactions.length > 0) && <Section title="Purchase & sale" {...at(backlog ? "transfers" : "ownership")}>
               <Table rows={data.transactions} cols={[["TransactionNo", "Transaction no."], ["TxnType", "Purchase / sale"], ["BuyerName", "Buyer"], ["SellerNames", "Seller(s)"], ["Area", "Area"], ["TotalValue", "Value ₹"], ["Paid", "Verified paid ₹"], ["TxnStatus", "Status"]]} />
             </Section>}
             {data.deeds.length > 0 && <Section title="Deed & registration" {...at("transfers")}>

@@ -44,7 +44,7 @@ export function DeedSearchReport() {
           <button key={String(k)} onClick={() => setPid(k)} className={`border px-3 py-1 text-xs font-semibold ${pid === k ? "border-foreground bg-foreground text-card" : "border-border hover:bg-muted"}`}>{label}</button>
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
         {tiles.map(([label, n, edge, view]) => (
           <button key={label} onClick={() => open(here, view)} title={`Open ${label.toLowerCase()} in Deed Registry Search`}
             className={`border border-l-4 ${edge} ${label === "Overdue" && n ? "bg-destructive/10" : "bg-muted/20"} px-3 py-2 text-left transition-transform hover:-translate-y-0.5`}>

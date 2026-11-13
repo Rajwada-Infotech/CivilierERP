@@ -68,8 +68,8 @@ export default function LandDeedRegistrationPage() {
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Deed Registration"]} />
       <LegalShell title="Deed Registration" subtitle="Lands approved in Deed Process. Work each land through consideration, stamp duty, application, final registration and the physical deed." icon={DocumentText}>
-        <div className="grid gap-4 xl:grid-cols-[19rem_minmax(0,1fr)] 2xl:grid-cols-[22rem_minmax(0,1fr)]">
-          <aside className="border border-border bg-card max-xl:max-h-80 max-xl:overflow-y-auto xl:sticky xl:top-4 xl:flex xl:max-h-[calc(100vh-8rem)] xl:flex-col xl:overflow-hidden">
+        <div className="legal-cq"><div className="legal-split">
+          <aside className="legal-queue border border-border bg-card">
             <div className="space-y-2 border-b border-border p-3">
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Land ID, name, mouza, Dag, deed no…" className="h-9 w-full border border-border bg-background px-3 text-sm" />
               <div className="grid grid-cols-2 border border-border text-[0.6875rem] font-semibold uppercase tracking-wider">
@@ -79,7 +79,7 @@ export default function LandDeedRegistrationPage() {
               </div>
             </div>
             {error && <p className="p-3 text-sm text-destructive">{(error as Error).message}</p>}
-            <ul className="divide-y divide-border xl:overflow-y-auto">
+            <ul className="divide-y divide-border">
               {list.map((l) => {
                 const steps = stepsOf(l, l.Queries);
                 const n = steps.filter((s) => s.done).length;
@@ -106,10 +106,10 @@ export default function LandDeedRegistrationPage() {
               {!list.length && <li className="p-4 text-center text-xs text-muted-foreground">{isFetching ? "Loading…" : tab === "active" ? "No land waiting for registration" : "No registered land yet"}</li>}
             </ul>
           </aside>
-          <section className="min-w-0">
+          <section className="legal-cq min-w-0">
             {pickedId ? <LandWork key={pickedId} id={pickedId} /> : <div className="flex h-48 items-center justify-center border border-dashed border-border text-sm text-muted-foreground">Pick a land from the list</div>}
           </section>
-        </div>
+        </div></div>
       </LegalShell>
     </>
   );
@@ -174,7 +174,7 @@ function LandWork({ id }: { id: number }) {
           </div>
           <button className={small} onClick={() => navigate(`/legal/deed-registration/${l.LandId}`)}>All land details</button>
         </div>
-        <dl className="mt-2 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 xl:grid-cols-3">
+        <dl className="legal-g3 mt-2 text-xs">
           <div><dt className="text-muted-foreground">RS Dag / Khatian</dt><dd className="font-semibold">{l.RsDagNo ?? "—"} / {l.RsKhatianNo ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">LR Dag / Khatian</dt><dd className="font-semibold">{l.LrDagNo ?? "—"} / {l.LrKhatianNo ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">Sellers (current owners)</dt><dd className="font-semibold">{l.Owners ?? "—"}</dd></div>
@@ -236,7 +236,7 @@ function Consideration({ l, revisions, valuation, editable, onSaved }: { l: Deed
         <p className="border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-800">Agreed {monthsSince} months ago and not fully paid — confirm the price still stands before the final payment.</p>
       )}
       <fieldset disabled={!editable} className="space-y-3">
-        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+        <div className="legal-g4">
           <label className="text-xs">Total consideration (₹) *<input className={field} inputMode="decimal" value={f.total} onChange={(e) => setF({ ...f, total: e.target.value })} /></label>
           <label className="text-xs">Rate (₹)<div className="flex gap-1"><input className={field} inputMode="decimal" value={f.rate} onChange={(e) => setF({ ...f, rate: e.target.value })} />
             <select className={`${field} w-28`} value={f.rateUnitId} onChange={(e) => setF({ ...f, rateUnitId: e.target.value })}><option value="">per…</option>{units.map((u) => <option key={u.value} value={u.value}>per {u.label}</option>)}</select></div></label>
@@ -348,7 +348,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
   return (
     <div className="space-y-4">
       {/* ── 1. Where the money stands ── */}
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="legal-g3">
         <div className="border border-border px-3 py-2"><p className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">Consideration</p><p className="text-lg font-bold tabular-nums">{inr(total)}</p></div>
         <div className="border border-emerald-600/40 bg-emerald-600/5 px-3 py-2"><p className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">Paid</p><p className="text-lg font-bold tabular-nums text-emerald-700">{inr(paid)}</p></div>
         <div className={`border px-3 py-2 ${due ? "border-amber-500/50 bg-amber-500/5" : "border-emerald-600/40 bg-emerald-600/5"}`}><p className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">Still to pay</p><p className={`text-lg font-bold tabular-nums ${due ? "text-amber-700" : "text-emerald-700"}`}>{due ? inr(due) : "Nothing — fully paid"}</p></div>
@@ -425,7 +425,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
 
           {form === "instalment" && (
             <div className="space-y-2 border border-border bg-muted/20 p-3">
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="legal-g2">
                 <label className="text-xs">Instalment name<input className={field} value={i.label} maxLength={100} placeholder="e.g. Second instalment" onChange={(e) => setI({ ...i, label: e.target.value })} /></label>
                 <label className="text-xs">Due date *<input type="date" className={field} value={i.dueDate} onChange={(e) => setI({ ...i, dueDate: e.target.value })} /></label>
                 <div className="text-xs">
@@ -503,7 +503,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
           )}
           {form === "payment" && (
             <div className="space-y-2 border border-border bg-muted/20 p-3">
-              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+              <div className="legal-g4">
                 <label className="text-xs">Date paid *<input type="date" className={field} max={today()} value={p.paymentDate} onChange={(e) => setP({ ...p, paymentDate: e.target.value })} /></label>
                 <label className="text-xs">Amount (₹) * <button type="button" className="ml-1 underline" onClick={() => setP({ ...p, amount: String(due) })}>whole balance</button>
                   <input className={field} inputMode="decimal" value={p.amount} onChange={(e) => setP({ ...p, amount: e.target.value })} /></label>
@@ -513,13 +513,13 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
               {Number(p.amount) > 0 && <p className="text-xs text-muted-foreground">After this payment: {inr(Math.max(0, due - Number(p.amount)))} still to pay{Number(p.amount) > due + 0.01 ? <b className="text-destructive"> — more than the balance</b> : null}</p>}
               <button type="button" className="text-xs underline" onClick={() => setMore(!more)}>{more ? "Fewer details" : "More details (paid to, transaction no., receipt)"}</button>
               {more && (
-                <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+                <div className="legal-g4">
                   <label className="text-xs">Paid to<input className={field} value={p.payee} maxLength={200} onChange={(e) => setP({ ...p, payee: e.target.value })} /></label>
                   <label className="text-xs">Transaction / cheque no.<input className={field} value={p.transactionRef} maxLength={100} onChange={(e) => setP({ ...p, transactionRef: e.target.value })} /></label>
                   <label className="text-xs">Receipt no.<input className={field} value={p.receiptNo} maxLength={60} onChange={(e) => setP({ ...p, receiptNo: e.target.value })} /></label>
                   <div className="text-xs">Receipt copy
                     <button type="button" className={`${field} text-left`} onClick={attachReceipt}>{p.receiptName || "Upload PDF / image"}</button></div>
-                  <label className="text-xs sm:col-span-2 2xl:col-span-4">Remarks<input className={field} value={p.remarks} maxLength={1000} onChange={(e) => setP({ ...p, remarks: e.target.value })} /></label>
+                  <label className="text-xs legal-span">Remarks<input className={field} value={p.remarks} maxLength={1000} onChange={(e) => setP({ ...p, remarks: e.target.value })} /></label>
                 </div>
               )}
               <div className="flex gap-2">
@@ -586,7 +586,7 @@ function StampDuty({ id, rows, editable, onSaved }: { id: number; rows: StampQue
         </tbody>
       </table>
       {editable && (
-        <div className="grid items-end gap-3 border border-border bg-muted/30 p-3 sm:grid-cols-2 2xl:grid-cols-[9rem_1fr_9rem_1.4fr_auto]">
+        <div className="legal-g4 border border-border bg-muted/30 p-3">
           <label className="text-xs">Query date<input type="date" className={field} value={f.queryDate} onChange={(e) => setF({ ...f, queryDate: e.target.value })} /></label>
           <label className="text-xs">Fee type<Pick list={fees} value={f.feeTypeId} onChange={(v) => setF({ ...f, feeTypeId: v })} placeholder="Stamp duty, registration…" /></label>
           <label className="text-xs">Amount (₹)<input className={field} inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
@@ -656,7 +656,7 @@ function FinalRegistration({ l, editable, canSubmit, onSaved }: { l: DeedRegLand
           {l.ConsTotalAmount == null ? "Save the consideration and record the payments first." : `${inr(Number(l.ConsTotalAmount) - Number(l.Paid))} of the consideration is still due — Final Registration opens when it is fully paid.`}
         </p>
       )}
-      <fieldset disabled={!editable || registered || !paidUp} className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+      <fieldset disabled={!editable || registered || !paidUp} className="legal-g4">
         <label className="text-xs">Date of registration *<input type="date" className={field} min={l.LastPaid ?? undefined} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></label>
         <label className="text-xs">Office of registration *<Pick list={offices} value={f.officeId} onChange={(v) => setF({ ...f, officeId: v })} /></label>
         <label className="text-xs">Mode of registration *<Pick list={modes} value={f.modeId} onChange={(v) => setF({ ...f, modeId: v })} /></label>
@@ -686,19 +686,19 @@ function Tracking({ l, rows, editable, onSaved }: { l: DeedRegLand; rows: TrackR
   };
   return (
     <div className="space-y-3">
-      <div className="grid gap-2 text-sm sm:grid-cols-3">
+      <div className="legal-g3 text-sm">
         <div className="border border-border px-3 py-2"><p className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">IGR status</p><p className="font-semibold">{l.IgrStatus ?? "—"}</p></div>
         <div className="border border-border px-3 py-2"><p className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">Physical deed is</p><p className="font-semibold">{l.DeedLocation ?? "—"}</p></div>
         <div className="border border-border px-3 py-2"><p className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">IGR tracking link</p>
           {l.IgrTrackingUrl ? <button className="truncate text-left font-semibold underline" onClick={() => openLegalLink(l.IgrTrackingUrl!, "IGR status")}>Open status page</button> : <p className="font-semibold">—</p>}</div>
       </div>
       {editable && (
-        <div className="grid items-end gap-3 border border-border bg-muted/30 p-3 sm:grid-cols-2 2xl:grid-cols-[9rem_1fr_1fr_1.4fr]">
+        <div className="legal-g4 border border-border bg-muted/30 p-3">
           <label className="text-xs">Date<input type="date" className={field} value={f.statusDate} onChange={(e) => setF({ ...f, statusDate: e.target.value })} /></label>
           <label className="text-xs">IGR status<Pick list={statuses} value={f.igrStatusId} onChange={(v) => setF({ ...f, igrStatusId: v })} /></label>
           <label className="text-xs">Deed location<Pick list={locations} value={f.deedLocationId} onChange={(v) => setF({ ...f, deedLocationId: v })} /></label>
           <label className="text-xs">IGR tracking link<input className={field} value={f.trackingUrl} placeholder="https://…" maxLength={500} onChange={(e) => setF({ ...f, trackingUrl: e.target.value })} /></label>
-          <label className="text-xs sm:col-span-2 2xl:col-span-3">Remarks<input className={field} value={f.remarks} maxLength={1000} onChange={(e) => setF({ ...f, remarks: e.target.value })} /></label>
+          <label className="text-xs legal-span">Remarks<input className={field} value={f.remarks} maxLength={1000} onChange={(e) => setF({ ...f, remarks: e.target.value })} /></label>
           <button className={`${primary} h-9`} disabled={busy} onClick={add}>Update status</button>
         </div>
       )}

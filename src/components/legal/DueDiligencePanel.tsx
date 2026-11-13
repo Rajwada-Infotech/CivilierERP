@@ -198,7 +198,7 @@ export const DueDiligencePanel: React.FC<{ landId: number; onGoTab: (tab: string
 
       {/* 3. Title */}
       <AreaCheck landId={landId} d={d} area={area("title")} onSaved={refresh}>
-        <p className="text-xs text-muted-foreground">{d.land.Transfers} ownership transfer(s) (sale / gift / partition / parent deeds) · {d.land.LandRecords} RS / LR record(s). Check that the chain is continuous and the RS / LR records match. {go("transfers")} {go("records")}</p>
+        <p className="text-xs text-muted-foreground">{d.land.Transfers} ownership transfer(s) (sale / gift / partition / parent deeds) · {d.land.LandRecords} RS / LR record(s). Check that the chain is continuous and the RS / LR records match. {go("ownership")} {go("records")}</p>
       </AreaCheck>
 
       {/* 4. Documents */}
