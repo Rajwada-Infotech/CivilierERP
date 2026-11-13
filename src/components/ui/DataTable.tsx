@@ -218,7 +218,9 @@ export function DataTable<TData extends RowData>({
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
+    // paginated={false} (e.g. the per-project groups on grouped registers) shows every row — it used to only hide
+    // the footer while still cutting the table to its first page of 10.
+    ...(paginated || sp ? { getPaginationRowModel: getPaginationRowModel() } : {}),
     getRowId,
     // TanStack's own autoResetPageIndex fires on ANY change to `data`
     // (by reference), not just a real content change — and every caller
