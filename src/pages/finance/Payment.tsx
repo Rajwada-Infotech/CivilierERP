@@ -1087,7 +1087,10 @@ const Payment: React.FC = () => {
       company: bookingFilters.company || f.company,
       partyId: loan.BorrowerCustomerId,
       amount: loan.Amount,
-      paymentName: f.paymentName || `Loan disbursement — ${loan.LoanNo}`,
+      // Replace a name left over from an earlier loan pick (or empty); keep only a name the user typed themselves.
+      paymentName: !f.paymentName || f.paymentName.startsWith("Loan disbursement — ")
+        ? `Loan disbursement — ${loan.LoanNo}`
+        : f.paymentName,
       // The loan already recorded which bank/cheque it was disbursed
       // through at sanction time — carry all of it over instead of leaving
       // the Bank field on whatever was last selected (previously this left
