@@ -46,6 +46,7 @@ export function printBoq(record: BoqRecord) {
   const docNo = record.BoqNo || record.DocNo || `#${record.BoqID}`;
   const company = record.CompanyName || "Company";
   const mark = escapeHtml(company.trim().charAt(0).toUpperCase());
+  const origin = window.location.origin;
   const printed = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const itemHead = `<tr class="th"><th class="c">SL.</th><th>DESCRIPTION</th><th>FOR ACTIVITY</th><th class="r">QTY</th><th class="c">UOM</th><th class="r">RATE</th><th class="r">AMOUNT</th></tr>`;
   const head = `<tr class="th"><th class="c">SL.</th><th>DESCRIPTION</th><th class="r">QTY</th><th class="c">UOM</th><th class="r">RATE</th><th class="r">AMOUNT</th></tr>`;
@@ -53,10 +54,13 @@ export function printBoq(record: BoqRecord) {
   openPrintWindow(`<!DOCTYPE html>
 <html><head><meta charset="utf-8" /><title>BOQ ${escapeHtml(String(docNo))}</title>
 <style>
+  /* DM Sans, from the app's own copy (the print window is a blob page, so the address must be absolute). */
+  @font-face { font-family: 'DM Sans'; font-weight: 100 600; src: url('${origin}/fonts/DMSans-Regular.ttf') format('truetype'); }
+  @font-face { font-family: 'DM Sans'; font-weight: 700 900; src: url('${origin}/fonts/DMSans-Bold.ttf') format('truetype'); }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   @page { size: A4 portrait; margin: 0; }
   html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { font-family: 'Lato', 'Segoe UI', Arial, sans-serif; font-size: 10.5px; color: #2b2b2b; background: #fff7ea; }
+  body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; font-size: 10.5px; color: #2b2b2b; background: #fff7ea; }
   /* Dark sidebar, repeated on every page */
   .side { position: fixed; top: 0; left: 0; bottom: 0; width: 64mm; background: #34373a; color: #fff; padding: 46mm 6mm 0 7mm; z-index: 1; }
   .side h5 { color: #f26a21; font-size: 10.5px; letter-spacing: 1.2px; margin: 14px 0 5px; text-transform: uppercase; }

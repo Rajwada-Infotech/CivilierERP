@@ -70,10 +70,11 @@ export function buildBoqHtml(record: BoqPdfRecord): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" /><title>BOQ ${esc(docNo)}</title>
 <style>
+  @import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&display=swap");
   * { box-sizing: border-box; margin: 0; padding: 0; }
   @page { size: A4 portrait; margin: 0; }
   html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { font-family: -apple-system, Roboto, 'Segoe UI', Arial, sans-serif; font-size: 10.5px; color: #2b2b2b; background: #fff7ea; }
+  body { font-family: 'DM Sans', -apple-system, Roboto, 'Segoe UI', Arial, sans-serif; font-size: 10.5px; color: #2b2b2b; background: #fff7ea; }
   .side { position: fixed; top: 0; left: 0; bottom: 0; width: 64mm; background: #34373a; color: #fff; padding: 46mm 6mm 0 7mm; z-index: 1; }
   .side h5 { color: #f26a21; font-size: 10.5px; letter-spacing: 1.2px; margin: 14px 0 5px; text-transform: uppercase; }
   .side p { font-size: 9.5px; line-height: 1.55; color: #e9e9e9; word-break: break-word; }
