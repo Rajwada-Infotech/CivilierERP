@@ -65,6 +65,12 @@ export interface BoqRecord {
   ApprovedBy?: string;
   RejectedBy?: string;
   RejectionNote?: string;
+  /** Where this estimation is for (migration 637). */
+  BlockId?: number | null;
+  BlockName?: string | null;
+  FloorNo?: string | null;
+  RoomId?: number | null;
+  RoomName?: string | null;
   BoqItems: BoqItem[];
   BoqActivities: BoqActivity[];
 }
@@ -243,6 +249,9 @@ export const buildPayload = (
   Description: form.Description,
   Remarks: form.Remarks,
   DocTypeId: form.DocTypeId ? Number(form.DocTypeId) : null,
+  BlockId: form.BlockId ? Number(form.BlockId) : null,
+  FloorNo: form.FloorNo || null,
+  RoomId: form.RoomId ? Number(form.RoomId) : null,
   finYear: form.FinYear || undefined,
   Status: form.Status,
   BoqItems: items.map((it) => {
@@ -345,6 +354,9 @@ export interface FormState {
   Remarks: string;
   DocTypeId: string;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
+  BlockId: string;
+  FloorNo: string;
+  RoomId: string;
 }
 
 export const canEditBoq = (status?: string | null) =>
@@ -360,6 +372,9 @@ export const defaultForm = (finYear?: string): FormState => ({
   Remarks: "",
   DocTypeId: "",
   Status: "Draft",
+  BlockId: "",
+  FloorNo: "",
+  RoomId: "",
 });
 
 export const recordToForm = (r: BoqRecord): FormState => ({
@@ -372,6 +387,9 @@ export const recordToForm = (r: BoqRecord): FormState => ({
   Remarks: r.Remarks ?? "",
   DocTypeId: String(r.DocTypeId ?? ""),
   Status: r.Status ?? "Draft",
+  BlockId: r.BlockId != null ? String(r.BlockId) : "",
+  FloorNo: r.FloorNo != null ? String(r.FloorNo) : "",
+  RoomId: r.RoomId != null ? String(r.RoomId) : "",
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

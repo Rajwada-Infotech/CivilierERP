@@ -620,7 +620,7 @@ export default function BOQ() {
       {/* One sheet frame for all three views: the list, the form (new / edit) and one BOQ opened. */}
       <SheetShell
         eyebrow="CivilierERP · Engineering"
-        title="Bills of quantities"
+        title="Bills of quantities (Estimation)"
         subtitle="Material items and work activities priced out for a project; an approved BOQ is what work orders are raised against."
         action={
           listView ? (

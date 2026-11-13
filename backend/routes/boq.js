@@ -274,12 +274,17 @@ router.get("/", cache("boq", 300), async (req, res) => {
           b.CreatedAt,
           b.DocTypeId,
           b.DocNo,
+          b.BlockId, blk.BlockName, b.FloorNo, b.RoomId,
+          CASE WHEN rm.Id IS NULL THEN NULL ELSE CONCAT(rm.RoomName, CASE WHEN rmu.UnitName IS NULL THEN '' ELSE CONCAT(' (', rmu.UnitName, ')') END) END AS RoomName,
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription
         FROM dbo.BOQ b
         LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
         LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = b.DocTypeId
+        LEFT JOIN dbo.BlockMaster blk ON blk.Id = b.BlockId
+        LEFT JOIN dbo.RoomMaster rm ON rm.Id = b.RoomId
+        LEFT JOIN dbo.UnitMaster rmu ON rmu.Id = rm.UnitId
         ${whereSql}
         ORDER BY b.BoqID DESC
         OFFSET @offset ROWS
@@ -306,6 +311,89 @@ router.get("/", cache("boq", 300), async (req, res) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
+// ── Location (Block / Floor / Room) ─────────────────────────────────────────────────────────────────────
+// A BOQ is an estimation for one Block, Floor and Room of its project. An activity can be estimated only
+// once per project + block + floor + room: a second BOQ (not rejected) for the same place can't carry it again.
+const locOf = (v) => ({
+  blockId: parseInt(v?.BlockId, 10) || null,
+  floorNo: v?.FloorNo != null && String(v.FloorNo).trim() !== "" ? String(v.FloorNo).trim().slice(0, 20) : null,
+  roomId: parseInt(v?.RoomId, 10) || null,
+});
+const activityIdsOf = (activities) =>
+  [...new Set((activities || []).map((a) => (a?.activityId ?? a?.ActivityId ?? "").toString().trim()).filter(Boolean))];
+
+// Activities of the given list already on another live BOQ for the same place: [{ ActivityId, ActivityName, BoqNo }].
+async function activitiesAlreadyEstimated(pool, { projectId, blockId, floorNo, roomId, excludeBoqId, activityIds }) {
+  if (!projectId || !blockId || !floorNo || !roomId) return [];
+  const r = pool.request()
+    .input("P", sql.Int, projectId).input("Bl", sql.Int, blockId)
+    .input("F", sql.NVarChar(20), floorNo).input("R", sql.Int, roomId)
+    .input("X", sql.Int, excludeBoqId || 0);
+  let idFilter = "";
+  if (activityIds) {
+    if (!activityIds.length) return [];
+    activityIds.slice(0, 500).forEach((a, i) => r.input(`a${i}`, sql.NVarChar(100), a));
+    idFilter = ` AND ba.ActivityId IN (${activityIds.slice(0, 500).map((_, i) => `@a${i}`).join(",")})`;
+  }
+  return (await r.query(`
+    SELECT ba.ActivityId, MAX(ba.ActivityName) AS ActivityName, MAX(COALESCE(b.DocNo, b.BoqNo)) AS BoqNo
+    FROM dbo.BoqActivities ba
+    JOIN dbo.BOQ b ON b.BoqID = ba.BoqID
+    WHERE b.ProjectId = @P AND b.BlockId = @Bl AND b.FloorNo = @F AND b.RoomId = @R
+      AND b.BoqID <> @X AND ISNULL(b.Status, '') NOT IN ('Rejected', 'Cancelled')
+      AND ISNULL(ba.ActivityId, '') <> ''${idFilter}
+    GROUP BY ba.ActivityId`)).recordset;
+}
+
+// GET /location-options?projectId=&blockId=&floorNo= — the chained dropdowns: blocks of the project, floors of the
+// block (from its units), rooms on that floor (with their unit).
+router.get("/location-options", async (req, res) => {
+  const projectId = parseInt(req.query.projectId, 10) || null;
+  const blockId = parseInt(req.query.blockId, 10) || null;
+  const floorNo = req.query.floorNo != null && String(req.query.floorNo).trim() !== "" ? String(req.query.floorNo).trim() : null;
+  if (!projectId) return res.json({ blocks: [], floors: [], rooms: [] });
+  try {
+    const pool = getPool();
+    const blocks = (await pool.request().input("P", sql.Int, projectId).query(
+      "SELECT Id AS id, BlockName AS name FROM dbo.BlockMaster WHERE ProjectId = @P AND IsActive = 1 ORDER BY BlockName")).recordset;
+    const floors = blockId ? (await pool.request().input("B", sql.Int, blockId).query(`
+      SELECT DISTINCT CAST(FloorNo AS NVARCHAR(20)) AS FloorNo FROM dbo.UnitMaster
+      WHERE BlockId = @B AND IsActive = 1 AND FloorNo IS NOT NULL`)).recordset
+      .map((r) => r.FloorNo)
+      .sort((a, b) => (Number(a) - Number(b)) || String(a).localeCompare(String(b), undefined, { numeric: true })) : [];
+    const rooms = blockId && floorNo ? (await pool.request().input("B", sql.Int, blockId).input("F", sql.NVarChar(20), floorNo).query(`
+      SELECT r.Id AS id, r.RoomName AS roomName, u.UnitName AS unitName
+      FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId
+      WHERE r.BlockId = @B AND CAST(u.FloorNo AS NVARCHAR(20)) = @F AND r.IsActive = 1
+      ORDER BY u.UnitName, r.RoomName`)).recordset
+      .map((r) => ({ id: r.id, name: r.unitName ? `${r.roomName} (${r.unitName})` : r.roomName })) : [];
+    res.json({ blocks, floors, rooms });
+  } catch (err) {
+    console.error("BOQ location options error:", err.message);
+    res.status(500).json({ error: "Could not load blocks / floors / rooms" });
+  }
+});
+
+// GET /used-activities?projectId=&blockId=&floorNo=&roomId=&excludeId= — activities already estimated for that place,
+// so the form can leave them out of the activity picker.
+router.get("/used-activities", async (req, res) => {
+  try {
+    const rows = await activitiesAlreadyEstimated(getPool(), {
+      projectId: parseInt(req.query.projectId, 10) || null,
+      ...locOf({ BlockId: req.query.blockId, FloorNo: req.query.floorNo, RoomId: req.query.roomId }),
+      excludeBoqId: parseInt(req.query.excludeId, 10) || null,
+      activityIds: null,
+    });
+    res.json(rows.map((r) => ({ activityId: String(r.ActivityId), activityName: r.ActivityName, boqNo: r.BoqNo })));
+  } catch (err) {
+    console.error("BOQ used activities error:", err.message);
+    res.status(500).json({ error: "Could not check activities already estimated" });
+  }
+});
+
+const duplicateMessage = (dups) =>
+  `Already estimated for this block, floor and room: ${dups.slice(0, 5).map((d) => `${d.ActivityName || d.ActivityId} (${d.BoqNo})`).join(", ")}${dups.length > 5 ? ` and ${dups.length - 5} more` : ""}. Remove ${dups.length === 1 ? "it" : "them"} or pick another location.`;
+
 router.get("/:id", async (req, res) => {
   try {
     const pool = getPool();
@@ -316,12 +404,17 @@ router.get("/:id", async (req, res) => {
           b.*,
           co.name AS CompanyName,
           pr.name AS ProjectName,
+          blk.BlockName,
+          CASE WHEN rm.Id IS NULL THEN NULL ELSE CONCAT(rm.RoomName, CASE WHEN rmu.UnitName IS NULL THEN '' ELSE CONCAT(' (', rmu.UnitName, ')') END) END AS RoomName,
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription
         FROM dbo.BOQ b
         LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
         LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = b.DocTypeId
+        LEFT JOIN dbo.BlockMaster blk ON blk.Id = b.BlockId
+        LEFT JOIN dbo.RoomMaster rm ON rm.Id = b.RoomId
+        LEFT JOIN dbo.UnitMaster rmu ON rmu.Id = rm.UnitId
         WHERE b.BoqID = @BoqID
       `);
 
@@ -377,6 +470,7 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
     DocTypeId,
     finYear,
   } = req.body;
+  const loc = locOf(req.body);
 
   const itemsArray = Array.isArray(BoqItems)
     ? BoqItems
@@ -394,6 +488,13 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
+    if (!loc.blockId || !loc.floorNo || !loc.roomId) {
+      return res.status(400).json({ error: "Select the Block, Floor and Room this BOQ is for." });
+    }
+    const dupsNew = await activitiesAlreadyEstimated(pool, {
+      projectId: ProjectId ? parseInt(ProjectId, 10) : null, ...loc, excludeBoqId: null, activityIds: activityIdsOf(activitiesArray),
+    });
+    if (dupsNew.length) return res.status(400).json({ error: duplicateMessage(dupsNew) });
     const uomMap = await buildUomMap(pool);
     transaction = pool.transaction();
     await transaction.begin();
@@ -432,17 +533,18 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
       .input("CreatedBy", sql.NVarChar(100), userEmail)
       .input("CreatedAt", sql.DateTime2, new Date())
       .input("BoqItems", sql.NVarChar(sql.MAX), itemsJson)
-      .input("BoqActivities", sql.NVarChar(sql.MAX), activitiesJson).query(`
+      .input("BoqActivities", sql.NVarChar(sql.MAX), activitiesJson)
+      .input("BlockId", sql.Int, loc.blockId).input("FloorNo", sql.NVarChar(20), loc.floorNo).input("RoomId", sql.Int, loc.roomId).query(`
         INSERT INTO dbo.BOQ (
           BoqNo, BoqDate, CompanyId, ProjectId, Description,
           TotalAmount, Status, Remarks, DocTypeId, DocNo,
-          CreatedBy, CreatedAt, BoqItems, BoqActivities
+          CreatedBy, CreatedAt, BoqItems, BoqActivities, BlockId, FloorNo, RoomId
         )
         OUTPUT INSERTED.BoqID
         VALUES (
           @BoqNo, @BoqDate, @CompanyId, @ProjectId, @Description,
           @TotalAmount, @Status, @Remarks, @DocTypeId, @DocNo,
-          @CreatedBy, @CreatedAt, @BoqItems, @BoqActivities
+          @CreatedBy, @CreatedAt, @BoqItems, @BoqActivities, @BlockId, @FloorNo, @RoomId
         )
       `);
 
@@ -504,6 +606,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     DocTypeId,
     DocNo,
   } = req.body;
+  const locSent = locOf(req.body);
 
   const itemsArray = Array.isArray(BoqItems)
     ? BoqItems
@@ -539,6 +642,13 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     // wasApproved handling. BOQ doesn't post to GL directly, so no
     // reversal needed.
     const effectiveStatus = wasApproved || wasPending ? "Pending" : Status || "Draft";
+    // The form always sends the location; an amendment or an older BOQ edited without one keeps what is saved.
+    const saved = (await pool.request().input("Id", sql.Int, id).query("SELECT BlockId, FloorNo, RoomId FROM dbo.BOQ WHERE BoqID = @Id")).recordset[0] || {};
+    const loc = locSent.blockId || locSent.floorNo || locSent.roomId ? locSent : locOf(saved);
+    const dupsEdit = await activitiesAlreadyEstimated(pool, {
+      projectId: ProjectId ? parseInt(ProjectId, 10) : null, ...loc, excludeBoqId: id, activityIds: activityIdsOf(activitiesArray),
+    });
+    if (dupsEdit.length) return res.status(400).json({ error: duplicateMessage(dupsEdit) });
     const uomMap = await buildUomMap(pool);
     transaction = pool.transaction();
     await transaction.begin();
@@ -546,6 +656,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     const result = await transaction
       .request()
       .input("BoqID", sql.Int, id)
+      .input("BlockId", sql.Int, loc.blockId).input("FloorNo", sql.NVarChar(20), loc.floorNo).input("RoomId", sql.Int, loc.roomId)
       .input("BoqNo", sql.NVarChar(100), BoqNo || null)
       .input("BoqDate", sql.Date, BoqDate || null)
       .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId, 10) : null)
@@ -565,7 +676,8 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
           ProjectId = @ProjectId, Description = @Description, TotalAmount = @TotalAmount,
           Status = @Status, Remarks = @Remarks, DocTypeId = @DocTypeId,
           DocNo = @DocNo, UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt,
-          BoqItems = @BoqItems, BoqActivities = @BoqActivities
+          BoqItems = @BoqItems, BoqActivities = @BoqActivities,
+          BlockId = @BlockId, FloorNo = @FloorNo, RoomId = @RoomId
         WHERE BoqID = @BoqID
       `);
 

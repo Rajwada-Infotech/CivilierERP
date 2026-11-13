@@ -25,6 +25,8 @@ import {
 import { getCostCenterOptions } from "@/api/costCenterApi";
 import { getUnlinkedEmployeeCandidates, type UnlinkedEmployeeCandidate } from "@/api/offerLetterApi";
 import { getSalaryStructureFamilies } from "@/api/salaryStructureApi";
+import { getDepartmentOptions } from "@/api/departmentMasterApi";
+import { getDesignations } from "@/api/designationMasterApi";
 import { Wallet3 } from "iconsax-react";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
@@ -295,6 +297,12 @@ export default function EmployeeMaster() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Department and Designation come from their masters (Department Master / Designation Master).
+  const { data: departmentData } = useQuery({ queryKey: ["department-master-options"], queryFn: getDepartmentOptions, staleTime: 5 * 60 * 1000 });
+  const { data: designationData } = useQuery({ queryKey: ["designation-master"], queryFn: getDesignations, staleTime: 5 * 60 * 1000 });
+  const departmentNames = (Array.isArray(departmentData) ? departmentData : []).filter((d) => d.IsActive !== false).map((d) => d.DepartmentName);
+  const designationList = (Array.isArray(designationData) ? designationData : []).filter((d) => d.IsActive !== false);
+
   const { data: unlinkedData } = useQuery({
     queryKey: ["offer-letter-unlinked-employees"],
     queryFn: getUnlinkedEmployeeCandidates,
@@ -438,8 +446,33 @@ export default function EmployeeMaster() {
     { name: "sec-employment", label: "Employment Details", type: "section" },
     { name: "joiningDate", label: "Joining Date", type: "date" },
     { name: "confirmationDate", label: "Confirmation Date", type: "date" },
-    { name: "department", label: "Department", type: "text" },
-    { name: "designation", label: "Designation", type: "text" },
+    {
+      name: "department",
+      label: "Department",
+      type: "select",
+      optionsProvider: (_all, _id, form) => {
+        const names = [...departmentNames];
+        const cur = String(form?.department ?? "");
+        // An older record may carry a department name typed before the master existed — keep it selectable.
+        if (cur && !names.includes(cur)) names.unshift(cur);
+        return names.map((n) => ({ value: n, label: n }));
+      },
+    },
+    {
+      name: "designation",
+      label: "Designation",
+      type: "select",
+      optionsProvider: (_all, _id, form) => {
+        const dept = String(form?.department ?? "");
+        // With a department chosen, offer that department's designations plus the ones not tied to any department.
+        const names = designationList
+          .filter((d) => !dept || !d.DepartmentName || d.DepartmentName === dept)
+          .map((d) => d.DesignationName);
+        const cur = String(form?.designation ?? "");
+        if (cur && !names.includes(cur)) names.unshift(cur);
+        return Array.from(new Set(names)).map((n) => ({ value: n, label: n }));
+      },
+    },
     { name: "branchLocation", label: "Branch / Location", type: "text" },
     {
       name: "reportingManagerId",
@@ -601,6 +634,15 @@ export default function EmployeeMaster() {
           columnRenderers={columnRenderers}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          onFieldChange={(next, fieldName) => {
+            if (fieldName !== "department") return next;
+            const dept = String(next.department ?? "");
+            const des = String(next.designation ?? "");
+            if (!des) return next;
+            const d = designationList.find((x) => x.DesignationName === des);
+            // Keep the designation if it is unassigned or belongs to the chosen department; otherwise clear it.
+            return !dept || !d || !d.DepartmentName || d.DepartmentName === dept ? next : { ...next, designation: "" };
+          }}
           externalFormPatch={candidatePatch}
           externalFormPatchKey={pickedCandidateId || null}
           exportConfig={rights.canExport ? {

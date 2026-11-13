@@ -98,12 +98,14 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            flexWrap: "wrap",
+            rowGap: 10,
             padding: "14px 20px",
             borderBottom: "1px solid hsl(var(--foreground))",
             background: "hsl(var(--card))",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", minWidth: 0 }}>
             <button type="button" onClick={onClose} className={`${KEY_LINE} h-8 px-3`}>
               <ArrowLeft size={12} /> Back
             </button>
@@ -124,7 +126,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           </div>
 
           {/* Right-side actions */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {canDelete && (
               <button type="button" disabled={acting} onClick={() => setConfirmDelete(true)} className={`${KEY_RED} h-8 px-3`}>
                 <Trash2 size={12} /> Delete
@@ -187,6 +189,9 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               value={<span className="font-heading tabular-nums">{record.DocNo}</span>}
             />
             <DetailRow label="Created By" value={record.CreatedBy} />
+            <DetailRow label="Block" value={record.BlockName} />
+            <DetailRow label="Floor" value={record.FloorNo ? `Floor ${record.FloorNo}` : null} />
+            <DetailRow label="Room" value={record.RoomName} />
             <DetailRow
               label="Total Amount"
               value={
@@ -235,6 +240,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            flexWrap: "wrap",
             gap: 10,
             background: "hsl(var(--card))",
             flexShrink: 0,
@@ -245,7 +251,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               <Trash2 size={13} /> Delete
             </button>
           )}
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
             {canPrint && (
               <button type="button" onClick={onPrint} className={`${KEY_LINE} h-9 px-4`}>
                 <Printer size={13} /> Print

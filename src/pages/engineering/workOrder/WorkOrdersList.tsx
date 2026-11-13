@@ -228,7 +228,7 @@ export const WorkOrdersList: React.FC<{
           <div className="divide-y divide-foreground/10">
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="px-4 py-4 animate-pulse">
-                <div className="grid grid-cols-[1fr_1fr_1fr_90px_100px_90px_100px_80px_120px] gap-3">
+                <div className="grid grid-cols-3 sm:grid-cols-[1fr_1fr_1fr_90px_100px_90px_100px_80px_120px] gap-3">
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((j) => (
                     <div key={j} className="h-4 bg-card" />
                   ))}
@@ -323,7 +323,7 @@ export const WorkOrdersList: React.FC<{
                         <span>{wo.ContractorName || "—"}</span>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between pt-1 border-t border-foreground/30">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-foreground/30">
                       <div className="flex items-center gap-3 text-xs text-muted-foreground">
                         <span>{dateStr}</span>
                         <span className="flex items-center gap-1">
@@ -451,7 +451,7 @@ export const WorkOrdersList: React.FC<{
 
         {/* Pagination */}
         {filteredPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-foreground/30 bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-foreground/30 bg-card">
             <p className="text-xs text-muted-foreground">
               Showing {(page - 1) * LIMIT + 1}–
               {Math.min(page * LIMIT, filteredTotal)} of {filteredTotal}
