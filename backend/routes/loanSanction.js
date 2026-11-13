@@ -1290,6 +1290,7 @@ router.get("/:id/posting", requirePageRight("loan-sanction", "view"), async (req
     const loanRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
       SELECT
         ls.LoanId, ls.LoanNo, ls.Amount, ls.LenderCompanyId, ls.LenderLHeadId, ls.BorrowerLHeadId,
+        ls.DisbursementPaymentId, ls.DisbursementPaymentType,
         lender_gl.LHeadName AS LenderLHeadName,
         lender_grp.Name AS LenderGroupName,
         borrower_gl.LHeadName AS BorrowerLHeadName,
@@ -1304,11 +1305,26 @@ router.get("/:id/posting", requirePageRight("loan-sanction", "view"), async (req
     if (!loanRes.recordset.length) return res.status(404).json({ error: "Loan not found" });
     const loan = loanRes.recordset[0];
 
+    // A Bank / Customer Loan disbursed through a payment is posted once, by that payment's own
+    // approval (loan head against bank) — show those entries; older loans still carry a LoanPosting.
+    let postSrcType = "LoanPosting";
+    let postSrcId = loanId;
     const postedRes = await pool.request().input("SrcId", sql.Int, loanId).query(`
       SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry
       WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
     `);
-    const existingPost = postedRes.recordset[0];
+    let existingPost = postedRes.recordset[0];
+    if (!existingPost && loan.DisbursementPaymentId && loan.DisbursementPaymentType) {
+      const payRes = await pool.request()
+        .input("SrcType", sql.NVarChar(30), loan.DisbursementPaymentType)
+        .input("SrcId", sql.Int, loan.DisbursementPaymentId)
+        .query(`SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType = @SrcType AND SourceId = @SrcId AND IsReversed = 0`);
+      if (payRes.recordset.length) {
+        existingPost = payRes.recordset[0];
+        postSrcType = loan.DisbursementPaymentType;
+        postSrcId = loan.DisbursementPaymentId;
+      }
+    }
 
     // Inter-Company loans sanctioned via the direct form auto-post two
     // separate company-scoped entries (see POST / above) instead of the
@@ -1317,7 +1333,7 @@ router.get("/:id/posting", requirePageRight("loan-sanction", "view"), async (req
     // by company, rather than assuming the old single-JV shape.
     let postings = [];
     if (existingPost) {
-      const linesRes = await pool.request().input("SrcId", sql.Int, loanId).query(`
+      const linesRes = await pool.request().input("SrcType", sql.NVarChar(30), postSrcType).input("SrcId", sql.Int, postSrcId).query(`
         SELECT gle.CompanyId, gle.VoucherNo, gle.DebitAmount, gle.CreditAmount, gle.Narration,
                ah.LHeadId, ah.LHeadName, grp.Name AS GroupName,
                ent.name AS CompanyName
@@ -1325,7 +1341,7 @@ router.get("/:id/posting", requirePageRight("loan-sanction", "view"), async (req
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = gle.LHeadId
         LEFT JOIN dbo.AccountGroup grp ON grp.AGId = ah.LBelongsTo
         LEFT JOIN dbo.enterprise ent ON ent.id = gle.CompanyId
-        WHERE gle.SourceType = 'LoanPosting' AND gle.SourceId = @SrcId AND gle.IsReversed = 0
+        WHERE gle.SourceType = @SrcType AND gle.SourceId = @SrcId AND gle.IsReversed = 0
         ORDER BY gle.CompanyId, gle.EntryId
       `);
       const byCompany = new Map();
@@ -1467,12 +1483,25 @@ async function postLoanToGLInternal(pool, loanId, userEmail) {
   try {
     const loanRes = await tx.request().input("LoanId", sql.Int, loanId).query(`
       SELECT LoanId, LoanNo, LoanType, LoanDate, Amount, LenderCompanyId, BorrowerCompanyId,
-             LenderLHeadId, BorrowerLHeadId, LenderBankAccountId, BorrowerBankAccountId
+             LenderLHeadId, BorrowerLHeadId, LenderBankAccountId, BorrowerBankAccountId,
+             DisbursementPaymentId, LenderCustomerId
       FROM dbo.LoanSanction WITH (UPDLOCK, HOLDLOCK) WHERE LoanId = @LoanId
     `);
     if (!loanRes.recordset.length) throw Object.assign(new Error("Loan not found"), { status: 404 });
     loan = loanRes.recordset[0];
-    if (!loan.LenderLHeadId || !loan.BorrowerLHeadId) {
+    if (loan.LoanType !== "Inter-Company" && loan.DisbursementPaymentId) {
+      throw Object.assign(new Error("This loan was disbursed through a payment, which posts it to GL on approval — it is not posted again here."), { status: 409 });
+    }
+    // Customer Loan, Company → Customer: disbursed straight from the loan, like Inter-Company —
+    // Dr the borrower's loan head, Cr the lender bank recorded on the loan. No separate payment entry.
+    const isCompanyToCustomer = loan.LoanType === "Customer Loan" && !loan.LenderCustomerId;
+    if (loan.LoanType !== "Inter-Company" && !isCompanyToCustomer) {
+      throw Object.assign(new Error("Bank loans and customer-to-company loans are disbursed from Received Payment."), { status: 400 });
+    }
+    if (isCompanyToCustomer && (!loan.BorrowerLHeadId || !loan.LenderBankAccountId)) {
+      throw Object.assign(new Error("This loan is missing the borrower's loan ledger or the lender bank A/C — add it from Loan Sanction before disbursing."), { status: 422 });
+    }
+    if (!isCompanyToCustomer && (!loan.LenderLHeadId || !loan.BorrowerLHeadId)) {
       throw Object.assign(new Error("This loan is missing its lender/borrower GL accounts — cannot post."), { status: 422 });
     }
 
@@ -1535,23 +1564,17 @@ async function postLoanToGLInternal(pool, loanId, userEmail) {
         ],
       });
     } else {
-      // Dr the borrower's Loan ledger (they now owe this — a receivable from
-      // the sanctioning side), Cr the lender's Loan ledger (funds went out).
-      const lines = [
-        { LHeadId: loan.BorrowerLHeadId, DebitAmount: amt, CreditAmount: 0, Narration: `Loan Posting: ${loan.LoanNo} — Borrower` },
-        { LHeadId: loan.LenderLHeadId, DebitAmount: 0, CreditAmount: amt, Narration: `Loan Posting: ${loan.LoanNo} — Lender` },
-      ];
       await insertVoucherLegsInTx(tx, {
         voucherNo: loan.LoanNo,
-        // The loan's own date, not the date it happened to get posted —
-        // matches the Inter-Company branch above, which already got this
-        // right.
         voucherDate: loan.LoanDate,
         sourceType: "LoanPosting",
         sourceId: loanId,
-        companyId: loan.LenderCompanyId || loan.BorrowerCompanyId || null,
+        companyId: loan.LenderCompanyId || null,
         createdBy: userEmail,
-        legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+        legs: [
+          { lHeadId: loan.BorrowerLHeadId, debit: amt, narration: `${loan.LoanNo} — loan disbursed to customer` },
+          { lHeadId: loan.LenderBankAccountId, credit: amt, narration: `${loan.LoanNo} — loan disbursed` },
+        ],
       });
     }
 
@@ -1649,24 +1672,22 @@ router.post("/:id/disburse", requirePageRight("loan-sanction", "edit"), async (r
       return res.status(400).json({ error: `Unknown loan type: ${loan.LoanType}` });
     }
 
-    // postLoanToGLInternal posts the loan-ledger legs (Dr borrower / Cr
-    // lender against the "Loan - X" heads) and stamps DisbursedAt using the
-    // loan's own LoanDate — same mechanism Inter-Company's post-to-gl uses,
-    // just reached from this route for these two types instead.
-    const result = await postLoanToGLInternal(pool, loanId, userEmail);
-
-    await pool.request()
+    // Link only. The payment's own approval posts the disbursement once — loan head against bank
+    // (postPaymentApproval / postReceivedPaymentApproval). A separate LoanPosting here doubled it.
+    const linked = await pool.request()
       .input("LoanId", sql.Int, loanId)
       .input("PaymentId", sql.Int, paymentId)
       .input("PaymentType", sql.NVarChar(20), paymentType)
+      .input("PaidOn", sql.Date, paymentDate)
       .query(`
         UPDATE dbo.LoanSanction
-        SET DisbursementPaymentId = @PaymentId, DisbursementPaymentType = @PaymentType
-        WHERE LoanId = @LoanId
+        SET DisbursementPaymentId = @PaymentId, DisbursementPaymentType = @PaymentType, DisbursedAt = @PaidOn
+        WHERE LoanId = @LoanId AND DisbursedAt IS NULL
       `);
+    if (!linked.rowsAffected[0]) return res.status(409).json({ error: "This loan has already been disbursed." });
 
     await bumpCacheVersion("loan-sanction");
-    res.json({ voucherNo: result.voucherNo, message: "Loan disbursement recorded and posted to GL." });
+    res.json({ voucherNo: null, message: "Loan disbursement linked — it posts to GL when the payment is approved." });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

@@ -827,6 +827,9 @@ export default function ReceivedPaymentPage() {
   };
 
   // ── Open edit dialog ──────────────────────────────────────────────────────────
+  // Editable from the list: Draft / Pending, or Approved when not CRM-linked (the server refuses that case and re-queues approval otherwise).
+  const canEditReceipt = (p: ReceivedPayment) =>
+    rights.canEdit && (p.status === "Draft" || p.status === "Pending" || (p.status === "Approved" && p.crmBookingId == null));
   const openEdit = (p: ReceivedPayment) => {
     setEditingId(p.id);
     setForm({
@@ -961,8 +964,8 @@ export default function ReceivedPaymentPage() {
         // bank-side record.
         if (disbursingBankLoan) {
           try {
-            const res = await disburseLoan(disbursingBankLoan.LoanId, { receivedPaymentId: created.RPPaymentID });
-            toast.success(`${disbursingBankLoan.LoanNo} disbursed — JV ${res.voucherNo}`);
+            await disburseLoan(disbursingBankLoan.LoanId, { receivedPaymentId: created.RPPaymentID });
+            toast.success(`${disbursingBankLoan.LoanNo} linked — posts to GL when this receipt is approved.`);
             refetchUndisbursedBankLoans();
           } catch (loanErr: any) {
             toast.error(
@@ -1338,6 +1341,15 @@ export default function ReceivedPaymentPage() {
                             >
                               <Eye size={12} />
                             </button>
+                            {canEditReceipt(p) && (
+                              <button
+                                onClick={() => openEdit(p)}
+                                title="Edit"
+                                className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            )}
                             {rights.canDelete && (
                               <button
                                 onClick={() => deletePayment(p.id)}
@@ -1395,6 +1407,11 @@ export default function ReceivedPaymentPage() {
                         >
                           <Eye size={13} />
                         </button>
+                        {canEditReceipt(p) && (
+                          <button onClick={() => openEdit(p)} className="p-1.5 text-muted-foreground hover:text-foreground" title="Edit">
+                            <Pencil size={13} />
+                          </button>
+                        )}
                         {p.status === "Pending" && (
                           <span
                             title="Awaiting admin approval"
@@ -2360,7 +2377,7 @@ export default function ReceivedPaymentPage() {
                   {viewingPayment.crmBookingId != null && !viewingPayment.depositBankId ? "Awaiting deposit bank (Accounts)" : "Awaiting admin approval"}
                 </span>
               )}
-              {viewingPayment.status === "Draft" && rights.canEdit && (
+              {(viewingPayment.status === "Draft" || viewingPayment.status === "Pending") && rights.canEdit && (
                 <button
                   onClick={() => {
                     setViewingPayment(null);
