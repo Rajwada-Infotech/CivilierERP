@@ -362,6 +362,10 @@ export default function MaterialExpenseBooking() {
   const [partnerHeads, setPartnerHeads] = useState<
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
+  // Employees (LHeadType='E', one head per Employee Master record) — so staff can be billed and paid.
+  const [employeeHeads, setEmployeeHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
   // "Vendor" spans every party type a booking can actually be billed
   // against — Supplier, Contractor, and Customer/Applicant (LHeadType
   // S/C/A) — not just supplierHeads alone.
@@ -385,8 +389,9 @@ export default function MaterialExpenseBooking() {
     if (brokerHeads.some((b) => b.id === id)) return `b:${id}`;
     if (customerHeads.some((cu) => cu.id === id)) return `a:${id}`;
     if (partnerHeads.some((p) => p.id === id)) return `p:${id}`;
+    if (employeeHeads.some((e) => e.id === id)) return `e:${id}`;
     return "";
-  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads]);
+  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads, employeeHeads]);
   const payablePartyGroups: PayablePartyGroup[] = useMemo(
     () => [
       { prefix: "s", label: "Suppliers", options: supplierHeads },
@@ -394,8 +399,9 @@ export default function MaterialExpenseBooking() {
       { prefix: "b", label: "Brokers", options: brokerHeads },
       { prefix: "a", label: "Customers", options: customerHeads },
       { prefix: "p", label: "Partners", options: partnerHeads },
+      { prefix: "e", label: "Employees", options: employeeHeads },
     ],
-    [supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads],
+    [supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads, employeeHeads],
   );
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
@@ -720,6 +726,17 @@ export default function MaterialExpenseBooking() {
         toast.error(
           err instanceof Error ? err.message : "Something went wrong",
         );
+      });
+    apiFetch("/api/account-head?type=E")
+      .then((list: any[]) => {
+        setEmployeeHeads((Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        })));
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Something went wrong");
       });
   }, []);
   useLiveData("ledgers", loadPartyHeads);

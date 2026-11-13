@@ -757,7 +757,7 @@ const Payment: React.FC = () => {
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(s);
     });
-    const order = ["Vendors", "Suppliers", "Landlords", "Contractors", "Brokers", "Customers", "Partners", "Other"];
+    const order = ["Vendors", "Suppliers", "Landlords", "Contractors", "Brokers", "Customers", "Partners", "Employees", "Other"];
     return [...groups.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b)).map((label) => ({ label, parties: groups.get(label)! }));
   }, [supplierOptions]);
   // A ledger, vendor, contractor, broker, customer or partner added anywhere appears in the Payee / filter pickers at once.

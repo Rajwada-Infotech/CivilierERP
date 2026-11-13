@@ -17,6 +17,8 @@ export interface BoqItem {
   itemCode: string;
   description: string;
   quantity: string;
+  /** Wastage on top of the quantity, in % — Amount = Qty × (1 + Wastage %) × Rate. */
+  wastage: string;
   uomName: string;
   rate: string;
   tax: string;
@@ -153,8 +155,8 @@ export const fmtDate = (d?: string) =>
       })
     : "—";
 
-export const calcAmount = (qty: string, rate: string) =>
-  (parseFloat(qty) || 0) * (parseFloat(rate) || 0);
+export const calcAmount = (qty: string, rate: string, wastagePct: string = "") =>
+  (parseFloat(qty) || 0) * (1 + (parseFloat(wastagePct) || 0) / 100) * (parseFloat(rate) || 0);
 
 /**
  * What an activity's per-unit figures are divided by: its Total Area when one is
@@ -176,6 +178,7 @@ export const blankItem = (): BoqItem => ({
   itemCode: "",
   description: "",
   quantity: "",
+  wastage: "",
   uomName: "",
   rate: "",
   tax: "18",
@@ -208,6 +211,7 @@ export const rowToItem = (r: any): BoqItem => ({
   itemCode: r.ItemCode ?? "",
   description: r.Description ?? "",
   quantity: String(r.Quantity ?? ""),
+  wastage: Number(r.WastagePct ?? r.wastage) ? String(Number(r.WastagePct ?? r.wastage)) : "",
   uomName: r.UomName ?? "",
   rate: String(r.Rate ?? ""),
   tax: String(r.TaxPct ?? "18"),
@@ -251,7 +255,7 @@ export const buildPayload = (
   DocTypeId: form.DocTypeId ? Number(form.DocTypeId) : null,
   BlockId: form.BlockId ? Number(form.BlockId) : null,
   FloorNo: form.FloorNo || null,
-  RoomId: form.RoomId ? Number(form.RoomId) : null,
+  RoomId: null, // the form no longer asks for a room — a BOQ is for a block + floor
   finYear: form.FinYear || undefined,
   Status: form.Status,
   BoqItems: items.map((it) => {
@@ -266,6 +270,7 @@ export const buildPayload = (
     itemCode: it.itemCode,
     description: it.description,
     quantity: it.quantity,
+    wastage: it.wastage,
     uomName: it.uomName,
     unit: it.uomName,
     rate: it.rate,
