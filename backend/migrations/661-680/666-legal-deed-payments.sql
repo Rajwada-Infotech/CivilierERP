@@ -1,4 +1,4 @@
--- 664: Deed Registration — payment management before Final Registration.
+-- 666: Deed Registration — payment management before Final Registration.
 --   • Consideration date, and every change of the consideration kept as a revision (old → new total, date, reason,
 --     optional valuation it follows) — the price agreed months ago can change when the land's valuation changes.
 --   • Payment schedule: the instalments agreed (due date, amount, purpose).

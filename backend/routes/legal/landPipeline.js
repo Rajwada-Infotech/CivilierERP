@@ -358,7 +358,7 @@ async function pipelineCounters(pool) {
     "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Registered') AS registered",
   ];
   if (has.dt) parts.push("(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND DeedTargetDate < CAST(GETDATE() AS DATE)) AS deedOverdue");
-  // Deed Registration lands with an instalment past its due date and not covered by the payments made (migration 664).
+  // Deed Registration lands with an instalment past its due date and not covered by the payments made (migration 666).
   if ((await pool.request().query("SELECT OBJECT_ID('dbo.LegalPaymentSchedule','U') AS t")).recordset[0].t) parts.push(
     `(SELECT COUNT(DISTINCT s.LandId) FROM dbo.LegalPaymentSchedule s JOIN dbo.LegalLand l ON l.LandId = s.LandId AND l.IsActive = 1 AND l.WorkflowStatus = N'Deed Registration'
       WHERE s.DueDate < CAST(GETDATE() AS DATE)
@@ -2068,7 +2068,7 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
     if ((await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'RegFinalDate') AS c")).recordset[0].c) {
       const f = (await pool.request().input("Id", sql.Int, id).query("SELECT RegFinalDate, RegOfficeId, RegModeId FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
       if (!f.RegFinalDate || !f.RegOfficeId || !f.RegModeId) return res.status(409).json({ error: "Fill Final Registration (date, office, mode) before submitting the registered deed" });
-      // The consideration must be fully paid (migration 664: payments are the land's Payment History).
+      // The consideration must be fully paid (migration 666: payments are the land's Payment History).
       if ((await pool.request().query("SELECT OBJECT_ID('dbo.LegalPaymentSchedule','U') AS t")).recordset[0].t) {
         const pay = (await pool.request().input("Id", sql.Int, id).query(`SELECT l.ConsTotalAmount AS Total,
             ISNULL((SELECT SUM(CASE WHEN tt.Name = N'Refund' THEN -p.Amount WHEN tt.Name IN (N'Sale Receipt', N'Expense') THEN 0 ELSE p.Amount END) FROM dbo.LegalPayment p
