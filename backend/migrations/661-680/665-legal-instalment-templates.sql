@@ -1,4 +1,4 @@
--- 663: Instalment schedule templates (Setup) and percentage instalments.
+-- 665: Instalment schedule templates (Setup) and percentage instalments.
 --   • Setup → Instalment Schedule Templates: one row per instalment line — template name, order, label, % of the
 --     consideration, days after the consideration date, purpose. A land's schedule can be made from a template.
 --   • A land's instalment may be a percentage (amount = % × consideration, re-worked when the consideration is revised)
@@ -39,5 +39,5 @@ WHEN NOT MATCHED THEN INSERT (TemplateName, SeqNo, Label, SharePct, DueDays, Txn
 GO
 IF NOT EXISTS (SELECT 1 FROM dbo.PageDefinitions WHERE PageKey = N'legal-instalment-template-master')
   INSERT INTO dbo.PageDefinitions (PageKey, Label, Module, GroupName, Actions, SortOrder, IsActive, CreatedBy, CreatedAt)
-  VALUES (N'legal-instalment-template-master', N'Instalment Schedule Templates', N'Legal', N'Legal Masters - Legal & Financial', N'view,create,edit,delete,print,export', 165, 1, N'migration-663', SYSDATETIME());
+  VALUES (N'legal-instalment-template-master', N'Instalment Schedule Templates', N'Legal', N'Legal Masters - Legal & Financial', N'view,create,edit,delete,print,export', 165, 1, N'migration-665', SYSDATETIME());
 GO
