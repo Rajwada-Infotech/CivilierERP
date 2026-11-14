@@ -25,6 +25,7 @@
 const { sql } = require("../db");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
 const { generateFAItemCodes } = require("./faItemCodeGenerator");
+const { assetTax } = require("./faTax");
 
 // Financial Year is always derived from the date, never guessed — mirrors
 // the same dbo.FinYear range lookup used by FA Inventory's tagging endpoint,
@@ -181,7 +182,10 @@ async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
     const qty = Number(item.receivedQty) || 0;
     if (qty <= 0) continue;
     const unitRate = Number(item.unitRate ?? item.rate ?? 0);
-    const purchaseCost = unitRate * qty || Number(item.totalAmount) || 0;
+    // VAT before 1 July 2017 (added to cost), GST from then on (recorded, not in cost) — services/faTax.js.
+    const linePct = item.gstPct ?? item.taxPct ?? item.TaxPct;
+    const tax = assetTax({ base: unitRate * qty || Number(item.totalAmount) || 0, pct: linePct, date: grn.GRNDate });
+    const purchaseCost = tax.cost;
     const itemName = master.M_Name || item.itemName || "Fixed Asset";
 
     // Idempotent — the filtered unique index on (SourceType, SourceId,
@@ -199,6 +203,9 @@ async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
         .input("PurchaseInvoiceRef", sql.NVarChar(100), docNo)
         .input("SupplierId", sql.Int, grn.SupplierID ?? null)
         .input("PurchaseCost", sql.Decimal(18, 2), purchaseCost)
+        .input("TaxType", sql.NVarChar(10), tax.taxType)
+        .input("TaxPct", sql.Decimal(9, 4), tax.taxPct)
+        .input("TaxAmount", sql.Decimal(18, 2), tax.taxAmount)
         .input("Quantity", sql.Decimal(18, 3), qty)
         .input("AssetStatus", sql.NVarChar(30), "Pending")
         .input("Remarks", sql.NVarChar(sql.MAX), `Auto-allocated from GRN ${docNo} on approval — complete depreciation details.`)
@@ -211,12 +218,12 @@ async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
         .query(`
           INSERT INTO dbo.FixedAssetRecord
             (DocDate, CompanyId, ProjectId, FinYear, AssetName, AssetCategory,
-             PurchaseDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
+             PurchaseDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, TaxType, TaxPct, TaxAmount, Quantity,
              AssetStatus, Remarks, SourceType, SourceId, SourceItemId, GodownID, CreatedBy)
           OUTPUT INSERTED.AssetId
           VALUES
             (@DocDate, @CompanyId, @ProjectId, @FinYear, @AssetName, @AssetCategory,
-             @PurchaseDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
+             @PurchaseDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @TaxType, @TaxPct, @TaxAmount, @Quantity,
              @AssetStatus, @Remarks, @SourceType, @SourceId, @SourceItemId, @GodownId, @CreatedBy)
         `);
       newAssetId = insertRes.recordset[0]?.AssetId;
@@ -254,7 +261,7 @@ async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
 // "awaiting tagging" panel so received stock is never silently invisible.
 async function listUntaggedBatches(pool) {
   const r = await pool.request().query(`
-    SELECT fa.AssetId, fa.AssetName, fa.Quantity, fa.SourceType, fa.SourceItemId,
+    SELECT fa.AssetId, fa.AssetName, fa.Quantity, fa.SourceType, fa.SourceItemId, fa.TaxType, fa.TaxPct,
            fa.PurchaseInvoiceRef AS SourceDocNo, fa.DocDate,
            fa.CompanyId, co.name AS CompanyName, fa.ProjectId, pr.name AS ProjectName,
            fa.GodownID AS GodownId, gd.GodownName,

@@ -144,7 +144,13 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
         t.GodownId, gd.GodownName,
-        batch.AssetCategory   -- captured at FA Inventory import; the Depreciation Tag reuses it
+        batch.AssetCategory,  -- captured at FA Inventory import; the Depreciation Tag reuses it
+        -- What one unit of the batch cost before tax, its purchase date and tax rate: the asset form pre-fills
+        -- them, and the date decides VAT (before 1 July 2017) or GST.
+        batch.PurchaseDate AS BatchPurchaseDate, batch.TaxType AS BatchTaxType, batch.TaxPct AS BatchTaxPct,
+        CASE WHEN ISNULL(batch.Quantity, 0) > 0
+             THEN (batch.PurchaseCost - CASE WHEN batch.TaxType = 'VAT' THEN ISNULL(batch.TaxAmount, 0) ELSE 0 END) / batch.Quantity
+        END AS BatchUnitCost
       FROM dbo.FixedAssetTagging t
       LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
       LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
@@ -251,7 +257,7 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
         t.ProjectId, pr.name AS ProjectName,
         t.GodownId, gd.GodownName,
         t.AssetId, fa.AssetName, fa.AssetCategory, fa.AssetCode,
-        fa.SourceType AS StockSource,
+        fa.SourceType AS StockSource, fa.TaxType, fa.TaxPct,
         CASE
           WHEN t.FAItemCode IS NULL THEN NULL
           WHEN EXISTS (

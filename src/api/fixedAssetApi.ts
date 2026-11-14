@@ -16,6 +16,10 @@ export interface FixedAssetListItem {
   PurchaseDate: string | null;
   ActivationDate: string | null;
   PurchaseCost: number;
+  /** 'VAT' (bought before 1 July 2017 — the VAT is inside PurchaseCost) or 'GST' (recorded, not in PurchaseCost). */
+  TaxType?: "VAT" | "GST" | null;
+  TaxPct?: number | null;
+  TaxAmount?: number | null;
   Quantity: number;
   Location: string | null;
   Department: string | null;
@@ -74,6 +78,8 @@ export interface FixedAssetPayload {
   purchaseInvoiceRef?: string;
   supplierId?: number | null;
   purchaseCost?: number;
+  /** VAT / GST %. When sent, purchaseCost is before tax and the server adds VAT for a pre-July-2017 purchase. */
+  taxPct?: number | null;
   quantity?: number;
   location?: string;
   department?: string;
