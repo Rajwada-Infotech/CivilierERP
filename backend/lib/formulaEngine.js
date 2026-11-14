@@ -442,6 +442,11 @@ function calculateStructure(lines, testCtc, ctcFrequency, structureFrequency) {
     return { errors: computeErrors, valid: false, lines: [], totals: null };
   }
 
+  // A deduction is money taken out of the employee's pay: it always reduces the net salary, and it is never part of
+  // gross or CTC, whatever the In Gross / In CTC / In Net flags on the line say (a line saved with the wrong flags
+  // used to add the deduction to gross and leave net unchanged).
+  const isDeduction = (l) => l.HeadType === "Deduction";
+
   const sumWhere = (predicate) =>
     lines
       .filter((l) => l.IsActive && !l.IsBalancing && predicate(l))
@@ -450,7 +455,7 @@ function calculateStructure(lines, testCtc, ctcFrequency, structureFrequency) {
   const targetCtc = ctcInStructureFrequency;
   const balancingLine = lines.find((l) => l.IsBalancing && l.IsActive);
   if (balancingLine) {
-    const otherCtcSum = sumWhere((l) => l.IncludeInCTC);
+    const otherCtcSum = sumWhere((l) => l.IncludeInCTC && !isDeduction(l));
     let balancingAmount = targetCtc - otherCtcSum;
     balancingAmount = clamp(
       balancingAmount,
@@ -462,14 +467,14 @@ function calculateStructure(lines, testCtc, ctcFrequency, structureFrequency) {
     scope[(balancingLine.HeadCode || "").toUpperCase()] = balancingAmount;
   }
 
-  const gross = lines.filter((l) => l.IsActive && l.IncludeInGross).reduce((acc, l) => acc + (results.get(l) || 0), 0);
+  const gross = lines.filter((l) => l.IsActive && l.IncludeInGross && !isDeduction(l)).reduce((acc, l) => acc + (results.get(l) || 0), 0);
   const totalEmployeeDeduction = lines
-    .filter((l) => l.IsActive && l.HeadType === "Deduction" && l.IncludeInNet)
+    .filter((l) => l.IsActive && isDeduction(l))
     .reduce((acc, l) => acc + (results.get(l) || 0), 0);
   const totalEmployerContribution = lines
     .filter((l) => l.IsActive && l.HeadType === "Employer Contribution" && l.IncludeInCTC)
     .reduce((acc, l) => acc + (results.get(l) || 0), 0);
-  const totalCtc = lines.filter((l) => l.IsActive && l.IncludeInCTC).reduce((acc, l) => acc + (results.get(l) || 0), 0);
+  const totalCtc = lines.filter((l) => l.IsActive && l.IncludeInCTC && !isDeduction(l)).reduce((acc, l) => acc + (results.get(l) || 0), 0);
   const netSalary = gross - totalEmployeeDeduction;
 
   const computedLines = lines
