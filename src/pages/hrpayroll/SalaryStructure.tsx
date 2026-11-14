@@ -201,6 +201,19 @@ const SalaryStructure: React.FC = () => {
 
   const updateLine = (idx: number, patch: Partial<LineForm>) =>
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  // Choosing a head sets the flags that head type normally needs, so a new line calculates right without toggling:
+  // earnings count in gross and CTC, a deduction comes out of net (never gross / CTC), an employer contribution is CTC.
+  const pickHead = (idx: number, id: string) => {
+    const h = heads.find((x) => String(x.Id) === id);
+    const byType = !h
+      ? {}
+      : h.Type === "Deduction"
+        ? { includeInGross: false, includeInCTC: false, includeInNet: true }
+        : h.Type === "Employer Contribution"
+          ? { includeInGross: false, includeInCTC: true, includeInNet: false }
+          : { includeInGross: true, includeInCTC: true, includeInNet: false };
+    updateLine(idx, { deductionAdditionId: id, ...byType });
+  };
   const addLine = () => setLines((prev) => [...prev, emptyLine(prev.length + 1)]);
   const removeLine = (idx: number) =>
     setLines((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
@@ -586,7 +599,7 @@ const SalaryStructure: React.FC = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_auto_minmax(0,1.2fr)] gap-3 items-end">
                               <div className="min-w-0">
                                 <label className={lineLabel}>Salary Head</label>
-                                <select value={line.deductionAdditionId} onChange={(e) => updateLine(idx, { deductionAdditionId: e.target.value })} className={smallInput}>
+                                <select value={line.deductionAdditionId} onChange={(e) => pickHead(idx, e.target.value)} className={smallInput}>
                                   <option value="">Select...</option>
                                   {heads.map((h) => (
                                     <option key={h.Id} value={String(h.Id)}>{h.Code} — {h.Name} ({h.Type})</option>
