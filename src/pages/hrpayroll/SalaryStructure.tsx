@@ -268,7 +268,14 @@ const SalaryStructure: React.FC = () => {
     Lines: linesToPayload(),
   });
 
+  // Effective Upto (stored as EffectiveTo) must come after Effective From — same check as the backend's headerErrors.
+  const uptoError =
+    header.effectiveFrom && header.effectiveTo && header.effectiveTo <= header.effectiveFrom
+      ? "Must be after Effective From — leave empty for no end date"
+      : "";
+
   const canSave =
+    !uptoError &&
     header.name.trim() !== "" &&
     header.code.trim() !== "" &&
     lines.some((l) => l.deductionAdditionId !== "");
@@ -571,8 +578,9 @@ const SalaryStructure: React.FC = () => {
                         <DateInput value={header.effectiveFrom} onChange={(e) => setHeader((h) => ({ ...h, effectiveFrom: e.target.value }))} className={inputBase} />
                       </div>
                       <div>
-                        <label className={labelBase}>Effective To</label>
+                        <label className={labelBase}>Effective Upto</label>
                         <DateInput value={header.effectiveTo} onChange={(e) => setHeader((h) => ({ ...h, effectiveTo: e.target.value }))} className={inputBase} />
+                        {uptoError && <p className="mt-1 text-[0.6875rem] text-destructive">{uptoError}</p>}
                       </div>
                       <div>
                         <label className={labelBase}>CTC Frequency</label>

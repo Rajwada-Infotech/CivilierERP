@@ -106,6 +106,13 @@ function headerErrors(body) {
   if (body.CTCFrequency && !["Annual", "Monthly"].includes(body.CTCFrequency)) {
     errors.push({ message: "CTC Frequency must be Annual or Monthly" });
   }
+  // Effective Upto is the last day it applies, so it must come after Effective From — the same date on both made a
+  // structure that applied for one day only, and Salary Details / payroll found no version for any other date.
+  const from = body.EffectiveFrom ? String(body.EffectiveFrom).slice(0, 10) : "";
+  const upto = body.EffectiveTo ? String(body.EffectiveTo).slice(0, 10) : "";
+  if (from && upto && upto <= from) {
+    errors.push({ message: "Effective Upto must be after Effective From (leave it empty for no end date)" });
+  }
   if (!Array.isArray(body.Lines) || body.Lines.length === 0) {
     errors.push({ message: "At least one Salary Head line is required" });
   }
