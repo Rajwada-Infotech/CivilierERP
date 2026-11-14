@@ -410,6 +410,13 @@ export const civilWorkDprSetupItems: SetupItem[] = [
     pageKey: "dpr-tag-master",
   },
   {
+    icon: Layers,
+    label: "Floor Master",
+    path: "/civilworkdpr/floor-master",
+    color: "text-cyan-500",
+    pageKey: "dpr-floor-master",
+  },
+  {
     icon: LayoutGrid,
     label: "Unit Composition",
     path: "/civilworkdpr/room-composition",

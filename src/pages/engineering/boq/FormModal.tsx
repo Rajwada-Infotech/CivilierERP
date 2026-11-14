@@ -70,33 +70,32 @@ export const FormModal: React.FC<FormModalProps> = ({
     setErrors((p) => ({ ...p, [k]: "" }));
   };
 
-  // Where the estimation is for: Block → Floor → Room, each list narrowed by the one before.
+  // Where the estimation is for: Block → Floor, floors narrowed by the block (Floor Master + Auto Project Setup).
   const clearLocation = () => setForm((p) => ({ ...p, BlockId: "", FloorNo: "", RoomId: "" }));
-  const [locOpts, setLocOpts] = useState<{ blocks: { id: number; name: string }[]; floors: string[]; rooms: { id: number; name: string }[] }>({ blocks: [], floors: [], rooms: [] });
+  const [locOpts, setLocOpts] = useState<{ blocks: { id: number; name: string }[]; floors: { value: string; label: string }[] }>({ blocks: [], floors: [] });
   useEffect(() => {
-    if (!form.ProjectId) { setLocOpts({ blocks: [], floors: [], rooms: [] }); return; }
+    if (!form.ProjectId) { setLocOpts({ blocks: [], floors: [] }); return; }
     let live = true;
     const q = new URLSearchParams({ projectId: form.ProjectId });
     if (form.BlockId) q.set("blockId", form.BlockId);
-    if (form.BlockId && form.FloorNo) q.set("floorNo", form.FloorNo);
     apiFetch(`/boq/location-options?${q}`)
-      .then((d: any) => { if (live) setLocOpts({ blocks: d?.blocks ?? [], floors: d?.floors ?? [], rooms: d?.rooms ?? [] }); })
-      .catch(() => { if (live) setLocOpts({ blocks: [], floors: [], rooms: [] }); });
+      .then((d: any) => { if (live) setLocOpts({ blocks: d?.blocks ?? [], floors: d?.floors ?? [] }); })
+      .catch(() => { if (live) setLocOpts({ blocks: [], floors: [] }); });
     return () => { live = false; };
-  }, [form.ProjectId, form.BlockId, form.FloorNo]);
+  }, [form.ProjectId, form.BlockId]);
 
   // Activities already estimated on another BOQ for this exact place — they can't be added here.
   const [usedActivities, setUsedActivities] = useState<{ activityId: string; activityName: string; boqNo: string }[]>([]);
   useEffect(() => {
-    if (!form.ProjectId || !form.BlockId || !form.FloorNo || !form.RoomId) { setUsedActivities([]); return; }
+    if (!form.ProjectId || !form.BlockId || !form.FloorNo) { setUsedActivities([]); return; }
     let live = true;
-    const q = new URLSearchParams({ projectId: form.ProjectId, blockId: form.BlockId, floorNo: form.FloorNo, roomId: form.RoomId });
+    const q = new URLSearchParams({ projectId: form.ProjectId, blockId: form.BlockId, floorNo: form.FloorNo });
     if (record?.BoqID) q.set("excludeId", String(record.BoqID));
     apiFetch(`/boq/used-activities?${q}`)
       .then((d: any) => { if (live) setUsedActivities(Array.isArray(d) ? d : []); })
       .catch(() => { if (live) setUsedActivities([]); });
     return () => { live = false; };
-  }, [form.ProjectId, form.BlockId, form.FloorNo, form.RoomId, record?.BoqID]);
+  }, [form.ProjectId, form.BlockId, form.FloorNo, record?.BoqID]);
   const usedIds = new Set(usedActivities.map((u) => String(u.activityId)));
   const pickableActivities = activityOptions.filter((o) => !usedIds.has(String(o.id)));
   const clashing = usedActivities.filter((u) => activities.some((a) => String(a.activityId) === String(u.activityId)));
@@ -131,6 +130,7 @@ export const FormModal: React.FC<FormModalProps> = ({
             itemCode: li.itemCode || "",
             description: "",
             quantity: "",
+            wastage: "",
             uomName: li.uom || "",
             rate: "",
             tax: "18",
@@ -204,10 +204,9 @@ export const FormModal: React.FC<FormModalProps> = ({
     if (!form.FinYear) e.FinYear = "Financial year is required";
     if (!form.BlockId) e.BlockId = "Block is required";
     if (!form.FloorNo) e.FloorNo = "Floor is required";
-    if (!form.RoomId) e.RoomId = "Room is required";
     setErrors(e);
     if (Object.keys(e).length === 0 && clashing.length) {
-      toast.error(`Already estimated for this block, floor and room: ${clashing.map((c) => `${c.activityName || c.activityId} (${c.boqNo})`).join(", ")}`);
+      toast.error(`Already estimated for this block and floor: ${clashing.map((c) => `${c.activityName || c.activityId} (${c.boqNo})`).join(", ")}`);
       return false;
     }
     return Object.keys(e).length === 0;
@@ -513,8 +512,8 @@ export const FormModal: React.FC<FormModalProps> = ({
               </Field>
             </div>
 
-            {/* Where this estimation is for — an activity can be estimated once per block + floor + room. */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Where this estimation is for — an activity can be estimated once per block + floor. */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field label="Block" required error={errors.BlockId}>
                 <Select value={form.BlockId} onValueChange={(v) => setForm((p) => ({ ...p, BlockId: v, FloorNo: "", RoomId: "" }))} disabled={!form.ProjectId}>
                   <SelectTrigger className={`h-10 ${errors.BlockId ? "border-destructive" : ""}`}>
@@ -526,29 +525,19 @@ export const FormModal: React.FC<FormModalProps> = ({
                 </Select>
               </Field>
               <Field label="Floor" required error={errors.FloorNo}>
-                <Select value={form.FloorNo} onValueChange={(v) => setForm((p) => ({ ...p, FloorNo: v, RoomId: "" }))} disabled={!form.BlockId}>
+                <Select value={form.FloorNo} onValueChange={(v) => set("FloorNo", v)} disabled={!form.BlockId}>
                   <SelectTrigger className={`h-10 ${errors.FloorNo ? "border-destructive" : ""}`}>
                     <SelectValue placeholder={form.BlockId ? (locOpts.floors.length ? "— Select floor —" : "No floors in this block") : "— Select block first —"} />
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
-                    {locOpts.floors.map((f) => <SelectItem key={f} value={f}>Floor {f}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Room" required error={errors.RoomId}>
-                <Select value={form.RoomId} onValueChange={(v) => set("RoomId", v)} disabled={!form.FloorNo}>
-                  <SelectTrigger className={`h-10 ${errors.RoomId ? "border-destructive" : ""}`}>
-                    <SelectValue placeholder={form.FloorNo ? (locOpts.rooms.length ? "— Select room —" : "No rooms on this floor") : "— Select floor first —"} />
-                  </SelectTrigger>
-                  <SelectContent className="z-[300]">
-                    {locOpts.rooms.map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>)}
+                    {locOpts.floors.map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </Field>
             </div>
             {clashing.length > 0 ? (
               <p className="border border-destructive bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                Already estimated for this block, floor and room — remove {clashing.length === 1 ? "it" : "them"} or pick another location:{" "}
+                Already estimated for this block and floor — remove {clashing.length === 1 ? "it" : "them"} or pick another location:{" "}
                 {clashing.map((c) => `${c.activityName || c.activityId} (${c.boqNo})`).join(", ")}
               </p>
             ) : usedActivities.length > 0 ? (

@@ -7,7 +7,7 @@ import { KEY_INK, KEY_LINE, KEY_RED } from "@/components/sheet/sheetParts";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
-import { BoqRecord, Company, Project, UomOption, apiFetch, fmt, fmtDate, rowToItem, rowToActivity, DetailRow, canEditBoq } from "./config";
+import { BoqRecord, Company, Project, UomOption, apiFetch, fmt, fmtDate, rowToItem, rowToActivity, DetailRow, canEditBoq, canOpenBoqEdit } from "./config";
 import { LineEditor } from "./LineEditor";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,12 +78,13 @@ export const DetailModal: React.FC<DetailModalProps> = ({
     }
   };
 
+  // Saved lines come back as DB rows (LineAmount), not form rows (amount) — read them the way the table does.
   const itemsTotal = (record.BoqItems ?? []).reduce(
-    (s, r) => s + (r.amount || 0),
+    (s, r) => s + (rowToItem(r).amount || 0),
     0,
   );
   const activitiesTotal = (record.BoqActivities ?? []).reduce(
-    (s, r) => s + (r.amount || 0),
+    (s, r) => s + (rowToActivity(r).amount || 0),
     0,
   );
 
@@ -132,7 +133,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                 <Trash2 size={12} /> Delete
               </button>
             )}
-            {canEdit && (record.Status === "Draft" || record.Status === "Approved" || record.Status === "Rejected") && (
+            {canEdit && canOpenBoqEdit(record.Status) && (
               <button type="button" disabled={acting} onClick={onEdit} className={`${KEY_LINE} h-8 px-3`}>
                 <Edit3 size={12} /> Edit
               </button>
@@ -190,8 +191,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             />
             <DetailRow label="Created By" value={record.CreatedBy} />
             <DetailRow label="Block" value={record.BlockName} />
-            <DetailRow label="Floor" value={record.FloorNo ? `Floor ${record.FloorNo}` : null} />
-            <DetailRow label="Room" value={record.RoomName} />
+            <DetailRow label="Floor" value={record.FloorNo == null || record.FloorNo === "" ? null : String(record.FloorNo) === "0" ? "Ground floor" : `Floor ${record.FloorNo}`} />
             <DetailRow
               label="Total Amount"
               value={
@@ -260,7 +260,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             <button type="button" onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>
               Close
             </button>
-            {canEdit && canEditBoq(record.Status) && (
+            {canEdit && canOpenBoqEdit(record.Status) && (
               <button type="button" disabled={acting} onClick={onEdit} className={`${KEY_LINE} h-9 px-4`}>
                 <Edit3 size={13} /> Edit
               </button>
@@ -275,11 +275,6 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   submitOnly
                 />
               </>
-            )}
-            {canEdit && record.Status === "Approved" && (
-              <button type="button" disabled={acting} onClick={onEdit} className={`${KEY_LINE} h-9 px-4`}>
-                <Edit3 size={13} /> Edit
-              </button>
             )}
             {canEdit && onAmend && record.Status === "Approved" && (
               <button type="button" disabled={acting} onClick={onAmend} title="Amend — change it with a reason; applies once approved" className={`${KEY_INK} h-9 px-5`}>

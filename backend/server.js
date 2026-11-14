@@ -164,6 +164,7 @@ const ALL_ROUTES = [
   { path: "/api/account-head", file: "./routes/accountHeadMaster" },
   { path: "/api/activity-master", file: "./routes/activityMaster" },
   { path: "/api/dpr-tag-master", file: "./routes/dprTagMaster" },
+  { path: "/api/dpr-floor-master", file: "./routes/dprFloorMaster" },
   { path: "/api/engineering-activity-master", file: "./routes/engineeringActivityMaster" },
   { path: "/api/bank-master", file: "./routes/bankMaster" },
   { path: "/api/partner-master", file: "./routes/partnerMaster" },

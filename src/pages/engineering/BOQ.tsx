@@ -21,7 +21,7 @@ import { fetchAllPages } from "@/lib/fetchAllPages";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { BoqExcelImportModal } from "./BoqExcelImportModal";
-import { BoqRecord, Company, Project, DocType, UomOption, ItemOption, ActivityOption, ActivityGroupOption, apiFetch, fmt, fmtDate, canEditBoq } from "./boq/config";
+import { BoqRecord, Company, Project, DocType, UomOption, ItemOption, ActivityOption, ActivityGroupOption, apiFetch, fmt, fmtDate, canOpenBoqEdit } from "./boq/config";
 import { FormModal } from "./boq/FormModal";
 import { printBoq } from "./boq/printBoq";
 import { DetailModal } from "./boq/DetailModal";
@@ -404,8 +404,8 @@ export default function BOQ() {
   };
 
   const openEdit = (r: BoqRecord) => {
-    if (!canEditBoq(r.Status)) {
-      toast.error("Only Draft or Rejected BOQs can be edited.");
+    if (!canOpenBoqEdit(r.Status)) {
+      toast.error(`A ${r.Status} BOQ can't be edited.`);
       return;
     }
     setViewRecord(null);
@@ -452,7 +452,7 @@ export default function BOQ() {
               <Printer size={14} />
             </Button>
           )}
-          {rights.canEdit && canEditBoq(row.original.Status) && (
+          {rights.canEdit && canOpenBoqEdit(row.original.Status) && (
             <Button
               variant="ghost"
               size="sm"
