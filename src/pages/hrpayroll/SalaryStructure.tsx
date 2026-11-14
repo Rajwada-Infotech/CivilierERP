@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { MoneyChange, Add, Edit2, ArrowUp2, ArrowDown2, Copy, TickCircle, CloseCircle } from "iconsax-react";
+import { MoneyChange, Add, Edit2, ArrowUp2, ArrowDown2, Copy, TickCircle, CloseCircle, Layer } from "iconsax-react";
 import { Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -23,6 +23,7 @@ import {
   activateSalaryStructure,
   deactivateSalaryStructure,
   copySalaryStructure,
+  newSalaryStructureVersion,
   type SalaryStructureRow,
   type SalaryStructureLinePayload,
   type CalculationType,
@@ -143,6 +144,10 @@ const SalaryStructure: React.FC = () => {
   const [copyTargetId, setCopyTargetId] = useState<number | null>(null);
   const [copyCode, setCopyCode] = useState("");
   const [copyName, setCopyName] = useState("");
+  // New version: the same code changes from a date (backend POST /:id/new-version).
+  const [versionSource, setVersionSource] = useState<SalaryStructureRow | null>(null);
+  const [versionFrom, setVersionFrom] = useState("");
+  const [versionName, setVersionName] = useState("");
 
   // Preview calculator state
   const [testCtc, setTestCtc] = useState("50000");
@@ -387,6 +392,18 @@ const SalaryStructure: React.FC = () => {
     }
   };
 
+  const handleNewVersion = async () => {
+    if (!versionSource || !versionFrom) return;
+    try {
+      const res = await newSalaryStructureVersion(versionSource.SalaryStructureId, versionFrom, versionName.trim() || undefined);
+      toast.success(`${res.message} — check its lines, then Activate it`);
+      setVersionSource(null);
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create the new version");
+    }
+  };
+
   const availableHeadsForFormula = lines
     .filter((l) => l.deductionAdditionId !== "")
     .map((l) => {
@@ -470,6 +487,11 @@ const SalaryStructure: React.FC = () => {
                         <p className="text-[0.6875rem] text-muted-foreground truncate">
                           <span className={HR_NUM}>{row.Code}</span> · v{row.Version} · {row.Lines.length} line{row.Lines.length !== 1 ? "s" : ""}
                         </p>
+                        {(row.EffectiveFrom || row.EffectiveTo) && (
+                          <p className={`text-[0.6875rem] text-muted-foreground truncate ${HR_NUM}`}>
+                            {row.EffectiveFrom ? row.EffectiveFrom.slice(0, 10) : "…"} → {row.EffectiveTo ? row.EffectiveTo.slice(0, 10) : "open"}
+                          </p>
+                        )}
                         {row.CompanyName && <p className="text-[0.6875rem] text-muted-foreground truncate">{row.CompanyName}</p>}
                       </button>
                       <span className="shrink-0"><SheetMark text={row.IsActive ? "Active" : "Draft"} tone={row.IsActive ? "done" : "draft"} /></span>
@@ -485,6 +507,9 @@ const SalaryStructure: React.FC = () => {
                         <button onClick={() => handleDeactivate(row.SalaryStructureId)} title="Deactivate" className={`${KEY_LINE} h-7 px-2.5`}><CloseCircle size={12} /> Deactivate</button>
                       )}
                       <span className="flex-1" />
+                      {rights.canCreate && (
+                        <button onClick={() => { setVersionSource(row); setVersionFrom(""); setVersionName(row.Name); }} title="New version — the structure changes from a date" className={ACT}><Layer size={13} /></button>
+                      )}
                       {rights.canCreate && (
                         <button onClick={() => { setCopyTargetId(row.SalaryStructureId); setCopyCode(""); setCopyName(`${row.Name} Copy`); }} title="Copy structure" className={ACT}><Copy size={13} /></button>
                       )}
@@ -774,6 +799,31 @@ const SalaryStructure: React.FC = () => {
           availableHeads={availableHeadsForFormula.filter((h) => h.code !== heads.find((hh) => String(hh.Id) === lines[formulaBuilderIdx]?.deductionAdditionId)?.Code)}
           reservedKeywords={RESERVED_KEYWORDS}
         />
+      )}
+
+      {versionSource && (
+        <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={() => setVersionSource(null)}>
+          <div className="bg-card p-5 w-full max-w-sm" style={{ border: HR_RULE }} onClick={(e) => e.stopPropagation()}>
+            <h3 className={`${HR_HEAD} mb-1`}>New version of {versionSource.Code}</h3>
+            <p className="text-xs text-muted-foreground mb-3">
+              A Draft copy under the same code. Once activated, employees on {versionSource.Code} get it from this date; earlier dates keep the current version.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className={labelBase}>Effective From<span className="text-destructive ml-0.5">*</span></label>
+                <input type="date" value={versionFrom} onChange={(e) => setVersionFrom(e.target.value)} className={`${inputBase} ${HR_NUM}`} />
+              </div>
+              <div>
+                <label className={labelBase}>Structure Name</label>
+                <input type="text" value={versionName} onChange={(e) => setVersionName(e.target.value)} className={inputBase} />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 mt-4 pt-3" style={{ borderTop: "1px solid hsl(var(--foreground) / 0.15)" }}>
+              <button onClick={() => setVersionSource(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleNewVersion} disabled={!versionFrom} className={`${KEY_INK} h-9 px-5`}>Create version</button>
+            </div>
+          </div>
+        </div></BodyPortal>
       )}
 
       {copyTargetId !== null && (

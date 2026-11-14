@@ -189,6 +189,16 @@ export const deactivateSalaryStructure = async (id: number) => {
   return handle<{ message: string }>(res);
 };
 
+/** The structure changes from a date: a Draft under the same code, next version, starting `effectiveFrom`. */
+export const newSalaryStructureVersion = async (id: number, effectiveFrom: string, name?: string) => {
+  const res = await fetchWithAuth(`${BASE}/${id}/new-version`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ EffectiveFrom: effectiveFrom, Name: name }),
+  });
+  return handle<{ message: string; id: number; version: number }>(res);
+};
+
 export const copySalaryStructure = async (id: number, code: string, name?: string) => {
   const res = await fetchWithAuth(`${BASE}/${id}/copy`, {
     method: "POST",

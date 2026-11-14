@@ -11,9 +11,26 @@ const { validateStructure, calculateStructure, CALCULATION_TYPES, ROUNDING_RULES
 
 const isUniqueViolation = (err) => /UQ_SalaryStructure_Name|UQ_SalaryStructure_Code/i.test(err.message || "");
 const uniqueViolationMessage = (err) =>
-  /UQ_SalaryStructure_Code/i.test(err.message || "")
-    ? "A salary structure with this code already exists"
-    : "A salary structure with this name already exists";
+  /UQ_SalaryStructure_CodeVersion/i.test(err.message || "")
+    ? "That version of this structure already exists — refresh and try again"
+    : /UQ_SalaryStructure_Code/i.test(err.message || "")
+      ? "A salary structure with this code already exists"
+      : "A salary structure with this name already exists";
+
+// A code holds one structure's dated versions (migration 669), so a new structure (create / copy) needs a code
+// nobody uses (newCode), and a name belongs to one code. Returns the 409 message, or null.
+async function familyClash(runner, { code, name, newCode }) {
+  const r = await runner.request()
+    .input("Code", sql.NVarChar(30), code)
+    .input("Name", sql.NVarChar(150), name)
+    .query(`SELECT
+              (SELECT COUNT(*) FROM dbo.SalaryStructure WHERE Code = @Code) AS CodeRows,
+              (SELECT TOP 1 Code FROM dbo.SalaryStructure WHERE Name = @Name AND Code <> @Code) AS NameCode`);
+  const { CodeRows, NameCode } = r.recordset[0];
+  if (newCode && CodeRows) return `Code "${code}" is already used — to change that structure from a date, use New version on it`;
+  if (NameCode) return `The name "${name}" is already used by structure ${NameCode}`;
+  return null;
+}
 
 const HEADER_SELECT = `
   SELECT s.SalaryStructureId, s.CompanyId, comp.name AS CompanyName, s.Name, s.Code, s.Description,
@@ -99,7 +116,7 @@ function headerErrors(body) {
 router.get("/", cache("salary-structure", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const headers = await pool.request().query(`${HEADER_SELECT} ORDER BY s.Name`);
+    const headers = await pool.request().query(`${HEADER_SELECT} ORDER BY s.Code, s.Version`);
     const lines = await pool.request().query(`${LINES_SELECT} ORDER BY l.Sequence, l.LineId`);
     const linesByStructure = new Map();
     for (const line of lines.recordset) {
@@ -124,11 +141,10 @@ router.get("/families", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Code, MAX(Name) AS Name
-      FROM dbo.SalaryStructure
-      WHERE IsActive = 1
-      GROUP BY Code
-      ORDER BY MAX(Name)
+      SELECT f.Code,
+             (SELECT TOP 1 s.Name FROM dbo.SalaryStructure s WHERE s.Code = f.Code AND s.IsActive = 1 ORDER BY s.Version DESC) AS Name
+      FROM (SELECT DISTINCT Code FROM dbo.SalaryStructure WHERE IsActive = 1) f
+      ORDER BY Name
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -224,6 +240,9 @@ router.post("/", pageRightByMethod("salary-structure"), async (req, res) => {
     return res.status(400).json({ error: errs[0].message, errors: allErrors });
   }
 
+  const clash = await familyClash(pool, { code: Code.trim(), name: Name.trim(), newCode: true });
+  if (clash) return res.status(409).json({ error: clash });
+
   const createdBy = req.user?.userId || null;
   const tx = pool.transaction();
   await tx.begin();
@@ -318,10 +337,22 @@ router.put("/:id", pageRightByMethod("salary-structure"), async (req, res) => {
   await tx.begin();
   try {
     const existing = await tx.request().input("Id", sql.Int, id)
-      .query("SELECT SalaryStructureId FROM dbo.SalaryStructure WHERE SalaryStructureId = @Id");
+      .query(`SELECT Code, (SELECT COUNT(*) FROM dbo.SalaryStructure o WHERE o.Code = s.Code AND o.SalaryStructureId <> s.SalaryStructureId) AS Siblings
+              FROM dbo.SalaryStructure s WHERE SalaryStructureId = @Id`);
     if (!existing.recordset.length) {
       await tx.rollback();
       return res.status(404).json({ error: "Salary structure not found" });
+    }
+    // The code names all of a structure's versions (and employees point at it), so one version can't take a new one.
+    const codeChanged = existing.recordset[0].Code.trim().toUpperCase() !== Code.trim().toUpperCase();
+    if (codeChanged && existing.recordset[0].Siblings) {
+      await tx.rollback();
+      return res.status(400).json({ error: `Code can't be changed on one version — ${existing.recordset[0].Code} has other versions` });
+    }
+    const clash = await familyClash(tx, { code: Code.trim(), name: Name.trim(), newCode: codeChanged });
+    if (clash) {
+      await tx.rollback();
+      return res.status(409).json({ error: clash });
     }
 
     await tx
@@ -413,6 +444,11 @@ router.post("/:id/copy", pageRightByMethod("salary-structure"), async (req, res)
       return res.status(404).json({ error: "Salary structure not found" });
     }
     const src = hdrRes.recordset[0];
+    const clash = await familyClash(tx, { code: Code.trim(), name: (Name || src.Name).trim(), newCode: true });
+    if (clash) {
+      await tx.rollback();
+      return res.status(409).json({ error: clash });
+    }
     const linesRes = await tx.request().input("Id", sql.Int, id).query(`${LINES_SELECT} WHERE l.SalaryStructureId = @Id`);
 
     const createdBy = req.user?.userId || null;
@@ -459,6 +495,73 @@ router.post("/:id/copy", pageRightByMethod("salary-structure"), async (req, res)
     await tx.rollback();
     if (isUniqueViolation(err)) return res.status(409).json({ error: uniqueViolationMessage(err) });
     console.error("[salary-structure] POST /copy error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/new-version -- the structure changes from a date: a Draft copy under the SAME code, next version number,
+// Effective From = the given date, open-ended. Employees stay on the code; once it's activated, Salary Details and
+// payroll use it for dates from then on and the earlier version before it (pickStructureVersion: highest version
+// whose window covers the date). Body: { EffectiveFrom: "yyyy-mm-dd", Name? }.
+router.post("/:id/new-version", pageRightByMethod("salary-structure"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const from = String(req.body?.EffectiveFrom || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || Number.isNaN(Date.parse(from))) {
+    return res.status(400).json({ error: "Effective From date is required for a new version" });
+  }
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const src = (await tx.request().input("Id", sql.Int, id).query(`${HEADER_SELECT} WHERE s.SalaryStructureId = @Id`)).recordset[0];
+    if (!src) {
+      await tx.rollback();
+      return res.status(404).json({ error: "Salary structure not found" });
+    }
+    const fam = (await tx.request().input("Code", sql.NVarChar(30), src.Code).query(`
+      SELECT MAX(Version) AS MaxVersion, CONVERT(char(10), MAX(EffectiveFrom), 23) AS LatestFrom
+      FROM dbo.SalaryStructure WITH (UPDLOCK, HOLDLOCK) WHERE Code = @Code`)).recordset[0];
+    if (fam.LatestFrom && from <= fam.LatestFrom) {
+      await tx.rollback();
+      return res.status(400).json({ error: `Effective From must be after ${fam.LatestFrom}, when the latest version of ${src.Code} starts` });
+    }
+    const name = (req.body?.Name || src.Name).trim();
+    const clash = await familyClash(tx, { code: src.Code, name, newCode: false });
+    if (clash) {
+      await tx.rollback();
+      return res.status(409).json({ error: clash });
+    }
+    const version = (fam.MaxVersion || 0) + 1;
+    const newId = (await tx.request()
+      .input("CompanyId", sql.Int, src.CompanyId || null)
+      .input("Name", sql.NVarChar(150), name)
+      .input("Code", sql.NVarChar(30), src.Code)
+      .input("Description", sql.NVarChar(sql.MAX), src.Description || null)
+      .input("EffectiveFrom", sql.Date, from)
+      .input("CTCFrequency", sql.NVarChar(10), src.CTCFrequency)
+      .input("Version", sql.Int, version)
+      .input("CreatedBy", sql.Int, req.user?.userId || null)
+      .query(`
+        INSERT INTO dbo.SalaryStructure (CompanyId, Name, Code, Description, EffectiveFrom, EffectiveTo, CTCFrequency, Version, IsActive, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.SalaryStructureId
+        VALUES (@CompanyId, @Name, @Code, @Description, @EffectiveFrom, NULL, @CTCFrequency, @Version, 0, @CreatedBy, SYSUTCDATETIME())`)).recordset[0].SalaryStructureId;
+    await tx.request().input("From", sql.Int, id).input("To", sql.Int, newId).query(`
+      INSERT INTO dbo.SalaryStructureLines (
+        SalaryStructureId, DeductionAdditionId, CalculationType, CalculationBase, Percentage, Amount,
+        Formula, MinAmount, MaxAmount, RoundingRule, Sequence, IncludeInGross, IncludeInCTC, IncludeInNet,
+        Taxable, IsBalancing, IsActive, CreatedAt)
+      SELECT @To, DeductionAdditionId, CalculationType, CalculationBase, Percentage, Amount,
+        Formula, MinAmount, MaxAmount, RoundingRule, Sequence, IncludeInGross, IncludeInCTC, IncludeInNet,
+        Taxable, IsBalancing, IsActive, SYSUTCDATETIME()
+      FROM dbo.SalaryStructureLines WHERE SalaryStructureId = @From`);
+    await tx.commit();
+    await bumpCacheVersion("salary-structure");
+    res.json({ message: `Version ${version} of ${src.Code} created as a Draft from ${from}`, id: newId, version });
+  } catch (err) {
+    await tx.rollback();
+    if (isUniqueViolation(err)) return res.status(409).json({ error: uniqueViolationMessage(err) });
+    console.error("[salary-structure] POST /new-version error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
