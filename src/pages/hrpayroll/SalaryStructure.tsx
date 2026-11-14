@@ -93,7 +93,7 @@ const emptyHeader = () => ({
   effectiveFrom: "",
   effectiveTo: "",
   ctcFrequency: "Monthly" as CTCFrequency,
-  isActive: false,
+  isActive: true, // a new structure is active by default; untick to save it as a draft
 });
 
 // Sheet fields (docs/DESIGN.md): square h-9 fields in the form, h-8 inside a component line.
