@@ -277,7 +277,7 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
         </div>
 
         {error ? <p className="p-6 text-sm text-destructive">Could not load this block&apos;s layout. Close and try again.</p>
-          : (isLoading || (isFetching && initialised.current === null)) ? <p className="p-6 text-sm text-muted-foreground">Loading layout...</p> : (
+          : (isLoading || (isFetching && initialised.current === null)) ? <p className="p-6 text-sm text-muted-foreground">Loading layout…</p> : (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex h-8" style={{ border: RULE }} role="group" aria-label="Editor mode">

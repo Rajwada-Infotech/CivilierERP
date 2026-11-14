@@ -129,7 +129,7 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
     queryKey: ["auto-setup-naming", projectId],
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/naming?ProjectId=${projectId}`);
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load naming");
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not load naming");
       return res.json();
     },
     enabled: !!projectId,
@@ -167,7 +167,7 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ProjectId: projectId, Draft: { Template: draftTemplate, SkipLetters: effective.skipIO ? "IO" : null, GroundLabel: effective.ground, BlockId: target === "project" ? null : Number(target) } }),
       });
-      if (!res.ok) throw new Error("Failed to check names");
+      if (!res.ok) throw new Error("Could not check names");
       return res.json();
     },
     enabled: !!projectId && isOpen,
@@ -415,7 +415,7 @@ export function ParkingNamingPanel({ projectId, shortName, blocks, canEdit }: {
     queryKey: ["auto-setup-naming", projectId],
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/naming?ProjectId=${projectId}`);
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load naming");
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not load naming");
       return res.json();
     },
     enabled: !!projectId,

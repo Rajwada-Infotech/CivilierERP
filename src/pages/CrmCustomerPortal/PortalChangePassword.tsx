@@ -71,7 +71,7 @@ const PortalChangePassword: React.FC = () => {
           <button type="submit" disabled={loading}
             className="w-full py-2.5 text-white text-sm font-semibold rounded-xl disabled:opacity-40 transition-opacity"
             style={{ background: `linear-gradient(135deg, ${INK}, ${VIOLET_DEEP})` }}>
-            {loading ? "Saving..." : "Save & Continue"}
+            {loading ? "Saving…" : "Save & Continue"}
           </button>
         </form>
       </div>

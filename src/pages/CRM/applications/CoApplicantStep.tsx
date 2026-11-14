@@ -129,7 +129,7 @@ export const CoApplicantStep: React.FC<{
     if (draft.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(draft.PanNo.trim().toUpperCase())) { toast.error("Co-applicant PAN must be in format ABCDE1234F"); return; }
     if (draft.AadhaarNo?.trim() && !/^\d{12}$/.test(draft.AadhaarNo.trim())) { toast.error("Co-applicant Aadhaar must be exactly 12 digits"); return; }
     if (draft.Pincode?.trim() && !/^\d{6}$/.test(draft.Pincode.trim())) { toast.error("Co-applicant Pincode must be exactly 6 digits"); return; }
-    if (draft.Email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.Email.trim())) { toast.error("Invalid co-applicant email address"); return; }
+    if (draft.Email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.Email.trim())) { toast.error("Enter a valid email address for the co-applicant"); return; }
     setSaving(true);
     try {
       const isNew = editingId === "new";
@@ -205,7 +205,7 @@ export const CoApplicantStep: React.FC<{
               value={draft.CustomerId != null ? String(draft.CustomerId) : ""}
               onChange={pickCustomer}
               placeholder="Pick an existing customer, or fill in a new person below"
-              searchPlaceholder="Search name, mobile or customer no..."
+              searchPlaceholder="Search name, mobile or customer no…"
               options={(customerPool as any[]).map((c: any) => ({ value: String(c.Id), label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · ") }))}
             />
           </div>
@@ -321,7 +321,7 @@ export const CoApplicantStep: React.FC<{
             <button onClick={cancelEdit} className="px-3 py-1.5 text-xs border border-border text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSave} disabled={saving}
               className={`${KEY_INK} h-9 px-4`}>
-              {saving ? "Saving..." : "Save"}
+              {saving ? "Saving…" : "Save"}
             </button>
           </div>
         </div>

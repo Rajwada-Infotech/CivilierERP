@@ -473,6 +473,7 @@ const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
 // "crm-applications" navPath and CrmApplication.tsx's "Open Verification"
 // button, both of which now link here instead of the old inline checklist.
 const CrmBooking           = lazy(() => import("./pages/CRM/CrmBooking"));
+const CrmUnitChanges       = lazy(() => import("./pages/CRM/CrmUnitChanges"));
 const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
 // The Agreement workspace now merges the old Agreement Papers, AFS Query
 // Payment and AFS Registry pages in as tabs — the standalone routes below
@@ -2728,6 +2729,7 @@ function AppRoutes() {
       <Route path="/crm/customers"       element={<ProtectedRoute pageKey="crm-customers"><CrmCustomers /></ProtectedRoute>} />
       <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />
       <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
+      <Route path="/crm/unit-changes" element={<ProtectedRoute pageKey="crm-bookings"><CrmUnitChanges /></ProtectedRoute>} />
       <Route path="/crm/booking-amendments" element={<ProtectedRoute pageKey="crm-bookings"><CrmBookingAmendments /></ProtectedRoute>} />
       <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />
       <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />

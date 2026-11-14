@@ -39,7 +39,7 @@ const head = "px-4 py-2.5 font-heading text-[0.6875rem] font-bold uppercase trac
 async function send(method: string, url: string, body?: any) {
   const r = await fetchWithAuth(url, body instanceof FormData ? { method, body } : { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || "Something went wrong");
+  if (!r.ok) throw new Error(j.error || "The request could not be completed. Please try again.");
   return j;
 }
 

@@ -199,7 +199,7 @@ function UploadDocDialog({ doc, applicationId, onClose, onUploaded }: { doc: any
           <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg hover:opacity-80" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
           <button onClick={submit} disabled={saving || !file}
             className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>
-            {saving ? "Uploading..." : "Submit"}
+            {saving ? "Uploading…" : "Submit"}
           </button>
         </div>
       </DialogContent>
@@ -244,7 +244,7 @@ function ProposeDateDialog({
           <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg hover:opacity-80" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
           <button onClick={submit} disabled={saving}
             className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>
-            {saving ? "Sending..." : "Submit"}
+            {saving ? "Sending…" : "Submit"}
           </button>
         </div>
       </DialogContent>
@@ -273,7 +273,7 @@ function RespondDialog({
             <DialogDescription>Tell us exactly what needs to be corrected — this goes straight to your assigned team.</DialogDescription>
           </DialogHeader>
           <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={4}
-            placeholder="e.g. My name is spelled incorrectly, the unit area is wrong..."
+            placeholder="e.g. My name is spelled incorrectly, the unit area is wrong…"
             className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT, background: SURFACE_ALT }} />
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setMode("choose")} className="px-3 py-1.5 text-sm rounded-lg hover:opacity-80" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Back</button>
@@ -381,7 +381,7 @@ const PortalAgreement: React.FC = () => {
     try {
       if (type === "agreement") await respondAgreement(applicationId, apiDecision, remarks);
       else await respondSalesDeed(applicationId, apiDecision, remarks);
-      toast.success(decision === "Approve" ? "Approved — thank you!" : "Recheck requested");
+      toast.success(decision === "Approve" ? "Approved. Thank you." : "Recheck requested");
       setRespondFor(null);
       qc.invalidateQueries({ queryKey: ["portal-timeline"] });
       qc.invalidateQueries({ queryKey: ["portal-agreement", applicationId] });
@@ -516,7 +516,7 @@ const PortalAgreement: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <button onClick={handleAcceptDate} disabled={acceptingDate}
                           className="px-5 py-2.5 text-white text-sm font-semibold rounded-lg shadow-sm hover:opacity-90 disabled:opacity-40" style={{ background: INK }}>
-                          {acceptingDate ? "Accepting..." : "Accept This Date"}
+                          {acceptingDate ? "Accepting…" : "Accept This Date"}
                         </button>
                         <button onClick={() => setProposeDateOpen(true)}
                           className="px-5 py-2.5 text-sm font-semibold rounded-lg flex items-center gap-1.5 transition-colors hover:opacity-80"
@@ -680,7 +680,7 @@ const PortalAgreement: React.FC = () => {
               <label className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg cursor-pointer text-sm font-semibold text-white"
                 style={{ background: qpUploading ? TEXT_FAINT : INK }}>
                 <Paperclip size={15} />
-                {qpUploading ? "Uploading..." : "Upload Proof of Payment"}
+                {qpUploading ? "Uploading…" : "Upload Proof of Payment"}
                 <input type="file" className="hidden" accept=".pdf,image/*" disabled={qpUploading}
                   onChange={(e) => handleUploadProof(e.target.files?.[0] || null)} />
               </label>

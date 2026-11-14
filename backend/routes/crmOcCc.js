@@ -12,7 +12,7 @@ const { actorId } = require("../services/saAccess");
 const { rollupBookingTotals } = require("./crmParking");
 const { bookingFundingApplySql } = require("../services/crmPaymentFunding");
 
-const LIVE_BOOKING_SQL = "b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')";
+const LIVE_BOOKING_SQL = "b.IsActive = 1 AND b.Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL;
 
 router.use(authMiddleware);
 
@@ -99,7 +99,7 @@ router.get("/overview", requirePageRight("crm-oc-cc", "view"), async (req, res) 
       pool.request().input("pid", sql.Int, projectId).query(`
         SELECT v.*, oc.CertType, oc.CertificateNo,
                (SELECT COUNT(*) FROM dbo.CrmBooking b LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-                 WHERE um.BlockId = v.BlockId AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')) AS LiveBookings
+                 WHERE um.BlockId = v.BlockId AND b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}) AS LiveBookings
         FROM dbo.vw_CrmBlockOcCc v
         LEFT JOIN dbo.CrmOccupancyCertificate oc ON oc.Id = v.CertificateId
         WHERE v.ProjectId = @pid
@@ -125,14 +125,14 @@ function buildSelect() {
     "  (SELECT COUNT(*) FROM dbo.CrmBooking b",
     "   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
     "   WHERE b.ProjectId = oc.ProjectId AND b.IsActive = 1",
-    "     AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred')",
+    "     AND b.Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL,
     "     AND (oc.BlockId IS NULL OR um.BlockId = oc.BlockId)",
     "  ) AS BookingCount,",
     "  (SELECT COUNT(*) FROM dbo.CrmBooking b",
     "   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
     "   JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id AND ag.Status = 'Registered'",
     "   WHERE b.ProjectId = oc.ProjectId AND b.IsActive = 1",
-    "     AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred')",
+    "     AND b.Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL,
     "     AND (oc.BlockId IS NULL OR um.BlockId = oc.BlockId)",
     "     AND NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
     "  ) AS BookingsAwaitingPossession",
@@ -247,7 +247,7 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
         .query(`
           SELECT bk.Id FROM dbo.CrmBooking bk
           WHERE bk.ProjectId = @pid AND bk.IsActive = 1
-            AND bk.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred')
+            AND bk.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
         `);
       setImmediate(async () => {
         for (const row of affectedIds.recordset) {
@@ -332,7 +332,7 @@ router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
         .query(`
           SELECT b.Id FROM dbo.CrmBooking b
           WHERE b.ProjectId = @pid AND b.IsActive = 1
-            AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred')
+            AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
         `);
       // Run async (setImmediate) so PUT response isn't blocked by project-wide rollup
       setImmediate(async () => {

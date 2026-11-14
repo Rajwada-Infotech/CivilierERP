@@ -50,7 +50,7 @@ async function landPositionOfUnits(poolOrTx, unitIds) {
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
       WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-        AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
+        AND b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
       ORDER BY bp.Id DESC
     ) owner
     WHERE u.Id IN (${ids.join(",")})
@@ -107,7 +107,7 @@ async function villaBookedOnLandOf(poolOrTx, bookingId) {
     JOIN dbo.CrmBooking vb ON vb.UnitId = p.ConvertedUnitId
     WHERE bp.BookingId = @b AND bp.Status = N'Active'
       AND vb.Id <> @b AND vb.IsActive = 1
-      AND vb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')`);
+      AND vb.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`);
   return r.recordset[0]?.BookingNo || null;
 }
 
@@ -127,7 +127,7 @@ async function directSaleLandValue(poolOrTx, unitIds) {
       AND NOT EXISTS (
         SELECT 1 FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
         WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND b.IsActive = 1
-          AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred'))`);
+          AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL})`);
   return Math.round(Number(r.recordset[0].Land || 0) * 100) / 100;
 }
 
@@ -153,7 +153,7 @@ async function copyLandCoOwners(poolOrTx, applicationId, unitIds, actorUserId = 
       JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id AND bp.Status = N'Active'
       JOIN dbo.PlotMaster p ON p.Id = bp.PlotId AND p.IsActive = 1
       WHERE p.ConvertedUnitId IN (${ids.join(",")}) AND c.IsActive = 1
-        AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
+        AND b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
     ) c
     WHERE c.rn = 1 AND NOT EXISTS (
       SELECT 1 FROM dbo.CrmCoApplicant x WHERE x.ApplicationId = @aid AND x.IsActive = 1
@@ -173,7 +173,7 @@ async function copyLandCoOwners(poolOrTx, applicationId, unitIds, actorUserId = 
  * property's totals. A booking with no partner is returned on its own.
  */
 async function propertyOfBooking(poolOrTx, bookingId) {
-  const live = "b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')";
+  const live = "b.IsActive = 1 AND b.Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL;
   const bookings = (await poolOrTx.request().input("b", sql.Int, bookingId).query(`
     WITH me AS (
       SELECT b.Id, b.UnitId, a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @b

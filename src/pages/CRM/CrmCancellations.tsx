@@ -1,3 +1,7 @@
+// CRM Cancellations: a request to cancel a booking. One list; one page per request with the money first, its four
+// steps, the one next action, and its approval, money, refund and details below. Requested → approved (the booking is
+// cancelled and the whole paid amount is held as credit) → refunded or re-booked from Refunds. Before approval it can be
+// corrected, or withdrawn with a reason. The server decides every rule.
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,31 +14,33 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import { round2 } from "@/lib/crmPriceQuote";
-import { ArrowLeft, ArrowRight, Copy, Download, ExternalLink, Info, RefreshCw, RotateCcw, Wallet, XCircle, ShieldCheck, FileText, Home } from "lucide-react";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ArrowLeft, ArrowRight, Download, FileText, Home, Info, PenLine, Plus, RefreshCw, ShieldCheck, Wallet, XCircle } from "lucide-react";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { ApprovalTrailTimeline } from "@/components/ApprovalStatusChain";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import {
-  CrmAppPage, CrmGrid, GridBulkBar, GridColumnChooser, GridDateFilter, GridFields, GridHighlights, GridMetric, GridPath, GridRelated,
-  GridSavedViews, GridSearch, GridStatusPill, GridTabs, GridToggleChip, exportGrid, gridListMeta, gridVisibleCols, resolveGridDateRange,
-  useGridPrefs, GRID_ANY_DATE, type GridDateRange,
-
-  GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_LABEL, GRID_PAGE_SIZES, type GridCol, type GridPathState,
+  CrmGrid, GridDateFilter, GridDialog, GridFields, GridFormField, GridFormSection, GridRelated, GridSearch, GridStatusPill, GridTabs, GridToggleChip,
+  exportGrid, resolveGridDateRange, useGridPrefs, GRID_ANY_DATE, GRID_BTN, GRID_BTN_BRAND, GRID_CARD, GRID_INPUT, GRID_PAGE_SIZES,
+  type GridCol, type GridDateRange,
 } from "@/components/crm/CrmDataTable";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, BandNext, CollectionBar, MoneyBand, StepBar, asName, personName, type StepState } from "./payments/parts";
+import { fmtShort } from "./payments/config";
 
 const API = "/api/crm/cancellations";
-const PREFS_KEY = "crm-cancellations-grid";
-const VIEWS_KEY = "crm-cancellations-saved-views";
+const PREFS_KEY = "crm-cancellations-grid-v2";
 const ALL = "All";
 const DEFAULT_SORT: CrmSort = { key: "CreatedAt", dir: "desc" };
 
-const STATUSES = ["Pending", "FinancePending", "Approved", "Rejected", "Refunded"];
+// The tabs. The money side moved to Refunds, so a request ends at Approved (or Rejected / Withdrawn).
+const STATUSES = ["Pending", "Approved", "Rejected", "Withdrawn"];
+const TAB_LABEL: Record<string, string> = { Pending: "Awaiting approval" };
 const statusText = (s: string) => (s === "FinancePending" ? "With Finance" : s);
+// Before approval a request can be corrected, or withdrawn with a reason.
+const CORRECTABLE = ["Pending", "Rejected"];
 
 const fmt = (n: number | null | undefined) => (n != null ? fmtRupees(Number(n)) : "—");
 const dt = (v: any) => (v ? new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
@@ -53,7 +59,6 @@ function queryString(q: CrmListQuery, x: ExtraFilters): URLSearchParams {
 
 interface CancellationList { rows: any[]; total: number; statusCounts: Record<string, number>; summary: { paidTillDate: number; refundsOverdue: number } }
 async function fetchCancellationsList(q: CrmListQuery, x: ExtraFilters): Promise<CancellationList> {
-  // A failed load used to read as "No cancellation requests".
   const r = await fetchWithAuth(`${API}?${queryString(q, x)}`);
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data?.error || `Could not load the cancellations (${r.status}).`);
@@ -80,193 +85,343 @@ async function fetchCancellationPolicy(bookingId: string): Promise<any | null> {
   if (!bookingId) return null;
   try { const r = await fetchWithAuth(`${API}/policy?bookingId=${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
 }
+async function putJson(url: string, body?: object) {
+  const r = await fetchWithAuth(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d?.error);
+  return d;
+}
 
 /** What a refund nets: the paid amount less the deduction, which is taken only if the customer takes a refund. */
 const deductionOf = (r: any) => Math.round(Number(r.AmountPaidTillDate || 0) * Number(r.DeductionPercent || 0)) / 100;
 const netOf = (r: any) => Math.max(0, round2(Number(r.AmountPaidTillDate || 0) - deductionOf(r)));
 const approvedLike = (s: string) => s === CrmStatus.APPROVED || s === "Cancelled" || s === "FinancePending" || s === "Refunded";
 
-/** What the cancellation is waiting on next, in words, and who acts. */
-function nextStepText(c: any): string {
-  if (c.Status === CrmStatus.PENDING) return "Waiting in the Approval Inbox";
-  if (c.Status === CrmStatus.REJECTED) return c.Notes ? `Rejected: ${c.Notes}` : "Rejected";
-  if (approvedLike(c.Status)) {
-    if (c.SettlementStatus === "Settled") return "Settled";
-    if (c.RefundId != null) return `Refund ${c.RefundNo}: ${c.RefundStatus}`;
-    return "Held credit parked. Refund or re-book from Refunds.";
-  }
-  return statusText(c.Status);
-}
-
-/** The record's stages, read from what is recorded: requested, approval, held credit, refund or re-booking. */
-function cancellationPath(c: any): { label: string; state: GridPathState; note?: string }[] {
-  const rejected = c.Status === CrmStatus.REJECTED;
+/** The request's four steps as the shared bar: requested, approval, held credit, refund or re-booking. */
+function cancellationBar(c: any): { label: string; state: StepState }[] {
+  const dropped = c.Status === CrmStatus.REJECTED || c.Status === "Withdrawn";
   const approved = approvedLike(c.Status);
   const held = c.HeldOnAccountId != null;
   const settled = c.SettlementStatus === "Settled";
   return [
-    { label: "Requested", state: "done", note: `Requested ${dt(c.RequestedDate)}${c.RequestedByName ? ` by ${c.RequestedByName}` : ""}` },
-    {
-      label: rejected ? "Rejected" : "Approval", state: rejected ? "failed" : approved ? "done" : "current",
-      note: rejected ? (c.Notes ? `Rejected: ${c.Notes}` : "Rejected in the Approval Inbox") : "Waiting in the Approval Inbox",
-    },
-    { label: "Held credit", state: rejected ? "todo" : held ? "done" : approved ? "current" : "todo", note: "The paid amount is parked as credit on approval." },
-    {
-      label: "Refund or re-booking", state: settled ? "done" : held && !rejected ? "current" : "todo",
-      note: c.RefundId != null ? `Refund ${c.RefundNo} is ${c.RefundStatus}${c.IsRefundOverdue ? " and overdue" : ""}.` : "Carried on in Refunds: refund the customer or use the credit for a new booking.",
-    },
+    { label: "Requested", state: "done" },
+    { label: "Approval", state: approved ? "done" : dropped ? "stopped" : "active" },
+    { label: "Held credit", state: held ? "done" : approved ? "active" : "off" },
+    { label: "Refund or re-booking", state: settled ? "done" : held && !dropped ? "active" : "off" },
   ];
 }
 
-/** The grid's columns. The Next step column needs the page's rights and actions, so they come in from the page. */
-function cancellationCols(ctx: { canEdit: boolean; onChanged: () => void; openRefund: (id: number) => void }): GridCol<any>[] {
-  return [
-    { id: "no", label: "Cancellation", sortKey: "CancellationNo", locked: true, cell: (c) => <span className="font-semibold text-primary hover:underline tabular-nums">{c.CancellationNo}</span>, csv: (c) => c.CancellationNo },
-    { id: "booking", label: "Booking", sortKey: "BookingNo", cell: (c) => <span className="tabular-nums">{c.BookingNo}</span>, csv: (c) => c.BookingNo },
-    {
-      id: "customer", label: "Customer", sortKey: "ApplicantName",
-      cell: (c) => <span className="truncate block max-w-[16rem]" onClick={(e) => e.stopPropagation()}><ApplicantNames name={c.ApplicantName} bookingId={c.BookingId} applicationId={c.ApplicationId} /></span>,
-      csv: (c) => c.ApplicantName,
-    },
-    { id: "mobile", label: "Mobile", cell: (c) => <span className="tabular-nums">{c.Mobile || "—"}</span>, csv: (c) => c.Mobile, hiddenByDefault: true },
-    {
-      id: "unit", label: "Project · unit", sortKey: "ProjectName",
-      cell: (c) => <span className="truncate block max-w-[14rem]">{[c.ProjectName, c.UnitNo].filter(Boolean).join(" · ") || "—"}</span>,
-      csv: (c) => [c.ProjectName, c.UnitNo].filter(Boolean).join(" · "),
-    },
-    { id: "paid", label: "Paid till date", sortKey: "AmountPaidTillDate", align: "right", cell: (c) => <span className="tabular-nums">{fmt(c.AmountPaidTillDate)}</span>, csv: (c) => c.AmountPaidTillDate },
-    { id: "pct", label: "Deduction %", sortKey: "DeductionPercent", align: "right", cell: (c) => <span className="tabular-nums">{Number(c.DeductionPercent)}%</span>, csv: (c) => Number(c.DeductionPercent) },
-    {
-      id: "deduction", label: "Deduction if refunded", align: "right",
-      cell: (c) => <span className="tabular-nums" title="Deducted only if the customer takes a refund; a re-booking keeps the full amount">{fmt(deductionOf(c))}</span>,
-      csv: (c) => deductionOf(c),
-    },
-    {
-      id: "net", label: "Refund if taken", align: "right",
-      cell: (c) => <span className="tabular-nums font-semibold" title={`The full ${fmt(c.AmountPaidTillDate)} is held as credit; a re-booking uses all of it`}>{fmt(netOf(c))}</span>,
-      csv: (c) => netOf(c),
-    },
-    { id: "status", label: "Status", sortKey: "Status", cell: (c) => <GridStatusPill status={c.Status} label={statusText(c.Status)} />, csv: (c) => statusText(c.Status) },
-    { id: "requested", label: "Requested", sortKey: "RequestedDate", cell: (c) => <span className="tabular-nums">{dt(c.RequestedDate)}</span>, csv: (c) => dt(c.RequestedDate) },
-    { id: "by", label: "Requested by", hiddenByDefault: true, cell: (c) => c.RequestedByName || "—", csv: (c) => c.RequestedByName },
-    { id: "reason", label: "Reason", hiddenByDefault: true, cell: (c) => <span className="truncate block max-w-[18rem]" title={c.Reason || ""}>{c.Reason || "—"}</span>, csv: (c) => c.Reason },
-    {
-      id: "next", label: "Next step", csv: nextStepText,
-      cell: (c) => (
-        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          {/* submitOnly: Approve/Reject only ever happen from the Admin Approval Inbox */}
-          {ctx.canEdit && <ApprovalActions status={c.Status} recordId={c.Id} endpoint={API} submitOnly onSuccess={ctx.onChanged} />}
-          {approvedLike(c.Status) && c.RefundId != null ? (
-            <button type="button" onClick={() => ctx.openRefund(c.RefundId)} className={cn(GRID_BTN, "h-7")}>
-              Refund {c.RefundNo} <ArrowRight size={11} />
-            </button>
-          ) : (
-            <span className={cn("truncate max-w-[18rem]", c.Status === CrmStatus.REJECTED ? "text-destructive" : "text-muted-foreground")} title={nextStepText(c)}>{nextStepText(c)}</span>
-          )}
-        </div>
-      ),
-    },
-  ];
+/** The policy slab for a booking, so any override of the charge is a deliberate choice. */
+function PolicyCard({ policy, loading }: { policy: any | null; loading: boolean }) {
+  const noCharge = policy?.source === "default" && Number(policy.DeductionPercent) === 0;
+  return (
+    <div className={cn("rounded-md border px-3 py-2.5 text-xs space-y-1", policy ? "border-primary/30 bg-primary/5" : "border-border bg-muted/40")}>
+      <div className="flex items-center gap-1.5 font-semibold">
+        <Info size={12} className="text-primary" />
+        {loading ? "Loading the cancellation policy…" : noCharge ? "No policy for this booking: no charge (0%)" : policy ? "Cancellation policy" : "No policy configured — the system default applies"}
+      </div>
+      {!loading && policy && !noCharge && (
+        <>
+          <p>{policy.PolicyName || "Policy"} · <span className="tabular-nums">{policy.daysSinceBooking}</span> day{policy.daysSinceBooking !== 1 ? "s" : ""} since booking</p>
+          <p className="tabular-nums">
+            Slab {policy.DaysFromBookingMin ?? 0}–{policy.DaysFromBookingMax != null ? policy.DaysFromBookingMax : "∞"} days → <span className="font-bold">{Number(policy.DeductionPercent)}% deduction</span>
+          </p>
+          {policy.Notes && <p className="text-muted-foreground italic">{policy.Notes}</p>}
+          {policy.source === "default" && <p className="text-muted-foreground">The global default (no policy for this project).</p>}
+        </>
+      )}
+    </div>
+  );
+}
+/** The charge field with its policy card: shared by the request and the correction. */
+function useBookingPolicy(bookingId: string) {
+  const [policy, setPolicy] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!bookingId) { setPolicy(null); return; }
+    let cancelled = false;
+    setLoading(true);
+    fetchCancellationPolicy(bookingId).then((p) => { if (!cancelled) setPolicy(p); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [bookingId]);
+  return { policy, loading };
+}
+function ChargeField({ value, onChange, policy, loading }: { value: string; onChange: (v: string) => void; policy: any | null; loading: boolean }) {
+  const overriding = policy && value !== "" && value !== String(Number(policy.DeductionPercent));
+  return (
+    <GridFormField label="Cancellation charge (%)" hint={overriding ? `overriding the policy (${Number(policy.DeductionPercent)}%)` : undefined}>
+      <input type="number" min={0} max={100} step="0.01" value={value}
+        placeholder={loading ? "Loading…" : "Leave blank to apply the policy"}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(GRID_INPUT, "tabular-nums", overriding && "border-destructive")} />
+    </GridFormField>
+  );
 }
 
-// ── Record page ──────────────────────────────────────────────────────────────
-const CancellationRecord: React.FC<{ id: number; canEdit: boolean; onChanged: () => void }> = ({ id, canEdit, onChanged }) => {
+const COLS: GridCol<any>[] = [
+  { id: "customer", label: "Customer", locked: true, sortKey: "ApplicantName", csv: (c) => c.ApplicantName, cell: (c) => (
+    <span className="block py-1.5 min-w-0">
+      <span className="block font-semibold text-foreground capitalize truncate max-w-[16rem]" title={c.ApplicantName}>{asName(c.ApplicantName)}</span>
+      <span className="block text-xs text-muted-foreground tabular-nums">{c.CancellationNo} · {c.BookingNo}</span>
+    </span>
+  ) },
+  { id: "unit", label: "Project · unit", sortKey: "ProjectName", csv: (c) => [c.ProjectName, c.UnitNo].filter(Boolean).join(" · "),
+    cell: (c) => <span className="truncate block max-w-[14rem]">{[c.ProjectName, c.UnitNo].filter(Boolean).join(" · ") || "—"}</span> },
+  { id: "progress", label: "Progress", csv: (c) => statusText(c.Status), cell: (c) => <span className="block min-w-[15rem] py-1.5"><StepBar steps={cancellationBar(c)} /></span> },
+  { id: "status", label: "Status", sortKey: "Status", csv: (c) => statusText(c.Status), cell: (c) => <GridStatusPill status={c.Status} label={statusText(c.Status)} /> },
+  { id: "paid", label: "Paid till date", sortKey: "AmountPaidTillDate", align: "right", csv: (c) => c.AmountPaidTillDate, cell: (c) => <span className="tabular-nums">{fmt(c.AmountPaidTillDate)}</span> },
+  { id: "charge", label: "Charge if refunded", sortKey: "DeductionPercent", align: "right", csv: (c) => deductionOf(c),
+    cell: (c) => <span className="tabular-nums" title="Deducted only if the customer takes a refund; a re-booking keeps the full amount">{Number(c.DeductionPercent)}% · {fmt(deductionOf(c))}</span> },
+  { id: "net", label: "Refund if taken", align: "right", csv: (c) => netOf(c),
+    cell: (c) => <span className="tabular-nums font-semibold" title={`The full ${fmt(c.AmountPaidTillDate)} is held as credit; a re-booking uses all of it`}>{fmt(netOf(c))}</span> },
+  { id: "requested", label: "Requested", sortKey: "RequestedDate", csv: (c) => dt(c.RequestedDate), cell: (c) => <span className="tabular-nums">{dt(c.RequestedDate)}</span> },
+  // In the export only.
+  ...([
+    ["no", "Cancellation", (c: any) => c.CancellationNo], ["booking", "Booking", (c: any) => c.BookingNo], ["mobile", "Mobile", (c: any) => c.Mobile],
+    ["pct", "Deduction %", (c: any) => Number(c.DeductionPercent)], ["by", "Requested by", (c: any) => c.RequestedByName], ["reason", "Reason", (c: any) => c.Reason],
+  ] as [string, string, (c: any) => unknown][]).map(([id, label, csv]): GridCol<any> => ({ id, label, hiddenByDefault: true, csv, cell: () => null })),
+];
+
+// ── One request ────────────────────────────────────────────────────────────────
+const CancellationRecord: React.FC<{ id: number; canEdit: boolean; onBack: () => void; onEdit: (c: any, thenSubmit?: boolean) => void; onWithdraw: (c: any) => void }> = ({ id, canEdit, onBack, onEdit, onWithdraw }) => {
   const navigate = useNavigate();
-  const { data: c, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["crm-cancellation", id],
-    queryFn: () => fetchCancellation(id),
-    staleTime: 15_000,
-    retry: false,
-  });
+  const { data: c, isLoading, isError, error, isFetching, refetch } = useQuery({ queryKey: ["crm-cancellation", id], queryFn: () => fetchCancellation(id), staleTime: 15_000, retry: false });
   if (isLoading) return <div className={cn(GRID_CARD, "py-16 text-center text-sm text-muted-foreground")}>Loading…</div>;
   if (isError || !c) return <div className={cn(GRID_CARD, "py-16 text-center text-sm text-destructive")}>{(error as Error)?.message || "Could not load this cancellation."}</div>;
 
   const heldBalance = c.HeldOnAccountId != null ? Math.max(0, round2(Number(c.HeldAmount || 0) - Number(c.HeldApplied || 0))) : null;
-  const changed = () => { refetch(); onChanged(); };
+  const editable = canEdit && CORRECTABLE.includes(c.Status);
+  const go = (key: string) => () => document.getElementById(`cx-${key}`)?.scrollIntoView({ block: "start" });
+
+  // Where it stands, and the one action that moves it on.
+  let next = ""; let action: { label: string; run: () => void } | null = null; let finished = false;
+  if (c.Status === CrmStatus.PENDING) { next = "Waiting for approval (Approval Inbox). The booking stays active until it is approved."; action = { label: "Go to Approval", run: go("approval") }; }
+  else if (c.Status === CrmStatus.REJECTED) { next = `Rejected${c.RejectionNote ? `: ${c.RejectionNote}` : ""}. Correct it, then send it again.`; action = editable ? { label: "Correct and Send Again", run: () => onEdit(c, true) } : null; }
+  else if (c.Status === "Withdrawn") { next = `Withdrawn${c.RejectionNote ? `: ${c.RejectionNote}` : ""}. The booking stays active; a new request can be raised.`; finished = true; }
+  else if (approvedLike(c.Status)) {
+    if (c.RefundId != null) { next = `Approved: refund ${c.RefundNo} is ${c.RefundStatus}.`; action = { label: "Open Refund", run: () => navigate(`/crm/refunds?id=${c.RefundId}`) }; }
+    else { next = `Approved: ${fmt(heldBalance ?? c.AmountPaidTillDate)} is held as credit. Refund it or use it for a new booking in Refunds.`; action = { label: "Open Refunds", run: () => navigate("/crm/refunds") }; }
+    finished = c.SettlementStatus === "Settled";
+  }
 
   return (
     <div className="space-y-4">
-      <GridHighlights icon={XCircle} object="Cancellation" title={<span className="tabular-nums">{c.CancellationNo}</span>}
-        status={<GridStatusPill status={c.Status} label={statusText(c.Status)} />}
-        sub={<>{c.ApplicantName} · <span className="tabular-nums">{c.BookingNo}</span></>}
+      <MoneyBand eyebrow={`Cancellation · ${c.CancellationNo}`} title={<span className="capitalize">{asName(c.ApplicantName)}</span>}
+        status={<span className="inline-flex items-center h-5 px-2 rounded-full border border-white/30 text-[0.6875rem] font-semibold text-white">{statusText(c.Status)}</span>}
+        sub={[c.BookingNo, c.ProjectName, c.UnitNo].filter(Boolean).join(" · ")}
         actions={<>
-          {canEdit && <ApprovalActions status={c.Status} recordId={c.Id} endpoint={API} submitOnly onSuccess={changed} />}
-          <button type="button" className={GRID_BTN} onClick={() => navigate(`/crm/bookings?view=${c.BookingId}`)}><Home size={13} /> Open booking</button>
-          {c.RefundId != null && <button type="button" className={GRID_BTN_BRAND} onClick={() => navigate(`/crm/refunds?id=${c.RefundId}`)}>Open refund {c.RefundNo} <ExternalLink size={12} /></button>}
+          <button type="button" onClick={onBack} className={BAND_KEY}><ArrowLeft size={13} /> All Cancellations</button>
+          <button type="button" onClick={() => navigate(`/crm/bookings?view=${c.BookingId}`)} className={BAND_KEY}><Home size={13} /> Open Booking</button>
+          {editable && <button type="button" onClick={() => onEdit(c)} className={BAND_KEY}><PenLine size={13} /> Edit Details</button>}
+          {editable && <button type="button" onClick={() => onWithdraw(c)} className={cn(BAND_KEY, "!text-rose-300")}><XCircle size={13} /> Withdraw</button>}
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
         </>}
-        fields={[
-          { label: "Paid till date", value: fmt(c.AmountPaidTillDate) },
-          { label: "Refund if taken", value: fmt(netOf(c)) },
-          { label: "Project · unit", value: [c.ProjectName, c.UnitNo].filter(Boolean).join(" · ") || "—" },
-          { label: "Requested", value: dt(c.RequestedDate) },
+        lead={fmtShort(Number(c.AmountPaidTillDate || 0))} leadNote="Paid till date"
+        bar={<StepBar steps={cancellationBar(c)} onDark />}
+        figures={[
+          { label: `Deduction (${Number(c.DeductionPercent)}%)`, value: fmtShort(deductionOf(c)), exact: fmt(deductionOf(c)), note: "only if refunded" },
+          { label: "Refund if taken", dot: BAND_DOT.collected, value: fmtShort(netOf(c)), exact: fmt(netOf(c)), note: "" },
+          { label: "Held credit", dot: BAND_DOT.finance, value: c.HeldOnAccountId != null ? fmtShort(Number(c.HeldAmount || 0)) : "—", exact: c.HeldOnAccountId != null ? fmt(c.HeldAmount) : undefined, note: c.HeldOnAccountId != null ? `${fmt(heldBalance)} left` : "Not parked yet" },
+          { label: "Refund", dot: c.IsRefundOverdue ? BAND_DOT.overdue : undefined, value: c.RefundNo || "—", note: c.RefundId != null ? (c.SettlementStatus === "Settled" ? "Settled" : c.RefundStatus) : "", alert: !!c.IsRefundOverdue },
+        ]}
+        footer={<BandNext text={next} finished={finished} action={action} />} />
+
+      <div id="cx-approval" className="scroll-mt-4">
+        <GridRelated icon={ShieldCheck} title="Approval history">
+          <div className="px-4 py-3 space-y-3 text-xs">
+            {c.Status === CrmStatus.PENDING && <div className="flex flex-wrap items-center gap-2"><ApprovalActions status={c.Status} recordId={c.Id} endpoint={API} module="crm-cancellations" onSuccess={() => refetch()} /></div>}
+            {c.Status === CrmStatus.REJECTED && canEdit && <div className="flex flex-wrap items-center gap-2"><ApprovalActions status={c.Status} recordId={c.Id} endpoint={API} submitOnly onSuccess={() => refetch()} /></div>}
+            <ApprovalTrailTimeline table="CrmCancellation" recordId={c.Id} refreshKey={c.UpdatedAt}
+              empty={<span className="text-muted-foreground">{c.Status === CrmStatus.PENDING ? "Waiting in the Approval Inbox. No level has acted yet." : "No approval steps recorded."}</span>} />
+          </div>
+        </GridRelated>
+      </div>
+
+      <GridRelated icon={Wallet} title="Money">
+        <GridFields fields={[
+          { label: "Paid till date", value: <span className="tabular-nums font-semibold">{fmt(c.AmountPaidTillDate)}</span> },
+          { label: "Booking value", value: <span className="tabular-nums">{fmt(c.TotalValue)}</span> },
+          { label: `Deduction (${Number(c.DeductionPercent)}%)`, value: <span className="tabular-nums">{fmt(deductionOf(c))} <span className="text-muted-foreground">· only if refunded</span></span> },
+          { label: "Refund if taken", value: <span className="tabular-nums font-semibold">{fmt(netOf(c))}</span> },
+          { label: "Held credit", value: c.HeldOnAccountId != null ? <span className="tabular-nums">{fmt(c.HeldAmount)}</span> : "Not parked yet" },
+          { label: "Held credit left", value: heldBalance != null ? <span className="tabular-nums">{fmt(heldBalance)}{Number(c.HeldApplied) > 0 ? <span className="text-muted-foreground"> · {fmt(c.HeldApplied)} used</span> : null}</span> : "—" },
+        ]} />
+      </GridRelated>
+
+      <GridRelated icon={ArrowRight} title="Refund"
+        action={c.RefundId != null ? <button type="button" className={GRID_BTN} onClick={() => navigate(`/crm/refunds?id=${c.RefundId}`)}>Open Refund</button> : undefined}>
+        {c.RefundId == null ? (
+          <p className="px-4 py-4 text-xs text-muted-foreground">
+            {approvedLike(c.Status) ? "No refund made yet. The credit can still be used for a new booking." : "A refund is made once the cancellation is approved."}
+          </p>
+        ) : (
+          <GridFields fields={[
+            { label: "Refund", value: <span className="tabular-nums font-medium">{c.RefundNo}</span> },
+            { label: "Status", value: <GridStatusPill status={c.SettlementStatus === "Settled" ? "Settled" : c.RefundStatus} /> },
+            { label: "Net amount", value: <span className="tabular-nums">{fmt(c.RefundNetAmount)}</span> },
+            {
+              label: "Due", value: c.RefundDueDate ? (
+                <span className={cn("tabular-nums", c.IsRefundOverdue ? "text-destructive font-semibold" : "")}>
+                  {dt(c.RefundDueDate)}{c.RefundDaysRemaining != null ? (c.IsRefundOverdue ? ` · ${Math.abs(c.RefundDaysRemaining)} days overdue` : ` · ${c.RefundDaysRemaining} days left`) : ""}
+                </span>) : "—",
+            },
+          ]} />
+        )}
+      </GridRelated>
+
+      <GridRelated icon={FileText} title="Details">
+        <GridFields fields={[
+          { label: "Reason", value: c.Reason || "—", wide: true },
+          ...(c.Status === CrmStatus.REJECTED && c.RejectionNote ? [{ label: "Rejection reason", value: <span className="whitespace-pre-line">{c.RejectionNote}</span>, wide: true }] : []),
+          ...(c.Notes ? [{ label: "Notes", value: <span className="whitespace-pre-line">{c.Notes}</span>, wide: true }] : []),
+          { label: "Customer", value: <ApplicantNames name={c.ApplicantName} bookingId={c.BookingId} applicationId={c.ApplicationId} /> },
+          { label: "Mobile", value: <span className="tabular-nums">{c.Mobile || "—"}</span> },
+          { label: "Booking", value: <span className="tabular-nums">{c.BookingNo}</span> },
           { label: "Requested by", value: c.RequestedByName || "—" },
           { label: approvedLike(c.Status) ? "Approved by" : "Approver", value: c.ApprovedByName ? `${c.ApprovedByName}${c.ApprovedAt ? ` · ${dt(c.ApprovedAt)}` : ""}` : "—" },
+          { label: "Last updated", value: <span className="tabular-nums">{c.UpdatedAt ? new Date(c.UpdatedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—"}</span> },
         ]} />
+      </GridRelated>
 
-      <GridPath steps={cancellationPath(c)} />
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem] items-start">
-        <div className="space-y-4 min-w-0">
-          <GridRelated icon={Wallet} title="Money">
-            <GridFields fields={[
-              { label: "Paid till date", value: <span className="tabular-nums font-semibold">{fmt(c.AmountPaidTillDate)}</span> },
-              { label: "Booking value", value: <span className="tabular-nums">{fmt(c.TotalValue)}</span> },
-              { label: `Deduction (${Number(c.DeductionPercent)}%)`, value: <span className="tabular-nums">{fmt(deductionOf(c))} <span className="text-muted-foreground">· only if refunded</span></span> },
-              { label: "Refund if taken", value: <span className="tabular-nums font-semibold">{fmt(netOf(c))}</span> },
-              { label: "Held credit", value: c.HeldOnAccountId != null ? <span className="tabular-nums">{fmt(c.HeldAmount)}</span> : "Not parked yet" },
-              { label: "Held credit left", value: heldBalance != null ? <span className="tabular-nums">{fmt(heldBalance)}{Number(c.HeldApplied) > 0 ? <span className="text-muted-foreground"> · {fmt(c.HeldApplied)} used</span> : null}</span> : "—" },
-            ]} />
-          </GridRelated>
-
-          <GridRelated icon={ArrowRight} title="Refund"
-            action={c.RefundId != null ? <button type="button" className={GRID_BTN} onClick={() => navigate(`/crm/refunds?id=${c.RefundId}`)}>Open <ExternalLink size={11} /></button> : undefined}>
-            {c.RefundId == null ? (
-              <p className="px-4 py-4 text-xs text-muted-foreground">
-                {approvedLike(c.Status) ? "No refund made yet. The credit can still be used for a new booking." : "A refund is made once the cancellation is approved."}
-              </p>
-            ) : (
-              <GridFields fields={[
-                { label: "Refund", value: <span className="tabular-nums font-medium">{c.RefundNo}</span> },
-                { label: "Status", value: <GridStatusPill status={c.SettlementStatus === "Settled" ? "Settled" : c.RefundStatus} /> },
-                { label: "Net amount", value: <span className="tabular-nums">{fmt(c.RefundNetAmount)}</span> },
-                {
-                  label: "Due", value: c.RefundDueDate ? (
-                    <span className={cn("tabular-nums", c.IsRefundOverdue ? "text-destructive font-semibold" : "")}>
-                      {dt(c.RefundDueDate)}{c.RefundDaysRemaining != null ? (c.IsRefundOverdue ? ` · ${Math.abs(c.RefundDaysRemaining)} days overdue` : ` · ${c.RefundDaysRemaining} days left`) : ""}
-                    </span>) : "—",
-                },
-              ]} />
-            )}
-          </GridRelated>
-
-          <GridRelated icon={FileText} title="Details">
-            <GridFields fields={[
-              { label: "Reason", value: c.Reason || "—", wide: true },
-              ...(c.Notes ? [{ label: c.Status === CrmStatus.REJECTED ? "Rejection note" : "Notes", value: <span className="whitespace-pre-line">{c.Notes}</span>, wide: true }] : []),
-              { label: "Customer", value: <ApplicantNames name={c.ApplicantName} bookingId={c.BookingId} applicationId={c.ApplicationId} /> },
-              { label: "Mobile", value: <span className="tabular-nums">{c.Mobile || "—"}</span> },
-              { label: "Booking", value: <span className="tabular-nums">{c.BookingNo}</span> },
-              { label: "Last updated", value: <span className="tabular-nums">{c.UpdatedAt ? new Date(c.UpdatedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—"}</span> },
-            ]} />
-          </GridRelated>
-        </div>
-
-        <aside className="space-y-4 min-w-0 xl:sticky xl:top-4">
-          <GridRelated icon={ShieldCheck} title="Approval history">
-            <div className="px-4 py-4 text-xs">
-              <ApprovalTrailTimeline table="CrmCancellation" recordId={c.Id} refreshKey={c.UpdatedAt}
-                empty={<span className="text-muted-foreground">{c.Status === CrmStatus.PENDING ? "Waiting in the Approval Inbox. No level has acted yet." : "No approval steps recorded."}</span>} />
-            </div>
-          </GridRelated>
-          <section className={cn(GRID_CARD, "px-4 py-3 text-xs text-muted-foreground flex gap-2")}>
-            <Info size={14} className="shrink-0 mt-0.5 text-primary" />
-            <p>On approval the whole paid amount is held as credit. The deduction is taken only if the customer takes a refund; a re-booking uses all of it.</p>
-          </section>
-        </aside>
-      </div>
+      <section className={cn(GRID_CARD, "px-4 py-3 text-xs text-muted-foreground flex gap-2")}>
+        <Info size={14} className="shrink-0 mt-0.5 text-primary" />
+        <p>On approval the whole paid amount is held as credit. The deduction is taken only if the customer takes a refund; a re-booking uses all of it.</p>
+      </section>
     </div>
   );
 };
+
+/** Correct a request before approval: the reason and the charge. After a rejection it is then sent again. */
+function EditDialog({ c, thenSubmit, onClose, onDone }: { c: any; thenSubmit: boolean; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState<string>(c.Reason || "");
+  const [pct, setPct] = useState<string>(c.DeductionPercent != null ? String(Number(c.DeductionPercent)) : "");
+  const [saving, setSaving] = useState(false);
+  const { policy, loading } = useBookingPolicy(String(c.BookingId));
+  const save = async () => {
+    if (!reason.trim()) return void toast.error("Give the reason for the cancellation");
+    const n = pct !== "" ? parseFloat(pct) : undefined;
+    if (n != null && (!(n >= 0) || n > 100)) return void toast.error("The charge must be between 0 and 100%");
+    setSaving(true);
+    try {
+      await putJson(`${API}/${c.Id}`, { Reason: reason.trim(), ...(n != null ? { DeductionPercent: n } : {}) });
+      if (thenSubmit) await putJson(`${API}/${c.Id}/submit`);
+      onDone(); onClose();
+    } catch (e: any) { toast.error(translateError(e.message)); onDone(); }
+    finally { setSaving(false); }
+  };
+  return (
+    <GridDialog onClose={onClose} icon={PenLine} width="max-w-2xl" title="Edit Cancellation Request" description={`${c.CancellationNo} · ${personName(c.ApplicantName)} · ${c.BookingNo}`}
+      footer={<><button type="button" onClick={onClose} className={GRID_BTN}>Cancel</button><button type="button" onClick={save} disabled={saving} className={GRID_BTN_BRAND}>{saving ? "Saving…" : thenSubmit ? "Save and Send Again" : "Save Details"}</button></>}>
+      {c.Status === CrmStatus.REJECTED && c.RejectionNote && <p className="mb-3 text-sm rounded-md px-3 py-2 border border-destructive/40 text-destructive"><strong>Rejection reason:</strong> {c.RejectionNote}</p>}
+      <GridFormSection>
+        <GridFormField label="Reason" required wide><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className={cn(GRID_INPUT, "h-auto py-2 resize-none")} /></GridFormField>
+        <ChargeField value={pct} onChange={setPct} policy={policy} loading={loading} />
+        <GridFormField label="" wide><PolicyCard policy={policy} loading={loading} /></GridFormField>
+      </GridFormSection>
+    </GridDialog>
+  );
+}
+
+// ── Cancellation Policy ────────────────────────────────────────────────────────
+// The slabs: for one project or all, a days-since-booking range, the charge % and the refund due days. The server
+// decides which slab applies (crmCancellations.js resolveCancellationPolicy) and checks every slab it is sent.
+const daysRange = (x: any) => (x.DaysFromBookingMax == null ? `${x.DaysFromBookingMin} and more` : `${x.DaysFromBookingMin}–${x.DaysFromBookingMax}`);
+const EMPTY_SLAB = { ProjectId: "", PolicyName: "", DaysFromBookingMin: "0", DaysFromBookingMax: "", DeductionPercent: "", RefundDueDays: "", Notes: "" };
+function PolicyScreen({ canEdit, onBack }: { canEdit: boolean; onBack: () => void }) {
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
+    queryKey: ["crm-cancellation-policies"],
+    queryFn: async () => { const r = await fetchWithAuth(`${API}/policies`); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d?.error); return d as { rows: any[]; defaults: { refundDueDays: number; deductionPercent: number } }; },
+  });
+  const { data: dropdown } = useQuery({ queryKey: ["crm-business-dropdown"], queryFn: async () => { const r = await fetchWithAuth("/api/business/dropdown"); return r.ok ? r.json() : { projects: [] }; }, staleTime: 5 * 60_000 });
+  const [editing, setEditing] = useState<any | null>(null);
+  const [form, setForm] = useState({ ...EMPTY_SLAB });
+  const [saving, setSaving] = useState(false);
+  const rows = data?.rows ?? [];
+  const def = data?.defaults ?? { refundDueDays: 0, deductionPercent: 0 };
+  const active = rows.filter((x) => x.IsActive);
+  const ownProjects = new Set(active.filter((x) => x.ProjectId != null).map((x) => x.ProjectId)).size;
+  const open = (x: any | null) => {
+    setEditing(x ?? {});
+    setForm(x ? { ProjectId: x.ProjectId != null ? String(x.ProjectId) : "", PolicyName: x.PolicyName || "", DaysFromBookingMin: String(x.DaysFromBookingMin ?? 0),
+      DaysFromBookingMax: x.DaysFromBookingMax != null ? String(x.DaysFromBookingMax) : "", DeductionPercent: String(Number(x.DeductionPercent)),
+      RefundDueDays: x.RefundDueDays != null ? String(x.RefundDueDays) : "", Notes: x.Notes || "" } : { ...EMPTY_SLAB });
+  };
+  const save = async () => {
+    setSaving(true);
+    try {
+      const body = { ...form, ProjectId: form.ProjectId || null };
+      const url = editing?.Id ? `${API}/policies/${editing.Id}` : `${API}/policies`;
+      const r = await fetchWithAuth(url, { method: editing?.Id ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error);
+      setEditing(null); refetch();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
+  };
+  const toggle = async (x: any) => {
+    try { await putJson(`${API}/policies/${x.Id}`, { IsActive: !x.IsActive }); refetch(); }
+    catch (e: any) { toast.error(translateError(e.message)); }
+  };
+  const cols: GridCol<any>[] = [
+    { id: "name", label: "Slab", locked: true, cell: (x) => <span className="block py-1.5"><span className="block font-semibold">{x.PolicyName}</span>{x.Notes && <span className="block text-xs text-muted-foreground truncate max-w-[18rem]">{x.Notes}</span>}</span> },
+    { id: "project", label: "Project", cell: (x) => x.ProjectName || "All projects" },
+    { id: "days", label: "Days since booking", cell: (x) => <span className="tabular-nums">{daysRange(x)}</span> },
+    { id: "charge", label: "Charge", align: "right", cell: (x) => <span className="tabular-nums">{Number(x.DeductionPercent)}%</span> },
+    { id: "due", label: "Refund due", cell: (x) => <span className="tabular-nums">{x.RefundDueDays != null ? `${x.RefundDueDays} days` : `${def.refundDueDays} days (default)`}</span> },
+    { id: "status", label: "Status", cell: (x) => <GridStatusPill status={x.IsActive ? "Active" : "Inactive"} label={x.IsActive ? "Active" : "Off"} /> },
+    { id: "act", label: "", align: "right", cell: (x) => canEdit ? (
+      <span className="inline-flex gap-1.5" onClick={(e) => e.stopPropagation()}>
+        <button type="button" onClick={() => open(x)} className={cn(GRID_BTN, "h-7")}>Edit</button>
+        <button type="button" onClick={() => toggle(x)} className={cn(GRID_BTN, "h-7")}>{x.IsActive ? "Switch Off" : "Switch On"}</button>
+      </span>
+    ) : null },
+  ];
+  const [prefs, setPrefs] = useGridPrefs("crm-cancellation-policy-cols", cols);
+  const set = (k: keyof typeof EMPTY_SLAB) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  return (
+    <div className="space-y-4">
+      <MoneyBand eyebrow="CRM · After-sales" title="Cancellation Policy"
+        sub="The charge kept if a cancelled customer takes a refund, and the days the refund is due in, by how long after booking the cancellation comes. A request keeps the figures it was raised with."
+        actions={<>
+          <button type="button" onClick={onBack} className={BAND_KEY}><ArrowLeft size={13} /> All Cancellations</button>
+          {canEdit && <button type="button" onClick={() => open(null)} className={BAND_KEY_MAIN}><Plus size={13} /> Add Slab</button>}
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+        </>}
+        lead={String(active.length)} leadNote="Active slabs" bar={<span />}
+        figures={[
+          { label: "Projects with their own slabs", value: String(ownProjects), note: "" },
+          { label: "Default charge", value: `${def.deductionPercent}%`, note: "" },
+          { label: "Default refund due", value: `${def.refundDueDays} days`, note: "" },
+        ]} />
+      <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
+        <CrmGrid cols={cols} prefs={prefs} onPrefs={setPrefs} rows={rows} rowKey={(x) => x.Id} noRowNumbers
+          loading={isLoading} fetching={isFetching} error={error ? translateError((error as Error).message) : null} onRetry={() => refetch()}
+          sort={{ key: "", dir: "asc" }} onSort={() => {}} onRowClick={canEdit ? (x) => open(x) : undefined}
+          empty={`No slabs yet: every request is charged ${def.deductionPercent}% and its refund is due in ${def.refundDueDays} days.`}
+          page={1} pageSize={Math.max(rows.length, 1)} total={rows.length} onPage={() => {}} onPageSize={() => {}} />
+      </div>
+      {editing && (
+        <GridDialog onClose={() => setEditing(null)} icon={FileText} width="max-w-2xl" title={editing.Id ? "Edit Slab" : "Add Slab"}
+          footer={<><button type="button" onClick={() => setEditing(null)} className={GRID_BTN}>Cancel</button><button type="button" onClick={save} disabled={saving} className={GRID_BTN_BRAND}>{saving ? "Saving…" : "Save Slab"}</button></>}>
+          <GridFormSection>
+            <GridFormField label="Name" required wide><input value={form.PolicyName} onChange={set("PolicyName")} className={GRID_INPUT} /></GridFormField>
+            <GridFormField label="Project" wide hint="Blank = All projects">
+              <select value={form.ProjectId} onChange={set("ProjectId")} className={GRID_INPUT}>
+                <option value="">All projects</option>
+                {((dropdown?.projects ?? []) as any[]).map((pr) => <option key={pr.id} value={String(pr.id)}>{pr.name}</option>)}
+              </select>
+            </GridFormField>
+            <GridFormField label="Days since booking: from" required><input type="number" min={0} value={form.DaysFromBookingMin} onChange={set("DaysFromBookingMin")} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
+            <GridFormField label="to" hint="Blank = no end"><input type="number" min={0} value={form.DaysFromBookingMax} onChange={set("DaysFromBookingMax")} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
+            <GridFormField label="Charge (%)" required><input type="number" min={0} max={100} step="0.01" value={form.DeductionPercent} onChange={set("DeductionPercent")} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
+            <GridFormField label="Refund due (days)" hint={`Blank = ${def.refundDueDays}`}><input type="number" min={1} max={365} value={form.RefundDueDays} onChange={set("RefundDueDays")} className={cn(GRID_INPUT, "tabular-nums")} /></GridFormField>
+            <GridFormField label="Notes" wide><textarea value={form.Notes} onChange={set("Notes")} rows={2} className={cn(GRID_INPUT, "h-auto py-2 resize-none")} /></GridFormField>
+          </GridFormSection>
+        </GridDialog>
+      )}
+    </div>
+  );
+}
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 const CrmCancellations: React.FC = () => {
@@ -275,26 +430,25 @@ const CrmCancellations: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const bookingIdParam = searchParams.get("bookingId") || "";
-  // The open cancellation lives in the address (?id=), so a refresh or a shared link lands on it.
+  // The open request lives in the address (?id=), so a refresh, a shared link or the Approval Inbox lands on it.
   const [idParam, setIdParam] = useUrlParam("id");
+  // The Cancellation Policy screen (?view=policy).
+  const [viewParam, setViewParam] = useUrlParam("view");
   const openId = Number(idParam) > 0 ? Number(idParam) : null;
   const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);
   const s = useCrmListState({ pageSize, defaultSort: DEFAULT_SORT, defaultStatus: ALL });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ BookingId: "", Reason: "", DeductionPercent: "" });
-  // Policy data loaded when a booking is selected — shown to staff before submit
-  const [policy, setPolicy] = useState<any | null>(null);
-  const [policyLoading, setPolicyLoading] = useState(false);
+  const { policy, loading: policyLoading } = useBookingPolicy(form.BookingId);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [extra, setExtraRaw] = useState<ExtraFilters>(NO_EXTRA);
   const setExtra = (x: Partial<ExtraFilters>) => { setExtraRaw((cur) => ({ ...cur, ...x })); s.setPage(1); };
-  const extraOn = extra.requested.preset !== "any" || extra.refundOverdue;
-  const filtered = s.hasFilters || extraOn;
-  const clearFilters = () => { s.reset(); setExtraRaw(NO_EXTRA); };
-  // Ticked rows, kept across pages and filters until cleared.
-  const [selected, setSelected] = useState<Map<string | number, any>>(new Map());
+  const filtered = s.hasFilters || extra.requested.preset !== "any" || extra.refundOverdue;
+  const [editing, setEditing] = useState<{ c: any; thenSubmit: boolean } | null>(null);
+  const [withdrawing, setWithdrawing] = useState<any | null>(null);
+  const [withdrawReason, setWithdrawReason] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (bookingIdParam && rights.canCreate) {
@@ -303,61 +457,26 @@ const CrmCancellations: React.FC = () => {
       setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete("bookingId"); return next; }, { replace: true });
     }
   }, [bookingIdParam, setSearchParams, rights.canCreate]);
+  // The policy's charge is filled in when a booking is picked; staff can still override it.
+  useEffect(() => { setForm((f) => ({ ...f, DeductionPercent: policy?.DeductionPercent != null ? String(Number(policy.DeductionPercent)) : "" })); }, [policy]);
 
-  // When BookingId changes, fetch the applicable policy slab and pre-fill
-  // DeductionPercent. Staff can still override it — the slab info card
-  // makes the policy visible so any deviation is a deliberate choice.
-  useEffect(() => {
-    if (!form.BookingId) { setPolicy(null); setForm((f) => ({ ...f, DeductionPercent: "" })); return; }
-    let cancelled = false;
-    setPolicyLoading(true);
-    fetchCancellationPolicy(form.BookingId).then((p) => {
-      if (cancelled) return;
-      setPolicy(p);
-      if (p?.DeductionPercent != null) setForm((f) => ({ ...f, DeductionPercent: String(Number(p.DeductionPercent)) }));
-    }).finally(() => { if (!cancelled) setPolicyLoading(false); });
-    return () => { cancelled = true; };
-  }, [form.BookingId]);
-
-  const { data, isLoading, isFetching, error, refetch } = useQuery({
-    queryKey: ["crm-cancellations", s.query, extra],
-    queryFn: () => fetchCancellationsList(s.query, extra),
-    staleTime: 30_000,
-  });
+  const { data, isLoading, isFetching, error, refetch } = useQuery({ queryKey: ["crm-cancellations", s.query, extra], queryFn: () => fetchCancellationsList(s.query, extra), staleTime: 30_000, enabled: openId == null && viewParam !== "policy" });
   const result = useSticky(data);
-  const rows = result?.rows ?? [];
-  const total = result?.total ?? 0;
   const counts = result?.statusCounts ?? {};
   const allCount = Object.values(counts).reduce((n, x) => n + x, 0);
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-cancellation-bookings"], queryFn: fetchBookings, staleTime: 60_000, enabled: dialogOpen });
+  const [prefs, setPrefs] = useGridPrefs(PREFS_KEY, COLS);
 
-  // A change from the list or the record refreshes both.
-  const refreshAll = useMemo(() => () => {
-    qc.invalidateQueries({ queryKey: ["crm-cancellations"] });
-    qc.invalidateQueries({ queryKey: ["crm-cancellation"] });
-  }, [qc]);
-  const cols = useMemo(() => cancellationCols({
-    canEdit: rights.canEdit,
-    onChanged: refreshAll,
-    openRefund: (id) => navigate(`/crm/refunds?id=${id}`),
-  }), [rights.canEdit, refreshAll, navigate]);
-  const [prefs, setPrefs] = useGridPrefs(PREFS_KEY, cols);
-
+  const refreshAll = () => {
+    ["crm-cancellations", "crm-cancellation", "crm-cancellation-bookings", "crm-booking-lifecycle", "crm-dashboard"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  };
   const runExport = async () => {
-    setExporting(true); setExportError(null);
-    try {
-      exportGrid(await fetchAllCancellations(s.query, extra), gridVisibleCols(cols, prefs), `cancellations-${s.status.toLowerCase()}`);
-    } catch (e) { setExportError((e as Error).message); } finally { setExporting(false); }
+    setExporting(true);
+    try { exportGrid(await fetchAllCancellations(s.query, extra), COLS, `cancellations-${s.status.toLowerCase()}`); }
+    catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setExporting(false); }
   };
-  const exportSelected = () => exportGrid([...selected.values()], gridVisibleCols(cols, prefs), `cancellations-selected-${selected.size}`);
-  const copySelected = async () => {
-    const text = [...selected.values()].map((c) => c.CancellationNo).join("\n");
-    try { await navigator.clipboard.writeText(text); toast.success(`Copied ${selected.size} cancellation number${selected.size === 1 ? "" : "s"}`); }
-    catch { toast.error("Could not copy. Your browser blocked the clipboard."); }
-  };
-
-  const closeDialog = () => { setDialogOpen(false); setPolicy(null); setForm({ BookingId: "", Reason: "", DeductionPercent: "" }); };
-
+  const closeDialog = () => { setDialogOpen(false); setForm({ BookingId: "", Reason: "", DeductionPercent: "" }); };
   const handleRequest = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
     if (!form.Reason.trim()) { toast.error("Give the reason for the cancellation"); return; }
@@ -365,167 +484,103 @@ const CrmCancellations: React.FC = () => {
     if (pct != null && (!(pct >= 0) || pct > 100)) { toast.error("The charge must be between 0 and 100%"); return; }
     setSaving(true);
     try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          BookingId: parseInt(form.BookingId),
-          Reason: form.Reason.trim() || undefined,
-          // Only send DeductionPercent if staff actually changed it from the
-          // policy suggestion — omitting it lets the backend re-resolve fresh.
-          DeductionPercent: pct,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || data.error);
-      toast.success(`Cancellation requested — ${fmt(data.refundAmt)} will be held as credit (deduction only if refunded)`);
+      const res = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ BookingId: parseInt(form.BookingId), Reason: form.Reason.trim() || undefined, DeductionPercent: pct }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.message || d.error);
+      toast.success(`Cancellation requested — ${fmt(d.refundAmt)} will be held as credit (deduction only if refunded)`);
       closeDialog();
-      qc.invalidateQueries({ queryKey: ["crm-cancellations"] });
-      qc.invalidateQueries({ queryKey: ["crm-cancellation-bookings"] });
-      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
-      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
+      refreshAll();
+      if (d.id) setIdParam(String(d.id));
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
+  };
+  const doWithdraw = async () => {
+    setBusy(true);
+    try { await putJson(`${API}/${withdrawing.Id}/withdraw`, { reason: withdrawReason.trim() }); setWithdrawing(null); refreshAll(); }
+    catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setBusy(false); }
   };
 
-  const overriding = policy && form.DeductionPercent !== "" && form.DeductionPercent !== String(Number(policy.DeductionPercent));
-  const tabs = [ALL, ...STATUSES].map((k) => ({ key: k, label: k === ALL ? "All" : statusText(k), count: result ? (k === ALL ? allCount : counts[k] ?? 0) : null }));
+  const tabs = [ALL, ...STATUSES].map((k) => ({ key: k, label: k === ALL ? "All" : TAB_LABEL[k] ?? statusText(k), count: result ? (k === ALL ? allCount : counts[k] ?? 0) : null }));
+  const dropped = (counts.Rejected ?? 0) + (counts.Withdrawn ?? 0);
 
   return (
-    <>
+    <div className="space-y-4">
       <Breadcrumbs items={openId ? ["Dashboard", "CRM", "Cancellations", "Record"] : ["Dashboard", "CRM", "Cancellations"]} />
-      <CrmAppPage icon={XCircle} section="CRM · After-sales" title="Cancellations"
-        subtitle={openId ? undefined : "On approval the paid amount is held as credit; the policy's deduction is taken only if the customer takes a refund. Refunds and re-bookings carry on in Refunds."}
-        actions={<>
-          {openId && <button type="button" onClick={() => setIdParam("")} className={GRID_BTN}><ArrowLeft size={13} /> All cancellations</button>}
-          {rights.canCreate && <button type="button" onClick={() => setDialogOpen(true)} className={GRID_BTN_BRAND}><XCircle size={13} /> Request cancellation</button>}
-        </>}>
-
-        {/* The list stays mounted while a record is open, so its tab, search, filters, sort and page survive the round trip. */}
-        <div hidden={openId != null} className={cn(GRID_CARD, "overflow-hidden")}>
-          <div className="px-4 pt-3 pb-2">
-            <h2 className="text-base font-bold leading-tight">{tabs.find((t) => t.key === s.status)?.label ?? "All"} cancellations</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{gridListMeta(total, cols, s.sort, filtered)}</p>
-          </div>
-          <GridTabs label="Status" tabs={tabs} active={s.status} onChange={s.setStatus} />
-
-          {/* Totals across the current tab and filters */}
-          <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border border-b border-border">
-            <GridMetric label="Requests" value={total.toLocaleString("en-IN")} />
-            <GridMetric label="Paid till date" value={fmt(result?.summary.paidTillDate ?? 0)} strong />
-            <GridMetric label="Awaiting approval" value={(counts.Pending ?? 0).toLocaleString("en-IN")} />
-            <GridMetric label="Refunds overdue" value={<span className={(result?.summary.refundsOverdue ?? 0) > 0 ? "text-destructive" : ""}>{(result?.summary.refundsOverdue ?? 0).toLocaleString("en-IN")}</span>} />
-          </div>
-
-          {selected.size > 0 && (
-            <GridBulkBar count={selected.size} onClear={() => setSelected(new Map())}>
-              <button type="button" className={GRID_BTN} onClick={exportSelected}><Download size={13} /> Export selected</button>
-              <button type="button" className={GRID_BTN} onClick={copySelected}><Copy size={13} /> Copy numbers</button>
-            </GridBulkBar>
-          )}
-
-          <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
-            <GridSearch value={s.searchInput} onChange={s.setSearchInput} placeholder="Search customer, booking, cancellation no." />
-            <CrmCompanyProjectBlockFilter value={s.cpb} onChange={s.setCpb} />
-            <GridDateFilter label="Requested" value={extra.requested} onChange={(v) => setExtra({ requested: v })} />
-            <GridToggleChip label="Refunds overdue" on={extra.refundOverdue} onChange={(on) => setExtra({ refundOverdue: on })}
-              count={extra.refundOverdue ? null : result?.summary.refundsOverdue ?? null} />
-            {filtered && (
-              <button type="button" onClick={clearFilters} className="inline-flex items-center gap-1 h-8 px-2 text-xs text-primary hover:underline">
-                <RotateCcw size={12} /> Clear filters
-              </button>
-            )}
-            <div className="ml-auto flex items-center gap-2 flex-wrap">
-              {exportError && <span className="text-xs text-destructive">{exportError}</span>}
-              <button type="button" className={cn(GRID_BTN, "w-9 px-0")} onClick={() => refetch()} aria-label="Refresh" title="Refresh">
-                <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
-              </button>
-              <GridSavedViews storageKey={VIEWS_KEY}
-                current={{ status: s.status, search: s.searchInput.trim(), cpb: s.cpb, sort: s.sort, pageSize, extra: { ...extra } }}
-                onApply={(v) => {
-                  setPageSize(GRID_PAGE_SIZES.includes(v.pageSize as typeof GRID_PAGE_SIZES[number]) ? v.pageSize : GRID_PAGE_SIZES[0]);
-                  s.apply(v);
-                  const x = (v.extra ?? {}) as Partial<ExtraFilters>;
-                  setExtraRaw({ requested: x.requested?.preset ? x.requested : GRID_ANY_DATE, refundOverdue: !!x.refundOverdue });
-                }} />
-              <GridColumnChooser cols={cols} prefs={prefs} onChange={setPrefs} />
-              <button type="button" className={GRID_BTN} onClick={runExport} disabled={exporting || total === 0} title="Export to Excel">
+      {viewParam === "policy" ? (
+        <PolicyScreen canEdit={rights.canEdit} onBack={() => setViewParam("")} />
+      ) : openId != null ? (
+        <CancellationRecord key={openId} id={openId} canEdit={rights.canEdit} onBack={() => setIdParam("")}
+          onEdit={(c, thenSubmit) => setEditing({ c, thenSubmit: !!thenSubmit })} onWithdraw={(c) => { setWithdrawing(c); setWithdrawReason(""); }} />
+      ) : (
+        <>
+          <MoneyBand eyebrow="CRM · After-sales" title="Cancellations"
+            sub="On approval the paid amount is held as credit; the policy's deduction is taken only if the customer takes a refund. Refunds and re-bookings carry on in Refunds."
+            actions={<>
+              <button type="button" onClick={() => setViewParam("policy")} className={BAND_KEY}><FileText size={13} /> Cancellation Policy</button>
+              {rights.canCreate && <button type="button" onClick={() => setDialogOpen(true)} className={BAND_KEY_MAIN}><XCircle size={13} /> Request Cancellation</button>}
+              <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            </>}
+            lead={fmtShort(result?.summary.paidTillDate ?? 0)} leadNote="Paid till date"
+            bar={<CollectionBar onDark due={allCount} collected={counts.Approved ?? 0} finance={counts.Pending ?? 0} recorded={0} />}
+            figures={[
+              { label: "Awaiting approval", dot: BAND_DOT.finance, value: String(counts.Pending ?? 0), note: "" },
+              { label: "Approved", dot: BAND_DOT.collected, value: String(counts.Approved ?? 0), note: "" },
+              { label: "Refunds overdue", dot: BAND_DOT.overdue, value: String(result?.summary.refundsOverdue ?? 0), note: "", alert: (result?.summary.refundsOverdue ?? 0) > 0 },
+              { label: "Rejected or withdrawn", value: String(dropped), note: "" },
+            ]} />
+          <div className={cn(GRID_CARD, "rounded-xl overflow-hidden")}>
+            <GridTabs label="Status" tabs={tabs} active={s.status} onChange={s.setStatus} />
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border">
+              <GridSearch value={s.searchInput} onChange={s.setSearchInput} placeholder="Search customer, booking, cancellation no." />
+              <CrmCompanyProjectBlockFilter value={s.cpb} onChange={s.setCpb} />
+              <GridDateFilter label="Requested" value={extra.requested} onChange={(v) => setExtra({ requested: v })} />
+              <GridToggleChip label="Refunds overdue" on={extra.refundOverdue} onChange={(on) => setExtra({ refundOverdue: on })} count={extra.refundOverdue ? null : result?.summary.refundsOverdue ?? null} />
+              {filtered && <button type="button" onClick={() => { s.reset(); setExtraRaw(NO_EXTRA); }} className={GRID_BTN}>Clear filters</button>}
+              <button type="button" className={cn(GRID_BTN, "ml-auto")} onClick={runExport} disabled={exporting || !(result?.total)} title="Export to Excel">
                 <Download size={13} /> <span className="hidden md:inline">{exporting ? "Exporting…" : "Export"}</span>
               </button>
             </div>
+            <CrmGrid cols={COLS} prefs={prefs} onPrefs={setPrefs} rows={result?.rows ?? []} rowKey={(c) => c.Id} noRowNumbers
+              loading={isLoading} fetching={isFetching} error={error ? (error as Error).message : null} onRetry={() => refetch()}
+              sort={s.sort} onSort={s.toggleSort} onRowClick={(c) => setIdParam(String(c.Id))}
+              empty={filtered ? "No cancellation matches these filters." : "No cancellation requests yet."}
+              page={s.page} pageSize={pageSize} total={result?.total ?? 0} onPage={s.setPage} onPageSize={(n) => { setPageSize(n); s.setPage(1); }} />
           </div>
+        </>
+      )}
 
-          <CrmGrid cols={cols} prefs={prefs} onPrefs={setPrefs} rows={rows} rowKey={(c) => c.Id}
-            loading={isLoading} fetching={isFetching} error={error ? (error as Error).message : null} onRetry={() => refetch()}
-            sort={s.sort} onSort={s.toggleSort} onRowClick={(c) => setIdParam(String(c.Id))} activeKey={openId}
-            selected={selected} onSelect={setSelected}
-            empty={filtered ? "No cancellation matches these filters." : "No cancellation requests yet."}
-            page={s.page} pageSize={pageSize} total={total} onPage={s.setPage} onPageSize={(n) => { setPageSize(n); s.setPage(1); }} />
-        </div>
-
-        {openId != null && <CancellationRecord key={openId} id={openId} canEdit={rights.canEdit} onChanged={refreshAll} />}
-      </CrmAppPage>
-
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) closeDialog(); }}>
-        <DialogContent className="max-w-md p-5 gap-4">
-          <DialogHeader><DialogTitle>Request cancellation</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <label className={cn("block font-medium", GRID_LABEL)}>Booking <span className="text-destructive">*</span></label>
-              <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))} className={cn(GRID_INPUT, "h-9 text-sm")}>
+      {dialogOpen && (
+        <GridDialog onClose={closeDialog} icon={XCircle} width="max-w-2xl" title="Request Cancellation"
+          footer={<><button type="button" onClick={closeDialog} className={GRID_BTN}>Cancel</button><button type="button" onClick={handleRequest} disabled={saving} className={GRID_BTN_BRAND}>{saving ? "Submitting…" : "Submit Request"}</button></>}>
+          <GridFormSection>
+            <GridFormField label="Booking" required wide>
+              <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))} className={GRID_INPUT}>
                 <option value="">Select booking</option>
-                {(bookings as any[]).map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>{`${b.BookingNo} — ${b.ApplicantName}${b.UnitNo ? ` (${b.UnitNo})` : ""}`}</option>
-                ))}
+                {(bookings as any[]).map((b: any) => <option key={b.Id} value={String(b.Id)}>{`${b.BookingNo} — ${b.ApplicantName}${b.UnitNo ? ` (${b.UnitNo})` : ""}`}</option>)}
               </SearchableNativeSelect>
-            </div>
+            </GridFormField>
+            {form.BookingId && <GridFormField label="" wide><PolicyCard policy={policy} loading={policyLoading} /></GridFormField>}
+            <ChargeField value={form.DeductionPercent} onChange={(v) => setForm((f) => ({ ...f, DeductionPercent: v }))} policy={policy} loading={policyLoading} />
+            <GridFormField label="Reason" required wide>
+              <textarea value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))} rows={3} className={cn(GRID_INPUT, "h-auto py-2 resize-none")} />
+            </GridFormField>
+          </GridFormSection>
+        </GridDialog>
+      )}
 
-            {/* The policy slab for this booking, so any override is a deliberate choice. */}
-            {form.BookingId && (
-              <div className={cn("rounded-md border px-3 py-2.5 text-xs space-y-1", policy ? "border-primary/30 bg-primary/5" : "border-border bg-muted/40")}>
-                <div className="flex items-center gap-1.5 font-semibold">
-                  <Info size={12} className="text-primary" />
-                  {policyLoading ? "Loading the cancellation policy…" : policy ? "Cancellation policy" : "No policy configured — the system default applies"}
-                </div>
-                {!policyLoading && policy && (
-                  <>
-                    <p>{policy.PolicyName || "Policy"} · <span className="tabular-nums">{policy.daysSinceBooking}</span> day{policy.daysSinceBooking !== 1 ? "s" : ""} since booking</p>
-                    <p className="tabular-nums">
-                      Slab {policy.DaysFromBookingMin ?? 0}–{policy.DaysFromBookingMax != null ? policy.DaysFromBookingMax : "∞"} days → <span className="font-bold">{Number(policy.DeductionPercent)}% deduction</span>
-                    </p>
-                    {policy.Notes && <p className="text-muted-foreground italic">{policy.Notes}</p>}
-                    {policy.source === "default" && <p className="text-muted-foreground">The global default (no policy for this project).</p>}
-                  </>
-                )}
-              </div>
-            )}
+      {editing && <EditDialog c={editing.c} thenSubmit={editing.thenSubmit} onClose={() => setEditing(null)} onDone={refreshAll} />}
 
-            <div className="space-y-1">
-              <label className={cn("block font-medium", GRID_LABEL)}>
-                Cancellation charge (%)
-                {overriding && <span className="ml-2 text-destructive">overriding the policy ({Number(policy.DeductionPercent)}%)</span>}
-              </label>
-              <input type="number" min={0} max={100} step="0.01" value={form.DeductionPercent}
-                placeholder={policyLoading ? "Loading…" : "Leave blank to apply the policy"}
-                onChange={(e) => setForm((f) => ({ ...f, DeductionPercent: e.target.value }))}
-                className={cn(GRID_INPUT, "h-9 text-sm tabular-nums", overriding && "border-destructive")} />
-            </div>
-            <div className="space-y-1">
-              <label className={cn("block font-medium", GRID_LABEL)}>Reason <span className="text-destructive">*</span></label>
-              <textarea value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))} rows={3}
-                className={cn(GRID_INPUT, "h-auto py-2 text-sm resize-none")} />
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <button type="button" onClick={closeDialog} className={cn(GRID_BTN, "h-9 px-4")}>Cancel</button>
-            <button type="button" onClick={handleRequest} disabled={saving} className={cn(GRID_BTN_BRAND, "h-9 px-4")}>{saving ? "Submitting…" : "Submit request"}</button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+      {withdrawing && (
+        <GridDialog onClose={() => setWithdrawing(null)} icon={XCircle} width="max-w-xl" title="Withdraw Cancellation Request" description={`${withdrawing.CancellationNo} · ${personName(withdrawing.ApplicantName)} · ${withdrawing.BookingNo}`}
+          footer={<><button type="button" onClick={() => setWithdrawing(null)} className={GRID_BTN}>Keep It</button><button type="button" onClick={doWithdraw} disabled={busy || !withdrawReason.trim()} className={cn(GRID_BTN_BRAND, "!bg-destructive !border-destructive")}>{busy ? "Withdrawing…" : "Withdraw Request"}</button></>}>
+          <p className="mb-3 text-sm text-muted-foreground">The request stays on record as Withdrawn and can't be sent or approved again. The booking stays active.</p>
+          <GridFormField label="Why it is withdrawn" required wide>
+            <textarea value={withdrawReason} onChange={(e) => setWithdrawReason(e.target.value)} rows={3} autoFocus className={cn(GRID_INPUT, "h-auto py-2 resize-none")} />
+          </GridFormField>
+        </GridDialog>
+      )}
+    </div>
   );
 };
 

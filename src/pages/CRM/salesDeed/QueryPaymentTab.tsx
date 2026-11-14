@@ -99,7 +99,7 @@ export function QueryPaymentTab({ detail, canCreate, canEdit, canConfirm, onChan
     try {
       const staged = await Promise.all(arr.map(toStaged));
       if (multi) setPending((p) => [...p, ...staged]); else setProof(staged[0]);
-    } catch { toast.error("Failed to read file"); }
+    } catch { toast.error("Could not read file"); }
   };
 
   const post = async (url: string, body?: any, method = "POST") => {
@@ -192,7 +192,7 @@ export function QueryPaymentTab({ detail, canCreate, canEdit, canConfirm, onChan
   );
 
   return (
-    <Panel title="Stamp Duty and Registration Fee" icon={<ReceiptIndianRupee size={13} />} right={qp?.Status ? <SheetMark text={qp.Status} tone={deedTone(qp.Status)} /> : undefined}>
+    <Panel title="Deed Registration Fees" icon={<ReceiptIndianRupee size={13} />} right={qp?.Status ? <SheetMark text={qp.Status} tone={deedTone(qp.Status)} /> : undefined}>
       <div className="p-4 space-y-3">
         <p className="text-xs text-muted-foreground">Communicate the government fee to the customer, then confirm once it's paid at the Sub-Registrar.</p>
         <AutoStep n={1} label="Stamp duty payment" done={confirmed} isLast>
@@ -219,7 +219,7 @@ export function QueryPaymentTab({ detail, canCreate, canEdit, canConfirm, onChan
                 const cells: [string, string, boolean][] = [
                   ["Stamp duty", fmtRupees(stamp), false],
                   ["Reg. fee", fmtRupees(reg), false],
-                  ...(credit > 0 ? [["AFS credit", "− " + fmtRupees(credit), false] as [string, string, boolean]] : []),
+                  ...(credit > 0 ? [["Agreement stamp duty credit", "− " + fmtRupees(credit), false] as [string, string, boolean]] : []),
                   ["Net payable", fmtRupees(net), true],
                 ];
                 return (
@@ -342,7 +342,7 @@ export function QueryPaymentTab({ detail, canCreate, canEdit, canConfirm, onChan
       </div>
       {proxyDialog && (
         <ProxyActionDialog
-          title="Upload Proof on Customer's Behalf — Query Payment"
+          title="Upload Proof on Customer's Behalf — Deed Registration Fees"
           description="Staff uploading the government payment receipt the customer provided."
           confirmLabel="Submit Proof"
           saving={proxySaving}

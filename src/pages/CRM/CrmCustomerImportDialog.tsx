@@ -621,7 +621,7 @@ export function CrmCustomerImportDialog({
         throw new Error("Supported formats: .xlsx, .csv, .tsv, .txt");
       }
     } catch (e: any) {
-      toast.error(e.message || "Failed to parse file.");
+      toast.error(e.message || "Could not parse file.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -684,7 +684,7 @@ export function CrmCustomerImportDialog({
       setSourceTag(`Remote URL: ${new URL(fetchUrl).hostname}`);
       toast.success(`Fetched ${parsed.rows.length} rows from remote link.`);
     } catch (e: any) {
-      toast.error(e.message || "Failed to fetch remote spreadsheet.");
+      toast.error(e.message || "Could not fetch remote spreadsheet.");
     } finally {
       setFetchingRemote(false);
     }
@@ -727,7 +727,7 @@ export function CrmCustomerImportDialog({
       setSourceTag("Converted Leads Pool Migration");
       toast.success(`Loaded ${leads.length} converted leads into the import staging grid.`);
     } catch (e: any) {
-      toast.error(e.message || "Failed to load leads pool.");
+      toast.error(e.message || "Could not load leads pool.");
     } finally {
       setFetchingLeads(false);
     }
@@ -830,7 +830,7 @@ export function CrmCustomerImportDialog({
       setExcludedRowNos(new Set());
       setStep(3);
     } catch (e: any) {
-      toast.error(e.message || "Failed to inspect records.");
+      toast.error(e.message || "Could not inspect records.");
     } finally {
       setChecking(false);
     }
@@ -869,7 +869,7 @@ export function CrmCustomerImportDialog({
       );
       onImported();
     } catch (e: any) {
-      toast.error(e.message || "Failed to execute customer import.");
+      toast.error(e.message || "Could not execute customer import.");
     } finally {
       setApplying(false);
     }
@@ -1550,7 +1550,7 @@ export function CrmCustomerImportDialog({
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by name, phone, PAN, email, or row number..."
+                    placeholder="Search by name, phone, PAN, email, or row number…"
                     className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-border bg-background"
                   />
                 </div>

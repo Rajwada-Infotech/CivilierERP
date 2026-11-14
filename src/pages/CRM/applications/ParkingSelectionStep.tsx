@@ -334,7 +334,7 @@ export const ParkingSelectionStep: React.FC<{
           {currentType && (
             <button onClick={handleAdd} disabled={adding || !currentType.HasSlots || !selectedSlotId}
               className={`${KEY_INK} h-9 px-4`}>
-              {adding ? "Adding..." : `Add ${currentType.ParkingType}`}
+              {adding ? "Adding…" : `Add ${currentType.ParkingType}`}
             </button>
           )}
         </div>

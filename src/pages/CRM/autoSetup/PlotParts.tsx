@@ -286,7 +286,7 @@ export const PlotBlockBrowser: React.FC<{ blockId: number; canDelete: boolean; c
     try {
       const res = await fetchWithAuth(`${API}/plots/${u.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete plot");
+      if (!res.ok) throw new Error(data.error || "Could not delete plot");
       toast.success(data.message || "Plot deleted");
       setPlots((ps) => (ps || []).filter((p) => p.Id !== u.Id));
       onChanged();

@@ -21,6 +21,7 @@
 // Every stage is worked out from the real records each time (never a stored
 // flag that can drift), and each blocks the next.
 const { sql } = require("../db");
+const { REFUND_CLOSED_SQL, CANCELLATION_DROPPED_SQL } = require("../constants/crmStatuses");
 
 class CaseError extends Error { constructor(m, status = 400) { super(m); this.status = status; } }
 
@@ -80,8 +81,8 @@ async function sellerFacts(db, r) {
     WHERE BookingId IN (${list}) AND ISNULL(Status, N'') NOT IN (N'Bounced', N'Held', N'Void', N'Cancelled', N'Refunded')`))[0].v) || 0;
   const demandedTotal = overdue.reduce((t, m) => t + Number(m.Balance || 0), 0);
   const uncovered = Math.max(0, Math.round((demandedTotal - onAccount) * 100) / 100);
-  const openCancellation = (await q(`SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WHERE BookingId IN (${list}) AND Status NOT IN (N'Rejected', N'Withdrawn', N'Cancelled')`))[0] || null;
-  const openRefund = (await q(`SELECT TOP 1 RefundNo FROM dbo.CrmRefund WHERE BookingId IN (${list}) AND Status NOT IN (N'Paid', N'Rejected', N'Cancelled')`))[0] || null;
+  const openCancellation = (await q(`SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WHERE BookingId IN (${list}) AND Status NOT IN ${CANCELLATION_DROPPED_SQL}`))[0] || null;
+  const openRefund = (await q(`SELECT TOP 1 RefundNo FROM dbo.CrmRefund WHERE BookingId IN (${list}) AND Status NOT IN ${REFUND_CLOSED_SQL}`))[0] || null;
   // The seller's money still waiting for Finance: approved after the transfer
   // it would land on the booking that is then the buyer's.
   const pendingReceipts = await q(`

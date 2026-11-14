@@ -215,7 +215,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to log call");
+      if (!res.ok) throw new Error(data.error || "Could not log call");
       setForm({ ...EMPTY_FORM, CalledBy: currentUser?.id || "", CallDate: nowLocal() });
       setCustomFields([]);
       setPaymentPlanConfirmed(null);
@@ -275,7 +275,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to update call");
+      if (!res.ok) throw new Error(data.error || "Could not update call");
       toast.success("Call updated");
       refetchChecklist();
       vcState.refetch();
@@ -295,7 +295,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
     try {
       const res = await fetchWithAuth(`${API}/${editingCall.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to remove call log");
+      if (!res.ok) throw new Error(data.error || "Could not remove call log");
       toast.success("Call log removed");
       refetchChecklist();
       vcState.refetch();
@@ -433,7 +433,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
         body: JSON.stringify({ BankName: bpBankName.trim(), Remarks: bpRemarks.trim() || null }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to save");
+      if (!res.ok) throw new Error(data.error || "Could not save");
       setBpBankName("");
       setBpRemarks("");
       refetchBankPreferences();
@@ -449,7 +449,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
     try {
       const res = await fetchWithAuth(`${API}/${booking.BookingId}/bank-preferences/${id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to remove");
+      if (!res.ok) throw new Error(data.error || "Could not remove");
       refetchBankPreferences();
       toast.success(`Removed — ${bankName}`);
     } catch (e: any) {
@@ -470,7 +470,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
         body: JSON.stringify({ FinancingType: ft }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to save");
+      if (!res.ok) throw new Error(data.error || "Could not save");
       toast.success(ft === "SelfFunded" ? "Marked as self-funded" : "Marked as loan-financed");
       qc.invalidateQueries({ queryKey: ["crm-welcome-call-context", booking.BookingId] });
     } catch (e: any) {
@@ -741,7 +741,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
               <div>
                 <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><StickyNote size={11} /> Notes</label>
                 <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                  rows={3} placeholder="What was discussed on this call..."
+                  rows={3} placeholder="What was discussed on this call…"
                   className="w-full text-sm border border-border px-2 py-1.5 bg-background resize-none" />
               </div>
 
@@ -775,7 +775,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                   {rights.canDelete && (
                     <button onClick={handleDeleteEditedCall} disabled={deletingCall || saving}
                       className="text-xs px-3 py-1.5 border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-40">
-                      {deletingCall ? "Removing..." : "Delete Call"}
+                      {deletingCall ? "Removing…" : "Delete Call"}
                     </button>
                   )}
                   <div className="flex gap-2">
@@ -787,7 +787,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                       <button onClick={handleSaveEditedCall} disabled={saving || deletingCall || !form.Outcome}
                         title={!form.Outcome ? "Select an outcome above first" : undefined}
                         className={`${KEY_INK} h-8 px-3`}>
-                        {saving ? "Saving..." : "Save Changes"}
+                        {saving ? "Saving…" : "Save Changes"}
                       </button>
                     )}
                   </div>
@@ -797,7 +797,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                   <button onClick={handleLogCall} disabled={saving || !form.Outcome}
                     title={!form.Outcome ? "Select an outcome above first" : undefined}
                     className={`${KEY_INK} h-8 px-3`}>
-                    {saving ? "Logging..." : "Log Call"}
+                    {saving ? "Logging…" : "Log Call"}
                   </button>
                 )
               )}
@@ -974,7 +974,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                 {expandedCard === "bank" && (
                   <div className="border-t border-border px-2.5 py-2 space-y-1 bg-muted/10 text-[0.6875rem]">
                     {loanLoading ? (
-                      <p className="text-muted-foreground">Loading...</p>
+                      <p className="text-muted-foreground">Loading…</p>
                     ) : !loanDetail ? (
                       <p className="text-muted-foreground">No loan/bank preference on file — record one from the Home Loan Tracking page.</p>
                     ) : (
@@ -1103,7 +1103,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                 <button onClick={() => { if (!docType) { toast.error("Select a document type first"); return; } fileInputRef.current?.click(); }}
                   disabled={uploading}
                   className="text-xs px-3 py-1.5 border border-border hover:bg-muted shrink-0 flex items-center gap-1 disabled:opacity-40">
-                  <Upload size={13} /> {uploading ? "Uploading..." : "Upload File(s)"}
+                  <Upload size={13} /> {uploading ? "Uploading…" : "Upload File(s)"}
                 </button>
               </div>
               )}
@@ -1298,7 +1298,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                   className={`${KEY_INK} h-8 px-3`}
                 >
                   <Plus size={13} />
-                  {bpSaving ? "Adding..." : "Add"}
+                  {bpSaving ? "Adding…" : "Add"}
                 </button>
               </div>
               <input

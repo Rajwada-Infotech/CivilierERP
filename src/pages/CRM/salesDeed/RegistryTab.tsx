@@ -124,7 +124,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
     setBusy(true);
     try {
       await send(`${API}/registry/${registryId}/complete`, "PUT", complete);
-      toast.success("Registry completed — Sale Deed marked Registered");
+      toast.success("Registry completed: the Sale Deed is Registered");
       setCompleteOpen(false); setComplete(EMPTY_COMPLETE());
       changed(true);
     } catch (e: any) { toast.error(translateError(e.message)); }
@@ -166,14 +166,14 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
 
   return (
     <div className="space-y-4">
-      <Panel title="Sub-Registrar Registration" icon={<Landmark size={13} />} right={status ? <SheetMark text={status} tone={deedTone(status)} /> : undefined}>
+      <Panel title="Deed Registry" icon={<Landmark size={13} />} right={status ? <SheetMark text={status} tone={deedTone(status)} /> : undefined}>
         <div className="p-4 space-y-3">
           <p className="text-xs text-muted-foreground">Both parties appear at the Sub-Registrar Office to register the Sale Deed — this legally transfers ownership to the buyer.</p>
           <AutoStep n={1} label="Sub-Registrar appointment" done={status === "Completed"}>
             {!registry && (
               <div className="mt-1">
                 {!qpConfirmed ? (
-                  <p className="text-xs text-muted-foreground">Unlocks once the stamp duty payment (above) is confirmed.</p>
+                  <p className="text-xs text-muted-foreground">Unlocks once the Deed Registration Fees (above) are confirmed.</p>
                 ) : canCreate ? (
                   <button onClick={handleStart} disabled={starting || !startEligible} className={`${KEY_INK} h-8 px-3`}>
                     {starting ? "Starting…" : "Start registry"}
@@ -230,7 +230,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
                   </div>
                 )}
                 {!locked && canCancel && (
-                  <button onClick={() => setCancelOpen(true)} className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}>Cancel registry</button>
+                  <button onClick={() => setCancelOpen(true)} className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}>Cancel Registry</button>
                 )}
 
                 {(registry.DeedStampDuty || registry.DeedRegistrationFee || registry.QPConfirmedAmount) && (
@@ -322,7 +322,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
       {/* Complete */}
       <Dialog open={completeOpen} onOpenChange={(o) => !o && setCompleteOpen(false)}>
         <DialogContent className={`max-w-md max-h-[90vh] overflow-y-auto ${sheetDialog}`} style={{ border: RULE }}>
-          <DialogHeader><DialogTitle className="font-heading">Mark registry completed</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-heading">Mark Registry Completed</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
               <label className={`block ${LBL}`}>Registration no. *</label>
@@ -377,14 +377,14 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
       {/* Cancel */}
       <Dialog open={cancelOpen} onOpenChange={(o) => !o && setCancelOpen(false)}>
         <DialogContent className={`max-w-sm ${sheetDialog}`} style={{ border: RULE }}>
-          <DialogHeader><DialogTitle className="font-heading">Cancel registry</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-heading">Cancel Registry</DialogTitle></DialogHeader>
           <div className="space-y-1">
             <label className={`block ${LBL}`}>Reason *</label>
             <textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} className={`${TEXTAREA} min-h-[80px]`} />
           </div>
           <DialogFooter className="gap-2">
             <button onClick={() => setCancelOpen(false)} className={`${KEY_LINE} h-9 px-4`}>Back</button>
-            <button onClick={handleCancel} disabled={busy || !cancelReason.trim()} className={`${KEY_RED} h-9 px-4`}>{busy ? "Cancelling…" : "Cancel registry"}</button>
+            <button onClick={handleCancel} disabled={busy || !cancelReason.trim()} className={`${KEY_RED} h-9 px-4`}>{busy ? "Cancelling…" : "Cancel Registry"}</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

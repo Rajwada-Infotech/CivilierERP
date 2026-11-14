@@ -31,8 +31,8 @@ const BANK_STEP_REQUIRED_FIELDS: [keyof typeof EMPTY_BANK, string][] = [];
 
 // The one format check for this form — used by Next and by autosave.
 const bankFormatError = (b: any): string | null => {
-  if (b.IfscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(b.IfscCode.toUpperCase())) return "Invalid IFSC format (e.g. HDFC0001234)";
-  if (b.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(b.PanNo.toUpperCase())) return "Invalid PAN format (e.g. ABCDE1234F)";
+  if (b.IfscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(b.IfscCode.toUpperCase())) return "Enter a valid IFSC code, e.g. HDFC0001234";
+  if (b.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(b.PanNo.toUpperCase())) return "Enter a valid PAN, e.g. ABCDE1234F";
   if (b.AadhaarNo && !/^\d{12}$/.test(b.AadhaarNo)) return "Aadhaar must be exactly 12 digits";
   return null;
 };
@@ -136,7 +136,7 @@ export const BankDetailsStep: React.FC<{
           <label className="text-xs font-semibold text-foreground">KYC / Bank Details</label>
           <button onClick={() => saveBank()} disabled={bankSaving || !bankLoaded}
             className="text-xs px-2.5 py-1 bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40">
-            {bankSaving ? "Saving..." : "Save"}
+            {bankSaving ? "Saving…" : "Save"}
           </button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

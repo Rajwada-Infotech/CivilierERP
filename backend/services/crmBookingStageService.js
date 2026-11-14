@@ -215,7 +215,7 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
     // flagged in the same moment must still stop it.
     const locked = (await tx.request().input("bid", sql.Int, bookingId).query(`
       SELECT WorkflowStage, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid`)).recordset[0];
-    if (!locked || !locked.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(locked.Status)) {
+    if (!locked || !locked.IsActive || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(locked.Status)) {
       throw Object.assign(new Error("This booking is no longer active"), { status: 400 });
     }
     if (locked.WorkflowStage !== STAGE_REVIEW) {
@@ -337,7 +337,7 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
     // approval row removed).
     const live = (await tx.request().input("bid", sql.Int, bookingId).query(`
       SELECT IsActive, Status FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid`)).recordset[0];
-    if (!live || !live.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(live.Status)) {
+    if (!live || !live.IsActive || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(live.Status)) {
       throw Object.assign(new Error("This booking was deleted or cancelled while it was being approved — nothing was approved"), { status: 409 });
     }
     await tx.request()
@@ -614,6 +614,7 @@ async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, u
 }
 
 module.exports = {
+  logStageAction,
   STAGE_REVIEW,
   STAGE_MARKETING,
   STAGE_DIRECTOR,

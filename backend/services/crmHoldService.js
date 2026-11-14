@@ -27,7 +27,7 @@ const HOLD_UNTIL_SENTINEL = "9999-12-31";
 async function assertEntityNotTaken(pool, entityType, entityId) {
   if (entityType === "Unit") {
     const taken = await pool.request().input("uid", sql.Int, entityId)
-      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
+      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL + " AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
     if (taken.recordset.length) { const e = new Error("This unit is already booked"); e.status = 409; throw e; }
   } else {
     const taken = await pool.request().input("sid", sql.Int, entityId)

@@ -105,7 +105,7 @@ const DETAIL_FIELDS: [string, string, string][] = [
   ["Deed value", "DeedValue", "number"],
   ["Stamp duty", "StampDuty", "number"],
   ["Registration fee", "RegistrationFee", "number"],
-  ["AFS stamp duty credit", "StampDutyCredit", "number"],
+  ["Agreement stamp duty credit", "StampDutyCredit", "number"],
   ["Deed date", "DeedDate", "date"],
   ["Registration deadline", "RegistrationDeadline", "date"],
 ];
@@ -176,7 +176,7 @@ export function DeedDetailsSection({ detail, onSave, saving, canEdit }: {
                 ["Deed value", detail.DeedValue ? fmtRupees(detail.DeedValue) : null],
                 ["Stamp duty", detail.StampDuty ? fmtRupees(detail.StampDuty) : null],
                 ["Registration fee", detail.RegistrationFee ? fmtRupees(detail.RegistrationFee) : null],
-                ["AFS stamp duty credit", detail.StampDutyCredit != null ? "− " + fmtRupees(detail.StampDutyCredit) : null],
+                ["Agreement stamp duty credit", detail.StampDutyCredit != null ? "− " + fmtRupees(detail.StampDutyCredit) : null],
                 ["Deed date", detail.DeedDate ? fmtDate(detail.DeedDate) : null],
                 ["Registration deadline", detail.RegistrationDeadline ? fmtDate(detail.RegistrationDeadline) : null],
                 ["Sub-Registrar office", detail.SubRegistrarOffice || null],

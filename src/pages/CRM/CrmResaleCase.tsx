@@ -68,7 +68,7 @@ const CrmResaleCase: React.FC = () => {
     queryKey: ["crm-resale-case", id],
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/${id}/case`);
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load the case");
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Could not load the case");
       return r.json();
     },
     enabled: !!id,

@@ -62,43 +62,14 @@ async function unwindBouncedCrmPayment(pool, receivedPaymentId, reason, actorUse
 
   const note = `Reversed — payment ${rp.RPDocNo || receivedPaymentId} bounced${reason ? `: ${reason}` : ""}`.slice(0, 200);
   let reversed = 0;
-    // Every live allocation on the booking (the hold: no part of the price
-    // stays settled once the full price is no longer in).
-    const allocs = (await tx.request().input("bid", sql.Int, bookingId).query(`
-      SELECT r.OnAccountPaymentId, r.MilestoneId, SUM(r.Amount) AS Net, SUM(ISNULL(r.BaseAmount, 0)) AS Base, SUM(ISNULL(r.GSTAmount, 0)) AS Gst
-      FROM dbo.CrmPaymentReceipt r
-      JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
-      WHERE m.BookingId = @bid AND r.OnAccountPaymentId IS NOT NULL
-      GROUP BY r.OnAccountPaymentId, r.MilestoneId
-      HAVING SUM(r.Amount) > 0.009`)).recordset;
-    for (const a of allocs) {
-      await tx.request()
-        .input("no", sql.NVarChar(30), `REV-${receivedPaymentId}-${a.OnAccountPaymentId}-${a.MilestoneId}`.slice(0, 30))
-        .input("mid", sql.Int, a.MilestoneId).input("amt", sql.Decimal(18, 2), -Number(a.Net))
-        .input("base", sql.Decimal(18, 2), -Number(a.Base)).input("gst", sql.Decimal(18, 2), -Number(a.Gst))
-        .input("oaid", sql.Int, a.OnAccountPaymentId).input("cb", sql.Int, actorUserId).input("note", sql.NVarChar(200), note)
-        .query(`INSERT INTO dbo.CrmPaymentReceipt
-                  (ReceiptNo, MilestoneId, Amount, BaseAmount, GSTAmount, ReceivedDate, PaymentMode, Notes, OnAccountPaymentId, CreatedBy, CreatedAt)
-                VALUES (@no, @mid, @amt, @base, @gst, CAST(SYSDATETIME() AS DATE), 'OnAccount', @note, @oaid, @cb, SYSDATETIME())`);
-      await tx.request().input("id", sql.Int, a.OnAccountPaymentId).input("amt", sql.Decimal(18, 2), Number(a.Net))
-        .query(`UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = CASE WHEN AppliedAmount - @amt < 0 THEN 0 ELSE AppliedAmount - @amt END,
-                  Status = CASE WHEN Status = 'Bounced' THEN Status WHEN AppliedAmount - @amt <= 0.009 THEN 'Unapplied' ELSE 'PartiallyApplied' END
-                WHERE Id = @id`);
-      reversed += Number(a.Net);
-    }
-    // Milestones reopen to what is really paid now.
-    await tx.request().input("bid", sql.Int, bookingId).query(`
-      UPDATE m SET
-        AmountPaid = ISNULL((SELECT SUM(r.Amount) FROM dbo.CrmPaymentReceipt r WHERE r.MilestoneId = m.Id), 0),
-        Status = CASE WHEN m.Status = 'Waived' THEN 'Waived'
-                      WHEN ISNULL((SELECT SUM(r.Amount) FROM dbo.CrmPaymentReceipt r WHERE r.MilestoneId = m.Id), 0) >= m.AmountDue - 0.009 THEN 'Paid'
-                      ELSE 'Pending' END,
-        PaidDate = CASE WHEN ISNULL((SELECT SUM(r.Amount) FROM dbo.CrmPaymentReceipt r WHERE r.MilestoneId = m.Id), 0) >= m.AmountDue - 0.009 THEN m.PaidDate ELSE NULL END,
-        DemandStatus = CASE WHEN m.DemandStatus = 'Paid'
-                             AND ISNULL((SELECT SUM(r.Amount) FROM dbo.CrmPaymentReceipt r WHERE r.MilestoneId = m.Id), 0) < m.AmountDue - 0.009
-                            THEN 'Demanded' ELSE m.DemandStatus END,
-        UpdatedAt = SYSDATETIME()
-      FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = @bid`);
+  let afterChange = null;
+    // Every live allocation on the booking goes back on account (the hold: no part of the price
+    // stays settled once the full price is no longer in) and the milestones reopen.
+    const unwound = await require("./crmOnAccountCoverage").unapplyBookingAllocations(tx, bookingId, {
+      actorUserId, note, receiptNo: (a) => `REV-${receivedPaymentId}-${a.OnAccountPaymentId}-${a.MilestoneId}`,
+    });
+    const allocs = unwound.allocs;
+    reversed += unwound.amount;
     // The bounced deposit: nothing of it is usable.
     for (const d of live) {
       await tx.request().input("id", sql.Int, d.Id).input("n", sql.NVarChar(300), note)
@@ -108,6 +79,10 @@ async function unwindBouncedCrmPayment(pool, receivedPaymentId, reason, actorUse
     // Finance's on-account figure follows: other deposits got their share back,
     // the bounced one is worth nothing.
     const touched = new Set([...allocs.map((x) => x.OnAccountPaymentId), ...live.map((d) => d.Id)]);
+    // The booking's unit was changed after this money arrived: it had moved to the new booking, so it comes off there.
+    afterChange = await require("./crmEntityCreation").bounceAfterUnitChange(tx, {
+      bookingId, amount: live.reduce((n, d) => n + Number(d.Amount || 0), 0), note, actorUserId,
+    });
     for (const oaId of touched) {
       await require("./crmLedger").syncCrmOnAccountLedger(tx, oaId, "system", note, { onlyDown: false });
     }
@@ -117,6 +92,8 @@ async function unwindBouncedCrmPayment(pool, receivedPaymentId, reason, actorUse
               WHERE ReceivedPaymentId = @rp AND Status <> 'Bounced'`);
     await tx.commit();
   const glReversed = await reverseGl();
+  // The new booking settles again on what is really in (the full-booking hold).
+  if (afterChange?.targetBookingId) await require("../routes/crmPayments").autoApplyOnAccountIfFullyFunded(pool, afterChange.targetBookingId, actorUserId, "system");
   // Issued invoices stay as they are: a bounced payment doesn't cancel the
   // sale — the customer still owes it, so no credit note (GST s.34 needs a
   // cancelled / reduced supply). Listed for reference only. A credit note

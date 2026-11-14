@@ -5,6 +5,8 @@ const CrmStatus = {
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
   CANCELLED: 'Cancelled',
+  // A booking closed by an approved Unit Change (the buyer's money and sale moved to the new booking).
+  UNIT_CHANGED: 'UnitChanged',
   
   // Bookings / Units
   ACTIVE: 'Active',
@@ -61,10 +63,58 @@ const ResaleStatus = Object.freeze({
 
 // A booking in one of these statuses no longer counts: it holds no inventory,
 // owes no dues, gets no deed or possession, and is not a sale in any report.
-// Expired (never confirmed) and Transferred (resold to a new owner) are as
-// dead as Cancelled and Rejected — every "live booking" filter uses this one
+// Expired (never confirmed), Transferred (resold to a new owner) and UnitChanged (the buyer moved to another unit:
+// an approved Unit Change closed this booking and opened a new one) are as dead as Cancelled and Rejected — every "live booking" filter uses this one
 // list, so a new terminal status is added here once instead of in 60 queries.
-const DEAD_BOOKING_STATUSES = Object.freeze(["Cancelled", "Rejected", "Expired", "Transferred"]);
+const DEAD_BOOKING_STATUSES = Object.freeze(["Cancelled", "Rejected", "Expired", "Transferred", "UnitChanged"]);
 const DEAD_BOOKING_SQL = `(${DEAD_BOOKING_STATUSES.map((s) => `N'${s}'`).join(", ")})`;
 
-module.exports = { CrmStatus, LineStatus, ResaleStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL };
+// A Unit Change request (dbo.CrmPropertyChangeRequest). Pending = waiting for approval; Approved = approved and being
+// carried out (a moment); MovingMoney = approved, the
+// money is on its way to the new booking through a Fund Transfer (another company); Failed = approved but a step did
+// not finish (retried from the request); the rest are over. Must stay in step with UX_CrmPropertyChangeRequest_OpenSource
+// (migration 656).
+const UnitChangeStatus = Object.freeze({
+  PENDING: "Pending", APPROVED: "Approved", MOVING_MONEY: "MovingMoney", FAILED: "Failed",
+  COMPLETED: "Completed", REJECTED: "Rejected", WITHDRAWN: "Withdrawn",
+});
+// A request in one of these is over: it no longer locks its old or new booking.
+const PROPERTY_CHANGE_CLOSED_STATUSES = Object.freeze([UnitChangeStatus.COMPLETED, UnitChangeStatus.REJECTED, UnitChangeStatus.WITHDRAWN]);
+const PROPERTY_CHANGE_CLOSED_SQL = `(${PROPERTY_CHANGE_CLOSED_STATUSES.map((s) => `N'${s}'`).join(", ")})`;
+
+// A refund (dbo.CrmRefund) in one of these statuses was dropped: it no longer claims the money it was raised against,
+// so a new refund or a re-booking can use that money. Withdrawn = taken back before approval (with a reason); Cancelled
+// is kept for older rows. Every "is this money still claimed" check reads these lists, so a status is added here once.
+const REFUND_DROPPED_STATUSES = Object.freeze(["Rejected", "Withdrawn", "Cancelled"]);
+// Dropped, or finished (Paid: the money is spent through AppliedAmount): no longer a live claim on the credit.
+const REFUND_CLOSED_STATUSES = Object.freeze([...REFUND_DROPPED_STATUSES, "Paid"]);
+// The RERA refund due date stops running once a refund is paid or withdrawn (a rejected one is still owed).
+const REFUND_DUE_STOPPED_STATUSES = Object.freeze(["Paid", "Withdrawn"]);
+const sqlList = (xs) => `(${xs.map((s) => `N'${s}'`).join(", ")})`;
+const REFUND_DROPPED_SQL = sqlList(REFUND_DROPPED_STATUSES);
+const REFUND_CLOSED_SQL = sqlList(REFUND_CLOSED_STATUSES);
+const REFUND_DUE_STOPPED_SQL = sqlList(REFUND_DUE_STOPPED_STATUSES);
+
+// A cancellation request (dbo.CrmCancellation) in one of these statuses is closed without cancelling the booking:
+// rejected by the approver, withdrawn by staff (with a reason), or Cancelled on older rows. Every "is a cancellation
+// open on this booking" check reads this list.
+const CANCELLATION_DROPPED_STATUSES = Object.freeze(["Rejected", "Withdrawn", "Cancelled"]);
+const CANCELLATION_DROPPED_SQL = sqlList(CANCELLATION_DROPPED_STATUSES);
+
+// The modes a refund can be paid by, and those that are bank transfers (they need the customer's account). Read by
+// Refunds and by Payments when Finance approves a refund payout.
+const REFUND_PAYMENT_MODES = Object.freeze(["Cheque", "NEFT", "RTGS", "IMPS", "UPI"]);
+const REFUND_TRANSFER_MODES = Object.freeze(["NEFT", "RTGS", "IMPS", "UPI"]);
+
+// Days after a cancellation is approved that its refund falls due (RERA s.18), when its policy slab sets none
+// (dbo.CrmCancellationPolicy.RefundDueDays; migration 637).
+const REFUND_DUE_DAYS_DEFAULT = 45;
+
+module.exports = {
+  REFUND_DUE_DAYS_DEFAULT,
+  UnitChangeStatus, PROPERTY_CHANGE_CLOSED_STATUSES, PROPERTY_CHANGE_CLOSED_SQL,
+  REFUND_PAYMENT_MODES, REFUND_TRANSFER_MODES,
+  CANCELLATION_DROPPED_STATUSES, CANCELLATION_DROPPED_SQL,
+  CrmStatus, LineStatus, ResaleStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL,
+  REFUND_DROPPED_STATUSES, REFUND_CLOSED_STATUSES, REFUND_DUE_STOPPED_STATUSES, REFUND_DROPPED_SQL, REFUND_CLOSED_SQL, REFUND_DUE_STOPPED_SQL,
+};

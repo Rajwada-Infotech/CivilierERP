@@ -386,7 +386,7 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
     if (!agr.recordset.length)
       return res.status(400).json({ error: "Pre-possession check requires an Agreement for Sale to exist first" });
     if (agr.recordset[0].Status !== CrmStatus.REGISTERED)
-      return res.status(400).json({ error: "Pre-possession check requires the Agreement for Sale to be Registered (AFS registered at Sub-Registrar) first" });
+      return res.status(400).json({ error: "Pre-possession needs the Agreement for Sale registered at the Sub-Registrar first" });
 
     const bk = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 ProjectId FROM dbo.CrmBooking WHERE Id = @bid");

@@ -76,7 +76,7 @@ const PortalBooking: React.FC = () => {
           <div className="flex items-center gap-2 mb-1">
             {detailsDone ? <CheckCircle2 size={16} style={{ color: "#0F7A44" }} /> : <Circle size={16} style={{ color: GOLD }} />}
             <span className="text-sm font-medium" style={{ color: TEXT }}>
-              {detailsDone ? "Complete — thank you!" : "Being completed by our team"}
+              {detailsDone ? "Completed. Thank you." : "Being completed by our team"}
             </span>
           </div>
           <p className="text-xs" style={{ color: TEXT_MUTED }}>

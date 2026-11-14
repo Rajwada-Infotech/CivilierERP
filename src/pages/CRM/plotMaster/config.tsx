@@ -38,18 +38,18 @@ export async function fetchFacings(all = false): Promise<PlotFacing[]> {
 }
 export async function fetchPlots(): Promise<Plot[]> {
   const response = await fetchWithAuth(PLOT_API);
-  if (!response.ok) throw new Error("Failed to load Plot Master");
+  if (!response.ok) throw new Error("Could not load Plot Master");
   return response.json();
 }
 export async function fetchPlotBlocks(): Promise<PlotBlock[]> {
   const response = await fetchWithAuth(`${PLOT_API}/blocks`);
-  if (!response.ok) throw new Error("Failed to load blocks");
+  if (!response.ok) throw new Error("Could not load blocks");
   return response.json();
 }
 export async function fetchConstructedAssetKinds(projectId?: number | null): Promise<ConstructedAssetKind[]> {
   // With a project: only the kinds that project's type sells.
   const response = await fetchWithAuth(`${PLOT_API}/constructed-kinds${projectId ? `?projectId=${projectId}` : ""}`);
-  if (!response.ok) throw new Error("Failed to load constructed asset kinds");
+  if (!response.ok) throw new Error("Could not load constructed asset kinds");
   return response.json();
 }
 

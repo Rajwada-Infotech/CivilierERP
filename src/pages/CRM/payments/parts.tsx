@@ -88,7 +88,7 @@ export function MoneyBand({ eyebrow, title, sub, status, actions, lead, leadNote
       <div className="mt-5 grid grid-cols-1 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,2fr)] gap-x-10 gap-y-4 items-end">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2">
-            <span className="text-[2rem] leading-none font-semibold tabular-nums tracking-tight">{lead}</span>
+            <span className="text-[2rem] leading-none font-semibold tabular-nums tracking-tight whitespace-nowrap">{lead}</span>
             <span className="text-[0.8125rem] text-slate-400 tabular-nums">{leadNote}</span>
           </div>
           <div className="mt-3">{bar}</div>
@@ -97,7 +97,7 @@ export function MoneyBand({ eyebrow, title, sub, status, actions, lead, leadNote
           {figures.map((f) => (
             <div key={f.label} className="min-w-0 border-l border-white/10 pl-4" title={f.exact}>
               <dt className="flex items-center gap-1.5 text-xs text-slate-400">{f.dot && <span className={cn("w-2 h-2 rounded-full shrink-0", f.dot)} />}{f.label}</dt>
-              <dd className={cn("mt-1 text-xl font-semibold tabular-nums tracking-tight", f.alert && "text-rose-300")}>{f.value}</dd>
+              <dd className={cn("mt-1 text-lg xl:text-xl font-semibold tabular-nums tracking-tight whitespace-nowrap", f.alert && "text-rose-300")}>{f.value}</dd>
               <dd className="mt-0.5 text-[0.6875rem] text-slate-400 truncate">{f.note}</dd>
             </div>
           ))}

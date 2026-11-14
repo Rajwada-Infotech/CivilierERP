@@ -258,7 +258,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         ) AS Applications,
         (SELECT COUNT(*) FROM dbo.CrmBooking b
           WHERE b.IsActive = 1
-            AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred')
+            AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
             ${projectId ? "AND b.ProjectId = @pid" : ""} ${scopeCond}
         ) AS Bookings,
         (SELECT COUNT(*) FROM dbo.CrmAgreement ag
@@ -302,7 +302,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
             THEN oa.Amount - ISNULL(oa.AppliedAmount,0) ELSE 0 END)
           FROM dbo.CrmOnAccountPayment oa
           JOIN dbo.CrmBooking b2 ON b2.Id = oa.BookingId
-          WHERE b2.IsActive = 1 AND b2.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b2.Status = 'Approved' OR b2.ConfirmDeadline IS NULL OR b2.ConfirmDeadline >= SYSDATETIME()) ${projectId ? "AND b2.ProjectId = @pid" : ""} ${scopeCond.replace(/b\.ProjectId/g, "b2.ProjectId")}
+          WHERE b2.IsActive = 1 AND b2.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL} AND (b2.Status = 'Approved' OR b2.ConfirmDeadline IS NULL OR b2.ConfirmDeadline >= SYSDATETIME()) ${projectId ? "AND b2.ProjectId = @pid" : ""} ${scopeCond.replace(/b\.ProjectId/g, "b2.ProjectId")}
         ), 0) AS TotalPaid,
         (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId
           WHERE ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond} AND ${MILESTONE_OVERDUE_SQL}) AS OverdueCount,

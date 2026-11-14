@@ -15,16 +15,17 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { applyPagination } = require("../services/crmListPagination");
-const { transition: approvalTransition, recordGLPosting, isApproverFor } = require("../services/approvalService");
+const { transition: approvalTransition, recordGLPosting, isApproverFor, writeAuditLog } = require("../services/approvalService");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { bumpCacheVersion } = require("../redis");
+const { reversePostingBySource } = require("../services/generalLedger");
 const {
   ensureCrmCustomerLedgerHead, postCrmRefundPaid,
   postCrmHeldCreditReallocateLedgerOnly, postCrmHeldCreditCrossCompanyMirror,
 } = require("../services/crmLedger");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { refundCreateSchema } = require("../validation/crmBookingSchemas");
-const { DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
+const { REFUND_PAYMENT_MODES, REFUND_TRANSFER_MODES, DEAD_BOOKING_STATUSES, REFUND_CLOSED_SQL, REFUND_DUE_STOPPED_SQL, CANCELLATION_DROPPED_SQL } = require("../constants/crmStatuses");
 
 router.use(authMiddleware);
 
@@ -33,11 +34,11 @@ router.use(authMiddleware);
 // Card are never valid here. Post-Dated Cheque is excluded too since this is
 // only ever a same-day mode preference, not a dated instrument. Optional
 // everywhere it's used — never required to raise or approve a refund.
-const ALLOWED_REFUND_MODES = new Set(["Cheque", "NEFT", "RTGS", "IMPS", "UPI"]);
+const ALLOWED_REFUND_MODES = new Set(REFUND_PAYMENT_MODES);
 // Like a money receipt, the payment mode decides what a payout needs: a
 // transfer needs the customer's account; a cheque is written to their name
 // and needs none. No mode yet = Finance chooses it on the voucher.
-const TRANSFER_REFUND_MODES = new Set(["NEFT", "RTGS", "IMPS", "UPI"]);
+const TRANSFER_REFUND_MODES = new Set(REFUND_TRANSFER_MODES);
 const needsCustomerAccount = (mode) => TRANSFER_REFUND_MODES.has(String(mode || "").trim());
 function validatePaymentMode(raw) {
   if (raw != null && raw !== "" && !ALLOWED_REFUND_MODES.has(raw)) {
@@ -93,7 +94,7 @@ async function getUnclaimedRemaining(pool, onAccountId, { excludeRefundId = null
         oa.Amount, oa.AppliedAmount,
         ISNULL((
           SELECT SUM(GrossAmount) FROM dbo.CrmRefund
-          WHERE SourceOnAccountId = @id AND Status NOT IN ('Rejected', 'Paid')
+          WHERE SourceOnAccountId = @id AND Status NOT IN ${REFUND_CLOSED_SQL}
             AND (@exRefund IS NULL OR Id <> @exRefund)
         ), 0) AS ReservedByRefunds,
         ISNULL((
@@ -143,7 +144,7 @@ async function reserveRebookingTransfer(pool, { heldId, amount, fromCompanyId, t
     }
     const openCancellation = (await tx.request().input("bid", sql.Int, toBookingId).query(`
       SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WITH (UPDLOCK, HOLDLOCK)
-      WHERE BookingId = @bid AND Status NOT IN ('Rejected', 'Cancelled')
+      WHERE BookingId = @bid AND Status NOT IN ${CANCELLATION_DROPPED_SQL}
     `)).recordset[0];
     if (openCancellation) {
       throw Object.assign(new Error(`Target booking has open cancellation ${openCancellation.CancellationNo}`), { status: 409 });
@@ -188,7 +189,7 @@ async function rejectStaleClaimsOnSource(pool, onAccountId, { exceptRefundId = n
       .input("id", sql.Int, onAccountId).input("ex", sql.Int, exceptRefundId).input("n", sql.NVarChar(500), note)
       .query(`
         UPDATE dbo.CrmRefund SET Status = 'Rejected', RejectionNote = @n, UpdatedAt = SYSDATETIME()
-        WHERE SourceOnAccountId = @id AND Status NOT IN ('Rejected', 'Paid') AND (@ex IS NULL OR Id <> @ex)
+        WHERE SourceOnAccountId = @id AND Status NOT IN ${REFUND_CLOSED_SQL} AND (@ex IS NULL OR Id <> @ex)
       `);
     await pool.request()
       .input("id", sql.Int, onAccountId).input("ex", sql.Int, exceptTransferId)
@@ -219,11 +220,14 @@ const REFUND_SELECT = `
     cxl.CancellationNo,
     bank.LHeadName AS RefundBankName,
     rq.name AS RequestedByName, ap.name AS ApprovedByName, fc.name AS FinanceClearedByName,
-    CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status <> 'Paid'
+    CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status NOT IN ${REFUND_DUE_STOPPED_SQL}
               AND CAST(SYSDATETIME() AS DATE) > r.RefundDueDate
          THEN 1 ELSE 0 END AS IsOverdue,
-    CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status <> 'Paid'
-         THEN DATEDIFF(day, CAST(SYSDATETIME() AS DATE), r.RefundDueDate) ELSE NULL END AS DaysRemaining
+    CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status NOT IN ${REFUND_DUE_STOPPED_SQL}
+         THEN DATEDIFF(day, CAST(SYSDATETIME() AS DATE), r.RefundDueDate) ELSE NULL END AS DaysRemaining,
+    -- A transfer mode with no customer account: approval would refuse it until the account is added or the mode changed.
+    CASE WHEN r.PreferredPaymentMode IN (${[...TRANSFER_REFUND_MODES].map((m) => `'${m}'`).join(", ")}) AND NULLIF(LTRIM(r.CustomerAccountNo), '') IS NULL
+         THEN 1 ELSE 0 END AS NeedsAccount
   FROM dbo.CrmRefund r
   JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
   LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId
@@ -287,7 +291,7 @@ const REFUND_SORT = {
 };
 // The tabs that cover more than one status.
 const REFUND_QUEUES = { CRM: ["Draft", "Pending"], Voucher: ["Approved", "FinancePending"] };
-const REFUND_OVERDUE_SQL = "r.RefundDueDate IS NOT NULL AND r.Status <> 'Paid' AND CAST(SYSDATETIME() AS DATE) > r.RefundDueDate";
+const REFUND_OVERDUE_SQL = `r.RefundDueDate IS NOT NULL AND r.Status NOT IN ${REFUND_DUE_STOPPED_SQL} AND CAST(SYSDATETIME() AS DATE) > r.RefundDueDate`;
 
 router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
@@ -321,7 +325,7 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
     const SELECT_WITH_BLOCK = `${REFUND_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
     const ORDER = Object.hasOwn(REFUND_SORT, req.query.sortKey)
       ? `ORDER BY ${REFUND_SORT[req.query.sortKey]} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, r.Id DESC`
-      : "ORDER BY CASE WHEN r.Status IN ('Paid', 'Rejected') THEN 1 ELSE 0 END, r.CreatedAt DESC, r.Id DESC";
+      : `ORDER BY CASE WHEN r.Status IN ${REFUND_CLOSED_SQL} THEN 1 ELSE 0 END, r.CreatedAt DESC, r.Id DESC`;
 
     if (!req.query.page) {
       const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
@@ -361,7 +365,7 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
 // getUnclaimedRemaining's JS logic in SQL so this list-view figure agrees
 // with what the create/apply endpoints will actually accept.
 const RESERVED_SUBQUERY = `(
-  ISNULL((SELECT SUM(GrossAmount) FROM dbo.CrmRefund WHERE SourceOnAccountId = oa.Id AND Status NOT IN ('Rejected', 'Paid')), 0) +
+  ISNULL((SELECT SUM(GrossAmount) FROM dbo.CrmRefund WHERE SourceOnAccountId = oa.Id AND Status NOT IN ${REFUND_CLOSED_SQL}), 0) +
   ISNULL((SELECT SUM(Amount) FROM dbo.CrmRebookingTransfer WHERE HeldOnAccountId = oa.Id AND Status NOT IN ('Rejected', 'Applied')), 0)
 )`;
 
@@ -406,7 +410,7 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
       JOIN dbo.CrmCustomer cu ON cu.Id = a.CustomerId
       WHERE ISNULL(oa.Status,'') IN ('Unapplied','PartiallyApplied')
         AND (oa.Amount - ISNULL(oa.AppliedAmount,0) - ${RESERVED_SUBQUERY}) > 0.01
-        AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred') ${custFilter} ${scope}
+        AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL} ${custFilter} ${scope}
       ORDER BY AsOf DESC
     `);
     res.json(result.recordset);
@@ -419,6 +423,55 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
 // ── GET /:id ─────────────────────────────────────────────────────────────
 // ── GST documents for money given back (services/crmGstNotes.js) ─────────────
 // Register: every credit note and refund voucher, for the GST return.
+// GET /payment-modes — the modes a refund can be paid by, and which of them need the customer's account (the forms' list).
+router.get("/payment-modes", requirePageRight("crm-refunds", "view"), (_req, res) => {
+  res.json({ modes: [...ALLOWED_REFUND_MODES], transfer: [...TRANSFER_REFUND_MODES] });
+});
+
+// GET /rebooking-transfers — every held credit moved onto a customer's new booking (New Refund → Apply to re-booking),
+// with where it stands and what is left to do: a cross-company one waits on its fund transfer (submitted for approval,
+// then approved in Fund Transfer); once Applied its ledger can be checked again (the retry is safe to repeat).
+router.get("/rebooking-transfers", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const rq = pool.request();
+    const conds = [];
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "fb.ProjectId", "").trim());
+    if (req.query.search) {
+      rq.input("search", sql.NVarChar(200), `%${req.query.search}%`);
+      conds.push("(cu.CustomerName LIKE @search OR cu.Mobile LIKE @search OR fb.BookingNo LIKE @search OR tb.BookingNo LIKE @search OR ft.DocNo LIKE @search)");
+    }
+    for (const [k, col] of [["companyId", "fb.CompanyId"], ["projectId", "fb.ProjectId"], ["blockId", "fb.BlockId"]]) {
+      const v = req.query[k] ? parseInt(req.query[k], 10) : null;
+      if (v) { rq.input(k, sql.Int, v); conds.push(`${col} = @${k}`); }
+    }
+    const rows = (await rq.query(`
+      SELECT rt.Id, rt.Amount, rt.IsCrossCompany, rt.Status, rt.Notes, rt.CreatedAt, rt.UpdatedAt,
+             rt.HeldOnAccountId, rt.ToBookingId, rt.FundTransferId, rt.NewOnAccountId,
+             fb.Id AS FromBookingId, fb.BookingNo AS FromBookingNo, tb.BookingNo AS ToBookingNo,
+             COALESCE(tbn.ProjectName, tb.ProjectName) AS ToProjectName, COALESCE(tbn.UnitNo, tb.UnitNo) AS ToUnitNo,
+             cu.CustomerName, cu.Mobile, cxl.CancellationNo,
+             ft.DocNo AS FundTransferNo, ft.Status AS FundTransferStatus,
+             u.name AS CreatedByName
+      FROM dbo.CrmRebookingTransfer rt
+      JOIN dbo.CrmOnAccountPayment hc ON hc.Id = rt.HeldOnAccountId
+      JOIN dbo.CrmBooking fb ON fb.Id = hc.BookingId
+      LEFT JOIN dbo.CrmBooking tb ON tb.Id = rt.ToBookingId
+      LEFT JOIN dbo.vw_CrmBookingDisplay tbn ON tbn.BookingId = tb.Id
+      LEFT JOIN dbo.CrmApplication fa ON fa.Id = fb.ApplicationId
+      LEFT JOIN dbo.CrmCustomer cu ON cu.Id = fa.CustomerId
+      LEFT JOIN dbo.CrmCancellation cxl ON cxl.Id = hc.HeldSourceRefId
+      LEFT JOIN dbo.FundTransfer ft ON ft.FTId = rt.FundTransferId
+      LEFT JOIN dbo.Users u ON u.id = rt.CreatedBy
+      ${conds.length ? `WHERE ${conds.join(" AND ")}` : ""}
+      ORDER BY CASE WHEN rt.Status IN ('Applied', 'Rejected') THEN 1 ELSE 0 END, rt.CreatedAt DESC, rt.Id DESC`)).recordset;
+    res.json(rows);
+  } catch (e) {
+    console.error("[crm-refunds] GET /rebooking-transfers error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 router.get("/gst-notes", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const gst = require("../services/crmGstNotes");
@@ -734,7 +787,7 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
   }
 });
 
-// ── PUT /:id — edit (Draft/Pending only) ─────────────────────────────────
+// ── PUT /:id — edit before approval (Draft, Pending, or Rejected so it can be corrected and sent again) ──
 router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -743,8 +796,15 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
     const b = req.body || {};
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRefund WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
-    if (!["Draft", "Pending"].includes(cur.recordset[0].Status)) {
+    if (!["Draft", "Pending", "Rejected"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot edit — refund is already ${cur.recordset[0].Status}` });
+    }
+    // The payment mode decides whether the customer's account is needed (approval checks it), so it can be corrected
+    // here too; sent only when it changes, empty to leave it to Finance.
+    const setMode = Object.hasOwn(b, "PreferredPaymentMode");
+    let mode = null;
+    if (setMode) {
+      try { mode = validatePaymentMode(b.PreferredPaymentMode); } catch (e) { return res.status(400).json({ error: e.message }); }
     }
     const updated = await pool.request()
       .input("id", sql.Int, id)
@@ -754,15 +814,18 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
       .input("cba", sql.NVarChar(50), b.CustomerAccountNo ?? null)
       .input("cbi", sql.NVarChar(20), b.CustomerIfscCode ?? null)
       .input("ub", sql.Int, actorId(req))
+      .input("setMode", sql.Bit, setMode ? 1 : 0)
+      .input("mode", sql.NVarChar(20), mode || null)
       .query(`
         UPDATE dbo.CrmRefund SET
           Reason = @reason,
+          PreferredPaymentMode = CASE WHEN @setMode = 1 THEN @mode ELSE PreferredPaymentMode END,
           RefundBankLHeadId = ISNULL(@bank, RefundBankLHeadId),
           CustomerBankName  = ISNULL(@cbn, CustomerBankName),
           CustomerAccountNo = ISNULL(@cba, CustomerAccountNo),
           CustomerIfscCode  = ISNULL(@cbi, CustomerIfscCode),
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id AND Status IN ('Draft', 'Pending')
+        WHERE Id = @id AND Status IN ('Draft', 'Pending', 'Rejected')
       `);
     if (updated.rowsAffected[0] !== 1) {
       return res.status(409).json({ error: "This refund changed status while you were editing it; reload before making further changes" });
@@ -939,6 +1002,44 @@ router.put("/:id/reject", requirePageRight("crm-refunds", "edit"), async (req, r
   } catch (e) {
     console.error("[crm-refunds] reject error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// ── PUT /:id/withdraw — take a refund back before it is approved (Draft, Pending or Rejected), with a reason ──
+// Final, and nothing is deleted: the refund stays on record as Withdrawn and stops claiming its money (constants
+// REFUND_DROPPED_STATUSES), so a new refund or a re-booking can use it. Nothing was posted yet (postings happen at Paid)
+// and no payout voucher exists before approval, so no money moves. It leaves the Approval Inbox (which lists Pending).
+const WITHDRAWABLE = ["Draft", "Pending", "Rejected"];
+router.put("/:id/withdraw", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) return res.status(400).json({ error: "Give the reason the refund is withdrawn." });
+  try {
+    const pool = getPool();
+    const cur = (await pool.request().input("id", sql.Int, id).query("SELECT Status, FinanceNewPaymentId FROM dbo.CrmRefund WHERE Id = @id")).recordset[0];
+    if (!cur) return res.status(404).json({ error: "Refund not found" });
+    if (!WITHDRAWABLE.includes(cur.Status) || cur.FinanceNewPaymentId != null) {
+      return res.status(409).json({ error: cur.Status === "Withdrawn" ? "This refund is already withdrawn." : `A refund that is ${cur.Status} can't be withdrawn: only before approval.` });
+    }
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const upd = await tx.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), `[Withdrawn] ${reason}`.slice(0, 500)).input("ub", sql.Int, actorId(req))
+        .query(`UPDATE dbo.CrmRefund SET Status = 'Withdrawn', RejectionNote = @n, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+                WHERE Id = @id AND Status IN (${WITHDRAWABLE.map((x) => `'${x}'`).join(", ")}) AND FinanceNewPaymentId IS NULL`);
+      if (upd.rowsAffected[0] !== 1) throw Object.assign(new Error("This refund changed while you were withdrawing it; reload and try again."), { status: 409 });
+      await writeAuditLog("CrmRefund", id, 0, req.user?.role, req.user?.email || req.user?.name || null, "Withdrawn", reason.slice(0, 500), tx, actorId(req));
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* rolled back */ }
+      throw txErr;
+    }
+    await bumpCacheVersion("crm-refunds");
+    res.json({ success: true, status: "Withdrawn" });
+  } catch (e) {
+    console.error("[crm-refunds] withdraw error:", e.message);
+    res.status(e.status || 500).json({ error: e.status ? e.message : "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1416,12 +1517,23 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
 
     await tx.request().input("id", sql.Int, rebookingTransferId).input("noa", sql.Int, newOaId)
       .query("UPDATE dbo.CrmRebookingTransfer SET Status = 'Applied', NewOnAccountId = @noa, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    // Money moved by an approved Unit Change counts on its request, and the request is done once its whole held
+    // credit has reached the new booking (a move between companies waits here for Finance's Fund Transfer approval).
+    await tx.request().input("hid", sql.Int, rt.HeldOnAccountId).input("amt", sql.Decimal(18, 2), amount).query(`
+      UPDATE r SET CreditCarriedAmount = r.CreditCarriedAmount + @amt,
+        Status = CASE WHEN oa.AppliedAmount >= oa.Amount - 0.01 AND r.Status = N'MovingMoney' THEN N'Completed' ELSE r.Status END,
+        CompletedAt = CASE WHEN oa.AppliedAmount >= oa.Amount - 0.01 AND r.Status = N'MovingMoney' THEN SYSDATETIME() ELSE r.CompletedAt END,
+        UpdatedAt = SYSDATETIME()
+      FROM dbo.CrmPropertyChangeRequest r JOIN dbo.CrmOnAccountPayment oa ON oa.Id = @hid
+      WHERE oa.HeldSourceType = N'UnitChange' AND r.Id = oa.HeldSourceRefId`);
 
     await tx.commit();
   } catch (txErr) {
     try { await tx.rollback(); } catch (_) {}
     throw txErr;
   }
+  // The credit now sits on account on the new booking: it settles the schedule there once the whole price is in.
+  await require("./crmPayments").autoApplyOnAccountIfFullyFunded(pool, rt.ToBookingId, null, userEmail);
 
   // Once this transfer fully consumes the source, any other still-open
   // refund claim on it is now stale — reject it rather than leaving it for
@@ -1443,19 +1555,11 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
 }
 
 // POST /rebooking-transfer — start moving held credit onto a new booking.
-router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const b = req.body || {};
-    const heldId = parseInt(b.heldOnAccountId ?? b.HeldOnAccountId, 10);
-    const toBookingId = parseInt(b.toBookingId ?? b.ToBookingId, 10);
-    const amount = Number(b.amount ?? b.Amount);
-    if (!Number.isFinite(heldId) || !Number.isFinite(toBookingId)) {
-      return res.status(400).json({ error: "heldOnAccountId and toBookingId are required" });
-    }
-    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "amount must be a positive number" });
-    const userEmail = req.user?.email || req.user?.name || String(actorId(req));
-
+// Moves part or all of a Held credit to another booking of the same customer: the one place a re-booking transfer is
+// started, used by the Refunds screen and by an approved Unit Change. Same company: applied to the target booking at
+// once. Another company: a Fund Transfer is raised and sent for approval; Finance's approval applies the credit.
+// Returns the outcome (httpStatus is the status the Refunds route answers with); throws { status } on a refusal.
+async function startRebookingTransfer(pool, { heldId, toBookingId, amount, actorUserId = null, userEmail, userRole = null }) {
     const heldRes = await pool.request().input("id", sql.Int, heldId).query(`
       SELECT oa.Id, oa.Amount, oa.AppliedAmount, oa.Status, oa.BookingId AS FromBookingId,
              fb.CompanyId AS FromCompanyId, fb.ProjectId AS FromProjectId, fa.CustomerId AS FromCustomerId
@@ -1465,16 +1569,12 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
       WHERE oa.Id = @id
     `);
     const held = heldRes.recordset[0];
-    if (!held) return res.status(404).json({ error: "Held credit not found" });
+    if (!held) throw Object.assign(new Error("Held credit not found"), { status: 404 });
 
-    const fromAllowed = await assertBookingProjectScope(req, res, held.FromBookingId);
-    if (fromAllowed === false) return;
-    const toAllowed = await assertBookingProjectScope(req, res, toBookingId);
-    if (toAllowed === false) return;
-    if (held.Status !== "Held") return res.status(400).json({ error: "That on-account row is not a held credit" });
+    if (held.Status !== "Held") throw Object.assign(new Error("That on-account row is not a held credit"), { status: 400 });
     const { unclaimed } = await getUnclaimedRemaining(pool, heldId);
     if (amount > unclaimed + 0.01) {
-      return res.status(400).json({ error: `Amount exceeds the held credit's available balance (₹${unclaimed.toLocaleString("en-IN")}) — some of it may already be claimed by a pending refund` });
+      throw Object.assign(new Error(`Amount exceeds the held credit's available balance (₹${unclaimed.toLocaleString("en-IN")}) — some of it may already be claimed by a pending refund`), { status: 400 });
     }
 
     const toRes = await pool.request().input("bid", sql.Int, toBookingId).query(`
@@ -1482,23 +1582,18 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
       FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @bid
     `);
     const to = toRes.recordset[0];
-    if (!to) return res.status(404).json({ error: "Target booking not found" });
+    if (!to) throw Object.assign(new Error("Target booking not found"), { status: 404 });
     if (!to.IsActive || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(to.Status)) {
-      return res.status(400).json({ error: "Target booking is not active" });
+      throw Object.assign(new Error("Target booking is not active"), { status: 400 });
     }
     if (Number(to.ToCustomerId) !== Number(held.FromCustomerId)) {
-      return res.status(400).json({ error: "Held credit and the target booking belong to different customers" });
-    }
-
-    // Both bookings must be in projects the user may work in.
-    if (!projectAllowed(req.projectScope, held.FromProjectId) || !projectAllowed(req.projectScope, to.ToProjectId)) {
-      return res.status(403).json({ error: "You don't have access to this project" });
+      throw Object.assign(new Error("Held credit and the target booking belong to different customers"), { status: 400 });
     }
 
     const isCross = Number(held.FromCompanyId) !== Number(to.ToCompanyId);
 
     if (!isCross) {
-      const rtIns = await reserveRebookingTransfer(pool, { heldId, amount, fromCompanyId: held.FromCompanyId, toBookingId, toCompanyId: to.ToCompanyId, actorUserId: actorId(req), isCrossCompany: false });
+      const rtIns = await reserveRebookingTransfer(pool, { heldId, amount, fromCompanyId: held.FromCompanyId, toBookingId, toCompanyId: to.ToCompanyId, actorUserId, isCrossCompany: false });
       const rtId = rtIns.recordset[0].Id;
       let outcome;
       try {
@@ -1506,11 +1601,9 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
         if (outcome && outcome.ok === false) {
           if (outcome.applied) {
             await bumpCacheVersion("crm-refunds");
-            return res.status(202).json({
-              success: true, id: rtId, crossCompany: false, partialFailure: true,
+            return { httpStatus: 202, success: true, id: rtId, crossCompany: false, partialFailure: true,
               newOnAccountId: outcome.newOnAccountId,
-              message: `Held credit was applied in CRM, but its accounting ledger follow-up failed: ${outcome.reason}`,
-            });
+              message: `Held credit was applied in CRM, but its accounting ledger follow-up failed: ${outcome.reason}` };
           }
           throw Object.assign(new Error(`The credit couldn't be moved: ${outcome.reason}`), { status: 409 });
         }
@@ -1519,11 +1612,10 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
         // no way to retry or cancel - release it, as the cross-company path does.
         await pool.request().input("id", sql.Int, rtId).input("n", sql.NVarChar(500), `Could not be applied: ${String(applyErr.message).slice(0, 400)}`)
           .query("UPDATE dbo.CrmRebookingTransfer SET Status = 'Rejected', Notes = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status = 'Draft'");
-        if (applyErr.status === 409) return res.status(409).json({ error: applyErr.message });
         throw applyErr;
       }
       await bumpCacheVersion("crm-refunds");
-      return res.status(201).json({ success: true, id: rtId, crossCompany: false, ...outcome });
+      return { httpStatus: 201, success: true, id: rtId, crossCompany: false, ...outcome };
     }
 
     // Cross-company: needs a real Inter-Company Fund Transfer between the two
@@ -1533,12 +1625,12 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     const dstBank = await pool.request().input("pid", sql.Int, to.ToProjectId)
       .query("SELECT TOP 1 BankLHeadId FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
     if (!srcBank.recordset[0] || !dstBank.recordset[0]) {
-      return res.status(400).json({ error: "Both projects must have a tagged company bank account before a cross-company transfer" });
+      throw Object.assign(new Error("Both projects must have a tagged company bank account before a cross-company transfer"), { status: 400 });
     }
     // Reserve the held credit first (a live claim counts in getUnclaimedRemaining),
     // so nothing else can take it while the fund transfer is raised; if raising
     // it fails, the claim is released again.
-    const rtIns = await reserveRebookingTransfer(pool, { heldId, amount, fromCompanyId: held.FromCompanyId, toBookingId, toCompanyId: to.ToCompanyId, actorUserId: actorId(req), isCrossCompany: true });
+    const rtIns = await reserveRebookingTransfer(pool, { heldId, amount, fromCompanyId: held.FromCompanyId, toBookingId, toCompanyId: to.ToCompanyId, actorUserId, isCrossCompany: true });
     const rtId = rtIns.recordset[0].Id;
     let ftId, ftDocNo;
     try {
@@ -1586,21 +1678,54 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     }
     let fundTransferSubmitError = null;
     try {
-      await approvalTransition("fund-transfer", ftId, "Pending", req.user?.email, req.user?.role);
+      await approvalTransition("fund-transfer", ftId, "Pending", userEmail, userRole);
     } catch (subErr) {
       fundTransferSubmitError = subErr.message;
       console.warn("[crm-refunds] fund-transfer approval submission failed:", subErr.message);
     }
 
     await Promise.all([bumpCacheVersion("crm-refunds"), bumpCacheVersion("fund-transfer")]);
-    res.status(fundTransferSubmitError ? 202 : 201).json({
+    return { httpStatus: fundTransferSubmitError ? 202 : 201,
       success: true, id: rtId, crossCompany: true, fundTransferId: ftId, fundTransferDocNo: ftDocNo,
       partialFailure: Boolean(fundTransferSubmitError),
       fundTransferSubmitError: fundTransferSubmitError || undefined,
       message: fundTransferSubmitError
         ? "The Fund Transfer was created, but could not be submitted for approval. It remains Draft and the held credit is reserved; submit it manually when ready. No bank transfer was made."
         : "Inter-company Fund Transfer submitted for approval. The bank transfer must be completed manually; Finance approval records that it has happened and then applies the credit to the new booking.",
-    });
+    };
+}
+
+router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body || {};
+    const heldId = parseInt(b.heldOnAccountId ?? b.HeldOnAccountId, 10);
+    const toBookingId = parseInt(b.toBookingId ?? b.ToBookingId, 10);
+    const amount = Number(b.amount ?? b.Amount);
+    if (!Number.isFinite(heldId) || !Number.isFinite(toBookingId)) {
+      return res.status(400).json({ error: "heldOnAccountId and toBookingId are required" });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "amount must be a positive number" });
+    const userEmail = req.user?.email || req.user?.name || String(actorId(req));
+
+    const heldRes = await pool.request().input("id", sql.Int, heldId).query(`
+      SELECT oa.Id, oa.Amount, oa.AppliedAmount, oa.Status, oa.BookingId AS FromBookingId,
+             fb.CompanyId AS FromCompanyId, fb.ProjectId AS FromProjectId, fa.CustomerId AS FromCustomerId
+      FROM dbo.CrmOnAccountPayment oa
+      JOIN dbo.CrmBooking fb ON fb.Id = oa.BookingId
+      JOIN dbo.CrmApplication fa ON fa.Id = fb.ApplicationId
+      WHERE oa.Id = @id
+    `);
+    const held = heldRes.recordset[0];
+    if (!held) return res.status(404).json({ error: "Held credit not found" });
+
+    const fromAllowed = await assertBookingProjectScope(req, res, held.FromBookingId);
+    if (fromAllowed === false) return;
+    const toAllowed = await assertBookingProjectScope(req, res, toBookingId);
+    if (toAllowed === false) return;
+    const out = await startRebookingTransfer(pool, { heldId, toBookingId, amount, actorUserId: actorId(req), userEmail, userRole: req.user?.role });
+    const { httpStatus, ...body } = out;
+    res.status(httpStatus || 201).json(body);
   } catch (e) {
     console.error("[crm-refunds] rebooking-transfer error:", e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : "An internal error occurred. Please try again later." });
@@ -1684,7 +1809,86 @@ router.put("/rebooking-transfer/:transferId/retry-ledger", requirePageRight("crm
   }
 });
 
+// ── reverseRefundPayout — a paid refund's payout was undone ─────────────────
+// Its cheque was cancelled in Finance (chequeCancellation.js), or a bank transfer came back (PUT /:id/payout-returned).
+// The payout voucher itself is cancelled and its ledger reversed by the caller. Here, in one transaction: the refund
+// goes back to "voucher not raised" with the reason, the credit it used is restored to its source (a cancellation's
+// held credit is Held again), and the refund's own ledger adjustment is reversed. Then its GST documents are
+// cancelled. Finance raises a new voucher; approving it pays the refund again and issues fresh GST documents.
+// Idempotent: a refund that is not Paid is left alone.
+async function reverseRefundPayout(pool, refundId, { reason, userEmail, newPaymentId = null }) {
+  const why = String(reason || "").trim();
+  const tx = pool.transaction();
+  await tx.begin();
+  let rf;
+  try {
+    rf = (await tx.request().input("id", sql.Int, refundId).query(`
+      SELECT Id, RefundNo, Status, GrossAmount, SourceOnAccountId, FinanceNewPaymentId
+      FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id`)).recordset[0];
+    if (!rf || rf.Status !== "Paid" || (newPaymentId != null && rf.FinanceNewPaymentId != null && rf.FinanceNewPaymentId !== newPaymentId)) {
+      await tx.rollback();
+      return { ok: false, reason: !rf ? "refund not found" : rf.Status !== "Paid" ? `refund is ${rf.Status}, not Paid` : "a different voucher pays this refund" };
+    }
+    await tx.request().input("id", sql.Int, refundId).input("n", sql.NVarChar(500), `[Payout returned] ${why}`.slice(0, 500))
+      .query(`UPDATE dbo.CrmRefund SET Status = 'FinancePending', FinanceNewPaymentId = NULL, PaidAt = NULL, RejectionNote = @n, UpdatedAt = SYSDATETIME()
+              WHERE Id = @id AND Status = 'Paid'`);
+    if (rf.SourceOnAccountId) {
+      await tx.request().input("oid", sql.Int, rf.SourceOnAccountId).input("g", sql.Decimal(18, 2), Number(rf.GrossAmount) || 0).input("rid", sql.Int, refundId)
+        .query(`
+          UPDATE dbo.CrmOnAccountPayment SET
+            AppliedAmount = CASE WHEN AppliedAmount - @g > 0 THEN AppliedAmount - @g ELSE 0 END,
+            Status = CASE WHEN HeldSourceType = 'Cancellation' THEN 'Held'
+                          WHEN AppliedAmount - @g > 0.005 THEN 'PartiallyApplied' ELSE 'Unapplied' END,
+            Notes = ISNULL(Notes, '') + char(10) + 'Payout of CrmRefund #' + CAST(@rid AS NVARCHAR(20)) + ' returned: credit restored'
+          WHERE Id = @oid`);
+      await require("../services/crmLedger").syncCrmOnAccountLedger(tx, rf.SourceOnAccountId, userEmail, `Payout of CrmRefund #${refundId} returned`);
+    }
+    await reversePostingBySource(tx, "CrmRefund", refundId);
+    await writeAuditLog("CrmRefund", refundId, 0, null, userEmail || null, "PayoutReturned", why.slice(0, 500), tx, null);
+    await tx.commit();
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* rolled back */ }
+    throw e;
+  }
+  const gst = require("../services/crmGstNotes");
+  const live = (await pool.request().input("r", sql.Int, refundId)
+    .query("SELECT TOP 1 Id FROM dbo.CrmGstNote WHERE RefundId = @r AND Status <> N'Cancelled'")).recordset[0];
+  if (live) await gst.cancel(pool, live.Id, `Payout of ${rf.RefundNo} returned: ${why}`, userEmail);
+  await bumpCacheVersion("crm-refunds");
+  return { ok: true };
+}
+
+// PUT /:id/payout-returned — a paid refund's bank transfer came back (or its payout was approved by mistake). The payout
+// voucher is cancelled and its ledger reversed, as Cheque Cancellation does for a cheque, then the refund is reversed
+// (reverseRefundPayout above) so Finance can pay it again.
+router.put("/:id/payout-returned", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) return res.status(400).json({ error: "Give the reason the payout came back." });
+  try {
+    const pool = getPool();
+    const rf = (await pool.request().input("id", sql.Int, id).query("SELECT Status, FinanceNewPaymentId FROM dbo.CrmRefund WHERE Id = @id")).recordset[0];
+    if (!rf) return res.status(404).json({ error: "Refund not found" });
+    if (rf.Status !== "Paid") return res.status(409).json({ error: `Only a paid refund's payout can be returned (this one is ${rf.Status}).` });
+    if (rf.FinanceNewPaymentId != null) {
+      await pool.request().input("np", sql.Int, rf.FinanceNewPaymentId)
+        .query("UPDATE dbo.NewPayment SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE PPaymentID = @np");
+      for (const st of ["NewPayment", "PaymentPosting", "BounceChargePosting"]) await reversePostingBySource(pool, st, rf.FinanceNewPaymentId);
+      await bumpCacheVersion("new-payment");
+    }
+    const out = await reverseRefundPayout(pool, id, { reason, userEmail: req.user?.email || req.user?.name || null, newPaymentId: rf.FinanceNewPaymentId });
+    if (!out.ok) return res.status(409).json({ error: out.reason });
+    res.json({ success: true, status: "FinancePending" });
+  } catch (e) {
+    console.error("[crm-refunds] payout-returned error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 module.exports = router;
 module.exports.markCrmRefundPaid = markCrmRefundPaid;
+module.exports.reverseRefundPayout = reverseRefundPayout;
+module.exports.startRebookingTransfer = startRebookingTransfer;
 module.exports.applyRebookingTransferToBooking = applyRebookingTransferToBooking;
 module.exports.settlePaidRefunds = settlePaidRefunds;

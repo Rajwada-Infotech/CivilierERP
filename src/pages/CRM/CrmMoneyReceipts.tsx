@@ -57,7 +57,7 @@ const receiptState = (r: ReceiptRow): { label: string; tone: "done" | "waiting" 
 async function fetchList(params: URLSearchParams): Promise<{ rows: ReceiptRow[]; total: number; statusCounts?: Counts }> {
   const res = await fetchWithAuth(`${API}?${params}`);
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.error || "Failed to load money receipts");
+  if (!res.ok) throw new Error(data?.error || "Could not load money receipts");
   return { rows: data.rows || [], total: data.total || 0, statusCounts: data.statusCounts };
 }
 

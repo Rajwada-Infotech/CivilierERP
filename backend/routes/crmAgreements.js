@@ -17,7 +17,7 @@ const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
-const { validateAgreementPreparationPrerequisites, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
+const { agreementStepFlagsSql, validateAgreementPreparationPrerequisites, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const { applyPagination } = require("../services/crmListPagination");
@@ -103,7 +103,14 @@ const AGR_SELECT = `
     -- sent a count) and for each row's stage: mandatory papers / uploaded.
     (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id) AS DocumentCount,
     (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1) AS MandatoryDocCount,
-    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1 AND dc.FileBase64 IS NOT NULL) AS MandatoryUploadedCount
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1 AND dc.FileBase64 IS NOT NULL) AS MandatoryUploadedCount,
+    -- Each step's done flag (D_agr*): the one set of rules in services/crmWorkflowGuards.js, also behind Legal Milestones.
+    ${agreementStepFlagsSql({
+      legal: "ag.LegalExecutiveId", senior: "ag.SeniorApprovalStatus", sent: "ag.SentToCustomerAt", customer: "ag.CustomerApprovalStatus",
+      date: "ag.AgreementDate", status: "ag.Status",
+      papersAsked: "(SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1)",
+      papersIn: "(SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1 AND dc.FileBase64 IS NOT NULL)",
+    })}
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -1500,10 +1507,10 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
     const { AfsRegistrationNo, AfsRegistrationDate, AfsStampDuty, AfsRegistrationFee } = req.body || {};
 
     if (!AfsRegistrationNo || !String(AfsRegistrationNo).trim()) {
-      return res.status(400).json({ error: "AFS Registration No. is required — enter the Doc No received from the Sub-Registrar" });
+      return res.status(400).json({ error: "Agreement registration no. is required: enter the document no. from the Sub-Registrar" });
     }
     if (!AfsRegistrationDate) {
-      return res.status(400).json({ error: "AFS Registration Date is required — enter the date of Sub-Registrar registration" });
+      return res.status(400).json({ error: "Registration date is required: enter the date it was registered at the Sub-Registrar" });
     }
 
     const cur = await pool.request().input("id", sql.Int, id)
@@ -1526,7 +1533,7 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
     const afsReg = await pool.request().input("bid", sql.Int, cur.recordset[0].BookingId)
       .query("SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = @bid ORDER BY CreatedAt DESC");
     if (!afsReg.recordset.length || afsReg.recordset[0].Status !== "Completed") {
-      return res.status(400).json({ error: "AFS Registry must be marked Completed (the Sub-Registrar visit tracker) before the Agreement can be marked Registered" });
+      return res.status(400).json({ error: "Complete the Agreement Registry before marking the agreement registered" });
     }
 
     const regNo = String(AfsRegistrationNo).trim();

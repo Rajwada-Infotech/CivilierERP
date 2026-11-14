@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL, REFUND_DUE_STOPPED_SQL, REFUND_CLOSED_SQL, CANCELLATION_DROPPED_SQL, REFUND_DUE_DAYS_DEFAULT } = require("../constants/crmStatuses");
 const { returnLeadToPool } = require("../services/saHandoff");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -9,6 +9,8 @@ const { reversePostingBySource } = require("../services/generalLedger");
 // Project access: a cancellation belongs to its booking's project.
 const { projectParamGuard, projectPredicate, projectAllowed, assertBookingAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmCancellation c JOIN dbo.CrmBooking b ON b.Id = c.BookingId WHERE c.Id = @id"));
+// A policy slab: a project-restricted user works only their projects' slabs (an all-projects slab is outside every scope).
+router.param("pid", projectParamGuard("SELECT ProjectId FROM dbo.CrmCancellationPolicy WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -22,7 +24,7 @@ const { applyPagination } = require("../services/crmListPagination");
 // Approve/reject is gated to admin/super_admin/marketing_head via this shared
 // engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any
 // editor being able to self-approve a cancellation/refund on this page.
-const { transition: approvalTransition } = require("../services/approvalService");
+const { transition: approvalTransition, writeAuditLog } = require("../services/approvalService");
 const { requireActiveBooking, releaseBookingInventoryLines } = require("../services/crmWorkflowGuards");
 const { releaseAllParkingForBooking } = require("./crmParking");
 const { emitNotification } = require("../services/notify");
@@ -57,9 +59,11 @@ async function resolveDefaultDeductionPct(pool) {
   try {
     const r = await pool.request()
       .query("SELECT TOP 1 Value FROM dbo.AppSetting WHERE [Key] = 'CancellationDefaultPct'");
-    return r.recordset.length ? (parseFloat(r.recordset[0].Value) || 10) : 10;
+    // No policy and no setting: no charge (user, 2026-11-12: the default is 0%, not 10%).
+    const v = r.recordset.length ? parseFloat(r.recordset[0].Value) : NaN;
+    return Number.isFinite(v) ? v : 0;
   } catch {
-    return 10;
+    return 0;
   }
 }
 
@@ -72,7 +76,7 @@ const LATEST_REFUND = `(
     ORDER BY r.Id DESC
   )`;
 const refundOverdue = (lr) =>
-  `${lr}.RefundDueDate IS NOT NULL AND ISNULL(${lr}.Status,'') <> 'Paid' AND CAST(SYSDATETIME() AS DATE) > ${lr}.RefundDueDate`;
+  `${lr}.RefundDueDate IS NOT NULL AND ISNULL(${lr}.Status,'') NOT IN ${REFUND_DUE_STOPPED_SQL} AND CAST(SYSDATETIME() AS DATE) > ${lr}.RefundDueDate`;
 const REFUND_OVERDUE_EXISTS = `EXISTS (SELECT 1 FROM ${LATEST_REFUND} lro WHERE ${refundOverdue("lro")})`;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -107,7 +111,8 @@ const CANCEL_SELECT = `
       ELSE NULL
     END AS RefundDaysRemaining,
     (SELECT COUNT(DISTINCT x.DepositBankId) FROM ${DEPOSIT_BANKS_FOR_BOOKING}) AS DistinctDepositBankCount,
-    (SELECT TOP 1 x.DepositBankId FROM ${DEPOSIT_BANKS_FOR_BOOKING}) AS SingleDepositBankId
+    (SELECT TOP 1 x.DepositBankId FROM ${DEPOSIT_BANKS_FOR_BOOKING}) AS SingleDepositBankId,
+    rj.RejectionNote, rj.RejectedAt
   FROM dbo.CrmCancellation c
   JOIN  dbo.CrmBooking b     ON b.Id = c.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -121,7 +126,34 @@ const CANCEL_SELECT = `
     ORDER BY oa.Id DESC
   ) hc
   OUTER APPLY ${LATEST_REFUND} lr
+  OUTER APPLY (
+    SELECT TOP 1 al.Note AS RejectionNote, al.ActionAt AS RejectedAt
+    FROM dbo.ApprovalAuditLog al
+    WHERE al.TableName = 'CrmCancellation' AND al.RecordId = c.Id AND al.ActionStatus IN ('Rejected', 'Withdrawn')
+    ORDER BY al.ActionAt DESC, al.Id DESC
+  ) rj
 `;
+
+// ── The cancellation policy for a booking ─────────────────────────────────────
+// The one place the slab is chosen: active slabs for the booking's project first, then the ones for all projects; the
+// slab whose days-since-booking range holds the booking. Its charge % and refund due days; with no slab, the default
+// charge (resolveDefaultDeductionPct) and REFUND_DUE_DAYS_DEFAULT.
+async function resolveCancellationPolicy(pool, projectId, bookingDate) {
+  const daysSinceBooking = bookingDate ? Math.floor((Date.now() - new Date(bookingDate).getTime()) / 86_400_000) : 0;
+  const slab = (await pool.request()
+    .input("pid", sql.Int, projectId != null ? projectId : null).input("days", sql.Int, daysSinceBooking)
+    .query(`
+      SELECT TOP 1 Id, ProjectId, PolicyName, DaysFromBookingMin, DaysFromBookingMax, DeductionPercent, RefundDueDays, Notes
+      FROM dbo.CrmCancellationPolicy
+      WHERE IsActive = 1
+        AND @days >= DaysFromBookingMin
+        AND (DaysFromBookingMax IS NULL OR @days <= DaysFromBookingMax)
+        AND (ProjectId = @pid OR ProjectId IS NULL)
+      ORDER BY CASE WHEN ProjectId = @pid THEN 0 ELSE 1 END, DaysFromBookingMin DESC
+    `)).recordset[0];
+  if (slab) return { ...slab, DeductionPercent: Number(slab.DeductionPercent), RefundDueDays: slab.RefundDueDays ?? REFUND_DUE_DAYS_DEFAULT, daysSinceBooking, source: "policy" };
+  return { DeductionPercent: await resolveDefaultDeductionPct(pool), RefundDueDays: REFUND_DUE_DAYS_DEFAULT, daysSinceBooking, source: "default" };
+}
 
 // GET /policy — returns the applicable cancellation penalty slab for a given
 // project and booking date. Called by the frontend when a booking is selected
@@ -130,7 +162,7 @@ const CANCEL_SELECT = `
 // Priority:  1. Project-specific slab (ProjectId = bookingId's project)
 //            2. Global slab (ProjectId IS NULL)
 //            3. AppSetting 'CancellationDefaultPct' (single hard fallback)
-//            4. 10 % if nothing is configured at all
+//            4. 0 % (no charge) if nothing is configured at all
 //
 // The "days since booking" calculation uses today's date vs. BookingDate so
 // the slab shown is the one that will actually apply at submission time.
@@ -144,42 +176,13 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
     if (allowed === false) return;
 
     const bkgRow = await pool.request().input("bid", sql.Int, parseInt(bookingId))
-      .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')");
+      .query(`SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}`);
     if (!bkgRow.recordset.length) return res.status(404).json({ error: "Booking not found or not eligible for cancellation" });
     // The booking comes in the query string, which the path guards don't see.
     if (!projectAllowed(req.projectScope, bkgRow.recordset[0].ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
 
     const { ProjectId, BookingDate } = bkgRow.recordset[0];
-    const daysSince = BookingDate
-      ? Math.floor((Date.now() - new Date(BookingDate).getTime()) / 86_400_000)
-      : 0;
-
-    // Find the matching slab: project-specific first, then global (NULL).
-    // A slab matches when daysSince >= Min AND (Max IS NULL OR daysSince <= Max).
-    const slabRes = await pool.request()
-      .input("pid", sql.Int, ProjectId != null ? ProjectId : null)
-      .input("days", sql.Int, daysSince)
-      .query(`
-        SELECT TOP 1
-          Id, ProjectId, PolicyName, DaysFromBookingMin, DaysFromBookingMax,
-          DeductionPercent, Notes
-        FROM dbo.CrmCancellationPolicy
-        WHERE IsActive = 1
-          AND @days >= DaysFromBookingMin
-          AND (DaysFromBookingMax IS NULL OR @days <= DaysFromBookingMax)
-          AND (ProjectId = @pid OR ProjectId IS NULL)
-        ORDER BY
-          CASE WHEN ProjectId = @pid THEN 0 ELSE 1 END,  -- project-specific wins
-          DaysFromBookingMin DESC                          -- most restrictive slab first
-      `);
-
-    if (slabRes.recordset.length) {
-      return res.json({ ...slabRes.recordset[0], daysSinceBooking: daysSince, source: "policy" });
-    }
-
-    // No slab configured — fall back to the app default (10% if unset).
-    const fallbackPct = await resolveDefaultDeductionPct(pool);
-    return res.json({ DeductionPercent: fallbackPct, daysSinceBooking: daysSince, source: "default" });
+    res.json(await resolveCancellationPolicy(pool, ProjectId, BookingDate));
   } catch (e) {
     console.error("[crm-cancellations] GET /policy error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -187,6 +190,107 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
 });
 
 // The list's sortable columns: sortKey → ORDER BY expression.
+// ── Cancellation Policy (the screen) ─────────────────────────────────────────
+// The slabs: for one project or all projects, a days-since-booking range, the charge % and the refund due days.
+// Changing a slab affects requests raised afterwards; a request keeps the figures it was raised with.
+const POLICY_SELECT = `
+  SELECT p.Id, p.ProjectId, pr.name AS ProjectName, p.PolicyName, p.DaysFromBookingMin, p.DaysFromBookingMax,
+         p.DeductionPercent, p.RefundDueDays, p.Notes, p.IsActive, p.CreatedAt, p.UpdatedAt, u.name AS CreatedByName
+  FROM dbo.CrmCancellationPolicy p
+  LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
+  LEFT JOIN dbo.Users u ON u.id = p.CreatedBy`;
+function readPolicyBody(b) {
+  const num = (v) => (v === null || v === undefined || String(v).trim() === "" ? null : Number(v));
+  const p = {
+    ProjectId: num(b.ProjectId), PolicyName: String(b.PolicyName || "").trim(), Notes: String(b.Notes || "").trim() || null,
+    DaysFromBookingMin: num(b.DaysFromBookingMin) ?? 0, DaysFromBookingMax: num(b.DaysFromBookingMax),
+    DeductionPercent: num(b.DeductionPercent), RefundDueDays: num(b.RefundDueDays),
+  };
+  if (!p.PolicyName) return { error: "Give the slab a name." };
+  if (!Number.isInteger(p.DaysFromBookingMin) || p.DaysFromBookingMin < 0) return { error: "The days from booking must start at 0 or more." };
+  if (p.DaysFromBookingMax != null && (!Number.isInteger(p.DaysFromBookingMax) || p.DaysFromBookingMax < p.DaysFromBookingMin)) return { error: "The days range must end at or after where it starts." };
+  if (p.DeductionPercent == null || !(p.DeductionPercent >= 0 && p.DeductionPercent <= 100)) return { error: "The charge must be between 0 and 100%." };
+  if (p.RefundDueDays != null && !(Number.isInteger(p.RefundDueDays) && p.RefundDueDays >= 1 && p.RefundDueDays <= 365)) return { error: "The refund due days must be between 1 and 365." };
+  return { p };
+}
+// Two active slabs for the same project (or both for all projects) may not cover the same days.
+async function overlappingSlab(pool, p, exceptId = null) {
+  return (await pool.request()
+    .input("pid", sql.Int, p.ProjectId).input("min", sql.Int, p.DaysFromBookingMin).input("max", sql.Int, p.DaysFromBookingMax).input("ex", sql.Int, exceptId)
+    .query(`SELECT TOP 1 PolicyName, DaysFromBookingMin, DaysFromBookingMax FROM dbo.CrmCancellationPolicy
+            WHERE IsActive = 1 AND (@ex IS NULL OR Id <> @ex)
+              AND ((ProjectId IS NULL AND @pid IS NULL) OR ProjectId = @pid)
+              AND DaysFromBookingMin <= ISNULL(@max, 2147483647) AND ISNULL(DaysFromBookingMax, 2147483647) >= @min`)).recordset[0];
+}
+const overlapError = (o) => `It overlaps the slab "${o.PolicyName}" (${o.DaysFromBookingMin}–${o.DaysFromBookingMax ?? "∞"} days).`;
+
+router.get("/policies", requirePageRight("crm-cancellations", "view"), async (req, res) => {
+  try {
+    const scoped = req.projectScope ? ` WHERE p.ProjectId IS NULL${projectPredicate(req.projectScope, "p.ProjectId", " OR")}` : "";
+    const rows = (await getPool().request().query(`${POLICY_SELECT}${scoped} ORDER BY p.IsActive DESC, CASE WHEN p.ProjectId IS NULL THEN 1 ELSE 0 END, pr.name, p.DaysFromBookingMin`)).recordset;
+    res.json({ rows, defaults: { refundDueDays: REFUND_DUE_DAYS_DEFAULT, deductionPercent: await resolveDefaultDeductionPct(getPool()) } });
+  } catch (e) {
+    console.error("[crm-cancellations] GET /policies error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+router.post("/policies", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
+  try {
+    const { p, error } = readPolicyBody(req.body || {});
+    if (error) return res.status(400).json({ error });
+    if (!projectAllowed(req.projectScope, p.ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
+    const pool = getPool();
+    const o = await overlappingSlab(pool, p);
+    if (o) return res.status(409).json({ error: overlapError(o) });
+    const id = (await pool.request()
+      .input("pid", sql.Int, p.ProjectId).input("name", sql.NVarChar(200), p.PolicyName).input("min", sql.Int, p.DaysFromBookingMin).input("max", sql.Int, p.DaysFromBookingMax)
+      .input("pct", sql.Decimal(5, 2), p.DeductionPercent).input("due", sql.Int, p.RefundDueDays).input("notes", sql.NVarChar(500), p.Notes).input("by", sql.Int, actorId(req))
+      .query(`INSERT INTO dbo.CrmCancellationPolicy (ProjectId, PolicyName, DaysFromBookingMin, DaysFromBookingMax, DeductionPercent, RefundDueDays, Notes, IsActive, CreatedBy, CreatedAt)
+              OUTPUT INSERTED.Id VALUES (@pid, @name, @min, @max, @pct, @due, @notes, 1, @by, SYSDATETIME())`)).recordset[0].Id;
+    res.status(201).json({ success: true, id });
+  } catch (e) {
+    console.error("[crm-cancellations] POST /policies error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+router.put("/policies/:pid", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
+  try {
+    const id = parseId(req.params.pid);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const pool = getPool();
+    const cur = (await pool.request().input("id", sql.Int, id).query("SELECT IsActive FROM dbo.CrmCancellationPolicy WHERE Id = @id")).recordset[0];
+    if (!cur) return res.status(404).json({ error: "Slab not found" });
+    const b = req.body || {};
+    // Switching a slab off (or back on) on its own.
+    if (Object.keys(b).length === 1 && Object.hasOwn(b, "IsActive")) {
+      if (b.IsActive) {
+        const row = (await pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmCancellationPolicy WHERE Id = @id")).recordset[0];
+        const o = await overlappingSlab(pool, row, id);
+        if (o) return res.status(409).json({ error: overlapError(o) });
+      }
+      await pool.request().input("id", sql.Int, id).input("on", sql.Bit, b.IsActive ? 1 : 0)
+        .query("UPDATE dbo.CrmCancellationPolicy SET IsActive = @on, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      return res.json({ success: true });
+    }
+    const { p, error } = readPolicyBody(b);
+    if (error) return res.status(400).json({ error });
+    if (!projectAllowed(req.projectScope, p.ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
+    if (cur.IsActive) {
+      const o = await overlappingSlab(pool, p, id);
+      if (o) return res.status(409).json({ error: overlapError(o) });
+    }
+    await pool.request().input("id", sql.Int, id)
+      .input("pid", sql.Int, p.ProjectId).input("name", sql.NVarChar(200), p.PolicyName).input("min", sql.Int, p.DaysFromBookingMin).input("max", sql.Int, p.DaysFromBookingMax)
+      .input("pct", sql.Decimal(5, 2), p.DeductionPercent).input("due", sql.Int, p.RefundDueDays).input("notes", sql.NVarChar(500), p.Notes)
+      .query(`UPDATE dbo.CrmCancellationPolicy SET ProjectId = @pid, PolicyName = @name, DaysFromBookingMin = @min, DaysFromBookingMax = @max,
+                DeductionPercent = @pct, RefundDueDays = @due, Notes = @notes, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-cancellations] PUT /policies error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 const CANCEL_SORT = {
   CreatedAt: "c.CreatedAt",
   RequestedDate: "c.RequestedDate",
@@ -273,7 +377,7 @@ router.get("/bookings", requirePageRight("crm-cancellations", "create"), async (
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+      WHERE b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmCancellation c WHERE c.BookingId = b.Id AND c.Status IN ('Pending', 'FinancePending', 'Approved'))${projectPredicate(req.projectScope, "b.ProjectId")}
       ORDER BY b.CreatedAt DESC`);
     res.json(r.recordset);
@@ -324,7 +428,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
 
     // Explicit duplicate guard — clearer error than relying on a DB UNIQUE catch.
     const existingCancel = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 CancellationNo, Status FROM dbo.CrmCancellation WHERE BookingId = @bid AND Status NOT IN ('Rejected')");
+      .query(`SELECT TOP 1 CancellationNo, Status FROM dbo.CrmCancellation WHERE BookingId = @bid AND Status NOT IN ${CANCELLATION_DROPPED_SQL}`);
     if (existingCancel.recordset.length) {
       const ex = existingCancel.recordset[0];
       return res.status(409).json({ error: `A cancellation request (${ex.CancellationNo}) already exists for this booking and is currently ${ex.Status}` });
@@ -336,40 +440,15 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
       return res.status(400).json({ error: "This booking's sales deed is already Registered — a legal deed-cancellation process is required, not a standard cancellation request" });
     }
 
-    // Determine the deduction %:
-    //   1. If the requester explicitly passes DeductionPercent, validate and use it
-    //      (admin override — still capped 0-100 to prevent typos or malicious values)
-    //   2. Otherwise auto-look up the matching slab from CrmCancellationPolicy
-    //      (project-specific first, global default second)
-    //   3. Final fallback: AppSetting 'CancellationDefaultPct', then 10%
-    let deductionPct;
+    // The charge % and the refund due days come from the booking's policy slab (resolveCancellationPolicy); staff may
+    // override the charge (0-100). Both are kept on the request.
+    const bkgMeta = (await pool.request().input("bid", sql.Int, bookingId).query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0] || {};
+    const policy = await resolveCancellationPolicy(pool, bkgMeta.ProjectId, bkgMeta.BookingDate);
+    let deductionPct = policy.DeductionPercent;
     if (b.DeductionPercent != null && String(b.DeductionPercent).trim() !== "") {
       deductionPct = parseFloat(b.DeductionPercent);
       if (!Number.isFinite(deductionPct) || deductionPct < 0 || deductionPct > 100) {
         return res.status(400).json({ error: "DeductionPercent must be a number between 0 and 100" });
-      }
-    } else {
-      // Auto-resolve from policy
-      const bkgMeta = await pool.request().input("bid", sql.Int, bookingId)
-        .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid");
-      const { ProjectId: pId, BookingDate } = bkgMeta.recordset[0] || {};
-      const daysSince = BookingDate
-        ? Math.floor((Date.now() - new Date(BookingDate).getTime()) / 86_400_000)
-        : 0;
-      const policyRes = await pool.request()
-        .input("pid", sql.Int, pId != null ? pId : null).input("days", sql.Int, daysSince)
-        .query(`
-          SELECT TOP 1 DeductionPercent FROM dbo.CrmCancellationPolicy
-          WHERE IsActive = 1
-            AND @days >= DaysFromBookingMin
-            AND (DaysFromBookingMax IS NULL OR @days <= DaysFromBookingMax)
-            AND (ProjectId = @pid OR ProjectId IS NULL)
-          ORDER BY CASE WHEN ProjectId = @pid THEN 0 ELSE 1 END, DaysFromBookingMin DESC
-        `);
-      if (policyRes.recordset.length) {
-        deductionPct = Number(policyRes.recordset[0].DeductionPercent);
-      } else {
-        deductionPct = await resolveDefaultDeductionPct(pool);
       }
     }
     // The resolved deduction % is REMEMBERED on the request but NOT taken now.
@@ -419,9 +498,12 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
       if (incomingTransfer) {
         throw Object.assign(new Error(`Cannot request cancellation while incoming re-booking transfer #${incomingTransfer.Id} is open; finish or reject it first.`), { status: 409 });
       }
+      // A unit change still open on this booking (as its old or its new booking) is finished or withdrawn first.
+      const openChange = await require("../services/crmEntityCreation").openUnitChangeOn(createTx, bookingId);
+      if (openChange) throw Object.assign(new Error(`Unit change ${openChange.RequestNo} is open on this booking. Withdraw or finish it first.`), { status: 409 });
       const duplicate = (await createTx.request().input("bid", sql.Int, bookingId).query(`
         SELECT TOP 1 CancellationNo, Status FROM dbo.CrmCancellation WITH (UPDLOCK, HOLDLOCK)
-        WHERE BookingId = @bid AND Status NOT IN ('Rejected')
+        WHERE BookingId = @bid AND Status NOT IN ${CANCELLATION_DROPPED_SQL}
       `)).recordset[0];
       if (duplicate) {
         throw Object.assign(new Error(`A cancellation request (${duplicate.CancellationNo}) already exists for this booking and is currently ${duplicate.Status}`), { status: 409 });
@@ -444,11 +526,12 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
       .input("damt",  sql.Decimal(18,2), 0)
       .input("ramt",  sql.Decimal(18,2), totalPaid)
       .input("rb",    sql.Int,           actorId(req))
+      .input("due",   sql.Int,           policy.RefundDueDays)
       .query(`
         INSERT INTO dbo.CrmCancellation
-          (CancellationNo, BookingId, Reason, AmountPaidTillDate, DeductionPercent, DeductionAmount, RefundAmount, Status, RequestedBy, CreatedAt)
+          (CancellationNo, BookingId, Reason, AmountPaidTillDate, DeductionPercent, DeductionAmount, RefundAmount, Status, RequestedBy, CreatedAt, RefundDueDays)
         OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @reason, @paid, @dpct, @damt, @ramt, 'Pending', @rb, SYSDATETIME())
+        VALUES (@no, @bid, @reason, @paid, @dpct, @damt, @ramt, 'Pending', @rb, SYSDATETIME(), @due)
       `);
       await createTx.commit();
     } catch (createError) {
@@ -469,31 +552,39 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
   }
 });
 
-// PUT /:id — edit notes only. Status is never settable here — Approved/
-// Rejected go through the endpoints below. The money side (refund/settlement)
-// now lives on dbo.CrmRefund (the Refunds page), not on this record.
-// Blocked once the cancellation is Approved — its held credit and linked
-// refund are already in flight; notes shouldn't be quietly rewritable then.
+// PUT /:id — correct a request before it is approved: the reason, the cancellation charge % and the notes, while it
+// waits for approval or after a rejection (then it is sent again). The charge is taken only if the customer later takes
+// a refund. Approved and withdrawn requests are closed.
+const CORRECTABLE = ["Pending", "Rejected"];
 router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const b = req.body;
+    const b = req.body || {};
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmCancellation WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    if ([CrmStatus.APPROVED, "Cancelled"].includes(cur.recordset[0].Status)) {
-      return res.status(400).json({ error: "This cancellation is already approved — its held credit and refund are in flight; notes can no longer be edited here" });
+    if (!CORRECTABLE.includes(cur.recordset[0].Status)) {
+      return res.status(400).json({ error: `This cancellation is ${cur.recordset[0].Status}: it can no longer be changed` });
     }
+    const setReason = Object.hasOwn(b, "Reason");
+    if (setReason && !String(b.Reason || "").trim()) return res.status(400).json({ error: "Give the reason for the cancellation" });
+    const setPct = Object.hasOwn(b, "DeductionPercent") && b.DeductionPercent !== null && String(b.DeductionPercent).trim() !== "";
+    const pct = setPct ? parseFloat(b.DeductionPercent) : null;
+    if (setPct && (!Number.isFinite(pct) || pct < 0 || pct > 100)) return res.status(400).json({ error: "DeductionPercent must be a number between 0 and 100" });
 
     const updated = await pool.request()
-      .input("id",    sql.Int,           id)
-      .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("id", sql.Int, id)
+      .input("setReason", sql.Bit, setReason ? 1 : 0).input("reason", sql.NVarChar(sql.MAX), setReason ? String(b.Reason).trim() : null)
+      .input("setPct", sql.Bit, setPct ? 1 : 0).input("pct", sql.Decimal(5, 2), pct)
+      .input("notes", sql.NVarChar(sql.MAX), b.Notes ?? null)
       .query(`
-        UPDATE dbo.CrmCancellation
-        SET Notes = ISNULL(@notes, Notes), UpdatedAt = SYSDATETIME()
-        WHERE Id = @id AND Status NOT IN ('${CrmStatus.APPROVED}', 'Cancelled')
+        UPDATE dbo.CrmCancellation SET
+          Reason = CASE WHEN @setReason = 1 THEN @reason ELSE Reason END,
+          DeductionPercent = CASE WHEN @setPct = 1 THEN @pct ELSE DeductionPercent END,
+          Notes = ISNULL(@notes, Notes), UpdatedAt = SYSDATETIME()
+        WHERE Id = @id AND Status IN (${CORRECTABLE.map((x) => `'${x}'`).join(", ")})
       `);
     if (updated.rowsAffected[0] !== 1) {
       return res.status(409).json({ error: "This cancellation changed state while you were editing it; reload before making further changes" });
@@ -533,6 +624,10 @@ router.put("/:id/submit", requirePageRight("crm-cancellations", "edit"), async (
   } catch (e) {
     try { if (tx) await tx.rollback(); } catch {}
     console.error("[crm-cancellations] submit error:", e.message);
+    // One live request per booking (migration 636): sending a rejected one again while another is open.
+    if (/UX_CrmCancellation_Booking_Live|duplicate key/i.test(e.message || "")) {
+      return res.status(409).json({ error: "Another cancellation request for this booking is already open. Withdraw or finish it first." });
+    }
     res.status(e.status || 400).json({ error: e.message });
   }
 });
@@ -631,6 +726,9 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       if (!lockedBooking || !lockedBooking.IsActive || DEAD_BOOKING_STATUSES.includes(lockedBooking.Status)) {
         throw Object.assign(new Error(`Cannot cancel this booking because it is no longer active${lockedBooking ? ` (status: ${lockedBooking.Status})` : ""}.`), { status: 409 });
       }
+      // A unit change still open on this booking (as its old or its new booking) is finished or withdrawn first.
+      const openChange = await require("../services/crmEntityCreation").openUnitChangeOn(tx, bookingId);
+      if (openChange) throw Object.assign(new Error(`Unit change ${openChange.RequestNo} is open on this booking. Withdraw or finish it first.`), { status: 409 });
       const lockedVillaOnLand = await require("../services/villaLand").villaBookedOnLandOf(tx, bookingId);
       if (lockedVillaOnLand) {
         throw Object.assign(new Error(`The villa built on this land is booked (${lockedVillaOnLand}). Cancel the villa booking first — the land can't be cancelled from under it.`), { status: 409 });
@@ -645,7 +743,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       const liveClaim = (await tx.request().input("bid", sql.Int, bookingId).query(`
         SELECT TOP 1 r.RefundNo AS ClaimNo, 'refund' AS ClaimType
         FROM dbo.CrmRefund r
-        WHERE r.BookingId = @bid AND r.Status NOT IN ('Paid', 'Rejected', 'Cancelled')
+        WHERE r.BookingId = @bid AND r.Status NOT IN ${REFUND_CLOSED_SQL}
         UNION ALL
         SELECT TOP 1 CAST(rt.Id AS VARCHAR(30)), 're-booking transfer'
         FROM dbo.CrmRebookingTransfer rt
@@ -759,69 +857,12 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       // never onto the dead booking's milestones. A refund cannot go for
       // approval while any of them is still with Finance (crmRefunds.js).
 
-      await releaseAllParkingForBooking(tx, bookingId);
-
-      // Orphaned Brokerage Clawback
-      // Void any unpaid brokerage tranches for this cancelled booking, and flag paid ones for clawback.
-      // An Approved tranche (accrued, not yet paid) is voided too and its accrual reversed — left
-      // Approved, its rejected voucher let 'retry finance hand-off' raise a fresh payout for a
-      // cancelled booking.
-      const accrued = (await tx.request().input("bid", sql.Int, bookingId)
-        .query(`SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid AND Status = '${CrmStatus.APPROVED}'`)).recordset;
-      for (const a of accrued) await reversePostingBySource(tx, "CrmBrokerage", a.Id);
-      await tx.request().input("bid", sql.Int, bookingId).query(`
-        UPDATE dbo.CrmBrokerageMaster
-        SET Status = '${CrmStatus.VOIDED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided due to booking cancellation.'
-        WHERE BookingId = @bid AND Status IN ('${CrmStatus.PENDING}', '${CrmStatus.APPROVED}');
-
-        UPDATE dbo.CrmBrokerageMaster
-        SET Status = '${CrmStatus.CLAWBACK_REQUIRED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Clawback required due to booking cancellation.'
-        WHERE BookingId = @bid AND Status = '${CrmStatus.PAID}';
-      `);
-
-      // Void any finance payment vouchers (NewPayment) linked to brokerage
-      // tranches that were just voided above. Without this, Finance can still
-      // see — and process — a live PAY document for a cancelled deal, which is
-      // a real cash-outflow risk.
-      await tx.request().input("bid", sql.Int, bookingId).query(`
-        UPDATE dbo.NewPayment
-        SET Status = 'Rejected', UpdatedAt = SYSDATETIME()
-        WHERE SourceCrmBrokerageId IN (
-          SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid
-        )
-        AND Status IN ('Draft', 'Pending')   -- unpaid only: a paid voucher is Status 'Approved' (the old
-                                            -- NOT IN ('Paid', ...) rejected real, already-paid payouts)
-      `);
-
-      // guardAndConvertHold() closes the Unit's hold to 'Converted' the moment
-      // a Booking is created from it — but if an Active hold on this same unit
-      // still lingers for any reason (e.g. legacy data from before that
-      // conversion existed), a Cancelled booking must not leave it standing:
-      // that would keep blocking every other genuinely current applicant for
-      // a unit that just became free again.
-      const unitRow = await tx.request().input("bid", sql.Int, bookingId)
-        .query("SELECT UnitId FROM dbo.CrmBooking WHERE Id = @bid");
-      const unitId = unitRow.recordset[0]?.UnitId;
-      if (unitId) {
-        const stuckHold = await findActiveHold(tx, "Unit", unitId);
-        if (stuckHold) await releaseHold(tx, stuckHold.Id, actorId(req));
-      }
-
-      const pendingAmendments = await tx.request().input("bid", sql.Int, bookingId)
-        .query("SELECT Id, RequestedBy FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status = 'Pending'");
-      for (const amend of pendingAmendments.recordset) {
-        await tx.request().input("id", sql.Int, amend.Id).input("rb", sql.Int, actorId(req))
-          .query(`
-            UPDATE dbo.CrmBookingAmendmentRequest SET
-              Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(),
-              ReviewNotes = 'Auto-rejected — the booking was cancelled'
-            WHERE Id = @id
-          `);
+      // Parking, brokerage, holds and open amendments of the closed booking (shared with an approved Unit Change).
+      const { amendments } = await releaseClosedBookingSideEffects(tx, bookingId, { actorUserId: actorId(req), why: "cancelled" });
+      for (const amend of amendments) {
         // Defer websocket notification until after commit — emitNotification is
         // a pure outbound push (no DB write) and must not run inside a tx.
-        if (amend.RequestedBy) {
-          pendingNotifications.push({ userId: amend.RequestedBy, amendId: amend.Id });
-        }
+        if (amend.RequestedBy) pendingNotifications.push({ userId: amend.RequestedBy, amendId: amend.Id });
       }
 
       // ── Park the money as HELD on-account credit ─────────────────────────
@@ -925,6 +966,115 @@ router.put("/:id/reject", requirePageRight("crm-cancellations", "edit"), async (
 });
 
 
+// PUT /:id/withdraw — staff take a request back before it is approved (the customer no longer wants to cancel), with
+// a reason. Final, and nothing is deleted: the request stays as Withdrawn, the booking stays active, and a new request
+// can be raised for it later (constants CANCELLATION_DROPPED_STATUSES). It leaves the Approval Inbox (which lists Pending).
+router.put("/:id/withdraw", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) return res.status(400).json({ error: "Give the reason the request is withdrawn." });
+  try {
+    const pool = getPool();
+    const cur = (await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmCancellation WHERE Id = @id")).recordset[0];
+    if (!cur) return res.status(404).json({ error: "Cancellation request not found" });
+    if (!CORRECTABLE.includes(cur.Status)) {
+      return res.status(409).json({ error: cur.Status === "Withdrawn" ? "This request is already withdrawn." : `A request that is ${cur.Status} can't be withdrawn: only before approval.` });
+    }
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const upd = await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req))
+        .query(`UPDATE dbo.CrmCancellation SET Status = 'Withdrawn', UpdatedAt = SYSDATETIME()
+                WHERE Id = @id AND Status IN (${CORRECTABLE.map((x) => `'${x}'`).join(", ")})`);
+      if (upd.rowsAffected[0] !== 1) throw Object.assign(new Error("This request changed while you were withdrawing it; reload and try again."), { status: 409 });
+      await writeAuditLog("CrmCancellation", id, 0, req.user?.role, req.user?.email || req.user?.name || null, "Withdrawn", reason.slice(0, 500), tx, actorId(req));
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* rolled back */ }
+      throw txErr;
+    }
+    res.json({ success: true, status: "Withdrawn" });
+  } catch (e) {
+    console.error("[crm-cancellations] withdraw error:", e.message);
+    res.status(e.status || 500).json({ error: e.status ? e.message : "An internal error occurred. Please try again later." });
+  }
+});
+
+// What closing a booking for good releases, beyond its own status and lines: its parking (back to inventory), its
+// brokerage (on a cancellation), any lingering hold on its unit, and its open
+// amendment requests. Shared by an approved Cancellation (why "cancelled") and an approved Unit Change (why "moved to
+// another unit": the sale carries on, so its brokerage moves with it and is left alone here). Returns the rejected
+// amendments so the caller notifies their requesters after commit.
+async function releaseClosedBookingSideEffects(tx, bookingId, { actorUserId = null, why = "cancelled" } = {}) {
+  const cancelled = why === "cancelled";
+  await releaseAllParkingForBooking(tx, bookingId);
+
+  // Brokerage: a cancelled sale voids what is unpaid (its accrual reversed, its payout vouchers rejected) and claws
+  // paid brokerage back. A Unit Change carries the sale on: its brokerage moves to the new booking as it stands (paid
+  // parts stay closed, unpaid parts carry on) and is not touched here (crmEntityCreation.executeUnitChange).
+  if (cancelled) {
+    // Orphaned Brokerage Clawback
+    // Void any unpaid brokerage tranches for this cancelled booking, and flag paid ones for clawback.
+    // An Approved tranche (accrued, not yet paid) is voided too and its accrual reversed — left
+    // Approved, its rejected voucher let 'retry finance hand-off' raise a fresh payout for a
+    // cancelled booking.
+    const accrued = (await tx.request().input("bid", sql.Int, bookingId)
+      .query(`SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid AND Status = '${CrmStatus.APPROVED}'`)).recordset;
+    for (const a of accrued) await reversePostingBySource(tx, "CrmBrokerage", a.Id);
+    await tx.request().input("bid", sql.Int, bookingId).query(`
+      UPDATE dbo.CrmBrokerageMaster
+      SET Status = '${CrmStatus.VOIDED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided due to booking cancellation.'
+      WHERE BookingId = @bid AND Status IN ('${CrmStatus.PENDING}', '${CrmStatus.APPROVED}');
+
+      UPDATE dbo.CrmBrokerageMaster
+      SET Status = '${CrmStatus.CLAWBACK_REQUIRED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Clawback required due to booking cancellation.'
+      WHERE BookingId = @bid AND Status = '${CrmStatus.PAID}';
+    `);
+
+    // Void any finance payment vouchers (NewPayment) linked to brokerage
+    // tranches that were just voided above. Without this, Finance can still
+    // see — and process — a live PAY document for a cancelled deal, which is
+    // a real cash-outflow risk.
+    await tx.request().input("bid", sql.Int, bookingId).query(`
+      UPDATE dbo.NewPayment
+      SET Status = 'Rejected', UpdatedAt = SYSDATETIME()
+      WHERE SourceCrmBrokerageId IN (
+        SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid
+      )
+      AND Status IN ('Draft', 'Pending')   -- unpaid only: a paid voucher is Status 'Approved' (the old
+                                          -- NOT IN ('Paid', ...) rejected real, already-paid payouts)
+    `);
+  }
+
+  // guardAndConvertHold() closes the Unit's hold to 'Converted' the moment
+  // a Booking is created from it — but if an Active hold on this same unit
+  // still lingers for any reason (e.g. legacy data from before that
+  // conversion existed), a Cancelled booking must not leave it standing:
+  // that would keep blocking every other genuinely current applicant for
+  // a unit that just became free again.
+  const unitRow = await tx.request().input("bid", sql.Int, bookingId)
+    .query("SELECT UnitId FROM dbo.CrmBooking WHERE Id = @bid");
+  const unitId = unitRow.recordset[0]?.UnitId;
+  if (unitId) {
+    const stuckHold = await findActiveHold(tx, "Unit", unitId);
+    if (stuckHold) await releaseHold(tx, stuckHold.Id, actorUserId);
+  }
+
+  const pendingAmendments = await tx.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id, RequestedBy FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status = 'Pending'");
+  for (const amend of pendingAmendments.recordset) {
+    await tx.request().input("id", sql.Int, amend.Id).input("rb", sql.Int, actorUserId).input("note", sql.NVarChar(300), `Auto-rejected — the booking was ${why}`)
+      .query(`
+        UPDATE dbo.CrmBookingAmendmentRequest SET
+          Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(),
+          ReviewNotes = @note
+        WHERE Id = @id
+      `);
+  }
+  return { amendments: pendingAmendments.recordset };
+}
+
 // ── Held credit + draft refund for a cancellation ──────────────────────────
 // The one place a cancelled booking's money is set aside for the buyer: ONE
 // Held on-account credit keyed to the cancellation (no GL — the receipts
@@ -938,7 +1088,7 @@ async function holdCancellationCredit(tx, { cancellationId, bookingId, amount, a
   const amt = Math.round((Number(amount) || 0) * 100) / 100;
   if (!(amt > 0)) return null;
   const c = (await tx.request().input("cid", sql.Int, cancellationId)
-    .query("SELECT CancellationNo, DeductionPercent FROM dbo.CrmCancellation WITH (UPDLOCK) WHERE Id = @cid")).recordset[0];
+    .query("SELECT CancellationNo, DeductionPercent, RefundDueDays FROM dbo.CrmCancellation WITH (UPDLOCK) WHERE Id = @cid")).recordset[0];
   if (!c) throw Object.assign(new Error("Cancellation not found"), { status: 404 });
   const pct = Number(deductionPct ?? c.DeductionPercent) || 0;
 
@@ -996,7 +1146,7 @@ async function holdCancellationCredit(tx, { cancellationId, bookingId, amount, a
         .input("damt", sql.Decimal(18, 2), damt).input("net", sql.Decimal(18, 2), net)
         .input("cbank", sql.NVarChar(200), ctx.BankName || null).input("cacc", sql.NVarChar(50), ctx.AccountNo || null)
         .input("cifsc", sql.NVarChar(20), ctx.IfscCode || null)
-        .input("due", sql.Date, new Date(Date.now() + 45 * 86400000)).input("rb", sql.Int, actorUserId ?? null)
+        .input("due", sql.Date, new Date(Date.now() + (c.RefundDueDays ?? REFUND_DUE_DAYS_DEFAULT) * 86400000)).input("rb", sql.Int, actorUserId ?? null)
         .query(`
           INSERT INTO dbo.CrmRefund
             (RefundNo, CustomerId, CompanyId, ProjectId, BookingId, SourceType,
@@ -1022,3 +1172,4 @@ async function holdCancellationCredit(tx, { cancellationId, bookingId, amount, a
 
 module.exports = router;
 module.exports.holdCancellationCredit = holdCancellationCredit;
+module.exports.releaseClosedBookingSideEffects = releaseClosedBookingSideEffects;

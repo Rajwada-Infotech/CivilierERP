@@ -76,7 +76,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
     queryKey: ["crm-transfer-deed", id],
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/${id}`);
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load the deed");
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Could not load the deed");
       return r.json();
     },
   });

@@ -1,10 +1,10 @@
+import { useCanApprove } from "@/hooks/useCanApprove";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { useAuth } from "@/contexts/AuthContext";
 import { translateError } from "@/lib/translateError";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, Ban, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, ListChecks, Plus, Receipt, RefreshCw, Send, Wallet } from "lucide-react";
@@ -20,7 +20,7 @@ import { useCrmListState, useSticky, listParams } from "@/hooks/useCrmListState"
 import { BAND_DOT, BAND_KEY, BAND_KEY_MAIN, Initials, MoneyBand, WaiverNotes, WaiverSection, asName, moneyWords } from "./payments/parts";
 import { fmtShort, pct, pendingWaiverIds } from "./payments/config";
 import {
-  BILLING_MARK, CreditedNote, INVOICE_VOID_ROLES, InvoiceBar, InvoiceMark, billingStateOf, downloadFinalStatement, downloadInvoicePdf, fetchBookingBilling, fetchInvoice, fetchInvoiceExport, fetchInvoiceRows,
+  BILLING_MARK, CreditedNote, InvoiceBar, InvoiceMark, billingStateOf, downloadFinalStatement, downloadInvoicePdf, fetchBookingBilling, fetchInvoice, fetchInvoiceExport, fetchInvoiceRows,
   fetchLedger, fetchLedgerExport, fetchLedgerSummary, fmtDate, fmtMoney, generateFinalInvoice, generateMilestoneInvoices, invalidateInvoiceRelatedQueries, raiseDemand, typeLabel, type InvoiceRow, type LedgerRow,
 } from "./invoices/config";
 import { InvoicePreviewDialog, VoidInvoiceDialog } from "./invoices/InvoiceDialogs";
@@ -125,8 +125,8 @@ function invoiceCols(actions: (inv: InvoiceRow) => React.ReactNode): GridCol<Inv
 const CrmInvoices: React.FC = () => {
   const rights = usePageRights("crm-invoices");
   const qc = useQueryClient();
-  const { currentUser } = useAuth();
-  const canVoid = !!currentUser?.role && INVOICE_VOID_ROLES.includes(currentUser.role);
+  // Who may void is set in Approval Setup (CRM Invoice Void); the server checks the same.
+  const canVoid = useCanApprove("crm-invoice-void");
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [pageSize, setPageSize] = useState<number>(GRID_PAGE_SIZES[0]);

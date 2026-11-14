@@ -39,6 +39,7 @@ export type ApprovalTable =
   | "CrmAgreement"
   | "CrmBrokerageMaster"
   | "CrmCancellation"
+  | "CrmPropertyChangeRequest"
   | "CrmRefund"
   | "CrmUnitResale"
   | "CrmOwnershipChange"
