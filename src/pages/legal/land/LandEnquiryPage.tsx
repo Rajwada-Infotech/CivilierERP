@@ -93,7 +93,7 @@ export default function LandEnquiryPage() {
       <LegalShell title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and Land Profile." icon={MessageQuestion}>
         <ProjectPicker value={projectId} onChange={setProjectId} />
         {projectId && (
-          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-10">
+          <div className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
             {FILTERS.map(([k, label, test, edge]) => {
               const n = rows.filter(test).length;
               const hot = (k === "overdue" && n > 0);
@@ -143,12 +143,22 @@ export default function LandEnquiryPage() {
             }
             if (!rights.canEdit) return <span className="inline-flex flex-wrap gap-1.5">{map}{portal}</span>;
             // Deed Registry Search comes first: Convert / Hold / Reject open once every office's search is complete.
+            // No office type set up for this enquiry's state: nothing to search yet, so it cannot be converted.
+            if (Number(raw.OfficesTotal ?? 0) === 0 && st !== "Rejected") {
+              return (
+                <span className="inline-flex flex-wrap justify-end gap-1.5">
+                  {map}{portal}
+                  <button onClick={() => navigate("/legal/setup/registration-office-type")} className={`${small} border-amber-500 bg-amber-500/10 font-semibold text-amber-800`}
+                    title="Add the registration office types of this state in Setup; the enquiry then gets its deed search timelines">No office type for this state — set up</button>
+                </span>
+              );
+            }
             const openOffices = Number(raw.OfficesPending ?? 0);
             if (openOffices > 0) {
               return (
                 <span className="inline-flex flex-wrap justify-end gap-1.5">
                   {map}{portal}
-                  <button onClick={() => navigate(`/legal/land/deed-search?q=${encodeURIComponent(no)}`)} className={`${small} font-semibold ${Number(raw.OfficesOverdue) > 0 ? "border-destructive bg-destructive/10 text-destructive" : "border-amber-500 bg-amber-500/10 text-amber-800"}`}
+                  <button onClick={() => navigate(`/legal/land/deed-search?view=all&q=${encodeURIComponent(no)}&project=${projectId}`)} className={`${small} font-semibold ${Number(raw.OfficesOverdue) > 0 ? "border-destructive bg-destructive/10 text-destructive" : "border-amber-500 bg-amber-500/10 text-amber-800"}`}
                     title="Search every registration office first; the other actions open when all are complete">
                     Deed search {Number(raw.OfficesTotal ?? 0) - openOffices}/{Number(raw.OfficesTotal ?? 0)}{Number(raw.OfficesOverdue) > 0 ? ` · ${raw.OfficesOverdue} overdue` : ""}
                   </button>

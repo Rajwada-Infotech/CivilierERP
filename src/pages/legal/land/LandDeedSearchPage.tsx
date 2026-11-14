@@ -12,7 +12,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import {
   getSearchOptions, findEnquiries, getEnquirySearches, setOfficeOf, addYearResult, editYearResult, deleteYearResult, addYearRange,
   completeOffice, reopenOffice, addOffice, daysCounter,
-  type EnquiryHit, type OfficeSearch, type YearResult, type YearBody, type SearchTab, type SearchOptions,
+  type EnquiryHit, type OfficeSearch, type YearResult, type YearBody, type SearchOptions,
 } from "@/api/legalEnquirySearchApi";
 
 const field = "h-9 w-full border border-border bg-background px-2 text-sm";
@@ -38,11 +38,19 @@ function Counter({ due, done }: { due: string | null; done: boolean }) {
 export default function LandDeedSearchPage() {
   const rights = usePageRights("legal-land-enquiry");
   const navigate = useNavigate();
-  const [projectId, setProjectId] = useLegalProject();
+  const [remembered, setRemembered] = useLegalProject();
+  // "All projects" comes only from the link (?project=all, the dashboard report) or the picker; it is not remembered.
+  const [all_, setAll] = useState(new URLSearchParams(window.location.search).get("project") === "all");
+  const projectId: number | "all" | null = all_ ? "all" : remembered;
+  const setProjectId = (id: number | null | "all") => { if (id === "all") setAll(true); else { setAll(false); setRemembered(id); } };
   const start = new URLSearchParams(window.location.search).get("q") ?? "";
   const [q, setQ] = useState(start);
   const [pickedId, setPickedId] = useState<number | null>(null);
-  const [tab, setTab] = useState<SearchTab>(start ? "all" : "pending");
+  // ?view= from the dashboard report opens that portion: pending, overdue, ontime, done or all.
+  const VIEWS = ["pending", "overdue", "ontime", "done", "all"] as const;
+  type View = (typeof VIEWS)[number];
+  const asked = new URLSearchParams(window.location.search).get("view") as View | null;
+  const [tab, setTab] = useState<View>(asked && VIEWS.includes(asked) ? asked : start ? "all" : "pending");
 
   const { data: all = [], isFetching, error } = useQuery({
     queryKey: ["legal-enq-find", projectId, "", "all"],
@@ -55,10 +63,39 @@ export default function LandDeedSearchPage() {
   // Filter on the client: instant while typing (enquiry no, Land ID, location, RS / LR Dag or Khatian).
   const term = q.trim().toLowerCase();
   const list = all
-    .filter((h) => (tab === "pending" ? !isDone(h) : tab === "done" ? isDone(h) : true))
+    .filter((h) => (tab === "pending" ? !isDone(h) : tab === "overdue" ? !isDone(h) && h.DaysOver > 0
+      : tab === "ontime" ? !isDone(h) && !h.DaysOver : tab === "done" ? isDone(h) : true))
     .filter((h) => !term || [h.EnquiryNo, h.LandCode, h.LandLocation, h.RsDagNo, h.LrDagNo, h.RsKhatianNo, h.LrKhatianNo, h.MouzaName]
       .some((v) => String(v ?? "").toLowerCase().includes(term)));
   const current = all.find((h) => h.EnquiryId === pickedId) ?? null;
+  const doneN = all.filter(isDone).length;
+
+  // Link values (?project, ?q, ?view, ?office from the dashboard / Land Enquiries) are used once; any choice made here
+  // drops them from the address so a refresh or the next pick does not bring them back.
+  const dropLink = () => { if (window.location.search) navigate("/legal/land/deed-search", { replace: true }); };
+  // Switching the project by hand starts clean: no search text, no open enquiry, the Pending list.
+  const changeProject = (id: number | null | "all") => { setProjectId(id); setPickedId(null); setQ(""); setTab("pending"); dropLink(); };
+  const pick = (id: number) => { setPickedId(id); dropLink(); };
+
+  // Search across every project (enquiry no, Land ID, RS / LR Dag or Khatian): the project of what is found is opened
+  // by itself — one project → that project; several → All projects; one enquiry → it is picked.
+  const [finding, setFinding] = useState(false);
+  const findEverywhere = async () => {
+    const text = q.trim();
+    if (!text) return;
+    setFinding(true);
+    try {
+      const hits = await findEnquiries("all", text, "all");
+      if (!hits.length) { toast.error(`No enquiry found for "${text}" in any project`); return; }
+      const projects = [...new Set(hits.map((h) => h.ProjectId ?? 0))];
+      setProjectId(projects.length === 1 && projects[0] ? projects[0] : "all");
+      setTab("all");
+      setPickedId(hits.length === 1 ? hits[0].EnquiryId : null);
+      dropLink();
+      toast.success(hits.length === 1 ? `Found ${hits[0].EnquiryNo}${hits[0].ProjectName ? ` in ${hits[0].ProjectName}` : ""}`
+        : `${hits.length} enquiries found${projects.length > 1 ? ` in ${projects.length} projects` : hits[0].ProjectName ? ` in ${hits[0].ProjectName}` : ""}`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Search failed"); } finally { setFinding(false); }
+  };
   useEffect(() => {
     if (!pickedId && start) { const m = all.find((h) => h.EnquiryNo === start); if (m) setPickedId(m.EnquiryId); }
   }, [all, pickedId, start]);
@@ -67,36 +104,49 @@ export default function LandDeedSearchPage() {
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", "Deed Registry Search"]} />
       <LegalShell title="Deed Registry Search" subtitle="Each enquiry gets a timeline per registration office when it is saved. Pick an enquiry, then search each office year by year; what you find is stored on the enquiry." icon={SearchStatus}>
-        <ProjectPicker value={projectId} onChange={(id) => { setProjectId(id); setPickedId(null); }} />
+        <ProjectPicker value={projectId} allowAll onChange={changeProject}>
+          <form className="flex min-w-[18rem] flex-1 items-center gap-2" onSubmit={(e) => { e.preventDefault(); findEverywhere(); }}>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Enquiry no, Land ID, RS / LR Dag or Khatian, mouza — filters this list; Search looks in all projects"
+              className="h-9 flex-1 border border-border bg-background px-3 text-sm" />
+            <button disabled={finding || !q.trim()} className="h-9 border border-foreground bg-foreground px-4 text-sm font-semibold text-card disabled:opacity-40">{finding ? "Searching…" : "Search"}</button>
+            {q && <button type="button" className="text-xs underline" onClick={() => { setQ(""); setPickedId(null); dropLink(); }}>Clear</button>}
+          </form>
+        </ProjectPicker>
         {projectId && (
-          <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
+          <div className="legal-cq"><div className="legal-split">
             {/* ── Queue ── */}
-            <aside className="border border-border bg-card lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:overflow-hidden lg:flex lg:flex-col">
+            <aside className="legal-queue border border-border bg-card">
               <div className="space-y-2 border-b border-border p-3">
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Enquiry, Land ID, Dag, Khatian, mouza…"
-                  className="h-9 w-full border border-border bg-background px-3 text-sm" />
+                {term && <p className="text-xs text-muted-foreground">Filtered by “{q.trim()}” · {list.length} shown</p>}
                 <div className="grid grid-cols-3 border border-border text-[0.6875rem] font-semibold uppercase tracking-wider">
-                  {([["pending", `Pending ${pendingN}`], ["done", "Completed"], ["all", `All ${all.length}`]] as const).map(([k, l]) => (
+                  {([["pending", `Pending ${pendingN}`], ["done", `Completed ${doneN}`], ["all", `All ${all.length}`]] as const).map(([k, l]) => (
                     <button key={k} onClick={() => setTab(k)}
                       className={`px-2 py-1.5 ${tab === k ? "bg-foreground text-card" : k === "pending" && pendingN ? "bg-amber-500/15 text-amber-700" : "hover:bg-muted"}`}>{l}</button>
                   ))}
                 </div>
-                {overdueN > 0 && <p className="text-xs font-semibold text-destructive">{overdueN} enquir{overdueN > 1 ? "ies" : "y"} with an overdue office</p>}
+                {overdueN > 0 && tab !== "overdue" && <button onClick={() => setTab("overdue")} className="text-left text-xs font-semibold text-destructive underline">{overdueN} enquir{overdueN > 1 ? "ies" : "y"} with an overdue office — show</button>}
+                {(tab === "overdue" || tab === "ontime") && (
+                  <p className="flex items-center justify-between gap-2 text-xs font-semibold">
+                    <span className={tab === "overdue" ? "text-destructive" : "text-sky-700"}>{tab === "overdue" ? "Showing: overdue only" : "Showing: pending, within time"}</span>
+                    <button className="underline" onClick={() => setTab("pending")}>All pending</button>
+                  </p>
+                )}
               </div>
               {error && <p className="p-3 text-sm text-destructive">{(error as Error).message}</p>}
-              <ul className="divide-y divide-border lg:overflow-y-auto">
+              <ul className="divide-y divide-border">
                 {list.map((h) => {
                   const done = isDone(h);
                   const pct = h.OfficesTotal ? Math.round((h.OfficesDone / h.OfficesTotal) * 100) : 0;
                   return (
                     <li key={h.EnquiryId}>
-                      <button onClick={() => setPickedId(h.EnquiryId)}
+                      <button onClick={() => pick(h.EnquiryId)}
                         className={`block w-full border-l-4 px-3 py-2.5 text-left hover:bg-muted/40 ${pickedId === h.EnquiryId ? "bg-primary/10" : ""} ${done ? "border-l-emerald-600" : h.DaysOver > 0 ? "border-l-destructive" : "border-l-amber-500"}`}>
                         <span className="flex items-center justify-between gap-2">
                           <span className="font-mono text-sm font-semibold">{h.EnquiryNo}</span>
                           <Counter due={h.NextDue} done={done} />
                         </span>
                         <span className="mt-0.5 block truncate text-xs">{h.LandLocation}</span>
+                        {projectId === "all" && h.ProjectName && <span className="block text-[0.6875rem] font-semibold text-muted-foreground">{h.ProjectName}</span>}
                         <span className="block text-[0.6875rem] text-muted-foreground">RS {h.RsDagNo ?? "—"} · LR {h.LrDagNo ?? "—"}{h.LandCode ? ` · ${h.LandCode}` : ""}</span>
                         <span className="mt-1.5 flex items-center gap-2">
                           <span className="h-1.5 flex-1 bg-muted"><span className={`block h-full ${done ? "bg-emerald-600" : h.DaysOver > 0 ? "bg-destructive" : "bg-amber-500"}`} style={{ width: `${pct}%` }} /></span>
@@ -106,16 +156,16 @@ export default function LandDeedSearchPage() {
                     </li>
                   );
                 })}
-                {!list.length && <li className="p-4 text-center text-xs text-muted-foreground">{isFetching ? "Loading…" : tab === "pending" ? "Nothing pending in this project" : "No enquiry matches"}</li>}
+                {!list.length && <li className="p-4 text-center text-xs text-muted-foreground">{isFetching ? "Loading…" : tab === "pending" ? "Nothing pending in this project" : tab === "overdue" ? "Nothing overdue in this project" : "No enquiry matches"}</li>}
               </ul>
             </aside>
 
             {/* ── Work area ── */}
-            <section className="min-w-0">
+            <section className="legal-cq min-w-0">
               {current ? <EnquiryWork key={current.EnquiryId} enquiry={current} canEdit={rights.canEdit && !current.LandId} onOpenEnquiries={() => navigate("/legal/land/enquiries")} />
                 : <div className="flex h-48 items-center justify-center border border-dashed border-border text-sm text-muted-foreground">Pick an enquiry from the list to search its registration offices</div>}
             </section>
-          </div>
+          </div></div>
         )}
       </LegalShell>
     </>
@@ -128,9 +178,12 @@ function EnquiryWork({ enquiry, canEdit, onOpenEnquiries }: { enquiry: EnquiryHi
   const { data, error } = useQuery({ queryKey: ["legal-enq-searches", enquiry.EnquiryId], queryFn: () => getEnquirySearches(enquiry.EnquiryId) });
   const [active, setActive] = useState<number | null>(null);
   const offices = data?.offices ?? [];
-  // Open the first office still pending (overdue first).
+  // Open the office named in the link (dashboard overdue list), else the first one still pending (overdue first).
   useEffect(() => {
     if (active || !offices.length) return;
+    const asked = new URLSearchParams(window.location.search).get("office");
+    const named = asked && offices.find((o) => o.OfficeType === asked);
+    if (named) { setActive(named.OfficeSearchId); return; }
     const next = [...offices].filter((o) => o.Status === "Pending").sort((a, b) => b.DaysOver - a.DaysOver || a.DueDate.localeCompare(b.DueDate))[0];
     setActive((next ?? offices[0]).OfficeSearchId);
   }, [offices, active]);
@@ -250,7 +303,7 @@ function OfficePanel({ o, years, opts, enquiry, canEdit, onChanged }: {
   return (
     <div className="space-y-4 p-4">
       {/* Timeline + office */}
-      <div className="grid gap-3 md:grid-cols-[1fr_1.4fr]">
+      <div className="legal-g2">
         <div className={`border p-3 ${done ? "border-emerald-600/40 bg-emerald-600/5" : o.DaysOver > 0 ? "border-destructive bg-destructive/10" : "border-amber-500/50 bg-amber-500/5"}`}>
           <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Timeline</p>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-sm"><b>Due {o.DueDate}</b><Counter due={o.DueDate} done={done} /></p>
@@ -374,8 +427,8 @@ function YearPanel({ year, r, editable, onSave, onDelete, onClose }: {
         <p className="text-sm font-bold">{year}{r ? <span className="ml-2 text-xs font-normal text-muted-foreground">recorded{r.RecordedByName ? ` by ${r.RecordedByName}` : ""}</span> : <span className="ml-2 text-xs font-normal text-muted-foreground">not searched yet</span>}</p>
         <button className="text-xs underline" onClick={onClose}>Close</button>
       </div>
-      <fieldset disabled={!editable} className="grid gap-2 sm:grid-cols-2">
-        <div className="flex gap-2 sm:col-span-2">
+      <fieldset disabled={!editable} className="legal-g2">
+        <div className="flex gap-2 legal-span">
           {(["Found", "Not Found"] as const).map((x) => (
             <button key={x} type="button" onClick={() => setResult(x)}
               className={`border px-4 py-1.5 text-sm font-semibold ${result === x ? (x === "Found" ? "border-emerald-700 bg-emerald-600 text-white" : "border-foreground bg-foreground text-card") : "border-border"}`}>{x}</button>
@@ -385,11 +438,11 @@ function YearPanel({ year, r, editable, onSave, onDelete, onClose }: {
           <>
             <label className="text-xs">Deed number *<input className={field} value={deedNo} maxLength={100} onChange={(e) => setDeedNo(e.target.value)} autoFocus /></label>
             <label className="text-xs">Deed date<input type="date" className={field} value={deedDate} onChange={(e) => setDeedDate(e.target.value)} /></label>
-            <label className="text-xs sm:col-span-2">Parties (seller → buyer)<input className={field} value={parties} maxLength={500} onChange={(e) => setParties(e.target.value)} /></label>
+            <label className="text-xs legal-span">Parties (seller → buyer)<input className={field} value={parties} maxLength={500} onChange={(e) => setParties(e.target.value)} /></label>
           </>
         )}
-        <label className="text-xs sm:col-span-2">Details<input className={field} value={details} maxLength={2000} onChange={(e) => setDetails(e.target.value)} /></label>
-        <label className="text-xs sm:col-span-2">Government site checked<input className={field} value={siteName} maxLength={200} placeholder="e.g. WB Registration (igr.wb.gov.in)" onChange={(e) => setSiteName(e.target.value)} /></label>
+        <label className="text-xs legal-span">Details<input className={field} value={details} maxLength={2000} onChange={(e) => setDetails(e.target.value)} /></label>
+        <label className="text-xs legal-span">Government site checked<input className={field} value={siteName} maxLength={200} placeholder="e.g. WB Registration (igr.wb.gov.in)" onChange={(e) => setSiteName(e.target.value)} /></label>
       </fieldset>
       {editable && (
         <div className="mt-3 flex flex-wrap gap-2">

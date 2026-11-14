@@ -16,7 +16,7 @@ export interface SearchOptions {
 export interface EnquiryHit {
   EnquiryId: number; EnquiryNo: string; LandLocation: string; EnquiryStatus: string; FinYear: string | null; JLNo: string | null;
   RsDagNo: string | null; LrDagNo: string | null; RsKhatianNo: string | null; LrKhatianNo: string | null;
-  LandId: number | null; LandCode: string | null; DistrictName: string | null; StateName: string | null; MouzaName: string | null; EnquiryDate: string;
+  LandId: number | null; LandCode: string | null; DistrictName: string | null; StateName: string | null; ProjectId?: number | null; ProjectName?: string | null; MouzaName: string | null; EnquiryDate: string;
   /** Office timelines: one per office type, started when the enquiry was saved. */
   OfficesTotal: number; OfficesDone: number; NextDue: string | null; DaysOver: number; Found: number;
 }
@@ -24,7 +24,7 @@ export type SearchTab = "pending" | "done" | "all";
 export interface OfficeSearch {
   OfficeSearchId: number; EnquiryId: number; OfficeTypeId: number | null; OfficeType: string; OfficeId: number | null; OfficeName: string | null; SlaDays: number; FromYear: number; DueDate: string;
   Status: "Pending" | "Completed"; Remarks: string | null; CompletedAt: string | null; CompletedByName: string | null; DaysOver: number;
-  EnquiryNo?: string; ProjectName?: string | null;
+  EnquiryNo?: string; ProjectId?: number | null; ProjectName?: string | null;
 }
 export interface YearResult {
   SearchId: number; OfficeType: string; CalendarYear: number; Status: "Found" | "Not Found" | "Requested"; DeedNo: string | null; DeedDate: string | null;
@@ -33,7 +33,7 @@ export interface YearResult {
 export interface YearBody { calendarYear?: number; result: "Found" | "Not Found"; deedNo?: string; deedDate?: string; parties?: string; details?: string; siteName?: string }
 
 export const getSearchOptions = async () => handle<SearchOptions>(await fetchWithAuth(`${BASE}/options`));
-export const findEnquiries = async (projectId: number, q: string, tab: SearchTab = "all") =>
+export const findEnquiries = async (projectId: number | "all", q: string, tab: SearchTab = "all") =>
   handle<EnquiryHit[]>(await fetchWithAuth(`${BASE}/find?projectId=${projectId}&tab=${tab}&q=${encodeURIComponent(q)}`));
 export const getEnquirySearches = async (enquiryId: number) => handle<{ offices: OfficeSearch[]; years: YearResult[] }>(await fetchWithAuth(`${BASE}/${enquiryId}`));
 export const getOverdueSearches = async () => handle<OfficeSearch[]>(await fetchWithAuth(`${BASE}/overdue`));
@@ -58,3 +58,11 @@ export function daysCounter(due: string | null | undefined): { text: string; ton
   if (n === 0) return { text: "Due today", tone: "warn" };
   return { text: `${-n} day${n < -1 ? "s" : ""} overdue`, tone: "over" };
 }
+
+export interface SearchFigures { Enquiries: number; Searches: number; Completed: number; NotCompleted: number; Overdue: number; OnTime: number; DeedsFound: number; EnquiriesDone?: number }
+export interface SearchReport {
+  projects: (SearchFigures & { ProjectId: number | null; ProjectName: string })[];
+  offices: (SearchFigures & { OfficeType: string })[];
+  total: SearchFigures | null;
+}
+export const getSearchReport = async () => handle<SearchReport>(await fetchWithAuth(`${BASE}/report`));

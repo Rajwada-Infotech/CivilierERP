@@ -29,10 +29,20 @@ async function ready(pool) {
 }
 const notReady = (res) => res.status(503).json({ error: "Deed Registry Search is not set up yet — run the database migrations (655–658)" });
 
-/** Gives an enquiry its office timelines (one per office type) if it has none yet. */
+/**
+ * Gives an enquiry its office timelines: one per office type that applies to its state. A pending timeline with nothing
+ * recorded whose type no longer applies (the enquiry moved to another state, or the type was switched off) is removed.
+ */
 async function ensureOfficeTimelines(pool, enquiryId) {
   if (!(await ready(pool))) return;
   await pool.request().input("id", sql.Int, enquiryId).query(`
+    DELETE o FROM dbo.LegalEnquiryOfficeSearch o
+    JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = o.EnquiryId AND e.LandId IS NULL
+    LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = e.DistrictId
+    WHERE o.EnquiryId = @id AND o.Status = N'Pending'
+      AND NOT EXISTS (SELECT 1 FROM dbo.LegalEnquiryDeedSearch r WHERE r.EnquiryId = o.EnquiryId AND r.OfficeType = o.OfficeType)
+      AND NOT EXISTS (SELECT 1 FROM dbo.LegalRegistrationOfficeType t WHERE t.OfficeTypeId = o.OfficeTypeId AND t.IsActive = 1 AND t.OnEnquiry = 1
+                      AND (t.StateName IS NULL OR t.StateName = d.State));
     INSERT INTO dbo.LegalEnquiryOfficeSearch (EnquiryId, OfficeTypeId, OfficeType, SlaDays, FromYear, DueDate)
     SELECT e.EnquiryId, t.OfficeTypeId, t.TypeName, t.SlaDays, t.FromYear, DATEADD(day, t.SlaDays, e.EnquiryDate)
     FROM dbo.LegalLandEnquiry e
@@ -118,21 +128,24 @@ router.get("/find", requirePageRight(PAGE, "view"), async (req, res) => {
   try {
     const pool = getPool();
     if (!(await ready(pool))) return notReady(res);
+    // ?projectId=all — every project (dashboard "All projects").
+    const allProjects = req.query.projectId === "all";
     const projectId = idOf(req.query.projectId);
-    if (!projectId) return res.status(400).json({ error: "Select the project first" });
+    if (!projectId && !allProjects) return res.status(400).json({ error: "Select the project first" });
     const q = txt(req.query.q, 60);
     const tab = ["pending", "done"].includes(req.query.tab) ? req.query.tab : "all";
     const tabSql = tab === "pending" ? `AND e.LandId IS NULL AND ${PENDING}` : tab === "done" ? `AND NOT (e.LandId IS NULL AND ${PENDING})` : "";
     const rows = (await pool.request().input("p", sql.Int, projectId).input("q", sql.NVarChar(80), q ? `%${q}%` : null).query(`
       SELECT TOP 100 e.EnquiryId, e.EnquiryNo, e.LandLocation, e.EnquiryStatus, e.FinYear, e.JLNo, e.RsDagNo, e.LrDagNo, e.RsKhatianNo, e.LrKhatianNo,
+             e.ProjectId, (SELECT name FROM dbo.enterprise p WHERE p.id = e.ProjectId) AS ProjectName,
              e.LandId, l.LandCode, d.DistrictName, d.State AS StateName, m.MouzaName, CONVERT(char(10), e.EnquiryDate, 23) AS EnquiryDate, ${ENQ_STATE},
              (SELECT COUNT(*) FROM dbo.LegalEnquiryDeedSearch s WHERE s.EnquiryId = e.EnquiryId AND s.Status = N'Found') AS Found
       FROM dbo.LegalLandEnquiry e
       LEFT JOIN dbo.LegalLand l ON l.LandId = e.LandId
       LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = e.DistrictId
       LEFT JOIN dbo.LegalMouza m ON m.MouzaId = e.MouzaId
-      WHERE e.IsActive = 1 AND e.ProjectId = @p ${tabSql} AND (@q IS NULL
-        OR e.EnquiryNo LIKE @q OR l.LandCode LIKE @q OR e.RsDagNo LIKE @q OR e.LrDagNo LIKE @q OR e.RsKhatianNo LIKE @q OR e.LrKhatianNo LIKE @q
+      WHERE e.IsActive = 1 ${allProjects ? "" : "AND e.ProjectId = @p"} ${tabSql} AND (@q IS NULL
+        OR e.EnquiryNo LIKE @q OR l.LandCode LIKE @q OR e.LandLocation LIKE @q OR m.MouzaName LIKE @q OR e.RsDagNo LIKE @q OR e.LrDagNo LIKE @q OR e.RsKhatianNo LIKE @q OR e.LrKhatianNo LIKE @q
         OR EXISTS (SELECT 1 FROM dbo.LegalLandRsRecord x WHERE x.LandId = e.LandId AND x.IsActive = 1 AND (x.RsDagNo LIKE @q OR x.RsKhatianNo LIKE @q))
         OR EXISTS (SELECT 1 FROM dbo.LegalLandLrRecord x WHERE x.LandId = e.LandId AND x.IsActive = 1 AND (x.LrDagNo LIKE @q OR x.LrKhatianNo LIKE @q)))
       ORDER BY CASE WHEN e.LandId IS NULL AND ${PENDING} THEN 0 ELSE 1 END, e.EnquiryDate DESC, e.EnquiryId DESC`)).recordset;
@@ -148,7 +161,7 @@ router.get("/overdue", requirePageRight(PAGE, "view"), async (_req, res) => {
   try {
     const pool = getPool();
     if (!(await ready(pool))) return res.json([]);
-    const rows = (await pool.request().query(`SELECT ${OFFICE_COLS}, e.EnquiryNo, p.name AS ProjectName ${OFFICE_FROM}
+    const rows = (await pool.request().query(`SELECT ${OFFICE_COLS}, e.EnquiryNo, e.ProjectId, p.name AS ProjectName ${OFFICE_FROM}
       JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = o.EnquiryId AND e.IsActive = 1 AND e.LandId IS NULL AND e.EnquiryStatus <> N'Rejected'
       LEFT JOIN dbo.enterprise p ON p.id = e.ProjectId
       WHERE o.Status = N'Pending' AND o.DueDate < CAST(GETDATE() AS DATE) ORDER BY o.DueDate, e.EnquiryNo`)).recordset;
@@ -156,6 +169,37 @@ router.get("/overdue", requirePageRight(PAGE, "view"), async (_req, res) => {
   } catch (err) {
     console.error("[legal-enquiry-search] overdue:", err.message);
     res.status(500).json({ error: "Could not load overdue searches" });
+  }
+});
+
+// GET /report — Deed Registry Search figures for the dashboard: per project and for all projects, plus per office type.
+// Counted per office search (one per office type per enquiry). Rejected enquiries are left out.
+router.get("/report", requirePageRight(PAGE, "view"), async (_req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await ready(pool))) return res.json({ projects: [], offices: [], total: null });
+    const FIG = `COUNT(DISTINCT e.EnquiryId) AS Enquiries, COUNT(*) AS Searches,
+      SUM(CASE WHEN o.Status = N'Completed' THEN 1 ELSE 0 END) AS Completed,
+      SUM(CASE WHEN o.Status = N'Pending' THEN 1 ELSE 0 END) AS NotCompleted,
+      SUM(CASE WHEN o.Status = N'Pending' AND o.DueDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS Overdue,
+      SUM(CASE WHEN o.Status = N'Pending' AND o.DueDate >= CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS OnTime,
+      SUM(f.n) AS DeedsFound`;
+    const FROM = `FROM dbo.LegalEnquiryOfficeSearch o JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = o.EnquiryId AND e.IsActive = 1 AND e.EnquiryStatus <> N'Rejected'
+      OUTER APPLY (SELECT COUNT(*) AS n FROM dbo.LegalEnquiryDeedSearch d WHERE d.EnquiryId = o.EnquiryId AND d.OfficeType = o.OfficeType AND d.Status = N'Found') f`;
+    // Enquiries with every office complete (ready for conversion or already converted).
+    const READY = `(SELECT COUNT(*) FROM dbo.LegalLandEnquiry x WHERE x.IsActive = 1 AND x.EnquiryStatus <> N'Rejected' AND %P%
+      AND EXISTS (SELECT 1 FROM dbo.LegalEnquiryOfficeSearch y WHERE y.EnquiryId = x.EnquiryId)
+      AND NOT EXISTS (SELECT 1 FROM dbo.LegalEnquiryOfficeSearch y WHERE y.EnquiryId = x.EnquiryId AND y.Status = N'Pending'))`;
+    const projects = (await pool.request().query(`SELECT e.ProjectId, ISNULL(p.name, N'No project') AS ProjectName, ${FIG},
+        ${READY.replace("%P%", "ISNULL(x.ProjectId, 0) = ISNULL(e.ProjectId, 0)")} AS EnquiriesDone
+      ${FROM} LEFT JOIN dbo.enterprise p ON p.id = e.ProjectId GROUP BY e.ProjectId, p.name ORDER BY p.name`)).recordset;
+    const total = (await pool.request().query(`SELECT ${FIG}, ${READY.replace("%P%", "1 = 1")} AS EnquiriesDone ${FROM}`)).recordset[0];
+    const offices = (await pool.request().query(`SELECT o.OfficeType, ${FIG} ${FROM}
+      LEFT JOIN dbo.LegalRegistrationOfficeType t ON t.OfficeTypeId = o.OfficeTypeId GROUP BY o.OfficeType, t.SortOrder ORDER BY t.SortOrder, o.OfficeType`)).recordset;
+    res.json({ projects, offices, total });
+  } catch (err) {
+    console.error("[legal-enquiry-search] report:", err.message);
+    res.status(500).json({ error: "Could not load the Deed Registry Search report" });
   }
 });
 

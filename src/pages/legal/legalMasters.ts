@@ -62,6 +62,7 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("txn-type", "Financial Transaction Type", "Legal & Financial", MoneySend, "Advance, payment, receipt, refund"),
   S("expense-type", "Expense Type", "Legal & Financial", Receipt1, "Advocate fee, commission, survey fee"),
   S("payment-mode", "Payment Mode", "Legal & Financial", Wallet, "Cash, bank transfer, cheque, UPI"),
+  S("instalment-template", "Instalment Schedule Templates", "Legal & Financial", Wallet, "Payment plans: % of consideration, days after agreement"),
   // ── Setup: Deed & Registration ──
   S("registration-office-type", "Registration Office Types", "Deed & Registration", Building4, "Office types per state, deed search time limit and start year"),
   S("registration-office", "Deed Registration Office", "Deed & Registration", Building4, "ADSR / DSR / ARA offices"),

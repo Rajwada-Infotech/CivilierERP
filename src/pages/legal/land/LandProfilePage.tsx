@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { openLegalMap } from "@/components/legal/LegalDocumentPreview";
+import { openLegalMap, LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Global } from "iconsax-react";
@@ -12,6 +12,7 @@ import {
   type LandOverview,
 } from "@/api/legalLandApi";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { getDeedRegLand } from "@/api/legalDeedRegApi";
 import { LegalMasterTable, WhatsAppName } from "../LegalMasterPage";
 import { useAuth } from "@/contexts/AuthContext";
 import { OwnershipStep } from "./steps/OwnershipStep";
@@ -184,6 +185,15 @@ export default function LandProfilePage() {
     </button>
   );
   const land = data?.land;
+  // The chain: a land bought through the module (New Acquisition) gets its consideration and payments at Deed
+  // Registration, after L1 / L2 approval — not here. Here (the land's history) they are kept only for existing / backlog
+  // land the company bought before, from its old file.
+  const ownPurchaseHere = !!land && land.EntryType !== "New Acquisition";
+  // Acquisition & Purchase: for a new acquisition it is the company's purchase, so it appears only once the deed is
+  // registered — as a read-only record built from Deed Registration. Earlier transfers live in Ownership History.
+  const registered = land?.WorkflowStatus === "Registered";
+  const tabs = TABS.filter((t) => (t.key !== "payments" || ownPurchaseHere) && (t.key !== "transfers" || ownPurchaseHere || registered));
+  const quickSections = QUICK_SECTIONS.filter((s) => (s.tab !== "payments" && s.tab !== "transfers") || ownPurchaseHere);
   const { currentUser } = useAuth();
   const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
   const c = data?.counts;
@@ -244,7 +254,7 @@ export default function LandProfilePage() {
             </Dialog>
             {/* 14 tabs: one swipeable row on phones, wrapped on wider screens */}
             <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible" role="tablist">
-              {TABS.map((t) => (
+              {tabs.map((t) => (
                 <button
                   key={t.key}
                   role="tab"
@@ -338,12 +348,12 @@ export default function LandProfilePage() {
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <p className="label">Land Information Sections — Complete Property Record</p>
                     <p className="text-xs text-muted-foreground">
-                      {QUICK_SECTIONS.filter((s) => c[s.count] > 0).length} of {QUICK_SECTIONS.length} sections have records · enter
+                      {quickSections.filter((s) => c[s.count] > 0).length} of {quickSections.length} sections have records · enter
                       information gradually in any order
                     </p>
                   </div>
                   <ol className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {QUICK_SECTIONS.map((s, i) => {
+                    {quickSections.map((s, i) => {
                       const done = c[s.count] > 0;
                       return (
                         <li key={s.tab}>
@@ -456,7 +466,7 @@ export default function LandProfilePage() {
             )}
 
             {/* TAB 4: ACQUISITION & PURCHASE DETAILS */}
-            {tab === "transfers" && (
+            {tab === "transfers" && ownPurchaseHere && (
               <div className="space-y-6">
                 <Section
                   title="Ownership Transfers & Acquisitions"
@@ -466,96 +476,17 @@ export default function LandProfilePage() {
                 </Section>
                 <Section
                   title="Purchase & Consideration Details"
-                  note="Financial and contract details of property purchases: consideration price, advance amount, settlement, and payment proofs."
+                  note="The company's earlier purchase of this land (from its old file): consideration price, advance, settlement and payment proofs."
                 >
                   <LegalMasterTable entry={table("land-purchase", "Purchase / Acquisition")} parentId={landId} onSaved={refresh}
                     rowActions={(raw) => childButton({ key: "payment", field: "TransactionId", id: Number(raw.TransactionId), title: `Payments · ${String(raw.TransactionNo ?? "purchase")}`, label: "Payments" }, payRows)} />
                 </Section>
               </div>
             )}
-
-            {/* TAB 5: LAND RECORDS (RS / LR) */}
-            {tab === "records" && (
-              <div className="space-y-6">
-                <Section
-                  title="Revisional Survey (RS) Records"
-                  note="RS Khatian, RS Plot (Dag) numbers, recorded holder names, and land classifications."
-                >
-                  <LegalMasterTable entry={table("land-rs-record", "RS Record")} parentId={landId} onSaved={refresh} />
-                </Section>
-                <Section
-                  title="Land Reforms (LR) Records of Rights (RoR)"
-                  note="LR Khatian (Parcha), LR Plot (Dag) numbers, and mapping from old RS plots."
-                >
-                  <LegalMasterTable entry={table("land-lr-record", "LR Record of Rights")} parentId={landId} onSaved={refresh} />
-                </Section>
-              </div>
-            )}
-
-            {/* TAB 6: DOCUMENTS ARCHIVE */}
-            {tab === "diligence" && <DueDiligencePanel landId={landId} onGoTab={(t) => setParams({ tab: t })} />}
-
-            {tab === "documents" && (
-              <Section
-                title="Centralized Document Archive"
-                note="Complete document storage for this property: Sale Deeds, Parent Deeds, Khatians, Mutation Certificates, Tax Receipts, Court Orders, Survey Reports, and Bank NOCs."
-              >
-                <DocumentsStep landId={landId} onSaved={refresh} />
-              </Section>
-            )}
-
-            {/* TAB 7: LEGAL INFORMATION */}
-            {tab === "legal" && (
-              <div className="space-y-6">
-                <Section
-                  title="Court Cases & Disputes"
-                  note="Past and ongoing court cases, plaintiffs, defendants, advocates, and case statuses."
-                >
-                  <LegalMasterTable entry={table("legal-case", "Court Case")} parentId={landId} onSaved={refresh}
-                    rowActions={(raw) => childButton({ key: "case-hearing", field: "CaseId", id: Number(raw.CaseId), title: `Hearings · ${String(raw.CaseNumber ?? "case")}`, label: "Hearings" }, hearingRows)} />
-                </Section>
-                <Section
-                  title="Legal Orders, Notices & Opinions"
-                  note="Judgments, court orders, legal notices, legal opinions, and due-diligence clearance reports."
-                >
-                  <LegalMasterTable entry={table("land-legal-record", "Legal Record")} parentId={landId} onSaved={refresh}
-                    rowActions={(raw) => docsButton({ kind: "legal", id: Number(raw.LegalRecordId), label: `${String(raw.RecordType ?? "Legal record")}${raw.CaseNumber ? ` ${String(raw.CaseNumber)}` : ""}` })} />
-                </Section>
-              </div>
-            )}
-
-            {/* TAB 8: LOAN & MORTGAGE */}
-            {tab === "loans" && (
-              <Section
-                title="Loan & Mortgage History"
-                note="Historical and active mortgages, bank loans, loan amounts, release dates, and bank NOCs. Closed loans are preserved."
-              >
-                <LegalMasterTable entry={table("mortgage", "Mortgage & Loan")} parentId={landId} onSaved={refresh}
-                  rowActions={(raw) => docsButton({ kind: "loan", id: Number(raw.MortgageId), label: `${String(raw.LenderName ?? "Loan")}${raw.LoanAccountRef ? ` · ${String(raw.LoanAccountRef)}` : ""}` })} />
-              </Section>
-            )}
-
-            {/* TAB 9: MUTATION RECORDS */}
-            {tab === "mutation" && (
-              <div className="space-y-6">
-                <Section
-                  title="Mutation Applications & Certificates"
-                  note="BL&LRO mutation case numbers, previous and new owners, order dates, and certificate records."
-                >
-                  <LegalMasterTable entry={table("mutation", "Mutation")} parentId={landId} onSaved={refresh}
-                    rowActions={(raw) => childButton({ key: "mutation-record", field: "MutationId", id: Number(raw.MutationId), title: `New Khatian / RoR · ${String(raw.ApplicationNo ?? raw.CaseNo ?? "mutation")}`, label: "New Khatian" }, khatianRows)} />
-                </Section>
-                <Section
-                  title="New Khatian / RoR Post-Mutation"
-                  note="New Khatian and plot records created by each mutation. Add one with New Khatian on its mutation's row above."
-                >
-                  <LegalMasterTable entry={table("mutation-record", "New Khatian / RoR")} parentId={landId} onSaved={refresh} noAdd />
-                </Section>
-              </div>
-            )}
+            {tab === "transfers" && !ownPurchaseHere && registered && <AcquisitionRecord landId={landId} onOpen={() => navigate("/legal/deed-registration")} />}
 
             {/* TAB 10: PAYMENT HISTORY */}
-            {tab === "payments" && (
+            {tab === "payments" && ownPurchaseHere && (
               <Section
                 title="Payment & Transaction History"
                 note="Historical financial payments for this land: advances, installments, and final settlements with payment modes and references."
@@ -612,3 +543,56 @@ export default function LandProfilePage() {
     </>
   );
 }
+
+/**
+ * The company's acquisition of a new-acquisition land, read-only, after registration: everything comes from Deed
+ * Registration (consideration and its revisions, payments, stamp duty, final registration, the registered deed and the
+ * physical deed / IGR status). It is changed there, never typed again here.
+ */
+function AcquisitionRecord({ landId, onOpen }: { landId: number; onOpen: () => void }) {
+  const { data, error, isLoading } = useQuery({ queryKey: ["legal-deed-reg-land", landId], queryFn: () => getDeedRegLand(landId) });
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (error || !data) return <p className="text-sm text-destructive">{(error as Error)?.message ?? "Could not load"}</p>;
+  const l = data.land;
+  const stamp = data.queries.reduce((a, q) => a + Number(q.Amount), 0);
+  const box = "border border-border bg-card p-4";
+  const row = (k: string, v: React.ReactNode) => <div className="flex justify-between gap-3 border-t border-border py-1.5 text-sm first:border-t-0"><span className="text-muted-foreground">{k}</span><span className="text-right font-semibold">{v}</span></div>;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border border-emerald-600/40 bg-emerald-600/5 px-4 py-3">
+        <div>
+          <p className="text-sm font-bold">Acquired by the company — deed {l.RegDeedNo ?? "—"}{l.RegFinalDate ? ` registered ${l.RegFinalDate}` : ""}</p>
+          <p className="text-xs text-muted-foreground">Read-only record from Deed Registration. The transfer to the company is also in Ownership History.</p>
+        </div>
+        <button className="border border-foreground px-3 py-1.5 text-xs font-semibold hover:bg-muted" onClick={onOpen}>Open in Deed Registration</button>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className={box}>
+          <p className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Consideration & payment</p>
+          {row("Consideration", inrFmt(l.ConsTotalAmount))}
+          {row("Agreed on", l.ConsDate ?? "—")}
+          {row("Paid", inrFmt(l.Paid))}
+          {row("Last payment", l.LastPaid ?? "—")}
+          {row("Stamp duty & fees", inrFmt(stamp))}
+          {data.revisions.length > 1 && row("Price revisions", `${data.revisions.length - 1}`)}
+        </div>
+        <div className={box}>
+          <p className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Registration</p>
+          {row("Date", l.RegFinalDate ?? "—")}
+          {row("Office", l.RegOffice ?? "—")}
+          {row("Mode", l.RegMode ?? "—")}
+          {row("Deed number", l.RegDeedNo ?? "—")}
+          {row("Registered deed", l.RegDeedFileId ? <LegalFileLink id={l.RegDeedFileId} name={l.RegDeedFileName ?? "Registered deed"} /> : "—")}
+          {row("Physical deed", `${l.IgrStatus ?? "—"} · ${l.DeedLocation ?? "—"}`)}
+        </div>
+      </div>
+      {data.payments.length > 0 && (
+        <div className={box}>
+          <p className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Payments</p>
+          {data.payments.map((pm) => row(`${pm.PaymentDate} · ${pm.Purpose ?? "Payment"}${pm.Mode ? ` · ${pm.Mode}` : ""}`, `${pm.Purpose === "Refund" ? "−" : ""}${inrFmt(pm.Amount)}`))}
+        </div>
+      )}
+    </div>
+  );
+}
+const inrFmt = (n: number | null | undefined) => (n == null ? "—" : `₹${Number(n).toLocaleString("en-IN")}`);
