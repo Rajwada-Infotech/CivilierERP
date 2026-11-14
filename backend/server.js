@@ -481,6 +481,7 @@ async function createApp() {
         "X-Request-Id",
         "X-Page",
         "X-Session-Id",
+        "X-Client", // which mobile app sent it (mobile-*/src/services/appSession.ts)
         "X-Skip-Activity-Log",
         "X-Fresh",
       ],

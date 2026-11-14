@@ -133,7 +133,9 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
     const result = await pool.request().query(`
       SELECT
         t.TagId, t.FAItemCode, t.DocNo,
-        CONVERT(NVARCHAR(100), im.M_Id) AS ItemId, im.M_Name AS ItemName,
+        -- The received batch's own name (it can be corrected in FA Inventory without renaming the item master),
+        -- else the item master's.
+        CONVERT(NVARCHAR(100), im.M_Id) AS ItemId, ISNULL(NULLIF(LTRIM(batch.AssetName), ''), im.M_Name) AS ItemName,
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
         t.GodownId, gd.GodownName,
