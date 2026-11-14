@@ -21,6 +21,7 @@ import { Body, Field, InfoGrid, Input, Key, Label, Notice, Panel, SheetMark, Ske
 import { FormPage, LineList, fmtDate } from "@/components/sheet/Register";
 import { MODULE_CONFIG, REVIEW_INSTEAD, SUB_GATE_SUFFIX, needsBankReview } from "./approvalInboxConfig";
 import { downloadApprovalPdf, type PdfLine } from "./approvalPdf";
+import { shareBoqPdf, type BoqPdfRecord } from "./boqPdf";
 
 const fmtAmount = (n: number | null) => (n == null ? "—" : formatINR(n, { decimals: 2 }));
 
@@ -135,6 +136,11 @@ export function ApprovalInboxDetailModal({
   const download = async () => {
     setDownloading(true);
     try {
+      // A Bill of Quantities prints in the web app's invoice-style BOQ format instead of the generic sheet.
+      if (item.Module === "boq" && detail) {
+        await shareBoqPdf({ BoqID: item.RecordId, Status: item.Status, ...(detail as BoqPdfRecord) });
+        return;
+      }
       await downloadApprovalPdf({
         module: cfg?.label ?? item.ModuleLabel,
         reference: item.Reference || `#${item.RecordId}`,

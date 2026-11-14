@@ -9,7 +9,6 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
-const allowRoles = require("../middleware/role");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../services/crmHoldService");
@@ -1077,8 +1076,13 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
 // Reason is required only when routing through the amendment queue (agreement
 // Executed/Registered). For direct releases (normal booking workflow) it is
 // optional — recorded in the audit trail when supplied, silent when not.
-router.delete("/:id", allowRoles.superAdminOnly, async (req, res) => {
+// Who may release is set in Approval Setup (CRM Parking Release, migration 638): super admin always, everyone else when
+// the entry names their role or them.
+router.delete("/:id", async (req, res) => {
   try {
+    if (!(await require("../services/approvalService").isApproverFor("crm-parking-release", req.user?.userId ?? req.user?.id, req.user?.role))) {
+      return res.status(403).json({ error: "You are not named in Approval Setup (CRM Parking Release) to release a parking slot." });
+    }
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });

@@ -27,7 +27,7 @@ export async function fetchAllAgreements(params: URLSearchParams): Promise<any[]
 
 export async function fetchAgreementDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
-  if (!r.ok) throw new Error("Failed to load agreement");
+  if (!r.ok) throw new Error("Could not load agreement");
   return r.json();
 }
 export async function fetchAgreementIdByBooking(bookingId: string): Promise<number | null> {

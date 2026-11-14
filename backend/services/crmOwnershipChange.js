@@ -15,7 +15,7 @@ class OwnershipError extends Error {
 }
 
 const SALE_DEED_REGISTERED = (b) => `EXISTS (SELECT 1 FROM dbo.CrmSalesDeed d WHERE d.BookingId = ${b}.Id AND d.Status = N'Registered')`;
-const LIVE_BOOKING = "b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')";
+const LIVE_BOOKING = "b.IsActive = 1 AND b.Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL;
 
 const SELECT_CHANGE = `
   SELECT o.Id, o.ChangeNo, o.BookingId, o.FromCustomerId, o.ToCustomerId, o.FromApplicationId, o.ToApplicationId,

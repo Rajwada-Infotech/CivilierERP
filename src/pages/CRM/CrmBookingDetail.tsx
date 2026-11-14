@@ -11,7 +11,7 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { downloadAuthFile } from "@/components/crm/AuthFilePreview";
 import { useAuth } from "@/contexts/AuthContext";
-import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X } from "lucide-react";
+import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X, Repeat } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
@@ -26,6 +26,8 @@ import { ExtraWorkGstPreview, PdfPreviewDialog, ParkingVcSection } from "./booki
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, bookingTone } from "./bookings/config";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { Link, useNavigate } from "react-router-dom";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ChangeUnitDialog } from "./bookings/ChangeUnitDialog";
 import { checklistStep } from "./applications/config";
 import { useSentBack, sinceLabel } from "@/components/crm/CrmListToolbar";
 
@@ -79,6 +81,14 @@ async function fetchChecklist(id: number): Promise<any> {
 async function fetchInvoices(id: number): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/${id}/invoices`);
   return r.ok ? r.json() : [];
+}
+async function fetchUnitChangeLog(id: number): Promise<any[]> {
+  const r = await fetchWithAuth(`${API}/${id}/unit-change-log`);
+  return r.ok ? r.json() : [];
+}
+async function fetchUnitChange(id: number): Promise<any | null> {
+  const r = await fetchWithAuth(`${API}/${id}/unit-change`);
+  return r.ok ? r.json() : null;
 }
 async function fetchMoneyReceipts(bookingId: number): Promise<any[]> {
   const r = await fetchWithAuth(`/api/crm/money-receipts?bookingId=${bookingId}`);
@@ -198,10 +208,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   }, [previewAttachment]);
 
   const downloadPdf = async (apiUrl: string, filename: string) => {
-    const toastId = toast.loading("Generating PDF...");
+    const toastId = toast.loading("Generating PDF…");
     try {
       const res = await fetchWithAuth(apiUrl);
-      if (!res.ok) throw new Error("Failed to load PDF");
+      if (!res.ok) throw new Error("Could not load PDF");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -235,6 +245,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [payForm, setPayForm] = useState({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [planEditOpen, setPlanEditOpen] = useState(false);
+  const [unitChangeOpen, setUnitChangeOpen] = useState(false);
   const [planEditValue, setPlanEditValue] = useState("");
   const [planSaving, setPlanSaving] = useState(false);
 
@@ -250,6 +261,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { data: checklistData, refetch: refetchChecklist } = useQuery({
     queryKey: ["crm-booking-checklist", bookingId],
     queryFn: () => fetchChecklist(bookingId),
+  });
+  const { data: unitChangeLog = [] } = useQuery({
+    queryKey: ["crm-booking-unit-change-log", bookingId],
+    queryFn: () => fetchUnitChangeLog(bookingId),
+    enabled: tab === "Booking",
+  });
+  const { data: unitChange } = useQuery({
+    queryKey: ["crm-booking-unit-change", bookingId],
+    queryFn: () => fetchUnitChange(bookingId),
+    enabled: tab === "Booking",
   });
   const checklistItems: any[] = checklistData?.items || [];
   // One refresh after any step of the chain (send, tick / flag, approve, send
@@ -356,7 +377,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     try {
       const r = await fetchWithAuth(`${API}/${bookingId}/portal/${deactivate ? "deactivate" : "reactivate"}`, { method: "PUT" });
       const body = await r.json().catch(() => ({}));
-      if (!r.ok) { toast.error(body.error || "Failed to update portal access"); return; }
+      if (!r.ok) { toast.error(body.error || "Could not update portal access"); return; }
       toast.success(deactivate ? "Portal access deactivated" : "Portal access reactivated");
       refetchPortal();
     } finally {
@@ -369,7 +390,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const r = await fetchWithAuth(`${API}/${bookingId}/provision-portal`, { method: "POST" });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) { toast.error(body.error || "Provisioning failed"); return; }
-      toast.success("Customer portal provisioned successfully");
+      toast.success("Customer portal access created");
       refetchPortal();
     } finally {
       setProvisioning(false);
@@ -745,7 +766,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         body: JSON.stringify({ PaymentPlanId: planEditValue || null }),
       });
       const resData = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(resData.error || "Failed to update payment plan");
+      if (!res.ok) throw new Error(resData.error || "Could not update payment plan");
       toast.success(resData.milestonesRegenerated
         ? "Payment Plan updated — milestone schedule regenerated"
         : "Payment Plan updated");
@@ -928,7 +949,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     try {
       const res = await fetchWithAuth(`${API}/${bookingId}/ready-for-approval`, { method: "PUT" });
       const resData = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(resData.error || "Failed to mark ready for approval");
+      if (!res.ok) throw new Error(resData.error || "Could not mark ready for approval");
       toast.success(`Data review complete — sent to ${resData.label || "Marketing Head Approval"}`);
       if (resData.mrWarning) {
         toast.warning(`Money Receipt could not be auto-created — use the payment form to submit it manually. (${resData.mrWarning})`, { duration: 8000 });
@@ -1167,6 +1188,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   };
 
   return (<>
+    {unitChangeOpen && booking && <ChangeUnitDialog booking={booking} onClose={() => setUnitChangeOpen(false)} />}
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto thin-scroll rounded-none p-5" style={{ border: RULE }}>
         <DialogHeader>
@@ -1186,7 +1208,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               )}
               {/* Offered only to those who may raise a cancellation (the server checks the same right).
                   Kept in a menu: a red button beside the title read as the page's main action. */}
-              {booking && booking.Status !== 'Cancelled' && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit) && (
+              {booking && !isBookingClosed(booking.Status) && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit) && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button className={`${KEY_LINE} h-9 w-9 shrink-0`} title="More actions" aria-label="More actions"><MoreHorizontal size={15} /></button>
@@ -1195,6 +1217,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <DropdownMenuItem onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className="gap-2 text-destructive focus:text-destructive">
                       <AlertTriangle size={14} /> Request cancellation
                     </DropdownMenuItem>
+                    {canEdit && !isPlotSale && (
+                      <DropdownMenuItem onClick={() => setUnitChangeOpen(true)} className="gap-2 text-destructive focus:text-destructive">
+                        <Repeat size={14} /> Change unit
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
@@ -1202,7 +1229,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         </DialogHeader>
 
         {isLoading ? (
-          <div className="py-16 text-center text-muted-foreground text-sm">Loading...</div>
+          <div className="py-16 text-center text-muted-foreground text-sm">Loading…</div>
         ) : !booking ? (
           // fetchDetail returns null for a missing / deleted booking or one outside the user's projects.
           <div className="py-16 text-center text-sm text-muted-foreground">This booking could not be found — it may have been deleted, or it belongs to a project you can't open.</div>
@@ -1586,6 +1613,45 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     for why there's no longer a separate Confirm button
                     here. */}
                 {renderTabChecklist("Booking")}
+                {unitChange && <section className="border border-border p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Unit change {unitChange.RequestNo}</h3>
+                    <StatusBadge status={unitChange.Status} />
+                  </div>
+                  <p className="text-xs">{[unitChange.SourceProjectName, unitChange.SourceUnitName].filter(Boolean).join(" · ") || "Old unit"} → {[unitChange.TargetProjectName, unitChange.TargetUnitName].filter(Boolean).join(" · ") || "New unit"}</p>
+                  <p className="text-xs text-muted-foreground">{Number(unitChange.SourceBookingId) === Number(booking.Id)
+                    ? (unitChange.TargetBookingNo ? `The sale moved to booking ${unitChange.TargetBookingNo}.` : "A new booking opens on the new unit once this is approved.")
+                    : `Opened from booking ${unitChange.SourceBookingNo || ""} by this unit change.`}</p>
+                  <Link to={`/crm/unit-changes?id=${unitChange.Id}`} className="inline-flex text-xs underline underline-offset-2">Open Unit Change</Link>
+                </section>}
+                {unitChangeLog.length > 0 && <section className="border border-border p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Unit change history</h3>
+                    <span className="text-[0.65rem] text-muted-foreground">{unitChangeLog.length} change{unitChangeLog.length === 1 ? "" : "s"}</span>
+                  </div>
+                  {unitChangeLog.map((entry: any) => (
+                    <div key={entry.Id} className="border-t border-border pt-3 space-y-2 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <strong>{entry.OldUnitName || "Previous unit"} → {entry.NewUnitName || "New unit"}</strong>
+                        <span className="text-muted-foreground">{fmtIstDateTime(entry.ChangedAt)} · {entry.ChangedByName || "User"}</span>
+                      </div>
+                      <p className="text-muted-foreground">{entry.Reason}</p>
+                      {entry.OldTotalValue != null && <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-muted-foreground">
+                        <span>Booking value: {fmt(entry.OldTotalValue)} → {fmt(entry.NewTotalValue)}</span>
+                        <span>Grand total: {fmt(entry.OldGrandTotal)} → {fmt(entry.NewGrandTotal)}</span>
+                        <span>Area (sq ft): {entry.OldAreaSqFt != null ? Number(entry.OldAreaSqFt).toLocaleString("en-IN") : "—"} → {entry.NewAreaSqFt != null ? Number(entry.NewAreaSqFt).toLocaleString("en-IN") : "—"}</span>
+                        <span>Rate/sq ft: {fmt(entry.OldRatePerSqFt)} → {fmt(entry.NewRatePerSqFt)}</span>
+                        <span>Booking amount: {fmt(entry.OldBookingAmount)} → {fmt(entry.NewBookingAmount)}</span>
+                        <span>Milestone-cleared at change: {fmt(entry.ClearedAtChange)}</span>
+                        <span>Available credit: {fmt(entry.AvailableCreditAtChange)}</span>
+                        <span>Held credit: {fmt(entry.HeldCreditAtChange)}</span>
+                        <span>Pending Finance: {fmt(entry.PendingFinanceAtChange)}</span>
+                        <span>Pending CRM receipts: {fmt(entry.PendingCrmReceiptAtChange)}</span>
+                        <span>Contractual due: {fmt(entry.ContractualDueAtChange)}</span>
+                      </div>}
+                    </div>
+                  ))}
+                </section>}
               </div>
             )}
 
@@ -1617,7 +1683,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         </button>
                         <button onClick={handleSavePaymentPlan} disabled={planSaving}
                           className={`${KEY_INK} h-8 px-3`}>
-                          {planSaving ? "Saving..." : "Save"}
+                          {planSaving ? "Saving…" : "Save"}
                         </button>
                       </div>
                     </div>
@@ -2102,7 +2168,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <p className="text-[0.6875rem] text-muted-foreground">Deposit bank: assigned by Accounts on the Received Payment before approval.</p>
                     <button onClick={handleRecordPayment} disabled={paySaving}
                       className={`${KEY_INK} h-8 px-3`}>
-                      {paySaving ? "Submitting..." : `Submit for Approval`}
+                      {paySaving ? "Submitting…" : `Submit for Approval`}
                     </button>
                   </div>
                 )}
@@ -2511,7 +2577,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           className="w-32 text-sm border border-border px-2.5 py-2 bg-background" />
                         <button onClick={handleAddExtra} disabled={chargesSaving}
                           className={`${KEY_INK} h-8 px-3`}>
-                          {chargesSaving ? "Adding..." : "Add"}
+                          {chargesSaving ? "Adding…" : "Add"}
                         </button>
                       </div>
                       {/* GST preview at the rate the server gives this booking. */}
@@ -2533,7 +2599,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {tab === "Bank Details" && (
               <div className="space-y-4 pt-2">
                 {!bankLoaded ? (
-                  <div className="py-8 text-center text-xs text-muted-foreground">Loading bank details...</div>
+                  <div className="py-8 text-center text-xs text-muted-foreground">Loading bank details…</div>
                 ) : (
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -2585,7 +2651,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         ) : canEdit ? (
                           <button onClick={handleSaveBank} disabled={bankSaving}
                             className="px-2.5 py-1 text-xs border border-border font-medium hover:bg-muted disabled:opacity-40">
-                            {bankSaving ? "Saving..." : "Verify & Save Bank/KYC Details"}
+                            {bankSaving ? "Saving…" : "Verify & Save Bank/KYC Details"}
                           </button>
                         ) : (
                           <span className="text-xs text-muted-foreground">Not saved</span>
@@ -2722,7 +2788,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <div className="flex items-center gap-2">
                     <label className="flex items-center gap-2 px-3 py-2 text-sm border border-border cursor-pointer hover:bg-muted">
                       <Upload size={14} />
-                      {uploading ? "Uploading..." : "Upload Files"}
+                      {uploading ? "Uploading…" : "Upload Files"}
                       <input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} disabled={uploading} />
                     </label>
                   </div>
@@ -2974,7 +3040,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady || !checklistAllChecked}
                     title={!mandatoryReady || !checklistAllChecked ? pendingStepMessage?.text : undefined}
                     className="px-4 py-1.5 text-sm bg-foreground text-card font-medium hover:bg-foreground/80 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
-                    {bookingRequesting ? "Submitting..." : "Verify & Send for Approval"}
+                    {bookingRequesting ? "Submitting…" : "Verify & Send for Approval"}
                     {!bookingRequesting && <Check size={14} />}
                   </button>
                 ) : canActOnStage ? (
@@ -2986,7 +3052,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <button onClick={handleStageApprove} disabled={stageActioning !== null}
                       className="px-4 py-1.5 text-sm bg-foreground text-card font-medium hover:bg-foreground/80 disabled:opacity-40 flex items-center gap-1">
                       {stageActioning === "approve"
-                        ? "Approving..."
+                        ? "Approving…"
                         : <>{currentStage === "DirectorApproval" ? "Final Approve" : "Approve"} <Check size={14} /></>}
                     </button>
                   </>
@@ -3051,7 +3117,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           </div>
           <div className="flex-1 bg-neutral-950 flex items-center justify-center min-h-0">
             {previewAttachmentLoading ? (
-              <div className="text-xs text-neutral-300">Loading preview...</div>
+              <div className="text-xs text-neutral-300">Loading preview…</div>
             ) : previewAttachmentError ? (
               <div className="text-center space-y-2 px-4">
                 <p className="text-sm text-neutral-100">{previewAttachmentError}</p>
@@ -3095,7 +3161,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           </button>
           <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
             className="px-3 py-1.5 text-sm bg-destructive text-white font-medium hover:bg-destructive/80 disabled:opacity-40">
-            {stageActioning === "reject" ? "Sending..." : "Send Back"}
+            {stageActioning === "reject" ? "Sending…" : "Send Back"}
           </button>
         </div>
       </DialogContent>

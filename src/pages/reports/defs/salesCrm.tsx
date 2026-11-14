@@ -397,7 +397,7 @@ export const SALES_CRM_REPORTS: ReportDef[] = [
   {
     id: "crm-legal-milestones",
     label: "Legal Milestone Report",
-    description: "Title clearance & legal drafting progress",
+    description: "Each booking's legal journey: agreement, both Sub-Registrar visits, NOC, possession, sale deed and mutation",
     icon: BookOpen,
     color: "#047857",
     apiPath: "/api/crm/reports/legal-milestones",
@@ -405,10 +405,13 @@ export const SALES_CRM_REPORTS: ReportDef[] = [
     columns: [
       { header: "Booking No", accessor: "BookingNo" },
       { header: "Applicant", accessor: "ApplicantName" },
-      { header: "Current Step", accessor: "CurrentStep" },
-      { header: "Overall Status", accessor: "OverallStatus" },
-      { header: "Created", accessor: (r) => (r.CreatedDate ? String(r.CreatedDate).slice(0, 10) : "—") },
-      { header: "Updated", accessor: (r) => (r.UpdatedDate ? String(r.UpdatedDate).slice(0, 10) : "—") },
+      { header: "Project / Unit", accessor: (r) => [r.ProjectName, r.UnitNo].filter(Boolean).join(" / ") || "—" },
+      { header: "Agreement", accessor: (r) => [r.AgreementNo, r.AgreementStatus].filter(Boolean).join(" · ") || "—" },
+      { header: "Steps Done", accessor: (r) => `${r.StepsDone} of ${r.StepsTotal}` },
+      { header: "Phases Done", accessor: (r) => `${r.PhasesDone} of ${r.PhasesTotal}` },
+      { header: "Journey", accessor: "JourneyStatus" },
+      { header: "Started", accessor: (r) => (r.CreatedDate ? String(r.CreatedDate).slice(0, 10) : "—") },
+      { header: "Updated", accessor: (r) => (r.LastUpdated ? String(r.LastUpdated).slice(0, 10) : "—") },
     ],
   },
   {

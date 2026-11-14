@@ -330,7 +330,7 @@ export default function CrmOnAccount() {
       q.set("pageSize", String(PAGE_SIZE));
       const r = await fetchWithAuth(`${API}/on-account?${q}`);
       const body = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(body?.error || "Failed to load deposits");
+      if (!r.ok) throw new Error(body?.error || "Could not load deposits");
       return body as { deposits: Deposit[]; total: number };
     },
     placeholderData: (prev) => prev,
@@ -343,7 +343,7 @@ export default function CrmOnAccount() {
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/on-account/summary?${summaryQuery}`);
       const body = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(body?.error || "Failed to load the totals");
+      if (!r.ok) throw new Error(body?.error || "Could not load the totals");
       return body as Summary;
     },
     placeholderData: (prev) => prev,

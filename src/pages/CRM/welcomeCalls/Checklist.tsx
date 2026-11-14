@@ -110,7 +110,7 @@ export const ChecklistItemRow: React.FC<{
         body: JSON.stringify({ Reason: recheckReason.trim() }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to flag for recheck");
+      if (!res.ok) throw new Error(data.error || "Could not flag for recheck");
       toast.success("Sent for recheck — assigned salesperson notified");
       setRecheckReason("");
       setShowRecheckBox(false);
@@ -126,7 +126,7 @@ export const ChecklistItemRow: React.FC<{
     try {
       const res = await fetchWithAuth(`${VC_API}/${bookingId}/items/${item.ItemKey}/resolve`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to resolve");
+      if (!res.ok) throw new Error(data.error || "Could not resolve");
       toast.success("Recheck resolved — please re-verify and tick the item");
       onChanged();
     } catch (e: any) {
@@ -189,7 +189,7 @@ export const ChecklistItemRow: React.FC<{
                     rows={2} className="w-full text-xs border border-border px-2 py-1 bg-background resize-none" />
                   <button type="button" onClick={handleSaveRemarks} disabled={saving || remarks === (item.Remarks || "")}
                     className={`${KEY_INK} h-8 px-3`}>
-                    {saving ? "Saving..." : "Save Remarks"}
+                    {saving ? "Saving…" : "Save Remarks"}
                   </button>
                 </div>
               )}
@@ -197,11 +197,11 @@ export const ChecklistItemRow: React.FC<{
               {showRecheckBox && !locked && rights.canEdit && (
                 <div className="mt-1.5 space-y-1">
                   <textarea value={recheckReason} onChange={(e) => setRecheckReason(e.target.value)}
-                    placeholder="What doesn't match / what's the conflict with the customer's data..."
+                    placeholder="What doesn't match / what's the conflict with the customer's data…"
                     rows={2} className="w-full text-xs border border-destructive/40 px-2 py-1.5 bg-background resize-none" />
                   <button type="button" onClick={handleSendRecheck} disabled={flagging || !recheckReason.trim()}
                     className="text-[0.6875rem] font-medium px-2 py-1 bg-destructive text-white disabled:opacity-40 hover:bg-destructive/80">
-                    {flagging ? "Sending..." : "Confirm — flag for recheck"}
+                    {flagging ? "Sending…" : "Confirm — flag for recheck"}
                   </button>
                 </div>
               )}
@@ -293,7 +293,7 @@ export const InlineVerify: React.FC<{
         body: JSON.stringify({ Reason: recheckReason.trim() }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to flag for recheck");
+      if (!res.ok) throw new Error(data.error || "Could not flag for recheck");
       toast.success("Sent for recheck — assigned salesperson notified");
       setRecheckReason("");
       setShowRecheckBox(false);
@@ -310,7 +310,7 @@ export const InlineVerify: React.FC<{
     try {
       const res = await fetchWithAuth(`${VC_API}/${bookingId}/items/${item.ItemKey}/resolve`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to resolve");
+      if (!res.ok) throw new Error(data.error || "Could not resolve");
       toast.success("Recheck resolved — please re-verify and tick the item");
       onChanged();
     } catch (e: any) {
@@ -359,7 +359,7 @@ export const InlineVerify: React.FC<{
           <div className="flex items-center gap-2">
             <button type="button" onClick={handleSaveRemarks} disabled={saving || remarks === (item.Remarks || "")}
               className={`${KEY_INK} h-8 px-3`}>
-              {saving ? "Saving..." : "Save Remarks"}
+              {saving ? "Saving…" : "Save Remarks"}
             </button>
             <button type="button" onClick={() => setShowRecheckBox((v) => !v)}
               className="text-[0.6875rem] font-medium text-destructive hover:underline flex items-center gap-1">
@@ -369,11 +369,11 @@ export const InlineVerify: React.FC<{
           {showRecheckBox && (
             <div className="space-y-1 pt-1 border-t border-border">
               <textarea value={recheckReason} onChange={(e) => setRecheckReason(e.target.value)}
-                placeholder="What doesn't match / what's the conflict with the customer's data..."
+                placeholder="What doesn't match / what's the conflict with the customer's data…"
                 rows={2} className="w-full text-xs border border-destructive/40 px-2 py-1.5 bg-background resize-none" />
               <button type="button" onClick={handleSendRecheck} disabled={flagging || !recheckReason.trim()}
                 className="text-[0.6875rem] font-medium px-2 py-1 bg-destructive text-white disabled:opacity-40 hover:bg-destructive/80">
-                {flagging ? "Sending..." : "Confirm — flag for recheck"}
+                {flagging ? "Sending…" : "Confirm — flag for recheck"}
               </button>
             </div>
           )}
@@ -408,7 +408,7 @@ export function useVerificationChecklist(bookingId: number, onAfterSubmit?: () =
     try {
       const res = await fetchWithAuth(`${VC_API}/${bookingId}/submit`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to submit");
+      if (!res.ok) throw new Error(data.error || "Could not submit");
       toast.success("Welcome call verification submitted and locked");
       await refetch();
       onAfterSubmit?.();
@@ -424,7 +424,7 @@ export function useVerificationChecklist(bookingId: number, onAfterSubmit?: () =
     try {
       const res = await fetchWithAuth(`${VC_API}/${bookingId}/reopen`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to reopen");
+      if (!res.ok) throw new Error(data.error || "Could not reopen");
       toast.success("Checklist reopened for edits");
       refetch();
     } catch (e: any) {
@@ -517,7 +517,7 @@ export const ChecklistSubmitFooter: React.FC<{
             {rights.canEdit && (
               <button type="button" onClick={onReopen} disabled={reopening}
                 className="flex items-center gap-1 font-medium text-foreground hover:underline disabled:opacity-40">
-                <Unlock size={12} /> {reopening ? "Reopening..." : "Reopen"}
+                <Unlock size={12} /> {reopening ? "Reopening…" : "Reopen"}
               </button>
             )}
           </div>
@@ -532,7 +532,7 @@ export const ChecklistSubmitFooter: React.FC<{
           {rights.canEdit && (
             <button type="button" onClick={onSubmit} disabled={!vc.canSubmit || !vc.hasWelcomedCall || submitting}
               className="px-4 py-1.5 text-sm bg-foreground text-card font-medium hover:bg-foreground/80 disabled:opacity-40 shrink-0">
-              {submitting ? "Submitting..." : "Submit Verification"}
+              {submitting ? "Submitting…" : "Submit Verification"}
             </button>
           )}
         </div>

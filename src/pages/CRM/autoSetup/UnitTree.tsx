@@ -109,7 +109,7 @@ export function useUnitEditing({ unitTypesMaster, commercialKinds, defaultKind, 
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to update unit");
+      if (!res.ok) throw new Error(data.error || "Could not update unit");
       // A Unit Type change rebuilds the unit's rooms from the new layout.
       const rs = data.roomSync;
       toast.success(
@@ -148,7 +148,7 @@ export function useUnitEditing({ unitTypesMaster, commercialKinds, defaultKind, 
     try {
       const res = await fetchWithAuth(`/api/unit-master/${unit.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete unit");
+      if (!res.ok) throw new Error(data.error || "Could not delete unit");
       toast.success(data.message || "Unit deleted");
       setFloorUnits((m) => ({ ...m, [floorId]: (m[floorId] || []).filter((u) => u.Id !== unit.Id) }));
       onChanged();

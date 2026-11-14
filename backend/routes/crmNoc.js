@@ -258,7 +258,7 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
+        AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
         ${scope}
         -- Agreement for Sale, registered at the Sub-Registrar, is mandatory
         -- for every booking regardless of project type — no exception.
@@ -439,10 +439,17 @@ router.put("/:id/submit", requirePageRight("crm-noc", "edit"), async (req, res) 
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool0 = getPool();
-    const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId, NocType FROM dbo.CrmNoc WHERE Id = @id");
     if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
     const activeErr0 = await requireActiveBooking(pool0, cur0.recordset[0].BookingId);
     if (activeErr0) return res.status(400).json({ error: activeErr0 });
+    // One live NOC per booking (UQ_CrmNoc_ActiveNocPerType): when a newer one was requested after this was rejected,
+    // say so plainly instead of the database's duplicate-key error.
+    const live = await pool0.request().input("bid", sql.Int, cur0.recordset[0].BookingId).input("t", sql.NVarChar(30), cur0.recordset[0].NocType).input("id", sql.Int, id)
+      .query("SELECT TOP 1 NocNo FROM dbo.CrmNoc WHERE BookingId = @bid AND NocType = @t AND Id <> @id AND Status <> 'Rejected'");
+    if (live.recordset.length) {
+      return res.status(409).json({ error: `This booking already has ${live.recordset[0].NocNo} in progress. Work on that one; this rejected NOC stays as history.` });
+    }
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;

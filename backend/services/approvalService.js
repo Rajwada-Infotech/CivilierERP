@@ -135,6 +135,7 @@ const MODULE_MAP = {
   "crm-agreement-date": { table: "dbo.CrmAgreement", pk: "Id", status: "DateApprovalStatus" },
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
+  "crm-unit-change": { table: "dbo.CrmPropertyChangeRequest", pk: "Id", status: "Status" },
   "crm-refunds": { table: "dbo.CrmRefund", pk: "Id", status: "Status" },
   "crm-resales": { table: "dbo.CrmUnitResale", pk: "Id", status: "Status" },
   // A new owner after conveyance (migration 562), from their registered sale deed.

@@ -271,4 +271,50 @@ async function getBookingWaivers(pool, bookingId) {
   return r.recordset.map((w) => ({ ...w, ReversalBlock }));
 }
 
-module.exports = { getBookingWaivers, waiverReversalBlock, coverMilestones, stageMilestones, getBookingOnAccountCoverage, getMilestoneMoneyStages, getBookingMoneyTrail, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };
+// Takes every live milestone allocation of a booking back on account: one negative CrmPaymentReceipt per deposit and
+// milestone (history kept, nothing deleted), the deposit's AppliedAmount down by it, and every milestone reopened to
+// what is really settled on it now. The money is then free on account again and settles through the usual
+// full-payment sweep (crmPayments.js autoApplyOnAccountIfFullyFunded). Used when a payment bounces and when a
+// booking moves to another unit. The caller brings the on-account tracker in line (syncCrmOnAccountLedger) for the
+// deposits returned in `allocs`. receiptNo(a) names each reversal row.
+async function unapplyBookingAllocations(tx, bookingId, { actorUserId = null, note, receiptNo }) {
+  const allocs = (await tx.request().input("bid", sql.Int, bookingId).query(`
+    SELECT r.OnAccountPaymentId, r.MilestoneId, SUM(r.Amount) AS Net, SUM(ISNULL(r.BaseAmount, 0)) AS Base, SUM(ISNULL(r.GSTAmount, 0)) AS Gst
+    FROM dbo.CrmPaymentReceipt r
+    JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
+    WHERE m.BookingId = @bid AND r.OnAccountPaymentId IS NOT NULL
+    GROUP BY r.OnAccountPaymentId, r.MilestoneId
+    HAVING SUM(r.Amount) > 0.009`)).recordset;
+  let amount = 0;
+  for (const a of allocs) {
+    await tx.request()
+      .input("no", sql.NVarChar(30), String(receiptNo(a)).slice(0, 30))
+      .input("mid", sql.Int, a.MilestoneId).input("amt", sql.Decimal(18, 2), -Number(a.Net))
+      .input("base", sql.Decimal(18, 2), -Number(a.Base)).input("gst", sql.Decimal(18, 2), -Number(a.Gst))
+      .input("oaid", sql.Int, a.OnAccountPaymentId).input("cb", sql.Int, actorUserId).input("note", sql.NVarChar(200), String(note || "").slice(0, 200))
+      .query(`INSERT INTO dbo.CrmPaymentReceipt
+                (ReceiptNo, MilestoneId, Amount, BaseAmount, GSTAmount, ReceivedDate, PaymentMode, Notes, OnAccountPaymentId, CreatedBy, CreatedAt)
+              VALUES (@no, @mid, @amt, @base, @gst, CAST(SYSDATETIME() AS DATE), 'OnAccount', @note, @oaid, @cb, SYSDATETIME())`);
+    await tx.request().input("id", sql.Int, a.OnAccountPaymentId).input("amt", sql.Decimal(18, 2), Number(a.Net))
+      .query(`UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = CASE WHEN AppliedAmount - @amt < 0 THEN 0 ELSE AppliedAmount - @amt END,
+                Status = CASE WHEN Status = 'Bounced' THEN Status WHEN AppliedAmount - @amt <= 0.009 THEN 'Unapplied' ELSE 'PartiallyApplied' END
+              WHERE Id = @id`);
+    amount += Number(a.Net);
+  }
+  // Milestones reopen to what is really paid now.
+  await tx.request().input("bid", sql.Int, bookingId).query(`
+    UPDATE m SET
+      AmountPaid = ISNULL((SELECT SUM(r.Amount) FROM dbo.CrmPaymentReceipt r WHERE r.MilestoneId = m.Id), 0),
+      Status = CASE WHEN m.Status = 'Waived' THEN 'Waived'
+                    WHEN ISNULL((SELECT SUM(r.Amount) FROM dbo.CrmPaymentReceipt r WHERE r.MilestoneId = m.Id), 0) >= m.AmountDue - 0.009 THEN 'Paid'
+                    ELSE 'Pending' END,
+      PaidDate = CASE WHEN ISNULL((SELECT SUM(r.Amount) FROM dbo.CrmPaymentReceipt r WHERE r.MilestoneId = m.Id), 0) >= m.AmountDue - 0.009 THEN m.PaidDate ELSE NULL END,
+      DemandStatus = CASE WHEN m.DemandStatus = 'Paid'
+                           AND ISNULL((SELECT SUM(r.Amount) FROM dbo.CrmPaymentReceipt r WHERE r.MilestoneId = m.Id), 0) < m.AmountDue - 0.009
+                          THEN 'Demanded' ELSE m.DemandStatus END,
+      UpdatedAt = SYSDATETIME()
+    FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = @bid`);
+  return { allocs, amount: Math.round(amount * 100) / 100 };
+}
+
+module.exports = { unapplyBookingAllocations, getBookingWaivers, waiverReversalBlock, coverMilestones, stageMilestones, getBookingOnAccountCoverage, getMilestoneMoneyStages, getBookingMoneyTrail, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };

@@ -49,7 +49,7 @@ export function PdfPreviewDialog({ pdfUrl, title, subtitle, filename, onClose }:
         setBlobUrl(objectUrl);
       })
       .catch((e) => {
-        if (!cancelled) setLoadError(e?.message || "Failed to load PDF");
+        if (!cancelled) setLoadError(e?.message || "Could not load PDF");
       });
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [pdfUrl]);

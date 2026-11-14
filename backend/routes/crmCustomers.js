@@ -652,7 +652,7 @@ router.delete("/:id", requirePageRight("crm-customers", "delete"), async (req, r
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE a.CustomerId = @id
         AND b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+        AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
       ORDER BY b.BookingNo
     `);
     if (liveBookings.recordset.length) {

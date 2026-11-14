@@ -87,7 +87,7 @@ export const WelcomeCallPdfDialog: React.FC<{ bookingId: number; bookingNo: stri
           </div>
         </DialogHeader>
         <div className="flex items-center justify-center min-h-[300px] bg-muted/20 overflow-hidden border border-border">
-          {!blobUrl ? <span className="text-sm text-muted-foreground">Loading preview...</span>
+          {!blobUrl ? <span className="text-sm text-muted-foreground">Loading preview…</span>
             : <iframe src={blobUrl} title={`WelcomeCall_${bookingNo}`} className="w-full h-[60vh] border-0" />}
         </div>
       </DialogContent>

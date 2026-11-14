@@ -12,9 +12,10 @@ const stub = (rel, exportsValue) => { const f = require.resolve(rel); require.ca
 
 /**
  * mounts: { "/prefix": "routeFile" }. count: a read-only SQL whose one row must be the same before and after.
+ * port: where it listens (0 = any free port).
  * Returns the helpers each script uses, and finish() which rolls back, checks nothing changed and exits.
  */
-async function openHarness({ mounts, count }) {
+async function openHarness({ mounts, count, port = 0 }) {
   await db.connectDB();
   const realPool = db.getPool();
   const before = (await realPool.request().query(count)).recordset[0];
@@ -56,9 +57,11 @@ async function openHarness({ mounts, count }) {
 
   const app = express();
   app.use(express.json());
+  // Every request carries the test user, as the server's own auth does before routes that rely on it (e.g. Payments).
+  app.use((req, _r, n) => { req.user = actor; n(); });
   for (const [at, file] of Object.entries(mounts)) app.use(at, require(`../routes/${file}`));
   const srv = http.createServer(app);
-  await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));
+  await new Promise((ok) => srv.listen(port, "127.0.0.1", ok));
   const base = `http://127.0.0.1:${srv.address().port}`;
 
   const results = [];

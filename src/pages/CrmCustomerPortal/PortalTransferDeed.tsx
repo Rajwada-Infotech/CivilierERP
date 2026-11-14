@@ -25,7 +25,7 @@ async function send(path: string, method: string, body?: any) {
   if (isForm) delete headers["Content-Type"];
   const r = await fetch(`${API}${path}`, { method, headers, body: method === "GET" ? undefined : isForm ? body : JSON.stringify(body || {}) });
   const out = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(out.error || "Something went wrong");
+  if (!r.ok) throw new Error(out.error || "The request could not be completed. Please try again.");
   return out;
 }
 

@@ -116,5 +116,5 @@ export function bookingSendBackChoices(targets: string[] | string | null | undef
 }
 
 // A booking in one of these has ended — no stage, checklist or approval applies to it any more.
-export const BOOKING_CLOSED_STATUSES: readonly string[] = [CrmStatus.CANCELLED, CrmStatus.REJECTED, 'Expired', 'Transferred'];
+export const BOOKING_CLOSED_STATUSES: readonly string[] = [CrmStatus.CANCELLED, CrmStatus.REJECTED, 'Expired', 'Transferred', 'UnitChanged'];
 export const isBookingClosed = (status: string | null | undefined) => !!status && BOOKING_CLOSED_STATUSES.includes(status);

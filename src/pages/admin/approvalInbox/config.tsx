@@ -4,7 +4,7 @@ import React from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { computeGrnNetWithTerms } from "@/pages/material/ExpenseBooking/helpers";
-import { ClipboardCheck, ClipboardList, Package, PackageOpen, Hammer, Banknote, Truck, Receipt, ArrowDownCircle, XCircle, ArrowLeftRight, Warehouse, ShoppingCart, Building2, Home, Car, Eye, FileText, Landmark, UserCheck, FileWarning, Undo2, ShieldCheck, FilePenLine } from "lucide-react";
+import { ArrowRightLeft, ClipboardCheck, ClipboardList, Package, PackageOpen, Hammer, Banknote, Truck, Receipt, ArrowDownCircle, XCircle, ArrowLeftRight, Warehouse, ShoppingCart, Building2, Home, Car, Eye, FileText, Landmark, UserCheck, FileWarning, Undo2, ShieldCheck, FilePenLine } from "lucide-react";
 import { type ApprovalTable } from "@/components/ApprovalStatusChain";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -298,6 +298,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/cancellations",
     label: "CRM Cancellations",
   },
+  "crm-unit-change": {
+    icon: ArrowRightLeft,
+    color: "text-sky-500 bg-sky-500/10",
+    navPath: "/crm/unit-changes",
+    apiEndpoint: "/api/crm/bookings/unit-changes",
+    label: "CRM Unit Change",
+  },
   "crm-noc": {
     icon: ClipboardCheck,
     color: "text-teal-500 bg-teal-500/10",
@@ -510,6 +517,7 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "crm-sales-deed-director": "sales",
   "crm-brokerage": "sales",
   "crm-cancellations": "sales",
+  "crm-unit-change": "sales",
   "crm-noc": "sales",
   "crm-booking-amendment": "sales",
   "crm-refunds": "sales",
@@ -594,7 +602,8 @@ export function openInModulePath(item: InboxItem, navPath: string): string {
   if (item.Module === "crm-credit-notes" || item.Module === "crm-credit-note-cancel") {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }
-  if (item.Module === "crm-ownership-changes") {
+  // The refunds page opens one refund by ?id= (its approval and its payout voucher step are on it).
+  if (item.Module === "crm-ownership-changes" || item.Module === "crm-noc" || item.Module === "crm-refunds" || item.Module === "crm-refunds-finance" || item.Module === "crm-cancellations" || item.Module === "crm-unit-change") {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }
   // The sale deed page opens one deed by ?deedId=, at its approvals.
@@ -703,6 +712,7 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "crm-sales-deed-director":"border-purple-500",
   "crm-brokerage":        "border-amber-500",
   "crm-cancellations":    "border-rose-500",
+  "crm-unit-change":      "border-sky-500",
   "crm-noc":              "border-teal-500",
   "crm-refunds":          "border-orange-600",
   "crm-refunds-finance":  "border-orange-700",

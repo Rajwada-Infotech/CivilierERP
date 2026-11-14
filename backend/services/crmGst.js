@@ -129,7 +129,7 @@ async function landOwnedByCustomer(pool, unitIds, customerId) {
          JOIN dbo.CrmApplication landApplication ON landApplication.Id = landBooking.ApplicationId
          WHERE p.IsActive = 1 AND p.ConvertedUnitId IN (${ids.join(",")})
            AND landBooking.IsActive = 1
-           AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
+           AND landBooking.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
            AND landApplication.CustomerId = @cid) AS CustomerOwnedPlotCount
   `)).recordset[0];
   const sourceCount = Number(row?.SourcePlotCount || 0);

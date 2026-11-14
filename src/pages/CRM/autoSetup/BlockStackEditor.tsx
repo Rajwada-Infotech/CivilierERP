@@ -133,7 +133,7 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
     queryKey: key,
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/blocks/${blockId}/stack`);
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load floors");
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Could not load floors");
       return r.json();
     },
   });

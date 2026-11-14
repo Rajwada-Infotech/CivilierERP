@@ -33,7 +33,7 @@ function InvoicePdfDialog({ pdfUrl, title, subtitle, filename, onClose }: {
     fetchWithAuth(pdfUrl)
       .then((r) => { if (!r.ok) throw new Error(`Failed to load PDF (${r.status})`); return r.blob(); })
       .then((blob) => { if (cancelled) return; objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
-      .catch((e) => { if (!cancelled) setLoadError(e?.message || "Failed to load PDF"); });
+      .catch((e) => { if (!cancelled) setLoadError(e?.message || "Could not load PDF"); });
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [pdfUrl]);
 

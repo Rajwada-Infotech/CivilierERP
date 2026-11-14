@@ -31,7 +31,7 @@ const tri = (v: unknown) => (v === true || v === 1 ? "1" : v === false || v === 
 async function fetchRules(): Promise<RecordWithId[]> {
   const res = await fetchWithAuth(API);
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(body?.error || "Failed to load GST rules");
+  if (!res.ok) throw new Error(body?.error || "Could not load GST rules");
   return (Array.isArray(body) ? body : []).map((r: any) => ({
     ...r,
     id: r.Id,
@@ -107,7 +107,7 @@ const CrmGstRuleMaster: React.FC = () => {
       else if (e.action === "delete") { await send(`${API}/${e.id}`, "DELETE"); toast.success("GST rule retired"); }
       queryClient.invalidateQueries({ queryKey: ["crm-gst-rules"] });
     } catch (err: any) {
-      toast.error(err.message || "Something went wrong");
+      toast.error(err.message || "The request could not be completed. Please try again.");
     }
   };
 

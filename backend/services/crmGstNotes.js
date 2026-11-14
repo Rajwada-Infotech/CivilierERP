@@ -12,6 +12,7 @@
 // Cancellation charges kept by us get no document. One set per refund,
 // issued once (idempotent by RefundId); never fatal to the payout.
 const { sql } = require("../db");
+const { REFUND_DROPPED_SQL } = require("../constants/crmStatuses");
 const { getGstSplit } = require("./crmLedger");
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -391,6 +392,7 @@ function renderPdf(n) {
     y += 22; x = L;
     const REASON_TEXT = { Discount: "Discount allowed", AreaChange: "Change in area", PriceCorrection: "Price correction", Other: "Reduction in value" };
     const desc = n.Source === "Adjustment" ? `${REASON_TEXT[n.ReasonType] || "Reduction in value"} on the sale — ${n.Remarks || ""}`
+      : n.Source === "UnitChange" ? "Sale of this unit cancelled — the buyer moved to another unit; the amount paid is carried to the new booking"
       : n.DocType === "CreditNote" ? "Reduction of the sale value — booking cancelled / amount refunded" : "Advance received for the property, refunded — no supply made against it";
     const cells = [desc, formatSac(n.HsnCode), money(n.TaxableValue), n.GstRate != null ? `${Number(n.GstRate)}%` : "-", money(n.GstAmount)];
     doc.font(F.regular).fontSize(8.5);
@@ -515,7 +517,7 @@ async function invoiceCreditable(pool, invoiceId) {
 function assertCreditable(inv, amount, { ignoreOpenRequests = false } = {}) {
   if (!SALE_INVOICE_TYPES.includes(inv.InvoiceType)) throw new GstNoteError("Only a sale invoice (booking / milestone / final) can be credited");
   if (inv.Status === "Void") throw new GstNoteError(`Invoice ${inv.InvoiceNo} is void`, 409);
-  if (!inv.BookingActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(inv.BookingStatus))
+  if (!inv.BookingActive || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(inv.BookingStatus))
     throw new GstNoteError(`The booking of ${inv.InvoiceNo} is ${String(inv.BookingStatus || "closed").toLowerCase()} — its money is settled through the cancellation / refund`, 409);
   if (inv.pastDeadline) throw new GstNoteError(`Too late for a credit note on ${inv.InvoiceNo}: it had to be declared by ${inv.deadline}`, 409);
   if (!ignoreOpenRequests && inv.OpenRequests) throw new GstNoteError(`A credit note on ${inv.InvoiceNo} is already being prepared or approved — finish that one first`, 409);
@@ -744,11 +746,79 @@ async function postAdjustmentToGL(pool, id, userEmail) {
   return { posted: true };
 }
 
+// ── Unit Change: the old booking's invoices are credited ─────────────────────────────────────────────────────────
+// A buyer moved to another unit (crmEntityCreation.executeUnitChange): the old unit's sale will never happen, so each
+// live sale invoice of the old booking is credited in full (GST s.34) — the approved Unit Change is its approval. Only
+// the document and the books change: the money itself moves to the new booking with the change, so nothing goes on
+// account here (unlike an Adjustment). The new booking invoices its own sale. An invoice past its credit-note deadline
+// (30 Nov after its financial year) gets a TimeBarred note: no GST can be reduced, so nothing is posted; Finance sees
+// it on the request. Safe to run again: an invoice already credited by this change is skipped.
+async function unitChangeInvoices(pool, bookingId) {
+  const rows = (await pool.request().input("b", sql.Int, bookingId).query(`
+    SELECT i.Id, i.InvoiceNo, i.InvoiceDate, i.InvoiceType, i.MilestoneId,
+           i.Amount - ISNULL((SELECT SUM(n.TotalAmount) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Status IN (N'Issued', N'TimeBarred')), 0) AS OpenAmount
+    FROM dbo.CrmInvoice i
+    WHERE i.BookingId = @b AND i.Status <> N'Void' AND i.InvoiceType IN (${SALE_INVOICE_TYPES.map((t) => `N'${t}'`).join(", ")})
+    ORDER BY i.InvoiceDate, i.Id`)).recordset;
+  const today = iso(new Date());
+  return rows.filter((i) => Number(i.OpenAmount) > 0.005).map((i) => {
+    const deadline = creditNoteDeadline(i.InvoiceDate);
+    return { ...i, Open: r2(i.OpenAmount), deadline, barred: today > deadline };
+  });
+}
+
+async function creditForUnitChange(pool, { bookingId, requestNo, newBookingNo, userEmail }) {
+  const b = (await pool.request().input("b", sql.Int, bookingId).query(`
+    SELECT b.CompanyId, b.ProjectId, a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @b`)).recordset[0];
+  const issued = [];
+  for (const inv of await unitChangeInvoices(pool, bookingId)) {
+    const done = (await pool.request().input("i", sql.Int, inv.Id).query(`
+      SELECT COUNT(*) n FROM dbo.CrmGstNote WHERE InvoiceId = @i AND Source = N'UnitChange' AND Status <> N'Cancelled'`)).recordset[0].n;
+    if (done) continue;
+    const { gstAmount } = await getGstSplit(pool, bookingId, inv.Open);
+    const rate = await rateFor(pool, bookingId);
+    const docNo = inv.barred ? null : await require("./docNumber").getNextDocNumber(pool, "CRN", "CRN");
+    const remarks = inv.barred
+      ? `Unit change ${requestNo}: the sale moved to booking ${newBookingNo}. Past ${inv.deadline}: no credit note can be declared for ${inv.InvoiceNo}; Finance decides how its GST is handled.`
+      : `Unit change ${requestNo}: the sale moved to booking ${newBookingNo}. Cancels invoice ${inv.InvoiceNo}; declare in GSTR-1 by ${inv.deadline}.`;
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    let id;
+    try {
+      id = (await tx.request()
+        .input("no", sql.NVarChar(16), docNo).input("st", sql.NVarChar(20), inv.barred ? "TimeBarred" : "Issued")
+        .input("b", sql.Int, bookingId).input("c", sql.Int, b?.CustomerId ?? null).input("co", sql.Int, b?.CompanyId ?? null).input("pr", sql.Int, b?.ProjectId ?? null)
+        .input("inv", sql.Int, inv.Id).input("m", sql.Int, inv.MilestoneId ?? null).input("ag", sql.NVarChar(400), inv.InvoiceNo).input("agd", sql.Date, inv.InvoiceDate)
+        .input("tv", sql.Decimal(18, 2), r2(inv.Open - gstAmount)).input("rate", sql.Decimal(9, 4), rate || null).input("g", sql.Decimal(18, 2), gstAmount)
+        .input("tot", sql.Decimal(18, 2), inv.Open).input("dl", sql.Date, inv.deadline).input("rm", sql.NVarChar(500), remarks.slice(0, 500))
+        .input("by", sql.NVarChar(200), userEmail || null)
+        .query(`INSERT INTO dbo.CrmGstNote (DocNo, DocType, Status, Source, RefundId, BookingId, CustomerId, CompanyId, ProjectId, InvoiceId, MilestoneId, AgainstRef, AgainstDate,
+                  DocDate, TaxableValue, GstRate, GstAmount, TotalAmount, DeadlineDate, ReasonType, Remarks, CreatedBy, ApprovalStatus, ApprovedAt)
+                OUTPUT INSERTED.Id
+                VALUES (@no, N'CreditNote', @st, N'UnitChange', NULL, @b, @c, @co, @pr, @inv, @m, @ag, @agd,
+                  CAST(SYSDATETIME() AS DATE), @tv, @rate, @g, @tot, @dl, N'UnitChange', @rm, @by, N'Approved', SYSDATETIME())`)).recordset[0].Id;
+      if (!inv.barred) {
+        await tx.request().input("b", sql.Int, bookingId).input("t", sql.Decimal(18, 2), inv.Open).input("g", sql.Decimal(18, 2), gstAmount)
+          .query("UPDATE dbo.CrmBooking SET CreditNoteTotal = ISNULL(CreditNoteTotal, 0) + @t, CreditNoteGst = ISNULL(CreditNoteGst, 0) + @g, UpdatedAt = SYSDATETIME() WHERE Id = @b");
+      }
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch { /* rolled back */ }
+      throw e;
+    }
+    // The invoice's income and GST back to Advance from Customer: the invoice's own voucher, mirrored (idempotent).
+    if (!inv.barred) await postAdjustmentToGL(pool, id, userEmail);
+    issued.push({ id, docNo, invoiceNo: inv.InvoiceNo, amount: inv.Open, gst: gstAmount, status: inv.barred ? "TimeBarred" : "Issued" });
+  }
+  return issued;
+}
+
 // ── Cancelling a credit note: a second person approves ('crm-credit-note-cancel')
 async function requestCancel(pool, id, reason, user) {
   const n = await load(pool, id);
   if (!n) throw new GstNoteError("Credit note not found", 404);
   if (!["Issued", "TimeBarred"].includes(n.Status)) throw new GstNoteError(n.Status === "Cancelled" ? "It is already cancelled" : "Only an issued credit note can be cancelled", 409);
+  if (n.Source === "UnitChange") throw new GstNoteError("This credit note comes from a unit change: the sale moved to another booking, so it stays", 409);
   if (n.CancelApprovalStatus === "Pending") throw new GstNoteError("Its cancellation is already waiting for approval", 409);
   if (!String(reason || "").trim()) throw new GstNoteError("Say why it is being cancelled");
   if (n.Source === "Adjustment") await assertAdjustmentReversible(pool, n);
@@ -765,7 +835,7 @@ async function assertAdjustmentReversible(pool, n) {
   const oa = (await pool.request().input("o", sql.Int, n.OnAccountId)
     .query("SELECT Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WHERE Id = @o")).recordset[0];
   const claimed = (await pool.request().input("o", sql.Int, n.OnAccountId)
-    .query("SELECT TOP 1 RefundNo FROM dbo.CrmRefund WHERE SourceOnAccountId = @o AND Status NOT IN (N'Rejected', N'Cancelled')")).recordset[0];
+    .query(`SELECT TOP 1 RefundNo FROM dbo.CrmRefund WHERE SourceOnAccountId = @o AND Status NOT IN ${REFUND_DROPPED_SQL}`)).recordset[0];
   if (claimed) throw new GstNoteError(`Its credit is being refunded (${claimed.RefundNo}) — it can't be cancelled`, 409);
   if (!oa || Number(oa.AppliedAmount || 0) > 0.005) throw new GstNoteError("Its credit has already been used on a milestone — it can't be cancelled; raise a new invoice instead", 409);
 }
@@ -859,7 +929,7 @@ async function creditableInvoices(pool, { search = "", projectScope = null } = {
     LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = i.MilestoneId
     LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
     WHERE i.Status <> N'Void' AND i.InvoiceType IN (N'Milestone', N'Booking', N'Final') AND b.IsActive = 1
-      AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')${scope}
+      AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}${scope}
       ${t ? "AND (i.InvoiceNo LIKE @q OR b.BookingNo LIKE @q OR b.UnitNo LIKE @q OR c.CustomerName LIKE @q)" : ""}
     ORDER BY i.InvoiceDate DESC, i.Id DESC`)).recordset;
   return rows.map((r) => ({ ...r, Open: r2(r.OpenAmount), Deadline: creditNoteDeadline(r.InvoiceDate) }))
@@ -867,6 +937,7 @@ async function creditableInvoices(pool, { search = "", projectScope = null } = {
 }
 
 module.exports = {
+  unitChangeInvoices, creditForUnitChange,
   issueForRefund, reissue, cancel, pending, list, load, renderPdf, creditNoteDeadline, formatSac, GstNoteError,
   createAdjustment, updateAdjustment, submitAdjustment, decideAdjustment, requestCancel, decideCancel, creditableInvoices, invoiceCreditable, REASONS,
 };

@@ -12,7 +12,8 @@ const num = (v: unknown) => Number(v) || 0;
 type Line = Record<string, any>;
 
 function tableRows(rows: Line[], kind: "item" | "activity") {
-  if (!rows.length) return `<tr><td colspan="6" class="empty">No ${kind === "item" ? "items" : "activities"}</td></tr>`;
+  const cols = kind === "item" ? 7 : 6;
+  if (!rows.length) return `<tr><td colspan="${cols}" class="empty">No ${kind === "item" ? "items" : "activities"}</td></tr>`;
   return rows.map((row, i) => {
     const name = kind === "item" ? row.itemName ?? row.ItemName : row.activityName ?? row.ActivityName;
     const code = kind === "item" ? row.itemCode ?? row.ItemCode : row.activityCode ?? row.ActivityCode;
@@ -21,9 +22,11 @@ function tableRows(rows: Line[], kind: "item" | "activity") {
     const uom = row.uomName ?? row.UomName ?? "";
     const rate = num(row.rate ?? row.Rate);
     const amount = num(row.amount ?? row.LineAmount ?? row.Amount);
+    const forActivity = row.activityName ?? row.ActivityName ?? "";
     return `<tr>
       <td class="c">${i + 1}</td>
       <td><b>${e(name)}</b>${code ? ` <span class="code">${escapeHtml(String(code))}</span>` : ""}${desc ? `<div class="desc">${escapeHtml(String(desc))}</div>` : ""}</td>
+      ${kind === "item" ? `<td class="act">${forActivity ? escapeHtml(String(forActivity)) : "—"}</td>` : ""}
       <td class="r">${escapeHtml(String(qty))}</td>
       <td class="c">${escapeHtml(String(uom))}</td>
       <td class="r">${fmt(rate)}</td>
@@ -43,16 +46,21 @@ export function printBoq(record: BoqRecord) {
   const docNo = record.BoqNo || record.DocNo || `#${record.BoqID}`;
   const company = record.CompanyName || "Company";
   const mark = escapeHtml(company.trim().charAt(0).toUpperCase());
+  const origin = window.location.origin;
   const printed = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const itemHead = `<tr class="th"><th class="c">SL.</th><th>DESCRIPTION</th><th>FOR ACTIVITY</th><th class="r">QTY</th><th class="c">UOM</th><th class="r">RATE</th><th class="r">AMOUNT</th></tr>`;
   const head = `<tr class="th"><th class="c">SL.</th><th>DESCRIPTION</th><th class="r">QTY</th><th class="c">UOM</th><th class="r">RATE</th><th class="r">AMOUNT</th></tr>`;
 
   openPrintWindow(`<!DOCTYPE html>
 <html><head><meta charset="utf-8" /><title>BOQ ${escapeHtml(String(docNo))}</title>
 <style>
+  /* DM Sans, from the app's own copy (the print window is a blob page, so the address must be absolute). */
+  @font-face { font-family: 'DM Sans'; font-weight: 100 600; src: url('${origin}/fonts/DMSans-Regular.ttf') format('truetype'); }
+  @font-face { font-family: 'DM Sans'; font-weight: 700 900; src: url('${origin}/fonts/DMSans-Bold.ttf') format('truetype'); }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   @page { size: A4 portrait; margin: 0; }
   html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { font-family: 'Lato', 'Segoe UI', Arial, sans-serif; font-size: 10.5px; color: #2b2b2b; background: #fff7ea; }
+  body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; font-size: 10.5px; color: #2b2b2b; background: #fff7ea; }
   /* Dark sidebar, repeated on every page */
   .side { position: fixed; top: 0; left: 0; bottom: 0; width: 64mm; background: #34373a; color: #fff; padding: 46mm 6mm 0 7mm; z-index: 1; }
   .side h5 { color: #f26a21; font-size: 10.5px; letter-spacing: 1.2px; margin: 14px 0 5px; text-transform: uppercase; }
@@ -80,6 +88,7 @@ export function printBoq(record: BoqRecord) {
   tbody tr:nth-child(even) td { background: #fdeede; }
   .c { text-align: center; } .r { text-align: right; white-space: nowrap; }
   th.c { text-align: center; } th.r { text-align: right; }
+  .act { color: #9a4a12; font-weight: 700; font-size: 9.5px; }
   .code { color: #9a4a12; font-size: 9px; margin-left: 4px; }
   .desc { color: #6b6b6b; font-size: 9.5px; margin-top: 2px; }
   .empty { text-align: center; color: #8a8a8a; }
@@ -120,8 +129,8 @@ export function printBoq(record: BoqRecord) {
     ${record.Description ? `<div class="note" style="margin:0 0 6mm"><b>Description</b>${escapeHtml(String(record.Description))}</div>` : ""}
 
     <h3 class="sec">Items <b>· ${items.length}</b></h3>
-    <table class="t"><thead><tr class="spacer"><td colspan="6"></td></tr>${head}</thead><tbody>${tableRows(items, "item")}</tbody>
-      <tfoot><tr class="sub"><td class="k" colspan="5">Items total</td><td>${fmt(itemTotal)}</td></tr></tfoot></table>
+    <table class="t"><thead><tr class="spacer"><td colspan="7"></td></tr>${itemHead}</thead><tbody>${tableRows(items, "item")}</tbody>
+      <tfoot><tr class="sub"><td class="k" colspan="6">Items total</td><td>${fmt(itemTotal)}</td></tr></tfoot></table>
 
     <h3 class="sec" style="margin-top:8mm">Activities <b>· ${activities.length}</b></h3>
     <table class="t"><thead><tr class="spacer"><td colspan="6"></td></tr>${head}</thead><tbody>${tableRows(activities, "activity")}</tbody>

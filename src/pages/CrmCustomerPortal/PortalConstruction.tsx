@@ -38,13 +38,13 @@ function DisputeDialog({ applicationId, onClose, onSubmitted }: { applicationId:
           <DialogDescription>Tell us exactly what's wrong — this goes straight to your assigned team.</DialogDescription>
         </DialogHeader>
         <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={4}
-          placeholder="e.g. Unit isn't ready, snags unresolved, dates don't work..."
+          placeholder="e.g. Unit isn't ready, snags unresolved, dates don't work…"
           className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none" style={{ border: `1px solid ${HAIRLINE}`, background: "transparent", color: TEXT }} />
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
           <button onClick={submit} disabled={saving}
             className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
-            {saving ? "Submitting..." : "Submit Dispute"}
+            {saving ? "Submitting…" : "Submit Dispute"}
           </button>
         </div>
       </DialogContent>

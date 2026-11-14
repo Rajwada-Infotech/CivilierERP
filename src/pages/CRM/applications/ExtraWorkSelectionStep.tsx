@@ -49,7 +49,7 @@ export const ExtraWorkSelectionStep: React.FC<{
         body: JSON.stringify({ Description: description.trim(), Amount: amt }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add extra work");
+      if (!res.ok) throw new Error(data.error || "Could not add extra work");
       toast.success(`${description.trim()} added — ${fmtInr(data.TotalAmount)}`);
       setDescription(""); setAmount("");
       refetch();
@@ -127,7 +127,7 @@ export const ExtraWorkSelectionStep: React.FC<{
           )}
           <button onClick={handleAdd} disabled={adding || !description.trim() || !amount}
             className={`${KEY_INK} h-9 px-4`}>
-            {adding ? "Adding..." : "Add Extra Charges"}
+            {adding ? "Adding…" : "Add Extra Charges"}
           </button>
         </div>
       )}

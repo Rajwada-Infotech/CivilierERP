@@ -196,7 +196,7 @@ async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmai
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
       SELECT np.PPaymentID, np.PChequeNo, np.PChequeLotId, np.PChequeLotNumber,
-             np.PIsChequeCancelled, np.PBankID, np.Status, np.PExpenseRef,
+             np.PIsChequeCancelled, np.PBankID, np.Status, np.PExpenseRef, np.SourceCrmRefundId,
              ISNULL(bm.LHeadName, np.PBankName) AS BankName,
              np.PChequeAccountNumber
       FROM dbo.NewPayment np
@@ -284,6 +284,15 @@ async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmai
     await syncBillStatus(pool, sql, payment.PExpenseRef);
   }
 
+  // A CRM refund's payout cheque: the refund goes back to "voucher not raised" and its credit is restored, so CRM and
+  // the books agree and Finance can pay it again (crmRefunds.js reverseRefundPayout).
+  let refundReversal = null;
+  if (payment.SourceCrmRefundId) {
+    refundReversal = await require("./crmRefunds").reverseRefundPayout(pool, payment.SourceCrmRefundId, {
+      reason: `Cheque #${payment.PChequeNo} cancelled: ${reason || "no reason given"}`, userEmail, newPaymentId: payment.PPaymentID,
+    });
+  }
+
   // This payment may BE a loan repayment (Finance > Payment's Loan EMIs tab
   // creates the NewPayment row first, then links it via
   // LoanPayment.NewPaymentId — migration 340). If so, cancelling its cheque
@@ -296,7 +305,7 @@ async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmai
     reason: `Cheque #${payment.PChequeNo} cancelled: ${reason || "no reason given"}`,
   });
 
-  return { ok: true, expenseRef: payment.PExpenseRef || null, loanReversal };
+  return { ok: true, expenseRef: payment.PExpenseRef || null, loanReversal, refundReversal };
 }
 
 // Undoes a LoanPayment's effect when the NewPayment backing it gets its
