@@ -30,7 +30,17 @@ export default function LandEnquiryPage() {
   const [plotsId, setPlotsId] = useState<number | null>(null);
   // Same rows the table loads (shared cache): counts for the summary tiles.
   const { data: allRows = [] } = useQuery({ queryKey: ["legal-master", "land-enquiry", null], queryFn: () => getLegalRows("land-enquiry"), staleTime: 60 * 1000 });
-  const rows = allRows.filter((r) => Number(r.ProjectId) === projectId && r.IsActive !== false);
+  // Enquiries raised before a project was required belong to no project: they are listed apart ("Without a project")
+  // so they never go missing — open one, set its project, and it moves under that project.
+  // Scope: one project (remembered), "all" projects (the dashboard's figures cover every project) or "none" (enquiries
+  // raised before a project was required). "all" / "none" come from the link or the picker and are not remembered.
+  const [scope, setScope] = useState<"all" | "none" | null>(() => { const v = new URLSearchParams(window.location.search).get("project"); return v === "all" || v === "none" ? v : null; });
+  const orphans = scope === "none";
+  const setOrphans = (on: boolean) => setScope(on ? "none" : null);
+  const isActive = (r: LegalRow) => r.IsActive !== false && r.IsActive !== 0;
+  const orphanN = allRows.filter((r) => isActive(r) && (r.ProjectId == null || r.ProjectId === "")).length;
+  const inScope = (r: LegalRow) => (scope === "all" ? true : orphans ? r.ProjectId == null || r.ProjectId === "" : Number(r.ProjectId) === projectId);
+  const rows = allRows.filter((r) => inScope(r) && isActive(r));
   const FILTERS: [string, string, (r: LegalRow) => boolean, string][] = [
     ["all", "All", () => true, "border-border"],
     ["search", "Deed search pending", (r) => !r.LandId && Number(r.OfficesPending) > 0, "border-amber-500"],
@@ -91,8 +101,18 @@ export default function LandEnquiryPage() {
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", entry.label]} />
       <LegalShell title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and Land Profile." icon={MessageQuestion}>
-        <ProjectPicker value={projectId} onChange={setProjectId} />
-        {projectId && (
+        <ProjectPicker value={scope ?? projectId} allowAll onChange={(id) => {
+          // A choice made here replaces the one from the link.
+          if (window.location.search) navigate("/legal/land/enquiries", { replace: true });
+          if (id === "all" || id === "none") setScope(id); else { setScope(null); setProjectId(id); }
+        }} />
+        {orphanN > 0 && scope !== "none" && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border border-amber-500/60 bg-amber-500/10 px-4 py-2 text-sm">
+            <span><b>{orphanN} enquir{orphanN > 1 ? "ies have" : "y has"} no project</b> — raised before a project was required, so {orphanN > 1 ? "they don't" : "it doesn't"} show under any project but still count on the dashboard.</span>
+            <button className="border border-foreground px-3 py-1 text-xs font-semibold hover:bg-muted" onClick={() => setOrphans(!orphans)}>Show them</button>
+          </div>
+        )}
+        {(projectId || scope) && (
           <div className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
             {FILTERS.map(([k, label, test, edge]) => {
               const n = rows.filter(test).length;
@@ -109,14 +129,17 @@ export default function LandEnquiryPage() {
         )}
         <MyWhatsAppPrompt />
         <div className="mb-4"><GovtSiteLinks hint="Before converting an enquiry, check the plot on the official site (opens in a new tab)." /></div>
-        {projectId ? (
+        {projectId || scope ? (
         <LegalMasterTable
-          key={projectId}
+          key={scope ?? projectId ?? 0}
           entry={entry}
           // Only this project's enquiries; a new enquiry is raised under it.
-          rowFilter={(raw) => Number(raw.ProjectId) === projectId && active[2](raw)}
-          fixed={{ ProjectId: String(projectId) }}
-          addButton="Add Land Enquiry"
+          rowFilter={(raw) => inScope(raw) && active[2](raw)}
+          // Without a project: no new enquiry here, and editing one asks for its project.
+          // One project: a new enquiry is raised under it. All projects: the form asks for the project.
+          fixed={scope ? undefined : { ProjectId: String(projectId) }}
+          noAdd={orphans}
+          addButton={orphans ? undefined : "Add Land Enquiry"}
           onCreated={(newId) => setPlotsId(newId)}
           rowClassName={(raw) => STATUS_ROW[String(raw.EnquiryStatus)]}
           // A converted enquiry is history: its details are kept and changed on the land it became.
@@ -158,7 +181,7 @@ export default function LandEnquiryPage() {
               return (
                 <span className="inline-flex flex-wrap justify-end gap-1.5">
                   {map}{portal}
-                  <button onClick={() => navigate(`/legal/land/deed-search?view=all&q=${encodeURIComponent(no)}&project=${projectId}`)} className={`${small} font-semibold ${Number(raw.OfficesOverdue) > 0 ? "border-destructive bg-destructive/10 text-destructive" : "border-amber-500 bg-amber-500/10 text-amber-800"}`}
+                  <button onClick={() => navigate(`/legal/land/deed-search?view=all&q=${encodeURIComponent(no)}&project=${raw.ProjectId ?? "none"}`)} className={`${small} font-semibold ${Number(raw.OfficesOverdue) > 0 ? "border-destructive bg-destructive/10 text-destructive" : "border-amber-500 bg-amber-500/10 text-amber-800"}`}
                     title="Search every registration office first; the other actions open when all are complete">
                     Deed search {Number(raw.OfficesTotal ?? 0) - openOffices}/{Number(raw.OfficesTotal ?? 0)}{Number(raw.OfficesOverdue) > 0 ? ` · ${raw.OfficesOverdue} overdue` : ""}
                   </button>
@@ -206,7 +229,7 @@ export default function LandEnquiryPage() {
             </div>
           );
         })()}
-        {!projectId && <p className="text-sm text-muted-foreground">Select a project to see and raise its land enquiries.</p>}
+        {!projectId && !scope && <p className="text-sm text-muted-foreground">Select a project to see and raise its land enquiries.</p>}
       </LegalShell>
     </>
   );

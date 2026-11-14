@@ -129,9 +129,11 @@ router.get("/find", requirePageRight(PAGE, "view"), async (req, res) => {
     const pool = getPool();
     if (!(await ready(pool))) return notReady(res);
     // ?projectId=all — every project (dashboard "All projects").
+    // ?projectId=all — every project; ?projectId=none — enquiries without a project (raised before projects were required).
     const allProjects = req.query.projectId === "all";
+    const noProject = req.query.projectId === "none";
     const projectId = idOf(req.query.projectId);
-    if (!projectId && !allProjects) return res.status(400).json({ error: "Select the project first" });
+    if (!projectId && !allProjects && !noProject) return res.status(400).json({ error: "Select the project first" });
     const q = txt(req.query.q, 60);
     const tab = ["pending", "done"].includes(req.query.tab) ? req.query.tab : "all";
     const tabSql = tab === "pending" ? `AND e.LandId IS NULL AND ${PENDING}` : tab === "done" ? `AND NOT (e.LandId IS NULL AND ${PENDING})` : "";
@@ -144,7 +146,7 @@ router.get("/find", requirePageRight(PAGE, "view"), async (req, res) => {
       LEFT JOIN dbo.LegalLand l ON l.LandId = e.LandId
       LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = e.DistrictId
       LEFT JOIN dbo.LegalMouza m ON m.MouzaId = e.MouzaId
-      WHERE e.IsActive = 1 ${allProjects ? "" : "AND e.ProjectId = @p"} ${tabSql} AND (@q IS NULL
+      WHERE e.IsActive = 1 ${allProjects ? "" : noProject ? "AND e.ProjectId IS NULL" : "AND e.ProjectId = @p"} ${tabSql} AND (@q IS NULL
         OR e.EnquiryNo LIKE @q OR l.LandCode LIKE @q OR e.LandLocation LIKE @q OR m.MouzaName LIKE @q OR e.RsDagNo LIKE @q OR e.LrDagNo LIKE @q OR e.RsKhatianNo LIKE @q OR e.LrKhatianNo LIKE @q
         OR EXISTS (SELECT 1 FROM dbo.LegalLandRsRecord x WHERE x.LandId = e.LandId AND x.IsActive = 1 AND (x.RsDagNo LIKE @q OR x.RsKhatianNo LIKE @q))
         OR EXISTS (SELECT 1 FROM dbo.LegalLandLrRecord x WHERE x.LandId = e.LandId AND x.IsActive = 1 AND (x.LrDagNo LIKE @q OR x.LrKhatianNo LIKE @q)))

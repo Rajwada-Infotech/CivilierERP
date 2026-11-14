@@ -40,9 +40,10 @@ export default function LandDeedSearchPage() {
   const navigate = useNavigate();
   const [remembered, setRemembered] = useLegalProject();
   // "All projects" comes only from the link (?project=all, the dashboard report) or the picker; it is not remembered.
-  const [all_, setAll] = useState(new URLSearchParams(window.location.search).get("project") === "all");
-  const projectId: number | "all" | null = all_ ? "all" : remembered;
-  const setProjectId = (id: number | null | "all") => { if (id === "all") setAll(true); else { setAll(false); setRemembered(id); } };
+  // "All projects" / "Without a project" come from the link (dashboard report) or the picker; they are not remembered.
+  const [scope, setScope] = useState<"all" | "none" | null>(() => { const v = new URLSearchParams(window.location.search).get("project"); return v === "all" || v === "none" ? v : null; });
+  const projectId: number | "all" | "none" | null = scope ?? remembered;
+  const setProjectId = (id: number | null | "all" | "none") => { if (id === "all" || id === "none") setScope(id); else { setScope(null); setRemembered(id); } };
   const start = new URLSearchParams(window.location.search).get("q") ?? "";
   const [q, setQ] = useState(start);
   const [pickedId, setPickedId] = useState<number | null>(null);
@@ -74,7 +75,7 @@ export default function LandDeedSearchPage() {
   // drops them from the address so a refresh or the next pick does not bring them back.
   const dropLink = () => { if (window.location.search) navigate("/legal/land/deed-search", { replace: true }); };
   // Switching the project by hand starts clean: no search text, no open enquiry, the Pending list.
-  const changeProject = (id: number | null | "all") => { setProjectId(id); setPickedId(null); setQ(""); setTab("pending"); dropLink(); };
+  const changeProject = (id: number | null | "all" | "none") => { setProjectId(id); setPickedId(null); setQ(""); setTab("pending"); dropLink(); };
   const pick = (id: number) => { setPickedId(id); dropLink(); };
 
   // Search across every project (enquiry no, Land ID, RS / LR Dag or Khatian): the project of what is found is opened
@@ -88,7 +89,7 @@ export default function LandDeedSearchPage() {
       const hits = await findEnquiries("all", text, "all");
       if (!hits.length) { toast.error(`No enquiry found for "${text}" in any project`); return; }
       const projects = [...new Set(hits.map((h) => h.ProjectId ?? 0))];
-      setProjectId(projects.length === 1 && projects[0] ? projects[0] : "all");
+      setProjectId(projects.length === 1 ? (projects[0] || "none") : "all");
       setTab("all");
       setPickedId(hits.length === 1 ? hits[0].EnquiryId : null);
       dropLink();
