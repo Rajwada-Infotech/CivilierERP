@@ -10,7 +10,7 @@ const { projectPredicate, projectAllowed } = require("../services/projectScope")
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { generateFAItemCodes } = require("../services/faItemCodeGenerator");
-const { listUntaggedBatches } = require("../services/fixedAssetAutoAlloc");
+const { listUntaggedBatches, deriveFinYear } = require("../services/fixedAssetAutoAlloc");
 
 router.use(authenticateToken);
 
@@ -28,16 +28,9 @@ function toInt(val) {
 // Financial Year is derived from the Document Date, never trusted from the
 // client — this is the single source of truth both at save time and for the
 // list's Financial Year filter, so a tagging entry's date and its FinYear
-// can never drift apart the way manually-picked values could.
-async function deriveFinYear(pool, docDate) {
-  if (!docDate) return null;
-  const result = await pool.request().input("DocDate", sql.Date, docDate).query(`
-    SELECT TOP 1 FName FROM dbo.FinYear
-    WHERE @DocDate BETWEEN FStartDate AND FEndDate
-    ORDER BY FStartDate DESC
-  `);
-  return result.recordset[0]?.FName || null;
-}
+// can never drift apart the way manually-picked values could. deriveFinYear (services/fixedAssetAutoAlloc.js) gives
+// the master's year when one covers the date, else works it out from the date ("FY 2016-17") — the same year GRN
+// auto-allocation gives the batch.
 
 // ── GET /eligible-items — Fixed-Asset-type Item Master items with untagged
 // stock (StockLedger balance minus tagged-so-far) at the given Godown ───────

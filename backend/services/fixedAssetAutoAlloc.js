@@ -38,7 +38,27 @@ async function deriveFinYear(pool, docDate) {
     WHERE @DocDate BETWEEN FStartDate AND FEndDate
     ORDER BY FStartDate DESC
   `);
-  return result.recordset[0]?.FName || null;
+  if (result.recordset[0]?.FName) return result.recordset[0].FName;
+  // No Financial Year set up for that date (e.g. a GRN from before GST, 2016): work the year out from the date —
+  // April to March — written the way this database's own Financial Years are, so the batch can still be tagged.
+  const sample = (await pool.request().query("SELECT TOP 1 FName FROM dbo.FinYear ORDER BY FStartDate DESC")).recordset[0]?.FName;
+  return finYearLabelOf(docDate, sample);
+}
+
+// The financial year (April–March) a date falls in, in the same form as `sample` (an existing FinYear name):
+// "2016-2017", "FY 2016-17" or "2016-17"; "FY 2016-17" when there is no sample. null for a missing / bad date.
+function finYearLabelOf(date, sample) {
+  const s = date instanceof Date ? (Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10)) : String(date || "").slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(s);
+  if (!m) return null;
+  const start = Number(m[2]) >= 4 ? Number(m[1]) : Number(m[1]) - 1;
+  const yy = String((start + 1) % 100).padStart(2, "0");
+  const f = String(sample || "").trim();
+  if (/^\d{4}-\d{4}$/.test(f)) return `${start}-${start + 1}`;
+  if (/^\d{4}-\d{2}$/.test(f)) return `${start}-${yy}`;
+  const prefix = /^([A-Za-z]+\s*)\d{4}/.exec(f)?.[1] ?? "FY ";
+  if (/^[A-Za-z]+\s*\d{4}-\d{4}$/.test(f)) return `${prefix}${start}-${start + 1}`;
+  return `${prefix}${start}-${yy}`;
 }
 
 // Tags every unit of a freshly-created Pending batch in one shot, flipping

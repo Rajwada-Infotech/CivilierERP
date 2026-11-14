@@ -14,7 +14,20 @@ export const todayLocal = () => {
 // Financial Year always follows the Document Date, never picked by hand, so an entry's date and its year can't drift apart.
 export function deriveFinYear(docDate: string, finYears: { year: string; startDate: string; endDate: string }[]): string {
   if (!docDate) return "";
-  return finYears.find((f) => f.startDate && f.endDate && docDate >= f.startDate && docDate <= f.endDate)?.year || "";
+  const fromMaster = finYears.find((f) => f.startDate && f.endDate && docDate >= f.startDate && docDate <= f.endDate)?.year;
+  if (fromMaster) return fromMaster;
+  // No Financial Year set up for that date (e.g. a purchase from before GST): April–March from the date, written
+  // like the existing Financial Years — the same label the server gives (services/fixedAssetAutoAlloc.js).
+  const m = /^(\d{4})-(\d{2})/.exec(docDate);
+  if (!m) return "";
+  const start = Number(m[2]) >= 4 ? Number(m[1]) : Number(m[1]) - 1;
+  const yy = String((start + 1) % 100).padStart(2, "0");
+  const f = [...finYears].sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""))[0]?.year?.trim() || "";
+  if (/^\d{4}-\d{4}$/.test(f)) return `${start}-${start + 1}`;
+  if (/^\d{4}-\d{2}$/.test(f)) return `${start}-${yy}`;
+  const prefix = /^([A-Za-z]+\s*)\d{4}/.exec(f)?.[1] ?? "FY ";
+  if (/^[A-Za-z]+\s*\d{4}-\d{4}$/.test(f)) return `${prefix}${start}-${start + 1}`;
+  return `${prefix}${start}-${yy}`;
 }
 
 /** What New tagging starts from: blank, or a received batch's company, project, godown and item. */
