@@ -401,6 +401,7 @@ router.get("/:id", async (req, res) => {
           b.*,
           co.name AS CompanyName,
           pr.name AS ProjectName,
+          pr.logo AS ProjectLogo,
           blk.BlockName,
           CASE WHEN rm.Id IS NULL THEN NULL ELSE CONCAT(rm.RoomName, CASE WHEN rmu.UnitName IS NULL THEN '' ELSE CONCAT(' (', rmu.UnitName, ')') END) END AS RoomName,
           td.Prefix AS DocTypePrefix,

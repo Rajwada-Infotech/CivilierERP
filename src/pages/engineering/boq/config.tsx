@@ -52,6 +52,8 @@ export interface BoqRecord {
   CompanyName?: string;
   ProjectId: number | null;
   ProjectName?: string;
+  /** The project's logo (data URL or address) from the Project master; shown in the print header. */
+  ProjectLogo?: string | null;
   Description: string;
   TotalAmount: number;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
