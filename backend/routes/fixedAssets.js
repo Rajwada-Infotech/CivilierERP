@@ -371,7 +371,9 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       if (sourceTagIdVal) {
         const tagRes = await tx.request().input("TagId", sql.Int, sourceTagIdVal).query(`
           SELECT t.TagId, t.FAItemCode, t.CompanyId, t.ProjectId, t.GodownId,
-                 im.M_Name AS ItemName, batch.AssetCategory AS BatchCategory
+                 -- The asset is named after the received batch (which can be corrected in FA Inventory without
+                 -- renaming the item master), else the item master.
+                 ISNULL(NULLIF(LTRIM(batch.AssetName), ''), im.M_Name) AS ItemName, batch.AssetCategory AS BatchCategory
           FROM dbo.FixedAssetTagging t WITH (UPDLOCK, HOLDLOCK)
           LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
           LEFT JOIN dbo.FixedAssetRecord batch ON batch.AssetId = t.AssetId
