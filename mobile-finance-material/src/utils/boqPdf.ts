@@ -16,6 +16,7 @@ export interface BoqPdfRecord {
   Status?: string | null;
   CompanyName?: string | null;
   ProjectName?: string | null;
+  ProjectLogo?: string | null;
   BoqDate?: string | null;
   CreatedBy?: string | null;
   Description?: string | null;
@@ -63,6 +64,10 @@ export function buildBoqHtml(record: BoqPdfRecord): string {
   const grand = num(record.TotalAmount) || itemTotal + activityTotal;
   const docNo = record.BoqNo || record.DocNo || `#${record.BoqID ?? ""}`;
   const company = record.CompanyName || "Company";
+  // The project's logo (data URL or full address); anything else falls back to the diamond mark.
+  const logoRaw = String(record.ProjectLogo || "").trim();
+  const logoSrc = /^(data:image\/|https?:\/\/)/i.test(logoRaw) ? logoRaw : "";
+  const project = record.ProjectName || "Project";
   const printed = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const head = `<tr class="th"><th class="c">SL.</th><th>DESCRIPTION</th><th class="r">QTY</th><th class="c">UOM</th><th class="r">RATE</th><th class="r">AMOUNT</th></tr>`;
   const itemHead = `<tr class="th"><th class="c">SL.</th><th>DESCRIPTION</th><th>FOR ACTIVITY</th><th class="r">QTY</th><th class="c">UOM</th><th class="r">RATE</th><th class="r">AMOUNT</th></tr>`;
@@ -81,8 +86,9 @@ export function buildBoqHtml(record: BoqPdfRecord): string {
   .side p span { color: #a9acb0; display: inline-block; min-width: 20mm; }
   .side .big { font-size: 12px; font-weight: 800; color: #fff; }
   .brand { position: absolute; top: 0; left: 0; width: 64mm; height: 40mm; background: #f26a21; color: #fff; z-index: 2; padding: 12mm 6mm 0 7mm; border-bottom-right-radius: 10mm; }
+  .brand .logo { width: 16mm; height: 16mm; object-fit: contain; background: #fff; border-radius: 3mm; padding: 1.2mm; margin: 0 0 3mm; display: block; }
   .brand .mark { width: 9mm; height: 9mm; border: 2.2px solid #fff; transform: rotate(45deg) scale(.8); margin: 0 0 3mm 1mm; }
-  .brand .name { font-size: 15px; font-weight: 900; letter-spacing: .6px; text-transform: uppercase; line-height: 1.15; }
+  .brand .name { font-size: 14px; font-weight: 900; letter-spacing: .6px; text-transform: uppercase; line-height: 1.15; }
   .brand .tag { font-size: 7.5px; letter-spacing: 1.2px; margin-top: 2px; opacity: .95; }
   .topbar { position: absolute; top: 0; left: 64mm; right: 0; height: 40mm; background: #fff7ea; overflow: hidden; }
   .topbar::before { content: ""; position: absolute; top: 0; left: 6mm; width: 22mm; height: 100%; background: #34373a; transform: skewX(-32deg); transform-origin: top left; }
@@ -132,7 +138,7 @@ export function buildBoqHtml(record: BoqPdfRecord): string {
     <p><span>Activities</span>${fmt(activityTotal)}</p>
     <p class="big"><span>Total</span>${fmt(grand)}</p>
   </aside>
-  <div class="brand"><div class="mark"></div><div class="name">${e(company)}</div><div class="tag">${esc(record.ProjectName || "")}</div></div>
+  <div class="brand">${logoSrc ? `<img class="logo" src="${esc(logoSrc)}" alt="" />` : `<div class="mark"></div>`}<div class="name">${e(project)}</div><div class="tag">${esc(company)}</div></div>
   <div class="topbar"><h1>Bills of Quantities</h1><div class="status">${e(record.Status || "Draft")}</div></div>
 
   <div class="main">
