@@ -10,7 +10,7 @@ const { projectPredicate, projectAllowed } = require("../services/projectScope")
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { generateFAItemCodes } = require("../services/faItemCodeGenerator");
-const { listUntaggedBatches } = require("../services/fixedAssetAutoAlloc");
+const { listUntaggedBatches, deriveFinYear } = require("../services/fixedAssetAutoAlloc");
 
 router.use(authenticateToken);
 
@@ -28,16 +28,9 @@ function toInt(val) {
 // Financial Year is derived from the Document Date, never trusted from the
 // client — this is the single source of truth both at save time and for the
 // list's Financial Year filter, so a tagging entry's date and its FinYear
-// can never drift apart the way manually-picked values could.
-async function deriveFinYear(pool, docDate) {
-  if (!docDate) return null;
-  const result = await pool.request().input("DocDate", sql.Date, docDate).query(`
-    SELECT TOP 1 FName FROM dbo.FinYear
-    WHERE @DocDate BETWEEN FStartDate AND FEndDate
-    ORDER BY FStartDate DESC
-  `);
-  return result.recordset[0]?.FName || null;
-}
+// can never drift apart the way manually-picked values could. deriveFinYear (services/fixedAssetAutoAlloc.js) gives
+// the master's year when one covers the date, else works it out from the date ("FY 2016-17") — the same year GRN
+// auto-allocation gives the batch.
 
 // ── GET /eligible-items — Fixed-Asset-type Item Master items with untagged
 // stock (StockLedger balance minus tagged-so-far) at the given Godown ───────
@@ -144,7 +137,13 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
         t.GodownId, gd.GodownName,
-        batch.AssetCategory   -- captured at FA Inventory import; the Depreciation Tag reuses it
+        batch.AssetCategory,  -- captured at FA Inventory import; the Depreciation Tag reuses it
+        -- What one unit of the batch cost before tax, its purchase date and tax rate: the asset form pre-fills
+        -- them, and the date decides VAT (before 1 July 2017) or GST.
+        batch.PurchaseDate AS BatchPurchaseDate, batch.TaxType AS BatchTaxType, batch.TaxPct AS BatchTaxPct,
+        CASE WHEN ISNULL(batch.Quantity, 0) > 0
+             THEN (batch.PurchaseCost - CASE WHEN batch.TaxType = 'VAT' THEN ISNULL(batch.TaxAmount, 0) ELSE 0 END) / batch.Quantity
+        END AS BatchUnitCost
       FROM dbo.FixedAssetTagging t
       LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
       LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
@@ -251,7 +250,7 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
         t.ProjectId, pr.name AS ProjectName,
         t.GodownId, gd.GodownName,
         t.AssetId, fa.AssetName, fa.AssetCategory, fa.AssetCode,
-        fa.SourceType AS StockSource,
+        fa.SourceType AS StockSource, fa.TaxType, fa.TaxPct,
         CASE
           WHEN t.FAItemCode IS NULL THEN NULL
           WHEN EXISTS (

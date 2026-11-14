@@ -170,14 +170,40 @@ async function computeMonth(pool, asset, year, month) {
   }
 
   // Not posted yet — preview.
+  // Months must go in order: each month opens on what the months before it left. Posting an earlier month after a
+  // later one was already posted made both start from full cost, so the asset was charged twice over the overlap
+  // (seen on production: ₹22,995 posted on a ₹20,000 asset). Refuse until the later months are reversed.
+  const later = await pool.request()
+    .input("AssetId", sql.Int, asset.AssetId).input("Y", sql.SmallInt, year).input("M", sql.TinyInt, month)
+    .query(`SELECT TOP 1 PeriodYear, PeriodMonth FROM dbo.FixedAssetDepreciationEntry
+            WHERE AssetId = @AssetId AND Status <> 'Reversed' AND (PeriodYear > @Y OR (PeriodYear = @Y AND PeriodMonth > @M))
+            ORDER BY PeriodYear, PeriodMonth`);
+  if (later.recordset[0]) {
+    const l = later.recordset[0];
+    throw cfgErr(`${l.PeriodMonth}/${l.PeriodYear} is already posted for this asset — months are posted in order. Reverse the later months first to post ${month}/${year}.`);
+  }
   const accumBefore = await sumPostedDepreciation(pool, asset.AssetId, year, month, false);
   const opening = round2(cost - accumBefore);
   if (opening <= 0.01) {
     throw cfgErr("This asset is already fully depreciated — no further depreciation to post.");
   }
 
-  // Monthly charge: SLM on cost (constant), WDV on the opening book value. Rate is p.a.
-  const gross = method === "WDV" ? (opening * rate) / 1200 : (cost * rate) / 1200;
+  // Monthly charge, rate p.a.:
+  //   SLM — cost × rate ÷ 12, the same every month.
+  //   WDV — the year's charge is rate × the book value at the start of the financial year (1 April), posted as a
+  //         twelfth each month. (It used to be rate ÷ 12 on each month's own opening value, which compounds monthly
+  //         and charged less than the rate — about ₹14,011 instead of ₹15,000 in year one at 15% on ₹1,00,000.)
+  //         An asset that starts mid-year has nothing posted before that year, so its year opens at cost and it is
+  //         charged from its start month.
+  let gross;
+  if (method === "WDV") {
+    const fyStartYear = month >= 4 ? year : year - 1;
+    const accumBeforeYear = await sumPostedDepreciation(pool, asset.AssetId, fyStartYear, 4, false);
+    const yearOpening = Math.max(0, round2(cost - accumBeforeYear));
+    gross = (yearOpening * rate) / 1200;
+  } else {
+    gross = (cost * rate) / 1200;
+  }
   const charge = round2(Math.min(gross, opening)); // never below zero book value
   const closing = round2(opening - charge);
 

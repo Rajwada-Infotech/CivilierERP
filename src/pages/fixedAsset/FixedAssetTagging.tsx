@@ -102,6 +102,15 @@ export default function FixedAssetTagging() {
           <p className="text-[0.6875rem] text-muted-foreground truncate">
             {r.kind === "pending" ? `Qty ${fmt(r.b.Quantity)}${r.b.GodownName ? ` · ${r.b.GodownName}` : ""}` : [r.t.AssetCategory, r.t.GodownName].filter(Boolean).join(" · ")}
           </p>
+          {(() => {
+            // VAT before 1 July 2017 (in the cost), GST from then — from the received batch.
+            const x = r.kind === "pending" ? r.b : r.t;
+            return x.TaxType ? (
+              <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-1">
+                {x.TaxType}{x.TaxPct != null ? ` ${Number(x.TaxPct)}%` : ""}
+              </p>
+            ) : null;
+          })()}
         </div>
       ),
     },

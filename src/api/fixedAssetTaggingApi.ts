@@ -13,6 +13,9 @@ export interface EligibleAssetItem {
 
 export interface TaggingListItem {
   TagId: number;
+  /** The received batch's tax: 'VAT' (before 1 July 2017) or 'GST', and its rate. */
+  TaxType?: "VAT" | "GST" | null;
+  TaxPct?: number | null;
   DocNo: string | null;
   DocDate: string | null;
   FinYear: string | null;
@@ -65,6 +68,11 @@ export interface UnassignedFAItemCode {
   GodownName: string | null;
   /** Asset Category captured at FA Inventory import — the Depreciation Tag reuses it. */
   AssetCategory?: string | null;
+  /** The received batch's purchase date, tax and one unit's cost before tax — the asset form pre-fills them. */
+  BatchPurchaseDate?: string | null;
+  BatchTaxType?: "VAT" | "GST" | null;
+  BatchTaxPct?: number | null;
+  BatchUnitCost?: number | null;
 }
 
 export interface TaggingPayload {
@@ -85,6 +93,8 @@ async function handleError(res: Response, fallback: string) {
 
 export interface PendingBatch {
   AssetId: number;
+  TaxType?: "VAT" | "GST" | null;
+  TaxPct?: number | null;
   AssetName: string;
   Quantity: number;
   SourceType: "GRN" | "IMPORT";
