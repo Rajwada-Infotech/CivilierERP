@@ -26,6 +26,7 @@ const { MASTERS, EXTERNAL_REFS } = require("./masterConfig");
 const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
 const { canAct, ownWork, isAdmin } = require("./approvalAuthority");
 
+const { isSuperAdmin } = require("./approvalAuthority");
 const router = express.Router();
 router.use(apiRateLimit);
 
@@ -286,7 +287,7 @@ function sendDbError(res, cfg, err, where) {
 // ── Routes ────────────────────────────────────────────────────────────────────────────────────────
 router.get("/meta", (req, res) => {
   res.json(PAGED.map(([key, m]) => ({
-    key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, adminOnly: !!m.adminOnly,
+    key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, superAdminDelete: !!m.superAdminDelete, adminOnly: !!m.adminOnly,
     extras: (m.extras || []).map(({ name, label, whatsapp, after }) => ({ name, label, whatsapp: !!whatsapp, after })),
     fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden, system, multi }) =>
       ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden, system: !!system, multi: !!multi,
@@ -720,7 +721,8 @@ router.delete("/:master/:id", withRight("delete"), async (req, res) => {
   const cfg = MASTERS[req.params.master];
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  if (cfg.noDelete) return res.status(409).json({ error: `A ${cfg.title} is never deleted, so its history stays. Mark it inactive instead.` });
+  // superAdminDelete: kept for history, but the super admin may remove a wrong entry (a converted one stays: its land refers to it).
+  if (cfg.noDelete && !(cfg.superAdminDelete && isSuperAdmin(req))) return res.status(409).json({ error: `A ${cfg.title} is never deleted, so its history stays. Mark it inactive instead.` });
   try {
     const pool = getPool();
     const result = await pool.request().input("Id", sql.Int, id)

@@ -165,6 +165,15 @@ export default function LandEnquiryPage() {
               return <span className="inline-flex gap-1.5">{map}{portal}<button onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)} className={small}>Open land</button></span>;
             }
             if (!rights.canEdit) return <span className="inline-flex flex-wrap gap-1.5">{map}{portal}</span>;
+            // Rejected / on hold: only Resume.
+            if (st === "Rejected" || st === "On Hold") {
+              return <span className="inline-flex gap-1.5">{map}{portal}<button onClick={() => changeStatus(id, no, "Under Review")} className={small}>Resume</button></span>;
+            }
+            // Hold / Reject are open at any stage (e.g. a wrong entry), even while the deed search is running.
+            const holdReject = <>
+              <button onClick={() => changeStatus(id, no, "On Hold")} className={small}>Hold</button>
+              <button onClick={() => changeStatus(id, no, "Rejected")} className={`${small} text-rose-600`} title="Wrong entry or not interested: stops its deed search timelines">Reject</button>
+            </>;
             // Deed Registry Search comes first: Convert / Hold / Reject open once every office's search is complete.
             // No office type set up for this enquiry's state: nothing to search yet, so it cannot be converted.
             if (Number(raw.OfficesTotal ?? 0) === 0 && st !== "Rejected") {
@@ -173,6 +182,7 @@ export default function LandEnquiryPage() {
                   {map}{portal}
                   <button onClick={() => navigate("/legal/setup/registration-office-type")} className={`${small} border-amber-500 bg-amber-500/10 font-semibold text-amber-800`}
                     title="Add the registration office types of this state in Setup; the enquiry then gets its deed search timelines">No office type for this state — set up</button>
+                  {holdReject}
                 </span>
               );
             }
@@ -185,20 +195,16 @@ export default function LandEnquiryPage() {
                     title="Search every registration office first; the other actions open when all are complete">
                     Deed search {Number(raw.OfficesTotal ?? 0) - openOffices}/{Number(raw.OfficesTotal ?? 0)}{Number(raw.OfficesOverdue) > 0 ? ` · ${raw.OfficesOverdue} overdue` : ""}
                   </button>
+                  {holdReject}
                 </span>
               );
-            }
-            // Rejected / on hold: only Resume. Otherwise: Convert, Hold, Reject.
-            if (st === "Rejected" || st === "On Hold") {
-              return <span className="inline-flex gap-1.5">{map}{portal}<button onClick={() => changeStatus(id, no, "Under Review")} className={small}>Resume</button></span>;
             }
             return (
               <span className="inline-flex flex-wrap justify-end gap-1.5">
                 {map}
                 {portal}
                 {landRights.canCreate && <button onClick={() => convert(id, no)} className={small}>Land Conversion</button>}
-                <button onClick={() => changeStatus(id, no, "On Hold")} className={small}>Hold</button>
-                <button onClick={() => changeStatus(id, no, "Rejected")} className={`${small} text-rose-600`}>Reject</button>
+                {holdReject}
               </span>
             );
           }}

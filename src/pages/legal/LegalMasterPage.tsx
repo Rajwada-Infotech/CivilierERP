@@ -18,7 +18,7 @@ import {
 import type { LegalMasterEntry } from "./legalMasters";
 import { LegalFileLink, LegalLinkChip, previewLegalFile, showLegalDetails } from "@/components/legal/LegalDocumentPreview";
 
-import { isPrivilegedRole } from "@/contexts/auth.utils";
+import { isPrivilegedRole, isSuperAdminRole } from "@/contexts/auth.utils";
 // One page for every Legal Setup master: the form, table, export and detail view are all built from the
 // master's field definitions (GET /api/legal/masters/meta), so a new column only needs the backend config.
 // LegalMasterTable is the same thing without the page frame, for a land property's own records
@@ -493,7 +493,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       addButtonLabel={addButton}
       statusTabs
       canEdit={rights.canEdit && !locked}
-      canDelete={rights.canDelete && !master.noDelete && !locked}
+      canDelete={!locked && ((rights.canDelete && !master.noDelete) || (!!master.superAdminDelete && isSuperAdminRole(currentUser?.role)))}
       fields={formFields}
       columns={columns}
       columnRenderers={columnRenderers}

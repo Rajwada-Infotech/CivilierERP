@@ -355,7 +355,7 @@ const MASTERS = {
     desc: "A new land opportunity, before the full property record. Convert it to create the Land ID.",
     label: "EnquiryNo + ' - ' + LandLocation", orderBy: "EnquiryDate DESC, EnquiryId DESC",
     unique: [["EnquiryNo"], "This enquiry number already exists"],
-    noDelete: true,
+    noDelete: true, superAdminDelete: true,
     extras: [
       { name: "LandCode", label: "Land conversion", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" },
       // Deed Registry Search: offices still open (the enquiry's actions open once every office's search is complete).
