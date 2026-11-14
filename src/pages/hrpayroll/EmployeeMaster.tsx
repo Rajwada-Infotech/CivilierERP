@@ -285,18 +285,6 @@ export default function EmployeeMaster() {
     staleTime: 60 * 1000,
   });
 
-  const { data: costCenterData } = useQuery({
-    queryKey: ["cost-center-options"],
-    queryFn: getCostCenterOptions,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const { data: companyData } = useQuery({
-    queryKey: ["employee-company-options"],
-    queryFn: getEmployeeCompanyOptions,
-    staleTime: 5 * 60 * 1000,
-  });
-
   // Department and Designation come from their masters (Department Master / Designation Master).
   const { data: departmentData } = useQuery({ queryKey: ["department-master-options"], queryFn: getDepartmentOptions, staleTime: 5 * 60 * 1000 });
   const { data: designationData } = useQuery({ queryKey: ["designation-master"], queryFn: getDesignations, staleTime: 5 * 60 * 1000 });
@@ -311,14 +299,6 @@ export default function EmployeeMaster() {
 
   const rows: EmployeeRow[] = Array.isArray(data) ? data : [];
   const mappedData: RecordWithId[] = rows.map(mapRow);
-  const costCenterOptions = (Array.isArray(costCenterData) ? costCenterData : []).map((c) => ({
-    value: String(c.id),
-    label: c.code ? c.code + " - " + c.label : c.label,
-  }));
-  const companyOptions = (Array.isArray(companyData) ? companyData : []).map((c) => ({
-    value: String(c.id),
-    label: c.label,
-  }));
   const unlinkedCandidates: UnlinkedEmployeeCandidate[] = Array.isArray(unlinkedData) ? unlinkedData : [];
 
   const refresh = () => {
@@ -436,7 +416,14 @@ export default function EmployeeMaster() {
     // Rows of three on desktop: identity → contact → personal → photo/address.
     { name: "employeeCode", label: "Employee ID / Employee Code", type: "text", required: true, uppercase: true, placeholder: "e.g. EMP-0001" },
     { name: "employeeName", label: "Employee Name", type: "text", required: true },
-    { name: "companyId", label: "Company", type: "select", asyncOptions: async () => companyOptions },
+    // MasterPage calls asyncOptions once, when the form first mounts — so it fetches (via the shared query cache)
+    // instead of returning companyOptions, which is still empty if the query hadn't finished yet.
+    {
+      name: "companyId", label: "Company", type: "select",
+      asyncOptions: async () =>
+        (await queryClient.fetchQuery({ queryKey: ["employee-company-options"], queryFn: getEmployeeCompanyOptions, staleTime: 5 * 60 * 1000 }))
+          .map((c) => ({ value: String(c.id), label: c.label })),
+    },
     { name: "mobile", label: "Mobile", type: "text" },
     { name: "email", label: "Email", type: "text" },
     { name: "dateOfBirth", label: "Date of Birth", type: "date" },
@@ -491,7 +478,12 @@ export default function EmployeeMaster() {
     },
     { name: "employmentType", label: "Employment Type", type: "select", options: EMPLOYMENT_TYPES },
     { name: "gradeLevel", label: "Grade / Level", type: "text" },
-    { name: "costCenterId", label: "Cost Centre", type: "select", asyncOptions: async () => costCenterOptions },
+    {
+      name: "costCenterId", label: "Cost Centre", type: "select",
+      asyncOptions: async () =>
+        (await queryClient.fetchQuery({ queryKey: ["cost-center-options"], queryFn: getCostCenterOptions, staleTime: 5 * 60 * 1000 }))
+          .map((c) => ({ value: String(c.id), label: c.code ? c.code + " - " + c.label : c.label })),
+    },
 
     { name: "sec-payroll", label: "Payroll", type: "section" },
     { name: "ctcAmount", label: "CTC Amount", type: "number" },
