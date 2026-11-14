@@ -26,11 +26,11 @@ export function useLegalProject(): [number | null, (id: number | null) => void] 
  * Project picker with search: type to narrow the list (by name), pick with a click or the keyboard.
  * `allowAll`: offer "All projects" (value "all") — for pages that read across projects.
  */
-export function ProjectPicker({ value, onChange, allowAll, children }: { value: number | "all" | null; onChange: (id: number | null | "all") => void; allowAll?: boolean; children?: React.ReactNode }) {
+export function ProjectPicker({ value, onChange, allowAll, children }: { value: number | "all" | "none" | null; onChange: (id: number | null | "all" | "none") => void; allowAll?: boolean; children?: React.ReactNode }) {
   const { data: projects = [], isLoading } = useQuery({ queryKey: ["legal-lookup", "project"], queryFn: () => getLegalLookup("project"), staleTime: 5 * 60_000 });
   const [open, setOpen] = useState(false);
-  const shown = value === "all" ? "All projects" : projects.find((p) => Number(p.value) === value)?.label;
-  const pick = (v: number | "all") => { onChange(v); setOpen(false); };
+  const shown = value === "all" ? "All projects" : value === "none" ? "Without a project" : projects.find((p) => Number(p.value) === value)?.label;
+  const pick = (v: number | "all" | "none") => { onChange(v); setOpen(false); };
   return (
     <div className="mb-4 flex flex-wrap items-center gap-3 border border-border bg-card px-4 py-3">
       <span className="text-sm font-semibold">Project</span>
@@ -51,6 +51,11 @@ export function ProjectPicker({ value, onChange, allowAll, children }: { value: 
                 {allowAll && (
                   <CommandItem value="All projects" onSelect={() => pick("all")}>
                     <Check size={14} className={`mr-2 ${value === "all" ? "opacity-100" : "opacity-0"}`} /> All projects
+                  </CommandItem>
+                )}
+                {allowAll && (
+                  <CommandItem value="Without a project" onSelect={() => pick("none")}>
+                    <Check size={14} className={`mr-2 ${value === "none" ? "opacity-100" : "opacity-0"}`} /> Without a project
                   </CommandItem>
                 )}
                 {projects.map((p) => (

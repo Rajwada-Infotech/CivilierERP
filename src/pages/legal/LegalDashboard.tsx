@@ -120,7 +120,7 @@ export default function LegalDashboard() {
               <p className={eyebrow}>Legal pipeline</p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
                 {([
-                  ["Land enquiries", "enquiries", "/legal/land/enquiries", false],
+                  ["Land enquiries", "enquiries", "/legal/land/enquiries?project=all", false],
                   ["Pending ownership verification", "pendingOwnership", "/legal/approvals", true],
                   ["Pending due diligence", "pendingDiligence", "/legal/approvals", true],
                   ["Pending inheritance verification", "pendingInheritance", "/legal/approvals", true],
@@ -157,12 +157,12 @@ export default function LegalDashboard() {
             <div className="border-2 border-destructive bg-destructive/10 p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-heading font-bold uppercase tracking-[0.12em] text-destructive">Deed search overdue · {searchOverdue.length}</p>
-                <button onClick={() => navigate("/legal/land/deed-search")} className="inline-flex items-center gap-1 text-xs font-semibold text-destructive hover:underline">Open Deed Registry Search <ChevronRight size={13} /></button>
+                <button onClick={() => navigate("/legal/land/deed-search?view=overdue&project=all")} className="inline-flex items-center gap-1 text-xs font-semibold text-destructive hover:underline">Open Deed Registry Search <ChevronRight size={13} /></button>
               </div>
               <ul className="mt-2 space-y-1 text-sm">
                 {searchOverdue.map((s) => (
                   <li key={s.OfficeSearchId}>
-                    <button className="text-left hover:underline" onClick={() => navigate(`/legal/land/deed-search?view=all&q=${encodeURIComponent(s.EnquiryNo ?? "")}&project=${s.ProjectId ?? "all"}&office=${encodeURIComponent(s.OfficeType)}`)}>
+                    <button className="text-left hover:underline" onClick={() => navigate(`/legal/land/deed-search?view=all&q=${encodeURIComponent(s.EnquiryNo ?? "")}&project=${s.ProjectId ?? "none"}&office=${encodeURIComponent(s.OfficeType)}`)}>
                       <b className="font-mono">{s.EnquiryNo}</b>{s.ProjectName ? ` · ${s.ProjectName}` : ""} — {s.OfficeType}, due {fmtDate(s.DueDate)}, <b className="text-destructive">{s.DaysOver} day{s.DaysOver > 1 ? "s" : ""} overdue</b>
                     </button>
                   </li>
@@ -202,7 +202,7 @@ export default function LegalDashboard() {
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
                 {([
                   ["All Properties", land.totalLands, Global, "/legal/land/properties"],
-                  ["Active Enquiries", land.activeEnquiries ?? 0, MessageQuestion, "/legal/land/enquiries"],
+                  ["Active Enquiries", land.activeEnquiries ?? 0, MessageQuestion, "/legal/land/enquiries?project=all"],
                   ["Land Sales", land.sales ?? 0, MoneySend, "/legal/land/sales"],
                   ["RS Records", land.rsRecords ?? 0, Note1, "/legal/land/rs-register"],
                   ["LR Records of Rights", land.lrRecords ?? 0, DocumentText, "/legal/land/lr-register"],

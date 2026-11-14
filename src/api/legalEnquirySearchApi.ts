@@ -33,7 +33,7 @@ export interface YearResult {
 export interface YearBody { calendarYear?: number; result: "Found" | "Not Found"; deedNo?: string; deedDate?: string; parties?: string; details?: string; siteName?: string }
 
 export const getSearchOptions = async () => handle<SearchOptions>(await fetchWithAuth(`${BASE}/options`));
-export const findEnquiries = async (projectId: number | "all", q: string, tab: SearchTab = "all") =>
+export const findEnquiries = async (projectId: number | "all" | "none", q: string, tab: SearchTab = "all") =>
   handle<EnquiryHit[]>(await fetchWithAuth(`${BASE}/find?projectId=${projectId}&tab=${tab}&q=${encodeURIComponent(q)}`));
 export const getEnquirySearches = async (enquiryId: number) => handle<{ offices: OfficeSearch[]; years: YearResult[] }>(await fetchWithAuth(`${BASE}/${enquiryId}`));
 export const getOverdueSearches = async () => handle<OfficeSearch[]>(await fetchWithAuth(`${BASE}/overdue`));

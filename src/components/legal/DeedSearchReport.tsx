@@ -13,14 +13,15 @@ const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 export function DeedSearchReport() {
   const navigate = useNavigate();
   const { data } = useQuery({ queryKey: ["legal-enq-search-report"], queryFn: getSearchReport, staleTime: 60 * 1000, retry: false });
-  const [pid, setPid] = useState<number | "all">("all");
+  const [pid, setPid] = useState<number | "all" | "none">("all");
   if (!data?.total || !data.total.Searches) return null;
-  const sel: SearchFigures = pid === "all" ? data.total : data.projects.find((p) => p.ProjectId === pid) ?? data.total;
+  const keyOf = (id: number | null) => id ?? "none";
+  const sel: SearchFigures = pid === "all" ? data.total : data.projects.find((p) => keyOf(p.ProjectId) === pid) ?? data.total;
   // Opens Deed Registry Search on that project (the page reads the remembered project) and that portion of the queue.
-  const open = (projectId: number | null, view = "all") => {
-    navigate(`/legal/land/deed-search?view=${view}&project=${projectId ?? "all"}`);
+  const open = (scope: number | "all" | "none", view = "all") => {
+    navigate(`/legal/land/deed-search?view=${view}&project=${scope}`);
   };
-  const here = pid === "all" ? null : pid;
+  const here = pid;
   const tiles: [string, number, string, string][] = [
     ["Total searches", sel.Searches, "border-border", "all"],
     ["Completed", sel.Completed, "border-emerald-600", "done"],
@@ -40,7 +41,7 @@ export function DeedSearchReport() {
       </div>
       {/* Project switch */}
       <div className="mb-3 flex flex-wrap gap-1.5">
-        {([["all", "All projects"], ...data.projects.map((p) => [p.ProjectId ?? 0, p.ProjectName])] as [number | "all", string][]).map(([k, label]) => (
+        {([["all", "All projects"], ...data.projects.map((p) => [keyOf(p.ProjectId), p.ProjectId == null ? "Without a project" : p.ProjectName])] as [number | "all" | "none", string][]).map(([k, label]) => (
           <button key={String(k)} onClick={() => setPid(k)} className={`border px-3 py-1 text-xs font-semibold ${pid === k ? "border-foreground bg-foreground text-card" : "border-border hover:bg-muted"}`}>{label}</button>
         ))}
       </div>
@@ -67,7 +68,7 @@ export function DeedSearchReport() {
             </thead>
             <tbody>
               {data.projects.map((p) => (
-                <tr key={String(p.ProjectId)} onClick={() => open(p.ProjectId)} className={`cursor-pointer border-t border-border hover:bg-muted/40 ${pid === p.ProjectId ? "bg-primary/10" : ""}`}>
+                <tr key={String(p.ProjectId)} onClick={() => open(keyOf(p.ProjectId))} className={`cursor-pointer border-t border-border hover:bg-muted/40 ${pid === keyOf(p.ProjectId) ? "bg-primary/10" : ""}`}>
                   <td className="py-1.5 font-semibold">{p.ProjectName}</td>
                   <td className="py-1.5 text-right tabular-nums">{p.Enquiries}</td><td className="py-1.5 text-right tabular-nums">{p.Searches}</td>
                   <td className="py-1.5 text-right tabular-nums text-emerald-700">{p.Completed}</td><td className="py-1.5 text-right tabular-nums text-amber-700">{p.NotCompleted}</td>
