@@ -186,6 +186,8 @@ const INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Expense Head", accessor: (r: any) => r.expenseHeadName || "—" },
   { header: "Basic Amt", accessor: (r: any) => (r.status === "Draft" ? "—" : `Rs. ${fmt(r.basicAmount)}`) },
   { header: "GST %", accessor: (r: any) => (r.status === "Draft" ? "—" : (r.igstRate ?? 0) > 0 ? `${r.igstRate}%` : `${(r.cgstRate ?? 0) + (r.sgstRate ?? 0)}%`) },
+  { header: "TDS %", accessor: (r: any) => (r.status === "Draft" || !(r.tdsAmount ?? 0) ? "—" : r.tdsPercentage != null ? `${r.tdsPercentage}%` : "—") },
+  { header: "TDS Amt", accessor: (r: any) => (r.status === "Draft" || !(r.tdsAmount ?? 0) ? "—" : `Rs. ${fmt(r.tdsAmount)}`) },
   { header: "Net Amt", accessor: (r: any) => `Rs. ${fmt(computeEffectiveNet(r))}` },
   { header: "Doc No", accessor: (r: any) => r.sourceDocNo || r.linkedPODocNo || r.bookingReference || "—" },
   { header: "Status", accessor: (r: any) => r.status || "—" },
@@ -1542,6 +1544,12 @@ export default function MaterialExpenseBooking() {
       return false;
     return true;
   });
+  // Rate columns in the list follow what the rows on this page carry: GST only when a row has a GST rate,
+  // TDS only when a row had TDS deducted (e.g. a 1% TDS invoice shows why Net is below Basic).
+  const listRates = {
+    gst: filteredRecords.some((r) => r.status !== "Draft" && ((r.igstRate ?? 0) > 0 || (r.cgstRate ?? 0) + (r.sgstRate ?? 0) > 0)),
+    tds: filteredRecords.some((r) => r.status !== "Draft" && (r.tdsAmount ?? 0) > 0),
+  };
 
   // One request for every visible row's approval trail instead of one per
   // row — see useApprovalTrailsBulk's own comment.
@@ -2776,7 +2784,8 @@ export default function MaterialExpenseBooking() {
                               <TableHead className="w-[16%]">Vendor</TableHead>
                               <TableHead className="w-[12%] hidden xl:table-cell">Company / project</TableHead>
                               <TableHead className="w-[10%] text-right">Basic</TableHead>
-                              <TableHead className="w-[7%] text-right hidden md:table-cell">GST</TableHead>
+                              {listRates.gst && <TableHead className="w-[7%] text-right hidden md:table-cell">GST</TableHead>}
+                              {listRates.tds && <TableHead className="w-[8%] text-right hidden md:table-cell">TDS</TableHead>}
                               <TableHead className="w-[11%] text-right">Net</TableHead>
                               <TableHead className="w-[11%] hidden lg:table-cell">Against</TableHead>
                               <TableHead className="w-[9%]">Status</TableHead>
@@ -2840,9 +2849,21 @@ export default function MaterialExpenseBooking() {
                                   <TableCell className="py-3 text-right whitespace-nowrap text-[0.75rem] tabular-nums text-muted-foreground">
                                     {isDraft ? "—" : `₹${fmt(basic)}`}
                                   </TableCell>
+                                  {listRates.gst && (
                                   <TableCell className="py-3 text-right text-[0.75rem] tabular-nums text-muted-foreground hidden md:table-cell">
                                     {isDraft ? "—" : (rec.igstRate ?? 0) > 0 ? <span title="IGST (interstate)">{rec.igstRate}%</span> : `${(rec.cgstRate ?? 0) + (rec.sgstRate ?? 0)}%`}
                                   </TableCell>
+                                  )}
+                                  {listRates.tds && (
+                                  <TableCell className="py-3 text-right text-[0.75rem] tabular-nums text-muted-foreground hidden md:table-cell whitespace-nowrap">
+                                    {isDraft || !(rec.tdsAmount ?? 0) ? "—" : (
+                                      <span title={rec.tdsName || "TDS deducted"}>
+                                        {rec.tdsPercentage != null ? `${rec.tdsPercentage}%` : ""}
+                                        <span className="block text-[0.6875rem]">−₹{fmt(rec.tdsAmount ?? 0)}</span>
+                                      </span>
+                                    )}
+                                  </TableCell>
+                                  )}
                                   <TableCell className="py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">
                                     ₹{fmt(effectiveNet)}
                                   </TableCell>
@@ -2900,7 +2921,7 @@ export default function MaterialExpenseBooking() {
                             {filteredRecords.length === 0 && (
                               <TableRow>
                                 <TableCell
-                                  colSpan={10}
+                                  colSpan={8 + (listRates.gst ? 1 : 0) + (listRates.tds ? 1 : 0)}
                                   className="text-center py-14 text-muted-foreground text-sm"
                                 >
                                   {statusFilter !== "All"

@@ -367,6 +367,11 @@ export interface FormState {
 export const canEditBoq = (status?: string | null) =>
   !status || status === "Draft" || status === "Rejected";
 
+// Statuses the Edit button opens the form for. Pending stays Pending; Approved goes back for approval and needs
+// the post-approval right (the server refuses otherwise, and the form shows its message).
+export const canOpenBoqEdit = (status?: string | null) =>
+  canEditBoq(status) || status === "Pending" || status === "Approved";
+
 export const defaultForm = (finYear?: string): FormState => ({
   BoqNo: "",
   BoqDate: new Date().toISOString().slice(0, 10),

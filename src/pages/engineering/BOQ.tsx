@@ -5,8 +5,6 @@ import { projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { safeHtml, raw } from "@/utils/escapeHtml";
-import { printStatusLabel } from "@/utils/printStatus";
 import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { type DbItem } from "@/api/itemMasterApi";
 import { type DbActivity } from "@/api/engineeringActivityMasterApi";
@@ -23,8 +21,9 @@ import { fetchAllPages } from "@/lib/fetchAllPages";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { BoqExcelImportModal } from "./BoqExcelImportModal";
-import { BoqRecord, Company, Project, DocType, UomOption, ItemOption, ActivityOption, ActivityGroupOption, apiFetch, fmt, fmtDate, canEditBoq } from "./boq/config";
+import { BoqRecord, Company, Project, DocType, UomOption, ItemOption, ActivityOption, ActivityGroupOption, apiFetch, fmt, fmtDate, canOpenBoqEdit } from "./boq/config";
 import { FormModal } from "./boq/FormModal";
+import { printBoq } from "./boq/printBoq";
 import { DetailModal } from "./boq/DetailModal";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -405,8 +404,8 @@ export default function BOQ() {
   };
 
   const openEdit = (r: BoqRecord) => {
-    if (!canEditBoq(r.Status)) {
-      toast.error("Only Draft or Rejected BOQs can be edited.");
+    if (!canOpenBoqEdit(r.Status)) {
+      toast.error(`A ${r.Status} BOQ can't be edited.`);
       return;
     }
     setViewRecord(null);
@@ -416,111 +415,8 @@ export default function BOQ() {
 
   const statuses = ["All", "Draft", "Pending", "Approved", "Rejected"];
 
-  const handlePrint = (record: BoqRecord) => {
-    const items = Array.isArray(record.BoqItems) ? record.BoqItems : [];
-    const activities = Array.isArray(record.BoqActivities)
-      ? record.BoqActivities
-      : [];
-    const itemTotal = items.reduce(
-      (sum, row: any) =>
-        sum + (Number(row.amount ?? row.LineAmount ?? row.Amount) || 0),
-      0,
-    );
-    const activityTotal = activities.reduce(
-      (sum, row: any) =>
-        sum + (Number(row.amount ?? row.LineAmount ?? row.Amount) || 0),
-      0,
-    );
-    const renderRows = (rows: any[], type: "item" | "activity") =>
-      rows
-        .map((row, idx) => {
-          const name =
-            type === "item"
-              ? (row.itemName ?? row.ItemName)
-              : (row.activityName ?? row.ActivityName);
-          const code =
-            type === "item"
-              ? (row.itemCode ?? row.ItemCode)
-              : (row.activityCode ?? row.ActivityCode);
-          const qty = row.quantity ?? row.Quantity ?? "";
-          const uom = row.uomName ?? row.UomName ?? "";
-          const rate = Number(row.rate ?? row.Rate ?? 0);
-          const amount = Number(
-            row.amount ?? row.LineAmount ?? row.Amount ?? 0,
-          );
-          return safeHtml`<tr>
-            <td>${idx + 1}</td>
-            <td>${name || ""}</td>
-            <td>${code || ""}</td>
-            <td>${row.description ?? row.Description ?? ""}</td>
-            <td class="num">${qty}</td>
-            <td>${uom}</td>
-            <td class="num">${fmt(rate)}</td>
-            <td class="num">${fmt(amount)}</td>
-          </tr>`;
-        })
-        .join("");
-
-    const win = window.open("", "_blank", "width=980,height=720");
-    if (!win) return;
-    win.document.write(safeHtml`<!doctype html>
-      <html>
-        <head>
-          <title>BOQ ${record.BoqNo || record.DocNo || record.BoqID}</title>
-          <style>
-            body { font-family: Arial, sans-serif; color: #111827; margin: 32px; }
-            .head { display:flex; justify-content:space-between; gap:24px; border-bottom:2px solid #111827; padding-bottom:16px; margin-bottom:20px; }
-            h1 { margin:0; font-size:22px; }
-            .muted { color:#6b7280; font-size:12px; }
-            .badge { display:inline-block; border:1px solid #d1d5db; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:700; }
-            .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px 18px; margin-bottom:18px; }
-            .label { font-size:10px; text-transform:uppercase; color:#6b7280; letter-spacing:.06em; }
-            .value { font-size:13px; font-weight:600; margin-top:3px; }
-            table { width:100%; border-collapse:collapse; margin-top:10px; font-size:12px; }
-            th, td { border:1px solid #d1d5db; padding:7px; vertical-align:top; }
-            th { background:#f3f4f6; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
-            .num { text-align:right; white-space:nowrap; }
-            .section { margin-top:18px; }
-            .total { display:flex; justify-content:flex-end; gap:28px; margin-top:16px; font-weight:700; }
-            @media print { body { margin: 18mm; } }
-          </style>
-        </head>
-        <body>
-          <div class="head">
-            <div>
-              <h1>Bill of Quantities</h1>
-              <div class="muted">${record.BoqNo || record.DocNo || `#${record.BoqID}`}</div>
-            </div>
-            <div><span class="badge">${printStatusLabel(record.Status) || "Draft"}</span></div>
-          </div>
-          <div class="grid">
-            <div><div class="label">Company</div><div class="value">${record.CompanyName || ""}</div></div>
-            <div><div class="label">Project</div><div class="value">${record.ProjectName || ""}</div></div>
-            <div><div class="label">Date</div><div class="value">${fmtDate(record.BoqDate)}</div></div>
-            <div><div class="label">Created By</div><div class="value">${record.CreatedBy || ""}</div></div>
-            <div><div class="label">Document No</div><div class="value">${record.DocNo || record.BoqNo || ""}</div></div>
-            <div><div class="label">Total</div><div class="value">${fmt(record.TotalAmount || itemTotal + activityTotal)}</div></div>
-          </div>
-          ${record.Description ? raw(safeHtml`<p>${record.Description}</p>`) : ""}
-          <div class="section">
-            <h3>Items</h3>
-            <table><thead><tr><th>#</th><th>Item</th><th>Code</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${raw(renderRows(items, "item") || '<tr><td colspan="8">No items</td></tr>')}</tbody></table>
-          </div>
-          <div class="section">
-            <h3>Activities</h3>
-            <table><thead><tr><th>#</th><th>Activity</th><th>Code</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${raw(renderRows(activities, "activity") || '<tr><td colspan="8">No activities</td></tr>')}</tbody></table>
-          </div>
-          <div class="total">
-            <span>Items: ${fmt(itemTotal)}</span>
-            <span>Activities: ${fmt(activityTotal)}</span>
-            <span>Grand Total: ${fmt(record.TotalAmount || itemTotal + activityTotal)}</span>
-          </div>
-        </body>
-      </html>`);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 250);
-  };
+  // The saved BOQ in the invoice-style print format (see boq/printBoq.ts).
+  const handlePrint = (record: BoqRecord) => printBoq(record);
 
   const enrichedColumns = [
     ...COLUMNS,
@@ -556,7 +452,7 @@ export default function BOQ() {
               <Printer size={14} />
             </Button>
           )}
-          {rights.canEdit && canEditBoq(row.original.Status) && (
+          {rights.canEdit && canOpenBoqEdit(row.original.Status) && (
             <Button
               variant="ghost"
               size="sm"
