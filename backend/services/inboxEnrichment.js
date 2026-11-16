@@ -81,6 +81,7 @@ const SPECS = {
   "crm-milestone-waiver": crmBooking("CrmMilestoneWaiver"),
   "crm-milestone-waiver-reversal": crmBooking("CrmMilestoneWaiver"),
   "crm-booking-amendment": crmBooking("CrmBookingAmendmentRequest"),
+  "crm-unit-change": crmBooking("CrmPropertyChangeRequest", "SourceBookingId"),
   "crm-refunds": { from: "dbo.CrmRefund t", key: "t.Id", company: ent("t.CompanyId"), project: ent("t.ProjectId"), party: crmCust("t.CustomerId") },
   "crm-resales": {
     from: "dbo.CrmUnitResale t LEFT JOIN dbo.CrmBooking b ON b.Id = t.FromBookingId", key: "t.Id",

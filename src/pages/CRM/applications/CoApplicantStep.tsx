@@ -171,15 +171,15 @@ export const CoApplicantStep: React.FC<{
             {(coApplicants as any[]).map((co: any) => (
               <div key={co.Id}
                 onClick={() => setViewingCoApplicant(co)}
-                className="flex items-center justify-between text-xs bg-muted/30 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50">
-                <span className="flex items-center gap-1.5">
+                className="flex flex-wrap items-center justify-between gap-2 text-xs bg-muted/30 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50">
+                <span className="min-w-0 flex flex-wrap items-center gap-1.5">
                   {co.ApplicantNo && <span className="bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-primary">Applicant {co.ApplicantNo}</span>}
                   <span className="font-medium text-foreground">{co.Name}</span>
                   {co.Relation && <span className="text-muted-foreground">({co.Relation})</span>}
                   {co.Mobile && <span className="text-muted-foreground">— {co.Mobile}</span>}
                   {co.CustomerNo && <span className="text-muted-foreground">· customer {co.CustomerNo}</span>}
                 </span>
-                <span className="flex items-center gap-2">
+                <span className="ml-auto flex shrink-0 items-center gap-2">
                   <button onClick={(e) => { e.stopPropagation(); startEdit(co); }} className="text-primary hover:underline">Edit</button>
                   <button onClick={(e) => { e.stopPropagation(); handleDelete(co.Id); }} className="text-muted-foreground hover:text-destructive"><Trash2 size={12} /></button>
                 </span>
@@ -364,12 +364,12 @@ export const CoApplicantStep: React.FC<{
               <div><span className="text-muted-foreground">Gender:</span> <span className="text-foreground">{viewingCoApplicant.Gender || "—"}</span></div>
               <div><span className="text-muted-foreground">Occupation:</span> <span className="text-foreground">{viewingCoApplicant.Occupation || "—"}</span></div>
               <div><span className="text-muted-foreground">Annual Income:</span> <span className="text-foreground">{viewingCoApplicant.AnnualIncome != null && viewingCoApplicant.AnnualIncome !== "" ? viewingCoApplicant.AnnualIncome : "—"}</span></div>
-              <div className="col-span-2"><span className="text-muted-foreground">Address:</span> <span className="text-foreground">{viewingCoApplicant.Address || "—"}</span></div>
+              <div className="col-span-1 sm:col-span-2 break-words"><span className="text-muted-foreground">Address:</span> <span className="text-foreground">{viewingCoApplicant.Address || "—"}</span></div>
               <div><span className="text-muted-foreground">City:</span> <span className="text-foreground">{viewingCoApplicant.City || "—"}</span></div>
               <div><span className="text-muted-foreground">State:</span> <span className="text-foreground">{viewingCoApplicant.State || "—"}</span></div>
               <div><span className="text-muted-foreground">Pincode:</span> <span className="text-foreground">{viewingCoApplicant.Pincode || "—"}</span></div>
               {viewingCoApplicant.Notes && (
-                <div className="col-span-2"><span className="text-muted-foreground">Notes:</span> <span className="text-foreground">{viewingCoApplicant.Notes}</span></div>
+                <div className="col-span-1 sm:col-span-2 break-words"><span className="text-muted-foreground">Notes:</span> <span className="text-foreground">{viewingCoApplicant.Notes}</span></div>
               )}
             </div>
 

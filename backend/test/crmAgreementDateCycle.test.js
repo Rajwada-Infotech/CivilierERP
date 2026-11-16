@@ -32,5 +32,5 @@ const { getPool } = require("../db");
 test("accepting a date sends it for approval from level 1 (a fresh cycle on the date approval)", async () => {
   await acceptAgreementDate(getPool(), 31, "Company");
   expect(mockQueries.some((q) => q.includes("DateApprovalStatus = 'Pending'"))).toBe(true);
-  expect(restartApprovalCycle).toHaveBeenCalledWith("crm-agreement-date", 31, null, null, expect.stringMatching(/accepted by the company/));
+  expect(restartApprovalCycle).toHaveBeenCalledWith("crm-agreement-date", 31, null, null, expect.stringMatching(/accepted by the company/), expect.anything());
 });

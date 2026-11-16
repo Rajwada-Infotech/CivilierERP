@@ -13,8 +13,11 @@ const { sql } = require("../db");
 async function getNextDocNumber(pool, docType, prefix, padLength = 5) {
   const year = new Date().getFullYear();
   const resource = `docnum:${docType}:${year}`;
-  const tx = pool.transaction();
-  await tx.begin();
+  // A caller may already be inside a larger atomic operation (for example, creating a CRM application and its
+  // inventory holds together). Reuse that transaction instead of opening a second connection/transaction.
+  const ownsTransaction = typeof pool.transaction === "function";
+  const tx = ownsTransaction ? pool.transaction() : pool;
+  if (ownsTransaction) await tx.begin();
   try {
     await tx.request()
       .input("Resource",    sql.NVarChar(255), resource)
@@ -36,10 +39,10 @@ async function getNextDocNumber(pool, docType, prefix, padLength = 5) {
       `);
 
     const seq = result.recordset[0].LastNumber;
-    await tx.commit();
+    if (ownsTransaction) await tx.commit();
     return `${prefix}-${year}-${String(seq).padStart(padLength, "0")}`;
   } catch (e) {
-    await tx.rollback();
+    if (ownsTransaction) await tx.rollback();
     throw e;
   }
 }

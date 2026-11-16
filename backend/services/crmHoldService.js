@@ -24,14 +24,20 @@ const HOLD_UNTIL_SENTINEL = "9999-12-31";
 // Live availability check — same table each entity type's own route already
 // queries, kept here so placeHold() can't put a hold on something already
 // taken without duplicating that logic.
-async function assertEntityNotTaken(pool, entityType, entityId) {
+// applicationId (optional): the application asking. A parking slot allotted to a booking is still free for the
+// application of an open unit change from that booking: the buyer keeps the slot, and it moves to the new booking
+// when the change is approved (crmEntityCreation.executeUnitChange).
+async function assertEntityNotTaken(pool, entityType, entityId, applicationId = null) {
   if (entityType === "Unit") {
     const taken = await pool.request().input("uid", sql.Int, entityId)
       .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL + " AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
     if (taken.recordset.length) { const e = new Error("This unit is already booked"); e.status = 409; throw e; }
   } else {
-    const taken = await pool.request().input("sid", sql.Int, entityId)
-      .query("SELECT Id FROM dbo.CrmParkingAllotment WHERE ParkingSlotId = @sid AND IsActive = 1");
+    const { PROPERTY_CHANGE_CLOSED_SQL } = require("../constants/crmStatuses");
+    const taken = await pool.request().input("sid", sql.Int, entityId).input("aid", sql.Int, applicationId).query(`
+      SELECT pa.Id FROM dbo.CrmParkingAllotment pa WHERE pa.ParkingSlotId = @sid AND pa.IsActive = 1
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmPropertyChangeRequest r WHERE @aid IS NOT NULL AND r.TargetApplicationId = @aid
+          AND r.SourceBookingId = pa.BookingId AND r.Status NOT IN ${PROPERTY_CHANGE_CLOSED_SQL})`);
     if (taken.recordset.length) { const e = new Error("This parking slot is already allotted"); e.status = 409; throw e; }
   }
 }
@@ -94,7 +100,7 @@ async function placeHold(pool, { entityType, entityId, applicationId, reason, us
     throw e;
   }
 
-  await assertEntityNotTaken(pool, entityType, entityId);
+  await assertEntityNotTaken(pool, entityType, entityId, applicationId);
 
   const existing = await findActiveHold(pool, entityType, entityId);
   if (existing) { const e = new Error("This item already has an active hold"); e.status = 409; throw e; }

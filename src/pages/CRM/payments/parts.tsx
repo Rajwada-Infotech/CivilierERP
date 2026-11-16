@@ -355,17 +355,22 @@ export function MoneyTrail({ trail, totalDue }: { trail: any; totalDue: number }
         </div>
       )}
       <div className="overflow-x-auto thin-scroll">
-        <table className="w-full text-[0.8125rem] min-w-[900px]">
+        <table className="w-full text-[0.8125rem] min-w-[1080px]">
           <thead>
             <tr>
               <th className={th}>Date</th><th className={th}>Documents</th><th className={th}>Mode · Ref. no.</th>
-              <th className={cn(th, "text-right")}>Amount</th><th className={cn(th, "text-right")}>Adjusted</th><th className={cn(th, "text-right")}>On account</th><th className={cn(th, "text-right")}>Refunded / reserved</th>
+              <th className={cn(th, "text-right")}>Gross amount</th><th className={cn(th, "text-right")}>Adjusted</th><th className={cn(th, "text-right")}>On account</th><th className={cn(th, "text-right")}>Refunded (paid)</th><th className={cn(th, "text-right")}>Reserved / moved</th>
               <th className={th}>Status</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
               const st = TRAIL_STAGE[r.stage];
+              const refunded = Number(r.refunded) || 0;
+              const otherOut = Number(r.otherOut) || 0;
+              const statusText = r.stage === "out"
+                ? refunded > 0 && otherOut < 0.01 ? "Refunded (paid)" : refunded > 0 ? "Part refunded" : "Reserved / moved"
+                : r.stage === "split" && refunded > 0 ? "Part adjusted · refund paid" : st?.label || r.stage;
               const dead = r.stage === "returned" || r.stage === "bounced" || r.stage === "adjustment";
               return (
                 <tr key={r.id} className={cn("hover:bg-muted/40", dead && "text-muted-foreground")}>
@@ -375,21 +380,31 @@ export function MoneyTrail({ trail, totalDue }: { trail: any; totalDue: number }
                   <td className={cn(td, "text-right font-semibold", dead && "font-normal", dead && r.stage !== "adjustment" && "line-through")}>{fmt(r.amount)}</td>
                   <td className={cn(td, "text-right")}>{amt(r.settled)}</td>
                   <td className={cn(td, "text-right")}>{amt(r.held)}</td>
-                  <td className={cn(td, "text-right")}>{amt(r.out)}</td>
-                  <td className={td} title={[st?.hint, r.docs?.length ? r.note : null].filter(Boolean).join(" · ")}><GridToneMark text={st?.label || r.stage} tone={st?.tone ?? "waiting"} /></td>
+                  <td className={cn(td, "text-right")}>{amt(r.refunded)}</td>
+                  <td className={cn(td, "text-right")}>{amt(r.otherOut)}</td>
+                  <td className={td} title={[st?.hint, r.reservedRefund > 0 ? `${fmt(r.reservedRefund)} reserved for a pending refund` : null, r.docs?.length ? r.note : null].filter(Boolean).join(" · ")}><GridToneMark text={statusText} tone={st?.tone ?? "waiting"} /></td>
                 </tr>
               );
             })}
           </tbody>
           <tfoot>
             <tr className="bg-muted font-semibold tabular-nums">
-              <td className="h-9 px-3 border-t border-border" colSpan={3}>Total received, against {fmt(totalDue)} due</td>
+              <td className="h-9 px-3 border-t border-border" colSpan={3}>Gross receipts counted (excludes rejected/bounced; before refunds or transfers)</td>
               <td className="h-9 px-3 border-t border-border text-right">{fmt(t.received)}</td>
               <td className="h-9 px-3 border-t border-border text-right">{amt(t.settled)}</td>
               <td className="h-9 px-3 border-t border-border text-right">{amt(t.held)}</td>
-              <td className="h-9 px-3 border-t border-border text-right">{amt(t.out)}</td>
+              <td className="h-9 px-3 border-t border-border text-right">{amt(t.refunded)}</td>
+              <td className="h-9 px-3 border-t border-border text-right">{amt(t.otherOut)}</td>
               <td className="h-9 px-3 border-t border-border text-xs font-medium text-muted-foreground whitespace-nowrap">
                 {[Number(t.finance) > 0 ? `${fmt(t.finance)} pending with Finance` : null, Number(t.recorded) > 0 ? `${fmt(t.recorded)} not sent to Finance` : null].filter(Boolean).join(" · ")}
+              </td>
+            </tr>
+            <tr className="bg-muted/60">
+              <td className="px-3 py-2 border-t border-border text-xs text-muted-foreground" colSpan={9}>
+                <span className="font-semibold text-foreground">Currently credited to this booking: {fmt((Number(t.settled) || 0) + (Number(t.held) || 0))}</span>
+                {` = ${fmt(t.settled)} adjusted + ${fmt(t.held)} still on account. `}
+                {`${fmt(t.refunded)} has actually been refunded. ${fmt(t.otherOut)} is reserved or moved out. `}
+                {`Current billable amount: ${fmt(totalDue)}.`}
               </td>
             </tr>
           </tfoot>
@@ -531,8 +546,10 @@ function milestoneDetails(m: any) {
   return lines;
 }
 
-export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, nextMilestone, canManuallyApply, activeId, pendingWaivers, onPay, onApply, onWaive, onRemarks }: {
-  milestones: any[]; canEdit: boolean; onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; fullPaymentShortfall: number;
+export function MilestoneTable({ milestones, canEdit, closed = false, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, nextMilestone, canManuallyApply, activeId, pendingWaivers, onPay, onApply, onWaive, onRemarks }: {
+  milestones: any[]; canEdit: boolean;
+  /** The booking is closed (cancelled, unit changed …): its schedule is history, nothing on it is due or overdue. */
+  closed?: boolean; onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; fullPaymentShortfall: number;
   nextMilestone: any; canManuallyApply: boolean; activeId: number | null; pendingWaivers?: Set<number>;
   onPay: (m: any) => void; onApply: (payment: any, m: any) => void; onWaive: (m: any) => void; onRemarks: (m: any) => void;
 }) {
@@ -555,13 +572,13 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
           {milestones.length === 0 ? (
             <tr><td colSpan={7} className={cn(td, "py-10 text-center text-muted-foreground")}>No milestones on this booking.</td></tr>
           ) : milestones.map((m) => {
-            const overdue = isOverdue(m);
+            const overdue = !closed && isOverdue(m);
             const f = milestoneFill(m);
             // The server's money stage (MONEY_STAGE): verified money On Account covers it (no Pay / Waive, which
             // would read as owed / forgiven), or an entry for it is with Finance.
             const stage = MONEY_STAGE[m.MoneyStage as string] || null;
             const covered = m.MoneyStage === "Verified";
-            const status = stage ? stage.label : overdue ? (f.held + f.finance + f.recorded > 0 ? "Overdue · part received" : "Overdue") : m.Status === CrmStatus.PENDING ? "Due" : m.Status;
+            const status = closed && m.Status !== CrmStatus.PAID ? "Closed" : stage ? stage.label : overdue ? (f.held + f.finance + f.recorded > 0 ? "Overdue · part received" : "Overdue") : m.Status === CrmStatus.PENDING ? "Due" : m.Status;
             const open = m.Status !== CrmStatus.PAID && m.Status !== "Waived";
             const pmt = onAccountBalance > 0 && m.Id === nextMilestone?.Id
               ? onAccountData?.payments?.find((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) - Number(p.AppliedAmount || 0) > 0)
@@ -586,7 +603,7 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                   <td className={cn(td, "text-xs tabular-nums whitespace-nowrap text-muted-foreground")}>{fmtDate(m.DueDate)}</td>
                   <td className={cn(td, "text-right tabular-nums whitespace-nowrap font-medium")}>{noAmount ? <span className="text-xs font-normal text-muted-foreground">No amount due</span> : fmt(m.AmountDue)}</td>
                   <td className={cn(td, "text-xs")}>{moneyWords(m)}</td>
-                  <td className={cn(td, "text-right tabular-nums whitespace-nowrap", f.missing > 0 && "font-semibold")}>{f.waived || f.missing <= 0 ? dash : fmt(f.missing)}</td>
+                  <td className={cn(td, "text-right tabular-nums whitespace-nowrap", f.missing > 0 && "font-semibold")}>{closed || f.waived || f.missing <= 0 ? dash : fmt(f.missing)}</td>
                   <td className={td} title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={pendingWaivers?.has(m.Id) ? "waiting" : overdue ? "stopped" : stage?.tone ?? "waiting"} />}</td>
                   <td className={cn(td, "whitespace-nowrap")}>
                     {canEdit && open && (
@@ -612,7 +629,7 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
               <td className="h-9 px-3 border-t border-border" colSpan={2}>Total</td>
               <td className="h-9 px-3 border-t border-border text-right tabular-nums">{fmt(milestones.reduce((n, m) => n + (m.Status === "Waived" ? 0 : Number(m.AmountDue) || 0), 0))}</td>
               <td className="h-9 px-3 border-t border-border" />
-              <td className="h-9 px-3 border-t border-border text-right tabular-nums">{fmt(milestones.reduce((n, m) => n + (milestoneFill(m).waived ? 0 : milestoneFill(m).missing), 0))}</td>
+              <td className="h-9 px-3 border-t border-border text-right tabular-nums">{closed ? dash : fmt(milestones.reduce((n, m) => n + (milestoneFill(m).waived ? 0 : milestoneFill(m).missing), 0))}</td>
               <td className="h-9 px-3 border-t border-border" colSpan={2} />
             </tr>
           </tfoot>

@@ -130,6 +130,7 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
       throw chargeError("This booking's Sale Deed is already registered — extra charges can no longer be changed in the ERP. A Deed of Rectification is required for any correction.");
     }
   } else if (ApplicationId != null) {
+    await require("../services/crmUnitChangeGuards").assertUnitChangeApplicationEditable(pool, ApplicationId);
     const app = await pool.request().input("aid", sql.Int, ApplicationId)
       .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
@@ -220,6 +221,7 @@ async function applyAddExtraChargeToApplication(pool, applicationId, b, actorUse
   const app = await pool.request().input("aid", sql.Int, applicationId)
     .query("SELECT Id, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
   if (!app.recordset.length) throw chargeError("Application not found", 404);
+  await require("../services/crmUnitChangeGuards").assertUnitChangeApplicationEditable(pool, applicationId);
   // Same Draft/Pending gate as Parking's Application-stage step
   // (ParkingSelectionStep) — free to change pre-approval, locked after.
   if (![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
@@ -279,6 +281,7 @@ async function applyReleaseExtraCharge(pool, id) {
   // supposed to exist yet), and there's no milestone/GST rollup to redo.
   if (BookingId == null) {
     if (ApplicationId != null) {
+      await require("../services/crmUnitChangeGuards").assertUnitChangeApplicationEditable(pool, ApplicationId);
       const app = await pool.request().input("aid", sql.Int, ApplicationId)
         .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
       if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {

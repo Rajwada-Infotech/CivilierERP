@@ -98,10 +98,10 @@ export const ExtraWorkSelectionStep: React.FC<{
         {(charges as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(charges as any[]).map((c: any) => (
-              <div key={c.Id} className="flex items-center justify-between text-xs bg-muted/30 px-2.5 py-1.5">
-                <span>{c.Description} · {fmtInr(c.Amount)} + GST {fmtInr(c.GstAmount)} = <span className="font-medium">{fmtInr(c.TotalAmount)}</span></span>
+              <div key={c.Id} className="flex flex-wrap items-center justify-between gap-2 text-xs bg-muted/30 px-2.5 py-1.5">
+                <span className="min-w-0 break-words">{c.Description} · {fmtInr(c.Amount)} + GST {fmtInr(c.GstAmount)} = <span className="font-medium">{fmtInr(c.TotalAmount)}</span></span>
                 {canEdit && (
-                  <button onClick={() => handleRemove(c.Id)} className="text-muted-foreground hover:text-destructive"><Trash2 size={12} /></button>
+                  <button onClick={() => handleRemove(c.Id)} className="ml-auto shrink-0 text-muted-foreground hover:text-destructive" aria-label={`Remove ${c.Description}`}><Trash2 size={12} /></button>
                 )}
               </div>
             ))}
