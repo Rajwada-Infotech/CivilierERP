@@ -1678,7 +1678,14 @@ router.get("/", async (req, res) => {
     const rows = await runInboxQueries(pool, queries);
 
     // Every row gets the common person / company / project, then keeps what is special to its own document type.
-    res.json(await enrichInboxRows(pool, await filterVisibleToViewer(rows, req)));
+    const out = await enrichInboxRows(pool, await filterVisibleToViewer(rows, req));
+    // A unit change carries its whole decision in one line (the row's summary, as a journal voucher's does).
+    const uc = out.filter((r) => r.Module === "crm-unit-change");
+    if (uc.length) {
+      const sums = await require("../services/crmEntityCreation").unitChangeSummaries(pool, uc.map((r) => r.RecordId)).catch(() => new Map());
+      uc.forEach((r) => { r.JournalVoucherSummary = sums.get(Number(r.RecordId)) || null; });
+    }
+    res.json(out);
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox error");
     res.status(500).json({

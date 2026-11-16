@@ -178,6 +178,11 @@ async function createMoneyReceiptForBooking(pool, bookingId, data = {}, actorUse
 }
 
 async function createMoneyReceiptAfterDataReview(pool, bookingId, actorUserId) {
+  // A booking opened by a unit change takes no booking amount: the buyer's money came across from the old booking
+  // (crmEntityCreation.executeUnitChange), so there is no new receipt to draw.
+  const fromUnitChange = (await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 1 AS x FROM dbo.CrmPropertyChangeRequest WHERE TargetBookingId = @bid")).recordset.length > 0;
+  if (fromUnitChange) return null;
   return createMoneyReceiptForBooking(pool, bookingId, {}, actorUserId, { skipIfExists: true });
 }
 

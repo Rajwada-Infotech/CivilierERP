@@ -79,6 +79,8 @@ const CrmApplication: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [loadingApplication, setLoadingApplication] = useState(false);
   const [hasBooking, setHasBooking] = useState(false);
+  // The unit change this application is for (crmApplications GET /:id): its Submit sends the unit change for approval.
+  const [unitChange, setUnitChange] = useState<any>(null);
   const [applicationId, setApplicationId] = useState<number | null>(null);
   const [applicationNo, setApplicationNo] = useState<string | null>(null);
   // Status of the application currently open in the wizard, as loaded from
@@ -408,13 +410,16 @@ const CrmApplication: React.FC = () => {
   // computed server-side from whether a live Booking exists (see APP_SELECT
   // in crmApplications.js) and is the actual source of truth here.
   // Draft (mid-fill, paused before full submission) — no booking yet.
-  const isResumable = (app: any) => !!app && app.Stage !== "Converted" && app.Status === CrmStatus.DRAFT;
+  const hasSubmittedUnitChange = (app: any) => !!app?.UnitChangeStatus
+    && !["Draft", "Completed", "Rejected", "Withdrawn"].includes(app.UnitChangeStatus);
+  const isResumable = (app: any) => !!app && !hasSubmittedUnitChange(app) && app.Stage !== "Converted" && app.Status === CrmStatus.DRAFT;
   // Submitted (Pending) or reverted (Rejected) — booking may exist but not yet
   // approved by the next level. Editable until the booking reaches Approved;
   // if the booking is reverted (Rejected), also editable again.
   // Backend PUT /:id enforces the same gate server-side.
   const isEditableApplication = (app: any) =>
     !!app &&
+    !hasSubmittedUnitChange(app) &&
     [CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.Status) &&
     (app.Stage !== "Converted" || app.BookingStatus !== CrmStatus.APPROVED);
   // Kept for any callers that still reference it (row-level canResume).
@@ -461,13 +466,13 @@ const CrmApplication: React.FC = () => {
   // Direct cancel is only valid before a Booking exists (Stage=InProcess/NotConverted).
   // Once a Booking is auto-created (Stage=Converted), the only cancel path is the
   // formal Cancellation Request flow — the backend enforces this too.
-  const canCancelApplication = (app: any) => !!app && canEditApplications && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  const canCancelApplication = (app: any) => !!app && !hasSubmittedUnitChange(app) && canEditApplications && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
   // Admin delete — only when no live booking exists (Stage !== Converted).
   // On a Converted application the booking is live and has real financial
   // history; the backend rejects deletes in that state, so don't offer the
   // button either (misleading to show a destructive action that will always fail).
   // Until its booking is fully approved; a not-yet-approved booking is deleted with it.
-  const canDeleteApplication = (app: any) => !!app && canDeleteApplications && !(app.Stage === "Converted" && app.BookingStatus === CrmStatus.APPROVED);
+  const canDeleteApplication = (app: any) => !!app && !hasSubmittedUnitChange(app) && canDeleteApplications && !(app.Stage === "Converted" && app.BookingStatus === CrmStatus.APPROVED);
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -652,6 +657,7 @@ const CrmApplication: React.FC = () => {
     setBookingLockReason(null);
     setUnitLocked(false);
     setHasBooking(false);
+    setUnitChange(null);
     setPaymentLocked(false);
   };
 
@@ -762,7 +768,13 @@ const CrmApplication: React.FC = () => {
       const body = await res.json();
       const app = body.application;
       if (!app) throw new Error("Application record missing from response");
+      if (body.unitChange && hasSubmittedUnitChange({ UnitChangeStatus: body.unitChange.Status })) {
+        toast.info(`Unit change ${body.unitChange.RequestNo} is awaiting approval; its application is locked.`);
+        navigate(`/crm/unit-changes?id=${body.unitChange.Id}`);
+        return;
+      }
       setHasBooking((body.bookings || []).length > 0);
+      setUnitChange(body.unitChange || null);
 
       // ChequeNo/ChequeDate/TransactionRef live on CrmCustomerBankDetail
       // (keyed by ApplicationId), not on CrmApplication itself — same table
@@ -925,6 +937,7 @@ const CrmApplication: React.FC = () => {
       setApplicationId(data.id);
       setApplicationNo(data.ApplicationNo);
       setHasBooking(false);
+    setUnitChange(null);
       // Freshly created — always Draft, and stays unlocked since this is the
       // same step-1 pick that was just made, not yet a saved value to guard.
       setWizardAppStatus("Draft");
@@ -1031,6 +1044,14 @@ const CrmApplication: React.FC = () => {
       const subData = await subRes.json().catch(() => ({}));
       if (!subRes.ok) throw new Error(subData.error || "Submit failed");
       clearDraft(applicationId);
+      if (subData.unitChange) {
+        // A unit change's application: sent for its approval; the new booking opens when it is approved. Straight to
+        // the request (leaving the page closes the wizard; closing it first would put its own URL back).
+        toast.success(subData.unitChange.message);
+        ["crm-apps", "crm-unit-changes", "crm-bookings"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+        navigate(`/crm/unit-changes?id=${subData.unitChange.id}`);
+        return;
+      }
       setDialogOpen(false);
       resetWizard();
       qc.invalidateQueries({ queryKey: ["crm-apps"] });
@@ -1155,6 +1176,7 @@ const CrmApplication: React.FC = () => {
       cell: (i) => (
         <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-heading tabular-nums text-xs font-semibold text-primary hover:underline">
           {i.getValue() as string}
+          {i.row.original.UnitChangeNo && <span className="block text-[0.6875rem] font-medium font-sans text-sky-700 dark:text-sky-400 whitespace-nowrap">Unit change {i.row.original.UnitChangeNo}</span>}
         </span>
       ) },
     {/* Mobile folded into this cell — same rationale/pattern as
@@ -1245,6 +1267,7 @@ const CrmApplication: React.FC = () => {
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
           <div className="font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">{i.getValue() as string}</div>
+          {i.row.original.UnitChangeNo && <div className="text-[0.6875rem] font-medium text-sky-700 dark:text-sky-400 whitespace-nowrap">Unit change {i.row.original.UnitChangeNo}</div>}
           <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}</div>
         </div>
       ) },
@@ -1361,7 +1384,7 @@ const CrmApplication: React.FC = () => {
         const resumeOnRow = canResume && isResumable(a);
         const editLabel = a.Status === CrmStatus.REJECTED ? "Fix & Resubmit" : "Edit";
         const canCreateBooking = activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.Stage !== "Converted"
-          && !a.UnitUnavailableForBooking && a.PreferredUnitId != null;
+          && !a.UnitUnavailableForBooking && a.PreferredUnitId != null && !a.UnitChangeNo;
         const hasMenu = (canResume && !resumeOnRow) || canCreateBooking || a.Stage === "Converted"
           || canCancelApplication(a) || canDeleteApplication(a);
         // Sent back: the preparer corrects it in the form; resubmitted: the checker looks at the booking again.
@@ -1591,6 +1614,20 @@ const CrmApplication: React.FC = () => {
 
           {/* What Data Review / booking approval sent back, on the step that holds it. */}
           <CorrectionBanner applicationId={applicationId} step={step} stepLabels={wizardStepLabels} onJump={(n) => setStep(n)} />
+          {unitChange && (
+            <div className="border border-sky-500/30 bg-sky-500/[0.06] px-3 py-2.5 text-xs space-y-1">
+              <p className="font-semibold text-foreground flex flex-wrap items-center gap-x-2">
+                Unit change {unitChange.RequestNo}
+                <span className="font-normal text-muted-foreground">from booking {unitChange.SourceBookingNo}{unitChange.SourceUnitNo ? ` · ${unitChange.SourceUnitNo}` : ""} · {unitChange.Status}</span>
+                <button type="button" onClick={() => { setDialogOpen(false); resetWizard(); navigate(`/crm/unit-changes?id=${unitChange.Id}`); }} className="ml-auto text-primary hover:underline font-medium">Open request</button>
+              </p>
+              <p className="text-muted-foreground">
+                {unitChange.Status === "Draft"
+                  ? `This is the buyer's application for the new unit. The unit's rate is filled in as a starting point; agree and enter the final rate here, then set the payment plan, parking and extra charges. Submit it to send the unit change for approval. There is no separate unit-change fee; any amount due follows the new payment plan.`
+                  : `This unit change is ${unitChange.Status}: the new booking opens when it is approved.`}
+              </p>
+            </div>
+          )}
 
           {step === 1 && (
             <div className="space-y-4">
@@ -1803,16 +1840,16 @@ const CrmApplication: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-10 gap-3">
-                    <div className="col-span-4 lg:col-span-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-10 gap-3">
+                    <div className="col-span-1 sm:col-span-4">
                       <label className={labelCls}>Date of Apply</label>
                       <DateInput value={form.DateOfApply} onChange={(e) => setForm((f) => ({ ...f, DateOfApply: e.target.value }))} className={inputCls} />
                     </div>
-                    <div className="col-span-3 lg:col-span-3">
+                    <div className="col-span-1 sm:col-span-3">
                       <label className={labelCls}>Rate (₹/sqft) <span className="text-destructive">*</span></label>
                       <input type="number" value={form.RatePerSqFt} onChange={(e) => setForm((f) => ({ ...f, RatePerSqFt: e.target.value }))} className={inputCls} />
                     </div>
-                    <div className="col-span-3 lg:col-span-3">
+                    <div className="col-span-1 sm:col-span-3">
                       <label className={labelCls}>Total Value</label>
                       <input type="text" inputMode="decimal" disabled={!totalAreaSqFt} value={totalValueInput}
                         onFocus={() => { totalFieldFocused.current = true; }}
@@ -2114,7 +2151,7 @@ const CrmApplication: React.FC = () => {
                   editable (Edit always available) through Draft/Pending;
                   once Approved, canEditUnitSelection goes false and the
                   Edit control disappears for good. */}
-              <div className=" border border-border p-3 space-y-2.5">
+              {!unitChange && <div className=" border border-border p-3 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-foreground block">Payment Details</label>
                   {applicationId != null && (
@@ -2197,19 +2234,24 @@ const CrmApplication: React.FC = () => {
                     </div>
                   )}
                 </div>
-              </div>
+              </div>}
 
               <div>
                 <label className={labelCls}>Notes / Remarks</label>
                 <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
                   rows={4} className={`${inputCls} resize-none`} />
               </div>
-              <p className="text-xs text-muted-foreground">
+              {unitChange ? (
+                <p className="text-xs text-muted-foreground">
+                  Submitting sends unit change {unitChange.RequestNo} for approval. On approval the new booking opens with this rate,
+                  payment plan, parking and extra charges. Booking {unitChange.SourceBookingNo} then closes; moving received money follows the linked change process.
+                </p>
+              ) : <p className="text-xs text-muted-foreground">
                 Submitting creates the Booking immediately — there's no separate admin approval step. The
                 payment plan, booking amount and payment itself are all handled on the Booking page from there.
                 If the unit is unavailable at the moment of submit, the Application still saves as Pending and
                 you can retry booking creation from the list.
-              </p>
+              </p>}
             </div>
           )}
 
@@ -2264,7 +2306,7 @@ const CrmApplication: React.FC = () => {
               {step === 7 && (
                 <button onClick={handleFinalSave} disabled={saving}
                   className={`${KEY_INK} h-9 px-4`}>
-                  {saving ? "Submitting…" : hasBooking ? "Submit Edits" : "Submit Application"}
+                  {saving ? "Submitting…" : unitChange ? "Send Unit Change for Approval" : hasBooking ? "Submit Edits" : "Submit Application"}
                 </button>
               )}
             </div>

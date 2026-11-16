@@ -1386,6 +1386,12 @@
 .crm-dialog[class*="dlg-sticky"] :is([data-dlg-head], [data-dlg-foot]) {
   background: hsl(var(--card));
 }
+/* A dialog with no padding of its own (the CRM GridDialog pads its header, body and footer itself) keeps that
+   inner padding when its bars are pinned: the pinned padding above comes from the dialog's own, which is 0 there. */
+@media (min-width: 640px) {
+  .dlg-sticky [data-dlg-head] { padding-left: max(var(--dlg-pl), 1.5rem); padding-right: max(var(--dlg-pr), 1.5rem); padding-top: max(var(--dlg-pt), 1rem); }
+  .dlg-sticky [data-dlg-foot] { padding-left: max(var(--dlg-pl), 1.5rem); padding-right: max(var(--dlg-pr), 1.5rem); }
+}
 /* Phones: a dialog takes the whole screen less a small margin, whatever height cap the page gave it, so its
    content is never cut short; wide content (tables, item grids) scrolls sideways inside it instead of being
    clipped. The bottom bar steps aside while a dialog is open (MobileNav). */

@@ -459,7 +459,8 @@ async function notifyUnitChange(pool, requestId, event, { level = 0 } = {}) {
     if (!r) return;
     const who = `${r.ApplicantName} (${r.BookingNo} → ${r.UnitName})`;
     const text = {
-      raised: ["Unit change to approve", `${r.RequestNo}: ${who} is waiting for your approval.`],
+      raised: ["Unit change to approve", `${r.RequestNo}: ${r.ApplicantName} (${r.BookingNo}) is waiting for your approval. ${
+        (await require("../services/crmEntityCreation").unitChangeSummaries(pool, [r.Id])).get(r.Id) || ""}`],
       completed: ["Unit change done", `${r.RequestNo}: ${who} — approved; the sale carries on in ${r.TargetBookingNo} and the money has moved.`],
       moving: ["Unit change approved", `${r.RequestNo}: ${who} — approved; new booking ${r.TargetBookingNo} is open, the money moves once Finance approves the Fund Transfer.`],
       failed: ["Unit change stopped part-way", `${r.RequestNo}: ${who} — approved, but it stopped: ${r.Note || "see the request"}. Press Retry once fixed.`],
@@ -473,19 +474,34 @@ async function notifyUnitChange(pool, requestId, event, { level = 0 } = {}) {
   } catch (e) { console.error("[crm-bookings] unit-change notification failed:", e.message); }
 }
 
+// A unit nobody else holds: no live booking or booking line on it, no application line, no hold. One rule for the
+// single-unit check below and for the list of units free to move to. exceptApp: the unit change's own application,
+// whose line and hold on the unit don't count against it.
+const unitFreeSql = (u, exceptApp = null) => `NOT EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.UnitId = ${u}.Id AND b.IsActive = 1
+      AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
+      AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()))
+  AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingUnit x WHERE x.UnitId = ${u}.Id AND x.Status = N'Active')
+  AND NOT EXISTS (SELECT 1 FROM dbo.CrmApplicationUnit x WHERE x.UnitId = ${u}.Id AND x.Status = N'Active'${exceptApp ? ` AND x.ApplicationId <> ${Number(exceptApp)}` : ""})
+  AND NOT EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = N'Unit' AND h.EntityId = ${u}.Id AND h.Status = N'Active' AND h.HoldUntil >= SYSDATETIME()${exceptApp ? ` AND h.ApplicationId <> ${Number(exceptApp)}` : ""})`;
+
 // Everything a unit change needs to know about a booking and a new unit, and what stops it. Read by the preview and by
 // raising a request, so both say the same thing.
-async function unitChangeContext(pool, bookingId, targetUnitId, { typedRate = null, paymentPlanId = null, keepKeys = [] } = {}) {
+// applicationId / requestId: the unit change's own application and request, once it has them (submitting it).
+async function unitChangeContext(pool, bookingId, targetUnitId, { typedRate = null, paymentPlanId = null, applicationId = null, requestId = null } = {}) {
   const source = (await pool.request().input("id", sql.Int, bookingId).query(`
     SELECT b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.ProjectId, b.CompanyId, b.Status, b.WorkflowStage, b.IsActive,
            b.RatePerSqFt, b.TotalValue, b.GrandTotal, b.ParkingTotal, b.ExtraChargesTotal, b.TotalGstAmount, b.AssignedTo, b.UnitNo, b.ProjectName,
+           b.BlockName, b.UnitType, b.AreaSqFt, b.CarpetAreaSqFt, b.BookingAmount, b.BookingDate, b.PaymentPlanId,
+           (SELECT TOP 1 pp.PlanName FROM dbo.CrmPaymentPlanTemplate pp WHERE pp.Id = b.PaymentPlanId) AS PlanName,
+           (SELECT TOP 1 g.Status FROM dbo.CrmAgreement g WHERE g.BookingId = b.Id ORDER BY CASE WHEN g.Status = 'Cancelled' THEN 1 ELSE 0 END, g.Id DESC) AS AgreementStatus,
+           (SELECT TOP 1 d.Status FROM dbo.CrmSalesDeed d WHERE d.BookingId = b.Id ORDER BY d.Id DESC) AS DeedStatus,
            a.CustomerId, a.ApplicantName, a.Mobile, a.AltMobile, a.Email, a.PropertyType, a.BhkPreference, a.Source,
            a.PlatformId, a.CampaignId, a.AdId, a.ChannelPartnerId, a.BrokerId, a.BrokerageRatePercent, a.BrokeragePaymentPlan, a.Notes
     FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
     WHERE b.Id = @id AND b.IsActive = 1`)).recordset[0];
   if (!source) throw Object.assign(new Error("Booking not found"), { status: 404 });
   const target = targetUnitId == null ? null : (await pool.request().input("uid", sql.Int, targetUnitId).query(`
-    SELECT u.Id, u.UnitName, u.ProjectId, u.AreaSqFt, u.RatePerSqFt, u.BlockId, u.UnitKind, u.IsActive,
+    SELECT u.Id, u.UnitName, u.ProjectId, u.AreaSqFt, u.CarpetAreaSqFt, u.FloorNo, u.RatePerSqFt, u.BlockId, u.UnitKind, u.IsActive,
            p.name AS ProjectName, p.company_id AS CompanyId, blk.BlockName, COALESCE(u.UnitType, k.Name) AS UnitType,
            CASE WHEN k.IsLand = 1 THEN 1 ELSE 0 END AS IsLand
     FROM dbo.UnitMaster u
@@ -510,7 +526,7 @@ async function unitChangeContext(pool, bookingId, targetUnitId, { typedRate = nu
   if (Number(shape.Units) > 1) blockers.push("This booking has more than one unit: a unit change moves a single-unit booking.");
   if (shape.OpenCancellation) blockers.push(`Cancellation ${shape.OpenCancellation} is open on this booking: withdraw or finish it first.`);
   const open = await require("../services/crmEntityCreation").openUnitChangeOn(pool, bookingId);
-  if (open) blockers.push(`Unit change ${open.RequestNo} is already open on this booking.`);
+  if (open && Number(open.Id) !== Number(requestId)) blockers.push(`Unit change ${open.RequestNo} is already open on this booking.`);
 
   let rate = null, plans = [], planId = null, planError = null, isCrossProject = false, isCrossCompany = false;
   if (target) {
@@ -521,12 +537,7 @@ async function unitChangeContext(pool, bookingId, targetUnitId, { typedRate = nu
     const typeError = await bookingTypeViolation(pool, [target], { isPlotBooking: false, landKinds: await loadLandKinds(pool), commercialKinds: await loadCommercialKinds(pool) });
     if (typeError) blockers.push(typeError);
     const taken = (await pool.request().input("uid", sql.Int, target.Id).query(`
-      SELECT TOP 1 1 AS Taken FROM dbo.CrmBooking b
-      WHERE b.UnitId = @uid AND b.IsActive = 1 AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
-        AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME())
-      UNION ALL SELECT TOP 1 1 FROM dbo.CrmBookingUnit WHERE UnitId = @uid AND Status = N'Active'
-      UNION ALL SELECT TOP 1 1 FROM dbo.CrmApplicationUnit WHERE UnitId = @uid AND Status = N'Active'
-      UNION ALL SELECT TOP 1 1 FROM dbo.CrmInventoryHold WHERE EntityType = N'Unit' AND EntityId = @uid AND Status = N'Active' AND HoldUntil >= SYSDATETIME()`)).recordset;
+      SELECT 1 AS Taken FROM dbo.UnitMaster u WHERE u.Id = @uid AND NOT (${unitFreeSql("u", applicationId)})`)).recordset;
     if (taken.length) blockers.push(`${target.UnitName} is already booked or held.`);
     const svc = require("../services/crmEntityCreation");
     try { rate = svc.unitChangeRate({ typedRate, unitRate: target.RatePerSqFt, bookingRate: source.RatePerSqFt }); }
@@ -548,19 +559,56 @@ async function unitChangeContext(pool, bookingId, targetUnitId, { typedRate = nu
     }
   }
 
-  // The parking and extra charges on the booking: each one stays the same or is changed. Parking stays only within
-  // the same project (a slot belongs to its project).
-  const parking = (await pool.request().input("id", sql.Int, bookingId).query(`
-    SELECT pa.Id, pa.ParkingSlotNo, pa.Quantity, pa.TotalAmount, pa.TotalAmount - ISNULL(pa.GstAmount, 0) AS BaseAmount, pm.ParkingType
-    FROM dbo.CrmParkingAllotment pa LEFT JOIN dbo.ParkingMaster pm ON pm.Id = pa.ParkingMasterId
+  // The parking and extra charges: the old booking's, and (once it exists) what the new application has picked in the
+  // application wizard. Each one is kept (on both), dropped (only on the old booking) or added (only on the new one).
+  // Before the application exists, what it will start with: the old booking's slots in the new unit's project, and
+  // every extra charge.
+  const oldParking = (await pool.request().input("id", sql.Int, bookingId).query(`
+    SELECT pa.Id, pa.ParkingSlotId, pa.ParkingSlotNo, pa.Quantity, pa.RateSnapshot, pa.TotalAmount - ISNULL(pa.GstAmount, 0) AS BaseAmount,
+           pm.ParkingType, s.ProjectId AS SlotProjectId
+    FROM dbo.CrmParkingAllotment pa LEFT JOIN dbo.ParkingMaster pm ON pm.Id = pa.ParkingMasterId LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
     WHERE pa.BookingId = @id AND pa.IsActive = 1 ORDER BY pa.Id`)).recordset;
-  const charges = (await pool.request().input("id", sql.Int, bookingId).query(`
-    SELECT Id, Description, Amount, TotalAmount FROM dbo.CrmExtraCharge WHERE BookingId = @id AND IsActive = 1 ORDER BY Id`)).recordset;
-  const addOns = [
-    ...parking.map((p) => ({ kind: "Parking", id: p.Id, label: [p.ParkingType || "Parking", p.ParkingSlotNo].filter(Boolean).join(" · ") + (p.Quantity > 1 ? ` × ${p.Quantity}` : ""),
-      amount: Number(p.TotalAmount || 0), base: Number(p.BaseAmount || 0), canKeep: !isCrossProject })),
-    ...charges.map((c) => ({ kind: "ExtraCharge", id: c.Id, label: c.Description, amount: Number(c.TotalAmount || 0), base: Number(c.Amount || 0), canKeep: true })),
-  ];
+  const oldCharges = (await pool.request().input("id", sql.Int, bookingId).query(`
+    SELECT Id, ExtraChargeMasterId, Description, Amount FROM dbo.CrmExtraCharge WHERE BookingId = @id AND IsActive = 1 ORDER BY Id`)).recordset;
+  const parkingLabel = (type, slotNo, qty = 1) => [type || "Parking", slotNo].filter(Boolean).join(" · ") + (qty > 1 ? ` × ${qty}` : "");
+  const items = [];
+  if (applicationId) {
+    const holds = (await pool.request().input("aid", sql.Int, applicationId).query(`
+      SELECT h.EntityId AS SlotId, h.RateOverride FROM dbo.CrmInventoryHold h
+      WHERE h.EntityType = N'Parking' AND h.ApplicationId = @aid AND h.Status = N'Active' ORDER BY h.Id`)).recordset;
+    const { slotParkingRate } = require("../services/crmEntityCreation");
+    for (const h of holds) {
+      const { slot, master } = await slotParkingRate(pool, h.SlotId);
+      if (!slot) continue;
+      // A slot belongs to its project: one held in another project (the application's unit was changed to another
+      // project in the wizard) can't go on the new booking.
+      if (target && Number(slot.ProjectId) !== Number(target.ProjectId)) {
+        blockers.push(`Parking slot ${slot.SlotNo} is in another project than ${target.UnitName}: remove it in the application's Parking step.`);
+        continue;
+      }
+      const kept = oldParking.some((p) => Number(p.ParkingSlotId) === Number(h.SlotId));
+      items.push({ kind: "Parking", label: parkingLabel(slot.ParkingType, slot.SlotNo), base: Number(h.RateOverride ?? master?.Charge ?? 0), change: kept ? "kept" : "added" });
+    }
+    for (const p of oldParking) {
+      if (!holds.some((h) => Number(h.SlotId) === Number(p.ParkingSlotId))) items.push({ kind: "Parking", label: parkingLabel(p.ParkingType, p.ParkingSlotNo, p.Quantity), base: Number(p.BaseAmount || 0), change: "dropped" });
+    }
+    const appCharges = (await pool.request().input("aid", sql.Int, applicationId).query(`
+      SELECT ExtraChargeMasterId, Description, Amount FROM dbo.CrmExtraCharge WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1 ORDER BY Id`)).recordset;
+    const unmatched = [...oldCharges];
+    for (const c of appCharges) {
+      const i = unmatched.findIndex((o) => Number(o.ExtraChargeMasterId ?? 0) === Number(c.ExtraChargeMasterId ?? 0) && o.Description === c.Description && Math.abs(Number(o.Amount) - Number(c.Amount)) < 0.01);
+      if (i >= 0) unmatched.splice(i, 1);
+      items.push({ kind: "ExtraCharge", label: c.Description, base: Number(c.Amount || 0), change: i >= 0 ? "kept" : "added" });
+    }
+    for (const o of unmatched) items.push({ kind: "ExtraCharge", label: o.Description, base: Number(o.Amount || 0), change: "dropped" });
+  } else {
+    for (const p of oldParking) {
+      const carries = target && Number(p.SlotProjectId) === Number(target.ProjectId);
+      items.push({ kind: "Parking", label: parkingLabel(p.ParkingType, p.ParkingSlotNo, p.Quantity), base: Number(p.BaseAmount || 0), change: carries ? "kept" : "dropped" });
+    }
+    for (const c of oldCharges) items.push({ kind: "ExtraCharge", label: c.Description, base: Number(c.Amount || 0), change: "kept" });
+  }
+  items.forEach((x) => { x.amount = round2(x.base); });
 
   // The money on the booking, by where it is. Received = verified by Finance (settled on milestones or on account).
   const money = (await pool.request().input("id", sql.Int, bookingId).query(`
@@ -571,16 +619,15 @@ async function unitChangeContext(pool, bookingId, targetUnitId, { typedRate = nu
       ISNULL((SELECT SUM(mr.Amount) FROM dbo.CrmMoneyReceipt mr WHERE mr.BookingId = @id AND mr.Status = N'Pending' AND mr.ReceivedPaymentId IS NULL), 0) AS NotSentToFinance`)).recordset[0];
   money.Received = round2(Number(money.Settled) + Number(money.OnAccount));
 
-  const unitPriceNew = target && rate > 0 && Number(target.AreaSqFt) > 0 ? unitPrice(Number(target.AreaSqFt), rate) : null;
   // The new booking's price with GST, worked out by the same quote the application form uses (crmPriceQuote), with the
-  // parking and extra charges that stay. Compared with everything received (GST included: money sits on account until
-  // the whole price, GST included, is in).
-  const kept = new Set(keepKeys);
-  const keptAddOns = addOns.filter((a) => a.canKeep && kept.has(`${a.kind}:${a.id}`));
+  // parking and extra charges it will have. Compared with everything received (GST included: money sits on account
+  // until the whole price, GST included, is in).
+  const unitPriceNew = target && rate > 0 && Number(target.AreaSqFt) > 0 ? unitPrice(Number(target.AreaSqFt), rate) : null;
+  const live = items.filter((x) => x.change !== "dropped");
   const quote = unitPriceNew == null ? null : await require("../services/crmPriceQuote").quoteSale(pool, {
     unitIds: [target.Id], ratePerSqFt: rate, paymentPlanId: planId, customerId: source.CustomerId,
-    parkingBases: keptAddOns.filter((a) => a.kind === "Parking").map((a) => a.base),
-    extraAmounts: keptAddOns.filter((a) => a.kind === "ExtraCharge").map((a) => a.base),
+    parkingBases: live.filter((x) => x.kind === "Parking").map((x) => x.base),
+    extraAmounts: live.filter((x) => x.kind === "ExtraCharge").map((x) => x.base),
   });
   // The new booking takes its Booking Amount from the plan (createCrmBookingRecord), which can't exceed the price.
   if (planId && unitPriceNew != null) {
@@ -588,40 +635,93 @@ async function unitChangeContext(pool, bookingId, targetUnitId, { typedRate = nu
     if (plan?.BookingAmount == null) blockers.push(`Payment plan "${plan?.PlanName || planId}" has no booking amount: set it in Payment Plan Master first.`);
     else if (Number(plan.BookingAmount) > unitPriceNew + 0.009) blockers.push(`The booking amount of plan "${plan.PlanName}" (₹${Number(plan.BookingAmount).toLocaleString("en-IN")}) is more than the new unit's price: choose another plan or rate.`);
   }
+  // What travels with the sale to the new booking (crmEntityCreation.copyBuyerDetails and the brokerage move).
+  const travels = (await pool.request().input("id", sql.Int, bookingId).query(`
+    SELECT
+      (SELECT COUNT(*) FROM dbo.CrmCoApplicant WHERE BookingId = @id AND ISNULL(IsActive, 1) = 1) AS CoApplicants,
+      (SELECT STRING_AGG(Name, ', ') FROM dbo.CrmCoApplicant WHERE BookingId = @id AND ISNULL(IsActive, 1) = 1) AS CoApplicantNames,
+      (SELECT COUNT(*) FROM dbo.CrmBookingDocument WHERE BookingId = @id) AS Documents,
+      (SELECT COUNT(*) FROM dbo.CrmCustomerBankDetail WHERE BookingId = @id) AS BankDetails,
+      (SELECT TOP 1 BankName FROM dbo.CrmLoanDetail WHERE BookingId = @id ORDER BY Id DESC) AS LoanBank,
+      (SELECT TOP 1 BrokerName FROM dbo.CrmBrokerageMaster WHERE BookingId = @id AND Status <> '${CrmStatus.VOIDED}' ORDER BY Id) AS BrokerName,
+      ISNULL((SELECT SUM(ComputedAmount) FROM dbo.CrmBrokerageMaster WHERE BookingId = @id AND Status <> '${CrmStatus.VOIDED}'), 0) AS BrokerageTotal,
+      ISNULL((SELECT SUM(ComputedAmount) FROM dbo.CrmBrokerageMaster WHERE BookingId = @id AND Status = '${CrmStatus.PAID}'), 0) AS BrokeragePaid`)).recordset[0];
   // The old booking's live invoices: each is credited in full on approval (crmGstNotes.creditForUnitChange).
   const invoices = (await require("../services/crmGstNotes").unitChangeInvoices(pool, bookingId))
     .map((i) => ({ invoiceNo: i.InvoiceNo, invoiceDate: i.InvoiceDate, type: i.InvoiceType, amount: i.Open, deadline: i.deadline, timeBarred: i.barred }));
-  return { source, target, rate, plans, planId, planError, isCrossProject, isCrossCompany, addOns, money, unitPriceNew, quote, invoices, blockers };
+  return { source, target, rate, plans, planId, planError, isCrossProject, isCrossCompany, items, oldParking, oldCharges, money, unitPriceNew, quote, invoices, travels, blockers };
 }
 
-// The add-on choices sent with a request: one per parking slot and extra charge, keep only where it can be kept.
-function readAddOnChoices(ctx, sent) {
-  const byKey = new Map((Array.isArray(sent) ? sent : []).map((x) => [`${x.kind}:${x.id}`, x]));
-  return ctx.addOns.map((a) => {
-    const c = byKey.get(`${a.kind}:${a.id}`);
-    if (!c || typeof c.keep !== "boolean") throw Object.assign(new Error(`Choose whether ${a.label} stays the same or is changed`), { status: 400 });
-    if (c.keep && !a.canKeep) throw Object.assign(new Error(`${a.label} is in the old project: it can't stay with a unit in another project`), { status: 400 });
-    return { kind: a.kind, id: a.id, label: a.label, amount: a.amount, keep: c.keep };
-  });
-}
+// GET /:id/unit-change-units?projectId= — the units free to move to in a project (this booking's own by default): each
+// with the rate it would take (crmEntityCreation.unitChangeRate) and its unit value before GST (bookingUnits.unitPrice),
+// and the booking's own unit value to compare against. Land is left out (plots move through the plot transfer).
+router.get("/:id/unit-change-units", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid booking id" });
+    const bk = (await pool.request().input("id", sql.Int, id).query(
+      "SELECT UnitId, ProjectId, RatePerSqFt, TotalValue FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1")).recordset[0];
+    if (!bk) return res.status(404).json({ error: "Booking not found" });
+    const projectId = req.query.projectId ? parseId(req.query.projectId) : bk.ProjectId;
+    if (!projectAllowed(req.projectScope, projectId)) return res.status(403).json({ error: "You don't have access to this project" });
+    const landKinds = [...(await require("../services/projectType").loadLandKinds(pool))];
+    const rows = (await pool.request().input("pid", sql.Int, projectId).input("own", sql.Int, bk.UnitId ?? 0).query(`
+      SELECT u.Id, u.UnitName, u.UnitType, u.UnitKind, u.FloorNo, u.AreaSqFt, u.RatePerSqFt, blk.BlockName
+      FROM dbo.UnitMaster u LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
+      WHERE u.ProjectId = @pid AND u.IsActive = 1 AND u.Id <> @own AND u.AreaSqFt > 0 AND ${unitFreeSql("u")}
+      ORDER BY blk.BlockName, u.FloorNo, u.UnitName`)).recordset
+      .filter((u) => !landKinds.includes(String(u.UnitKind || "").toUpperCase()));
+    const { unitChangeRate } = require("../services/crmEntityCreation");
+    res.json({
+      projectId, currentUnitValue: bk.TotalValue,
+      units: rows.map((u) => {
+        const rate = unitChangeRate({ unitRate: u.RatePerSqFt, bookingRate: bk.RatePerSqFt });
+        return { id: u.Id, unitNo: u.UnitName, blockName: u.BlockName, unitType: u.UnitType, floorNo: u.FloorNo, areaSqFt: u.AreaSqFt,
+          ratePerSqFt: rate, ownRate: u.RatePerSqFt != null && Number(u.RatePerSqFt) > 0,
+          unitValue: rate > 0 ? unitPrice(Number(u.AreaSqFt), rate) : null };
+      }),
+    });
+  } catch (e) {
+    console.error("[crm-bookings] unit-change-units error:", e.message);
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Could not load the units" });
+  }
+});
 
-// GET /:id/unit-change-options?unitId=&rate=&planId= — the preview: price, plan, add-ons, money, and what stops it.
+// GET /:id/unit-change-options?unitId= — the preview on the Change Unit card: the new unit at its rate, the parking and
+// extra charges the application will start with, the money, and what stops it. open: a request already open on the
+// booking (a Draft one is continued in its application).
 router.get("/:id/unit-change-options", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid booking id" });
     const unitId = req.query.unitId ? parseId(req.query.unitId) : null;
-    const keepKeys = String(req.query.keep || "").split(",").map((x) => x.trim()).filter(Boolean);
-    const ctx = await unitChangeContext(pool, id, unitId, { typedRate: req.query.rate || null, paymentPlanId: req.query.planId || null, keepKeys });
+    const ctx = await unitChangeContext(pool, id, unitId, {});
+    const open = await require("../services/crmEntityCreation").openUnitChangeOn(pool, id);
+    const openRow = open ? (await pool.request().input("rid", sql.Int, open.Id)
+      .query("SELECT Id, RequestNo, Status, TargetApplicationId, SourceBookingId FROM dbo.CrmPropertyChangeRequest WHERE Id = @rid")).recordset[0] : null;
     if (ctx.target && !projectAllowed(req.projectScope, ctx.target.ProjectId)) return res.status(403).json({ error: "You don't have access to the new unit's project" });
     res.json({
-      blockers: ctx.blockers, plans: ctx.plans, planId: ctx.planId, planError: ctx.planError, addOns: ctx.addOns, money: ctx.money, invoices: ctx.invoices,
-      current: { bookingNo: ctx.source.BookingNo, unitNo: ctx.source.UnitNo, projectName: ctx.source.ProjectName,
-        ratePerSqFt: ctx.source.RatePerSqFt, totalValue: ctx.source.TotalValue, grandTotal: ctx.source.GrandTotal,
-        parkingTotal: ctx.source.ParkingTotal, extraChargesTotal: ctx.source.ExtraChargesTotal },
-      next: ctx.target ? { unitId: ctx.target.Id, unitNo: ctx.target.UnitName, blockName: ctx.target.BlockName, projectId: ctx.target.ProjectId,
+      blockers: ctx.blockers, plans: ctx.plans, planId: ctx.planId, planError: ctx.planError, items: ctx.items, money: ctx.money, invoices: ctx.invoices,
+      open: openRow && Number(openRow.SourceBookingId) === id
+        ? { id: openRow.Id, requestNo: openRow.RequestNo, status: openRow.Status, applicationId: openRow.TargetApplicationId } : null,
+      current: { bookingNo: ctx.source.BookingNo, customerName: ctx.source.ApplicantName, mobile: ctx.source.Mobile,
+        unitNo: ctx.source.UnitNo, blockName: ctx.source.BlockName, unitType: ctx.source.UnitType, projectName: ctx.source.ProjectName,
+        areaSqFt: ctx.source.AreaSqFt, carpetAreaSqFt: ctx.source.CarpetAreaSqFt, ratePerSqFt: ctx.source.RatePerSqFt,
+        totalValue: ctx.source.TotalValue, parkingTotal: ctx.source.ParkingTotal, extraChargesTotal: ctx.source.ExtraChargesTotal,
+        gstAmount: ctx.source.TotalGstAmount, grandTotal: ctx.source.GrandTotal, bookingAmount: ctx.source.BookingAmount,
+        bookingDate: ctx.source.BookingDate, planName: ctx.source.PlanName, status: ctx.source.Status, stage: ctx.source.WorkflowStage,
+        agreementStatus: ctx.source.AgreementStatus, deedStatus: ctx.source.DeedStatus,
+        due: Math.max(0, round2(Number(ctx.source.GrandTotal || 0) - Number(ctx.money.Received || 0))) },
+      travels: ctx.travels,
+      next: ctx.target ? { unitId: ctx.target.Id, unitNo: ctx.target.UnitName, blockName: ctx.target.BlockName, blockId: ctx.target.BlockId, projectId: ctx.target.ProjectId,
         projectName: ctx.target.ProjectName, areaSqFt: ctx.target.AreaSqFt, unitRate: ctx.target.RatePerSqFt, ratePerSqFt: ctx.rate,
+        unitType: ctx.target.UnitType, floorNo: ctx.target.FloorNo, carpetAreaSqFt: ctx.target.CarpetAreaSqFt,
+        planName: ctx.plans.find((x) => Number(x.Id) === Number(ctx.planId))?.PlanName ?? null,
+        planBookingAmount: ctx.plans.find((x) => Number(x.Id) === Number(ctx.planId))?.BookingAmount ?? null,
+        parkingTotal: ctx.quote?.parkingTotal ?? 0, extraChargesTotal: ctx.quote?.extraChargesTotal ?? 0, gstRate: ctx.quote?.gstRate ?? null,
+        schedule: ctx.quote?.schedule ?? [],
         unitPrice: ctx.unitPriceNew, gstAmount: ctx.quote?.totalGstAmount ?? null, grandTotal: ctx.quote?.grandTotal ?? null,
         balance: ctx.quote ? round2(ctx.quote.grandTotal - ctx.money.Received) : null,
         isCrossProject: ctx.isCrossProject, isCrossCompany: ctx.isCrossCompany } : null,
@@ -633,11 +733,27 @@ router.get("/:id/unit-change-options", requirePageRight("crm-bookings", "view"),
   }
 });
 
-// POST /:id/unit-change — raise a request. The new application (same buyer) is created as a draft and the new unit is
-// held for it; nothing else changes until the request is approved.
+// The figures a request keeps as they stood when it was started / sent for approval, from unitChangeContext.
+const unitChangeSnapshotInputs = (r, ctx) => {
+  const m = ctx.money;
+  return r.input("addons", sql.NVarChar(sql.MAX), JSON.stringify(ctx.items.map(({ kind, label, amount, change }) => ({ kind, label, amount, change }))))
+    .input("rate", rateSqlType(), ctx.rate).input("plan", sql.Int, ctx.planId)
+    .input("srcTotal", sql.Decimal(18, 2), ctx.source.GrandTotal ?? null)
+    .input("estimate", sql.Decimal(18, 2), ctx.quote?.grandTotal ?? null)
+    .input("cleared", sql.Decimal(18, 2), m.Settled).input("available", sql.Decimal(18, 2), m.OnAccount)
+    .input("pendingFinance", sql.Decimal(18, 2), m.WithFinance).input("pendingCrm", sql.Decimal(18, 2), m.NotSentToFinance)
+    .input("due", sql.Decimal(18, 2), Math.max(0, round2(Number(ctx.source.GrandTotal || 0) - m.Received)));
+};
+
+// POST /:id/unit-change { TargetUnitId, Reason } — start a unit change. The request opens as a Draft and the buyer's
+// application for the new unit is made (a draft, the new unit held for it), filled from the booking: the same buyer,
+// broker and lead source, the new unit's rate and plan, the booking's parking slots in the new unit's project (held,
+// at the price they were sold at) and its extra charges. The application is finished in the application wizard
+// (rate, plan, parking, charges, like any sale); submitting it sends the request for approval. Nothing else changes
+// until then.
 router.post("/:id/unit-change", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const pool = getPool();
-  let requestId = null, createdApp = null;
+  let requestId = null, createdApp = null, targetUnitName = null;
   try {
     const id = parseId(req.params.id);
     const b = req.body || {};
@@ -647,12 +763,11 @@ router.post("/:id/unit-change", requirePageRight("crm-bookings", "edit"), async 
     if (!reason) return res.status(400).json({ error: "Enter the reason for the unit change" });
     if (reason.length > 1000) return res.status(400).json({ error: "The reason can be up to 1,000 characters" });
     if (await assertNotFrozen(pool, id, res)) return;
-    const keepKeys = (Array.isArray(b.AddOns) ? b.AddOns : []).filter((x) => x?.keep === true).map((x) => `${x.kind}:${x.id}`);
-    const ctx = await unitChangeContext(pool, id, targetUnitId, { typedRate: b.RatePerSqFt ?? null, paymentPlanId: b.PaymentPlanId || null, keepKeys });
-    if (!projectAllowed(req.projectScope, ctx.target.ProjectId)) return res.status(403).json({ error: "You don't have access to the new unit's project" });
+    let ctx = await unitChangeContext(pool, id, targetUnitId, {});
+    if (!projectAllowed(req.projectScope, ctx.source.ProjectId) || !projectAllowed(req.projectScope, ctx.target.ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to the source or destination project" });
+    }
     if (ctx.blockers.length) return res.status(409).json({ error: ctx.blockers[0], blockers: ctx.blockers });
-    if (!ctx.planId) return res.status(409).json({ error: `Choose the payment plan for the new unit${ctx.planError ? `: ${ctx.planError}` : ""}`, plans: ctx.plans });
-    const addOns = readAddOnChoices(ctx, b.AddOns);
     const requestNo = await getNextDocNumber(pool, "UCR", "UCR");
 
     const tx = pool.transaction();
@@ -661,19 +776,18 @@ router.post("/:id/unit-change", requirePageRight("crm-bookings", "edit"), async 
       await tx.request().input("id", sql.Int, id).query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id");
       const open = await require("../services/crmEntityCreation").openUnitChangeOn(tx, id);
       if (open) throw Object.assign(new Error(`Unit change ${open.RequestNo} is already open on this booking.`), { status: 409 });
-      const m = ctx.money;
-      requestId = (await tx.request()
+      // Refresh every preflight value while holding the source-booking lock. The request snapshot and the
+      // application created below must describe the state that actually passed the final availability checks.
+      ctx = await unitChangeContext(tx, id, targetUnitId, {});
+      if (ctx.blockers.length) throw Object.assign(new Error(ctx.blockers[0]), { status: 409, blockers: ctx.blockers });
+      if (!projectAllowed(req.projectScope, ctx.source.ProjectId) || !projectAllowed(req.projectScope, ctx.target.ProjectId)) {
+        throw Object.assign(new Error("You don't have access to the source or destination project"), { status: 403 });
+      }
+      requestId = (await unitChangeSnapshotInputs(tx.request(), ctx)
         .input("no", sql.NVarChar(30), requestNo)
         .input("sb", sql.Int, id).input("sa", sql.Int, ctx.source.ApplicationId).input("su", sql.Int, ctx.source.UnitId)
         .input("tu", sql.Int, ctx.target.Id).input("sp", sql.Int, ctx.source.ProjectId).input("tp", sql.Int, ctx.target.ProjectId)
         .input("sc", sql.Int, ctx.source.CompanyId).input("tc", sql.Int, ctx.target.CompanyId)
-        .input("rate", rateSqlType(), ctx.rate).input("plan", sql.Int, ctx.planId)
-        .input("addons", sql.NVarChar(sql.MAX), JSON.stringify(addOns))
-        .input("srcTotal", sql.Decimal(18, 2), ctx.source.GrandTotal ?? null)
-        .input("estimate", sql.Decimal(18, 2), ctx.quote?.grandTotal ?? null)
-        .input("cleared", sql.Decimal(18, 2), m.Settled).input("available", sql.Decimal(18, 2), m.OnAccount)
-        .input("pendingFinance", sql.Decimal(18, 2), m.WithFinance).input("pendingCrm", sql.Decimal(18, 2), m.NotSentToFinance)
-        .input("due", sql.Decimal(18, 2), Math.max(0, round2(Number(ctx.source.GrandTotal || 0) - m.Received)))
         .input("reason", sql.NVarChar(1000), reason).input("actor", sql.Int, actorId(req))
         .query(`INSERT INTO dbo.CrmPropertyChangeRequest
           (RequestNo, SourceBookingId, SourceApplicationId, SourceUnitId, TargetUnitId, SourceProjectId, TargetProjectId, SourceCompanyId, TargetCompanyId,
@@ -681,42 +795,93 @@ router.post("/:id/unit-change", requirePageRight("crm-bookings", "edit"), async 
            HeldCreditAtRequest, PendingFinanceAtRequest, PendingCrmReceiptAtRequest, ContractualDueAtRequest, Reason, Status, CreatedBy, CreatedAt)
           OUTPUT INSERTED.Id
           VALUES (@no, @sb, @sa, @su, @tu, @sp, @tp, @sc, @tc, @rate, @plan, @addons, @srcTotal, @estimate, @cleared, @available,
-                  0, @pendingFinance, @pendingCrm, @due, @reason, N'${UnitChangeStatus.PENDING}', @actor, SYSDATETIME())`)).recordset[0].Id;
+                  0, @pendingFinance, @pendingCrm, @due, @reason, N'${UnitChangeStatus.DRAFT}', @actor, SYSDATETIME())`)).recordset[0].Id;
+      // Keep the request and every dependent application row in one transaction. A process exit cannot leave an
+      // open Draft request with no application or an application/hold orphaned from its request.
+      const s = ctx.source, t = ctx.target;
+      targetUnitName = t.UnitName;
+      createdApp = await createCrmApplicationRecord(tx, {
+        CustomerId: s.CustomerId, ApplicantName: s.ApplicantName, Mobile: s.Mobile, AltMobile: s.AltMobile, Email: s.Email,
+        ProjectId: t.ProjectId, CompanyId: t.CompanyId, PreferredUnitId: t.Id, InterestedProject: t.ProjectName, InterestedUnit: t.UnitName,
+        PropertyType: s.PropertyType, BhkPreference: s.BhkPreference,
+        Source: require("../services/crmEntityCreation").SOURCE_TYPES.includes(s.Source) ? s.Source : "Other",
+        PlatformId: s.PlatformId, CampaignId: s.CampaignId, AdId: s.AdId, ChannelPartnerId: s.ChannelPartnerId,
+        BrokerId: s.BrokerId, BrokerageRatePercent: s.BrokerageRatePercent, BrokeragePaymentPlan: s.BrokeragePaymentPlan,
+        RatePerSqFt: ctx.rate, PaymentPlanId: ctx.planId, AssignedTo: s.AssignedTo, ReferredByApplicationId: s.ApplicationId,
+        Notes: [`Unit change ${requestNo} from booking ${s.BookingNo}`, reason].join("\n\n"),
+      }, actorId(req));
+      await tx.request().input("rid", sql.Int, requestId).input("aid", sql.Int, createdApp.id)
+        .query("UPDATE dbo.CrmPropertyChangeRequest SET TargetApplicationId = @aid, UpdatedAt = SYSDATETIME() WHERE Id = @rid");
+      await placeHoldIfNeeded(tx, { entityType: "Unit", entityId: t.Id, applicationId: createdApp.id, reason: `Unit change ${requestNo}`, userId: actorId(req) });
+      // The booking's parking slots in the new unit's project: held for the application at the price they were sold at
+      // (they move to the new booking on approval). Its extra charges: added to the application at the same amount.
+      for (const p of ctx.oldParking) {
+        if (!p.ParkingSlotId || Number(p.SlotProjectId) !== Number(t.ProjectId)) continue;
+        const hold = await placeHoldIfNeeded(tx, { entityType: "Parking", entityId: p.ParkingSlotId, applicationId: createdApp.id, reason: `Unit change ${requestNo}`, userId: actorId(req) });
+        if (hold?.id && p.RateSnapshot != null) {
+          await tx.request().input("hid", sql.Int, hold.id).input("r", sql.Decimal(18, 2), p.RateSnapshot)
+            .query("UPDATE dbo.CrmInventoryHold SET RateOverride = @r WHERE Id = @hid");
+        }
+      }
+      // The buyer's co-applicants, KYC documents and bank details: on the application, to check in the wizard.
+      await require("../services/crmEntityCreation").copyBuyerDetails(tx, { fromBookingId: id, toApplicationId: createdApp.id });
+      for (const c of ctx.oldCharges) {
+        await require("./crmExtraCharges").applyAddExtraChargeToApplication(tx, createdApp.id, {
+          ExtraChargeMasterId: c.ExtraChargeMasterId, Description: c.Description, Amount: c.Amount,
+        }, actorId(req));
+      }
       await tx.commit();
     } catch (e) { try { await tx.rollback(); } catch { /* already rolled back */ } throw e; }
-
-    // The buyer's application for the new unit (a draft until approval) and the hold on the new unit.
-    const s = ctx.source, t = ctx.target;
-    createdApp = await createCrmApplicationRecord(pool, {
-      CustomerId: s.CustomerId, ApplicantName: s.ApplicantName, Mobile: s.Mobile, AltMobile: s.AltMobile, Email: s.Email,
-      ProjectId: t.ProjectId, CompanyId: t.CompanyId, PreferredUnitId: t.Id, InterestedProject: t.ProjectName, InterestedUnit: t.UnitName,
-      PropertyType: s.PropertyType, BhkPreference: s.BhkPreference,
-      Source: require("../services/crmEntityCreation").SOURCE_TYPES.includes(s.Source) ? s.Source : "Other",
-      PlatformId: s.PlatformId, CampaignId: s.CampaignId, AdId: s.AdId, ChannelPartnerId: s.ChannelPartnerId,
-      BrokerId: s.BrokerId, BrokerageRatePercent: s.BrokerageRatePercent, BrokeragePaymentPlan: s.BrokeragePaymentPlan,
-      RatePerSqFt: ctx.rate, PaymentPlanId: ctx.planId, AssignedTo: s.AssignedTo, ReferredByApplicationId: s.ApplicationId,
-      Notes: [`Unit change ${requestNo} from booking ${s.BookingNo}`, reason].join("\n\n"),
-    }, actorId(req));
-    await placeHoldIfNeeded(pool, { entityType: "Unit", entityId: t.Id, applicationId: createdApp.id, reason: `Unit change ${requestNo}`, userId: actorId(req) });
-    await pool.request().input("rid", sql.Int, requestId).input("aid", sql.Int, createdApp.id)
-      .query("UPDATE dbo.CrmPropertyChangeRequest SET TargetApplicationId = @aid, UpdatedAt = SYSDATETIME() WHERE Id = @rid");
     await bumpCacheVersion("crm-bookings").catch(() => {});
-    await notifyUnitChange(pool, requestId, "raised");
-    res.status(201).json({ success: true, id: requestId, requestNo, message: `Unit change ${requestNo} sent for approval. ${t.UnitName} is held for it.` });
+    await bumpCacheVersion("unit-master").catch(() => {});
+    try { getIo().emit("matrix:update", {}); } catch { /* realtime refresh is best-effort */ }
+    res.status(201).json({ success: true, id: requestId, requestNo, applicationId: createdApp.id,
+      message: `Unit change ${requestNo} started. ${targetUnitName} is held for it: finish the application and submit it for approval.` });
   } catch (e) {
-    // Raising stopped part-way: undo what was made, so the booking is as it was.
-    if (createdApp?.id) {
-      await require("../services/crmHoldService").releaseAllHoldsForApplication(pool, createdApp.id, actorId(req)).catch(() => {});
-      await advanceApplicationStatus(pool, createdApp.id, CrmStatus.CANCELLED, "Manual", "Unit change request could not be raised", actorId(req), { force: true }).catch(() => {});
-    }
-    if (requestId) {
-      await pool.request().input("rid", sql.Int, requestId).input("n", sql.NVarChar(1000), `Could not be raised: ${String(e.message || "").slice(0, 900)}`)
-        .query(`UPDATE dbo.CrmPropertyChangeRequest SET Status = N'${UnitChangeStatus.WITHDRAWN}', Note = @n, UpdatedAt = SYSDATETIME() WHERE Id = @rid`).catch(() => {});
-    }
-    console.error("[crm-bookings] unit-change raise error:", e.message);
-    res.status(e.status || 500).json({ error: e.status ? e.message : "Could not raise the unit change" });
+    console.error("[crm-bookings] unit-change start error:", e.message);
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Could not start the unit change" });
   }
 });
+
+// Submitting a unit change's application (crmApplications.js PUT /:id/submit) sends the request for its approval
+// instead of making a booking: the figures are taken again from the application as filled in (unit, rate, plan,
+// parking, extra charges). Returns null when the application belongs to no draft unit change. Throws with a status
+// for what stops it.
+async function submitUnitChangeApplication(pool, applicationId, req) {
+  const row = (await pool.request().input("aid", sql.Int, applicationId).query(`
+    SELECT TOP 1 r.Id, r.RequestNo, r.Status, r.SourceBookingId, sa.CustomerId AS SourceCustomerId, sa.ApplicantName,
+           a.CustomerId, a.PreferredUnitId, a.RatePerSqFt, a.PaymentPlanId
+    FROM dbo.CrmPropertyChangeRequest r JOIN dbo.CrmApplication sa ON sa.Id = r.SourceApplicationId
+    JOIN dbo.CrmApplication a ON a.Id = r.TargetApplicationId
+    WHERE r.TargetApplicationId = @aid AND r.Status NOT IN ${PROPERTY_CHANGE_CLOSED_SQL}
+    ORDER BY r.Id DESC`)).recordset[0];
+  if (!row) return null;
+  const fail = (status, message, extra = {}) => Object.assign(new Error(message), { status, ...extra });
+  // Already sent: it is the approvers' now (and never becomes a booking through the application).
+  if (row.Status !== UnitChangeStatus.DRAFT) throw fail(409, `Unit change ${row.RequestNo} is already sent (${row.Status}): it opens the new booking when it is approved.`);
+  if (Number(row.CustomerId) !== Number(row.SourceCustomerId)) {
+    throw fail(409, `A unit change keeps the same buyer (${row.ApplicantName}): put them back on the application. A new buyer is an Ownership Change.`);
+  }
+  if (!row.PreferredUnitId) throw fail(409, "Pick the new unit on the application.");
+  const ctx = await unitChangeContext(pool, row.SourceBookingId, row.PreferredUnitId, {
+    typedRate: row.RatePerSqFt, paymentPlanId: row.PaymentPlanId, applicationId, requestId: row.Id });
+  if (!projectAllowed(req.projectScope, ctx.target.ProjectId)) throw fail(403, "You don't have access to the new unit's project");
+  if (ctx.blockers.length) throw fail(409, ctx.blockers[0], { blockers: ctx.blockers });
+  if (!ctx.planId) throw fail(409, `Choose the payment plan for the new unit${ctx.planError ? `: ${ctx.planError}` : ""}`);
+  const upd = await unitChangeSnapshotInputs(pool.request(), ctx)
+    .input("rid", sql.Int, row.Id).input("tu", sql.Int, ctx.target.Id).input("tp", sql.Int, ctx.target.ProjectId)
+    .input("tc", sql.Int, ctx.target.CompanyId).input("u", sql.Int, actorId(req))
+    .query(`UPDATE dbo.CrmPropertyChangeRequest SET TargetUnitId = @tu, TargetProjectId = @tp, TargetCompanyId = @tc,
+              RatePerSqFt = @rate, PaymentPlanId = @plan, AddOnsJson = @addons, SourceGrandTotalAtRequest = @srcTotal,
+              TargetEstimateAtRequest = @estimate, ClearedAtRequest = @cleared, AvailableCreditAtRequest = @available,
+              PendingFinanceAtRequest = @pendingFinance, PendingCrmReceiptAtRequest = @pendingCrm, ContractualDueAtRequest = @due,
+              Status = N'${UnitChangeStatus.PENDING}', UpdatedBy = @u, UpdatedAt = SYSDATETIME()
+            WHERE Id = @rid AND Status = N'${UnitChangeStatus.DRAFT}'`);
+  if (!upd.rowsAffected[0]) throw fail(409, `Unit change ${row.RequestNo} is no longer a draft.`);
+  await bumpCacheVersion("crm-bookings").catch(() => {});
+  await notifyUnitChange(pool, row.Id, "raised");
+  return { id: row.Id, requestNo: row.RequestNo, message: `Unit change ${row.RequestNo} sent for approval.` };
+}
 
 // The request columns every screen reads, with names for its bookings, units and projects.
 const UNIT_CHANGE_SELECT = `
@@ -841,7 +1006,7 @@ router.get("/unit-changes/:rid", requirePageRight("crm-bookings", "view"), async
     const creditNotes = (await getPool().request().input("b", sql.Int, row.SourceBookingId ?? 0).query(`
       SELECT Id, DocNo, Status, AgainstRef, TotalAmount, GstAmount, DocDate, DeadlineDate FROM dbo.CrmGstNote
       WHERE BookingId = @b AND Source = N'UnitChange' AND Status <> N'Cancelled' ORDER BY Id`)).recordset;
-    const pendingInvoices = row.Status === UnitChangeStatus.PENDING && row.SourceBookingId
+    const pendingInvoices = [UnitChangeStatus.DRAFT, UnitChangeStatus.PENDING].includes(row.Status) && row.SourceBookingId
       ? (await require("../services/crmGstNotes").unitChangeInvoices(getPool(), row.SourceBookingId)).map((i) => ({ invoiceNo: i.InvoiceNo, amount: i.Open, timeBarred: i.barred, deadline: i.deadline }))
       : [];
     res.json({ ...row, creditNotes, pendingInvoices, canApprove: await require("../services/approvalService").isApproverFor(UNIT_CHANGE_MODULE, req.user?.userId ?? req.user?.id, req.user?.role) });
@@ -913,8 +1078,8 @@ router.put("/unit-changes/:rid/withdraw", requirePageRight("crm-bookings", "edit
     const pool = getPool();
     const upd = await pool.request().input("rid", sql.Int, row.Id).input("n", sql.NVarChar(1000), reason).input("u", sql.Int, actorId(req))
       .query(`UPDATE dbo.CrmPropertyChangeRequest SET Status = N'${UnitChangeStatus.WITHDRAWN}', Note = @n, UpdatedBy = @u, UpdatedAt = SYSDATETIME()
-              WHERE Id = @rid AND (Status = N'${UnitChangeStatus.PENDING}' OR (Status = N'${UnitChangeStatus.FAILED}' AND TargetBookingId IS NULL))`);
-    if (!upd.rowsAffected[0]) return res.status(409).json({ error: `This unit change is ${row.Status}: only one waiting for approval, or stopped before its new booking opened, can be withdrawn` });
+              WHERE Id = @rid AND (Status IN (N'${UnitChangeStatus.DRAFT}', N'${UnitChangeStatus.PENDING}') OR (Status = N'${UnitChangeStatus.FAILED}' AND TargetBookingId IS NULL))`);
+    if (!upd.rowsAffected[0]) return res.status(409).json({ error: `This unit change is ${row.Status}: only a draft, one waiting for approval, or one stopped before its new booking opened can be withdrawn` });
     // In its approval history, so the trail doesn't still read "waiting for an approver".
     await require("../services/approvalService").writeAuditLog("CrmPropertyChangeRequest", row.Id, 0, req.user?.role, userEmailOf(req), "Withdrawn", reason.slice(0, 500), null, actorId(req));
     await dropUnitChangeDraft(pool, row, actorId(req), `Unit change ${row.RequestNo} withdrawn`);
@@ -3482,3 +3647,4 @@ module.exports.softDeleteBooking = softDeleteBooking;
 module.exports.isBookingFullyApproved = isBookingFullyApproved;
 module.exports.finalInvoiceDescription = finalInvoiceDescription;
 module.exports.generateMilestoneInvoiceForBooking = generateMilestoneInvoiceForBooking;
+module.exports.submitUnitChangeApplication = submitUnitChangeApplication;
