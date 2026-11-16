@@ -15,7 +15,7 @@ export function MRForm({ m }: { m: MRState }) {
     <div className="space-y-5">
       {woSource && !editingId && (
         <div className="border-l-2 border-foreground pl-3 py-1 text-xs text-foreground/80">
-          Raised from Work Order <strong>{woSource.docNo}</strong>. The items below are the work order's materials — change, add or remove anything, then save.
+          Raised from {woSource.kind === "boq" ? "BOQ" : "Work Order"} <strong>{woSource.docNo}</strong>. The items below are the {woSource.kind === "boq" ? "BOQ's" : "work order's"} materials — change, add or remove anything, then save.
         </div>
       )}
       {/* Header card */}

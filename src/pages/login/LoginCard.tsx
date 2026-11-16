@@ -1,9 +1,9 @@
-// The sign-in side: logo and name, "Welcome back", email and password, then the supplier and customer portals and
+// The sign-in side: logo and name, "Welcome back", email and password, then the supplier, employee and customer portals and
 // the Android app. The nesting (p-6 > text-center > logo first) is what the black-and-white theme's CSS hooks into
 // to keep the logo in colour. Each part hops in after the one before (./motion); a wrong password shakes the form.
 import React, { useEffect, useState } from "react";
 import { AnimatePresence, motion, useAnimationControls } from "framer-motion";
-import { AlertCircle, Building2, Eye, EyeOff, Truck } from "lucide-react";
+import { AlertCircle, Building2, Eye, EyeOff, Truck, UserRound } from "lucide-react";
 import { BOUNCE, cascade, hop, pop } from "./motion";
 
 export interface LoginCardProps {
@@ -156,6 +156,9 @@ export function LoginCard(p: LoginCardProps) {
           <div className="mt-[min(1.25rem,2.2vh)] space-y-3">
             <motion.button type="button" onClick={() => p.onNavigate("/supplier-login")} className="ls-outline" title="Vendor & order portal" variants={hop} {...press}>
               <Truck size={17} style={{ color: "var(--brand)" }} /> Supplier Portal
+            </motion.button>
+            <motion.button type="button" onClick={() => p.onNavigate("/employee-login")} className="ls-outline" title="Salary, payslips, attendance & leave" variants={hop} {...press}>
+              <UserRound size={17} style={{ color: "var(--brand)" }} /> Employee Portal
             </motion.button>
             <motion.button type="button" onClick={() => p.onNavigate("/crm-client-portal/login")} className="ls-outline" title="Booking & owner portal" variants={hop} {...press}>
               <Building2 size={17} style={{ color: "var(--brand)" }} /> Customer Portal

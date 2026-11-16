@@ -11,7 +11,8 @@ import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { fetchAllPages } from "@/lib/fetchAllPages";
 import { usePageRights } from "@/hooks/usePageRights";
-import { WorkOrderListItem, fmt, ensureArray, getStatusConfig } from "./config";
+import { WorkOrderListItem, fmt, ensureArray } from "./config";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 
 const dateOf = (s?: string | null) => (s ? new Date(s).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "");
 
@@ -282,7 +283,6 @@ export const WorkOrdersList: React.FC<{
                   {!collapsed && (
           <div className="divide-y divide-foreground/10">
             {group.rows.map((wo) => {
-              const statusCfg = getStatusConfig(wo.Status);
               const dateStr = wo.DocumentDate
                 ? new Date(wo.DocumentDate).toLocaleDateString("en-IN", {
                     day: "2-digit",
@@ -414,12 +414,7 @@ export const WorkOrdersList: React.FC<{
                       {fmt(wo.TotalAmount || 0)}
                     </div>
                     <div>
-                      <span
-                        className={`flex items-center gap-1 px-2 py-1 text-xs font-semibold border w-fit ${statusCfg.cls}`}
-                      >
-                        {statusCfg.icon}
-                        {wo.Status || "Draft"}
-                      </span>
+                      <SheetMark text={wo.Status || "Draft"} tone={statusTone(wo.Status || "Draft")} />
                     </div>
                     <div className="flex items-center gap-1.5">
                       <button data-row-view

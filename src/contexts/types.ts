@@ -6,6 +6,7 @@ export type UserRole =
   | "engineer"
   | "customer"
   | "supplier"
+  | "employee portal"
   | "marketing_head"
   | "sales_team_lead"
   | "sales_person"

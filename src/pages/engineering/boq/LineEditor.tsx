@@ -66,6 +66,24 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   onActivitySelected,
 }) => {
   const isItem = mode === "item";
+  // Column widths (px), in header order. Tax % is wide enough for a rate like 12.5 plus the input's spinner.
+  const colWidths: number[] = [
+    44,
+    ...(!isItem ? [190] : []),
+    220,
+    ...(isItem ? [190] : []),
+    100,
+    160,
+    ...(isItem ? [96, 92] : []),
+    isItem ? 140 : 110,
+    108,
+    120,
+    104, // Tax %
+    124,
+    ...(!isItem ? [148] : []),
+    120,
+    ...(!readOnly ? [48] : []),
+  ];
 
   // The group an activity row is under: the one picked, else the one the saved
   // activity belongs to (BOQs made before groups were recorded).
@@ -215,28 +233,17 @@ export const LineEditor: React.FC<LineEditorProps> = ({
         <table
           style={{
             width: "100%",
+            // Never narrower than its columns: on smaller screens it scrolls sideways instead of
+            // squeezing columns (Tax % used to shrink until its rate no longer showed).
+            minWidth: colWidths.reduce((t, w) => t + w, 0),
+            tableLayout: "fixed",
             borderCollapse: "collapse",
             fontSize: 12.5,
           }}
         >
           <colgroup>
             {/* Room to read and type in every column; the table scrolls sideways where it doesn't fit. */}
-            <col style={{ width: 44 }} />
-            {!isItem && <col style={{ width: 190 }} />}
-            <col style={{ width: 220 }} />
-            {isItem && <col style={{ width: 190 }} />}
-            <col style={{ width: 100 }} />
-            <col style={{ width: 160 }} />
-            {isItem && <col style={{ width: 96 }} />}
-            {isItem && <col style={{ width: 92 }} />}
-            <col style={{ width: isItem ? 140 : 110 }} />
-            <col style={{ width: 108 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 84 }} />
-            <col style={{ width: 124 }} />
-            {!isItem && <col style={{ width: 148 }} />}
-            <col style={{ width: 120 }} />
-            {!readOnly && <col style={{ width: 48 }} />}
+            {colWidths.map((w, i) => <col key={i} style={{ width: w }} />)}
           </colgroup>
 
           <thead>

@@ -30,6 +30,7 @@ import { getDesignations } from "@/api/designationMasterApi";
 import { Wallet3 } from "iconsax-react";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { PortalLoginField } from "./PortalLoginField";
 
 const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Contract", "Consultant", "Intern"];
 const GENDERS = ["Male", "Female", "Other"];
@@ -514,6 +515,9 @@ export default function EmployeeMaster() {
     { name: "nomineeName", label: "Nominee Name", type: "text" },
     { name: "nomineeRelationship", label: "Nominee Relationship", type: "text" },
     { name: "nomineeContact", label: "Nominee Contact", type: "text" },
+
+    { name: "sec-portal", label: "Portal Login", type: "section" },
+    { name: "portalLogin", label: "Employee Portal login", type: "custom", fullWidth: true, render: (p) => <PortalLoginField employeeId={p.formData._id ? Number(p.formData._id) : null} /> },
 
     { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
   ];

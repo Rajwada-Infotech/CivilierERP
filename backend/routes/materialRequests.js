@@ -530,9 +530,9 @@ async function attachWorkOrderTerms(pool, mrId, items) {
 
   const lines = (await pool.request().input("wo", sql.Int, mr.SourceWOId).query(`
     SELECT CONVERT(NVARCHAR(100), m.ItemId) AS ItemId, uom.UOMCode,
-           SUM(ISNULL(m.Quantity, 0)) AS Qty,
-           SUM(ISNULL(m.Quantity, 0) * ISNULL(m.Rate, 0)) AS Value,
-           SUM(ISNULL(m.Quantity, 0) * ISNULL(m.GSTRate, 0)) AS GstWeighted,
+           SUM(ISNULL(m.Quantity, 0) * ISNULL(a.Area, 0)) AS Qty,
+           SUM(ISNULL(m.Quantity, 0) * ISNULL(a.Area, 0) * ISNULL(m.Rate, 0)) AS Value,
+           SUM(ISNULL(m.Quantity, 0) * ISNULL(a.Area, 0) * ISNULL(m.GSTRate, 0)) AS GstWeighted,
            MIN(m.SupplierIdPerLine) AS MinSupplier, MAX(m.SupplierIdPerLine) AS MaxSupplier,
            SUM(CASE WHEN m.SupplierIdPerLine IS NULL THEN 1 ELSE 0 END) AS NoSupplier,
            MAX(sup.LHeadName) AS SupplierName
@@ -911,6 +911,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       Remarks,
       DocTypeId: clientDocTypeId,
       SourceWOId: clientSourceWOId,
+      SourceBoqId: clientSourceBoqId,
       items = [],
     } = req.body;
 
@@ -927,6 +928,14 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid SourceWOId" });
       sourceWO = await loadWorkOrderForMR(req, res, pool, woId);
       if (!sourceWO) return;
+    }
+    // Raised from an approved BOQ — checked the same way.
+    let sourceBoq = null;
+    if (!sourceWO && clientSourceBoqId != null && clientSourceBoqId !== "") {
+      const boqId = parseInt(clientSourceBoqId, 10);
+      if (!Number.isFinite(boqId)) return res.status(400).json({ error: "Invalid SourceBoqId" });
+      sourceBoq = await loadBoqForMR(req, res, pool, boqId);
+      if (!sourceBoq) return;
     }
 
     if (RequiredByDate) {
@@ -989,13 +998,15 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
         .input("DocNo", sql.NVarChar(50), lockedDocNo || null)
         .input("SourceWOId", sql.Int, sourceWO ? sourceWO.Id : null)
         .input("SourceWODocNo", sql.NVarChar(100), sourceWO ? sourceWO.woNo : null)
+        .input("SourceBoqId", sql.Int, sourceBoq ? sourceBoq.BoqID : null)
+        .input("SourceBoqDocNo", sql.NVarChar(100), sourceBoq ? sourceBoq.boqNo : null)
         .input("CreatedBy", sql.NVarChar(200), user).query(`
           INSERT INTO dbo.MaterialRequests
             (CompanyId, ProjectId, FinYearId, RequestDate, RequiredByDate,
-             Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy${sourceWO ? ", SourceWOId, SourceWODocNo" : ""})
+             Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy${sourceWO ? ", SourceWOId, SourceWODocNo" : ""}${sourceBoq ? ", SourceBoqId, SourceBoqDocNo" : ""})
           OUTPUT INSERTED.MRId
           VALUES (@CompanyId, @ProjectId, @FinYearId, @RequestDate, @RequiredByDate,
-                  @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy${sourceWO ? ", @SourceWOId, @SourceWODocNo" : ""})
+                  @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy${sourceWO ? ", @SourceWOId, @SourceWODocNo" : ""}${sourceBoq ? ", @SourceBoqId, @SourceBoqDocNo" : ""})
         `);
 
       newId = insertHdr.recordset[0].MRId;
@@ -1125,14 +1136,15 @@ router.get("/from-work-order/:woId/prefill", authenticateToken, requirePageRight
     if (!wo) return;
 
     const mats = (await pool.request().input("id", sql.Int, woId).query(`
-      SELECT m.ItemId, MAX(img.M_Name) AS ItemName, uom.UOMCode, SUM(ISNULL(m.Quantity, 0)) AS Quantity
+      -- m.Quantity is the consumption ratio per unit of the activity; the item quantity is ratio × activity area.
+      SELECT m.ItemId, MAX(img.M_Name) AS ItemName, uom.UOMCode, SUM(ISNULL(m.Quantity, 0) * ISNULL(a.Area, 0)) AS Quantity
       FROM dbo.WorkOrderActivityMaterials m
       JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
       LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = m.ItemId
       LEFT JOIN dbo.UOMMaster uom ON uom.Id = m.UOMId
       WHERE a.WorkOrderHeaderId = @id AND m.ItemId IS NOT NULL
       GROUP BY m.ItemId, uom.UOMCode
-      HAVING SUM(ISNULL(m.Quantity, 0)) > 0
+      HAVING SUM(ISNULL(m.Quantity, 0) * ISNULL(a.Area, 0)) > 0
       ORDER BY MAX(img.M_Name), m.ItemId
     `)).recordset;
     if (!mats.length) {
@@ -1150,7 +1162,91 @@ router.get("/from-work-order/:woId/prefill", authenticateToken, requirePageRight
         ItemId: String(m.ItemId),
         ItemName: m.ItemName || null,
         UOMCode: m.UOMCode || null,
-        Quantity: parseFloat(m.Quantity) || 0,
+        Quantity: Math.round((parseFloat(m.Quantity) || 0) * 10000) / 10000,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Material Request raised from an approved BOQ ──────────────────────────────
+// Same as the Work Order route above: GET /from-boq/:boqId/prefill fills the normal form with the BOQ's items
+// (quantity incl. wastage, summed per item + unit); POST / stores SourceBoqId / SourceBoqDocNo.
+// One live MR per BOQ.
+const hasSourceBoq = makeColumnProbe("dbo.MaterialRequests", "SourceBoqId");
+
+async function loadBoqForMR(req, res, pool, boqId) {
+  if (!(await hasSourceBoq(pool))) {
+    res.status(503).json({ error: "Material Requests from BOQs need migration 673 — ask an administrator to run the database migrations." });
+    return null;
+  }
+  const boq = (await pool.request().input("id", sql.Int, boqId).query(`
+    SELECT BoqID, DocNo, BoqNo, Status, CompanyId, ProjectId FROM dbo.BOQ WHERE BoqID = @id
+  `)).recordset[0];
+  if (!boq) {
+    res.status(404).json({ error: "BOQ not found" });
+    return null;
+  }
+  if (!assertProjectAllowed(req, res, boq.ProjectId)) return null;
+  if (boq.Status !== "Approved") {
+    res.status(400).json({ error: "A Material Request can only be raised from an approved BOQ." });
+    return null;
+  }
+  const existing = (await pool.request().input("id", sql.Int, boqId).query(`
+    SELECT TOP 1 MRId, DocNo, Status FROM dbo.MaterialRequests
+    WHERE SourceBoqId = @id AND Status NOT IN ('Rejected', 'Cancelled')
+    ORDER BY MRId DESC
+  `)).recordset[0];
+  if (existing) {
+    res.status(409).json({
+      error: `Material Request ${existing.DocNo || "#" + existing.MRId} already exists for this BOQ.`,
+      mrId: existing.MRId,
+      docNo: existing.DocNo,
+      status: existing.Status,
+    });
+    return null;
+  }
+  return { ...boq, boqNo: boq.DocNo || boq.BoqNo || `BOQ-${boqId}` };
+}
+
+router.get("/from-boq/:boqId/prefill", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
+  const boqId = parseInt(req.params.boqId, 10);
+  if (!Number.isFinite(boqId)) return res.status(400).json({ error: "Invalid BOQ id" });
+  try {
+    const pool = getPool();
+    await ensureTablesExist(pool);
+    const boq = await loadBoqForMR(req, res, pool, boqId);
+    if (!boq) return;
+
+    const items = (await pool.request().input("id", sql.Int, boqId).query(`
+      SELECT bi.ItemId, MAX(COALESCE(img.M_Name, bi.ItemName)) AS ItemName, COALESCE(u.UOMCode, un.UOMCode) AS UOMCode,
+             SUM(ISNULL(bi.Quantity, 0) * (1 + ISNULL(bi.WastagePct, 0) / 100.0)) AS Quantity
+      FROM dbo.BoqItems bi
+      LEFT JOIN dbo.Item_Master_Group img ON CONVERT(NVARCHAR(100), img.M_Id) = bi.ItemId
+      LEFT JOIN dbo.UOMMaster u ON u.Id = bi.UomId
+      LEFT JOIN dbo.UOMMaster un ON bi.UomId IS NULL AND un.UOMName = bi.UomName
+      WHERE bi.BoqID = @id AND bi.ItemId IS NOT NULL AND bi.ItemId <> ''
+      GROUP BY bi.ItemId, COALESCE(u.UOMCode, un.UOMCode)
+      HAVING SUM(ISNULL(bi.Quantity, 0)) > 0
+      ORDER BY MAX(COALESCE(img.M_Name, bi.ItemName)), bi.ItemId
+    `)).recordset;
+    if (!items.length) {
+      return res.status(400).json({ error: "This BOQ has no material items to request." });
+    }
+
+    res.json({
+      BoqId: boqId,
+      BoqDocNo: boq.boqNo,
+      CompanyId: boq.CompanyId || null,
+      ProjectId: boq.ProjectId || null,
+      Reason: `Materials for BOQ ${boq.boqNo}`,
+      Remarks: `Raised from approved BOQ ${boq.boqNo}`,
+      items: items.map((m) => ({
+        ItemId: String(m.ItemId),
+        ItemName: m.ItemName || null,
+        UOMCode: m.UOMCode || null,
+        Quantity: Math.round((parseFloat(m.Quantity) || 0) * 10000) / 10000,
       })),
     });
   } catch (err) {

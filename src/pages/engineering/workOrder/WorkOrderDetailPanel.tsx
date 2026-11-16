@@ -10,7 +10,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { getDocumentChain } from "@/api/materialChainApi";
 import { printWorkOrder } from "./printWorkOrder";
-import { useWOChainStatus, Activity, WorkOrderDetail, WorkOrderActivityDetail, fmt, getStatusConfig } from "./config";
+import { useWOChainStatus, Activity, WorkOrderDetail, WorkOrderActivityDetail, fmt } from "./config";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 
 // ─── VIEW: Work Order Detail Panel ────────────────────────────────────────────
 
@@ -195,8 +196,6 @@ export const WorkOrderDetailPanel: React.FC<{
     );
   }
 
-  const statusCfg = getStatusConfig(detail.Status);
-
   // Group activities by ActivityGroupName
   const grouped: Record<string, WorkOrderActivityDetail[]> = {};
   (detail.activities || []).forEach((act) => {
@@ -330,12 +329,7 @@ export const WorkOrderDetailPanel: React.FC<{
             </h2>
           </div>
           <div className="flex items-center gap-2">
-            <span
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border ${statusCfg.cls}`}
-            >
-              {statusCfg.icon}
-              {detail.Status || "Draft"}
-            </span>
+            <SheetMark text={detail.Status || "Draft"} tone={statusTone(detail.Status || "Draft")} />
             <span className="font-heading text-xs text-muted-foreground bg-card px-2 py-1">
               {detail.DocumentNumber}
             </span>

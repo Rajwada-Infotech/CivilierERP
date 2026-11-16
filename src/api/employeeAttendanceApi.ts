@@ -39,6 +39,11 @@ export interface AttendanceRecord {
   status: AttendanceStatus;
   flags: AttendanceFlag[];
   hrEdited: boolean;
+  /** Device location and live photo captured at an Employee Portal punch (null for other punches). */
+  inLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
+  outLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
+  hasInPhoto?: boolean;
+  hasOutPhoto?: boolean;
   live: { sessionSeconds: number; breakSeconds: number; netSeconds: number } | null;
 }
 
@@ -140,6 +145,9 @@ export const getNotMarked = async (f: HrFilters & { date: string }) => parse<Not
 export const getHrRecord = async (id: number) =>
   parse<{ record: AttendanceRecord; audit: AuditEntry[] }>(await fetchWithAuth(`${BASE}/hr/records/${id}`), "Failed to load the record");
 
+export const getHrPunchPhoto = async (id: number, which: "in" | "out") =>
+  parse<{ photo: string | null }>(await fetchWithAuth(`${BASE}/hr/records/${id}/photo/${which}`), "Failed to load the photo");
+
 type Corrected = { record: AttendanceRecord; audit: AuditEntry[] };
 export const hrUpdateRecord = async (id: number, body: { inTime?: string; outTime?: string | null; reason: string }) =>
   parse<Corrected>(await post(`/hr/records/${id}`, body, "PUT"), "Could not save the correction");
@@ -147,5 +155,7 @@ export const hrAddBreak = async (id: number, body: { start: string; end?: string
   parse<Corrected>(await post(`/hr/records/${id}/breaks`, body), "Could not add the break");
 export const hrUpdateBreak = async (breakId: number, body: { start?: string; end?: string | null; reason: string }) =>
   parse<Corrected>(await post(`/hr/breaks/${breakId}`, body, "PUT"), "Could not save the break");
+export const hrDeleteRecord = async (id: number, reason: string) =>
+  parse<{ message: string }>(await post(`/hr/records/${id}`, { reason }, "DELETE"), "Could not delete the record");
 export const hrDeleteBreak = async (breakId: number, reason: string) =>
   parse<Corrected>(await post(`/hr/breaks/${breakId}`, { reason }, "DELETE"), "Could not delete the break");

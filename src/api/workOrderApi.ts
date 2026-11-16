@@ -432,6 +432,28 @@ export const getMaterialRequestPrefillFromWO = async (id: number): Promise<WorkO
   return body as WorkOrderMRPrefill;
 };
 
+/** Everything the Material Request form needs to be pre-filled from an approved BOQ. */
+export interface BoqMRPrefill {
+  BoqId: number;
+  BoqDocNo: string;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  Reason: string;
+  Remarks: string;
+  items: { ItemId: string; ItemName: string | null; UOMCode: string | null; Quantity: number }[];
+}
+
+/** The BOQ's items (quantity incl. wastage, summed per item + unit) shaped for the Material Request form. Creates nothing. */
+export const getMaterialRequestPrefillFromBoq = async (id: number): Promise<BoqMRPrefill> => {
+  const res = await fetchWithAuth(`/api/material-requests/from-boq/${id}/prefill`);
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 409 && body.mrId) {
+    throw new MaterialRequestExistsError(body.error || "A Material Request already exists", body.mrId, body.docNo ?? null);
+  }
+  if (!res.ok) throw new Error(body.error || `Failed to load the BOQ materials: ${res.status}`);
+  return body as BoqMRPrefill;
+};
+
 export const confirmWorkOrder = async (
   id: number,
   finYear?: string | null,
