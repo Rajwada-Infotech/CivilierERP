@@ -11,11 +11,14 @@ const { multiMrReady, poTaggedToMr, getPoMrIds } = require("../services/poMrLink
 
 // dbo.MaterialRequests.SourceWOId arrives with migration 545; until then there is simply no Work Order link.
 const hasMRSourceWO = makeColumnProbe("dbo.MaterialRequests", "SourceWOId");
+// dbo.MaterialRequests.SourceBoqId arrives with migration 673 (Material Request raised from an approved BOQ).
+const hasMRSourceBoq = makeColumnProbe("dbo.MaterialRequests", "SourceBoqId");
 
 // The project the starting document of a chain belongs to, so a restricted user
 // can't walk the chain of a document from a project they can't see.
 const ROOT_PROJECT_SQL = {
   wo: "SELECT ProjectId FROM dbo.WorkOrderHeader WHERE Id = @id",
+  boq: "SELECT ProjectId FROM dbo.BOQ WHERE BoqID = @id",
   qt: "SELECT ProjectId FROM dbo.Quotations WHERE QuotationId = @id",
   mr: "SELECT ProjectId FROM dbo.MaterialRequests WHERE MRId = @id",
   po: "SELECT ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id",
@@ -35,10 +38,12 @@ const ROOT_PROJECT_SQL = {
 
 async function getMR(pool, id) {
   const withWO = await hasMRSourceWO(pool);
+  const withBoq = await hasMRSourceBoq(pool);
   const r = await pool.request().input("id", sql.Int, id).query(`
     SELECT mr.MRId AS id, mr.DocNo, mr.RequestDate, mr.Status, mr.CreatedBy,
            mr.ProjectId, pr.name AS ProjectName,
-           ${withWO ? "mr.SourceWOId, mr.SourceWODocNo" : "CAST(NULL AS INT) AS SourceWOId, CAST(NULL AS NVARCHAR(100)) AS SourceWODocNo"}
+           ${withWO ? "mr.SourceWOId, mr.SourceWODocNo" : "CAST(NULL AS INT) AS SourceWOId, CAST(NULL AS NVARCHAR(100)) AS SourceWODocNo"},
+           ${withBoq ? "mr.SourceBoqId" : "CAST(NULL AS INT) AS SourceBoqId"}
     FROM dbo.MaterialRequests mr
     LEFT JOIN dbo.enterprise pr ON pr.id = mr.ProjectId
     WHERE mr.MRId = @id
@@ -108,6 +113,40 @@ async function getMRsForWO(pool, woId) {
     ORDER BY mr.MRId
   `);
   return r.recordset;
+}
+
+async function getBOQ(pool, id) {
+  const r = await pool.request().input("id", sql.Int, id).query(`
+    SELECT BoqID AS id, DocNo, BoqNo, BoqDate AS DocDate, Status, ProjectId FROM dbo.BOQ WHERE BoqID = @id
+  `);
+  return r.recordset[0] || null;
+}
+
+async function getMRsForBOQ(pool, boqId) {
+  if (!(await hasMRSourceBoq(pool))) return [];
+  const r = await pool.request().input("boqId", sql.Int, boqId).query(`
+    SELECT mr.MRId AS id, mr.DocNo, mr.RequestDate, mr.Status, mr.CreatedBy,
+           mr.ProjectId, pr.name AS ProjectName, mr.SourceBoqId
+    FROM dbo.MaterialRequests mr
+    LEFT JOIN dbo.enterprise pr ON pr.id = mr.ProjectId
+    WHERE mr.SourceBoqId = @boqId
+    ORDER BY mr.MRId
+  `);
+  return r.recordset;
+}
+
+// The documents an MR was raised from (its Work Order or BOQ), as chain nodes.
+async function sourceNodesOfMR(pool, mr) {
+  const out = [];
+  if (mr.SourceWOId) {
+    const wo = await getWO(pool, mr.SourceWOId);
+    if (wo) out.push(woNode(wo));
+  }
+  if (mr.SourceBoqId) {
+    const boq = await getBOQ(pool, mr.SourceBoqId);
+    if (boq) out.push(boqNode(boq));
+  }
+  return out;
 }
 
 // POs created straight from a Work Order (the retired "Create Material PO" button / auto WO-PO) carry
@@ -281,6 +320,17 @@ function woNode(wo) {
     extra: {},
   };
 }
+function boqNode(boq) {
+  return {
+    docType: "boq",
+    id: boq.id,
+    docNo: boq.DocNo || boq.BoqNo,
+    date: boq.DocDate ? String(boq.DocDate).slice(0, 10) : null,
+    status: boq.Status,
+    label: "BOQ",
+    extra: {},
+  };
+}
 function qtNode(qt) {
   return {
     docType: "qt",
@@ -360,6 +410,10 @@ async function upstreamOfPO(pool, po) {
     const wo = await getWO(pool, woId);
     if (wo) out.push(woNode(wo));
   }
+  for (const boqId of [...new Set(mrs.map((m) => m.SourceBoqId).filter(Boolean))]) {
+    const boq = await getBOQ(pool, boqId);
+    if (boq) out.push(boqNode(boq));
+  }
   for (const mr of mrs) out.push(mrNode(mr));
   if (po.SourceQTId) {
     const qt = await getQT(pool, po.SourceQTId);
@@ -392,9 +446,13 @@ const uniqueById = (rows) => {
 
 // Everything downstream of a Work Order: its MRs, their quotations and POs, and on to each PO's invoices.
 async function downstreamOfWO(pool, woId) {
-  const mrs = await getMRsForWO(pool, woId);
+  return downstreamOfMRs(pool, await getMRsForWO(pool, woId), await getLegacyPOsForWO(pool, woId));
+}
+
+// Some MRs and everything after them (quotations, POs, then each PO's vehicles, GRNs and invoices).
+async function downstreamOfMRs(pool, mrs, extraPOs = []) {
   const qts = [];
-  const pos = [...(await getLegacyPOsForWO(pool, woId))];
+  const pos = [...extraPOs];
   for (const mr of mrs) {
     qts.push(...(await getQTsForMR(pool, mr.id)));
     pos.push(...(await getPOsForMR(pool, mr.id)));
@@ -420,7 +478,12 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
     let upstream = [];
     let downstream = [];
 
-    if (type === "wo") {
+    if (type === "boq") {
+      const boq = await getBOQ(pool, id);
+      if (!boq) return res.status(404).json({ error: "BOQ not found" });
+      current = boqNode(boq);
+      downstream = await downstreamOfMRs(pool, await getMRsForBOQ(pool, id));
+    } else if (type === "wo") {
       const wo = await getWO(pool, id);
       if (!wo) return res.status(404).json({ error: "Work Order not found" });
       current = woNode(wo);
@@ -429,10 +492,7 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
       const mr = await getMR(pool, id);
       if (!mr) return res.status(404).json({ error: "Material Request not found" });
       current = mrNode(mr);
-      if (mr.SourceWOId) {
-        const wo = await getWO(pool, mr.SourceWOId);
-        if (wo) upstream.push(woNode(wo));
-      }
+      upstream.push(...(await sourceNodesOfMR(pool, mr)));
       const qts = await getQTsForMR(pool, id);
       const pos = uniqueById(await getPOsForMR(pool, id));
       downstream = [...qts.map(qtNode), ...pos.map(poNode), ...(await downstreamOfPOs(pool, pos))];
@@ -443,10 +503,7 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
       if (qt.SourceMRId) {
         const mr = await getMR(pool, qt.SourceMRId);
         if (mr) {
-          if (mr.SourceWOId) {
-            const wo = await getWO(pool, mr.SourceWOId);
-            if (wo) upstream.push(woNode(wo));
-          }
+          upstream.push(...(await sourceNodesOfMR(pool, mr)));
           upstream.push(mrNode(mr));
         }
       }
@@ -504,7 +561,7 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
         if (po) upstream = [...(await upstreamOfPO(pool, po)), poNode(po)];
       }
     } else {
-      return res.status(400).json({ error: "type must be one of wo, mr, qt, po, vio, grn, expense" });
+      return res.status(400).json({ error: "type must be one of boq, wo, mr, qt, po, vio, grn, expense" });
     }
 
     res.json({ current, upstream, downstream });

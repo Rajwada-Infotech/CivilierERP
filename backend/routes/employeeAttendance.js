@@ -42,7 +42,7 @@ router.post("/me/out", requirePageRight(SELF, "create"), async (req, res) => {
   try { res.json(await svc.clockOut(getPool(), req.user)); } catch (e) { fail(res, e, "POST /me/out"); }
 });
 router.post("/me/break-start", requirePageRight(SELF, "create"), async (req, res) => {
-  try { res.json(await svc.breakStart(getPool(), req.user)); } catch (e) { fail(res, e, "POST /me/break-start"); }
+  try { res.json(await svc.breakStart(getPool(), req.user, { type: req.body?.type, note: req.body?.note })); } catch (e) { fail(res, e, "POST /me/break-start"); }
 });
 router.post("/me/break-stop", requirePageRight(SELF, "create"), async (req, res) => {
   try { res.json(await svc.breakStop(getPool(), req.user)); } catch (e) { fail(res, e, "POST /me/break-stop"); }

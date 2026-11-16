@@ -43,26 +43,39 @@ function istDate(d) {
 /**
  * Derived figures for one attendance record + its breaks.
  *   totalSec = Out − In            (null until Out is recorded)
- *   breakSec = Σ completed breaks
+ *   breakSec = Σ completed breaks that come off working time (a "Meeting at other office" is work, so it doesn't)
  *   netSec   = totalSec − breakSec
+ *   extraSec = Σ time beyond each break's allowance (copied onto the break when it started; migration 673)
  * Plus live figures for a session still running, a status and review flags.
  */
 function compute(rec, breaks, now = new Date()) {
   const inT = new Date(rec.InTime);
   const outT = rec.OutTime ? new Date(rec.OutTime) : null;
   const sorted = [...breaks].sort((a, b) => new Date(a.BreakStart) - new Date(b.BreakStart));
-  const list = sorted.map((b, i) => ({
-    breakId: b.BreakId,
-    no: i + 1,
-    start: toIso(b.BreakStart),
-    end: toIso(b.BreakEnd),
-    seconds: b.BreakEnd ? secs(b.BreakStart, b.BreakEnd) : null,
-    open: !b.BreakEnd,
-    hrEdited: !!b.IsHrEdited,
-  }));
-  const openBreak = list.find((b) => b.open) || null;
-  const breakSec = list.reduce((s, b) => s + (b.seconds || 0), 0);
   const stale = !outT && now - inT > STALE_HOURS * 3_600_000;
+  const list = sorted.map((b, i) => {
+    const allowedSeconds = b.AllowedMinutes != null ? Number(b.AllowedMinutes) * 60 : null;
+    const seconds = b.BreakEnd ? secs(b.BreakStart, b.BreakEnd) : null;
+    const running = !b.BreakEnd && !outT && !stale ? secs(b.BreakStart, now) : 0; // a break still going on, up to now
+    return {
+      breakId: b.BreakId,
+      no: i + 1,
+      start: toIso(b.BreakStart),
+      end: toIso(b.BreakEnd),
+      seconds,
+      open: !b.BreakEnd,
+      hrEdited: !!b.IsHrEdited,
+      type: b.BreakType ?? "Break",
+      note: b.BreakNote ?? null,
+      deduct: b.DeductFromWork == null ? true : !!b.DeductFromWork,
+      allowedSeconds,
+      overSeconds: allowedSeconds != null ? Math.max(0, (seconds ?? running) - allowedSeconds) : 0,
+    };
+  });
+  const openBreak = list.find((b) => b.open) || null;
+  const breakSec = list.reduce((s, b) => s + (b.deduct ? b.seconds || 0 : 0), 0);
+  const officialSec = list.reduce((s, b) => s + (!b.deduct ? b.seconds || 0 : 0), 0);
+  const extraSec = list.reduce((s, b) => s + b.overSeconds, 0);
 
   const flags = [];
   if (!outT && stale) flags.push("MISSING_OUT");
@@ -78,7 +91,7 @@ function compute(rec, breaks, now = new Date()) {
 
   // Live figures for a running session (shown ticking on the employee's screen).
   const sessionSoFar = !outT ? secs(inT, now) : null;
-  const liveBreakSec = breakSec + (openBreak && !outT ? secs(openBreak.start, now) : 0);
+  const liveBreakSec = breakSec + (openBreak && openBreak.deduct && !outT ? secs(openBreak.start, now) : 0);
 
   return {
     attendanceId: rec.AttendanceId,
@@ -96,6 +109,8 @@ function compute(rec, breaks, now = new Date()) {
     breakCount: list.length,
     breaks: list,
     breakSeconds: breakSec,
+    officialSeconds: officialSec,
+    extraSeconds: extraSec,
     totalSeconds: totalSec,
     netSeconds: netSec,
     status,
@@ -140,7 +155,7 @@ async function loadBreaks(pool, attendanceIds) {
   if (!attendanceIds.length) return map;
   // Ids are integers we just read from the DB; inlined to avoid a 2,100-parameter limit.
   const r = await pool.request().query(`
-    SELECT BreakId, AttendanceId, BreakStart, BreakEnd, IsHrEdited
+    SELECT BreakId, AttendanceId, BreakStart, BreakEnd, IsHrEdited, BreakType, BreakNote, AllowedMinutes, DeductFromWork
     FROM dbo.EmployeeAttendanceBreak WHERE AttendanceId IN (${attendanceIds.map((i) => Number(i)).join(",")})
   `);
   for (const b of r.recordset) {
@@ -385,21 +400,35 @@ async function clockOut(pool, user, { evidence, requireEvidence } = {}) {
   return getMyState(pool, user);
 }
 
-async function breakStart(pool, user) {
+/** The break reasons an employee can pick (migration 673), with their rules. */
+async function getBreakTypes(pool) {
+  const r = await pool.request().query("SELECT BreakType, DeductFromWork, AllowedMinutes, RequiresNote FROM dbo.AttendanceBreakType WHERE IsActive = 1 ORDER BY SortOrder");
+  return r.recordset.map((x) => ({ type: x.BreakType, deduct: !!x.DeductFromWork, allowedMinutes: x.AllowedMinutes, requiresNote: !!x.RequiresNote }));
+}
+
+async function breakStart(pool, user, { type, note } = {}) {
+  const types = await getBreakTypes(pool);
+  const rule = types.find((t) => t.type === (type || "Break"));
+  if (!rule) throw new AttendanceError("Choose a valid break reason.", 400);
+  const cleanNote = String(note ?? "").trim().slice(0, 300);
+  if (rule.requiresNote && cleanNote.length < 3) throw new AttendanceError("Please write the reason for this break.", 400);
   const employee = await resolveEmployee(pool, user);
   const state = await getMyState(pool, user);
   if (state.state === "NOT_STARTED") throw new AttendanceError("Record In Time before starting a break.");
   if (state.state === "COMPLETED") throw new AttendanceError("You have already clocked out for today.");
   if (state.state === "ON_BREAK") throw new AttendanceError("A break is already running — stop it before starting another.");
   try {
-    await pool.request().input("Id", sql.Int, state.current.attendanceId).query(`
-      INSERT INTO dbo.EmployeeAttendanceBreak (AttendanceId, BreakStart) VALUES (@Id, SYSUTCDATETIME())
+    await pool.request().input("Id", sql.Int, state.current.attendanceId)
+      .input("Type", sql.NVarChar(40), rule.type).input("Note", sql.NVarChar(300), cleanNote || null)
+      .input("Allowed", sql.Int, rule.allowedMinutes).input("Deduct", sql.Bit, rule.deduct ? 1 : 0).query(`
+      INSERT INTO dbo.EmployeeAttendanceBreak (AttendanceId, BreakStart, BreakType, BreakNote, AllowedMinutes, DeductFromWork)
+      VALUES (@Id, SYSUTCDATETIME(), @Type, @Note, @Allowed, @Deduct)
     `);
   } catch (e) {
     if (isUnique(e)) throw new AttendanceError("A break is already running — stop it before starting another.");
     throw e;
   }
-  await audit(pool, { attendanceId: state.current.attendanceId, employeeId: employee.EmployeeId, action: "BREAK_START", by: user.email });
+  await audit(pool, { attendanceId: state.current.attendanceId, employeeId: employee.EmployeeId, action: "BREAK_START", detail: `${rule.type}${cleanNote ? `: ${cleanNote}` : ""}`, by: user.email });
   return getMyState(pool, user);
 }
 
@@ -433,13 +462,15 @@ async function summary(pool, filters = {}, now = new Date()) {
       s = {
         employeeId: r.employeeId, employeeCode: r.employeeCode, employeeName: r.employeeName, companyName: r.companyName,
         department: r.department, days: 0, completeDays: 0, incompleteDays: 0, breakCount: 0,
-        breakSeconds: 0, totalSeconds: 0, netSeconds: 0,
+        breakSeconds: 0, officialSeconds: 0, extraSeconds: 0, totalSeconds: 0, netSeconds: 0,
       };
       byEmp.set(r.employeeId, s);
     }
     s.days++;
     s.breakCount += r.breakCount;
     s.breakSeconds += r.breakSeconds;
+    s.officialSeconds += r.officialSeconds || 0;
+    s.extraSeconds += r.extraSeconds || 0;
     if (r.status === "Present") {
       s.completeDays++;
       s.totalSeconds += r.totalSeconds || 0;
@@ -452,7 +483,7 @@ async function summary(pool, filters = {}, now = new Date()) {
     employees,
     totals: {
       employees: employees.length, days: sum("days"), completeDays: sum("completeDays"), incompleteDays: sum("incompleteDays"),
-      breakCount: sum("breakCount"), breakSeconds: sum("breakSeconds"), totalSeconds: sum("totalSeconds"), netSeconds: sum("netSeconds"),
+      breakCount: sum("breakCount"), breakSeconds: sum("breakSeconds"), officialSeconds: sum("officialSeconds"), extraSeconds: sum("extraSeconds"), totalSeconds: sum("totalSeconds"), netSeconds: sum("netSeconds"),
     },
   };
 }
@@ -646,7 +677,7 @@ async function hrDeleteRecord(pool, attendanceId, { reason }, actor) {
 module.exports = {
   hrDeleteRecord,
   AttendanceError, STALE_HOURS, compute, istDate,
-  getMyState, clockIn, clockOut, breakStart, breakStop, getPhoto, cleanEvidence,
+  getMyState, clockIn, clockOut, breakStart, breakStop, getPhoto, cleanEvidence, getBreakTypes,
   listRecords, getRecord, getAudit, summary, notMarked, hrFilterOptions,
   hrUpdateRecord, hrAddBreak, hrUpdateBreak, hrDeleteBreak,
 };

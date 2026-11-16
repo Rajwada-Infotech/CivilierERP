@@ -13,6 +13,12 @@ export interface AttendanceBreak {
   seconds: number | null;
   open: boolean;
   hrEdited: boolean;
+  /** Why the break was taken (Break / Meeting at other office / Other reason), its note, whether it comes off working time, the allowance and the time beyond it. */
+  type?: string;
+  note?: string | null;
+  deduct?: boolean;
+  allowedSeconds?: number | null;
+  overSeconds?: number;
 }
 
 export interface AttendanceRecord {
@@ -31,7 +37,11 @@ export interface AttendanceRecord {
   outTime: string | null;
   breakCount: number;
   breaks: AttendanceBreak[];
+  /** Break time that comes off working time (a Meeting at other office counts as work and is in officialSeconds). */
   breakSeconds: number;
+  officialSeconds?: number;
+  /** Time beyond the allowed minutes, summed over the day's breaks. */
+  extraSeconds?: number;
   /** Out − In; null until Out Time is recorded. */
   totalSeconds: number | null;
   /** Total − breaks; null until Out Time is recorded. */
@@ -96,13 +106,15 @@ export interface EmployeeSummary {
   incompleteDays: number;
   breakCount: number;
   breakSeconds: number;
+  officialSeconds?: number;
+  extraSeconds?: number;
   totalSeconds: number;
   netSeconds: number;
 }
 
 export interface AttendanceSummary {
   employees: EmployeeSummary[];
-  totals: { employees: number; days: number; completeDays: number; incompleteDays: number; breakCount: number; breakSeconds: number; totalSeconds: number; netSeconds: number };
+  totals: { employees: number; days: number; completeDays: number; incompleteDays: number; breakCount: number; breakSeconds: number; officialSeconds?: number; extraSeconds?: number; totalSeconds: number; netSeconds: number };
 }
 
 export interface NotMarkedEmployee {

@@ -1,6 +1,6 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-export type ChainDocType = "wo" | "mr" | "qt" | "po" | "vio" | "grn" | "expense";
+export type ChainDocType = "boq" | "wo" | "mr" | "qt" | "po" | "vio" | "grn" | "expense";
 
 export interface ChainNode {
   docType: ChainDocType;
@@ -32,6 +32,7 @@ export const getDocumentChain = async (
 
 // Each doc type's list page and the query param it watches for deep-linking.
 export const CHAIN_ROUTES: Record<ChainDocType, string> = {
+  boq: "/engineering/boq",
   wo: "/engineering/work-order",
   qt: "/material/quotation",
   mr: "/material/material-request",

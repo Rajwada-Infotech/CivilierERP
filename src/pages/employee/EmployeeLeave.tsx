@@ -37,7 +37,7 @@ export default function EmployeeLeave() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {(balances.data?.Balances ?? []).map((b) => (
-          <div key={b.LeaveType} className="border border-foreground/30 bg-card p-4">
+          <div key={b.LeaveType} className="ep-card p-4">
             <p className={labelCls}>{b.LeaveType}</p>
             {b.Entitled == null ? (
               <><p className="font-heading text-2xl font-bold mt-1 tabular-nums">{Number(b.Used)}</p><p className="text-xs text-muted-foreground">days taken · no limit</p></>

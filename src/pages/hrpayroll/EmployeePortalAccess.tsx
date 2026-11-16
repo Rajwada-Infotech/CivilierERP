@@ -13,7 +13,7 @@ import { KEY_INK, KEY_LINE, KEY_RED } from "@/components/sheet/sheetParts";
 import { SheetMark, type MarkTone } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  disablePortalAccess, enablePortalAccess, getEntitlements, getLeavePolicy, getPortalEmployees, resetPortalPassword,
+  disablePortalAccess, enablePortalAccess, getBreakRules, saveBreakRules, getEntitlements, getLeavePolicy, getPortalEmployees, resetPortalPassword,
   saveEntitlements, saveLeavePolicy, type PortalAccess, type PortalEmployee,
 } from "@/api/employeePortalApi";
 
@@ -139,12 +139,52 @@ function PolicyPanel({ canEdit }: { canEdit: boolean }) {
   );
 }
 
+// ── Break rules: allowed minutes per reason, and whether the time comes off working time ──
+function BreakRulesPanel({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["portal-break-rules"], queryFn: getBreakRules });
+  const [edits, setEdits] = useState<Record<string, { minutes?: string; deduct?: boolean }>>({});
+  const save = useMutation({
+    mutationFn: () => saveBreakRules((data ?? []).map((r) => {
+      const e = edits[r.BreakType] ?? {};
+      const raw = e.minutes ?? (r.AllowedMinutes == null ? "" : String(r.AllowedMinutes));
+      return { BreakType: r.BreakType, AllowedMinutes: raw === "" ? null : Number(raw), DeductFromWork: e.deduct ?? r.DeductFromWork, IsActive: r.IsActive };
+    })),
+    onSuccess: (r) => { toast.success(r.message); setEdits({}); qc.invalidateQueries({ queryKey: ["portal-break-rules"] }); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  if (isLoading) return <HrSkeleton />;
+  return (
+    <div className="bg-card p-4 max-w-2xl" style={{ border: HR_RULE }}>
+      <h3 className={`${HR_LBL} mb-3`}>Break reasons an employee can pick on the portal</h3>
+      <table className="w-full text-sm">
+        <thead><tr className={`${HR_LBL} text-left`} style={{ borderBottom: HR_RULE }}><th className="px-3 py-2">Reason</th><th className="px-3 py-2">Allowed minutes</th><th className="px-3 py-2">Taken off working time</th></tr></thead>
+        <tbody className="divide-y divide-foreground/15">
+          {(data ?? []).map((r) => {
+            const e = edits[r.BreakType] ?? {};
+            return (
+              <tr key={r.BreakType}>
+                <td className="px-3 py-2">{r.BreakType}{r.RequiresNote && <span className="text-xs text-muted-foreground"> · note required</span>}</td>
+                <td className="px-3 py-2"><input type="number" min={0} max={1440} placeholder="No limit" disabled={!canEdit} className={`${HR_FIELD} !w-28`}
+                  value={e.minutes ?? (r.AllowedMinutes == null ? "" : String(r.AllowedMinutes))} onChange={(ev) => setEdits((s) => ({ ...s, [r.BreakType]: { ...s[r.BreakType], minutes: ev.target.value } }))} /></td>
+                <td className="px-3 py-2"><input type="checkbox" disabled={!canEdit} checked={e.deduct ?? r.DeductFromWork} onChange={(ev) => setEdits((s) => ({ ...s, [r.BreakType]: { ...s[r.BreakType], deduct: ev.target.checked } }))} aria-label={`${r.BreakType} is taken off working time`} /></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="text-xs text-muted-foreground mt-3">Time beyond the allowed minutes is "extra time": the employee gets a reminder when it starts and it shows on Team Attendance and Attendance Records. A reason that is not taken off working time (a meeting at another office) counts as work. A change applies to breaks started after you save; past days keep the rule they had.</p>
+      {canEdit && <button className={`${KEY_INK} h-9 px-4 mt-4`} disabled={save.isPending || !Object.keys(edits).length} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : "Save break rules"}</button>}
+    </div>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function EmployeePortalAccess() {
   const rights = usePageRights("employee-portal-access");
   const qc = useQueryClient();
   const { data, isLoading, isError } = useQuery({ queryKey: ["portal-employees"], queryFn: getPortalEmployees });
-  const [tab, setTab] = useState<"employees" | "policy">("employees");
+  const [tab, setTab] = useState<"employees" | "policy" | "breaks">("employees");
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<{ kind: "enable" | "reset" | "leave"; employee: PortalEmployee } | null>(null);
   const disable = useMutation({
@@ -171,12 +211,12 @@ export default function EmployeePortalAccess() {
         ]} />
 
         <div className="flex gap-2 my-4">
-          {([["employees", "Employees"], ["policy", "Leave policy"]] as const).map(([k, l]) => (
+          {([["employees", "Employees"], ["policy", "Leave policy"], ["breaks", "Break rules"]] as const).map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} className={`${tab === k ? KEY_INK : KEY_LINE} h-9 px-4`}>{l}</button>
           ))}
         </div>
 
-        {tab === "policy" ? <PolicyPanel canEdit={rights.canEdit} /> : isLoading ? <HrSkeleton rows={4} /> : isError ? <HrError text="Failed to load employees." /> : (
+        {tab === "breaks" ? <BreakRulesPanel canEdit={rights.canEdit} /> : tab === "policy" ? <PolicyPanel canEdit={rights.canEdit} /> : isLoading ? <HrSkeleton rows={4} /> : isError ? <HrError text="Failed to load employees." /> : (
           <div className="bg-card" style={{ border: HR_RULE }}>
             <div className="p-3" style={{ borderBottom: HR_RULE }}>
               <input className={`${HR_FIELD} max-w-xs`} placeholder="Search name, code, e-mail…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search employees" />
