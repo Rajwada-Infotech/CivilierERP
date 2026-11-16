@@ -75,16 +75,17 @@ export default function TimeTracker() {
           </div>
 
           {/* play / pause / stop */}
-          <div className="flex items-center justify-center gap-3 mt-3">
+          <div className="grid gap-2 mt-3">
             {data?.state === "ON_BREAK"
-              ? <button className="ep-round ep-gold" onClick={() => stop.mutate()} disabled={stop.isPending} title="End break" aria-label="End break"><Play size={18} /></button>
-              : <button className="ep-round ep-gold" onClick={() => setDialog("in")} disabled={!data?.allowed.in} title="Punch in" aria-label="Punch in"><Play size={18} /></button>}
-            <button className="ep-round ep-ink" onClick={() => setDialog("break")} disabled={!data?.allowed.breakStart || !types.data?.length} title="Take a break" aria-label="Take a break"><Pause size={18} /></button>
-            <button className="ep-round ep-ink" onClick={() => setDialog("out")} disabled={!data?.allowed.out} title="Punch out" aria-label="Punch out"><Square size={16} /></button>
+              ? <button className="ep-btn ep-btn-gold w-full" onClick={() => stop.mutate()} disabled={stop.isPending}><Play size={15} /> End break</button>
+              : <button className="ep-btn ep-btn-gold w-full" onClick={() => setDialog("in")} disabled={!data?.allowed.in}><Play size={15} /> Punch in</button>}
+            <div className="grid grid-cols-2 gap-2">
+              <button className="ep-btn ep-btn-ink" onClick={() => setDialog("break")} disabled={!data?.allowed.breakStart || !types.data?.length}><Pause size={15} /> Take a break</button>
+              <button className="ep-btn ep-btn-ink" onClick={() => setDialog("out")} disabled={!data?.allowed.out}><Square size={14} /> Punch out</button>
+            </div>
           </div>
-          <p className="text-center text-[0.6875rem] text-muted-foreground mt-1.5">
-            {data?.state === "ON_BREAK" ? "Play ends your break" : data?.allowed.in ? "Play to punch in" : data?.allowed.out ? "Pause for a break · Stop to punch out" : "Today's attendance is complete"}
-          </p>
+          {!data?.allowed.in && !data?.allowed.out && data?.state !== "ON_BREAK" && <p className="text-center text-[0.6875rem] text-muted-foreground mt-1.5">Today's attendance is complete</p>}
+          {!cur && <p className="text-center text-[0.6875rem] text-muted-foreground mt-1.5">Punch in first to start your day and take breaks</p>}
 
           {openBreak && (
             <div className={`mt-3 rounded-2xl p-3 text-sm flex items-center justify-between gap-2 ${over > 0 ? "bg-red-500/10 border border-red-500/50" : "bg-muted/50"}`} role="status">
