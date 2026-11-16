@@ -323,6 +323,7 @@ const EmployeeLeave = lazy(() => import("./pages/employee/EmployeeLeave"));
 const EmployeeHolidays = lazy(() => import("./pages/employee/EmployeeHolidays"));
 const EmployeeLoginHistory = lazy(() => import("./pages/employee/EmployeeLoginHistory"));
 const EmployeePortalAccess = lazy(() => import("./pages/hrpayroll/EmployeePortalAccess"));
+const DailyAttendanceCheck = lazy(() => import("./pages/hrpayroll/DailyAttendanceCheck"));
 const SupplierQuotationDetail = lazy(
   () => import("./pages/supplier/SupplierQuotationDetail"),
 );
@@ -1237,6 +1238,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="hr-attendance-management">
             <HrAttendanceManagement />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/daily-attendance"
+        element={
+          <ProtectedRoute pageKey="hr-attendance-management">
+            <DailyAttendanceCheck />
           </ProtectedRoute>
         }
       />
