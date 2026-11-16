@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlarmClock, Coffee, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 import { getPortalBreakTypes, portalBreakStart, portalBreakStop, type BreakType, type PunchBreak, type PunchState } from "@/api/employeePortalApi";
+import { BodyPortal } from "@/components/ui/body-portal";
 import { fieldCls, fmtTime, keyInk, keyLine, labelCls } from "./employeeUi";
 
 export const fmtDur = (sec: number | null | undefined) => {
@@ -36,8 +37,9 @@ function StartDialog({ types, onClose, onStarted }: { types: BreakType[]; onClos
   });
   const ok = !!rule && (!rule.requiresNote || note.trim().length >= 3);
   return (
+    <BodyPortal>
     <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-3" role="dialog" aria-modal="true" aria-label="Start a break">
-      <div className="w-full max-w-md bg-card border border-foreground">
+      <div className="w-full max-w-md max-h-[calc(100vh-1.5rem)] overflow-y-auto bg-card border border-foreground">
         <div className="px-4 py-2.5 border-b border-foreground/30"><h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">Start a break</h2></div>
         <div className="p-4 space-y-3">
           <div className="space-y-2" role="radiogroup" aria-label="Reason">
@@ -60,6 +62,7 @@ function StartDialog({ types, onClose, onStarted }: { types: BreakType[]; onClos
         </div>
       </div>
     </div>
+    </BodyPortal>
   );
 }
 

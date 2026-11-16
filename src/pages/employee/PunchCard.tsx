@@ -7,6 +7,7 @@ import { Camera, LogIn, LogOut, MapPin, X } from "lucide-react";
 import { toast } from "sonner";
 import { getPortalPunchState, portalPunch, type PunchLocation, type PunchState } from "@/api/employeePortalApi";
 import BreakPanel from "./BreakPanel";
+import { BodyPortal } from "@/components/ui/body-portal";
 import { Card, Mark, fmtTime, keyInk, keyLine, labelCls } from "./employeeUi";
 
 const MAX_WIDTH = 640;
@@ -98,8 +99,9 @@ function CaptureDialog({ kind, onClose, onDone }: { kind: "in" | "out"; onClose:
 
   const ready = camera === "ready" && !!position && !busy;
   return (
+    <BodyPortal>
     <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-3" role="dialog" aria-modal="true" aria-label={kind === "in" ? "Punch in" : "Punch out"}>
-      <div className="w-full max-w-md bg-card border border-foreground">
+      <div className="w-full max-w-md max-h-[calc(100vh-1.5rem)] overflow-y-auto bg-card border border-foreground">
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-foreground/30">
           <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{kind === "in" ? "Punch In" : "Punch Out"}</h2>
           <button onClick={() => { stop(); onClose(); }} aria-label="Close" className="p-1"><X size={16} /></button>
@@ -127,6 +129,7 @@ function CaptureDialog({ kind, onClose, onDone }: { kind: "in" | "out"; onClose:
         </div>
       </div>
     </div>
+    </BodyPortal>
   );
 }
 
