@@ -423,11 +423,8 @@ router.get("/timeline", async (req, res) => {
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT b.Id, b.BookingNo,
              COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
-             COALESCE(um.ProjectId,
-               (SELECT TOP 1 pm.ProjectId FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
-                WHERE bp.BookingId = b.Id AND bp.Status = N'Active' ORDER BY bp.IsPrimary DESC, bp.Id),
-               b.ProjectId) AS ProjectId,
-             b.UnitId, um.BlockId,
+             COALESCE(um.ProjectId, plot.ProjectId, b.ProjectId) AS ProjectId,
+             COALESCE(b.UnitId, plot.ConvertedUnitId) AS UnitId, COALESCE(um.BlockId, plot.BlockId) AS BlockId,
              COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
              b.TotalValue, b.BookingAmount,
              b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate,
@@ -435,7 +432,13 @@ router.get("/timeline", async (req, res) => {
              CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale
       FROM dbo.CrmBooking b
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      OUTER APPLY (
+        SELECT TOP 1 pm.ProjectId, pm.BlockId, pm.ConvertedUnitId
+        FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
+        WHERE bp.BookingId = b.Id AND bp.Status = N'Active'
+        ORDER BY bp.IsPrimary DESC, bp.Id
+      ) plot
+      LEFT JOIN dbo.UnitMaster um ON um.Id = COALESCE(b.UnitId, plot.ConvertedUnitId)
       WHERE b.ApplicationId = @aid AND b.IsActive = 1
     `);
     const bk = booking.recordset[0];

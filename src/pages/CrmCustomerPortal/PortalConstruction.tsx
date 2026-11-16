@@ -55,10 +55,10 @@ function DisputeDialog({ applicationId, onClose, onSubmitted }: { applicationId:
 const PortalConstruction: React.FC = () => {
   const { timeline, applicationId } = useOutletContext<Ctx>();
   const qc = useQueryClient();
-  // The buyer's own unit as the site records it, with its tower and project for context.
+  // Show only the exact unit attached to this booking.
   const mine = timeline.constructionProgress;
-  const live = mine ? (mine.unit || mine.tower || mine.project) : null;
-  const liveLabel = !mine ? "" : mine.unit ? "Your home" : mine.tower ? `Your tower (${mine.tower.blockName})` : "The project";
+  const live = mine?.scope === "unit" ? mine.unit : null;
+  const bookedUnit = timeline.booking?.UnitNo || "Your booked unit";
   const handover = timeline.handover;
   const notice = timeline.possessionNotice;
   const legalDoc = timeline.legalDocumentation;
@@ -99,16 +99,17 @@ const PortalConstruction: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="My Property" title="Construction Progress" subtitle="Live updates from the site, shared as they happen." />
+      <PageHeader eyebrow="My Property" title="Construction Progress" subtitle={`Updates for your booked unit: ${bookedUnit}.`} />
 
       {live && (
-        <Card className="p-5 space-y-4">
+        <Card className="p-5 sm:p-6 space-y-5">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <p className="text-xs" style={{ color: TEXT_FAINT }}>{liveLabel}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Progress for your unit</p>
+              <p className="mt-1 text-lg font-semibold" style={{ ...serif, color: TEXT }}>{bookedUnit}</p>
               <p className="text-sm mt-1" style={{ color: TEXT }}>
-                {live.allDone ? "All work complete" : live.now.length ? <>Now: {live.now.slice(0, 2).map((w: any) => `${w.name} ${w.pct}%`).join(" · ")}</> : "Work not started yet"}
-                {!live.allDone && live.next ? <span style={{ color: TEXT_MUTED }}> · Next: {live.next}</span> : null}
+                {live.allDone ? "Construction complete" : live.now.length ? <>Underway: {live.now.slice(0, 2).map((w: any) => `${w.name} ${w.pct}%`).join(" · ")}</> : "Construction not started yet"}
+                {!live.allDone && live.next ? <span style={{ color: TEXT_MUTED }}> · Coming next: {live.next}</span> : null}
               </p>
             </div>
             <span className="text-2xl font-semibold tabular-nums" style={{ ...serif, color: TEXT }}>{live.pct}%</span>
@@ -127,12 +128,10 @@ const PortalConstruction: React.FC = () => {
               </div>
             ))}
           </div>
-          <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
-            Live from the site's daily progress records.{mine.scope === "unit" && mine.tower ? ` Tower ${mine.tower.blockName}: ${mine.tower.pct}%.` : ""}{mine.scope !== "project" ? ` Whole project: ${mine.project.pct}%.` : ""}
-          </p>
+          <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>Showing progress recorded for {bookedUnit} only.</p>
           {mine.feed?.length > 0 && (
             <div className="pt-3 space-y-1.5" style={{ borderTop: `1px solid ${HAIRLINE}` }}>
-              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Recent work</p>
+              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Recent updates for your unit</p>
               {mine.feed.slice(0, 6).map((f: any, i: number) => (
                 <div key={i} className="flex items-start justify-between gap-3 text-xs">
                   <span style={{ color: TEXT }}>{f.activity}{f.room ? <span style={{ color: TEXT_MUTED }}> · {f.room}</span> : null} — {f.completed ? "completed" : f.from != null ? `${f.from}% → ${f.to}%` : `${f.to}%`}</span>
@@ -229,7 +228,7 @@ const PortalConstruction: React.FC = () => {
 
       {!live && (
         <Card className="p-8 text-center text-sm" style={{ color: TEXT_MUTED }}>
-          "Project construction progress will appear here automatically as site updates are recorded."
+          "Unit-specific progress is not available yet. It will appear automatically when site updates are recorded for your booked unit."
         </Card>
       )}
 

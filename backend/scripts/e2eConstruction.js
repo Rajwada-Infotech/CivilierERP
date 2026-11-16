@@ -106,13 +106,19 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
 
     section("Portal: the buyer sees the live progress");
     {
-      const bk = (await q(`SELECT b.ApplicationId, a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = ${BOOKING}`))[0];
+      const bk = (await q(`
+        SELECT TOP 1 b.ApplicationId, a.CustomerId
+        FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        JOIN dbo.UnitMaster u ON u.Id = b.UnitId
+        WHERE b.IsActive = 1
+          AND EXISTS (SELECT 1 FROM dbo.DependencyMaster dm WHERE dm.ProjectId = u.ProjectId AND dm.FlatId = u.Id AND dm.IsActive = 1)
+          AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = b.Id AND bp.Status = N'Active')
+        ORDER BY b.Id DESC`))[0];
       const pu = (await q("SELECT TOP 1 Id FROM dbo.CrmCustomerPortalUser WHERE IsActive = 1 ORDER BY Id"))[0];
       h.setPortal({ portalUserId: pu.Id, customerId: bk.CustomerId });
       const tl = (await call("GET", `/p/timeline?applicationId=${bk.ApplicationId}`)).json;
       const cp = tl.constructionProgress;
-      check("Live progress for the buyer (their unit, else tower, else project)", cp && ["unit", "tower", "project"].includes(cp.scope) && near(cp.project.pct, p.pct), JSON.stringify(cp)?.slice(0, 200));
-      check("With every work and its %", (cp.unit || cp.tower || cp.project).works.length > 0);
+      check("Only the buyer's booked unit is returned", cp?.scope === "unit" && cp.unit?.works?.length > 0, JSON.stringify(cp)?.slice(0, 200));
     }
     const plotBuyer = (await q(`
       SELECT TOP 1 b.ApplicationId, a.CustomerId, pm.ProjectId
@@ -120,15 +126,16 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id AND bp.Status = N'Active'
       JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
+      JOIN dbo.UnitMaster um ON um.Id = pm.ConvertedUnitId
       WHERE b.IsActive = 1 AND EXISTS (SELECT 1 FROM dbo.DependencyMaster dm WHERE dm.ProjectId = pm.ProjectId AND dm.IsActive = 1)
       ORDER BY bp.IsPrimary DESC, b.Id DESC`))[0];
     if (plotBuyer) {
       const pu = (await q("SELECT TOP 1 Id FROM dbo.CrmCustomerPortalUser WHERE IsActive = 1 ORDER BY Id"))[0];
       h.setPortal({ portalUserId: pu.Id, customerId: plotBuyer.CustomerId });
       const plotTimeline = (await call("GET", `/p/timeline?applicationId=${plotBuyer.ApplicationId}`)).json;
-      check("Plot buyer receives project-level construction progress", plotTimeline.constructionProgress?.scope === "project"
-        && plotTimeline.constructionProgress.project?.works?.length > 0, JSON.stringify(plotTimeline.constructionProgress)?.slice(0, 200));
-    } else check("Plot buyer with project DPR available for portal coverage", true, "Skipped: development data has no active plot booking on a project with DPR records");
+      check("Converted plot buyer receives only the linked unit's progress", plotTimeline.constructionProgress?.scope === "unit"
+        && plotTimeline.constructionProgress.unit?.works?.length > 0, JSON.stringify(plotTimeline.constructionProgress)?.slice(0, 200));
+    } else check("Converted plot buyer with unit DPR available", true, "Skipped: no active converted plot on a project with DPR in development data");
 
     section("Milestones ready to demand");
     const links = (await call("GET", "/cu/milestone-links")).json;

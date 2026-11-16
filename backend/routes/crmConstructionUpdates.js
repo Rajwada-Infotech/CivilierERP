@@ -169,17 +169,17 @@ async function siteFeed(pool, { projectId, blockId = null, unitId = null, days =
   });
 }
 
-// One buyer's unit: its own figures, its tower and project for context, and what moved there lately.
-async function unitProgress(pool, { projectId, unitId, blockId }) {
+// A buyer sees only the unit attached to their booking; never fall back to block or project totals.
+async function unitProgress(pool, { projectId, unitId }) {
+  if (!projectId || !unitId) return null;
   const p = (await constructionProgress(pool, [projectId])).get(Number(projectId));
   if (!p || !p.hasDpr) return null;
   const flat = p.flats.get(Number(unitId)) || null;
-  const tower = p.towers.find((t) => Number(t.blockId) === Number(blockId)) || null;
-  const scope = flat ? { unitId } : tower ? { blockId } : {};
-  const feed = (await siteFeed(pool, { projectId, ...scope, days: 30, top: 15 }))
+  if (!flat) return null;
+  const feed = (await siteFeed(pool, { projectId, unitId, days: 30, top: 15 }))
     .map(({ work, activity, room, from, to, completed, at }) => ({ work, activity, room, from, to, completed, at }));
   const pick = (x) => x && { pct: x.pct, works: x.works.map(({ name, pct }) => ({ name, pct })), now: x.now, next: x.next, allDone: x.allDone };
-  return { unit: pick(flat), tower: tower ? { blockName: tower.blockName, ...pick(tower) } : null, project: pick(p), feed, scope: flat ? "unit" : tower ? "tower" : "project" };
+  return { unit: pick(flat), feed, scope: "unit" };
 }
 
 // GET /progress — every project the user may see that has DPR work (or notes): its figures, works and towers.
