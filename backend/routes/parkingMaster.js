@@ -12,6 +12,7 @@ require("../services/projectScope").setupScopeGuard(router, { idPaths: [["/", "p
 const PAGE = "followup-parking-master";
 const { getPool, sql } = require("../db");
 const { PARKING_TYPES } = require("../constants/parkingTypes");
+const { sortNatural } = require("../utils/routeHelpers");
 
 bumpCacheVersion("parking-master").catch(() => {});
 
@@ -46,7 +47,7 @@ router.get("/", cache("parking-master", 300), async (req, res) => {
       ${req.projectScope ? `WHERE ${require("../services/projectScope").projectPredicate(req.projectScope, "p.ProjectId", "").trim()}` : ""}
       ORDER BY e.name, b.BlockName, p.ParkingType
     `);
-    res.json(result.recordset);
+    res.json(sortNatural(result.recordset, "ProjectName", "BlockName")); // stable: parking type order kept
   } catch (err) {
     console.error("[parking-master] GET error:", err.message);
     res.status(500).json({ error: err.message });

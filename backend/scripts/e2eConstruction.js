@@ -45,6 +45,8 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
       check(`Tower ${t.blockName}: %`, near(t.pct, expected(rows)) && t.steps === rows.length, `${t.pct} vs ${expected(rows)}`);
       check(`Tower ${t.blockName}: behind schedule`, t.late === lateCount(rows), `${t.late} vs ${lateCount(rows)}`);
     }
+    const blockNames = p.towers.map((t) => String(t.blockName || ""));
+    check("Blocks are in number order (2 before 10)", blockNames.every((n, i) => i === 0 || blockNames[i - 1].localeCompare(n, undefined, { numeric: true }) <= 0), blockNames.join(", "));
     for (const w of p.works) {
       const rows = raw.filter((r) => r.GroupId === w.groupId);
       check(`Work ${w.name}: %`, near(w.pct, expected(rows)) && w.steps === rows.length, `${w.pct} vs ${expected(rows)}`);

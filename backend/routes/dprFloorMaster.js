@@ -9,6 +9,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { floorName } = require("../services/projectFloors");
+const { sortNatural, naturalCompare } = require("../utils/routeHelpers");
 
 // Floor Master (Civil Work DPR setup). Lists a project's floors: those from Auto Project Setup (read-only here —
 // they're changed in the setup wizard) and those added for the project in dbo.DprFloorMaster (migration 663).
@@ -37,10 +38,11 @@ router.get("/", authMiddleware, requirePageRight("dpr-floor-master", "view"), as
       WHERE m.ProjectId = @P AND m.IsActive = 1`);
     const rows = r.recordset
       .map((x) => ({ ...x, name: floorName(x.floorNo, x.floorLabel) }))
-      .sort((a, b) => String(a.blockName ?? "").localeCompare(String(b.blockName ?? ""), undefined, { numeric: true })
+      .sort((a, b) => naturalCompare(a.blockName, b.blockName)
         || a.floorNo - b.floorNo || (a.source === "setup" ? -1 : 1));
     const blocks = (await pool.request().input("P", sql.Int, projectId).query(
       "SELECT Id AS id, BlockName AS name FROM dbo.BlockMaster WHERE ProjectId = @P AND IsActive = 1 ORDER BY BlockName")).recordset;
+    sortNatural(blocks, "name");
     res.json({ blocks, floors: rows });
   } catch (err) {
     console.error("[dpr-floor-master] GET error:", err.message);

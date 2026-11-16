@@ -10,6 +10,7 @@
 import { buildWorkbook, downloadBlob, parseSheetDate, readSheetTable, readWorkbook, type XlsxCell, type XlsxSheet } from "@/lib/xlsxBook";
 import { projectBelongsToCompany, projectCompanyIds, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { didYouMean, normText } from "@/lib/importMatch";
+import { naturalCompare } from "@/lib/utils";
 
 export interface WoImportMasters {
   companies: { id: number; name: string }[];
@@ -77,7 +78,7 @@ export async function downloadWoTemplate(m: WoImportMasters) {
   const pairs = m.activities
     .map((a) => ({ group: m.groups.find((g) => g.id === a.groupId)?.name.trim() ?? "", activity: a.name.trim() }))
     .filter((p) => p.group && p.activity)
-    .sort((a, b) => a.group.localeCompare(b.group) || a.activity.localeCompare(b.activity));
+    .sort((a, b) => naturalCompare(a.group, b.group) || naturalCompare(a.activity, b.activity));
   const groupNames = [...new Set(pairs.map((p) => p.group))];
 
   const cols: string[][] = [

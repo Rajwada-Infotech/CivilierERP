@@ -10,6 +10,7 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { resolveLayoutType, getLayoutComposition, getEffectiveComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX, ROOM_HAS_WORK, floorLabelOf } = require("../services/unitLayout");
+const { sortNatural } = require("../utils/routeHelpers");
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
@@ -64,7 +65,8 @@ router.get("/", cache("room-master", 300), async (req, res) => {
         CASE WHEN r.Storey IS NULL THEN -2 WHEN r.Storey = 'B' THEN -1 WHEN r.Storey = 'G' THEN 0 ELSE ISNULL(TRY_CAST(r.Storey AS INT), 999) END,
         r.RoomName
     `);
-    res.json(result.recordset);
+    // Number order for blocks and units; within a unit the storey order above is kept (the sort is stable).
+    res.json(sortNatural(result.recordset, "ProjectName", "BlockName", "UnitName"));
   } catch (err) {
     console.error("[room-master] GET error:", err.message);
     res.status(500).json({ error: err.message });
@@ -122,7 +124,7 @@ router.get("/units", cache("room-master-units", 300), async (req, res) => {
     query += projectPredicate(req.projectScope, "u.ProjectId");
     query += ` ORDER BY u.UnitName`;
     const result = await request.query(query);
-    res.json(result.recordset);
+    res.json(sortNatural(result.recordset, "UnitName"));
   } catch (err) {
     console.error("[room-master] GET /units error:", err.message);
     res.status(500).json({ error: err.message });
@@ -146,6 +148,7 @@ router.get("/structure", cache("room-master-structure", 120), async (req, res) =
     const blocks = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT Id, BlockName FROM dbo.BlockMaster WHERE ProjectId = @pid AND IsActive = 1 ORDER BY BlockName
     `);
+    sortNatural(blocks.recordset, "BlockName");
     const floors = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT
         f.Id, f.BlockId, f.FloorNo, f.FloorLabel,
@@ -191,6 +194,7 @@ router.get("/floor-units/:floorId", async (req, res) => {
       WHERE u.BlockId = @bid AND ${floorFilter} AND u.IsActive = 1
       ORDER BY u.UnitName
     `);
+    sortNatural(result.recordset, "UnitName");
     // TemplateRoomCount = the unit's EFFECTIVE layout (override if one
     // applies, else global) — computed via the shared resolver so the badge
     // can never disagree with what the sync builds.
@@ -243,6 +247,7 @@ router.get("/unit-rooms/:unitId", async (req, res) => {
       SELECT Id, RoomName, Floor, IsActive, BlueprintFileName
       FROM dbo.RoomMaster WHERE UnitId = @UnitId ORDER BY RoomName
     `);
+    sortNatural(existing.recordset, "RoomName");
 
     res.json({ unit, template: template.recordset, templateSource: effective.source, existing: existing.recordset });
   } catch (err) {

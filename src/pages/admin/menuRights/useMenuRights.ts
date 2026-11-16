@@ -9,6 +9,7 @@ import { getUsersForRights, getUserPermissions, saveUserPermissions, PagePermiss
 import { getRolesList, getRolePermissions, saveRolePermissions } from "@/api/roleApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { PageAction, PageDef, ROLE_PRESETS } from "./config";
+import { naturalCompare } from "@/lib/utils";
 
 export function useMenuRights() {
   const rights = usePageRights("menu-rights");
@@ -177,7 +178,7 @@ export function useMenuRights() {
       const ai = TIER_ORDER.indexOf(a);
       const bi = TIER_ORDER.indexOf(b);
       if (ai !== -1 || bi !== -1) return (ai === -1 ? TIER_ORDER.length : ai) - (bi === -1 ? TIER_ORDER.length : bi);
-      return a.localeCompare(b);
+      return naturalCompare(a, b);
     });
     return entries;
   }, [filteredPages]);

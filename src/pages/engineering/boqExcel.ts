@@ -7,6 +7,7 @@
 // imported BOQ is stored — and shows up, calculates and prints — exactly like a
 // hand-keyed one. One invalid cell blocks the whole import: nothing partial is created.
 import { buildWorkbook, downloadBlob, parseSheetDate as parseBoqDate, readWorkbook, type XlsxCell, type XlsxSheet } from "@/lib/xlsxBook";
+import { naturalCompare } from "@/lib/utils";
 
 export interface BoqImportMasters {
   companies: { id: number; label?: string }[];
@@ -73,7 +74,7 @@ export async function downloadBoqTemplate(m: BoqImportMasters) {
   const pairs = m.activities
     .map((a) => ({ group: m.groups.find((g) => g.id === a.groupId)?.name ?? "", activity: a.name }))
     .filter((p) => p.group && p.activity)
-    .sort((a, b) => a.group.localeCompare(b.group) || a.activity.localeCompare(b.activity));
+    .sort((a, b) => naturalCompare(a.group, b.group) || naturalCompare(a.activity, b.activity));
   const groupNames = [...new Set(pairs.map((p) => p.group))];
   const projectRows = m.projects.map((p) => ({
     project: p.label ?? "",

@@ -1,3 +1,4 @@
+import { naturalCompare } from "@/lib/utils";
 // Item short codes must be unique across items (case-insensitive, spaces ignored — the same rule the server
 // enforces). These helpers find the items that already share a code and suggest a free replacement.
 
@@ -30,7 +31,7 @@ export function findDuplicateShortCodes<T extends CodedItem>(items: T[]): Duplic
   return [...byCode.values()]
     .filter((list) => list.length > 1)
     .map((list) => ({ code: list[0].shortCode.trim(), items: list }))
-    .sort((a, b) => a.code.localeCompare(b.code));
+    .sort((a, b) => naturalCompare(a.code, b.code));
 }
 
 /**

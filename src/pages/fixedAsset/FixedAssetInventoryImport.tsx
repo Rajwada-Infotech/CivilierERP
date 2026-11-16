@@ -11,6 +11,7 @@ import { getInventoryImports, type InventoryImportListItem } from "@/api/fixedAs
 import { INP, KEY_INK, KEY_LINE, RULE, ensureArray, fmt, fmtCur, fmtDate } from "./record/config";
 import { ImportForm } from "./inventoryImport/ImportForm";
 import { ReverseImportDialog } from "./inventoryImport/ReverseImportDialog";
+import { naturalCompare } from "@/lib/utils";
 
 const value = (i: InventoryImportListItem) => (i.Rate != null ? (i.Quantity || 0) * i.Rate : null);
 
@@ -26,7 +27,7 @@ export default function FixedAssetInventoryImport() {
   const projects = useMemo(() => {
     const m = new Map<number, string>();
     all.forEach((i) => i.ProjectId && m.set(i.ProjectId, i.ProjectName || `Project ${i.ProjectId}`));
-    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => naturalCompare(a.name, b.name));
   }, [all]);
   const rows = useMemo(() => all.filter((i) => (!status || i.Status === status) && (!projectId || String(i.ProjectId) === projectId)), [all, status, projectId]);
 

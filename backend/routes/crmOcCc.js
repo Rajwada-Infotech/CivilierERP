@@ -13,6 +13,7 @@ const { rollupBookingTotals } = require("./crmParking");
 const { bookingFundingApplySql } = require("../services/crmPaymentFunding");
 
 const LIVE_BOOKING_SQL = "b.IsActive = 1 AND b.Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL;
+const { sortNatural } = require("../utils/routeHelpers");
 
 router.use(authMiddleware);
 
@@ -75,7 +76,7 @@ router.get("/board", requirePageRight("crm-oc-cc", "view"), async (req, res) => 
         ORDER BY b.ProjectId, b.BookingNo`),
     ]);
     res.json({
-      projects: projects.recordset, blocks: blocks.recordset,
+      projects: projects.recordset, blocks: sortNatural(blocks.recordset, "ProjectId", "BlockName"),
       held: held.recordset.map((r) => ({ ...r, Balance: Math.max(0, Math.round((r.RequiredAmount - r.Collected) * 100) / 100) })),
     });
   } catch (e) {
@@ -105,7 +106,7 @@ router.get("/overview", requirePageRight("crm-oc-cc", "view"), async (req, res) 
         WHERE v.ProjectId = @pid
         ORDER BY v.IsActive DESC, v.BlockName`),
     ]);
-    res.json({ project: proj.recordset[0] || { ProjectId: projectId, ActiveBlocks: 0, CoveredBlocks: 0, Received: 0, ReceivedDate: null, Basis: "project" }, blocks: blocks.recordset });
+    res.json({ project: proj.recordset[0] || { ProjectId: projectId, ActiveBlocks: 0, CoveredBlocks: 0, Received: 0, ReceivedDate: null, Basis: "project" }, blocks: sortNatural(blocks.recordset, (b) => (b.IsActive ? 0 : 1), "BlockName") });
   } catch (e) {
     console.error("[crm-oc-cc] GET /overview error:", e.message);
     res.status(500).json({ error: e.message });
@@ -154,7 +155,7 @@ router.get("/", requirePageRight("crm-oc-cc", "view"), async (req, res) => {
     if (status)    { req0.input("st",  sql.NVarChar(20), status);     where.push("oc.Status = @st");    }
     const q = buildSelect() + (where.length ? " WHERE " + where.join(" AND ") : "") + " ORDER BY oc.ProjectName, oc.BlockName, oc.CreatedAt DESC";
     const result = await req0.query(q);
-    res.json(result.recordset);
+    res.json(sortNatural(result.recordset, "ProjectName", "BlockName")); // stable: newest first within a block
   } catch (e) {
     console.error("[crm-oc-cc] GET error:", e.message);
     res.status(500).json({ error: e.message });

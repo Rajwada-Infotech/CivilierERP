@@ -19,6 +19,7 @@ import {
   Facts, Field, HOLDS_API, INP, KEY_INK, KEY_LINE, KEY_RED, LBL, Legend, PlaceHoldDialog, RULE, RULE_SOFT, Section, TILE_GRID, Tile,
   customerOptions, fetchOptions, fmtMoney, holdCall, useMatrixCustomers, type Option, type TileStatus,
 } from "./matrix/shared";
+import { naturalCompare } from "@/lib/utils";
 
 const API = "/api/parking-matrix";
 const RATE_API = "/api/parking-master/rate";
@@ -243,7 +244,7 @@ export function ParkingMatrixPage() {
 
   // By block, then by parking type (it was one flat grid of every slot).
   const grouped = useMemo(() => {
-    const cmp = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+    const cmp = naturalCompare;
     const byBlock = new Map<string, Map<string, MatrixSlot[]>>();
     for (const s of slots) {
       const bk = s.BlockName || "No block";

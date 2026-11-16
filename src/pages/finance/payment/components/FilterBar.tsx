@@ -5,6 +5,7 @@ import type { BookingFilters } from "../types";
 import { PARTY_TYPE_LABELS } from "../api";
 import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { naturalCompare } from "@/lib/utils";
 
 // Typeable, scrollable combobox for the Vendor filter (suppliers,
 // contractors, brokers — grouped by category) — a plain native <select>
@@ -211,7 +212,7 @@ export function FilterBar({
       .sort((a, b) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b))
       .map((groupLabel) => ({
         groupLabel,
-        items: groups.get(groupLabel)!.sort((a, b) => a.label.localeCompare(b.label)),
+        items: groups.get(groupLabel)!.sort((a, b) => naturalCompare(a.label, b.label)),
       }));
   })();
 

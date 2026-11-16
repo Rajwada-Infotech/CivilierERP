@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import { AlertTriangle, ArrowLeft, ArrowRight, ArrowRightLeft, Building2, Check, CircleCheck, ClipboardList, PenLine, Repeat, ShieldCheck, Wallet } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
-import { cn } from "@/lib/utils";
+import { cn, naturalCompare } from "@/lib/utils";
 import { GridDialog, GridRelated, GridSearch, GridSegment, GRID_BTN, GRID_BTN_BRAND, GRID_INPUT, GRID_TH, GRID_TD } from "@/components/crm/CrmDataTable";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { BAND_DOT, BandNext, MoneyBand, StepBar, asName, type StepState } from "../payments/parts";
@@ -83,17 +83,17 @@ export function ChangeUnitDialog({ booking, onClose }: { booking: any; onClose: 
     const m = new Map<string, string>();
     if (booking.ProjectId != null) m.set(String(booking.ProjectId), booking.ProjectName || `Project ${booking.ProjectId}`);
     (units as any[]).filter((u) => u.IsActive && u.ProjectId != null).forEach((u) => m.set(String(u.ProjectId), u.ProjectName || `Project ${u.ProjectId}`));
-    return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => naturalCompare(a.name, b.name));
   }, [units, booking.ProjectId, booking.ProjectName]);
 
   // The units free to move to in the chosen project (server: free, not land, with an area), with their rate and value.
   const free: any[] = freeData?.units ?? [];
   const nowValue = freeData?.currentUnitValue ?? null;
-  const blocks = useMemo(() => [...new Set(free.map((u) => u.blockName).filter(Boolean))].sort(), [free]);
+  const blocks = useMemo(() => [...new Set(free.map((u) => u.blockName).filter(Boolean))].sort(naturalCompare), [free]);
   const types = useMemo(() => {
     const m = new Map<string, number>();
     free.forEach((u) => { if (u.unitType) m.set(u.unitType, (m.get(u.unitType) || 0) + 1); });
-    return [...m].sort((a, b) => a[0].localeCompare(b[0]));
+    return [...m].sort((a, b) => naturalCompare(a[0], b[0]));
   }, [free]);
   const shown = useMemo(() => {
     const t = unitSearch.trim().toLowerCase();

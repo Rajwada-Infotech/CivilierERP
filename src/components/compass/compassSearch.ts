@@ -1,4 +1,5 @@
 import type { CompassEntry } from "./compassRegistry";
+import { naturalCompare } from "@/lib/utils";
 
 interface Prepared {
   entry: CompassEntry;
@@ -99,7 +100,7 @@ export function searchEntries(entries: CompassEntry[], query: string, limit = 40
     (a, b) =>
       b.score - a.score ||
       a.entry.label.length - b.entry.label.length ||
-      a.entry.label.localeCompare(b.entry.label),
+      naturalCompare(a.entry.label, b.entry.label),
   );
   return scored.slice(0, limit).map((s) => s.entry);
 }
