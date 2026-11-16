@@ -494,7 +494,7 @@ export default function EmployeeMaster() {
       type: "select",
       asyncOptions: async () => {
         const list = await getSalaryStructureFamilies();
-        return (Array.isArray(list) ? list : []).map((s) => ({ value: s.Code, label: s.Name }));
+        return (Array.isArray(list) ? list : []).map((s) => ({ value: s.Code, label: s.Label || s.Name }));
       },
     },
 

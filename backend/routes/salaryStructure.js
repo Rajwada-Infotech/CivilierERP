@@ -147,13 +147,27 @@ router.get("/", cache("salary-structure", 300), async (req, res) => {
 router.get("/families", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT f.Code,
-             (SELECT TOP 1 s.Name FROM dbo.SalaryStructure s WHERE s.Code = f.Code AND s.IsActive = 1 ORDER BY s.Version DESC) AS Name
-      FROM (SELECT DISTINCT Code FROM dbo.SalaryStructure WHERE IsActive = 1) f
-      ORDER BY Name
-    `);
-    res.json(result.recordset);
+    // One entry per code; Label names every active version with its dates (a code can hold dated versions —
+    // migration 669), so a version under an older name is still findable in the Employee Master dropdown.
+    const rows = (await pool.request().query(`
+      SELECT Code, Name, Version, CONVERT(char(10), EffectiveFrom, 23) AS FromD, CONVERT(char(10), EffectiveTo, 23) AS UptoD
+      FROM dbo.SalaryStructure WHERE IsActive = 1 ORDER BY Code, Version
+    `)).recordset;
+    const byCode = new Map();
+    for (const r of rows) {
+      if (!byCode.has(r.Code)) byCode.set(r.Code, []);
+      byCode.get(r.Code).push(r);
+    }
+    const span = (v) => (v.FromD && v.UptoD ? `${v.FromD} to ${v.UptoD}` : v.FromD ? `from ${v.FromD}` : v.UptoD ? `upto ${v.UptoD}` : "");
+    const out = [...byCode.entries()].map(([Code, vs]) => ({
+      Code,
+      Name: vs[vs.length - 1].Name,
+      Label: vs.length === 1
+        ? `${vs[0].Name} (${Code})`
+        : `${Code}: ${vs.map((v) => `v${v.Version} ${v.Name}${span(v) ? ` [${span(v)}]` : ""}`).join(" · ")}`,
+    }));
+    out.sort((a, b) => a.Label.localeCompare(b.Label));
+    res.json(out);
   } catch (err) {
     console.error("[salary-structure] GET /families error:", err.message);
     res.status(500).json({ error: err.message });

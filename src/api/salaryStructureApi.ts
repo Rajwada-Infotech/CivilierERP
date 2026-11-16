@@ -112,6 +112,8 @@ export interface CalculationResult {
 export interface StructureFamily {
   Code: string;
   Name: string;
+  /** Every active version of the code with its dates, for the Employee Master dropdown. */
+  Label?: string;
 }
 
 async function handle<T = unknown>(res: Response): Promise<T> {
