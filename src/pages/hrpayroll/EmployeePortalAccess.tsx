@@ -18,7 +18,7 @@ import {
 } from "@/api/employeePortalApi";
 
 const labelCls = `block ${HR_LBL} mb-1.5`;
-const ACCESS: Record<PortalAccess, { text: string; tone: MarkTone }> = {
+export const ACCESS: Record<PortalAccess, { text: string; tone: MarkTone }> = {
   active: { text: "Active", tone: "done" },
   disabled: { text: "Disabled", tone: "stopped" },
   none: { text: "No login", tone: "waiting" },
@@ -32,7 +32,7 @@ const newPassword = () => {
 };
 
 // ── Enable / reset password ──────────────────────────────────────────────────
-function PasswordDialog({ employee, mode, onClose }: { employee: PortalEmployee; mode: "enable" | "reset"; onClose: () => void }) {
+export function PasswordDialog({ employee, mode, onClose }: { employee: PortalEmployee; mode: "enable" | "reset"; onClose: () => void }) {
   const qc = useQueryClient();
   const [password, setPassword] = useState(newPassword);
   const save = useMutation({
