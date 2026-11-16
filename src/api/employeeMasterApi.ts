@@ -21,8 +21,9 @@ export interface EmployeeRow {
   Department: string | null;
   Designation: string | null;
   BranchLocation: string | null;
-  WorkLocationId: number | null;
-  WorkLocationName: string | null;
+  /** Comma-separated ids and the matching names of every Work Location the employee is tagged to. */
+  WorkLocationIds: string | null;
+  WorkLocationNames: string | null;
   ReportingManagerId: number | null;
   ReportingManagerName: string | null;
   EmploymentType: string | null;
@@ -71,7 +72,7 @@ export interface EmployeePayload {
   Department?: string | null;
   Designation?: string | null;
   BranchLocation?: string | null;
-  WorkLocationId?: number | null;
+  WorkLocationIds?: number[];
   ReportingManagerId?: number | null;
   EmploymentType?: string | null;
   GradeLevel?: string | null;

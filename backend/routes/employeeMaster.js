@@ -16,7 +16,7 @@ const headFields = (body) => ({
   name: body.EmployeeName, phone: body.Mobile, email: body.Email, address: body.Address, isActive: body.IsActive !== false,
 });
 
-const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, e.WorkLocationId, wl.LocationName AS WorkLocationName, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, cand.CandidateCode AS CandidateCode, cand.CandidateName AS CandidateName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.CTCAmount, e.CTCFrequency, e.SalaryStructureCode, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
+const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, (SELECT STRING_AGG(CAST(x.LocationId AS varchar(10)), ',') FROM dbo.EmployeeWorkLocation x WHERE x.EmployeeId = e.EmployeeId) AS WorkLocationIds, (SELECT STRING_AGG(w.LocationName, ', ') WITHIN GROUP (ORDER BY w.LocationName) FROM dbo.EmployeeWorkLocation x JOIN dbo.WorkLocationMaster w ON w.LocationId = x.LocationId WHERE x.EmployeeId = e.EmployeeId) AS WorkLocationNames, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, cand.CandidateCode AS CandidateCode, cand.CandidateName AS CandidateName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.CTCAmount, e.CTCFrequency, e.SalaryStructureCode, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
 
 
 // Rolls a transaction back without letting a failed rollback replace the ORIGINAL error: when SQL Server has already
@@ -35,7 +35,6 @@ router.get("/", cache("employee-master", 300), async (req, res) => {
       "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = e.CostCenterId " +
       "LEFT JOIN dbo.enterprise comp ON comp.id = e.CompanyId " +
       "LEFT JOIN dbo.CandidateMaster cand ON cand.CandidateId = e.CandidateId " +
-      "LEFT JOIN dbo.WorkLocationMaster wl ON wl.LocationId = e.WorkLocationId " +
       "ORDER BY e.EmployeeName"
     );
     res.json(result.recordset);
@@ -56,6 +55,17 @@ router.get("/options", async (req, res) => {
   }
 });
 
+// The employee's Work Locations (any number): replace the saved set with the ids sent. Left alone when the field is absent.
+async function saveWorkLocations(tx, employeeId, ids) {
+  if (!Array.isArray(ids)) return;
+  const clean = [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  await tx.request().input("EmployeeId", sql.Int, employeeId).query("DELETE FROM dbo.EmployeeWorkLocation WHERE EmployeeId = @EmployeeId");
+  for (const locId of clean) {
+    await tx.request().input("EmployeeId", sql.Int, employeeId).input("LocationId", sql.Int, locId)
+      .query("INSERT INTO dbo.EmployeeWorkLocation (EmployeeId, LocationId) VALUES (@EmployeeId, @LocationId)");
+  }
+}
+
 function bindEmployeeFields(request, body) {
   return request
     .input("EmployeeCode", sql.NVarChar(30), body.EmployeeCode || null)
@@ -74,7 +84,6 @@ function bindEmployeeFields(request, body) {
     .input("Department", sql.NVarChar(100), body.Department || null)
     .input("Designation", sql.NVarChar(100), body.Designation || null)
     .input("BranchLocation", sql.NVarChar(150), body.BranchLocation || null)
-    .input("WorkLocationId", sql.Int, body.WorkLocationId || null)
     .input("ReportingManagerId", sql.Int, body.ReportingManagerId || null)
     .input("EmploymentType", sql.NVarChar(30), body.EmploymentType || null)
     .input("GradeLevel", sql.NVarChar(50), body.GradeLevel || null)
@@ -117,17 +126,18 @@ router.post("/", requirePageRight("employee-master", "create"), async (req, res)
         "INSERT INTO dbo.EmployeeMaster (" +
         "EmployeeCode, EmployeeName, PhotoBase64, DateOfBirth, Gender, Mobile, Email, Address, " +
         "EmergencyContactName, EmergencyContactPhone, JoiningDate, ConfirmationDate, CompanyId, " +
-        "Department, Designation, BranchLocation, WorkLocationId, ReportingManagerId, EmploymentType, GradeLevel, " +
+        "Department, Designation, BranchLocation, ReportingManagerId, EmploymentType, GradeLevel, " +
         "CostCenterId, CandidateId, BankName, BankAccountNumber, BankIFSC, PAN, Aadhaar, UAN, ESICNumber, PFNumber, " +
         "NomineeName, NomineeRelationship, NomineeContact, CTCAmount, CTCFrequency, SalaryStructureCode, IsActive, CreatedBy, CreatedAt" +
         ") OUTPUT INSERTED.EmployeeId VALUES (" +
         "@EmployeeCode, @EmployeeName, @PhotoBase64, @DateOfBirth, @Gender, @Mobile, @Email, @Address, " +
         "@EmergencyContactName, @EmergencyContactPhone, @JoiningDate, @ConfirmationDate, @CompanyId, " +
-        "@Department, @Designation, @BranchLocation, @WorkLocationId, @ReportingManagerId, @EmploymentType, @GradeLevel, " +
+        "@Department, @Designation, @BranchLocation, @ReportingManagerId, @EmploymentType, @GradeLevel, " +
         "@CostCenterId, @CandidateId, @BankName, @BankAccountNumber, @BankIFSC, @PAN, @Aadhaar, @UAN, @ESICNumber, @PFNumber, " +
         "@NomineeName, @NomineeRelationship, @NomineeContact, @CTCAmount, @CTCFrequency, @SalaryStructureCode, @IsActive, @CreatedBy, SYSDATETIME())"
       );
     newId = result.recordset[0].EmployeeId;
+    await saveWorkLocations(tx, newId, req.body.WorkLocationIds);
     await createEmployeeAccountHead(tx, newId, headFields(req.body), actor);
     await tx.commit();
     } catch (e) { await safeRollback(tx); throw e; }
@@ -170,7 +180,7 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
         "DateOfBirth = @DateOfBirth, Gender = @Gender, Mobile = @Mobile, Email = @Email, Address = @Address, " +
         "EmergencyContactName = @EmergencyContactName, EmergencyContactPhone = @EmergencyContactPhone, " +
         "JoiningDate = @JoiningDate, ConfirmationDate = @ConfirmationDate, CompanyId = @CompanyId, " +
-        "Department = @Department, Designation = @Designation, BranchLocation = @BranchLocation, WorkLocationId = @WorkLocationId, " +
+        "Department = @Department, Designation = @Designation, BranchLocation = @BranchLocation, " +
         "ReportingManagerId = @ReportingManagerId, EmploymentType = @EmploymentType, GradeLevel = @GradeLevel, " +
         "CostCenterId = @CostCenterId, CandidateId = @CandidateId, BankName = @BankName, BankAccountNumber = @BankAccountNumber, BankIFSC = @BankIFSC, " +
         "PAN = @PAN, Aadhaar = @Aadhaar, UAN = @UAN, ESICNumber = @ESICNumber, PFNumber = @PFNumber, " +
@@ -179,7 +189,10 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
         "IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() " +
         "WHERE EmployeeId = @EmployeeId"
       );
-    if (upd.rowsAffected[0] > 0) await syncEmployeeAccountHead(tx, id, headFields(req.body), actor);
+    if (upd.rowsAffected[0] > 0) {
+      await syncEmployeeAccountHead(tx, id, headFields(req.body), actor);
+      await saveWorkLocations(tx, id, req.body.WorkLocationIds);
+    }
     await tx.commit();
     } catch (e) { await safeRollback(tx); throw e; }
     await bumpCacheVersion("employee-master");
