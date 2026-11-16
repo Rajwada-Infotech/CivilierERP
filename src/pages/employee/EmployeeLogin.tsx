@@ -6,6 +6,7 @@ import { ArrowLeft, Eye, EyeOff, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { LogoFull } from "@/components/Logo";
+import { EmployeeStyles } from "@/components/layout/EmployeeLayout";
 
 export default function EmployeeLogin() {
   const { login } = useAuth();
@@ -41,11 +42,12 @@ export default function EmployeeLogin() {
     }
   };
 
-  const field = "w-full h-11 px-3 bg-background border border-foreground/30 text-sm text-foreground outline-none focus:border-foreground";
+  const field = "ep-field";
   const label = "block text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-muted-foreground mb-1.5";
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <EmployeeStyles />
       <header className="flex items-center justify-between px-4 sm:px-8 h-14 border-b border-border">
         <LogoFull />
         <button type="button" onClick={() => navigate("/login")} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -54,9 +56,9 @@ export default function EmployeeLogin() {
       </header>
 
       <main className="flex-1 flex items-center justify-center p-4">
-        <form onSubmit={submit} className="w-full max-w-sm border border-foreground/30 bg-card p-6 sm:p-8" noValidate>
+        <form onSubmit={submit} className="w-full max-w-sm ep-card p-6 sm:p-8" noValidate>
           <div className="flex items-center gap-3 mb-6">
-            <span className="w-10 h-10 flex items-center justify-center border border-foreground/30"><UserRound size={18} /></span>
+            <span className="w-11 h-11 rounded-xl ep-gold flex items-center justify-center"><UserRound size={20} /></span>
             <div>
               <h1 className="font-heading text-xl font-bold leading-tight">Employee Portal</h1>
               <p className="text-xs text-muted-foreground">Salary, payslips, attendance and leave</p>
@@ -81,7 +83,7 @@ export default function EmployeeLogin() {
 
           {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
 
-          <button type="submit" disabled={busy} className="mt-6 w-full h-11 bg-foreground text-background text-sm font-bold uppercase tracking-[0.12em] disabled:opacity-60">
+          <button type="submit" disabled={busy} className="mt-6 w-full ep-btn ep-btn-gold h-11 text-sm">
             {busy ? "Signing in…" : "Sign in"}
           </button>
           <p className="mt-4 text-xs text-muted-foreground">No access yet, or forgot your password? Ask HR to enable or reset your Employee Portal login.</p>

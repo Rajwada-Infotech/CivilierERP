@@ -9,8 +9,8 @@ import { Card, Loading, MONTHS, Note, PageHeader, inr, keyLine, labelCls } from 
 
 function Breakdown({ slip }: { slip: Payslip }) {
   const block = (title: string, lines: Payslip["Earnings"], total: number, totalLabel: string) => (
-    <div className="border border-foreground/30">
-      <div className={`${labelCls} px-4 py-2 border-b border-foreground/30`}>{title}</div>
+    <div className="ep-card">
+      <div className={`${labelCls} px-4 py-2 border-b border-border`}>{title}</div>
       <table className="w-full text-sm"><tbody className="divide-y divide-foreground/15">
         {lines.length === 0 && <tr><td className="px-4 py-2 text-muted-foreground">None</td></tr>}
         {lines.map((l) => (<tr key={l.HeadCode}><td className="px-4 py-2">{l.HeadName}</td><td className="px-4 py-2 text-right tabular-nums">{inr(l.Amount)}</td></tr>))}
@@ -24,7 +24,7 @@ function Breakdown({ slip }: { slip: Payslip }) {
         {block("Earnings", slip.Earnings, slip.GrossSalary, "Gross salary")}
         {block("Deductions", slip.Deductions, slip.TotalEmployeeDeduction, "Total deductions")}
       </div>
-      <div className="flex justify-between border border-foreground px-4 py-3 font-heading font-bold"><span>Net salary</span><span className="tabular-nums">{inr(slip.NetSalary)}</span></div>
+      <div className="flex justify-between ep-gold rounded-xl px-4 py-3 font-heading font-bold"><span>Net salary</span><span className="tabular-nums">{inr(slip.NetSalary)}</span></div>
     </div>
   );
 }

@@ -3,18 +3,18 @@
 // supplies the time from its own clock.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Camera, LogIn, LogOut, MapPin, X } from "lucide-react";
+import { Camera, Clock, LogIn, LogOut, MapPin, X } from "lucide-react";
 import { toast } from "sonner";
 import { getPortalPunchState, portalPunch, type PunchLocation, type PunchState } from "@/api/employeePortalApi";
 import BreakPanel from "./BreakPanel";
 import { BodyPortal } from "@/components/ui/body-portal";
-import { Card, Mark, fmtTime, keyInk, keyLine, labelCls } from "./employeeUi";
+import { fmtTime, keyInk, keyLine, labelCls } from "./employeeUi";
 
 const MAX_WIDTH = 640;
 const JPEG_QUALITY = 0.72;
 
 const mapsUrl = (l: PunchLocation) => `https://www.google.com/maps?q=${l.lat},${l.lng}`;
-const place = (l: PunchLocation | null) =>
+export const place = (l: PunchLocation | null) =>
   l ? (
     <a href={mapsUrl(l)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-2">
       <MapPin size={12} /> {l.lat.toFixed(5)}, {l.lng.toFixed(5)}{l.accuracyM != null ? ` (±${l.accuracyM} m)` : ""}
@@ -33,7 +33,7 @@ const getPosition = () =>
   });
 
 // ── The capture dialog: live camera preview + location, then "Capture & punch" ──
-function CaptureDialog({ kind, onClose, onDone }: { kind: "in" | "out"; onClose: () => void; onDone: () => void }) {
+export function CaptureDialog({ kind, onClose, onDone }: { kind: "in" | "out"; onClose: () => void; onDone: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [camera, setCamera] = useState<"starting" | "ready" | "error">("starting");
@@ -101,13 +101,13 @@ function CaptureDialog({ kind, onClose, onDone }: { kind: "in" | "out"; onClose:
   return (
     <BodyPortal>
     <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-3" role="dialog" aria-modal="true" aria-label={kind === "in" ? "Punch in" : "Punch out"}>
-      <div className="w-full max-w-md max-h-[calc(100vh-1.5rem)] overflow-y-auto bg-card border border-foreground">
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-foreground/30">
-          <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{kind === "in" ? "Punch In" : "Punch Out"}</h2>
+      <div className="w-full max-w-md max-h-[calc(100vh-1.5rem)] overflow-y-auto bg-card border border-border rounded-2xl shadow-2xl">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h2 className="font-heading text-sm font-bold">{kind === "in" ? "Punch In" : "Punch Out"}</h2>
           <button onClick={() => { stop(); onClose(); }} aria-label="Close" className="p-1"><X size={16} /></button>
         </div>
         <div className="p-4 space-y-3">
-          <div className="relative aspect-[4/3] bg-black overflow-hidden">
+          <div className="relative aspect-[4/3] bg-black overflow-hidden rounded-xl">
             <video ref={videoRef} playsInline muted className="w-full h-full object-cover [transform:scaleX(-1)]" />
             {camera !== "ready" && (
               <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-white">
@@ -141,27 +141,36 @@ export default function PunchCard() {
   const cur = data?.current;
   const setState = (s: PunchState) => { qc.setQueryData(["ep-punch"], s); qc.invalidateQueries({ queryKey: ["ep-attendance"] }); };
 
+  const statusLabel = cur ? (cur.outTime ? "Day complete" : data?.state === "ON_BREAK" ? "On break" : "Working") : "Not in yet";
+
   return (
     <>
-      <Card title="Today" className="mb-6" right={cur ? <Mark text={cur.outTime ? "Present" : data?.state === "ON_BREAK" ? "Half Day" : "Pending"} label={cur.outTime ? "Day complete" : data?.state === "ON_BREAK" ? "On break" : "Working"} /> : undefined}>
-        <div className="p-4 flex flex-wrap items-center justify-between gap-4">
-          {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : isError ? <p className="text-sm text-destructive">{(error as Error).message}</p> : (
-            <>
-              <div className="grid sm:grid-cols-2 gap-x-10 gap-y-2 text-sm">
-                <div><p className={labelCls}>In time</p><p className="font-heading font-bold text-lg tabular-nums">{cur ? fmtTime(cur.inTime) : "—"}</p><p className="text-xs">{place(cur?.inLocation ?? null)}</p></div>
-                <div><p className={labelCls}>Out time</p><p className="font-heading font-bold text-lg tabular-nums">{cur?.outTime ? fmtTime(cur.outTime) : "—"}</p><p className="text-xs">{place(cur?.outLocation ?? null)}</p></div>
+      <section className="ep-tile ep-gold overflow-hidden mb-4" aria-label="Today's attendance">
+        <div className="p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center"><Clock size={20} /></span>
+              <div><p className="font-heading font-bold text-base leading-tight">Today</p><p className="text-xs text-white/80">Punch in and out with photo and location</p></div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full bg-white/20 text-[0.625rem] font-bold uppercase tracking-[0.08em] whitespace-nowrap shrink-0">{statusLabel}</span>
+          </div>
+          {isLoading ? <p className="text-sm text-white/80 mt-4">Loading…</p> : isError ? <p className="text-sm mt-4">{(error as Error).message}</p> : (
+            <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
+              <div className="grid grid-cols-2 gap-x-8 gap-y-1">
+                <div><p className="text-[0.6875rem] font-bold uppercase tracking-[0.12em] text-white/75">In time</p><p className="font-heading font-bold text-2xl tabular-nums">{cur ? fmtTime(cur.inTime) : "—"}</p><p className="text-xs text-white/85">{place(cur?.inLocation ?? null)}</p></div>
+                <div><p className="text-[0.6875rem] font-bold uppercase tracking-[0.12em] text-white/75">Out time</p><p className="font-heading font-bold text-2xl tabular-nums">{cur?.outTime ? fmtTime(cur.outTime) : "—"}</p><p className="text-xs text-white/85">{place(cur?.outLocation ?? null)}</p></div>
               </div>
-              <div className="flex gap-2">
-                {data?.allowed.in && <button className={keyInk} onClick={() => setDialog("in")}><LogIn size={13} /> Punch in</button>}
-                {data?.allowed.out && <button className={keyInk} onClick={() => setDialog("out")}><LogOut size={13} /> Punch out</button>}
-                {data?.state === "COMPLETED" && <span className="text-sm text-muted-foreground">Today's attendance is complete.</span>}
-                {data?.state === "ON_BREAK" && <span className="text-sm text-muted-foreground">You are on a break — end it before punching out.</span>}
+              <div className="flex flex-wrap items-center gap-2">
+                {data?.allowed.in && <button className="ep-btn ep-btn-light" onClick={() => setDialog("in")}><LogIn size={14} /> Punch in</button>}
+                {data?.allowed.out && <button className="ep-btn ep-btn-light" onClick={() => setDialog("out")}><LogOut size={14} /> Punch out</button>}
+                {data?.state === "COMPLETED" && <span className="text-sm text-white/90">Today's attendance is complete.</span>}
+                {data?.state === "ON_BREAK" && <span className="text-sm text-white/90">You are on a break — end it before punching out.</span>}
               </div>
-            </>
+            </div>
           )}
         </div>
-        {data && <BreakPanel state={data} onChange={setState} />}
-      </Card>
+        {data && <div className="bg-card text-card-foreground"><BreakPanel state={data} onChange={setState} /></div>}
+      </section>
       {dialog && <CaptureDialog kind={dialog} onClose={() => setDialog(null)} onDone={done} />}
     </>
   );

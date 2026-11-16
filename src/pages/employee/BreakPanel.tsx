@@ -22,7 +22,7 @@ const clock = (sec: number) => {
 const ruleText = (t: BreakType) =>
   `${t.deduct ? "Taken off working time" : "Counts as work"}${t.allowedMinutes != null ? ` · ${t.allowedMinutes} min allowed` : " · no limit"}`;
 
-function StartDialog({ types, onClose, onStarted }: { types: BreakType[]; onClose: () => void; onStarted: (s: PunchState) => void }) {
+export function StartDialog({ types, onClose, onStarted }: { types: BreakType[]; onClose: () => void; onStarted: (s: PunchState) => void }) {
   const [type, setType] = useState(types[0]?.type ?? "Break");
   const [note, setNote] = useState("");
   const rule = types.find((t) => t.type === type);
@@ -39,12 +39,12 @@ function StartDialog({ types, onClose, onStarted }: { types: BreakType[]; onClos
   return (
     <BodyPortal>
     <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-3" role="dialog" aria-modal="true" aria-label="Start a break">
-      <div className="w-full max-w-md max-h-[calc(100vh-1.5rem)] overflow-y-auto bg-card border border-foreground">
-        <div className="px-4 py-2.5 border-b border-foreground/30"><h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">Start a break</h2></div>
+      <div className="w-full max-w-md max-h-[calc(100vh-1.5rem)] overflow-y-auto bg-card border border-border rounded-2xl shadow-2xl">
+        <div className="px-4 py-3 border-b border-border"><h2 className="font-heading text-sm font-bold">Start a break</h2></div>
         <div className="p-4 space-y-3">
           <div className="space-y-2" role="radiogroup" aria-label="Reason">
             {types.map((t) => (
-              <label key={t.type} className={`flex items-start gap-3 p-3 border cursor-pointer ${type === t.type ? "border-foreground bg-muted/40" : "border-foreground/25"}`}>
+              <label key={t.type} className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer ${type === t.type ? "border-[hsl(var(--ep-gold))] bg-[hsl(var(--ep-gold)/0.08)]" : "border-border"}`}>
                 <input type="radio" name="break-type" className="mt-1" checked={type === t.type} onChange={() => setType(t.type)} />
                 <span><span className="block text-sm font-medium">{t.type}</span><span className="block text-xs text-muted-foreground">{ruleText(t)}</span></span>
               </label>
@@ -67,7 +67,7 @@ function StartDialog({ types, onClose, onStarted }: { types: BreakType[]; onClos
 }
 
 /** Live timer for the running break and the reminder when its allowance is used up (then again every 10 minutes). */
-function useBreakReminder(open: PunchBreak | undefined, skewMs: number) {
+export function useBreakReminder(open: PunchBreak | undefined, skewMs: number) {
   const [now, setNow] = useState(() => Date.now() + skewMs);
   const reminded = useRef<number>(-1);
   useEffect(() => {
@@ -102,7 +102,7 @@ export default function BreakPanel({ state, onChange }: { state: PunchState; onC
   if (!cur) {
     // Not punched in yet: the button is shown so it can be found, but a break can only start during a working day.
     return (
-      <div className="border-t border-foreground/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div className="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">Breaks, meetings at another office and other reasons are tracked once you punch in.</p>
         <button className={keyLine} disabled title="Punch in first"><Coffee size={13} /> Take a break</button>
       </div>
@@ -111,9 +111,9 @@ export default function BreakPanel({ state, onChange }: { state: PunchState; onC
 
   const finished = cur.breaks.filter((b) => !b.open);
   return (
-    <div className="border-t border-foreground/30 px-4 py-3 space-y-3">
+    <div className="px-4 py-3 space-y-3">
       {openBreak && (
-        <div className={`flex flex-wrap items-center justify-between gap-3 p-3 border ${over > 0 ? "border-red-500/60 bg-red-500/10" : "border-foreground/30 bg-muted/30"}`} role="status">
+        <div className={`flex flex-wrap items-center justify-between gap-3 p-3 border rounded-xl ${over > 0 ? "border-red-500/60 bg-red-500/10" : "border-border bg-muted/30"}`} role="status">
           <div className="flex items-center gap-3">
             {over > 0 ? <AlarmClock size={20} className="text-red-600 dark:text-red-400" /> : <Coffee size={20} />}
             <div>
@@ -142,7 +142,7 @@ export default function BreakPanel({ state, onChange }: { state: PunchState; onC
       </div>
 
       {finished.length > 0 && (
-        <ul className="divide-y divide-foreground/15 text-sm border border-foreground/20">
+        <ul className="divide-y divide-border text-sm border border-border rounded-xl overflow-hidden">
           {finished.map((b) => (
             <li key={b.breakId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
               <span><span className="font-medium">{b.type}</span>{b.note ? <span className="text-muted-foreground"> — {b.note}</span> : null}
