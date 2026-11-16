@@ -35,7 +35,7 @@ interface AuthContextType {
   login: (
     email: string,
     password: string,
-    portal?: "staff" | "supplier",
+    portal?: "staff" | "supplier" | "employee",
   ) => Promise<{
     success: boolean;
     error?: string;
@@ -243,7 +243,7 @@ export const AuthProvider = ({
 
   const queryClient = useQueryClient();
 
-  const login = useCallback(async (email: string, password: string, portal: "staff" | "supplier" = "staff") => {
+  const login = useCallback(async (email: string, password: string, portal: "staff" | "supplier" | "employee" = "staff") => {
     try {
       const data = await loginUser(email, password, portal);
 

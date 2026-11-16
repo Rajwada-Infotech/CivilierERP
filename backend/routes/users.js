@@ -10,6 +10,7 @@ const { blacklistToken } = require("../middleware/blacklist");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
+const { recordLogin } = require("../lib/loginHistory");
 const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
 const { usersHaveStatusReason } = require("../services/usersStatusReason");
 const { usersHaveWhatsApp, cleanWhatsApp } = require("../services/usersWhatsApp");
@@ -118,10 +119,12 @@ router.post("/login", async (req, res) => {
         console.warn("[Login] No user found for email:", normalizedEmail);
       }
       if (!isLocal) await incrementLoginAttempts(attemptsKey, lockKey);
+      recordLogin(req, { email: normalizedEmail, portal: req.body.portal, success: false, reason: "Unknown e-mail" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
     if (user.discontinue) {
+      recordLogin(req, { userId: user.id, email: normalizedEmail, portal: req.body.portal, success: false, reason: "Account inactive" });
       return res.status(403).json({ error: "User inactive" });
     }
 
@@ -136,6 +139,7 @@ router.post("/login", async (req, res) => {
 
     if (!match) {
       if (!isLocal) await incrementLoginAttempts(attemptsKey, lockKey);
+      recordLogin(req, { userId: user.id, email: normalizedEmail, portal: req.body.portal, success: false, reason: "Wrong password" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -150,16 +154,27 @@ router.post("/login", async (req, res) => {
     // Each login page is for its own people. Checked after the password, so a page can't be used to learn who has an account.
     // `portal` comes from the web login pages; apps already installed on phones don't send it and are left as they were.
     const portal = req.body.portal;
-    if (portal === "staff" || portal === "supplier") {
+    if (portal === "staff" || portal === "supplier" || portal === "employee") {
       const isSupplier = normalizedRole === "supplier" || String(user.roleName || "").trim().toLowerCase() === "supplier";
+      const isEmployee = normalizedRole === "employee portal";
+      const refuse = (message) => {
+        recordLogin(req, { userId: user.id, email: normalizedEmail, portal, success: false, reason: "Wrong login page" });
+        return res.status(403).json({ error: message });
+      };
       if (portal === "staff" && isSupplier) {
-        return res.status(403).json({ error: "Supplier accounts sign in on the Supplier Portal." });
+        return refuse("Supplier accounts sign in on the Supplier Portal.");
+      }
+      if (portal === "staff" && isEmployee) {
+        return refuse("Employee accounts sign in on the Employee Portal.");
       }
       if (portal === "staff" && normalizedRole === "customer") {
-        return res.status(403).json({ error: "Customer accounts sign in on the Customer Portal." });
+        return refuse("Customer accounts sign in on the Customer Portal.");
       }
       if (portal === "supplier" && !isSupplier) {
-        return res.status(403).json({ error: "This page is for supplier accounts. Please use the main login." });
+        return refuse("This page is for supplier accounts. Please use the main login.");
+      }
+      if (portal === "employee" && !isEmployee) {
+        return refuse("This page is for employee accounts. Please use the main login.");
       }
     }
 
@@ -172,6 +187,8 @@ router.post("/login", async (req, res) => {
         return res.status(503).json(maintenanceBody(maintenance));
       }
     }
+
+    recordLogin(req, { userId: user.id, email: normalizedEmail, portal, success: true });
 
     const token = jwt.sign(
       {
