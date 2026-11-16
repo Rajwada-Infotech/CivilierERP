@@ -114,6 +114,21 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
       check("Live progress for the buyer (their unit, else tower, else project)", cp && ["unit", "tower", "project"].includes(cp.scope) && near(cp.project.pct, p.pct), JSON.stringify(cp)?.slice(0, 200));
       check("With every work and its %", (cp.unit || cp.tower || cp.project).works.length > 0);
     }
+    const plotBuyer = (await q(`
+      SELECT TOP 1 b.ApplicationId, a.CustomerId, pm.ProjectId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id AND bp.Status = N'Active'
+      JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
+      WHERE b.IsActive = 1 AND EXISTS (SELECT 1 FROM dbo.DependencyMaster dm WHERE dm.ProjectId = pm.ProjectId AND dm.IsActive = 1)
+      ORDER BY bp.IsPrimary DESC, b.Id DESC`))[0];
+    if (plotBuyer) {
+      const pu = (await q("SELECT TOP 1 Id FROM dbo.CrmCustomerPortalUser WHERE IsActive = 1 ORDER BY Id"))[0];
+      h.setPortal({ portalUserId: pu.Id, customerId: plotBuyer.CustomerId });
+      const plotTimeline = (await call("GET", `/p/timeline?applicationId=${plotBuyer.ApplicationId}`)).json;
+      check("Plot buyer receives project-level construction progress", plotTimeline.constructionProgress?.scope === "project"
+        && plotTimeline.constructionProgress.project?.works?.length > 0, JSON.stringify(plotTimeline.constructionProgress)?.slice(0, 200));
+    } else check("Plot buyer with project DPR available for portal coverage", true, "Skipped: development data has no active plot booking on a project with DPR records");
 
     section("Milestones ready to demand");
     const links = (await call("GET", "/cu/milestone-links")).json;

@@ -423,7 +423,11 @@ router.get("/timeline", async (req, res) => {
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT b.Id, b.BookingNo,
              COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
-             COALESCE(um.ProjectId, b.ProjectId) AS ProjectId, b.UnitId, um.BlockId,
+             COALESCE(um.ProjectId,
+               (SELECT TOP 1 pm.ProjectId FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
+                WHERE bp.BookingId = b.Id AND bp.Status = N'Active' ORDER BY bp.IsPrimary DESC, bp.Id),
+               b.ProjectId) AS ProjectId,
+             b.UnitId, um.BlockId,
              COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
              b.TotalValue, b.BookingAmount,
              b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate,
@@ -526,7 +530,7 @@ router.get("/timeline", async (req, res) => {
       handover: handover.recordset[0] || null,
       possessionNotice: possessionNotice.recordset[0] || null,
       // The buyer's own unit as the site records it (DPR), with its tower and project for context.
-      constructionProgress: bk.ProjectId && !bk.IsPlotSale
+      constructionProgress: bk.ProjectId
         ? await require("./crmConstructionUpdates").unitProgress(pool, { projectId: bk.ProjectId, unitId: bk.UnitId, blockId: bk.BlockId }).catch((e) => {
           console.error("[crm-portal] construction progress error:", e.message);
           return null;

@@ -229,9 +229,7 @@ const PortalConstruction: React.FC = () => {
 
       {!live && (
         <Card className="p-8 text-center text-sm" style={{ color: TEXT_MUTED }}>
-          {timeline.booking?.IsPlotSale
-            ? "Construction progress tracking does not apply to this plot."
-            : "Site progress will appear here automatically once construction updates are recorded."}
+          "Project construction progress will appear here automatically as site updates are recorded."
         </Card>
       )}
 
