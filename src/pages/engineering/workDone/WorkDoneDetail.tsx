@@ -88,13 +88,13 @@ export const WorkDoneDetail: React.FC<{
           <p className="text-sm text-foreground whitespace-pre-wrap">{r.DescriptionOfWork}</p>
         </div>
       )}
-      <div className="grid grid-cols-3" style={{ border: RULE }}>
+      <div className="grid grid-cols-1 sm:grid-cols-3" style={{ border: RULE }}>
         {[
           { label: "Gross", value: fmt(r.GrossAmount) },
           { label: "Deductions", value: `− ${fmt(r.Deductions)}` },
           { label: "Certified", value: fmt(r.CertifiedAmount) },
         ].map((x, i) => (
-          <div key={x.label} className="px-4 py-3" style={i ? { borderLeft: "1px solid hsl(var(--foreground) / 0.2)" } : undefined}>
+          <div key={x.label} className={`px-4 py-3 ${i ? "border-t sm:border-t-0 sm:border-l border-foreground/20" : ""}`}>
             <p className={LBL}>{x.label}</p>
             <p className="font-heading text-lg font-bold tabular-nums mt-0.5 text-foreground">{x.value}</p>
           </div>

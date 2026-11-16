@@ -1,5 +1,6 @@
 import { Save, RotateCcw, Check } from "lucide-react";
 import type { POState } from "./usePurchaseOrder";
+import { KEY_INK, KEY_LINE } from "./config";
 
 // The bottom action bar: save, submit, print, cancel.
 export function POActionBar({ m }: { m: POState }) {
@@ -54,7 +55,7 @@ export function POActionBar({ m }: { m: POState }) {
                 <button
                   onClick={goToCreate}
                   disabled={saving || saved || !poIsDirty}
-                  className="flex-1 sm:flex-none px-4 py-1.5 text-xs font-heading border border-foreground/30 text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  className={`${KEY_LINE} flex-1 sm:flex-none h-9 px-4`}
                 >
                   <RotateCcw size={12} /> Reset
                 </button>
@@ -62,14 +63,14 @@ export function POActionBar({ m }: { m: POState }) {
                 <button
                   onClick={handleSave}
                   disabled={saving || saved || !poCanSave || amendChecking}
-                  className="flex-1 sm:flex-none px-5 py-2 text-sm font-heading font-semibold bg-foreground text-card border border-foreground disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                  className={`${KEY_INK} flex-1 sm:flex-none h-9 px-5 whitespace-nowrap`}
                 >
                   {saved ? (
-                    <Check size={14} />
+                    <Check size={13} />
                   ) : saving ? (
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-white animate-spin" />
+                    <span className="w-3 h-3 border-2 border-card/30 border-t-card rounded-full animate-spin" />
                   ) : (
-                    <Save size={14} />
+                    <Save size={13} />
                   )}
                   {saved
                     ? "Saved!"

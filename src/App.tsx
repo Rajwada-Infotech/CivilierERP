@@ -138,9 +138,13 @@ const LegalApprovalsInboxPage = lazy(() => import("./pages/legal/LegalApprovalsI
 const LegalActiveLandPage = lazy(() => import("./pages/legal/LegalActiveLandPage"));
 const LegalPendingQueuePage = lazy(() => import("./pages/legal/LegalPendingQueuePage"));
 const LandEnquiryPage = lazy(() => import("./pages/legal/land/LandEnquiryPage"));
+const LandDeedRegistrationPage = lazy(() => import("./pages/legal/land/LandDeedRegistrationPage"));
+const LandDeedSearchPage = lazy(() => import("./pages/legal/land/LandDeedSearchPage"));
 const LandPropertyListPage = lazy(() => import("./pages/legal/land/LandPropertyListPage"));
 const LandReportsPage = lazy(() => import("./pages/legal/land/LandReportsPage"));
 const LandDetailsPage = lazy(() => import("./pages/legal/land/LandDetailsPage"));
+const LandDeedProcessPage = lazy(() => import("./pages/legal/land/LandDeedProcessPage"));
+const LandPostRegistrationPage = lazy(() => import("./pages/legal/land/LandPostRegistrationPage"));
 const LandProfilePage = lazy(() => import("./pages/legal/land/LandProfilePage"));
 const LandSalesPage = lazy(() => import("./pages/legal/land/LandSalesPage"));
 const LandProjectMapPage = lazy(() => import("./pages/legal/land/LandProjectMapPage"));
@@ -192,6 +196,7 @@ const CivilWorkDprWorkTransfer = lazy(
 );
 const CivilWorkDprQuery = lazy(() => import("./pages/civilworkdpr/Query"));
 const DprTagMaster = lazy(() => import("./pages/civilworkdpr/DprTagMaster"));
+const FloorMaster = lazy(() => import("./pages/civilworkdpr/FloorMaster"));
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
 );
@@ -1056,6 +1061,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route path="/legal/deed-registration" element={<ProtectedRoute pageKey="legal-approvals"><LandDeedRegistrationPage /></ProtectedRoute>} />
       <Route
         path="/legal/active-land"
         element={
@@ -1074,10 +1080,17 @@ function AppRoutes() {
       />
       {/* Company Land Record Management System: Central Land Register and complete Land Details profile */}
       <Route path="/legal/land/enquiries" element={<ProtectedRoute pageKey="legal-land-enquiry"><LandEnquiryPage /></ProtectedRoute>} />
+      <Route path="/legal/land/deed-search" element={<ProtectedRoute pageKey="legal-land-enquiry"><LandDeedSearchPage /></ProtectedRoute>} />
       <Route path="/legal/land/properties" element={<ProtectedRoute pageKey="legal-land-master"><LandPropertyListPage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandProfilePage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id/profile" element={<ProtectedRoute pageKey="legal-land-master"><LandProfilePage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id/details" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage /></ProtectedRoute>} />
+      <Route path="/legal/land/properties/:id/final-verify" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage verify /></ProtectedRoute>} />
+      <Route path="/legal/land/deed-process" element={<ProtectedRoute pageKey="legal-land-master"><LandDeedProcessPage /></ProtectedRoute>} />
+      <Route path="/legal/land/post-registration" element={<ProtectedRoute pageKey="legal-land-master"><LandPostRegistrationPage /></ProtectedRoute>} />
+      <Route path="/legal/land/post-registration/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage from="post-registration" /></ProtectedRoute>} />
+      <Route path="/legal/land/deed-process/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage from="deed-process" /></ProtectedRoute>} />
+      <Route path="/legal/deed-registration/:id" element={<ProtectedRoute pageKey="legal-approvals"><LandDetailsPage from="deed-registration" /></ProtectedRoute>} />
       <Route path="/legal/land/register-existing" element={<Navigate to="/legal/land/properties" replace />} />
       <Route path="/legal/land/projects" element={<ProtectedRoute pageKey="legal-land-master"><LandProjectMapPage /></ProtectedRoute>} />
       <Route path="/legal/land/sales" element={<ProtectedRoute pageKey="legal-land-master"><LandSalesPage /></ProtectedRoute>} />
@@ -1380,6 +1393,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="dpr-tag-master">
             <DprTagMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/floor-master"
+        element={
+          <ProtectedRoute pageKey="dpr-floor-master">
+            <FloorMaster />
           </ProtectedRoute>
         }
       />

@@ -2,7 +2,7 @@
 //   config (types, helpers, sheet styles) · WorkDoneForm · WorkDoneDetail · printWorkDone
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Eye, PenSquare, Plus, Printer, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, PenSquare, Plus, Printer, RefreshCw } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell } from "@/components/sheet/Sheet";
@@ -52,6 +52,10 @@ export default function WorkDone() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [filterCompanyId, setFilterCompanyId] = useState<number | null>(null);
+  // Project filter, search and collapsible project groups (same pattern as Material Request / PO / BOQ / Work Order).
+  const [projectFilter, setProjectFilter] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Record<string, boolean>>({});
 
   const activeFinYear = finYears.find((fy) => fy.status === "Active")?.year ?? "";
   const finYearOptions = finYears.filter((fy) => fy.status === "Active" && !fy.locked).map((fy) => ({ id: String(fy.id), year: fy.year }));
@@ -90,7 +94,23 @@ export default function WorkDone() {
     staleTime: 30_000,
   });
   const entries = data?.rows ?? [];
-  const filtered = statusFilter === "all" ? entries : entries.filter((e) => (e.Status || "Draft") === statusFilter);
+  const q = search.trim().toLowerCase();
+  const filtered = entries.filter((e) =>
+    (statusFilter === "all" || (e.Status || "Draft") === statusFilter)
+    && (!projectFilter || e.ProjectId === projectFilter)
+    && (!q || [e.DocNo, e.CompanyName, e.ProjectName, e.SupplierName, e.WorkOrderNo, (e as { DescriptionOfWork?: string }).DescriptionOfWork]
+      .some((v) => String(v ?? "").toLowerCase().includes(q))));
+  // Grouped by project in list order (newest first), the project with the latest entry on top.
+  const groupedByProject = (() => {
+    const groups = new Map<string, { key: string; projectName: string | null; rows: WorkDoneEntry[] }>();
+    for (const e of filtered) {
+      const name = e.ProjectName || null;
+      const key = name || "no-project";
+      if (!groups.has(key)) groups.set(key, { key, projectName: name, rows: [] });
+      groups.get(key)!.rows.push(e);
+    }
+    return Array.from(groups.values());
+  })();
   const opened = openId != null ? entries.find((e) => e.ID === openId) ?? null : null;
 
   const { trails: approvalTrails, isLoading: approvalTrailsLoading } = useApprovalTrailsBulk("WorkDone", view === "list" ? filtered.map((e) => e.ID) : []);
@@ -210,7 +230,9 @@ export default function WorkDone() {
   // Export and Print cover what the list shows: the company and status picked.
   const filterNote = [
     filterCompanyId ? `Company: ${companies.find((c) => c.id === filterCompanyId)?.name ?? filterCompanyId}` : "",
+    projectFilter ? `Project: ${(projects as { id: number; name: string }[]).find((x) => x.id === projectFilter)?.name ?? projectFilter}` : "",
     statusFilter !== "all" ? `Status: ${statusFilter}` : "",
+    search.trim() ? `Search: ${search.trim()}` : "",
   ].filter(Boolean).join(" · ");
   const listRows = filtered as unknown as Record<string, unknown>[];
 
@@ -334,6 +356,24 @@ export default function WorkDone() {
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
+                <select
+                  value={projectFilter ?? ""}
+                  onChange={(e) => setProjectFilter(e.target.value ? Number(e.target.value) : null)}
+                  aria-label="Project"
+                  className="h-9 w-full md:w-56 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none"
+                >
+                  <option value="">All projects</option>
+                  {(projects as { id: number; name: string }[]).map((pr) => (
+                    <option key={pr.id} value={pr.id}>{pr.name}</option>
+                  ))}
+                </select>
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search doc no, work order, supplier…"
+                  aria-label="Search work done"
+                  className="h-9 w-full md:w-64 border border-foreground/40 focus:border-foreground bg-card px-3 text-sm text-foreground placeholder:text-muted-foreground/60 outline-none"
+                />
                 <div className="flex gap-2 flex-wrap">
                   {STATUSES.map((s) => (
                     <button key={s} onClick={() => setStatusFilter(s)} className={CHIP(statusFilter === s)}>
@@ -342,15 +382,43 @@ export default function WorkDone() {
                   ))}
                 </div>
               </div>
-              <DataTable
-                data={filtered}
-                columns={COLUMNS}
-                loading={isLoading}
-                searchable
-                paginated
-                emptyMessage="No work done entries. Adjust the filters or record a new one."
-                getRowId={(r: any) => String(r.ID)}
-              />
+              {isLoading ? (
+                <DataTable data={[]} columns={COLUMNS} loading searchable={false} paginated={false} getRowId={(r: any) => String(r.ID)} />
+              ) : filtered.length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-10">No work done entries. Adjust the filters or record a new one.</p>
+              ) : (
+                groupedByProject.map((group) => {
+                  const collapsed = !!collapsedProjectGroups[group.key];
+                  return (
+                    <div key={group.key} className="border-b border-foreground/20 last:border-0">
+                      <button
+                        type="button"
+                        aria-expanded={!collapsed}
+                        onClick={() => setCollapsedProjectGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-primary/5 transition-colors text-left"
+                        style={{ borderBottom: collapsed ? undefined : "1px solid hsl(var(--foreground) / 0.2)" }}
+                      >
+                        {collapsed ? <ChevronRight size={14} className="text-muted-foreground shrink-0" /> : <ChevronDown size={14} className="text-muted-foreground shrink-0" />}
+                        <span className="font-heading text-sm font-bold tracking-tight text-foreground">{group.projectName || "No project"}</span>
+                        <span className="ml-auto font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground border border-foreground/30 px-1.5 py-0.5">
+                          {group.rows.length} entr{group.rows.length !== 1 ? "ies" : "y"}
+                        </span>
+                      </button>
+                      {!collapsed && (
+                        <DataTable
+                          data={group.rows}
+                          columns={COLUMNS}
+                          searchable={false}
+                          paginated={group.rows.length > 10}
+                          defaultPageSize={10}
+                          emptyMessage="No work done entries."
+                          getRowId={(r: any) => String(r.ID)}
+                        />
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         )}

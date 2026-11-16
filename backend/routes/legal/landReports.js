@@ -23,7 +23,7 @@ const REPORTS = [
     LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId WHERE l.IsActive = 1 ORDER BY l.LandCode` },
   { key: "project-land", group: "Land", title: "Project-wise Land", sql: `
     SELECT ISNULL(p.name, N'(not mapped)') AS Project, ${LAND}, m.MouzaName AS Mouza, CAST(l.Area AS DECIMAL(18,4)) AS Area, u.UnitName AS Unit,
-           CASE WHEN l.L2Status = 'Approved' THEN N'Complete' ELSE N'Under process' END AS [Position],
+           CASE WHEN l.WorkflowStatus = N'Deed Completed' THEN N'Complete' WHEN l.WorkflowStatus = N'Deed Process' THEN N'Deed process' ELSE N'Under process' END AS [Position],
            CASE WHEN l.IsOnHold = 1 THEN N'On hold' ELSE l.WorkflowStatus END AS [Approval status], l.LandStatus AS [Land status],
            (SELECT COUNT(*) FROM dbo.LegalLandDocument x WHERE x.LandId = l.LandId AND x.IsActive = 1) AS Documents
     FROM dbo.LegalLand l LEFT JOIN dbo.enterprise p ON p.id = l.ProjectId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
@@ -37,11 +37,11 @@ const REPORTS = [
     WHERE e.IsActive = 1 ORDER BY e.EnquiryDate DESC` },
   { key: "current-ownership", group: "Ownership", title: "Current Ownership", sql: `
     SELECT ${LAND}, x.OwnerName AS Owner, x.OwnerGuardian AS [Father / husband], CAST(x.SharePct AS DECIMAL(7,4)) AS [Share %],
-           x.ValidFrom AS Since, x.VerificationStatus AS Verification
+           x.ValidFrom AS Since
     FROM dbo.LegalOwnershipRecord x ${JOIN_LAND} WHERE x.IsActive = 1 AND x.ValidTo IS NULL ORDER BY l.LandCode, x.SharePct DESC` },
   { key: "ownership-history", group: "Ownership", title: "Complete Ownership History", sql: `
     SELECT ${LAND}, x.EventDate AS [Date], t.Name AS [Transfer], ISNULL(x.PreviousOwnerName, N'(earliest)') AS [From], x.NewOwnerName AS [To],
-           CAST(x.TransferSharePct AS DECIMAL(7,4)) AS [Share %], ISNULL(x.DocumentNo, x.DeedNo) AS [Document no.], x.VerificationStatus AS Verification
+           CAST(x.TransferSharePct AS DECIMAL(7,4)) AS [Share %], ISNULL(x.DocumentNo, x.DeedNo) AS [Document no.]
     FROM dbo.LegalOwnershipEvent x ${JOIN_LAND} LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = x.TransferTypeId
     WHERE x.IsActive = 1 ORDER BY l.LandCode, x.EventDate` },
   { key: "joint-ownership", group: "Ownership", title: "Joint Ownership", sql: `
@@ -51,14 +51,8 @@ const REPORTS = [
     GROUP BY l.LandCode, l.LandName HAVING COUNT(*) > 1 ORDER BY l.LandCode` },
   { key: "inheritance", group: "Ownership", title: "Inheritance", sql: `
     SELECT ${LAND}, x.DeceasedName AS Deceased, x.DateOfDeath AS [Date of death], x.SupportingType AS [Supporting record],
-           (SELECT STRING_AGG(h.HeirName + ' ' + CAST(CAST(h.SharePct AS DECIMAL(7,2)) AS NVARCHAR(10)) + '%', ', ') FROM dbo.LegalInheritanceHeir h WHERE h.InheritanceId = x.InheritanceId AND h.IsActive = 1) AS Heirs,
-           x.VerificationStatus AS Verification
+           (SELECT STRING_AGG(h.HeirName + ' ' + CAST(CAST(h.SharePct AS DECIMAL(7,2)) AS NVARCHAR(10)) + '%', ', ') FROM dbo.LegalInheritanceHeir h WHERE h.InheritanceId = x.InheritanceId AND h.IsActive = 1) AS Heirs
     FROM dbo.LegalInheritance x ${JOIN_LAND} WHERE x.IsActive = 1 ORDER BY l.LandCode` },
-  { key: "pending-ownership", group: "Ownership", title: "Pending Ownership Verification", sql: `
-    SELECT ${LAND}, N'Ownership record' AS [Record], x.OwnerName AS [Detail], x.VerificationStatus AS Status FROM dbo.LegalOwnershipRecord x ${JOIN_LAND} WHERE x.IsActive = 1 AND x.VerificationStatus <> N'Verified'
-    UNION ALL SELECT ${LAND}, N'Transfer', ISNULL(x.PreviousOwnerName, '?') + N' → ' + x.NewOwnerName, x.VerificationStatus FROM dbo.LegalOwnershipEvent x ${JOIN_LAND} WHERE x.IsActive = 1 AND x.VerificationStatus <> N'Verified'
-    UNION ALL SELECT ${LAND}, N'Check: ' + x.CheckItem, (SELECT r.OwnerName FROM dbo.LegalOwnershipRecord r WHERE r.RecordId = x.RecordId), x.Result FROM dbo.LegalOwnershipCheck x ${JOIN_LAND} WHERE x.IsActive = 1 AND x.Result NOT IN (N'Verified', N'Not Applicable')
-    ORDER BY [Land ID]` },
   { key: "pending-documents", group: "Documents", title: "Pending Documents", sql: `
     SELECT ${LAND}, dt.DocTypeName AS Document, i.Requirement, i.StageNeeded AS [Needed by],
            ISNULL((SELECT TOP 1 v.ReviewStatus FROM dbo.LegalLandDocument d JOIN dbo.LegalLandDocumentVersion v ON v.DocumentId = d.DocumentId AND v.VersionNo = d.CurrentVersionNo
@@ -74,11 +68,11 @@ const REPORTS = [
     FROM dbo.LegalLandDocumentVersion v JOIN dbo.LegalLandDocument d ON d.DocumentId = v.DocumentId JOIN dbo.LegalLand l ON l.LandId = d.LandId
     WHERE v.ReviewStatus IN (N'Rejected', N'Reattachment Required') ORDER BY v.ReviewedAt DESC` },
   { key: "legal-cases", group: "Legal", title: "Legal Case Register", sql: `
-    SELECT ${LAND}, x.CaseNumber AS [Case], t.Name AS Type, x.CourtName AS Court, s.Name AS Status, x.NextHearingDate AS [Next hearing], x.VerificationStatus AS Verification
+    SELECT ${LAND}, x.CaseNumber AS [Case], t.Name AS Type, x.CourtName AS Court, s.Name AS Status, x.NextHearingDate AS [Next hearing]
     FROM dbo.LegalCase x ${JOIN_LAND} LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = x.CaseTypeId LEFT JOIN dbo.LegalLookupValue s ON s.LookupId = x.LegalStatusId
     WHERE x.IsActive = 1 ORDER BY x.NextHearingDate` },
   { key: "mortgages", group: "Legal", title: "Mortgage & Loan Register", sql: `
-    SELECT ${LAND}, x.LenderName AS Lender, t.Name AS Type, x.LoanAmount AS [Loan], x.OutstandingAmount AS Outstanding, x.MortgageStatus AS Status, x.VerificationStatus AS Verification
+    SELECT ${LAND}, x.LenderName AS Lender, t.Name AS Type, x.LoanAmount AS [Loan], x.OutstandingAmount AS Outstanding, x.MortgageStatus AS Status
     FROM dbo.LegalMortgage x ${JOIN_LAND} LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = x.MortgageTypeId WHERE x.IsActive = 1 ORDER BY l.LandCode` },
   { key: "legal-hold", group: "Legal", title: "Legal Hold / Dispute", sql: `
     SELECT ${LAND}, x.HoldCategory AS Category, x.HoldReason AS Reason, x.HoldDate AS [Since], x.ExpectedReviewDate AS [Review by],
@@ -88,29 +82,29 @@ const REPORTS = [
   { key: "sales", group: "Purchase & Sale", title: "Sale Register", txn: "Sale" },
   { key: "valuations", group: "Purchase & Sale", title: "Land Valuation", sql: `
     SELECT ${LAND}, x.ValuationDate AS [Date], x.MarketRate AS [Market rate], x.EstimatedMarketValue AS [Market value], x.GovernmentValuation AS [Govt. value],
-           x.ValuationSource AS Source, x.VerificationStatus AS Verification
+           x.ValuationSource AS Source
     FROM dbo.LegalValuation x ${JOIN_LAND} WHERE x.IsActive = 1 ORDER BY x.ValuationDate DESC` },
   // Deeds as recorded on each land's Acquisition & Purchase tab (one row per transfer).
   { key: "registered-deeds", group: "Deed & Registration", title: "Deed Register", sql: `
     SELECT ${LAND}, x.EventDate AS [Date], t.Name AS [Transfer], x.PreviousOwnerName AS [From], x.NewOwnerName AS [To],
-           ISNULL(x.DeedNo, x.DocumentNo) AS [Deed no.], x.RegistrationDate AS [Registered], o.OfficeName AS Office, x.VerificationStatus AS Verification
+           ISNULL(x.DeedNo, x.DocumentNo) AS [Deed no.], x.RegistrationDate AS [Registered], o.OfficeName AS Office
     FROM dbo.LegalOwnershipEvent x ${JOIN_LAND} LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = x.TransferTypeId
     LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = x.RegistrationOfficeId WHERE x.IsActive = 1 ORDER BY x.EventDate DESC` },
   { key: "mutation-pending", group: "Mutation & Closure", title: "Mutation Pending", mutation: false },
   { key: "mutation-completed", group: "Mutation & Closure", title: "Mutation Completed", mutation: true },
   { key: "workflow-status", group: "Mutation & Closure", title: "Approval Status & Waiting Time", sql: `
     SELECT ${LAND}, l.EntryType AS [Entry type], CASE WHEN l.IsOnHold = 1 THEN N'On hold' ELSE l.WorkflowStatus END AS [Approval status],
-           l.L1Status AS L1, l.L2Status AS L2, ISNULL(l.UpdatedAt, l.CreatedAt) AS [Last changed],
+           ISNULL(l.WorkflowStatus, N'Draft') AS Stage, ISNULL(l.UpdatedAt, l.CreatedAt) AS [Last changed],
            DATEDIFF(day, ISNULL(l.UpdatedAt, l.CreatedAt), SYSUTCDATETIME()) AS [Days waiting]
-    FROM dbo.LegalLand l WHERE l.IsActive = 1 ORDER BY CASE WHEN l.L2Status = N'Approved' THEN 1 ELSE 0 END, [Days waiting] DESC` },
+    FROM dbo.LegalLand l WHERE l.IsActive = 1 ORDER BY CASE WHEN l.WorkflowStatus IN (N'Deed Process', N'Deed Completed', N'Deed Registration', N'Registered') THEN 1 ELSE 0 END, [Days waiting] DESC` },
   { key: "audit", group: "Mutation & Closure", title: "User Activity / Audit", sql: `
     SELECT TOP 500 a.CreatedAt AS [When], u.name AS [User], a.Action, a.EntityType AS [Record], a.EntityId AS [Id], l.LandCode AS [Land ID], a.Remarks
     FROM dbo.LegalRecordAudit a LEFT JOIN dbo.users u ON u.id = a.UserId LEFT JOIN dbo.LegalLand l ON l.LandId = a.LandId ORDER BY a.EventId DESC` },
 ];
 const txnSql = (type) => `
   SELECT ${LAND}, x.TransactionNo AS [Transaction], x.BuyerName AS Buyer, x.SellerNames AS [Seller(s)], CAST(x.TxnArea AS DECIMAL(18,4)) AS Area, u.UnitName AS Unit,
-         x.TotalValue AS Value, ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = x.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0) AS [Verified paid],
-         x.TotalValue - ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = x.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0) AS Balance,
+         x.TotalValue AS Value, ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = x.TransactionId AND p.IsActive = 1), 0) AS [Verified paid],
+         x.TotalValue - ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = x.TransactionId AND p.IsActive = 1), 0) AS Balance,
          x.TxnStatus AS Status
   FROM dbo.LegalLandTransaction x ${JOIN_LAND} LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = x.AreaUnitId
   WHERE x.IsActive = 1 AND x.TxnType = N'${type}' ORDER BY x.TransactionId DESC`;

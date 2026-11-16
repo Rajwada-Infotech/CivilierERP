@@ -30,15 +30,15 @@ type Panel = Details | Doc | Site;
 
 const show = (detail: Panel) => window.dispatchEvent(new CustomEvent(EVENT, { detail }));
 
-/** Show an uploaded document in the right-side panel. */
+/** A document (deed copy, receipt, any uploaded file): shown on the same page, in the right-side panel. */
 export const previewLegalFile = (id: unknown, name?: string) => show({ kind: "doc", id: String(id), name: name || "Document" });
 
-/** Open a website (an office or portal link) in the right-side panel. */
-export const openLegalLink = (url: string, name?: string) => show({ kind: "site", url, name: name || url });
+/** A website (an office, portal or IGR link): a new browser tab — such sites refuse to be shown inside another page. */
+export const openLegalLink = (url: string, _name?: string) => { window.open(url, "_blank", "noopener,noreferrer"); };
 
-/** A plot on Google Maps in the side panel (the embed form of the map, which may be shown inside another site). */
+/** A plot on Google Maps: on the same page, in the side panel (the embed form of the map is allowed inside a page). */
 export const openLegalMap = (lat: unknown, lng: unknown, name?: string) =>
-  openLegalLink(`https://maps.google.com/maps?q=${Number(lat)},${Number(lng)}&z=17&output=embed`, name || `Map · ${lat}, ${lng}`);
+  show({ kind: "site", url: `https://maps.google.com/maps?q=${Number(lat)},${Number(lng)}&z=17&output=embed`, name: name || `Map · ${lat}, ${lng}` });
 
 /** A link cell: opens the site in the side panel. */
 export const LegalLinkChip: React.FC<{ url: unknown; name?: string; onOpen?: () => void }> = ({ url, name, onOpen }) =>
@@ -46,7 +46,7 @@ export const LegalLinkChip: React.FC<{ url: unknown; name?: string; onOpen?: () 
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); if (onOpen) onOpen(); else openLegalLink(String(url), name); }}
-      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-left text-xs hover:bg-muted"
+      className="inline-flex max-w-[min(220px,100%)] items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-left text-xs hover:bg-muted"
       title={String(url)}
     >
       <Globe size={13} className="shrink-0 text-sky-600" /> <span className="truncate">{String(url).replace(/^https?:\/\//, "")}</span>
@@ -62,7 +62,7 @@ export const LegalFileLink: React.FC<{ id: unknown; name?: string; className?: s
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); if (onOpen) onOpen(); else previewLegalFile(id, name); }}
-      className={`inline-flex max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-left text-xs hover:bg-muted ${className}`}
+      className={`inline-flex max-w-[min(220px,100%)] items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-left text-xs hover:bg-muted ${className}`}
       title={`Preview ${name || "document"}`}
     >
       <FileText size={13} className="shrink-0 text-[#7c4a2e] dark:text-[#c48e5c]" /> <span className="truncate">{name || "Document"}</span>

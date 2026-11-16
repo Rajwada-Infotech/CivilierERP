@@ -221,7 +221,12 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ent.id                   AS CompanyID,
           np.PBankID               AS BankID,
           np.PBankName             AS BankName,
-          np.PAmount               AS Amount,
+          -- What actually left the bank. A payment with its own TDS (no invoice / JV line behind it) holds the GROSS
+          -- amount in PAmount and posts Bank = PAmount - TDS, TDS head = TDS (postPaymentApproval). An invoice- or
+          -- JV-linked payment is already net (TDS was withheld on the invoice / JV), so its TDSAmount is not subtracted.
+          CASE WHEN ISNULL(np.PExpenseRef, '') = '' AND np.JVLineId IS NULL
+               THEN np.PAmount - ISNULL(np.TDSAmount, 0)
+               ELSE np.PAmount END AS Amount,
           np.PDate                 AS PayDate,
           np.PMode                 AS Mode,
           np.DocNo                 AS DocNo,
@@ -511,7 +516,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
         SELECT
           ls.LoanId                AS SourceID,
           'LOAN_DISBURSED'         AS SourceType,
-          bco.name                 AS PaymentName,
+          COALESCE(bco.name, bcrm.CustomerName, bah.LHeadName) AS PaymentName,
           lco.name                 AS CompanyName,
           lco.id                   AS CompanyID,
           ls.LenderBankAccountId   AS BankID,
@@ -544,10 +549,14 @@ router.get("/", cache("brs", 60), async (req, res) => {
         LEFT JOIN dbo.enterprise lco ON lco.business_type = 'C' AND lco.id = ls.LenderCompanyId
         LEFT JOIN dbo.enterprise bco ON bco.business_type = 'C' AND bco.id = ls.BorrowerCompanyId
         LEFT JOIN dbo.AccountHeadMaster lbk ON lbk.LHeadId = ls.LenderBankAccountId
+        LEFT JOIN dbo.CrmCustomer bcrm ON ls.LoanType = 'Customer Loan' AND ls.BorrowerCustomerSource = 'CRM' AND bcrm.Id = ls.BorrowerCustomerId
+        LEFT JOIN dbo.AccountHeadMaster bah ON ls.LoanType = 'Customer Loan' AND ISNULL(ls.BorrowerCustomerSource, '') <> 'CRM' AND bah.LHeadId = ls.BorrowerCustomerId
         LEFT JOIN BankReconciliation brc6
           ON  brc6.SourceType = 'LOAN_DISBURSED'
           AND brc6.SourceID   = ls.LoanId
-        WHERE ls.LoanType = 'Inter-Company'
+        WHERE (ls.LoanType = 'Inter-Company'
+               -- Customer Loan (Company → Customer) disbursed straight from the loan: same bank leg.
+               OR (ls.LoanType = 'Customer Loan' AND ls.LenderCustomerId IS NULL AND ls.DisbursementPaymentId IS NULL))
           AND ls.DisbursedAt IS NOT NULL
           AND ls.LenderBankAccountId IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM dbo.FundTransfer ft3 WHERE ft3.LinkedLoanId = ls.LoanId)

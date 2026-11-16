@@ -71,6 +71,9 @@ interface Broker {
   LHeadStatus: boolean;
   isTdsApplicable: boolean;
   tdsLimitApplicable: boolean;
+  // This broker's own TDS limits (null = standard ₹30k per bill / ₹1L per year).
+  tdsSingleBillLimit: number | null;
+  tdsYearlyLimit: number | null;
 }
 
 interface BrokerForm {
@@ -86,6 +89,9 @@ interface BrokerForm {
   LHeadStatus: boolean;
   isTdsApplicable: boolean;
   tdsLimitApplicable: boolean;
+  // As typed — blank = the standard ₹30,000 per bill / ₹1,00,000 per year.
+  tdsSingleBillLimit?: string;
+  tdsYearlyLimit?: string;
 }
 
 const EMPTY_FORM: BrokerForm = {
@@ -166,6 +172,8 @@ const CrmBrokerMaster: React.FC = () => {
       LHeadStatus: Boolean(item.LHeadStatus),
       isTdsApplicable: Boolean(item.IsTdsApplicable),
       tdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
+      tdsSingleBillLimit: item.TdsSingleBillLimit != null ? Number(item.TdsSingleBillLimit) : null,
+      tdsYearlyLimit: item.TdsYearlyLimit != null ? Number(item.TdsYearlyLimit) : null,
     }));
   }, [rawData]);
 
@@ -187,6 +195,8 @@ const CrmBrokerMaster: React.FC = () => {
     LHeadStatus: f.LHeadStatus,
     IsTdsApplicable: f.isTdsApplicable,
     TdsLimitApplicable: f.tdsLimitApplicable,
+    TdsSingleBillLimit: f.tdsSingleBillLimit ?? "",
+    TdsYearlyLimit: f.tdsYearlyLimit ?? "",
     LBranchName: null,
     LGSTState: null,
     LCountry: "India",
@@ -248,6 +258,8 @@ const CrmBrokerMaster: React.FC = () => {
       LHeadStatus: b.LHeadStatus,
       isTdsApplicable: b.isTdsApplicable,
       tdsLimitApplicable: b.tdsLimitApplicable,
+      tdsSingleBillLimit: b.tdsSingleBillLimit != null ? String(b.tdsSingleBillLimit) : "",
+      tdsYearlyLimit: b.tdsYearlyLimit != null ? String(b.tdsYearlyLimit) : "",
     });
     setErrors({});
     setLocked(true);
@@ -409,9 +421,18 @@ const CrmBrokerMaster: React.FC = () => {
                   <Switch on={form.isTdsApplicable} disabled={locked} onToggle={() => setForm((p) => ({ ...p, isTdsApplicable: !p.isTdsApplicable }))} label="TDS applicable" state={form.isTdsApplicable ? "Yes (Sec. 194H)" : "No"} />
                   {form.isTdsApplicable && (
                     <Switch on={form.tdsLimitApplicable} disabled={locked} onToggle={() => setForm((p) => ({ ...p, tdsLimitApplicable: !p.tdsLimitApplicable }))}
-                      label="TDS limit" state={form.tdsLimitApplicable ? "Applied (₹30k / ₹1L threshold)" : "Deduct on every bill"} />
+                      label="TDS limit" state={form.tdsLimitApplicable ? "Applied" : "Deduct on every bill"} />
                   )}
                 </div>
+                {/* This broker's own limits — blank keeps the standard ₹30,000 per bill / ₹1,00,000 per year. */}
+                {form.isTdsApplicable && form.tdsLimitApplicable && (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {field("TDS limit per bill (₹)", <input type="number" min={0} inputMode="decimal" value={form.tdsSingleBillLimit ?? ""} readOnly={locked}
+                      onChange={(e) => setForm((p) => ({ ...p, tdsSingleBillLimit: e.target.value }))} placeholder="30000 (standard)" className={`${INP} ${NUM}`} />)}
+                    {field("TDS limit per year (₹)", <input type="number" min={0} inputMode="decimal" value={form.tdsYearlyLimit ?? ""} readOnly={locked}
+                      onChange={(e) => setForm((p) => ({ ...p, tdsYearlyLimit: e.target.value }))} placeholder="100000 (standard)" className={`${INP} ${NUM}`} />)}
+                  </div>
+                )}
               </div>
               <div className="flex items-center justify-end gap-2 px-4 py-3" style={{ borderTop: RULE }}>
                 {editingId != null && locked ? (
@@ -472,7 +493,7 @@ const CrmBrokerMaster: React.FC = () => {
                   ["RERA number", viewRecord.LHeadRera, true],
                   ["Payment terms", viewRecord.LHeadPaymentTerms, false],
                   ["TDS", viewRecord.isTdsApplicable ? "Yes (Sec. 194H)" : "No", false],
-                  ["TDS limit", viewRecord.isTdsApplicable ? (viewRecord.tdsLimitApplicable ? "Applied (₹30k / ₹1L threshold)" : "Deduct on every bill") : null, false],
+                  ["TDS limit", viewRecord.isTdsApplicable ? (viewRecord.tdsLimitApplicable ? `Applied (₹${(viewRecord.tdsSingleBillLimit ?? 30000).toLocaleString("en-IN")} per bill / ₹${(viewRecord.tdsYearlyLimit ?? 100000).toLocaleString("en-IN")} per year)` : "Deduct on every bill") : null, false],
                 ] as const).map(([label, value, num]) => (
                   <div key={label} className="min-w-0">
                     <p className={LBL}>{label}</p>

@@ -28,6 +28,8 @@ import StockLedgerScreen from "@/screens/material/StockLedgerScreen";
 import StockTransferListScreen from "@/screens/material/StockTransferListScreen";
 import DebitNoteListScreen from "@/screens/material/DebitNoteListScreen";
 import type { QTPOPrefill } from "@/api/purchaseOrdersApi";
+import BoqListScreen from "@/screens/engineering/BoqListScreen";
+import BoqDetailScreen from "@/screens/engineering/BoqDetailScreen";
 import ContractListScreen from "@/screens/finance/ContractListScreen";
 import ContractDetailScreen from "@/screens/finance/ContractDetailScreen";
 import NewContractScreen from "@/screens/finance/NewContractScreen";
@@ -104,6 +106,8 @@ export type MainStackParamList = {
   } | undefined;
   StockTransfer: undefined;
   DebitNote: undefined;
+  Boq: undefined;
+  BoqDetail: { id: number };
   Contract: undefined;
   ContractDetail: { id: number };
   NewContract: { id?: number } | undefined;
@@ -169,6 +173,8 @@ export default function MainStack() {
       <Stack.Screen name="StockLedger" component={StockLedgerScreen} options={{ title: "Ledger" }} />
       <Stack.Screen name="StockTransfer" component={StockTransferListScreen} options={{ title: "Stock Transfer" }} />
       <Stack.Screen name="DebitNote" component={DebitNoteListScreen} options={{ title: "Debit Note" }} />
+      <Stack.Screen name="Boq" component={BoqListScreen} options={{ title: "Bills of Quantities" }} />
+      <Stack.Screen name="BoqDetail" component={BoqDetailScreen} options={{ title: "BOQ" }} />
       <Stack.Screen name="Contract" component={ContractListScreen} options={{ title: "Contracts" }} />
       <Stack.Screen name="ContractDetail" component={ContractDetailScreen} options={{ title: "Contract" }} />
       <Stack.Screen name="NewContract" component={NewContractScreen} options={{ title: "New Contract" }} />

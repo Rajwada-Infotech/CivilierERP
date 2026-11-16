@@ -70,6 +70,24 @@ export const updateCandidate = async (id: number, payload: CandidatePayload) => 
   return handle<{ message: string }>(res);
 };
 
+export interface CandidateImportRow { rowNo: number; cells: Record<string, string> }
+export interface CandidateImportResult {
+  dryRun: boolean;
+  imported: number;
+  summary: { total: number; valid: number; invalid: number };
+  results: { rowNo: number; name: string; errors: string[] }[];
+}
+
+/** dryRun = true only checks the rows; false saves them all (nothing is saved if any row is invalid). */
+export const importCandidates = async (rows: CandidateImportRow[], dryRun: boolean) => {
+  const res = await fetchWithAuth(`${BASE}/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rows, dryRun }),
+  });
+  return handle<CandidateImportResult>(res);
+};
+
 export type InterviewResult = "Selected" | "Rejected" | "On Hold";
 
 export const updateCandidateInterviewStatus = async (id: number, status: InterviewResult) => {

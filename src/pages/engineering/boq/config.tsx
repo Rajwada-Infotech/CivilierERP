@@ -17,6 +17,8 @@ export interface BoqItem {
   itemCode: string;
   description: string;
   quantity: string;
+  /** Wastage on top of the quantity, in % — Amount = Qty × (1 + Wastage %) × Rate. */
+  wastage: string;
   uomName: string;
   rate: string;
   tax: string;
@@ -50,6 +52,8 @@ export interface BoqRecord {
   CompanyName?: string;
   ProjectId: number | null;
   ProjectName?: string;
+  /** The project's logo (data URL or address) from the Project master; shown in the print header. */
+  ProjectLogo?: string | null;
   Description: string;
   TotalAmount: number;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
@@ -65,6 +69,12 @@ export interface BoqRecord {
   ApprovedBy?: string;
   RejectedBy?: string;
   RejectionNote?: string;
+  /** Where this estimation is for (migration 637). */
+  BlockId?: number | null;
+  BlockName?: string | null;
+  FloorNo?: string | null;
+  RoomId?: number | null;
+  RoomName?: string | null;
   BoqItems: BoqItem[];
   BoqActivities: BoqActivity[];
 }
@@ -147,8 +157,8 @@ export const fmtDate = (d?: string) =>
       })
     : "—";
 
-export const calcAmount = (qty: string, rate: string) =>
-  (parseFloat(qty) || 0) * (parseFloat(rate) || 0);
+export const calcAmount = (qty: string, rate: string, wastagePct: string = "") =>
+  (parseFloat(qty) || 0) * (1 + (parseFloat(wastagePct) || 0) / 100) * (parseFloat(rate) || 0);
 
 /**
  * What an activity's per-unit figures are divided by: its Total Area when one is
@@ -170,6 +180,7 @@ export const blankItem = (): BoqItem => ({
   itemCode: "",
   description: "",
   quantity: "",
+  wastage: "",
   uomName: "",
   rate: "",
   tax: "18",
@@ -202,6 +213,7 @@ export const rowToItem = (r: any): BoqItem => ({
   itemCode: r.ItemCode ?? "",
   description: r.Description ?? "",
   quantity: String(r.Quantity ?? ""),
+  wastage: Number(r.WastagePct ?? r.wastage) ? String(Number(r.WastagePct ?? r.wastage)) : "",
   uomName: r.UomName ?? "",
   rate: String(r.Rate ?? ""),
   tax: String(r.TaxPct ?? "18"),
@@ -243,6 +255,9 @@ export const buildPayload = (
   Description: form.Description,
   Remarks: form.Remarks,
   DocTypeId: form.DocTypeId ? Number(form.DocTypeId) : null,
+  BlockId: form.BlockId ? Number(form.BlockId) : null,
+  FloorNo: form.FloorNo || null,
+  RoomId: null, // the form no longer asks for a room — a BOQ is for a block + floor
   finYear: form.FinYear || undefined,
   Status: form.Status,
   BoqItems: items.map((it) => {
@@ -257,6 +272,7 @@ export const buildPayload = (
     itemCode: it.itemCode,
     description: it.description,
     quantity: it.quantity,
+    wastage: it.wastage,
     uomName: it.uomName,
     unit: it.uomName,
     rate: it.rate,
@@ -345,10 +361,18 @@ export interface FormState {
   Remarks: string;
   DocTypeId: string;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
+  BlockId: string;
+  FloorNo: string;
+  RoomId: string;
 }
 
 export const canEditBoq = (status?: string | null) =>
   !status || status === "Draft" || status === "Rejected";
+
+// Statuses the Edit button opens the form for. Pending stays Pending; Approved goes back for approval and needs
+// the post-approval right (the server refuses otherwise, and the form shows its message).
+export const canOpenBoqEdit = (status?: string | null) =>
+  canEditBoq(status) || status === "Pending" || status === "Approved";
 
 export const defaultForm = (finYear?: string): FormState => ({
   BoqNo: "",
@@ -360,6 +384,9 @@ export const defaultForm = (finYear?: string): FormState => ({
   Remarks: "",
   DocTypeId: "",
   Status: "Draft",
+  BlockId: "",
+  FloorNo: "",
+  RoomId: "",
 });
 
 export const recordToForm = (r: BoqRecord): FormState => ({
@@ -372,6 +399,9 @@ export const recordToForm = (r: BoqRecord): FormState => ({
   Remarks: r.Remarks ?? "",
   DocTypeId: String(r.DocTypeId ?? ""),
   Status: r.Status ?? "Draft",
+  BlockId: r.BlockId != null ? String(r.BlockId) : "",
+  FloorNo: r.FloorNo != null ? String(r.FloorNo) : "",
+  RoomId: r.RoomId != null ? String(r.RoomId) : "",
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

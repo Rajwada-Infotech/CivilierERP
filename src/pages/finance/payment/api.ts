@@ -189,6 +189,7 @@ export const PARTY_TYPE_LABELS: Record<string, string> = {
   BR: "Brokers",
   A: "Customers",
   P: "Partners",
+  E: "Employees",
 };
 
 export const fetchSupplierOptions = async (): Promise<
@@ -208,7 +209,7 @@ export const fetchSupplierOptions = async (): Promise<
   // so the Payment page can group the dropdown by category — see
   // PARTY_TYPE_LABELS. 'V' (Vendor) is included alongside 'S' (Supplier) —
   // a Landlord is also LHeadType='S', so it was already covered.
-  const res = await fetchWithAuth("/api/account-head/options?type=S,V,C,BR,A,P");
+  const res = await fetchWithAuth("/api/account-head/options?type=S,V,C,BR,A,P,E");
   if (!res.ok) return [];
   return res.json().catch(() => ({}));
 };

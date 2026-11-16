@@ -1,30 +1,25 @@
 import React, { useState } from "react";
-import { openLegalMap } from "@/components/legal/LegalDocumentPreview";
+import { openLegalMap, LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Global } from "iconsax-react";
-import { FileText, Pencil, ShieldCheck, CheckCircle2, RotateCcw, XCircle, Clock, AlertTriangle, Send } from "lucide-react";
-import { toast } from "sonner";
+import { FileText, Pencil } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import {
   getLandOverview,
   getLandAudit,
-  verifyLand,
-  submitLandForL1,
-  actionLandL1,
-  actionLandL2,
   type LandOverview,
 } from "@/api/legalLandApi";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { getDeedRegLand } from "@/api/legalDeedRegApi";
 import { LegalMasterTable, WhatsAppName } from "../LegalMasterPage";
 import { useAuth } from "@/contexts/AuthContext";
 import { OwnershipStep } from "./steps/OwnershipStep";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
-import { SectionVerify, VERIFY_SECTION_TABS } from "@/components/legal/SectionVerify";
+import { FinalVerifyBar } from "@/components/legal/FinalVerifyBar";
+import { DueDiligencePanel } from "@/components/legal/DueDiligencePanel";
+import { PortalFetchButtons } from "@/components/legal/PortalFetch";
 import { DocumentsStep, RecordDocuments, type DocLink } from "./steps/DocumentsStep";
 import { getLandDocuments } from "@/api/legalDocumentsApi";
 import { getLegalRows, type LegalRow } from "@/api/legalMastersApi";
@@ -42,6 +37,7 @@ type TabKey =
   | "transfers"
   | "records"
   | "documents"
+  | "diligence"
   | "legal"
   | "loans"
   | "mutation"
@@ -57,7 +53,7 @@ const TABS: { key: TabKey; label: string; count?: keyof LandOverview["counts"] }
   { key: "ownership", label: "Ownership History", count: "ownershipRecords" },
   { key: "transfers", label: "Acquisition & Purchase", count: "transfers" },
   { key: "records", label: "Land Records (RS / LR)", count: "landRecords" },
-  { key: "legal", label: "Legal Information", count: "legalHistory" },
+  { key: "legal", label: "Legal Dispute Information", count: "legalHistory" },
   { key: "loans", label: "Loan & Mortgage", count: "mortgages" },
   { key: "mutation", label: "Mutation Records", count: "mutations" },
   { key: "payments", label: "Payment History", count: "payments" },
@@ -65,6 +61,7 @@ const TABS: { key: TabKey; label: string; count?: keyof LandOverview["counts"] }
   { key: "survey", label: "Survey & Valuation", count: "valuations" },
   // Each section uploads its own documents; this tab is for everything else (and lists them all).
   { key: "documents", label: "Other Documents", count: "documents" },
+  { key: "diligence", label: "Due Diligence" },
   { key: "photos", label: "Notes & Attachments" },
   { key: "activity", label: "Activity History" },
 ];
@@ -74,7 +71,7 @@ const QUICK_SECTIONS: { tab: TabKey; label: string; count: keyof LandOverview["c
   { tab: "transfers", label: "Acquisition & Purchase", count: "transfers", hint: "Sale deed numbers, dates, purchase price & consideration" },
   { tab: "records", label: "Land Records (RS / LR)", count: "landRecords", hint: "RS and LR Khatian / Dag entries and mappings" },
   { tab: "documents", label: "Documents Archive", count: "documents", hint: "Deeds, khatian copies, mutation orders, tax receipts" },
-  { tab: "legal", label: "Legal Information", count: "legalHistory", hint: "Court cases, dispute records, orders, notices, legal opinions" },
+  { tab: "legal", label: "Legal Dispute Information", count: "legalHistory", hint: "Court cases, dispute records, orders, notices, legal opinions" },
   { tab: "loans", label: "Loan & Mortgage", count: "mortgages", hint: "Past and current bank loans and mortgages on this land" },
   { tab: "mutation", label: "Mutation Records", count: "mutations", hint: "Each mutation application, case number, and order" },
   { tab: "payments", label: "Payment History", count: "payments", hint: "Past payments, advances, and final settlements for the land" },
@@ -124,13 +121,13 @@ const Activity: React.FC<{ landId: number }> = ({ landId }) => {
           {data.map((a) => (
             <tr key={a.EventId}>
               <td className="whitespace-nowrap px-2 py-2 text-xs text-muted-foreground">{new Date(a.CreatedAt).toLocaleString("en-IN")}</td>
-              <td className="px-2 py-2">{a.UserName ?? "—"}</td>
+              <td className="px-2 py-2">{a.UserName ?? "—"}{a.UserRole ? <span className="block text-[0.6875rem] text-muted-foreground">{a.UserRole}</span> : null}</td>
               <td className="px-2 py-2">{a.Action}</td>
               <td className="px-2 py-2 text-xs text-muted-foreground">
                 {a.EntityType}
                 {a.EntityId ? ` #${a.EntityId}` : ""}
               </td>
-              <td className="px-2 py-2 text-xs text-muted-foreground">{a.Remarks ?? ""}</td>
+              <td className="px-2 py-2 text-xs text-muted-foreground">{a.Remarks ?? ""}{a.DocumentRef ? <span className="block">Document: {a.DocumentRef}</span> : null}</td>
             </tr>
           ))}
         </tbody>
@@ -161,7 +158,7 @@ export default function LandProfilePage() {
     queryClient.invalidateQueries({ queryKey: ["legal-land-overview", landId] });
     queryClient.invalidateQueries({ queryKey: ["legal-land-audit", landId] });
     queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] });
-    queryClient.invalidateQueries({ queryKey: ["legal-land-sections", landId] });
+    queryClient.invalidateQueries({ queryKey: ["legal-land-final", landId] });
   };
 
   // Documents filed under a legal record / loan: opened from that row, counted per row.
@@ -187,81 +184,16 @@ export default function LandProfilePage() {
       {c.label} ({(rows ?? []).filter((r) => Number(r[c.field]) === c.id).length})
     </button>
   );
-  const [actionModal, setActionModal] = useState<{
-    type: "verify" | "submit-l1" | "action-l1" | "action-l2";
-    action?: "Approve" | "Return" | "Reject";
-    title: string;
-    hint: string;
-  } | null>(null);
-  const [remarks, setRemarks] = useState("");
-
-  const verifyMutation = useMutation({
-    mutationFn: (r?: string) => verifyLand(landId, r),
-    onSuccess: (res) => {
-      toast.success(res.message);
-      refresh();
-      setActionModal(null);
-      setRemarks("");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const submitL1Mutation = useMutation({
-    mutationFn: () => submitLandForL1(landId),
-    onSuccess: (res) => {
-      toast.success(res.message);
-      refresh();
-      setActionModal(null);
-      setRemarks("");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const actionL1Mutation = useMutation({
-    mutationFn: (p: { action: "Approve" | "Return"; remarks: string }) =>
-      actionLandL1(landId, p.action, p.remarks),
-    onSuccess: (res) => {
-      toast.success(res.message);
-      refresh();
-      setActionModal(null);
-      setRemarks("");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const actionL2Mutation = useMutation({
-    mutationFn: (p: { action: "Approve" | "Return" | "Reject"; remarks: string }) =>
-      actionLandL2(landId, p.action, p.remarks),
-    onSuccess: (res) => {
-      toast.success(res.message);
-      refresh();
-      setActionModal(null);
-      setRemarks("");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const handleModalSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!actionModal) return;
-    if (actionModal.type === "verify") {
-      verifyMutation.mutate(remarks);
-    } else if (actionModal.type === "submit-l1") {
-      submitL1Mutation.mutate();
-    } else if (actionModal.type === "action-l1") {
-      actionL1Mutation.mutate({ action: actionModal.action as "Approve" | "Return", remarks });
-    } else if (actionModal.type === "action-l2") {
-      actionL2Mutation.mutate({ action: actionModal.action as "Approve" | "Return" | "Reject", remarks });
-    }
-  };
-
-  const isPending =
-    verifyMutation.isPending ||
-    submitL1Mutation.isPending ||
-    actionL1Mutation.isPending ||
-    actionL2Mutation.isPending;
-
   const land = data?.land;
+  // The chain: a land bought through the module (New Acquisition) gets its consideration and payments at Deed
+  // Registration, after L1 / L2 approval — not here. Here (the land's history) they are kept only for existing / backlog
+  // land the company bought before, from its old file.
+  const ownPurchaseHere = !!land && land.EntryType !== "New Acquisition";
+  // Acquisition & Purchase: for a new acquisition it is the company's purchase, so it appears only once the deed is
+  // registered — as a read-only record built from Deed Registration. Earlier transfers live in Ownership History.
+  const registered = land?.WorkflowStatus === "Registered";
+  const tabs = TABS.filter((t) => (t.key !== "payments" || ownPurchaseHere) && (t.key !== "transfers" || ownPurchaseHere || registered));
+  const quickSections = QUICK_SECTIONS.filter((s) => (s.tab !== "payments" && s.tab !== "transfers") || ownPurchaseHere);
   const { currentUser } = useAuth();
   const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
   const c = data?.counts;
@@ -320,44 +252,9 @@ export default function LandProfilePage() {
                 {docsFor && <RecordDocuments landId={landId} link={docsFor} onSaved={refresh} />}
               </DialogContent>
             </Dialog>
-            <Dialog open={!!actionModal} onOpenChange={() => setActionModal(null)}>
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle>{actionModal?.title}</DialogTitle>
-                  <DialogDescription className="text-xs text-muted-foreground">
-                    {actionModal?.hint}
-                  </DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleModalSubmit} className="space-y-4 py-2">
-                  <div>
-                    <Label htmlFor="remarks">
-                      Comments / Remarks {actionModal?.action === "Return" || actionModal?.action === "Reject" ? "*" : "(Optional)"}
-                    </Label>
-                    <Textarea
-                      id="remarks"
-                      value={remarks}
-                      onChange={(e) => setRemarks(e.target.value)}
-                      placeholder="Add instructions or justification for this decision..."
-                      required={actionModal?.action === "Return" || actionModal?.action === "Reject"}
-                      rows={3}
-                      className="mt-1"
-                    />
-                  </div>
-                  <DialogFooter className="gap-2 sm:gap-0">
-                    <Button type="button" variant="outline" onClick={() => setActionModal(null)} disabled={isPending}>
-                      Cancel
-                    </Button>
-                    <Button type="submit" disabled={isPending}>
-                      {isPending ? "Processing..." : "Confirm"}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
-
             {/* 14 tabs: one swipeable row on phones, wrapped on wider screens */}
             <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible" role="tablist">
-              {TABS.map((t) => (
+              {tabs.map((t) => (
                 <button
                   key={t.key}
                   role="tab"
@@ -421,9 +318,6 @@ export default function LandProfilePage() {
                           <span className="text-muted-foreground">
                             {Number(o.SharePct)}% share since {fmtDate(o.ValidFrom)}
                           </span>
-                          <span className="border border-border px-1.5 py-0.5 text-[0.625rem] uppercase tracking-wider text-muted-foreground">
-                            {o.VerificationStatus}
-                          </span>
                         </li>
                       ))}
                     </ul>
@@ -454,12 +348,12 @@ export default function LandProfilePage() {
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <p className="label">Land Information Sections — Complete Property Record</p>
                     <p className="text-xs text-muted-foreground">
-                      {QUICK_SECTIONS.filter((s) => c[s.count] > 0).length} of {QUICK_SECTIONS.length} sections have records · enter
+                      {quickSections.filter((s) => c[s.count] > 0).length} of {quickSections.length} sections have records · enter
                       information gradually in any order
                     </p>
                   </div>
                   <ol className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {QUICK_SECTIONS.map((s, i) => {
+                    {quickSections.map((s, i) => {
                       const done = c[s.count] > 0;
                       return (
                         <li key={s.tab}>
@@ -549,6 +443,10 @@ export default function LandProfilePage() {
                 />
                 <Field k="Full location address" v={land.LocationAddress} />
                 <Field k="Internal remarks" v={land.Remarks} />
+                <Field k="Fetch from government site" v={<PortalFetchButtons landId={landId} title={land.LandCode} values={{
+                  district: land.DistrictName, mouza: land.MouzaName, jlNo: land.JLNo, location: land.LocationAddress, lat: land.GpsLatitude, lng: land.GpsLongitude,
+                  rsDag: land.RsDagNo, lrDag: land.LrDagNo, rsKhatian: land.RsKhatianNo, lrKhatian: land.LrKhatianNo, landCode: land.LandCode,
+                }} />} />
                 <div className="sm:col-span-2 lg:col-span-3 pt-2">
                   <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
                     <Pencil size={13} /> Edit basic information
@@ -568,7 +466,7 @@ export default function LandProfilePage() {
             )}
 
             {/* TAB 4: ACQUISITION & PURCHASE DETAILS */}
-            {tab === "transfers" && (
+            {tab === "transfers" && ownPurchaseHere && (
               <div className="space-y-6">
                 <Section
                   title="Ownership Transfers & Acquisitions"
@@ -578,94 +476,17 @@ export default function LandProfilePage() {
                 </Section>
                 <Section
                   title="Purchase & Consideration Details"
-                  note="Financial and contract details of property purchases: consideration price, advance amount, settlement, and payment proofs."
+                  note="The company's earlier purchase of this land (from its old file): consideration price, advance, settlement and payment proofs."
                 >
                   <LegalMasterTable entry={table("land-purchase", "Purchase / Acquisition")} parentId={landId} onSaved={refresh}
                     rowActions={(raw) => childButton({ key: "payment", field: "TransactionId", id: Number(raw.TransactionId), title: `Payments · ${String(raw.TransactionNo ?? "purchase")}`, label: "Payments" }, payRows)} />
                 </Section>
               </div>
             )}
-
-            {/* TAB 5: LAND RECORDS (RS / LR) */}
-            {tab === "records" && (
-              <div className="space-y-6">
-                <Section
-                  title="Revisional Survey (RS) Records"
-                  note="RS Khatian, RS Plot (Dag) numbers, recorded holder names, and land classifications."
-                >
-                  <LegalMasterTable entry={table("land-rs-record", "RS Record")} parentId={landId} onSaved={refresh} />
-                </Section>
-                <Section
-                  title="Land Reforms (LR) Records of Rights (RoR)"
-                  note="LR Khatian (Parcha), LR Plot (Dag) numbers, and mapping from old RS plots."
-                >
-                  <LegalMasterTable entry={table("land-lr-record", "LR Record of Rights")} parentId={landId} onSaved={refresh} />
-                </Section>
-              </div>
-            )}
-
-            {/* TAB 6: DOCUMENTS ARCHIVE */}
-            {tab === "documents" && (
-              <Section
-                title="Centralized Document Archive"
-                note="Complete document storage for this property: Sale Deeds, Parent Deeds, Khatians, Mutation Certificates, Tax Receipts, Court Orders, Survey Reports, and Bank NOCs."
-              >
-                <DocumentsStep landId={landId} onSaved={refresh} />
-              </Section>
-            )}
-
-            {/* TAB 7: LEGAL INFORMATION */}
-            {tab === "legal" && (
-              <div className="space-y-6">
-                <Section
-                  title="Court Cases & Disputes"
-                  note="Past and ongoing court cases, plaintiffs, defendants, advocates, and case statuses."
-                >
-                  <LegalMasterTable entry={table("legal-case", "Court Case")} parentId={landId} onSaved={refresh}
-                    rowActions={(raw) => childButton({ key: "case-hearing", field: "CaseId", id: Number(raw.CaseId), title: `Hearings · ${String(raw.CaseNumber ?? "case")}`, label: "Hearings" }, hearingRows)} />
-                </Section>
-                <Section
-                  title="Legal Orders, Notices & Opinions"
-                  note="Judgments, court orders, legal notices, legal opinions, and due-diligence clearance reports."
-                >
-                  <LegalMasterTable entry={table("land-legal-record", "Legal Record")} parentId={landId} onSaved={refresh}
-                    rowActions={(raw) => docsButton({ kind: "legal", id: Number(raw.LegalRecordId), label: `${String(raw.RecordType ?? "Legal record")}${raw.CaseNumber ? ` ${String(raw.CaseNumber)}` : ""}` })} />
-                </Section>
-              </div>
-            )}
-
-            {/* TAB 8: LOAN & MORTGAGE */}
-            {tab === "loans" && (
-              <Section
-                title="Loan & Mortgage History"
-                note="Historical and active mortgages, bank loans, loan amounts, release dates, and bank NOCs. Closed loans are preserved."
-              >
-                <LegalMasterTable entry={table("mortgage", "Mortgage & Loan")} parentId={landId} onSaved={refresh}
-                  rowActions={(raw) => docsButton({ kind: "loan", id: Number(raw.MortgageId), label: `${String(raw.LenderName ?? "Loan")}${raw.LoanAccountRef ? ` · ${String(raw.LoanAccountRef)}` : ""}` })} />
-              </Section>
-            )}
-
-            {/* TAB 9: MUTATION RECORDS */}
-            {tab === "mutation" && (
-              <div className="space-y-6">
-                <Section
-                  title="Mutation Applications & Certificates"
-                  note="BL&LRO mutation case numbers, previous and new owners, order dates, and certificate records."
-                >
-                  <LegalMasterTable entry={table("mutation", "Mutation")} parentId={landId} onSaved={refresh}
-                    rowActions={(raw) => childButton({ key: "mutation-record", field: "MutationId", id: Number(raw.MutationId), title: `New Khatian / RoR · ${String(raw.ApplicationNo ?? raw.CaseNo ?? "mutation")}`, label: "New Khatian" }, khatianRows)} />
-                </Section>
-                <Section
-                  title="New Khatian / RoR Post-Mutation"
-                  note="New Khatian and plot records created by each mutation. Add one with New Khatian on its mutation's row above."
-                >
-                  <LegalMasterTable entry={table("mutation-record", "New Khatian / RoR")} parentId={landId} onSaved={refresh} noAdd />
-                </Section>
-              </div>
-            )}
+            {tab === "transfers" && !ownPurchaseHere && registered && <AcquisitionRecord landId={landId} onOpen={() => navigate("/legal/deed-registration")} />}
 
             {/* TAB 10: PAYMENT HISTORY */}
-            {tab === "payments" && (
+            {tab === "payments" && ownPurchaseHere && (
               <Section
                 title="Payment & Transaction History"
                 note="Historical financial payments for this land: advances, installments, and final settlements with payment modes and references."
@@ -714,242 +535,64 @@ export default function LandProfilePage() {
               </Section>
             )}
 
-            {/* One "Verified" tick at the end of each data section */}
-            {VERIFY_SECTION_TABS.includes(tab) && <SectionVerify landId={landId} section={tab} onSaved={refresh} />}
-
-            {/* ── LAND-WISE VERIFICATION & TWO-LEVEL APPROVAL — at the end of the page, after every section is filled and verified ── */}
-            <div className="rounded-xl border border-border/80 bg-card p-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
-                <div>
-                  <h4 className="text-xs font-heading font-bold uppercase tracking-wider text-muted-foreground">
-                    Land Verification & Two-Level Approval Rail
-                  </h4>
-                  <p className="mt-0.5 text-xs text-foreground">
-                    Workflow Status:{" "}
-                    <b className="font-semibold text-primary">{land.WorkflowStatus ?? "Draft"}</b>
-                  </p>
-                </div>
-
-                {/* Quick Action Buttons */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {land.VerificationStatus !== "Verified" && (
-                    <button
-                      onClick={() => {
-                        setActionModal({
-                          type: "verify",
-                          title: "Verify Land Data",
-                          hint: "Confirm that initial land entry and documentation have been reviewed and verified.",
-                        });
-                        setRemarks("");
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm"
-                    >
-                      <CheckCircle2 size={13} /> Verify Land Data
-                    </button>
-                  )}
-
-                  {land.VerificationStatus === "Verified" &&
-                    land.L1Status !== "Approved" &&
-                    land.L1Status !== "Pending" && (
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "submit-l1",
-                            title: "Submit for L1 Review",
-                            hint: "Forward this verified property to the Legal Officer for L1 review.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 shadow-sm"
-                      >
-                        <Send size={13} /> Submit for L1 Review
-                      </button>
-                    )}
-
-                  {land.L1Status === "Pending" && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l1",
-                            action: "Return",
-                            title: "Return from L1 Review",
-                            hint: "Return this land to Draft status for necessary corrections.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
-                      >
-                        <RotateCcw size={13} /> Return to Draft
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l1",
-                            action: "Approve",
-                            title: "L1 Approve Land Record",
-                            hint: "Formally approve Level 1 review and forward to Level 2 Executive Approval.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 shadow-sm"
-                      >
-                        <CheckCircle2 size={13} /> L1 Approve & Forward
-                      </button>
-                    </div>
-                  )}
-
-                  {land.L1Status === "Approved" && land.L2Status === "Pending" && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l2",
-                            action: "Return",
-                            title: "Return from L2 Approval",
-                            hint: "Return this land back to L1 Legal Review.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
-                      >
-                        <RotateCcw size={13} /> Return to L1
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l2",
-                            action: "Reject",
-                            title: "Reject Land Record",
-                            hint: "Reject this property acquisition / entry.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20"
-                      >
-                        <XCircle size={13} /> Reject
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActionModal({
-                            type: "action-l2",
-                            action: "Approve",
-                            title: "L2 Final Approval",
-                            hint: "Grant executive / partner final sign-off. Property status becomes Active / Owned.",
-                          });
-                          setRemarks("");
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm"
-                      >
-                        <ShieldCheck size={13} /> L2 Final Sign-Off
-                      </button>
-                    </div>
-                  )}
-
-                  {land.L2Status === "Approved" && (
-                    <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                      <CheckCircle2 size={14} /> Fully Approved & Active Land Record
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* 4 Steps Stepper */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-3">
-                {/* Step 1: Data Entry */}
-                <div className="rounded-lg border border-border/60 bg-muted/20 p-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 1</span>
-                    <CheckCircle2 size={14} className="text-emerald-600" />
-                  </div>
-                  <p className="mt-1 font-semibold text-xs text-foreground">Data Entry</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">Initial property record created</p>
-                </div>
-
-                {/* Step 2: Verification */}
-                <div className={`rounded-lg border p-2.5 ${
-                  land.VerificationStatus === "Verified"
-                    ? "border-emerald-500/30 bg-emerald-500/10"
-                    : "border-amber-500/30 bg-amber-500/10"
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 2</span>
-                    {land.VerificationStatus === "Verified" ? (
-                      <CheckCircle2 size={14} className="text-emerald-600" />
-                    ) : (
-                      <Clock size={14} className="text-amber-600" />
-                    )}
-                  </div>
-                  <p className="mt-1 font-semibold text-xs text-foreground">Data Verification</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">
-                    {land.VerificationStatus === "Verified" ? "Verified" : "Draft / Needs Verification"}
-                  </p>
-                </div>
-
-                {/* Step 3: L1 Legal Review */}
-                <div className={`rounded-lg border p-2.5 ${
-                  land.L1Status === "Approved"
-                    ? "border-emerald-500/30 bg-emerald-500/10"
-                    : land.L1Status === "Returned"
-                    ? "border-amber-500/30 bg-amber-500/10"
-                    : "border-blue-500/30 bg-blue-500/10"
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 3</span>
-                    {land.L1Status === "Approved" ? (
-                      <CheckCircle2 size={14} className="text-emerald-600" />
-                    ) : land.L1Status === "Returned" ? (
-                      <RotateCcw size={14} className="text-amber-600" />
-                    ) : (
-                      <Clock size={14} className="text-blue-600" />
-                    )}
-                  </div>
-                  <p className="mt-1 font-semibold text-xs text-foreground">L1 Legal Review</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">
-                    {land.L1Status === "Approved"
-                      ? `Approved by ${land.L1ReviewerName || "Legal Officer"}`
-                      : land.L1Status === "Returned"
-                      ? "Returned for edits"
-                      : "Pending Legal Review"}
-                  </p>
-                </div>
-
-                {/* Step 4: L2 Executive Approval */}
-                <div className={`rounded-lg border p-2.5 ${
-                  land.L2Status === "Approved"
-                    ? "border-emerald-500/30 bg-emerald-500/10"
-                    : land.L2Status === "Returned"
-                    ? "border-amber-500/30 bg-amber-500/10"
-                    : land.L2Status === "Rejected"
-                    ? "border-destructive/30 bg-destructive/10"
-                    : "border-purple-500/30 bg-purple-500/10"
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 4</span>
-                    {land.L2Status === "Approved" ? (
-                      <ShieldCheck size={14} className="text-emerald-600" />
-                    ) : land.L2Status === "Rejected" ? (
-                      <XCircle size={14} className="text-destructive" />
-                    ) : (
-                      <Clock size={14} className="text-purple-600" />
-                    )}
-                  </div>
-                  <p className="mt-1 font-semibold text-xs text-foreground">L2 Executive Approval</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">
-                    {land.L2Status === "Approved"
-                      ? `Signed off by ${land.L2ApproverName || "Executive"}`
-                      : land.L2Status === "Rejected"
-                      ? "Rejected"
-                      : land.L2Status === "Returned"
-                      ? "Returned to L1"
-                      : "Pending Executive Sign-off"}
-                  </p>
-                </div>
-              </div>
-            </div>
+            {/* All data entered → the verifier checks everything on one page and sends the land to Deed Process. */}
+            <FinalVerifyBar landId={landId} />
           </div>
         )}
       </LegalShell>
     </>
   );
 }
+
+/**
+ * The company's acquisition of a new-acquisition land, read-only, after registration: everything comes from Deed
+ * Registration (consideration and its revisions, payments, stamp duty, final registration, the registered deed and the
+ * physical deed / IGR status). It is changed there, never typed again here.
+ */
+function AcquisitionRecord({ landId, onOpen }: { landId: number; onOpen: () => void }) {
+  const { data, error, isLoading } = useQuery({ queryKey: ["legal-deed-reg-land", landId], queryFn: () => getDeedRegLand(landId) });
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (error || !data) return <p className="text-sm text-destructive">{(error as Error)?.message ?? "Could not load"}</p>;
+  const l = data.land;
+  const stamp = data.queries.reduce((a, q) => a + Number(q.Amount), 0);
+  const box = "border border-border bg-card p-4";
+  const row = (k: string, v: React.ReactNode) => <div className="flex justify-between gap-3 border-t border-border py-1.5 text-sm first:border-t-0"><span className="text-muted-foreground">{k}</span><span className="text-right font-semibold">{v}</span></div>;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border border-emerald-600/40 bg-emerald-600/5 px-4 py-3">
+        <div>
+          <p className="text-sm font-bold">Acquired by the company — deed {l.RegDeedNo ?? "—"}{l.RegFinalDate ? ` registered ${l.RegFinalDate}` : ""}</p>
+          <p className="text-xs text-muted-foreground">Read-only record from Deed Registration. The transfer to the company is also in Ownership History.</p>
+        </div>
+        <button className="border border-foreground px-3 py-1.5 text-xs font-semibold hover:bg-muted" onClick={onOpen}>Open in Deed Registration</button>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className={box}>
+          <p className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Consideration & payment</p>
+          {row("Consideration", inrFmt(l.ConsTotalAmount))}
+          {row("Agreed on", l.ConsDate ?? "—")}
+          {row("Paid", inrFmt(l.Paid))}
+          {row("Last payment", l.LastPaid ?? "—")}
+          {row("Stamp duty & fees", inrFmt(stamp))}
+          {data.revisions.length > 1 && row("Price revisions", `${data.revisions.length - 1}`)}
+        </div>
+        <div className={box}>
+          <p className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Registration</p>
+          {row("Date", l.RegFinalDate ?? "—")}
+          {row("Office", l.RegOffice ?? "—")}
+          {row("Mode", l.RegMode ?? "—")}
+          {row("Deed number", l.RegDeedNo ?? "—")}
+          {row("Registered deed", l.RegDeedFileId ? <LegalFileLink id={l.RegDeedFileId} name={l.RegDeedFileName ?? "Registered deed"} /> : "—")}
+          {row("Physical deed", `${l.IgrStatus ?? "—"} · ${l.DeedLocation ?? "—"}`)}
+        </div>
+      </div>
+      {data.payments.length > 0 && (
+        <div className={box}>
+          <p className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Payments</p>
+          {data.payments.map((pm) => row(`${pm.PaymentDate} · ${pm.Purpose ?? "Payment"}${pm.Mode ? ` · ${pm.Mode}` : ""}`, `${pm.Purpose === "Refund" ? "−" : ""}${inrFmt(pm.Amount)}`))}
+        </div>
+      )}
+    </div>
+  );
+}
+const inrFmt = (n: number | null | undefined) => (n == null ? "—" : `₹${Number(n).toLocaleString("en-IN")}`);

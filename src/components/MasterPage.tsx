@@ -174,6 +174,8 @@ interface MasterPageProps {
    *   ],
    * }}
    */
+  /** Extra buttons placed in the table toolbar, just before Export (e.g. an Import button). */
+  toolbarExtra?: React.ReactNode;
   exportConfig?: {
     title: string;
     filename?: string;
@@ -248,6 +250,8 @@ interface MasterPageProps {
    * (existing always-open behavior, unchanged for every other page).
    */
   collapsibleAddForm?: boolean;
+  /** Label of the button that opens a collapsed add form (default "New Entry"). */
+  addButtonLabel?: string;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -284,6 +288,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   externalFormPatchKey,
   requestEditId,
   requestEditKey,
+  toolbarExtra,
   exportConfig,
   hideTable,
   viewConfig,
@@ -300,6 +305,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   isRowLocked,
   isDeleteLocked,
   collapsibleAddForm = false,
+  addButtonLabel = "New Entry",
   statusTabs = false,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
@@ -719,7 +725,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               {editingId !== null
                 ? "Modify the details below and save."
                 : !formOpen
-                  ? 'Click "New Entry" to add a record.'
+                  ? `Click "${addButtonLabel}" to add a record.`
                   : fields.some((f) => f.required)
                     ? <>Fields marked <span className="text-destructive">*</span> are required</>
                     : "Fill in the details to create a new record."}
@@ -729,7 +735,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             <button
               onClick={() => setFormOpen((v) => !v)}
               className={sheet
-                ? `flex-shrink-0 ${KEY} px-3 py-2 border border-foreground ${formOpen ? "text-foreground hover:bg-primary/10" : "bg-foreground text-card"}`
+                ? `flex-shrink-0 ${KEY} h-9 px-4 border border-foreground ${formOpen ? "text-foreground hover:bg-primary/10" : "bg-foreground text-card"}`
                 : `flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-colors ${
                 formOpen
                   ? "border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -737,7 +743,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               }`}
             >
               {formOpen ? <X size={12} /> : <Plus size={12} />}
-              {formOpen ? "Close" : "New Entry"}
+              {formOpen ? "Close" : addButtonLabel}
             </button>
           )}
         </div>
@@ -1104,6 +1110,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </div>
             )}
             <div className={fluid ? "flex w-full min-w-0 items-center justify-end gap-2 sm:w-auto sm:min-w-[15rem] sm:flex-1" : "flex items-center gap-2 w-full sm:w-auto"}>
+              {toolbarExtra}
               {exportConfig && canExport && (
                 <ExportMenu
                   data={sorted as Record<string, unknown>[]}
@@ -1209,6 +1216,16 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         >
                           {columnRenderers && columnRenderers[col.key] ? (
                             columnRenderers[col.key](row[col.key], row, data)
+                          ) : col.key === "status" && sheet && typeof row[col.key] === "string" && row[col.key] ? (
+                            // A worded status (Pending / Approved / Paid / Present …) shows its own word — only an on/off
+                            // value means Active / Inactive. Solid = settled, red = stopped, hatched = still waiting.
+                            <SheetMark
+                              text={String(row[col.key])}
+                              tone={/^inactive$/i.test(String(row[col.key])) ? "draft"
+                                : /reject|cancel|absent|fail|bounce/i.test(String(row[col.key])) ? "stopped"
+                                : /approv|paid|present|posted|closed|complete|active|cleared|holiday|week off/i.test(String(row[col.key])) ? "done"
+                                : "waiting"}
+                            />
                           ) : col.key === "status" && sheet ? (
                             <SheetMark text={row[col.key] ? "Active" : "Inactive"} tone={row[col.key] ? "done" : "none"} />
                           ) : col.key === "status" ? (
@@ -1382,7 +1399,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   onClick={() => {
                     onPrint(viewRow);
                   }}
-                  className={sx("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all", `${KEY} h-9 px-3 border border-foreground text-foreground hover:bg-primary/10`)}
+                  className={sx("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all", `${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`)}
                 >
                   <Printer size={13} />
                   Print
@@ -1390,7 +1407,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               )}
               <button
                 onClick={() => setViewRow(null)}
-                className={sx("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all", `${KEY} h-9 px-4 bg-foreground text-card border border-foreground`)}
+                className={sx("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all", `${KEY} h-9 px-5 bg-foreground text-card border border-foreground`)}
               >
                 Close
               </button>

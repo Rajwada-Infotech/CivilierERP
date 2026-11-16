@@ -6,6 +6,7 @@
 import { apiUrl } from "@/utils/apiBase";
 import { getToken, clearAuthStorage } from "./authStorage";
 import { emitSessionExpired } from "./sessionEvents";
+import { APP_CLIENT, appSessionId } from "./appSession";
 
 export class ApiError extends Error {
   status: number;
@@ -54,6 +55,9 @@ export async function fetchWithAuth(
         ...(fetchOptions.headers || {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(skipActivityLog ? { "X-Skip-Activity-Log": "1" } : {}),
+        // Which app and session this is, for the Activity Browser (see ./appSession).
+        "X-Client": APP_CLIENT,
+        ...(token ? { "X-Session-Id": appSessionId() } : {}),
       },
     });
   } catch (err: unknown) {

@@ -11,6 +11,7 @@ const { projectPredicate, assertProjectAllowed } = require("../services/projectS
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { runDepreciationForPeriod, previewDepreciationForPeriod, backfillDepreciationForAsset, AUTO_USER } = require("../services/fixedAssetAutoDepreciation");
+const { assetTax, taxTypeFor } = require("../services/faTax");
 const { buildReversalPlan, executeReversal } = require("../services/fixedAssetReversal");
 const {
   buildPostingPlan: buildDepreciationPlan,
@@ -114,7 +115,7 @@ router.get("/", requireAnyPageRight(FA_READ_PAGES, "view"), async (req, res) => 
         fa.AssetId, fa.DocNo, fa.DocDate, fa.FinYear,
         fa.AssetName, fa.AssetCategory, fa.AssetCode,
         fa.Brand, fa.Model, fa.SerialNumber,
-        fa.PurchaseDate, fa.ActivationDate, fa.PurchaseCost, fa.Quantity,
+        fa.PurchaseDate, fa.ActivationDate, fa.PurchaseCost, fa.TaxType, fa.TaxPct, fa.TaxAmount, fa.Quantity,
         fa.Location, fa.Department, fa.Custodian, fa.CustodianUserId,
         fa.DepreciationSetupId, fa.DepreciationType, fa.DepreciationRate, fa.UsefulLife,
         fa.AssetStatus, fa.SellingPrice, fa.SaleDate, fa.BuyerName,
@@ -339,7 +340,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
     const {
       docDate, companyId, projectId, finYear,
       assetName, assetCategory, brand, model, serialNumber,
-      purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
+      purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity, taxPct,
       location, department, custodianUserId,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
       remarks, sourceTagId, pictureBase64, repairType,
@@ -370,7 +371,9 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       if (sourceTagIdVal) {
         const tagRes = await tx.request().input("TagId", sql.Int, sourceTagIdVal).query(`
           SELECT t.TagId, t.FAItemCode, t.CompanyId, t.ProjectId, t.GodownId,
-                 im.M_Name AS ItemName, batch.AssetCategory AS BatchCategory
+                 -- The asset is named after the received batch (which can be corrected in FA Inventory without
+                 -- renaming the item master), else the item master.
+                 ISNULL(NULLIF(LTRIM(batch.AssetName), ''), im.M_Name) AS ItemName, batch.AssetCategory AS BatchCategory
           FROM dbo.FixedAssetTagging t WITH (UPDLOCK, HOLDLOCK)
           LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
           LEFT JOIN dbo.FixedAssetRecord batch ON batch.AssetId = t.AssetId
@@ -407,6 +410,12 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       }
       if (!effectiveCategory) { await tx.rollback(); return res.status(400).json({ error: "assetCategory is required" }); }
 
+      // taxPct sent (the asset form) → purchaseCost is before tax; VAT (before 1 July 2017) is added to the cost,
+      // GST is recorded beside it. Not sent (older callers) → purchaseCost is taken as is.
+      const tax = taxPct !== undefined
+        ? assetTax({ base: purchaseCost ? parseFloat(purchaseCost) : 0, pct: taxPct, date: purchaseDate })
+        : { taxType: taxTypeFor(purchaseDate), taxPct: null, taxAmount: null, cost: purchaseCost ? parseFloat(purchaseCost) : 0 };
+
       const docTypeId = await resolveDocTypeId(pool, sql, "FA");
       const docNo     = await lockNextDocNumber(pool, sql, {
         docTypeId, finYear, tableName: "FixedAssetRecord", issuedBy: email,
@@ -429,7 +438,10 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         .input("ActivationDate",      sql.Date,          activationDate || null)
         .input("PurchaseInvoiceRef",  sql.NVarChar(100), purchaseInvoiceRef || null)
         .input("SupplierId",          sql.Int,           supplierId  ? parseInt(supplierId, 10)  : null)
-        .input("PurchaseCost",        sql.Decimal(18,2), purchaseCost ? parseFloat(purchaseCost) : 0)
+        .input("PurchaseCost",        sql.Decimal(18,2), tax.cost)
+        .input("TaxType",             sql.NVarChar(10),  tax.taxType)
+        .input("TaxPct",              sql.Decimal(9,4),  tax.taxPct)
+        .input("TaxAmount",           sql.Decimal(18,2), tax.taxAmount)
         .input("Quantity",            sql.Decimal(18,3), quantity    ? parseFloat(quantity)      : 1)
         .input("Location",            sql.NVarChar(200), location || null)
         .input("Department",          sql.NVarChar(100), department || null)
@@ -450,7 +462,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
           INSERT INTO dbo.FixedAssetRecord
             (DocNo, DocDate, CompanyId, ProjectId, FinYear,
              AssetName, AssetCategory, AssetCode, Brand, Model, SerialNumber,
-             PurchaseDate, ActivationDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
+             PurchaseDate, ActivationDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, TaxType, TaxPct, TaxAmount, Quantity,
              Location, Department, Custodian, CustodianUserId,
              DepreciationSetupId, DepreciationType, DepreciationRate, UsefulLife,
              AssetStatus, Status, Remarks, PictureBase64, RepairType, CreatedBy, CreatedAt,
@@ -458,7 +470,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
           VALUES
             (@DocNo, @DocDate, @CompanyId, @ProjectId, @FinYear,
              @AssetName, @AssetCategory, @AssetCode, @Brand, @Model, @SerialNumber,
-             @PurchaseDate, @ActivationDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
+             @PurchaseDate, @ActivationDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @TaxType, @TaxPct, @TaxAmount, @Quantity,
              @Location, @Department, @Custodian, @CustodianUserId,
              @DepreciationSetupId, @DepreciationType, @DepreciationRate, @UsefulLife,
              'Active', 'Draft', @Remarks, @PictureBase64, @RepairType, @CreatedBy, SYSDATETIME(),
@@ -507,7 +519,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
     const {
       docDate, companyId, projectId, finYear,
       assetName, assetCategory, brand, model, serialNumber,
-      purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
+      purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity, taxPct,
       location, department, custodianUserId,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
       assetStatus, sellingPrice, saleDate, buyerName, saleRemarks,
@@ -516,9 +528,19 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
 
     const custodianUserIdVal = custodianUserId ? parseInt(custodianUserId, 10) : null;
     const custodianName = await resolveCustodianName(pool, custodianUserIdVal);
+    // taxPct sent (the asset form) → purchaseCost is before tax and the tax is worked out again from the date;
+    // not sent (older callers) → cost as given and the saved tax left alone.
+    const taxSent = taxPct !== undefined;
+    const tax = taxSent
+      ? assetTax({ base: purchaseCost != null && purchaseCost !== "" ? parseFloat(purchaseCost) : 0, pct: taxPct, date: purchaseDate })
+      : null;
 
     await pool.request()
       .input("AssetId",            sql.Int,           id)
+      .input("TaxSent",            sql.Bit,           taxSent ? 1 : 0)
+      .input("TaxType",            sql.NVarChar(10),  tax ? tax.taxType : null)
+      .input("TaxPct",             sql.Decimal(9,4),  tax ? tax.taxPct : null)
+      .input("TaxAmount",          sql.Decimal(18,2), tax ? tax.taxAmount : null)
       .input("DocDate",            sql.Date,          docDate || null)
       .input("CompanyId",          sql.Int,           companyId   ? parseInt(companyId, 10)   : null)
       .input("ProjectId",          sql.Int,           projectId   ? parseInt(projectId, 10)   : null)
@@ -532,7 +554,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
       .input("ActivationDate",     sql.Date,          activationDate || null)
       .input("PurchaseInvoiceRef", sql.NVarChar(100), purchaseInvoiceRef || null)
       .input("SupplierId",         sql.Int,           supplierId  ? parseInt(supplierId, 10)  : null)
-      .input("PurchaseCost",       sql.Decimal(18,2), purchaseCost != null && purchaseCost !== "" ? parseFloat(purchaseCost) : null)
+      .input("PurchaseCost",       sql.Decimal(18,2), tax ? tax.cost : purchaseCost != null && purchaseCost !== "" ? parseFloat(purchaseCost) : null)
       .input("Quantity",           sql.Decimal(18,3), quantity    != null && quantity !== "" ? parseFloat(quantity)      : null)
       .input("Location",           sql.NVarChar(200), location || null)
       .input("Department",         sql.NVarChar(100), department || null)
@@ -569,6 +591,9 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
           PurchaseInvoiceRef = @PurchaseInvoiceRef,
           SupplierId         = @SupplierId,
           PurchaseCost       = ISNULL(@PurchaseCost,       PurchaseCost),
+          TaxType            = CASE WHEN @TaxSent = 1 THEN @TaxType   ELSE TaxType   END,
+          TaxPct             = CASE WHEN @TaxSent = 1 THEN @TaxPct    ELSE TaxPct    END,
+          TaxAmount          = CASE WHEN @TaxSent = 1 THEN @TaxAmount ELSE TaxAmount END,
           Quantity           = ISNULL(@Quantity,           Quantity),
           Location           = @Location,
           Department         = @Department,

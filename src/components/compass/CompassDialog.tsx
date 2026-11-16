@@ -56,6 +56,9 @@ export function CompassDialog() {
     <Dialog open={open} onOpenChange={(o) => !o && closeCompass()}>
       <DialogContent
         hideCloseButton
+        // Opens from anywhere, including over a page's own full-screen window (the payment detail sits at z-[70]):
+        // elevated puts Compass above every page overlay, below only the toasts.
+        elevated
         className="compass-sheet top-[10dvh] translate-y-0 flex flex-col gap-0 p-0 sm:p-0 sm:max-w-2xl max-h-[80dvh] overflow-clip"
       >
         <style>{COMPASS_CSS}</style>

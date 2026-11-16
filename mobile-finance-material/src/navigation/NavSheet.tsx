@@ -35,7 +35,19 @@ import type { MainStackParamList } from "./MainStack";
 const MODULE_ROUTES: Partial<Record<string, keyof MainStackParamList>> = {
   finance: "FinanceDashboard",
   material: "MaterialDashboard",
+  engineering: "Boq",
 };
+
+/** The module a screen belongs to: its dashboard, or any page in its menu tree (null for neither). */
+function moduleOfRoute(route: string): string | null {
+  for (const [mod, dash] of Object.entries(MODULE_ROUTES)) if (dash === route) return mod;
+  for (const [mod, tree] of Object.entries(MODULE_NAV_TREES)) {
+    for (const item of tree ?? []) {
+      if (item.kind === "leaf" ? item.nav === route : item.children.some((c) => c.nav === route)) return mod;
+    }
+  }
+  return null;
+}
 
 type NavLeaf = { kind: "leaf"; label: string; icon: React.ComponentType<{ size?: number; color?: string }>; nav?: keyof MainStackParamList };
 type NavGroup = {
@@ -109,9 +121,13 @@ const MATERIAL_NAV_TREE: NavTree = [
 /** Pages that are forms: the menu key is hidden there. */
 const FORM_ROUTES = new Set<string>(["PaymentForm", "ReceivedPaymentForm", "JournalVoucherForm", "NewContract", "NewInvoice", "MaterialRequestForm", "QuotationForm", "DebitNoteForm", "StockTransferForm", "IssueReturnForm", "MaterialIssueForm", "GRNForm", "VehicleInOutForm", "PurchaseOrderForm"]);
 
+// Engineering on the phone is just the BOQ register (view + invoice-style PDF).
+const ENGINEERING_NAV_TREE: NavTree = [{ kind: "leaf", label: "BOQ", icon: ClipboardList, nav: "Boq" }];
+
 const MODULE_NAV_TREES: Partial<Record<string, NavTree>> = {
   finance: FINANCE_NAV_TREE,
   material: MATERIAL_NAV_TREE,
+  engineering: ENGINEERING_NAV_TREE,
 };
 
 export function NavSheet() {
@@ -126,7 +142,16 @@ export function NavSheet() {
 
   useEffect(() => {
     const unsub = navigationRef.addListener?.("state", () => {
-      setActiveRoute(navigationRef.getCurrentRoute()?.name);
+      const name = navigationRef.getCurrentRoute()?.name;
+      setActiveRoute(name);
+      // The selected module follows the screen that is open: the home dashboard clears it (it used to stay on Finance
+      // or Material after going back home), a module's own page selects that module. Screens of neither (Profile,
+      // Notifications) leave it as it was.
+      if (name === "Dashboard") setActiveModuleId(null);
+      else if (name) {
+        const owner = moduleOfRoute(name);
+        if (owner) setActiveModuleId(owner);
+      }
     });
     return unsub;
   }, []);

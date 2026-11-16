@@ -1,11 +1,13 @@
-import { Judge, Global, Note1, DocumentText, MessageQuestion, MoneySend, ClipboardTick, Building } from "iconsax-react";
+import { Judge, Global, Note1, DocumentText, MessageQuestion, MoneySend, ClipboardTick, Building, SearchStatus } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Company Land Record Management System navigation:
 // - Dashboard
-// - Land Enquiries (prospects & leads)
+// - Land Enquiries (prospects & leads), under a project
+// - Deed Registry Search (enquiry land, office and calendar year; per-office time limits)
 // - Land Register (all company properties)
-// - Pending Approvals (Land Verification & Two-Level L1/L2 Approvals)
+// - Pending Verification (lands waiting for final verification)
+// - Deed Process (verified lands, with the verifier's deed timeline)
 // - Register Existing / Backlog Land
 // - Land & Projects (which land serves which project; complete vs under process)
 // - Land Sales (sale/disposal transactions)
@@ -17,8 +19,12 @@ export const legalNavItems: NavItem[] = [
 
   // ── Company Land Records & Verification / Approvals ───────────────────────
   { label: "Land Enquiries", icon: MessageQuestion, path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
+  { label: "Deed Registry Search", icon: SearchStatus, path: "/legal/land/deed-search", pageKey: "legal-land-enquiry" },
   { label: "Land Register", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
-  { label: "Pending Approvals", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
+  { label: "Pending Verification", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
+  { label: "Deed Process", icon: Note1, path: "/legal/land/deed-process", pageKey: "legal-land-master" },
+  { label: "Deed Registration", icon: DocumentText, path: "/legal/deed-registration", pageKey: "legal-approvals" },
+  { label: "Post-Registration", icon: Note1, path: "/legal/land/post-registration", pageKey: "legal-land-master" },
   { label: "Land & Projects", icon: Building, path: "/legal/land/projects", pageKey: "legal-land-master" },
   { label: "Land Sales", icon: MoneySend, path: "/legal/land/sales", pageKey: "legal-land-master" },
   { label: "RS Record Register", icon: Note1, path: "/legal/land/rs-register", pageKey: "legal-land-master" },

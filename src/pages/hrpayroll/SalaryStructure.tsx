@@ -1,11 +1,14 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { MoneyChange, Add, Edit2, ArrowUp2, ArrowDown2, Copy, TickCircle, CloseCircle } from "iconsax-react";
+import { MoneyChange, Add, Edit2, ArrowUp2, ArrowDown2, Copy, TickCircle, CloseCircle, Layer } from "iconsax-react";
 import { Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell, HR_PAYROLL_ACCENT as ACCENT, HR_GRADIENT } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrBreakup, HrError, HrSkeleton, hrCard, hrTypeTone, HR_FIELD, HR_HEAD, HR_LBL, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { KEY_INK, KEY_LINE, KEY_RED_SOLID } from "@/components/sheet/sheetParts";
+import { SheetMark } from "@/components/sheet/Sheet";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { FormulaBuilderModal } from "@/components/hrpayroll/FormulaBuilderModal";
 import { getEmployeeCompanyOptions } from "@/api/employeeMasterApi";
@@ -20,6 +23,7 @@ import {
   activateSalaryStructure,
   deactivateSalaryStructure,
   copySalaryStructure,
+  newSalaryStructureVersion,
   type SalaryStructureRow,
   type SalaryStructureLinePayload,
   type CalculationType,
@@ -90,13 +94,19 @@ const emptyHeader = () => ({
   effectiveFrom: "",
   effectiveTo: "",
   ctcFrequency: "Monthly" as CTCFrequency,
-  isActive: false,
+  isActive: true, // a new structure is active by default; untick to save it as a draft
 });
 
-const inputBase =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelBase = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
-const smallInput = inputBase + " py-1.5 text-xs";
+// Sheet fields (docs/DESIGN.md): square h-9 fields in the form, h-8 inside a component line.
+const inputBase = HR_FIELD;
+const labelBase = `block ${HR_LBL} mb-1.5`;
+const smallInput = `${HR_FIELD} !h-8 text-xs`;
+const lineLabel = `block ${HR_LBL} mb-1`;
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-30 disabled:hover:border-transparent";
+// A segmented switch: one ink-ruled box, the chosen option filled ink.
+const SEG = "flex border border-foreground";
+const segKey = (on: boolean) => `px-3 h-8 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:bg-primary/10 hover:text-foreground"}`;
+const TAG = "inline-flex items-center px-1.5 py-0.5 border font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]";
 
 const SalaryStructure: React.FC = () => {
   const rights = usePageRights("salary-structure");
@@ -134,6 +144,10 @@ const SalaryStructure: React.FC = () => {
   const [copyTargetId, setCopyTargetId] = useState<number | null>(null);
   const [copyCode, setCopyCode] = useState("");
   const [copyName, setCopyName] = useState("");
+  // New version: the same code changes from a date (backend POST /:id/new-version).
+  const [versionSource, setVersionSource] = useState<SalaryStructureRow | null>(null);
+  const [versionFrom, setVersionFrom] = useState("");
+  const [versionName, setVersionName] = useState("");
 
   // Preview calculator state
   const [testCtc, setTestCtc] = useState("50000");
@@ -192,6 +206,19 @@ const SalaryStructure: React.FC = () => {
 
   const updateLine = (idx: number, patch: Partial<LineForm>) =>
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  // Choosing a head sets the flags that head type normally needs, so a new line calculates right without toggling:
+  // earnings count in gross and CTC, a deduction comes out of net (never gross / CTC), an employer contribution is CTC.
+  const pickHead = (idx: number, id: string) => {
+    const h = heads.find((x) => String(x.Id) === id);
+    const byType = !h
+      ? {}
+      : h.Type === "Deduction"
+        ? { includeInGross: false, includeInCTC: false, includeInNet: true }
+        : h.Type === "Employer Contribution"
+          ? { includeInGross: false, includeInCTC: true, includeInNet: false }
+          : { includeInGross: true, includeInCTC: true, includeInNet: false };
+    updateLine(idx, { deductionAdditionId: id, ...byType });
+  };
   const addLine = () => setLines((prev) => [...prev, emptyLine(prev.length + 1)]);
   const removeLine = (idx: number) =>
     setLines((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
@@ -241,7 +268,14 @@ const SalaryStructure: React.FC = () => {
     Lines: linesToPayload(),
   });
 
+  // Effective Upto (stored as EffectiveTo) must come after Effective From — same check as the backend's headerErrors.
+  const uptoError =
+    header.effectiveFrom && header.effectiveTo && header.effectiveTo <= header.effectiveFrom
+      ? "Must be after Effective From — leave empty for no end date"
+      : "";
+
   const canSave =
+    !uptoError &&
     header.name.trim() !== "" &&
     header.code.trim() !== "" &&
     lines.some((l) => l.deductionAdditionId !== "");
@@ -251,7 +285,7 @@ const SalaryStructure: React.FC = () => {
     try {
       const res = await validateSalaryStructure(buildPayload());
       setValidationErrors(res.errors || []);
-      if (!res.errors?.length) toast.success("No validation errors found ✓");
+      if (!res.errors?.length) toast.success("No validation errors found");
       else toast.error(`${res.errors.length} validation issue(s) found`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Validation failed");
@@ -288,11 +322,11 @@ const SalaryStructure: React.FC = () => {
     try {
       if (editingId !== null) {
         const res = await updateSalaryStructure(editingId, buildPayload());
-        toast.success("Salary structure updated successfully ✓");
+        toast.success("Salary structure updated successfully");
         if (res.warnings?.length) setValidationErrors(res.warnings);
       } else {
         const res = await addSalaryStructure(buildPayload());
-        toast.success("Salary structure saved successfully ✓");
+        toast.success("Salary structure saved successfully");
         if (res.warnings?.length) setValidationErrors(res.warnings);
         else setValidationErrors([]);
         if (andCalculate) {
@@ -330,7 +364,7 @@ const SalaryStructure: React.FC = () => {
   const handleActivate = async (id: number) => {
     try {
       await activateSalaryStructure(id);
-      toast.success("Salary structure activated ✓");
+      toast.success("Salary structure activated");
       await refresh();
     } catch (err) {
       const e = err as Error & { errors?: ValidationError[] };
@@ -355,13 +389,25 @@ const SalaryStructure: React.FC = () => {
     if (copyTargetId === null || !copyCode.trim()) return;
     try {
       await copySalaryStructure(copyTargetId, copyCode.trim().toUpperCase(), copyName.trim() || undefined);
-      toast.success("Salary structure copied successfully ✓");
+      toast.success("Salary structure copied successfully");
       setCopyTargetId(null);
       setCopyCode("");
       setCopyName("");
       await refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to copy");
+    }
+  };
+
+  const handleNewVersion = async () => {
+    if (!versionSource || !versionFrom) return;
+    try {
+      const res = await newSalaryStructureVersion(versionSource.SalaryStructureId, versionFrom, versionName.trim() || undefined);
+      toast.success(`${res.message} — check its lines, then Activate it`);
+      setVersionSource(null);
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create the new version");
     }
   };
 
@@ -376,25 +422,20 @@ const SalaryStructure: React.FC = () => {
   const calculationBaseOptions = [...RESERVED_KEYWORDS, ...availableHeadsForFormula.map((h) => h.code)];
 
   // ── Presentation helpers (display only) ────────────────────────────────
-  const TYPE_TONE: Record<string, { bar: string; chip: string; label: string }> = {
-    Earning: { bar: "#10b981", chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400", label: "Earning" },
-    Deduction: { bar: "#ef4444", chip: "bg-red-500/10 text-red-600 dark:text-red-400", label: "Deduction" },
-    "Employer Contribution": { bar: "#3b82f6", chip: "bg-blue-500/10 text-blue-600 dark:text-blue-400", label: "Employer" },
-    Informational: { bar: "#94a3b8", chip: "bg-slate-500/10 text-slate-600 dark:text-slate-300", label: "Info" },
-  };
-  const toneOf = (t?: string) => TYPE_TONE[t || ""] ?? TYPE_TONE.Informational;
+  // Earnings ink, deductions red, employer contributions blue, informational graphite — same as the breakup (HrUi).
+  const toneOf = hrTypeTone;
   const [libSearch, setLibSearch] = useState("");
   const shownStructures = structures.filter((r) => {
     const q = libSearch.trim().toLowerCase();
     return !q || [r.Name, r.Code, r.CompanyName].some((v) => (v || "").toLowerCase().includes(q));
   });
-  const card = "rounded-2xl bg-card/80 backdrop-blur-lg border border-border shadow-sm";
+  const card = hrCard;
   const StepHead = ({ n, title, hint }: { n: number; title: string; hint: string }) => (
     <div className="flex items-center gap-3 mb-4">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm" style={{ background: HR_GRADIENT }}>{n}</span>
+      <span className={`flex h-6 w-6 shrink-0 items-center justify-center border border-foreground text-[0.6875rem] font-bold text-foreground ${HR_NUM}`}>{n}</span>
       <div>
-        <p className="text-sm font-heading font-semibold text-foreground leading-tight">{title}</p>
-        <p className="text-[0.6875rem] text-muted-foreground">{hint}</p>
+        <p className={`${HR_HEAD} leading-tight`}>{title}</p>
+        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{hint}</p>
       </div>
     </div>
   );
@@ -402,42 +443,37 @@ const SalaryStructure: React.FC = () => {
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[0.6875rem] font-medium transition-colors ${on ? "text-white border-transparent shadow-sm" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
-      style={on ? { background: HR_GRADIENT } : undefined}
+      aria-pressed={on}
+      className={`inline-flex items-center gap-1 h-7 px-2.5 border font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${on ? "bg-foreground text-card border-foreground" : "border-foreground/30 text-muted-foreground hover:text-foreground hover:border-foreground"}`}
     >
       {on && <TickCircle size={11} />} {label}
     </button>
   );
   const inr = (n: number) => "₹" + n.toLocaleString("en-IN");
 
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-1 xl:grid-cols-[22rem_minmax(0,1fr)] gap-5 p-1">
-        <div className="h-96 rounded-2xl bg-muted/50 animate-pulse" />
-        <div className="h-[32rem] rounded-2xl bg-muted/40 animate-pulse" />
-      </div>
-    );
-  }
-  if (error) return <div className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">Failed to load Salary Structure.</div>;
-
   const canWrite = editingId === null ? rights.canCreate : rights.canEdit;
   const t = previewResult?.totals;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Salary Structure"]} />
-      <HrPayrollShell title="Salary Structure Master" subtitle="Formula-driven payroll templates built from Salary Heads" icon={MoneyChange}>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Salary Structures"]} />
+      <HrPayrollShell title="Salary Structures" subtitle="Formula-driven payroll templates built from Salary Heads" icon={MoneyChange}>
+        {isLoading ? (
+          <HrSkeleton rows={2} />
+        ) : error ? (
+          <HrError text="Failed to load salary structures." />
+        ) : (
         <div className="grid grid-cols-1 xl:grid-cols-[22rem_minmax(0,1fr)] gap-5 items-start">
           {/* ═════════ Library ═════════ */}
           <aside className={`${card} p-4 xl:sticky xl:top-20`}>
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <div>
-                <p className="text-sm font-heading font-semibold text-foreground">Structure library</p>
-                <p className="text-[0.6875rem] text-muted-foreground">{structures.length} template{structures.length !== 1 ? "s" : ""}</p>
+            <div className="flex items-center justify-between gap-2 mb-3 pb-3" style={{ borderBottom: HR_RULE }}>
+              <div className="flex items-baseline gap-2.5">
+                <p className={HR_HEAD}>Structure library</p>
+                <span className={`${HR_NUM} text-[0.6875rem] text-muted-foreground`}>{structures.length}</span>
               </div>
               {(rights.canCreate || rights.canEdit) && (
-                <button type="button" onClick={resetForm} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-heading font-semibold text-white shadow-sm" style={{ background: HR_GRADIENT }}>
-                  <Add size={14} /> New
+                <button type="button" onClick={resetForm} className={`${KEY_INK} h-8 px-3`}>
+                  <Add size={12} /> New
                 </button>
               )}
             </div>
@@ -450,43 +486,48 @@ const SalaryStructure: React.FC = () => {
                 return (
                   <div
                     key={row.SalaryStructureId}
-                    className={`group rounded-xl border p-3 transition-all ${sel ? "shadow-md" : "border-border hover:border-border hover:shadow-sm bg-background/40"}`}
-                    style={sel ? { borderColor: `${ACCENT}66`, background: `${ACCENT}0d` } : undefined}
+                    className={`group border p-3 transition-colors ${sel ? "border-foreground bg-primary/5" : "border-foreground/25 bg-card hover:border-foreground"}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <button type="button" onClick={() => rights.canEdit && startEdit(row)} className="min-w-0 text-left" disabled={!rights.canEdit}>
                         <p className="text-sm font-semibold text-foreground truncate">{row.Name}</p>
                         <p className="text-[0.6875rem] text-muted-foreground truncate">
-                          <span className="font-mono">{row.Code}</span> · v{row.Version} · {row.Lines.length} line{row.Lines.length !== 1 ? "s" : ""}
+                          <span className={HR_NUM}>{row.Code}</span> · v{row.Version} · {row.Lines.length} line{row.Lines.length !== 1 ? "s" : ""}
                         </p>
+                        {(row.EffectiveFrom || row.EffectiveTo) && (
+                          <p className={`text-[0.6875rem] text-muted-foreground truncate ${HR_NUM}`}>
+                            {row.EffectiveFrom ? row.EffectiveFrom.slice(0, 10) : "…"} → {row.EffectiveTo ? row.EffectiveTo.slice(0, 10) : "open"}
+                          </p>
+                        )}
                         {row.CompanyName && <p className="text-[0.6875rem] text-muted-foreground truncate">{row.CompanyName}</p>}
                       </button>
-                      <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${row.IsActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
-                        {row.IsActive ? "Active" : "Draft"}
-                      </span>
+                      <span className="shrink-0"><SheetMark text={row.IsActive ? "Active" : "Draft"} tone={row.IsActive ? "done" : "draft"} /></span>
                     </div>
-                    <div className="mt-2.5 flex items-center gap-1 border-t border-border/60 pt-2">
+                    <div className="mt-2.5 flex items-center gap-1 border-t border-foreground/15 pt-2">
                       {rights.canEdit && (
-                        <button onClick={() => startEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"><Edit2 size={14} /></button>
+                        <button onClick={() => startEdit(row)} title="Edit" className={ACT}><Edit2 size={13} /></button>
                       )}
                       {rights.canEdit && !row.IsActive && (
-                        <button onClick={() => handleActivate(row.SalaryStructureId)} title="Activate" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.6875rem] font-medium text-emerald-600 hover:bg-emerald-500/10"><TickCircle size={13} /> Activate</button>
+                        <button onClick={() => handleActivate(row.SalaryStructureId)} title="Activate" className={`${KEY_LINE} h-7 px-2.5`}><TickCircle size={12} /> Activate</button>
                       )}
                       {rights.canEdit && row.IsActive && (
-                        <button onClick={() => handleDeactivate(row.SalaryStructureId)} title="Deactivate" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.6875rem] font-medium text-amber-600 hover:bg-amber-500/10"><CloseCircle size={13} /> Deactivate</button>
+                        <button onClick={() => handleDeactivate(row.SalaryStructureId)} title="Deactivate" className={`${KEY_LINE} h-7 px-2.5`}><CloseCircle size={12} /> Deactivate</button>
                       )}
                       <span className="flex-1" />
                       {rights.canCreate && (
-                        <button onClick={() => { setCopyTargetId(row.SalaryStructureId); setCopyCode(""); setCopyName(`${row.Name} Copy`); }} title="Copy Structure" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"><Copy size={14} /></button>
+                        <button onClick={() => { setVersionSource(row); setVersionFrom(""); setVersionName(row.Name); }} title="New version — the structure changes from a date" className={ACT}><Layer size={13} /></button>
+                      )}
+                      {rights.canCreate && (
+                        <button onClick={() => { setCopyTargetId(row.SalaryStructureId); setCopyCode(""); setCopyName(`${row.Name} Copy`); }} title="Copy structure" className={ACT}><Copy size={13} /></button>
                       )}
                       {rights.canDelete && (
                         deleteConfirmId === row.SalaryStructureId ? (
                           <span className="flex items-center gap-1">
-                            <button onClick={() => handleDelete(row.SalaryStructureId)} className="px-2 py-1 rounded-md text-[0.6875rem] font-medium bg-destructive text-destructive-foreground">Confirm</button>
-                            <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded-md text-[0.6875rem] font-medium border border-border">Cancel</button>
+                            <button onClick={() => handleDelete(row.SalaryStructureId)} className={`${KEY_RED_SOLID} h-7 px-2.5`}>Confirm</button>
+                            <button onClick={() => setDeleteConfirmId(null)} className={`${KEY_LINE} h-7 px-2.5`}>Cancel</button>
                           </span>
                         ) : (
-                          <button onClick={() => setDeleteConfirmId(row.SalaryStructureId)} title="Delete" className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 size={14} /></button>
+                          <button onClick={() => setDeleteConfirmId(row.SalaryStructureId)} title="Delete" className={`${ACT} hover:text-destructive hover:border-destructive`}><Trash2 size={13} /></button>
                         )
                       )}
                     </div>
@@ -500,16 +541,14 @@ const SalaryStructure: React.FC = () => {
           <div className="space-y-5 min-w-0">
             {(rights.canCreate || rights.canEdit) && (
               <div className={`${card} overflow-hidden`}>
-                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border" style={{ background: `${ACCENT}0a` }}>
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5" style={{ borderBottom: HR_RULE }}>
                   <div>
-                    <p className="text-[0.625rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">{editingId !== null ? "Editing" : "New template"}</p>
-                    <h2 className="font-heading font-semibold text-foreground">
+                    <p className={HR_LBL}>{editingId !== null ? "Editing" : "New template"}</p>
+                    <h2 className="font-heading font-semibold text-foreground mt-0.5">
                       {editingId !== null ? (header.name || "Salary structure") : "Build a salary structure"}
                     </h2>
                   </div>
-                  <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold ${header.isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
-                    {header.isActive ? "Active" : "Draft / Inactive"}
-                  </span>
+                  <SheetMark text={header.isActive ? "Active" : "Draft / Inactive"} tone={header.isActive ? "done" : "draft"} />
                 </div>
 
                 <div className="p-5 space-y-7">
@@ -532,22 +571,23 @@ const SalaryStructure: React.FC = () => {
                       </div>
                       <div>
                         <label className={labelBase}>Structure Code<span className="text-destructive ml-0.5">*</span></label>
-                        <input type="text" value={header.code} onChange={(e) => setHeader((h) => ({ ...h, code: e.target.value.toUpperCase() }))} className={inputBase + " font-mono"} placeholder="e.g. STF-STD" />
+                        <input type="text" value={header.code} onChange={(e) => setHeader((h) => ({ ...h, code: e.target.value.toUpperCase() }))} className={`${inputBase} ${HR_NUM}`} placeholder="e.g. STF-STD" />
                       </div>
                       <div>
                         <label className={labelBase}>Effective From</label>
                         <DateInput value={header.effectiveFrom} onChange={(e) => setHeader((h) => ({ ...h, effectiveFrom: e.target.value }))} className={inputBase} />
                       </div>
                       <div>
-                        <label className={labelBase}>Effective To</label>
+                        <label className={labelBase}>Effective Upto</label>
                         <DateInput value={header.effectiveTo} onChange={(e) => setHeader((h) => ({ ...h, effectiveTo: e.target.value }))} className={inputBase} />
+                        {uptoError && <p className="mt-1 text-[0.6875rem] text-destructive">{uptoError}</p>}
                       </div>
                       <div>
                         <label className={labelBase}>CTC Frequency</label>
-                        <div className="flex rounded-lg border border-border bg-muted p-0.5">
+                        <div className={SEG}>
                           {(["Monthly", "Annual"] as CTCFrequency[]).map((f) => (
                             <button key={f} type="button" onClick={() => setHeader((h) => ({ ...h, ctcFrequency: f }))}
-                              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${header.ctcFrequency === f ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                              className={`flex-1 h-9 ${segKey(header.ctcFrequency === f)}`}>
                               {f}
                             </button>
                           ))}
@@ -555,7 +595,7 @@ const SalaryStructure: React.FC = () => {
                       </div>
                       <div className="col-span-full">
                         <label className={labelBase}>Description</label>
-                        <textarea value={header.description} onChange={(e) => setHeader((h) => ({ ...h, description: e.target.value }))} rows={2} className={inputBase + " resize-none"} placeholder="Optional — who this template is for" />
+                        <textarea value={header.description} onChange={(e) => setHeader((h) => ({ ...h, description: e.target.value }))} rows={2} className={`${inputBase} !h-auto py-2 resize-none`} placeholder="Optional — who this template is for" />
                       </div>
                     </div>
                   </section>
@@ -564,8 +604,8 @@ const SalaryStructure: React.FC = () => {
                   <section>
                     <div className="flex items-start justify-between gap-3">
                       <StepHead n={2} title="Salary components" hint="Each line is one salary head and how it's calculated, in order" />
-                      <button type="button" onClick={addLine} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors">
-                        <Add size={14} /> Add component
+                      <button type="button" onClick={addLine} className={`${KEY_LINE} h-8 px-3 shrink-0`}>
+                        <Add size={12} /> Add component
                       </button>
                     </div>
                     <div className="space-y-3">
@@ -573,26 +613,26 @@ const SalaryStructure: React.FC = () => {
                         const head = heads.find((h) => String(h.Id) === line.deductionAdditionId);
                         const tone = toneOf(head?.Type);
                         return (
-                          <div key={idx} className={`relative rounded-xl border bg-background/50 p-3.5 pl-5 ${line.isActive ? "border-border" : "border-dashed border-border opacity-70"}`}>
-                            <span className="absolute left-0 top-3 bottom-3 w-1 rounded-full" style={{ background: tone.bar }} />
+                          <div key={idx} className={`relative border bg-card p-3.5 pl-5 ${line.isActive ? "border-foreground/30" : "border-dashed border-foreground/30 opacity-70"}`}>
+                            <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: tone.bar }} />
                             <div className="flex flex-wrap items-center gap-2 mb-3">
-                              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-[0.6875rem] font-bold text-muted-foreground">{idx + 1}</span>
+                              <span className={`flex h-6 w-6 items-center justify-center border border-foreground text-[0.6875rem] font-bold text-foreground ${HR_NUM}`}>{idx + 1}</span>
                               {head ? (
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${tone.chip}`}>{tone.label}</span>
+                                <span className={`${TAG} ${tone.chip}`}>{tone.label}</span>
                               ) : (
                                 <span className="text-[0.6875rem] text-muted-foreground">Pick a salary head</span>
                               )}
-                              {line.isBalancing && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold text-white" style={{ background: HR_GRADIENT }}>★ Balancing</span>}
+                              {line.isBalancing && <span className={`${TAG} bg-foreground text-card border-foreground`}>Balancing</span>}
                               <span className="flex-1" />
-                              <button type="button" onClick={() => moveLine(idx, -1)} disabled={idx === 0} title="Move up" className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 text-muted-foreground"><ArrowUp2 size={14} /></button>
-                              <button type="button" onClick={() => moveLine(idx, 1)} disabled={idx === lines.length - 1} title="Move down" className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 text-muted-foreground"><ArrowDown2 size={14} /></button>
-                              <button type="button" onClick={() => removeLine(idx)} disabled={lines.length === 1} title="Remove" className="p-1.5 rounded-lg hover:bg-destructive/10 disabled:opacity-30 text-muted-foreground hover:text-destructive"><Trash2 size={14} /></button>
+                              <button type="button" onClick={() => moveLine(idx, -1)} disabled={idx === 0} title="Move up" className={ACT}><ArrowUp2 size={13} /></button>
+                              <button type="button" onClick={() => moveLine(idx, 1)} disabled={idx === lines.length - 1} title="Move down" className={ACT}><ArrowDown2 size={13} /></button>
+                              <button type="button" onClick={() => removeLine(idx)} disabled={lines.length === 1} title="Remove" className={`${ACT} hover:text-destructive hover:border-destructive`}><Trash2 size={13} /></button>
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_auto_minmax(0,1.2fr)] gap-3 items-end">
                               <div className="min-w-0">
-                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Salary Head</label>
-                                <select value={line.deductionAdditionId} onChange={(e) => updateLine(idx, { deductionAdditionId: e.target.value })} className={smallInput}>
+                                <label className={lineLabel}>Salary Head</label>
+                                <select value={line.deductionAdditionId} onChange={(e) => pickHead(idx, e.target.value)} className={smallInput}>
                                   <option value="">Select...</option>
                                   {heads.map((h) => (
                                     <option key={h.Id} value={String(h.Id)}>{h.Code} — {h.Name} ({h.Type})</option>
@@ -600,11 +640,11 @@ const SalaryStructure: React.FC = () => {
                                 </select>
                               </div>
                               <div>
-                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Calculated as</label>
-                                <div className="flex rounded-lg border border-border bg-muted p-0.5">
+                                <label className={lineLabel}>Calculated as</label>
+                                <div className={SEG}>
                                   {CALCULATION_TYPES.map((ct) => (
                                     <button key={ct} type="button" onClick={() => updateLine(idx, { calculationType: ct })}
-                                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${line.calculationType === ct ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                                      className={segKey(line.calculationType === ct)}>
                                       {ct === "Percentage" ? "%" : ct}
                                     </button>
                                   ))}
@@ -613,32 +653,32 @@ const SalaryStructure: React.FC = () => {
                               <div className="min-w-0">
                                 {line.calculationType === "Fixed" && (
                                   <>
-                                    <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Fixed Amount (₹)</label>
+                                    <label className={lineLabel}>Fixed Amount (₹)</label>
                                     <input type="number" value={line.amount} onChange={(e) => updateLine(idx, { amount: e.target.value })} className={smallInput} placeholder="Amount" />
                                   </>
                                 )}
                                 {line.calculationType === "Percentage" && (
                                   <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
                                     <div className="min-w-0">
-                                      <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Of</label>
+                                      <label className={lineLabel}>Of</label>
                                       <select value={line.calculationBase} onChange={(e) => updateLine(idx, { calculationBase: e.target.value })} className={smallInput}>
                                         <option value="">Select...</option>
                                         {calculationBaseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
                                       </select>
                                     </div>
                                     <div>
-                                      <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Percent</label>
+                                      <label className={lineLabel}>Percent</label>
                                       <input type="number" value={line.percentage} onChange={(e) => updateLine(idx, { percentage: e.target.value })} className={smallInput} placeholder="%" />
                                     </div>
                                   </div>
                                 )}
                                 {line.calculationType === "Formula" && (
                                   <>
-                                    <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Formula</label>
+                                    <label className={lineLabel}>Formula</label>
                                     <div className="flex gap-1.5">
-                                      <input type="text" value={line.formula} onChange={(e) => updateLine(idx, { formula: e.target.value })} className={smallInput + " font-mono"} placeholder="e.g. GROSS - BASIC - HRA" />
-                                      <button type="button" onClick={() => setFormulaBuilderIdx(idx)} className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white whitespace-nowrap shadow-sm" style={{ background: HR_GRADIENT }}>
-                                        ƒ Builder
+                                      <input type="text" value={line.formula} onChange={(e) => updateLine(idx, { formula: e.target.value })} className={`${smallInput} font-mono`} placeholder="e.g. GROSS - BASIC - HRA" />
+                                      <button type="button" onClick={() => setFormulaBuilderIdx(idx)} className={`${KEY_INK} h-8 px-3 whitespace-nowrap`}>
+                                        Builder
                                       </button>
                                     </div>
                                   </>
@@ -648,15 +688,15 @@ const SalaryStructure: React.FC = () => {
 
                             <div className="mt-3 grid grid-cols-3 gap-2 sm:max-w-md">
                               <div>
-                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Min ₹</label>
+                                <label className={lineLabel}>Min ₹</label>
                                 <input type="number" value={line.minAmount} onChange={(e) => updateLine(idx, { minAmount: e.target.value })} className={smallInput} />
                               </div>
                               <div>
-                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Max ₹</label>
+                                <label className={lineLabel}>Max ₹</label>
                                 <input type="number" value={line.maxAmount} onChange={(e) => updateLine(idx, { maxAmount: e.target.value })} className={smallInput} />
                               </div>
                               <div>
-                                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Rounding</label>
+                                <label className={lineLabel}>Rounding</label>
                                 <select value={line.roundingRule} onChange={(e) => updateLine(idx, { roundingRule: e.target.value as RoundingRule })} className={smallInput}>
                                   {ROUNDING_RULES.map((r) => <option key={r} value={r}>{r}</option>)}
                                 </select>
@@ -669,11 +709,11 @@ const SalaryStructure: React.FC = () => {
                               <Flag on={line.includeInNet} label="In Net" onClick={() => updateLine(idx, { includeInNet: !line.includeInNet })} />
                               <Flag on={line.taxable} label="Taxable" onClick={() => updateLine(idx, { taxable: !line.taxable })} />
                               <Flag on={line.isActive} label="Active" onClick={() => updateLine(idx, { isActive: !line.isActive })} />
-                              <Flag on={line.isBalancing} label="★ Balancing" onClick={() => setBalancing(idx)} />
+                              <Flag on={line.isBalancing} label="Balancing" onClick={() => setBalancing(idx)} />
                             </div>
                             {head && (
                               <p className="text-[0.625rem] text-muted-foreground mt-2">
-                                {head.Code} · {head.Type}{head.LedgerName ? ` · ${head.LedgerName}` : ""}
+                                <span className={HR_NUM}>{head.Code}</span> · {head.Type}{head.LedgerName ? ` · ${head.LedgerName}` : ""}
                               </p>
                             )}
                           </div>
@@ -683,8 +723,8 @@ const SalaryStructure: React.FC = () => {
                   </section>
 
                   {validationErrors.length > 0 && (
-                    <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 space-y-1">
-                      <p className="text-xs font-heading font-semibold text-destructive">Validation issues</p>
+                    <div className="border border-destructive bg-destructive/5 p-3.5 space-y-1">
+                      <p className={`${HR_HEAD} !text-destructive`}>Validation issues</p>
                       {validationErrors.map((e, i) => (
                         <p key={i} className="text-xs text-destructive flex items-start gap-1.5">
                           <CloseCircle size={13} className="mt-0.5 shrink-0" /> {e.message}
@@ -695,22 +735,20 @@ const SalaryStructure: React.FC = () => {
                 </div>
 
                 {/* Pinned action bar */}
-                <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 px-5 py-3 border-t border-border bg-card/95 backdrop-blur">
-                  <span className={`text-[0.6875rem] font-medium ${canSave ? "text-emerald-600" : "text-muted-foreground"}`}>
-                    {canSave ? "● Ready to save" : "Name, code and at least one component are required"}
-                  </span>
+                <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 px-5 py-3 bg-card" style={{ borderTop: HR_RULE }}>
+                  {canSave ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-[0.6875rem] text-muted-foreground">Name, code and at least one component are required</span>}
                   <span className="flex-1" />
-                  <button type="button" onClick={handleValidate} disabled={validating || !canSave} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
-                    {validating ? "Validating…" : "Validate Formula"}
+                  <button type="button" onClick={handleValidate} disabled={validating || !canSave} className={`${KEY_LINE} h-9 px-3`}>
+                    {validating ? "Validating…" : "Validate formula"}
                   </button>
-                  <button type="button" onClick={runPreview} disabled={previewLoading || !canSave} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
+                  <button type="button" onClick={runPreview} disabled={previewLoading || !canSave} className={`${KEY_LINE} h-9 px-3`}>
                     Preview
                   </button>
-                  <button onClick={() => handleSave(false)} disabled={!canSave || saving || !canWrite} className="px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40">
+                  <button onClick={() => handleSave(false)} disabled={!canSave || saving || !canWrite} className={`${KEY_LINE} h-9 px-4`}>
                     Save
                   </button>
-                  <button onClick={() => handleSave(true)} disabled={!canSave || saving || !canWrite} className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm disabled:opacity-40" style={{ background: HR_GRADIENT }}>
-                    {saving ? "Saving…" : editingId !== null ? "Update & Calculate" : "Save & Calculate"}
+                  <button onClick={() => handleSave(true)} disabled={!canSave || saving || !canWrite} className={`${KEY_INK} h-9 px-5`}>
+                    {saving ? "Saving…" : editingId !== null ? "Update & calculate" : "Save & calculate"}
                   </button>
                 </div>
               </div>
@@ -722,26 +760,26 @@ const SalaryStructure: React.FC = () => {
               <div className="flex flex-wrap items-end gap-3">
                 <div>
                   <label className={labelBase}>Test CTC (₹)</label>
-                  <input type="number" value={testCtc} onChange={(e) => setTestCtc(e.target.value)} className={inputBase + " w-44"} />
+                  <input type="number" value={testCtc} onChange={(e) => setTestCtc(e.target.value)} className={`${inputBase} !w-44 ${HR_NUM}`} />
                 </div>
                 <div>
                   <label className={labelBase}>Frequency</label>
-                  <div className="flex rounded-lg border border-border bg-muted p-0.5">
+                  <div className={SEG}>
                     {(["Monthly", "Annual"] as CTCFrequency[]).map((f) => (
                       <button key={f} type="button" onClick={() => setTestCtcFrequency(f)}
-                        className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${testCtcFrequency === f ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                        className={`h-9 ${segKey(testCtcFrequency === f)}`}>
                         {f}
                       </button>
                     ))}
                   </div>
                 </div>
-                <button type="button" onClick={runPreview} disabled={previewLoading} className="h-10 px-5 rounded-lg text-sm font-heading font-semibold text-white shadow-sm disabled:opacity-40" style={{ background: HR_GRADIENT }}>
-                  {previewLoading ? "Calculating..." : "Calculate"}
+                <button type="button" onClick={runPreview} disabled={previewLoading} className={`${KEY_INK} h-9 px-4`}>
+                  {previewLoading ? "Calculating…" : "Calculate"}
                 </button>
               </div>
 
               {previewResult && !previewResult.valid && (
-                <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-1">
+                <div className="mt-4 border border-destructive bg-destructive/5 p-3 space-y-1">
                   {previewResult.errors.map((e, i) => (
                     <p key={i} className="text-xs text-destructive">{e.message}</p>
                   ))}
@@ -749,51 +787,15 @@ const SalaryStructure: React.FC = () => {
               )}
 
               {previewResult && previewResult.valid && t && (
-                <div className="mt-5 space-y-4">
-                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
-                    {([
-                      ["Gross", t.GrossSalary, "text-foreground"],
-                      ["Employee deduction", t.TotalEmployeeDeduction, "text-red-500"],
-                      ["Net salary", t.NetSalary, "text-emerald-600 dark:text-emerald-400"],
-                      ["Employer contribution", t.TotalEmployerContribution, "text-blue-600 dark:text-blue-400"],
-                    ] as const).map(([l, v, c]) => (
-                      <div key={l} className="rounded-xl border border-border bg-background/50 px-3.5 py-2.5">
-                        <p className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">{l}</p>
-                        <p className={`text-lg font-heading font-bold tabular-nums ${c}`}>{inr(v)}</p>
-                      </div>
-                    ))}
-                    <div className="rounded-xl px-3.5 py-2.5 text-white shadow-sm col-span-2 lg:col-span-1" style={{ background: HR_GRADIENT }}>
-                      <p className="text-[0.625rem] uppercase tracking-wider text-white/80">Total CTC</p>
-                      <p className="text-lg font-heading font-bold tabular-nums">{inr(t.TotalCTC)}</p>
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-border divide-y divide-border/60 overflow-hidden">
-                    {previewResult.lines.map((l) => {
-                      const tone = toneOf(l.HeadType);
-                      const pct = t.TotalCTC ? Math.min(100, (Math.abs(l.Amount) / t.TotalCTC) * 100) : 0;
-                      return (
-                        <div key={l.DeductionAdditionId} className="px-4 py-2.5">
-                          <div className="flex items-center gap-3">
-                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: tone.bar }} />
-                            <span className="min-w-0 flex-1">
-                              <span className="text-sm font-medium text-foreground">{l.HeadName}</span>
-                              <span className="ml-2 text-[0.6875rem] text-muted-foreground">{l.Calculation}</span>
-                            </span>
-                            <span className={`hidden sm:inline-flex px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${tone.chip}`}>{tone.label}</span>
-                            <span className="w-28 text-right text-sm font-semibold tabular-nums">{inr(l.Amount)}</span>
-                          </div>
-                          <div className="mt-1.5 ml-5 h-1 rounded-full bg-muted overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: tone.bar }} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                <div className="mt-5">
+                  {/* Same breakup Salary Calculation and Payroll Run show (HrUi). */}
+                  <HrBreakup lines={previewResult.lines} totals={t} />
                 </div>
               )}
             </div>
           </div>
         </div>
+        )}
       </HrPayrollShell>
 
       {formulaBuilderIdx !== null && (
@@ -807,10 +809,35 @@ const SalaryStructure: React.FC = () => {
         />
       )}
 
+      {versionSource && (
+        <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={() => setVersionSource(null)}>
+          <div className="bg-card p-5 w-full max-w-sm" style={{ border: HR_RULE }} onClick={(e) => e.stopPropagation()}>
+            <h3 className={`${HR_HEAD} mb-1`}>New version of {versionSource.Code}</h3>
+            <p className="text-xs text-muted-foreground mb-3">
+              A Draft copy under the same code. Once activated, employees on {versionSource.Code} get it from this date; earlier dates keep the current version.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className={labelBase}>Effective From<span className="text-destructive ml-0.5">*</span></label>
+                <input type="date" value={versionFrom} onChange={(e) => setVersionFrom(e.target.value)} className={`${inputBase} ${HR_NUM}`} />
+              </div>
+              <div>
+                <label className={labelBase}>Structure Name</label>
+                <input type="text" value={versionName} onChange={(e) => setVersionName(e.target.value)} className={inputBase} />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 mt-4 pt-3" style={{ borderTop: "1px solid hsl(var(--foreground) / 0.15)" }}>
+              <button onClick={() => setVersionSource(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleNewVersion} disabled={!versionFrom} className={`${KEY_INK} h-9 px-5`}>Create version</button>
+            </div>
+          </div>
+        </div></BodyPortal>
+      )}
+
       {copyTargetId !== null && (
-        <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCopyTargetId(null)}>
-          <div className="bg-card border border-border rounded-xl shadow-lg p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-heading font-semibold text-foreground text-sm mb-3">Copy Structure</h3>
+        <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={() => setCopyTargetId(null)}>
+          <div className="bg-card p-5 w-full max-w-sm" style={{ border: HR_RULE }} onClick={(e) => e.stopPropagation()}>
+            <h3 className={`${HR_HEAD} mb-3`}>Copy structure</h3>
             <div className="space-y-3">
               <div>
                 <label className={labelBase}>New Structure Name</label>
@@ -818,12 +845,12 @@ const SalaryStructure: React.FC = () => {
               </div>
               <div>
                 <label className={labelBase}>New Structure Code<span className="text-destructive ml-0.5">*</span></label>
-                <input type="text" value={copyCode} onChange={(e) => setCopyCode(e.target.value.toUpperCase())} className={inputBase} />
+                <input type="text" value={copyCode} onChange={(e) => setCopyCode(e.target.value.toUpperCase())} className={`${inputBase} ${HR_NUM}`} />
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2 mt-4">
-              <button onClick={() => setCopyTargetId(null)} className="px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
-              <button onClick={handleCopy} disabled={!copyCode.trim()} className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm disabled:opacity-40" style={{ background: HR_GRADIENT }}>Copy</button>
+            <div className="flex items-center justify-end gap-2 mt-4 pt-3" style={{ borderTop: "1px solid hsl(var(--foreground) / 0.15)" }}>
+              <button onClick={() => setCopyTargetId(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleCopy} disabled={!copyCode.trim()} className={`${KEY_INK} h-9 px-5`}>Copy</button>
             </div>
           </div>
         </div></BodyPortal>

@@ -19,14 +19,17 @@ const DOC_ICON: Record<ChainDocType, React.ElementType> = {
   expense: Receipt,
 };
 
+const SHEET_CHIP = "bg-card border-foreground/40 text-foreground hover:border-foreground hover:bg-primary/5";
 const DOC_COLOR: Record<ChainDocType, string> = {
-  wo: "bg-orange-500/10 border-orange-500/20 text-orange-700 dark:text-orange-400",
-  qt: "bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-400",
-  mr: "bg-indigo-500/10 border-indigo-500/20 text-indigo-700 dark:text-indigo-400",
-  po: "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400",
-  vio: "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400",
-  grn: "bg-teal-500/10 border-teal-500/20 text-teal-700 dark:text-teal-400",
-  expense: "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400",
+  // On the sheet every document is an ink-ruled chip (docs/DESIGN.md: no per-type colours); the chip's own label
+  // and icon say which document it is.
+  wo: SHEET_CHIP,
+  qt: SHEET_CHIP,
+  mr: SHEET_CHIP,
+  po: SHEET_CHIP,
+  vio: SHEET_CHIP,
+  grn: SHEET_CHIP,
+  expense: SHEET_CHIP,
 };
 
 /**

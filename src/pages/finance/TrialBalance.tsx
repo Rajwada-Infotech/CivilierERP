@@ -409,7 +409,7 @@ function TBRow({
                       <th className="px-3 py-2">Voucher No.</th>
                       <th className="px-3 py-2">Date</th>
                       <th className="px-3 py-2">Source / Entry</th>
-                      <th className="px-3 py-2">Invoice No.</th>
+                      <th className="px-3 py-2">Ref Doc</th>
                       <th className="px-3 py-2">Mode</th>
                       <th className="px-3 py-2">Fixed Asset</th>
                       <th className="px-3 py-2">Cost Centre</th>
@@ -430,6 +430,8 @@ function TBRow({
                         : st === "grn" || st === "grnposting" ? "GRN"
                         : st === "journalvoucher" ? "JV"
                         : st === "onaccountledger" ? "On account"
+                        : st === "loanrepayment" ? "Loan repayment"
+                        : st === "loanposting" ? "Loan"
                         : t.sourceType ?? "Entry";
 
                       const ref = (t as any).sourceRef as { id: number; docNo: string; type: string } | null;
@@ -1629,7 +1631,7 @@ export default function TrialBalance() {
                   { label: "Date",          value: glEntryDetail.date ? fmtDate(glEntryDetail.date) : "—" },
                   { label: "Voucher No.",   value: glEntryDetail.voucherNo || "—" },
                   { label: "Source Type",   value: glEntryDetail.sourceType || "—" },
-                  { label: "Invoice No.",   value: glEntryDetail.invoiceNo || "—" },
+                  { label: "Ref Doc",       value: glEntryDetail.invoiceNo || "—" },
                   { label: "Mode",          value: glEntryDetail.mode || glEntryDetail.payment?.mode || "—" },
                   {
                     label: "Cost Centre",

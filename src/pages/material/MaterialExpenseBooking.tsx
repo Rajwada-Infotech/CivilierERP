@@ -186,6 +186,8 @@ const INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Expense Head", accessor: (r: any) => r.expenseHeadName || "—" },
   { header: "Basic Amt", accessor: (r: any) => (r.status === "Draft" ? "—" : `Rs. ${fmt(r.basicAmount)}`) },
   { header: "GST %", accessor: (r: any) => (r.status === "Draft" ? "—" : (r.igstRate ?? 0) > 0 ? `${r.igstRate}%` : `${(r.cgstRate ?? 0) + (r.sgstRate ?? 0)}%`) },
+  { header: "TDS %", accessor: (r: any) => (r.status === "Draft" || !(r.tdsAmount ?? 0) ? "—" : r.tdsPercentage != null ? `${r.tdsPercentage}%` : "—") },
+  { header: "TDS Amt", accessor: (r: any) => (r.status === "Draft" || !(r.tdsAmount ?? 0) ? "—" : `Rs. ${fmt(r.tdsAmount)}`) },
   { header: "Net Amt", accessor: (r: any) => `Rs. ${fmt(computeEffectiveNet(r))}` },
   { header: "Doc No", accessor: (r: any) => r.sourceDocNo || r.linkedPODocNo || r.bookingReference || "—" },
   { header: "Status", accessor: (r: any) => r.status || "—" },
@@ -362,6 +364,10 @@ export default function MaterialExpenseBooking() {
   const [partnerHeads, setPartnerHeads] = useState<
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
+  // Employees (LHeadType='E', one head per Employee Master record) — so staff can be billed and paid.
+  const [employeeHeads, setEmployeeHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
   // "Vendor" spans every party type a booking can actually be billed
   // against — Supplier, Contractor, and Customer/Applicant (LHeadType
   // S/C/A) — not just supplierHeads alone.
@@ -385,8 +391,9 @@ export default function MaterialExpenseBooking() {
     if (brokerHeads.some((b) => b.id === id)) return `b:${id}`;
     if (customerHeads.some((cu) => cu.id === id)) return `a:${id}`;
     if (partnerHeads.some((p) => p.id === id)) return `p:${id}`;
+    if (employeeHeads.some((e) => e.id === id)) return `e:${id}`;
     return "";
-  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads]);
+  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads, employeeHeads]);
   const payablePartyGroups: PayablePartyGroup[] = useMemo(
     () => [
       { prefix: "s", label: "Suppliers", options: supplierHeads },
@@ -394,8 +401,9 @@ export default function MaterialExpenseBooking() {
       { prefix: "b", label: "Brokers", options: brokerHeads },
       { prefix: "a", label: "Customers", options: customerHeads },
       { prefix: "p", label: "Partners", options: partnerHeads },
+      { prefix: "e", label: "Employees", options: employeeHeads },
     ],
-    [supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads],
+    [supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads, employeeHeads],
   );
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
@@ -404,7 +412,12 @@ export default function MaterialExpenseBooking() {
   // form is filled (direct/TOD bookings only; see the field's gating
   // condition below for why). Purely informational until save, where the
   // backend re-validates everything server-side regardless.
-  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
+  // advanceCovered / tdsBase: advances to this party that already had TDS deducted cover that much of the invoice, so
+  // TDS is only due on tdsBase; coveredByAdvance = they cover all of it and no TDS can be deducted.
+  const [tdsEligibility, setTdsEligibility] = useState<{
+    tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number; singleBillThreshold?: number; yearlyThreshold?: number;
+    advanceCovered?: number; tdsBase?: number; coveredByAdvance?: boolean;
+  } | null>(null);
 
   const isEditing = editingId !== null;
 
@@ -715,6 +728,17 @@ export default function MaterialExpenseBooking() {
         toast.error(
           err instanceof Error ? err.message : "Something went wrong",
         );
+      });
+    apiFetch("/api/account-head?type=E")
+      .then((list: any[]) => {
+        setEmployeeHeads((Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        })));
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Something went wrong");
       });
   }, []);
   useLiveData("ledgers", loadPartyHeads);
@@ -1520,6 +1544,12 @@ export default function MaterialExpenseBooking() {
       return false;
     return true;
   });
+  // Rate columns in the list follow what the rows on this page carry: GST only when a row has a GST rate,
+  // TDS only when a row had TDS deducted (e.g. a 1% TDS invoice shows why Net is below Basic).
+  const listRates = {
+    gst: filteredRecords.some((r) => r.status !== "Draft" && ((r.igstRate ?? 0) > 0 || (r.cgstRate ?? 0) + (r.sgstRate ?? 0) > 0)),
+    tds: filteredRecords.some((r) => r.status !== "Draft" && (r.tdsAmount ?? 0) > 0),
+  };
 
   // One request for every visible row's approval trail instead of one per
   // row — see useApprovalTrailsBulk's own comment.
@@ -1644,6 +1674,7 @@ export default function MaterialExpenseBooking() {
       amount: String(form.basicAmount || 0),
     });
     if (form.bookingDate) qs.set("date", form.bookingDate);
+    if (editingId) qs.set("eid", String(editingId));
     apiFetch(`${API}/tds-eligibility?${qs.toString()}`)
       .then((data: any) => {
         if (!cancelled) setTdsEligibility(data);
@@ -1655,7 +1686,10 @@ export default function MaterialExpenseBooking() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirectPartyMode, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
+  }, [isDirectPartyMode, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate, editingId]);
+
+  // What TDS is worked out on: the invoice amount less what TDS-deducted advances already cover.
+  const tdsBaseAmount = tdsEligibility?.tdsBase ?? form.basicAmount;
 
   // Keep form.tdsAmount live — it used to only be set once, inside the TDS
   // <select>'s onChange, so editing the basic amount (or anything else that
@@ -1663,11 +1697,19 @@ export default function MaterialExpenseBooking() {
   // shown TDS amount frozen at its old value instead of tracking the
   // invoice in real time.
   useEffect(() => {
-    if (!form.tdsId || form.tdsPercentage == null) return;
-    const recalculated = calculateTdsPreview(form.basicAmount, form.tdsPercentage);
+    if (!form.tdsId) return;
+    // Advances already TDS'd cover the whole invoice: no TDS can be deducted on it.
+    if (tdsEligibility?.coveredByAdvance) {
+      set("tdsId", null);
+      set("tdsPercentage", null);
+      set("tdsAmount", 0);
+      return;
+    }
+    if (form.tdsPercentage == null) return;
+    const recalculated = calculateTdsPreview(tdsBaseAmount, form.tdsPercentage);
     if (recalculated !== form.tdsAmount) set("tdsAmount", recalculated);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.tdsId, form.tdsPercentage, form.basicAmount]);
+  }, [form.tdsId, form.tdsPercentage, tdsBaseAmount, tdsEligibility?.coveredByAdvance]);
 
   const { bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
     useMemo(() => {
@@ -2330,22 +2372,27 @@ export default function MaterialExpenseBooking() {
                         label="TDS"
                         className="sm:col-span-2"
                         hint={
-                          tdsEligibility.thresholdMet
+                          tdsEligibility.coveredByAdvance
+                            ? `TDS was already deducted on advance payments covering this whole invoice (₹${fmt(tdsEligibility.advanceCovered || 0)}) — no TDS can be deducted again`
+                            : (tdsEligibility.advanceCovered || 0) > 0
+                            ? `₹${fmt(tdsEligibility.advanceCovered || 0)} of this invoice was covered by advances that already had TDS — TDS applies only on the remaining ₹${fmt(tdsEligibility.tdsBase || 0)}`
+                            : tdsEligibility.thresholdMet
                             ? "This supplier/contractor has crossed the TDS threshold — select the applicable TDS"
-                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} booked this year so far) — optional`
+                            : `Not yet required — ₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} booked this year so far; this party's limit is ₹${(tdsEligibility.singleBillThreshold ?? 30000).toLocaleString("en-IN")} per bill / ₹${(tdsEligibility.yearlyThreshold ?? 100000).toLocaleString("en-IN")} per year — optional`
                         }
                       >
                         <div className="flex items-center gap-3">
                           <select
                             value={form.tdsId ?? ""}
+                            disabled={!!tdsEligibility.coveredByAdvance}
                             onChange={(e) => {
                               const id = e.target.value ? Number(e.target.value) : null;
                               const rec = tdsRecords.find((t) => Number(t.id) === id);
                               set("tdsId", id);
                               set("tdsPercentage", rec?.percentage ?? null);
-                              set("tdsAmount", rec ? calculateTdsPreview(form.basicAmount, rec.percentage) : 0);
+                              set("tdsAmount", rec ? calculateTdsPreview(tdsBaseAmount, rec.percentage) : 0);
                             }}
-                            className="flex-1 appearance-none pl-3 pr-7 py-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            className="flex-1 appearance-none pl-3 pr-7 py-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
                           >
                             <option value="">-- No TDS --</option>
                             {tdsRecords.filter((t) => t.status).map((t) => (
@@ -2737,7 +2784,8 @@ export default function MaterialExpenseBooking() {
                               <TableHead className="w-[16%]">Vendor</TableHead>
                               <TableHead className="w-[12%] hidden xl:table-cell">Company / project</TableHead>
                               <TableHead className="w-[10%] text-right">Basic</TableHead>
-                              <TableHead className="w-[7%] text-right hidden md:table-cell">GST</TableHead>
+                              {listRates.gst && <TableHead className="w-[7%] text-right hidden md:table-cell">GST</TableHead>}
+                              {listRates.tds && <TableHead className="w-[8%] text-right hidden md:table-cell">TDS</TableHead>}
                               <TableHead className="w-[11%] text-right">Net</TableHead>
                               <TableHead className="w-[11%] hidden lg:table-cell">Against</TableHead>
                               <TableHead className="w-[9%]">Status</TableHead>
@@ -2801,9 +2849,21 @@ export default function MaterialExpenseBooking() {
                                   <TableCell className="py-3 text-right whitespace-nowrap text-[0.75rem] tabular-nums text-muted-foreground">
                                     {isDraft ? "—" : `₹${fmt(basic)}`}
                                   </TableCell>
+                                  {listRates.gst && (
                                   <TableCell className="py-3 text-right text-[0.75rem] tabular-nums text-muted-foreground hidden md:table-cell">
                                     {isDraft ? "—" : (rec.igstRate ?? 0) > 0 ? <span title="IGST (interstate)">{rec.igstRate}%</span> : `${(rec.cgstRate ?? 0) + (rec.sgstRate ?? 0)}%`}
                                   </TableCell>
+                                  )}
+                                  {listRates.tds && (
+                                  <TableCell className="py-3 text-right text-[0.75rem] tabular-nums text-muted-foreground hidden md:table-cell whitespace-nowrap">
+                                    {isDraft || !(rec.tdsAmount ?? 0) ? "—" : (
+                                      <span title={rec.tdsName || "TDS deducted"}>
+                                        {rec.tdsPercentage != null ? `${rec.tdsPercentage}%` : ""}
+                                        <span className="block text-[0.6875rem]">−₹{fmt(rec.tdsAmount ?? 0)}</span>
+                                      </span>
+                                    )}
+                                  </TableCell>
+                                  )}
                                   <TableCell className="py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">
                                     ₹{fmt(effectiveNet)}
                                   </TableCell>
@@ -2861,7 +2921,7 @@ export default function MaterialExpenseBooking() {
                             {filteredRecords.length === 0 && (
                               <TableRow>
                                 <TableCell
-                                  colSpan={10}
+                                  colSpan={8 + (listRates.gst ? 1 : 0) + (listRates.tds ? 1 : 0)}
                                   className="text-center py-14 text-muted-foreground text-sm"
                                 >
                                   {statusFilter !== "All"

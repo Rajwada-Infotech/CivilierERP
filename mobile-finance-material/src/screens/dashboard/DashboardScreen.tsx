@@ -407,7 +407,11 @@ export default function DashboardScreen() {
             <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
               {heroKpis.map((k, i) => (
                 <View key={k.id} style={{ width: "50%", paddingVertical: 10, paddingLeft: i % 2 ? 14 : 0, paddingRight: 10, borderLeftWidth: i % 2 ? 1 : 0, borderLeftColor: S.rule, borderTopWidth: i > 1 ? 1 : 0, borderTopColor: S.ruleSoft }}>
-                  <Label>{k.label}</Label>
+                  {/* Every label gets the same two-line room, set at its foot: a label that wraps ("Open purchase
+                      orders") no longer pushes its figure below the one beside it ("Open PO value"). */}
+                  <View style={{ minHeight: 28, justifyContent: "flex-end" }}>
+                    <Label>{k.label}</Label>
+                  </View>
                   <Text numberOfLines={1} style={{ fontFamily: fonts.heading.semibold, fontSize: 26, letterSpacing: -0.5, color: S.ink, marginTop: 10, fontVariant: ["tabular-nums"] }}>
                     {typeof k.value === "number" ? <Counter target={k.value} prefix={k.prefix} suffix={k.suffix} /> : kpiText(k) ?? "…"}
                   </Text>

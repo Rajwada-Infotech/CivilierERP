@@ -100,6 +100,11 @@ export interface LandStats {
   sales?: number; disposed?: number; rsRecords?: number; lrRecords?: number;
   recent: { LandId: number; LandCode: string; LandName: string; WorkflowStatus: string | null; IsOnHold: boolean; MouzaName: string | null; JLNo: string | null }[];
   allLands?: LandSummaryItem[];
+  /** Lands in Deed Process whose timeline has passed. */
+  /** Counters along the legal flow (Legal dashboard). */
+  pipeline?: Partial<Record<"enquiries" | "pendingOwnership" | "pendingDiligence" | "pendingInheritance" | "pendingReview" | "highRisk" | "restricted" | "pendingFinal"
+    | "pendingL1" | "pendingL2" | "pendingRegistration" | "deedOverdue" | "pendingMutation" | "registered" | "pendingDeedSearch" | "deedSearchOverdue" | "paymentOverdue", number>>;
+  deedOverdue?: { LandId: number; LandCode: string; LandName: string; DeedTargetDate: string; DaysOver: number }[];
   pendingRegistration: number;
   mutationPending: number;
   approvals: { Kind: string; N: number }[];
@@ -111,7 +116,7 @@ export interface LandStats {
 }
 
 export interface AuditEvent {
-  EventId: number; Action: string; EntityType: string; EntityId: number | null; OldValue: string | null; NewValue: string | null;
+  EventId: number; UserRole?: string | null; DocumentRef?: string | null; Action: string; EntityType: string; EntityId: number | null; OldValue: string | null; NewValue: string | null;
   Remarks: string | null; CreatedAt: string; UserName: string | null;
 }
 
@@ -211,19 +216,32 @@ export const setEnquiryStatus = async (id: number, status: "Rejected" | "On Hold
 export const convertEnquiry = async (id: number, landName?: string) =>
   handle<{ landId: number; landCode: string; message: string }>(await fetchWithAuth(`${BASE}/enquiries/${id}/convert`, post({ landName })));
 
-// ── Land-Wise Verification, Two-Level Approvals & Cascade Deletion ───────────
-
-export const verifyLand = async (id: number, remarks?: string) =>
-  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/verify`, post({ remarks })));
-
-export const submitLandForL1 = async (id: number) =>
-  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/submit-l1`, post({})));
-
-export const actionLandL1 = async (id: number, action: "Approve" | "Return", remarks: string) =>
-  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/action-l1`, post({ action, remarks })));
-
-export const actionLandL2 = async (id: number, action: "Approve" | "Return" | "Reject", remarks: string) =>
-  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/action-l2`, post({ action, remarks })));
+// ── Final verification → Deed Process ───────────
+export interface FinalStatus {
+  missing: string[]; ready: boolean; inDeedProcess: boolean; workflowStatus: string | null;
+  verifiedAt: string | null; verifiedBy: string | null; targetDate: string | null;
+  canVerify: boolean; blockedReason: string | null;
+  changed: { at: string; by: string | null; items: { CreatedAt: string; Action: string; EntityType: string; UserName: string | null }[] } | null;
+}
+export const getFinalStatus = async (id: number) => handle<FinalStatus>(await fetchWithAuth(`${BASE}/${id}/final-status`));
+export const finalVerifyLand = async (id: number, targetDate: string) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/final-verify`, post({ targetDate })));
+export interface DeedProcessLand {
+  LandId: number; LandCode: string; LandName: string; WorkflowStatus: string; DistrictName: string | null; MouzaName: string | null;
+  FinalVerifiedAt: string | null; VerifiedBy: string | null; DeedTargetDate: string | null; DeedCompletedAt: string | null;
+  DeedFileId?: number | null; DeedFileName?: string | null;
+  DeedChangedAt?: string | null; DeedChangedByName?: string | null;
+  L1Status?: string; L1By?: string | null; L2Status?: string; DeedApprovalNote?: string | null;
+}
+export const reverifyDeedChanges = async (id: number) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/reverify`, post({})));
+export const approveDeedProcess = async (id: number, level: 1 | 2, action: "Approve" | "Reject" | "Hold", remarks?: string) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/approve`, post({ level, action, remarks })));
+export const deedRegistrationAction = async (id: number, action: "apply" | "submit", fileId?: number) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-registration`, post({ action, fileId })));
+export const getDeedProcessLands = async () => handle<{ lands: DeedProcessLand[]; canEditTimeline: boolean; canL1?: boolean; canL2?: boolean }>(await fetchWithAuth(`${BASE}/deed-process/list`));
+export const updateDeedProcess = async (id: number, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null }) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 
 export const getLandPendingQueue = async () =>
   handle<LandPendingQueueItem[]>(await fetchWithAuth(`${BASE}/pending-queue`));
@@ -234,7 +252,7 @@ export const deleteLand = async (id: number, confirmCode: string) =>
 
 /** Land ↔ project map: every company land with the project it serves. Complete = fully approved (L2). */
 export interface ProjectLand {
-  LandId: number; LandCode: string; LandName: string; ProjectId: number | null; ProjectName: string | null;
+  LandId: number; LandCode: string; LandName: string; ProjectId: number | null; ProjectName: string | null; EnquiryNo?: string | null;
   MouzaName: string | null; DistrictName: string | null; Area: number | null; UnitName: string | null;
   EntryType: string | null; LandStatus: string; WorkflowStatus: string | null; VerificationStatus: string | null;
   L1Status: string | null; L2Status: string | null; IsOnHold: boolean; IsComplete: boolean; Documents: number; CurrentOwners: string | null;
@@ -252,8 +270,33 @@ export const setMyWhatsApp = async (WhatsAppNo: string) =>
 export const setUserWhatsApp = async (userId: number, WhatsAppNo: string) =>
   handle<{ message: string; WhatsAppNo: string }>(await fetchWithAuth(`/api/users/${userId}/whatsapp`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ WhatsAppNo }) }));
 
-// One "Verified" tick per land-page section (all that section's rows at once).
-export interface SectionStatus { label: string; total: number; verified: number; done: boolean; verifiedAt: string | null; verifiedBy: string | null }
-export const getLandSections = async (landId: number) => handle<Record<string, SectionStatus>>(await fetchWithAuth(`${BASE}/${landId}/sections`));
-export const verifyLandSection = async (landId: number, section: string, verified: boolean, remarks?: string) =>
-  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${landId}/sections/${section}/verify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verified, remarks }) }));
+
+// Registry search (Deed Registration page): look a land up, check its RS / LR references on the government site, store the finding.
+export interface RegistryLookup {
+  land: { LandId: number; LandCode: string; LandName: string; EnquiryNo: string | null; DistrictId: number | null; DistrictName: string | null; MouzaName: string | null; JLNo: string | null;
+    WorkflowStatus: string | null; RsDagNo: string | null; RsKhatianNo: string | null; LrDagNo: string | null; LrKhatianNo: string | null;
+    Area: number | null; UnitName: string | null; LocationAddress: string | null; Owners: string | null };
+  records: { Kind: "RS" | "LR"; Dag: string | null; Khatian: string | null }[];
+  results: string[];
+}
+export interface RegistrySearch {
+  SearchId: number; FinYear: string | null; OfficeName: string | null; RsDagNo: string | null; RsKhatianNo: string | null; LrDagNo: string | null; LrKhatianNo: string | null;
+  SiteName: string | null; SourceUrl?: string | null; CheckedAt?: string | null; MatchResult?: string | null; Result: string; DeedNoFound: string | null; Details: string | null; FileId: number | null; FileName: string | null; CreatedAt: string; CreatedByName: string | null;
+}
+export const lookupRegistryLand = async (q: string) => handle<RegistryLookup>(await fetchWithAuth(`${BASE}/registry-search/lookup?q=${encodeURIComponent(q)}`));
+export const getRegistrySearches = async (landId: number) => handle<RegistrySearch[]>(await fetchWithAuth(`${BASE}/${landId}/registry-search`));
+export const updateRegistrySearch = async (searchId: number, body: Record<string, unknown>) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/registry-search/${searchId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+export const deleteRegistrySearch = async (searchId: number) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/registry-search/${searchId}`, { method: "DELETE" }));
+export const saveRegistrySearch = async (landId: number, body: Record<string, unknown>) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${landId}/registry-search`, post(body)));
+
+// Post-registration compliance (after the deed is registered).
+export interface PostRegTask { TaskId: number; LandId: number; TaskNo: number; Task: string; Status: string; RefNo: string | null; DueDate: string | null; Remarks: string | null;
+  FileId: number | null; FileName: string | null; UpdatedAt: string | null; UpdatedByName: string | null }
+export interface PostRegLand { LandId: number; LandCode: string; LandName: string; DistrictName: string | null; MouzaName: string | null; RegCompletedAt: string | null;
+  RegDeedFileId: number | null; RegDeedFileName: string | null; tasks: PostRegTask[] }
+export const getPostRegistration = async () => handle<{ lands: PostRegLand[]; statuses: string[] }>(await fetchWithAuth(`${BASE}/post-registration/list`));
+export const updatePostRegTask = async (taskId: number, body: Record<string, unknown>) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/post-registration/task/${taskId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));

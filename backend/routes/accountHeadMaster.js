@@ -107,6 +107,17 @@ const DEFAULT_SUPPLIER_PASSWORD = "123456";
 // LHeadType='V' and never reaches this check at all). Without the category
 // check here, saving a Landlord silently created portal credentials nobody
 // asked for.
+// Vendor Master's heads (Supplier / Vendor / Landlord) have no approval stage: created Active, always editable and
+// deletable like any unapproved head, and the submit / approve / reject steps refuse them.
+const isVendorType = (t) => t === "S" || t === "V";
+const NO_VENDOR_APPROVAL = "Vendors have no approval step.";
+
+// A party's TDS limit as typed on the form: a positive amount, or NULL (= the standard ₹30k / ₹1L, services/tds.js).
+function tdsLimitValue(v) {
+  const n = Number(String(v ?? "").replace(/,/g, ""));
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+
 function isSupplierPortalHead(LHeadType, LHeadCategory) {
   return LHeadType === "S" && LHeadCategory !== "Landlord";
 }
@@ -225,6 +236,8 @@ router.get("/:id", async (req, res, next) => {
       selectColumns.push("lh.IsTdsApplicable");
     if (hasColumn(columnMeta, "TdsLimitApplicable"))
       selectColumns.push("lh.TdsLimitApplicable");
+    if (hasColumn(columnMeta, "TdsSingleBillLimit")) selectColumns.push("lh.TdsSingleBillLimit");
+    if (hasColumn(columnMeta, "TdsYearlyLimit")) selectColumns.push("lh.TdsYearlyLimit");
     if (hasColumn(columnMeta, "InvoiceMode"))
       selectColumns.push("lh.InvoiceMode");
     if (hasColumn(columnMeta, "LBankName")) selectColumns.push("lh.LBankName");
@@ -298,6 +311,8 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       selectColumns.push("lh.IsTdsApplicable");
     if (hasColumn(columnMeta, "TdsLimitApplicable"))
       selectColumns.push("lh.TdsLimitApplicable");
+    if (hasColumn(columnMeta, "TdsSingleBillLimit")) selectColumns.push("lh.TdsSingleBillLimit");
+    if (hasColumn(columnMeta, "TdsYearlyLimit")) selectColumns.push("lh.TdsYearlyLimit");
     if (hasColumn(columnMeta, "InvoiceMode"))
       selectColumns.push("lh.InvoiceMode");
     if (hasColumn(columnMeta, "LBankName")) selectColumns.push("lh.LBankName");
@@ -417,6 +432,8 @@ router.post("/", headRight("create"), async (req, res) => {
     LHeadType,
   IsTdsApplicable,
     TdsLimitApplicable,
+    TdsSingleBillLimit,
+    TdsYearlyLimit,
     InvoiceMode,
     SupplierPassword: supplierPasswordPlain,
     // Bank Details section (Vendor Master / Contractor Master) — all four
@@ -563,7 +580,9 @@ router.post("/", headRight("create"), async (req, res) => {
       .input("LBelongsTo", sql.Int, effectiveLBelongsTo || null)
       .input("LDescription", sql.NVarChar, LDescription || null)
       .input("LHeadType", sql.VarChar(50), LHeadType || "GL")
-      .input("Status", sql.NVarChar(20), "Draft") // ← always Draft on create
+      // Vendors (Supplier / Vendor / Landlord) have no approval stage — saved straight as Active, the normal status of a
+      // live ledger. Every other head starts as Draft.
+      .input("Status", sql.NVarChar(20), LHeadType === "S" || LHeadType === "V" ? "Active" : "Draft")
       .input("LAccountNo", sql.VarChar(20), LAccountNo || null)
       .input("LIFSCCode", sql.NVarChar(11), LIFSCCode || null);
 
@@ -623,6 +642,13 @@ router.post("/", headRight("create"), async (req, res) => {
       request.input("TdsLimitApplicable", sql.Bit, TdsLimitApplicable === false ? 0 : 1);
       insertColumns.push("TdsLimitApplicable");
       insertValues.push("@TdsLimitApplicable");
+    }
+    // A party's own TDS limits (migration 635) — blank = the standard ₹30k / ₹1L.
+    for (const [col, val] of [["TdsSingleBillLimit", TdsSingleBillLimit], ["TdsYearlyLimit", TdsYearlyLimit]]) {
+      if (!hasColumn(columnMeta, col)) continue;
+      request.input(col, sql.Decimal(18, 2), tdsLimitValue(val));
+      insertColumns.push(col);
+      insertValues.push("@" + col);
     }
     // Invoice / Non-Invoice (migration 420) — only meaningful for
     // LHeadType='A' (Customer Master) rows, but the column itself is
@@ -814,11 +840,12 @@ router.put("/:id/submit", requirePageRight("account-head", "edit"), async (req, 
       .request()
       .input("id", sql.Int, req.params.id)
       .query(
-        "SELECT Status, CreatedBy FROM dbo.AccountHeadMaster WHERE LHeadId = @id",
+        "SELECT Status, CreatedBy, RTRIM(LHeadType) AS LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id",
       );
 
     const row = existing.recordset[0];
     if (!row) return res.status(404).json({ error: "Record not found" });
+    if (isVendorType(row.LHeadType)) return res.status(400).json({ error: NO_VENDOR_APPROVAL });
     if (!["Draft", "Rejected"].includes(row.Status)) {
       return res
         .status(400)
@@ -855,10 +882,11 @@ router.put("/:id/approve", requireApprover("account-heads", "account heads"), as
     const existing = await pool
       .request()
       .input("id", sql.Int, req.params.id)
-      .query("SELECT Status FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+      .query("SELECT Status, RTRIM(LHeadType) AS LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
 
     const row = existing.recordset[0];
     if (!row) return res.status(404).json({ error: "Record not found" });
+    if (isVendorType(row.LHeadType)) return res.status(400).json({ error: NO_VENDOR_APPROVAL });
     if (row.Status !== "Pending") {
       return res
         .status(400)
@@ -897,10 +925,11 @@ router.put("/:id/reject", requireApprover("account-heads", "account heads"), asy
     const existing = await pool
       .request()
       .input("id", sql.Int, req.params.id)
-      .query("SELECT Status FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+      .query("SELECT Status, RTRIM(LHeadType) AS LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
 
     const row = existing.recordset[0];
     if (!row) return res.status(404).json({ error: "Record not found" });
+    if (isVendorType(row.LHeadType)) return res.status(400).json({ error: NO_VENDOR_APPROVAL });
     if (row.Status !== "Pending") {
       return res
         .status(400)
@@ -951,6 +980,8 @@ router.put("/:id", headRight("edit"), async (req, res) => {
     LHeadType,
     IsTdsApplicable,
     TdsLimitApplicable,
+    TdsSingleBillLimit,
+    TdsYearlyLimit,
     InvoiceMode,
     SupplierPassword: supplierPasswordPlain,
     LAccountNo,
@@ -987,11 +1018,14 @@ router.put("/:id", headRight("edit"), async (req, res) => {
     const existing = await pool
       .request()
       .input("id", sql.Int, req.params.id)
-      .query("SELECT Status FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+      .query("SELECT Status, RTRIM(LHeadType) AS LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
 
     const row = existing.recordset[0];
     if (!row) return res.status(404).json({ error: "Record not found" });
-    if (row.Status === "Approved") {
+    // Vendors (Vendor Master: Supplier / Vendor / Landlord) have no approval step — no screen submits or approves
+    // them — so they stay editable whatever Status says (one set to Approved by a script was locked for good).
+    const isVendorHead = isVendorType(row.LHeadType);
+    if (row.Status === "Approved" && !isVendorHead) {
       return res.status(400).json({ error: "Cannot edit an approved record" });
     }
 
@@ -1121,6 +1155,11 @@ router.put("/:id", headRight("edit"), async (req, res) => {
       request.input("TdsLimitApplicable", sql.Bit, TdsLimitApplicable === false ? 0 : 1);
       updates.push("TdsLimitApplicable=@TdsLimitApplicable");
     }
+    for (const [col, val] of [["TdsSingleBillLimit", TdsSingleBillLimit], ["TdsYearlyLimit", TdsYearlyLimit]]) {
+      if (!hasColumn(columnMeta, col) || val === undefined) continue;
+      request.input(col, sql.Decimal(18, 2), tdsLimitValue(val));
+      updates.push(`${col}=@${col}`);
+    }
     if (hasColumn(columnMeta, "InvoiceMode")) {
       request.input("InvoiceMode", sql.NVarChar(20), InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice");
       updates.push("InvoiceMode=@InvoiceMode");
@@ -1188,10 +1227,10 @@ router.delete("/:id", headRight("delete"), async (req, res) => {
     const existing = await pool
       .request()
       .input("id", sql.Int, req.params.id)
-      .query("SELECT Status FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+      .query("SELECT Status, RTRIM(LHeadType) AS LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
 
     const row = existing.recordset[0];
-    if (row?.Status === "Approved") {
+    if (row?.Status === "Approved" && !isVendorType(row.LHeadType)) {
       return res
         .status(400)
         .json({ error: "Cannot delete an approved record" });

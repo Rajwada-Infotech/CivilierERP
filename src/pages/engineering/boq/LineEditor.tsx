@@ -25,6 +25,31 @@ export interface LineEditorProps {
   onActivitySelected?: (activityId: string) => void;
 }
 
+// Sheet styling for the lines block: empty panel, thin scrollbar, ruled totals (docs/DESIGN.md).
+const LINE_CSS = `
+.boq-lines-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 36px 20px 34px; }
+.boq-lines-empty-title { font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: hsl(var(--foreground)); margin: 0; }
+.boq-lines-empty-text { font-size: 12.5px; color: hsl(var(--muted-foreground)); max-width: 46ch; margin: 0; }
+.boq-lines-add { margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border: 1px solid hsl(var(--foreground)); background: hsl(var(--foreground)); color: hsl(var(--card)); font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; }
+.boq-lines-add:hover { opacity: .9; }
+.boq-lines-scroll { scrollbar-width: thin; scrollbar-color: hsl(var(--foreground) / 0.35) transparent; }
+.boq-lines-scroll::-webkit-scrollbar { height: 6px; }
+.boq-lines-scroll::-webkit-scrollbar-thumb { background: hsl(var(--foreground) / 0.35); }
+.boq-lines-totals { display: flex; flex-wrap: wrap; align-items: stretch; justify-content: space-between; border-top: 1px solid hsl(var(--foreground)); }
+.boq-lines-sub { display: flex; }
+.boq-lines-sub > div { display: flex; flex-direction: column; gap: 4px; padding: 12px 18px; min-width: 120px; }
+.boq-lines-sub > div + div { border-left: 1px solid hsl(var(--foreground) / 0.15); }
+.boq-lines-grand { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding: 12px 18px; margin-left: auto; border-left: 1px solid hsl(var(--foreground) / 0.15); }
+.boq-lines-lbl { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: hsl(var(--muted-foreground)); }
+.boq-lines-fig { font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; color: hsl(var(--foreground)); }
+.boq-lines-fig-big { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+@media (max-width: 640px) {
+  .boq-lines-sub { width: 100%; }
+  .boq-lines-sub > div { flex: 1; min-width: 0; }
+  .boq-lines-grand { width: 100%; align-items: flex-start; border-left: 0; border-top: 1px solid hsl(var(--foreground) / 0.15); }
+}
+`;
+
 export const LineEditor: React.FC<LineEditorProps> = ({
   mode,
   rows,
@@ -55,8 +80,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
       // (Per Activity Price = Total Rate / Total Area is shown separately).
       if (!isItem) {
         if (field === "rate") updated.amount = parseFloat(val) || 0;
-      } else if (field === "quantity" || field === "rate") {
-        updated.amount = calcAmount(updated.quantity, updated.rate);
+      } else if (field === "quantity" || field === "rate" || field === "wastage") {
+        updated.amount = calcAmount(updated.quantity, updated.rate, updated.wastage);
       }
       return updated;
     });
@@ -77,36 +102,35 @@ export const LineEditor: React.FC<LineEditorProps> = ({
   // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
   // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
   // Activities also get a leading "Activity Group" column.
-  const colCount = 12 + (readOnly ? 0 : 1);
+  const colCount = (isItem ? 13 : 12) + (readOnly ? 0 : 1);
 
   return (
     <div
       style={{
-        border: "1px solid hsl(var(--border))",
-        borderRadius: "calc(var(--radius) + 2px)",
+        border: "1px solid hsl(var(--foreground))",
         overflow: "hidden",
-        background: "hsl(var(--background))",
+        background: "hsl(var(--card))",
       }}
     >
+      <style>{LINE_CSS}</style>
       {/* ── Tab strip + add button ── */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "8px 12px",
-          background: "hsl(var(--muted))",
-          borderBottom: "1px solid hsl(var(--border))",
+          flexWrap: "wrap",
+          padding: "12px 14px",
+          background: "hsl(var(--card))",
+          borderBottom: "1px solid hsl(var(--foreground))",
           gap: 12,
         }}
       >
         <div
           style={{
             display: "flex",
-            gap: 2,
-            background: "hsl(var(--border))",
-            borderRadius: 8,
-            padding: 3,
+            gap: 0,
+            border: "1px solid hsl(var(--foreground))",
           }}
         >
           {(["activities", "items"] as const).map((t) => {
@@ -119,18 +143,17 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 5,
-                  padding: "4px 14px",
-                  borderRadius: 6,
+                  padding: "0 14px",
+                  height: 34,
                   border: "none",
                   cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  transition: "all 0.1s",
-                  background: active ? "hsl(var(--background))" : "transparent",
-                  color: active
-                    ? "hsl(var(--primary))"
-                    : "hsl(var(--muted-foreground))",
-                  boxShadow: active ? "0 0 0 0.5px hsl(var(--border))" : "none",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  transition: "background 0.1s",
+                  background: active ? "hsl(var(--foreground))" : "transparent",
+                  color: active ? "hsl(var(--card))" : "hsl(var(--muted-foreground))",
                 }}
               >
                 {t === "items" ? (
@@ -151,13 +174,15 @@ export const LineEditor: React.FC<LineEditorProps> = ({
               display: "inline-flex",
               alignItems: "center",
               gap: 5,
-              padding: "5px 12px",
-              border: "1px solid hsl(var(--primary) / 0.35)",
-              borderRadius: 6,
-              background: "hsl(var(--primary) / 0.08)",
-              color: "hsl(var(--primary))",
-              fontSize: 12,
-              fontWeight: 500,
+              padding: "0 12px",
+              height: 32,
+              border: "1px solid hsl(var(--foreground))",
+              background: "hsl(var(--card))",
+              color: "hsl(var(--foreground))",
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
               cursor: "pointer",
               transition: "background 0.1s",
             }}
@@ -168,8 +193,25 @@ export const LineEditor: React.FC<LineEditorProps> = ({
         )}
       </div>
 
-      {/* ── Table ── */}
-      <div style={{ overflowX: "auto" }}>
+      {/* ── Table (or, with nothing added yet, a short empty panel) ── */}
+      {(rows as any[]).length === 0 ? (
+        <div className="boq-lines-empty">
+          <p className="boq-lines-empty-title font-heading">No {isItem ? "items" : "activities"} yet</p>
+          <p className="boq-lines-empty-text">
+            {readOnly
+              ? `This BOQ has no ${isItem ? "material items" : "work activities"}.`
+              : isItem
+                ? "Add the material items priced in this BOQ, each against one of its activities."
+                : "Add the work activities priced in this BOQ — their linked items are added for you."}
+          </p>
+          {!readOnly && (
+            <button type="button" onClick={add} className="boq-lines-add font-heading">
+              <Plus size={12} /> Add {isItem ? "item" : "activity"}
+            </button>
+          )}
+        </div>
+      ) : (
+      <div className="boq-lines-scroll" style={{ overflowX: "auto" }}>
         <table
           style={{
             width: "100%",
@@ -178,28 +220,30 @@ export const LineEditor: React.FC<LineEditorProps> = ({
           }}
         >
           <colgroup>
-            <col style={{ width: 36 }} />
-            {!isItem && <col style={{ width: 170 }} />}
-            <col style={{ width: 180 }} />
-            {isItem && <col style={{ width: 170 }} />}
-            <col style={{ width: 80 }} />
-            <col style={{ width: 120 }} />
-            {isItem && <col style={{ width: 72 }} />}
-            <col style={{ width: isItem ? 130 : 84 }} />
-            <col style={{ width: 96 }} />
-            <col style={{ width: 96 }} />
-            <col style={{ width: 64 }} />
+            {/* Room to read and type in every column; the table scrolls sideways where it doesn't fit. */}
+            <col style={{ width: 44 }} />
+            {!isItem && <col style={{ width: 190 }} />}
+            <col style={{ width: 220 }} />
+            {isItem && <col style={{ width: 190 }} />}
+            <col style={{ width: 100 }} />
+            <col style={{ width: 160 }} />
+            {isItem && <col style={{ width: 96 }} />}
+            {isItem && <col style={{ width: 92 }} />}
+            <col style={{ width: isItem ? 140 : 110 }} />
             <col style={{ width: 108 }} />
-            {!isItem && <col style={{ width: 130 }} />}
-            <col />
-            {!readOnly && <col style={{ width: 36 }} />}
+            <col style={{ width: 120 }} />
+            <col style={{ width: 84 }} />
+            <col style={{ width: 124 }} />
+            {!isItem && <col style={{ width: 148 }} />}
+            <col style={{ width: 120 }} />
+            {!readOnly && <col style={{ width: 48 }} />}
           </colgroup>
 
           <thead>
             <tr
               style={{
-                background: "hsl(var(--muted))",
-                borderBottom: "1px solid hsl(var(--border))",
+                background: "hsl(var(--card))",
+                borderBottom: "1px solid hsl(var(--foreground) / 0.2)",
               }}
             >
               {(
@@ -210,7 +254,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   ...(isItem ? [["For Activity", "left"]] : []),
                   ["Code", "left"],
                   ["Spec / Notes", "left"],
-                  ...(isItem ? [["Item Qty", "right"]] : []),
+                  ...(isItem ? [["Item Qty", "right"], ["Wastage %", "right"]] : []),
                   [isItem ? "Per Unit Qty" : "Total Area", "right"],
                   ["UOM", "left"],
                   [isItem ? "Rate (₹)" : "Total Rate (₹)", "right"],
@@ -224,15 +268,15 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                 <th
                   key={h}
                   style={{
-                    padding: "0 8px",
-                    height: 30,
+                    padding: "0 10px",
+                    height: 38,
                     textAlign: align,
                     fontSize: 10,
                     fontWeight: 600,
                     letterSpacing: "0.07em",
                     textTransform: "uppercase",
                     color: "hsl(var(--muted-foreground))",
-                    borderRight: "1px solid hsl(var(--border))",
+                    borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                   }}
@@ -275,9 +319,9 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                   <tr
                     key={row._key ?? row.Id ?? idx}
                     style={{
-                      borderBottom: "1px solid hsl(var(--border))",
+                      borderBottom: "1px solid hsl(var(--foreground) / 0.2)",
                       background: isEven
-                        ? "hsl(var(--muted) / 0.4)"
+                        ? "hsl(var(--foreground) / 0.03)"
                         : "hsl(var(--background))",
                     }}
                   >
@@ -285,9 +329,9 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     <td
                       style={{
                         textAlign: "center",
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 6px",
-                        height: 40,
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
+                        height: 52,
                       }}
                     >
                       <span
@@ -305,8 +349,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {!isItem && (
                       <td
                         style={{
-                          borderRight: "1px solid hsl(var(--border))",
-                          padding: "4px 6px",
+                          borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                          padding: "8px 10px",
                         }}
                       >
                         {readOnly ? (
@@ -356,8 +400,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Name select */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 6px",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
                       }}
                     >
                       {readOnly ? (
@@ -459,8 +503,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {isItem && (
                       <td
                         style={{
-                          borderRight: "1px solid hsl(var(--border))",
-                          padding: "4px 6px",
+                          borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                          padding: "8px 10px",
                         }}
                       >
                         {readOnly ? (
@@ -512,8 +556,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Code */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 6px",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
                       }}
                     >
                       <span
@@ -522,9 +566,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           fontVariantNumeric: "tabular-nums",
                           fontSize: 10,
                           color: "hsl(var(--muted-foreground))",
-                          background: "hsl(var(--muted))",
-                          border: "0.5px solid hsl(var(--border))",
-                          borderRadius: 3,
+                          background: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--foreground) / 0.3)",
                           padding: "2px 5px",
                           display: "inline-block",
                           maxWidth: "100%",
@@ -540,8 +583,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Spec/Notes */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 6px",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
                       }}
                     >
                       {readOnly ? (
@@ -566,9 +609,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           }
                           style={{
                             width: "100%",
-                            height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            height: 34,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -584,8 +626,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {isItem && (
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 6px",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
                       }}
                     >
                       {readOnly ? (
@@ -609,9 +651,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           onChange={(e) => upd(idx, "quantity", e.target.value)}
                           style={{
                             width: "100%",
-                            height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            height: 34,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -627,11 +668,59 @@ export const LineEditor: React.FC<LineEditorProps> = ({
 
                     )}
 
+                    {/* Wastage % (items only) — added on top of the quantity in the amount */}
+                    {isItem && (
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
+                      }}
+                    >
+                      {readOnly ? (
+                        <span
+                          style={{
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
+                            fontSize: 12.5,
+                            display: "block",
+                            textAlign: "right",
+                          }}
+                        >
+                          {row.wastage ? `${row.wastage}%` : "—"}
+                        </span>
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.01"
+                          value={row.wastage ?? ""}
+                          placeholder="0"
+                          title="Wastage on top of the item quantity — Amount = Qty × (1 + Wastage %) × Rate"
+                          onChange={(e) => upd(idx, "wastage", e.target.value)}
+                          style={{
+                            width: "100%",
+                            height: 34,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
+                            background: "hsl(var(--background))",
+                            padding: "0 7px",
+                            fontSize: 12,
+                            color: "hsl(var(--foreground))",
+                            outline: "none",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
+                            textAlign: "right",
+                          }}
+                        />
+                      )}
+                    </td>
+                    )}
+
                     {/* Per Unit Qty (items) / Total Area (activities) */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 6px",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
                         textAlign: "right",
                       }}
                     >
@@ -664,7 +753,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                                 fontVariantNumeric: "tabular-nums",
                                 fontSize: 12.5,
                                 fontWeight: 600,
-                                color: "hsl(var(--primary))",
+                                color: "hsl(var(--foreground))",
                               }}
                             >
                               {fmtQty(q / basis.value)}
@@ -693,9 +782,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           onChange={(e) => upd(idx, "area", e.target.value)}
                           style={{
                             width: "100%",
-                            height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            height: 34,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -712,8 +800,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* UOM */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 6px",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
                       }}
                     >
                       {readOnly ? (
@@ -752,8 +840,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Rate */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 6px",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
                       }}
                     >
                       {readOnly ? (
@@ -777,9 +865,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           onChange={(e) => upd(idx, "rate", e.target.value)}
                           style={{
                             width: "100%",
-                            height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            height: 34,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -796,8 +883,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Tax % */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 6px",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 10px",
                       }}
                     >
                       {readOnly ? (
@@ -823,9 +910,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           onChange={(e) => upd(idx, "tax", e.target.value)}
                           style={{
                             width: "100%",
-                            height: 30,
-                            border: "0.5px solid hsl(var(--border))",
-                            borderRadius: 4,
+                            height: 34,
+                            border: "1px solid hsl(var(--foreground) / 0.3)",
                             background: "hsl(var(--background))",
                             padding: "0 7px",
                             fontSize: 12,
@@ -842,8 +928,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Amount */}
                     <td
                       style={{
-                        borderRight: "1px solid hsl(var(--border))",
-                        padding: "4px 10px",
+                        borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                        padding: "8px 12px",
                         textAlign: "right",
                       }}
                     >
@@ -853,7 +939,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           fontVariantNumeric: "tabular-nums",
                           fontSize: 12.5,
                           fontWeight: 700,
-                          color: "hsl(var(--primary))",
+                          color: "hsl(var(--foreground))",
                         }}
                       >
                         {fmt(amt)}
@@ -864,8 +950,8 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     {!isItem && (
                       <td
                         style={{
-                          borderRight: "1px solid hsl(var(--border))",
-                          padding: "4px 10px",
+                          borderRight: "1px solid hsl(var(--foreground) / 0.2)",
+                          padding: "8px 12px",
                           textAlign: "right",
                         }}
                       >
@@ -898,9 +984,9 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                     <td
                       style={{
                         borderRight: !readOnly
-                          ? "1px solid hsl(var(--border))"
+                          ? "1px solid hsl(var(--foreground) / 0.2)"
                           : "none",
-                        padding: "4px 10px",
+                        padding: "8px 12px",
                         textAlign: "right",
                       }}
                     >
@@ -919,7 +1005,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
 
                     {/* Delete */}
                     {!readOnly && (
-                      <td style={{ textAlign: "center", padding: "4px 4px" }}>
+                      <td style={{ textAlign: "center", padding: "8px 6px" }}>
                         <button
                           onClick={() => remove(idx)}
                           style={{
@@ -928,7 +1014,6 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                             cursor: "pointer",
                             width: 26,
                             height: 26,
-                            borderRadius: 4,
                             display: "inline-flex",
                             alignItems: "center",
                             justifyContent: "center",
@@ -967,33 +1052,33 @@ export const LineEditor: React.FC<LineEditorProps> = ({
             <tfoot>
               <tr
                 style={{
-                  background: "hsl(var(--muted))",
-                  borderTop: "1px solid hsl(var(--border))",
+                  background: "hsl(var(--card))",
+                  borderTop: "1px solid hsl(var(--foreground) / 0.2)",
                 }}
               >
                 <td
                   colSpan={colCount - 2}
                   style={{
                     textAlign: "right",
-                    padding: "6px 10px",
+                    padding: "12px 12px",
                     fontSize: 10,
                     fontWeight: 600,
                     letterSpacing: "0.07em",
                     textTransform: "uppercase",
                     color: "hsl(var(--muted-foreground))",
-                    borderRight: "1px solid hsl(var(--border))",
+                    borderRight: "1px solid hsl(var(--foreground) / 0.2)",
                   }}
                 >
                   {isItem ? "Items" : "Activities"} subtotal
                 </td>
-                <td style={{ padding: "6px 10px", textAlign: "right" }}>
+                <td style={{ padding: "12px 12px", textAlign: "right" }}>
                   <span
                     style={{
                       fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
                       fontVariantNumeric: "tabular-nums",
                       fontSize: 13,
                       fontWeight: 700,
-                      color: "hsl(var(--primary))",
+                      color: "hsl(var(--foreground))",
                     }}
                   >
                     {fmt(subtotal)}
@@ -1005,95 +1090,23 @@ export const LineEditor: React.FC<LineEditorProps> = ({
           )}
         </table>
       </div>
+      )}
 
-      {/* ── Grand total bar ── */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "10px 16px",
-          borderTop: "1px solid hsl(var(--border))",
-          background: "hsl(var(--muted))",
-          flexWrap: "wrap",
-          gap: 12,
-        }}
-      >
-        <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            <span
-              style={{
-                fontSize: 9,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: "hsl(var(--muted-foreground))",
-              }}
-            >
-              Items
-            </span>
-            <span
-              style={{
-                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
-                fontVariantNumeric: "tabular-nums",
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: "hsl(var(--foreground))",
-              }}
-            >
-              {fmt(itemsTotal)}
-            </span>
+      {/* ── Totals ── */}
+      <div className="boq-lines-totals">
+        <div className="boq-lines-sub">
+          <div>
+            <span className="boq-lines-lbl">Items</span>
+            <span className="boq-lines-fig font-heading">{fmt(itemsTotal)}</span>
           </div>
-          <span style={{ color: "hsl(var(--border))", fontSize: 16 }}>+</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            <span
-              style={{
-                fontSize: 9,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: "hsl(var(--muted-foreground))",
-              }}
-            >
-              Activities
-            </span>
-            <span
-              style={{
-                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
-                fontVariantNumeric: "tabular-nums",
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: "hsl(var(--foreground))",
-              }}
-            >
-              {fmt(activitiesTotal)}
-            </span>
+          <div>
+            <span className="boq-lines-lbl">Activities</span>
+            <span className="boq-lines-fig font-heading">{fmt(activitiesTotal)}</span>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span
-            style={{
-              fontSize: 9,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "hsl(var(--muted-foreground))",
-            }}
-          >
-            Grand total (excl. tax)
-          </span>
-          <span
-            style={{
-              fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
-              fontVariantNumeric: "tabular-nums",
-              fontSize: 20,
-              fontWeight: 700,
-              color: "hsl(var(--primary))",
-              letterSpacing: "-0.5px",
-            }}
-          >
-            {fmt(grandTotal)}
-          </span>
+        <div className="boq-lines-grand">
+          <span className="boq-lines-lbl">Grand total (excl. tax)</span>
+          <span className="boq-lines-fig boq-lines-fig-big font-heading">{fmt(grandTotal)}</span>
         </div>
       </div>
     </div>

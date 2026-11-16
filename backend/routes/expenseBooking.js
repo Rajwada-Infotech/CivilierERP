@@ -1441,15 +1441,17 @@ router.get("/tds-eligibility", async (req, res) => {
   }
   try {
     const pool = getPool();
-    const { resolveFinYearId, resolveThresholdStatus, SINGLE_BILL_THRESHOLD, YEARLY_CUMULATIVE_THRESHOLD } = require("../services/tds");
+    const { resolveFinYearId, resolveThresholdStatus, getTdsLimits } = require("../services/tds");
 
     const supRes = await pool.request().input("Id", sql.Int, supplierId)
       .query("SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id");
     const tdsApplicable = !!supRes.recordset[0]?.IsTdsApplicable;
     const tdsLimitApplicable = !!supRes.recordset[0]?.TdsLimitApplicable;
 
+    // This party's own limits (Vendor / Contractor Master), else the standard ₹30k / ₹1L.
+    const limits = await getTdsLimits(pool, sql, supplierId);
     if (!tdsApplicable) {
-      return res.json({ tdsApplicable: false, thresholdMet: false, cumulativeAmount: 0, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD });
+      return res.json({ tdsApplicable: false, thresholdMet: false, cumulativeAmount: 0, singleBillThreshold: limits.singleBill, yearlyThreshold: limits.yearly });
     }
 
     const finYearId = await resolveFinYearId(pool, sql, date || new Date());
@@ -1457,7 +1459,19 @@ router.get("/tds-eligibility", async (req, res) => {
       tdsLimitApplicable, billAmount: amount, partyHeadId: supplierId, companyId, finYearId,
     });
 
-    res.json({ tdsApplicable: true, thresholdMet, cumulativeAmount, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD });
+    // Advances to this party that already had TDS deducted: TDS on this invoice is only due on what they don't cover.
+    const { getAdvanceTdsAvailable } = require("../services/tds");
+    const excludeEid = parseInt(req.query.eid, 10) || 0;
+    const advanceAvailable = await getAdvanceTdsAvailable(() => pool.request(), sql, {
+      partyHeadId: supplierId, companyId, date: date || new Date(), excludeEid,
+    });
+    const advanceCovered = Math.round(Math.min(amount, advanceAvailable) * 100) / 100;
+    const tdsBase = Math.max(0, Math.round((amount - advanceCovered) * 100) / 100);
+
+    res.json({
+      tdsApplicable: true, thresholdMet, cumulativeAmount, singleBillThreshold: limits.singleBill, yearlyThreshold: limits.yearly, tdsLimitApplicable,
+      advanceAvailable, advanceCovered, tdsBase, coveredByAdvance: advanceCovered > 0 && tdsBase <= 0,
+    });
   } catch (err) {
     console.error("TDS eligibility error:", err.message);
     res.status(500).json({ error: err.message });
@@ -2979,6 +2993,26 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       );
     }
 
+    // Advances to this party that already had TDS deducted cover part (or all) of this invoice: TDS is only deducted
+    // on the rest, and a TDS can't be deducted at all when they cover the whole invoice (services/tds.js).
+    if (newExpenseId) {
+      const { computeAdvanceTdsCover } = require("../services/tds");
+      const cover = await computeAdvanceTdsCover(() => transaction.request(), sql, parseInt(newExpenseId, 10));
+      if (cover.blocked) {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `TDS was already deducted on advance payment(s) to this party covering this whole invoice (₹${cover.covered.toLocaleString("en-IN")}) — it can't be deducted again. Remove the TDS and save.`,
+        });
+      }
+      if (cover.covered > 0) {
+        await transaction.request()
+          .input("Eid", sql.Int, parseInt(newExpenseId, 10))
+          .input("Covered", sql.Decimal(18, 2), cover.covered)
+          .input("TDSAmount", sql.Decimal(18, 2), cover.tdsAmount)
+          .query("UPDATE dbo.ExpenseBooking SET TDSAdvanceCovered = @Covered, TDSAmount = CASE WHEN TDSId IS NULL THEN TDSAmount ELSE @TDSAmount END WHERE Eid = @Eid");
+      }
+    }
+
     await transaction.commit();
 
     // ── Contract Master: auto-allocate (FIFO) any available advance ─────────
@@ -3678,6 +3712,24 @@ router.put(
         };
       }
 
+      // Advances already TDS'd cover part (or all) of this invoice — see the same step on POST /. Worked out with the
+      // edit's own values before anything is written, so a blocked save changes nothing.
+      const { computeAdvanceTdsCover } = require("../services/tds");
+      const coverPut = await computeAdvanceTdsCover(() => pool.request(), sql, numericId, {
+        amount: bookingAmount,
+        companyId: ECompanyId,
+        date: EDocDate,
+        lHeadId: LHeadId,
+        tdsId: tdsSnapshotPut.TDSId,
+        tdsPercentage: tdsSnapshotPut.TDSPercentage,
+      });
+      if (coverPut.blocked) {
+        return res.status(400).json({
+          error: `TDS was already deducted on advance payment(s) to this party covering this whole invoice (₹${coverPut.covered.toLocaleString("en-IN")}) — it can't be deducted again. Remove the TDS and save.`,
+        });
+      }
+      if (tdsSnapshotPut.TDSId) tdsSnapshotPut.TDSAmount = coverPut.tdsAmount;
+
       const putReq = pool
         .request()
         .input("Eid", sql.Int, numericId)
@@ -3770,7 +3822,8 @@ router.put(
         .input("TDSNature", sql.NVarChar(200), tdsSnapshotPut.TDSNature)
         .input("TDSName", sql.NVarChar(200), tdsSnapshotPut.TDSName)
         .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshotPut.TDSPercentage)
-        .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshotPut.TDSAmount);
+        .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshotPut.TDSAmount)
+        .input("TDSAdvanceCovered", sql.Decimal(18, 2), coverPut.covered);
 
       if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
       if (hasDirectItemsColPut) putReq.input("EDirectItemsDataPut", sql.NVarChar(sql.MAX), EDirectItemsDataPut || null);
@@ -3793,7 +3846,8 @@ router.put(
           EAdditionalCharges=@EAdditionalCharges,
           ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EGLAccountId=@EGLAccountId, EWorkDoneRef=@EWorkDoneRef,
           LHeadId=@LHeadId,
-          TDSId=@TDSId, TDSNature=@TDSNature, TDSName=@TDSName, TDSPercentage=@TDSPercentage, TDSAmount=@TDSAmount
+          TDSId=@TDSId, TDSNature=@TDSNature, TDSName=@TDSName, TDSPercentage=@TDSPercentage, TDSAmount=@TDSAmount,
+          TDSAdvanceCovered=@TDSAdvanceCovered
           ${hasPayTermColPut ? ", PaymentTermId=@PaymentTermIdPut" : ""}
           ${hasDirectItemsColPut ? ", EDirectItemsData=@EDirectItemsDataPut" : ""}
         WHERE Eid = @Eid

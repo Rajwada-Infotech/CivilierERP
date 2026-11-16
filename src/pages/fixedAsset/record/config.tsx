@@ -26,7 +26,10 @@ export interface FormState {
   activationDate: string;
   purchaseInvoiceRef: string;
   supplierId: string;
+  /** Before tax. */
   purchaseCost: string;
+  /** VAT % (purchase before 1 July 2017) or GST % — see faTax. */
+  taxPct: string;
   quantity: string;
   depreciationSetupId: string;
   depreciationType: string;
@@ -61,6 +64,7 @@ export const emptyForm = (finYear = ""): FormState => ({
   purchaseInvoiceRef: "",
   supplierId: "",
   purchaseCost: "",
+  taxPct: "",
   quantity: "1",
   depreciationSetupId: "",
   depreciationType: "",
@@ -94,7 +98,11 @@ export const detailToForm = (d: FixedAssetDetail): FormState => ({
   activationDate: d.ActivationDate?.slice(0, 10) || "",
   purchaseInvoiceRef: d.PurchaseInvoiceRef || "",
   supplierId: String(d.SupplierId || ""),
-  purchaseCost: String(d.PurchaseCost || ""),
+  // PurchaseCost holds VAT for a VAT-era asset; the form edits the cost before tax.
+  purchaseCost: String(
+    (d.PurchaseCost || 0) - (d.TaxType === "VAT" ? d.TaxAmount || 0 : 0) || "",
+  ),
+  taxPct: d.TaxPct != null ? String(Number(d.TaxPct)) : "",
   quantity: String(d.Quantity || "1"),
   depreciationSetupId: String(d.DepreciationSetupId || ""),
   depreciationType: d.DepreciationType || "",
@@ -109,17 +117,49 @@ export const detailToForm = (d: FixedAssetDetail): FormState => ({
   pictureBase64: d.PictureBase64 || "",
 });
 
+// ── VAT / GST on the purchase ── (mirrors backend/services/faTax.js — keep the two in step)
+// GST started in India on 1 July 2017. Bought before that → VAT, which couldn't be claimed back, so it is part of the
+// asset's cost and depreciated. From then → GST, claimed as input credit, so it is recorded but not in the cost.
+export const GST_START = "2017-07-01";
+export const taxTypeFor = (date: string): "VAT" | "GST" | null => (date ? (date.slice(0, 10) < GST_START ? "VAT" : "GST") : null);
+export function faTax(base: number, pct: string, date: string) {
+  const type = taxTypeFor(date);
+  const p = pct === "" ? null : Math.max(0, parseFloat(pct) || 0);
+  const amount = p == null ? 0 : Math.round(base * p) / 100;
+  return { type, amount, cost: type === "VAT" ? Math.round((base + amount) * 100) / 100 : base };
+}
+
 /** What the asset is worth on the books: cost less the depreciation actually posted against it. */
 export const bookValue = (a: Pick<FixedAssetListItem, "PurchaseCost" | "Depreciated">) =>
   Math.max(0, (a.PurchaseCost || 0) - (a.Depreciated || 0));
 
-/** Straight-line estimate from the purchase date, for the form before anything is posted. */
-export function estimateDepreciation(purchaseCost: number, rate: number, purchaseDate: string) {
-  if (!purchaseCost || !rate || !purchaseDate) return null;
-  const years = Math.max(0, (Date.now() - new Date(purchaseDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
-  const annualDep = purchaseCost * (rate / 100);
-  const totalDep = Math.min(purchaseCost, annualDep * years);
-  return { years: parseFloat(years.toFixed(2)), annualDep, totalDep, bookValue: Math.max(0, purchaseCost - totalDep) };
+/**
+ * Estimate for the form before anything is posted — the same months and maths the posting engine uses
+ * (backend/services/fixedAssetDepreciationPosting.js computeMonth): one charge a month from the start month up to the
+ * last closed month. SLM = cost × rate ÷ 12; WDV = rate × book value at the start of the financial year (1 April) ÷ 12.
+ * annualDep is the first year's charge.
+ */
+export function estimateDepreciation(purchaseCost: number, rate: number, startDate: string, method = "SLM") {
+  if (!purchaseCost || !rate || !startDate) return null;
+  const sy = Number(startDate.slice(0, 4)), sm = Number(startDate.slice(5, 7));
+  if (!sy || !sm) return null;
+  const now = new Date();
+  const lastClosed = now.getFullYear() * 12 + now.getMonth() - 1; // previous calendar month, as an index
+  const wdv = method.toUpperCase() === "WDV";
+  let book = purchaseCost, yearOpening = purchaseCost, months = 0;
+  for (let i = sy * 12 + (sm - 1); i <= lastClosed && book > 0.01; i++) {
+    if (i % 12 === 3) yearOpening = book; // April opens a financial year
+    const gross = ((wdv ? yearOpening : purchaseCost) * rate) / 1200;
+    book -= Math.min(gross, book);
+    months++;
+  }
+  const totalDep = Math.round((purchaseCost - book) * 100) / 100;
+  return {
+    years: parseFloat((months / 12).toFixed(2)),
+    annualDep: purchaseCost * (rate / 100),
+    totalDep,
+    bookValue: Math.max(0, Math.round(book * 100) / 100),
+  };
 }
 
 export const fmt = (n: number | null | undefined) => (n == null ? "—" : new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n));

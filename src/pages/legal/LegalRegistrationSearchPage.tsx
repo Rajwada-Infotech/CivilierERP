@@ -119,11 +119,9 @@ export default function LegalRegistrationSearchPage() {
   const verifiedUrl = mappedPortalLink?.Url || (selectedOfficeObj as any)?.Url || "https://igr.wb.gov.in/";
 
   // Open the portal in right split workspace
-  const handleOpenSidePortal = (urlToOpen?: string, titleToDisplay?: string) => {
-    const targetUrl = urlToOpen || verifiedUrl;
-    setPortalUrl(targetUrl);
-    setPortalOfficeTitle(titleToDisplay || selectedOfficeObj?.label || "West Bengal Registration Portal");
-    setPortalOpen(true);
+  // Government sites open in a new browser tab (they refuse to be shown inside another page).
+  const handleOpenSidePortal = (urlToOpen?: string, _titleToDisplay?: string) => {
+    window.open(urlToOpen || verifiedUrl, "_blank", "noopener,noreferrer");
   };
 
   // Mutations

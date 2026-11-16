@@ -2,10 +2,13 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Profile2User, Camera } from "iconsax-react";
-import { FileText } from "lucide-react";
+import { FileText, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell, HR_PAYROLL_ACCENT as ACCENT, HR_GRADIENT } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrAvatar, HrError, HrSkeleton, HrStatStrip, HR_FIELD, HR_HEAD, HR_LBL, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { KEY_INK, KEY_LINE, KEY_RED, TONE } from "@/components/sheet/sheetParts";
+import { SheetMark } from "@/components/sheet/Sheet";
 import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent, type RecordWithId } from "@/components/MasterPage";
 import { EmployeeDocumentsModal } from "@/components/hrpayroll/EmployeeDocumentsModal";
 import {
@@ -22,6 +25,8 @@ import {
 import { getCostCenterOptions } from "@/api/costCenterApi";
 import { getUnlinkedEmployeeCandidates, type UnlinkedEmployeeCandidate } from "@/api/offerLetterApi";
 import { getSalaryStructureFamilies } from "@/api/salaryStructureApi";
+import { getDepartmentOptions } from "@/api/departmentMasterApi";
+import { getDesignations } from "@/api/designationMasterApi";
 import { Wallet3 } from "iconsax-react";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
@@ -134,7 +139,7 @@ const PhotoField: React.FC<{
   const inputId = "employee-photo-input";
   return (
     <div className="flex items-center gap-3">
-      <div className="w-16 h-16 rounded-xl border border-border bg-muted/40 flex items-center justify-center overflow-hidden shrink-0">
+      <div className="w-16 h-16 border border-foreground/40 bg-foreground/5 flex items-center justify-center overflow-hidden shrink-0">
         {photo ? (
           <img src={photo} alt="Employee" className="w-full h-full object-cover" />
         ) : (
@@ -144,7 +149,7 @@ const PhotoField: React.FC<{
       <div className="flex items-center gap-2">
         <label
           htmlFor={inputId}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+          className={`${KEY_LINE} h-9 px-3 cursor-pointer`}
         >
           <Camera size={13} /> {photo ? "Change Photo" : "Upload Photo"}
         </label>
@@ -152,7 +157,7 @@ const PhotoField: React.FC<{
           <button
             type="button"
             onClick={() => onChange("")}
-            className="text-xs text-destructive hover:underline"
+            className={`${KEY_RED} h-9 px-3`}
           >
             Remove
           </button>
@@ -194,14 +199,14 @@ const SalaryBreakupModal: React.FC<{
   const result = data as SalaryBreakupResult | undefined;
 
   return (
-    <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-xl shadow-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+    <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card w-full max-w-2xl max-h-[85vh] overflow-y-auto" style={{ border: HR_RULE }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: HR_RULE }}>
           <div>
-            <h3 className="font-heading font-semibold text-foreground text-sm">Salary Details</h3>
+            <h3 className={HR_HEAD}>Salary details</h3>
             <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{employeeName}</p>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-sm">✕</button>
+          <button onClick={onClose} aria-label="Close" className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"><X size={14} /></button>
         </div>
         <div className="p-5">
           {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
@@ -218,44 +223,44 @@ const SalaryBreakupModal: React.FC<{
               <p className="text-[0.6875rem] text-muted-foreground">
                 Structure: {result.SalaryStructureName} (v{result.SalaryStructureVersion})
               </p>
-              <div className="rounded-lg border border-border overflow-hidden">
+              <div className="overflow-hidden" style={{ border: HR_RULE }}>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/30 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
+                    <tr className={HR_LBL} style={{ borderBottom: HR_RULE }}>
                       <th className="text-left px-3 py-2">Salary Head</th>
                       <th className="text-left px-3 py-2">Type</th>
                       <th className="text-left px-3 py-2">Calculation</th>
                       <th className="text-right px-3 py-2">Amount</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
+                  <tbody className="divide-y divide-foreground/15">
                     {result.lines.map((l) => (
                       <tr key={l.DeductionAdditionId}>
                         <td className="px-3 py-2 font-medium">{l.HeadName}</td>
                         <td className="px-3 py-2 text-muted-foreground">{l.HeadType}</td>
                         <td className="px-3 py-2 text-muted-foreground">{l.Calculation}</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{l.Amount.toLocaleString("en-IN")}</td>
+                        <td className="px-3 py-2 text-right font-heading tabular-nums">₹{l.Amount.toLocaleString("en-IN")}</td>
                       </tr>
                     ))}
-                    <tr className="bg-muted/20 font-semibold">
+                    <tr className="font-semibold" style={{ borderTop: HR_RULE }}>
                       <td className="px-3 py-2" colSpan={3}>Gross Salary</td>
-                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.GrossSalary.toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-2 text-right font-heading tabular-nums">₹{result.totals.GrossSalary.toLocaleString("en-IN")}</td>
                     </tr>
                     <tr className="font-semibold">
                       <td className="px-3 py-2" colSpan={3}>Total Employee Deduction</td>
-                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.TotalEmployeeDeduction.toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-2 text-right font-heading tabular-nums">₹{result.totals.TotalEmployeeDeduction.toLocaleString("en-IN")}</td>
                     </tr>
                     <tr className="font-semibold">
                       <td className="px-3 py-2" colSpan={3}>Net Salary</td>
-                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.NetSalary.toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-2 text-right font-heading tabular-nums">₹{result.totals.NetSalary.toLocaleString("en-IN")}</td>
                     </tr>
                     <tr className="font-semibold">
                       <td className="px-3 py-2" colSpan={3}>Employer Contribution</td>
-                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.TotalEmployerContribution.toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-2 text-right font-heading tabular-nums">₹{result.totals.TotalEmployerContribution.toLocaleString("en-IN")}</td>
                     </tr>
-                    <tr className="bg-primary/10 font-bold">
+                    <tr className="bg-primary/5 font-bold" style={{ borderTop: HR_RULE }}>
                       <td className="px-3 py-2" colSpan={3}>Total CTC</td>
-                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.TotalCTC.toLocaleString("en-IN")}</td>
+                      <td className="px-3 py-2 text-right font-heading tabular-nums">₹{result.totals.TotalCTC.toLocaleString("en-IN")}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -280,17 +285,11 @@ export default function EmployeeMaster() {
     staleTime: 60 * 1000,
   });
 
-  const { data: costCenterData } = useQuery({
-    queryKey: ["cost-center-options"],
-    queryFn: getCostCenterOptions,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const { data: companyData } = useQuery({
-    queryKey: ["employee-company-options"],
-    queryFn: getEmployeeCompanyOptions,
-    staleTime: 5 * 60 * 1000,
-  });
+  // Department and Designation come from their masters (Department Master / Designation Master).
+  const { data: departmentData } = useQuery({ queryKey: ["department-master-options"], queryFn: getDepartmentOptions, staleTime: 5 * 60 * 1000 });
+  const { data: designationData } = useQuery({ queryKey: ["designation-master"], queryFn: getDesignations, staleTime: 5 * 60 * 1000 });
+  const departmentNames = (Array.isArray(departmentData) ? departmentData : []).filter((d) => d.IsActive !== false).map((d) => d.DepartmentName);
+  const designationList = (Array.isArray(designationData) ? designationData : []).filter((d) => d.IsActive !== false);
 
   const { data: unlinkedData } = useQuery({
     queryKey: ["offer-letter-unlinked-employees"],
@@ -300,14 +299,6 @@ export default function EmployeeMaster() {
 
   const rows: EmployeeRow[] = Array.isArray(data) ? data : [];
   const mappedData: RecordWithId[] = rows.map(mapRow);
-  const costCenterOptions = (Array.isArray(costCenterData) ? costCenterData : []).map((c) => ({
-    value: String(c.id),
-    label: c.code ? c.code + " - " + c.label : c.label,
-  }));
-  const companyOptions = (Array.isArray(companyData) ? companyData : []).map((c) => ({
-    value: String(c.id),
-    label: c.label,
-  }));
   const unlinkedCandidates: UnlinkedEmployeeCandidate[] = Array.isArray(unlinkedData) ? unlinkedData : [];
 
   const refresh = () => {
@@ -346,31 +337,34 @@ export default function EmployeeMaster() {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
+      // A failed save must REACH the page (rethrow): MasterPage only adds the row to its list and says "saved" when
+      // this handler doesn't throw — swallowing the error here showed an employee that was never stored.
       try {
         await addEmployee(toPayload(event.record));
-        toast.success("Employee added");
-        await refresh();
       } catch (err: any) {
-        toast.error("Save failed: " + (err?.message || "Unknown error"));
+        throw new Error("Save failed: " + (err?.message || "Unknown error"));
       }
+      toast.success("Employee added");
+      await refresh();
     }
     if (event.action === "update") {
       try {
         await updateEmployee(Number(event.id), toPayload(event.record));
-        toast.success("Employee updated");
-        await refresh();
       } catch (err: any) {
-        toast.error("Update failed: " + (err?.message || "Unknown error"));
+        throw new Error("Update failed: " + (err?.message || "Unknown error"));
       }
+      toast.success("Employee updated");
+      await refresh();
     }
     if (event.action === "delete") {
+      let res: { message?: string } | undefined;
       try {
-        const res = await deleteEmployee(Number(event.id));
-        toast.success(res?.message || "Employee removed");
-        await refresh();
+        res = await deleteEmployee(Number(event.id));
       } catch (err: any) {
-        toast.error("Delete failed: " + (err?.message || "Unknown error"));
+        throw new Error("Delete failed: " + (err?.message || "Unknown error"));
       }
+      toast.success(res?.message || "Employee removed");
+      await refresh();
     }
   };
 
@@ -385,13 +379,13 @@ export default function EmployeeMaster() {
         const isExistingRecord = !!p.formData._id;
         if (isExistingRecord) {
           return p.formData.candidateId ? (
-            <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground">
-              {(p.formData.candidateCode as string) || "-"} {(p.formData.candidateName as string) ? `— ${p.formData.candidateName}` : ""}
+            <div className="w-full min-h-9 px-2.5 py-2 border border-foreground/20 bg-foreground/5 text-sm text-foreground">
+              <span className={HR_NUM}>{(p.formData.candidateCode as string) || "-"}</span> {(p.formData.candidateName as string) ? `— ${p.formData.candidateName}` : ""}
               <span className="ml-2 text-[0.6875rem] text-muted-foreground">(auto-linked from Offer Letter &amp; Joining)</span>
             </div>
           ) : (
-            <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-muted-foreground">
-              Not linked to a candidate — created directly in Employee Master
+            <div className="w-full h-9 px-2.5 flex items-center border border-foreground/20 bg-foreground/5 text-sm text-muted-foreground">
+              Not linked to a candidate — created directly in Employees
             </div>
           );
         }
@@ -403,7 +397,7 @@ export default function EmployeeMaster() {
                 p.onChange(e.target.value);
                 handlePickCandidate(e.target.value);
               }}
-              className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className={HR_FIELD}
             >
               <option value="">— Not linked (fill in manually) —</option>
               {unlinkedCandidates.map((c) => (
@@ -422,7 +416,14 @@ export default function EmployeeMaster() {
     // Rows of three on desktop: identity → contact → personal → photo/address.
     { name: "employeeCode", label: "Employee ID / Employee Code", type: "text", required: true, uppercase: true, placeholder: "e.g. EMP-0001" },
     { name: "employeeName", label: "Employee Name", type: "text", required: true },
-    { name: "companyId", label: "Company", type: "select", asyncOptions: async () => companyOptions },
+    // MasterPage calls asyncOptions once, when the form first mounts — so it fetches (via the shared query cache)
+    // instead of returning companyOptions, which is still empty if the query hadn't finished yet.
+    {
+      name: "companyId", label: "Company", type: "select",
+      asyncOptions: async () =>
+        (await queryClient.fetchQuery({ queryKey: ["employee-company-options"], queryFn: getEmployeeCompanyOptions, staleTime: 5 * 60 * 1000 }))
+          .map((c) => ({ value: String(c.id), label: c.label })),
+    },
     { name: "mobile", label: "Mobile", type: "text" },
     { name: "email", label: "Email", type: "text" },
     { name: "dateOfBirth", label: "Date of Birth", type: "date" },
@@ -435,8 +436,33 @@ export default function EmployeeMaster() {
     { name: "sec-employment", label: "Employment Details", type: "section" },
     { name: "joiningDate", label: "Joining Date", type: "date" },
     { name: "confirmationDate", label: "Confirmation Date", type: "date" },
-    { name: "department", label: "Department", type: "text" },
-    { name: "designation", label: "Designation", type: "text" },
+    {
+      name: "department",
+      label: "Department",
+      type: "select",
+      optionsProvider: (_all, _id, form) => {
+        const names = [...departmentNames];
+        const cur = String(form?.department ?? "");
+        // An older record may carry a department name typed before the master existed — keep it selectable.
+        if (cur && !names.includes(cur)) names.unshift(cur);
+        return names.map((n) => ({ value: n, label: n }));
+      },
+    },
+    {
+      name: "designation",
+      label: "Designation",
+      type: "select",
+      optionsProvider: (_all, _id, form) => {
+        const dept = String(form?.department ?? "");
+        // With a department chosen, offer that department's designations plus the ones not tied to any department.
+        const names = designationList
+          .filter((d) => !dept || !d.DepartmentName || d.DepartmentName === dept)
+          .map((d) => d.DesignationName);
+        const cur = String(form?.designation ?? "");
+        if (cur && !names.includes(cur)) names.unshift(cur);
+        return Array.from(new Set(names)).map((n) => ({ value: n, label: n }));
+      },
+    },
     { name: "branchLocation", label: "Branch / Location", type: "text" },
     {
       name: "reportingManagerId",
@@ -452,7 +478,12 @@ export default function EmployeeMaster() {
     },
     { name: "employmentType", label: "Employment Type", type: "select", options: EMPLOYMENT_TYPES },
     { name: "gradeLevel", label: "Grade / Level", type: "text" },
-    { name: "costCenterId", label: "Cost Centre", type: "select", asyncOptions: async () => costCenterOptions },
+    {
+      name: "costCenterId", label: "Cost Centre", type: "select",
+      asyncOptions: async () =>
+        (await queryClient.fetchQuery({ queryKey: ["cost-center-options"], queryFn: getCostCenterOptions, staleTime: 5 * 60 * 1000 }))
+          .map((c) => ({ value: String(c.id), label: c.code ? c.code + " - " + c.label : c.label })),
+    },
 
     { name: "sec-payroll", label: "Payroll", type: "section" },
     { name: "ctcAmount", label: "CTC Amount", type: "number" },
@@ -463,7 +494,7 @@ export default function EmployeeMaster() {
       type: "select",
       asyncOptions: async () => {
         const list = await getSalaryStructureFamilies();
-        return (Array.isArray(list) ? list : []).map((s) => ({ value: s.Code, label: s.Name }));
+        return (Array.isArray(list) ? list : []).map((s) => ({ value: s.Code, label: s.Label || s.Name }));
       },
     },
 
@@ -501,20 +532,16 @@ export default function EmployeeMaster() {
     { key: "isActive", label: "Status" },
   ];
 
-  const initials = (name: string) => (name || "?").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-  const chip = "inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium";
+  // A small ruled tag for a word in a cell.
+  const chip = "inline-flex items-center px-1.5 py-0.5 border border-foreground/30 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground";
 
   const columnRenderers: Record<string, (value: unknown, row: RecordWithId) => React.ReactNode> = {
     employeeCode: (value) => (
-      <span className="font-mono text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded-md" style={{ background: `${ACCENT}14`, color: ACCENT }}>
-        {String(value || "-")}
-      </span>
+      <span className={`${HR_NUM} text-[0.6875rem] font-semibold`}>{String(value || "—")}</span>
     ),
     employeeName: (value, row) => (
       <div className="flex items-center gap-2.5 min-w-0">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[0.6875rem] font-bold text-white shadow-sm" style={{ background: HR_GRADIENT }}>
-          {initials(String(value || ""))}
-        </span>
+        <HrAvatar name={String(value || "")} size={28} />
         <div className="min-w-0">
           <p className="font-medium text-foreground truncate">{String(value || "-")}</p>
           {(row.mobile || row.email) && (
@@ -525,41 +552,28 @@ export default function EmployeeMaster() {
     ),
     designation: (value) => (value ? <span className="text-sm text-foreground">{String(value)}</span> : <span className="text-xs text-muted-foreground">-</span>),
     department: (value) =>
-      value ? <span className={`${chip} bg-muted text-foreground border border-border`}>{String(value)}</span> : <span className="text-xs text-muted-foreground">-</span>,
+      value ? <span className={chip}>{String(value)}</span> : <span className="text-xs text-muted-foreground">—</span>,
     employmentType: (value) =>
       value ? (
-        <span className={chip} style={{ background: `${ACCENT}14`, color: ACCENT }}>{String(value)}</span>
+        <span className={chip}>{String(value)}</span>
       ) : <span className="text-xs text-muted-foreground">-</span>,
     candidateCode: (value, row) =>
       value ? (
-        <span className="text-xs" title={row.candidateName as string}>{String(value)}</span>
+        <span className={`text-xs ${HR_NUM}`} title={row.candidateName as string}>{String(value)}</span>
       ) : (
         <span className="text-xs text-muted-foreground">-</span>
       ),
-    isActive: (value) => (
-      <span
-        className={
-          "inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border " +
-          (value
-            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
-            : "bg-red-500/10 border-red-500/20 text-red-600")
-        }
-      >
-        <span className={"w-1.5 h-1.5 rounded-full mr-1.5 " + (value ? "bg-emerald-500" : "bg-red-500")} />
-        {value ? "Active" : "Inactive"}
-      </span>
-    ),
+    isActive: (value) => <SheetMark text={value ? "Active" : "Inactive"} tone={value ? "done" : "draft"} />,
     documents: (_value, row) => (
       <button
         type="button"
         onClick={() =>
           setDocsFor({ id: Number(row._id), name: (row.employeeName as string) || "" })
         }
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[0.6875rem] font-medium transition-colors hover:brightness-95"
-        style={{ borderColor: `${ACCENT}40`, background: `${ACCENT}0f`, color: ACCENT }}
+        className={`${KEY_LINE} h-8 px-3`}
         title="Documents"
       >
-        <FileText size={12} /> {Number(row.documentCount || 0)}
+        <FileText size={12} /> <span className="font-heading tabular-nums">{Number(row.documentCount || 0)}</span>
       </button>
     ),
     salaryBreakup: (_value, row) =>
@@ -567,8 +581,7 @@ export default function EmployeeMaster() {
         <button
           type="button"
           onClick={() => setBreakupFor({ id: Number(row._id), name: (row.employeeName as string) || "" })}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-semibold text-white shadow-sm hover:shadow-md transition-shadow"
-          style={{ background: HR_GRADIENT }}
+          className={`${KEY_INK} h-8 px-3`}
         >
           <Wallet3 size={12} /> View
         </button>
@@ -576,16 +589,6 @@ export default function EmployeeMaster() {
         <span className="text-[0.6875rem] text-muted-foreground">No CTC</span>
       ),
   };
-
-  if (isLoading) {
-    return (
-      <div className="space-y-4 p-1">
-        <div className="h-24 rounded-2xl bg-muted/60 animate-pulse" />
-        <div className="h-72 rounded-2xl bg-muted/40 animate-pulse" />
-      </div>
-    );
-  }
-  if (error) return <div className="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">Failed to load Employee Master.</div>;
 
   // Display-only summary from the rows already loaded.
   const summary = (() => {
@@ -603,15 +606,16 @@ export default function EmployeeMaster() {
 
   return (
     <>
-      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "HR and Payroll", path: "/hr-payroll" }, { label: "Employee Master" }]} />
-      <HrPayrollShell title="Employee Master" subtitle="Employees, roles, statutory & bank details" icon={Profile2User}>
-        <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 rounded-2xl border p-3" style={{ background: `${ACCENT}0a`, borderColor: `${ACCENT}2e` }}>
-          {summary.map(([label, n], i) => (
-            <div key={label} className="rounded-xl bg-card/80 border border-border px-3.5 py-2.5 shadow-sm">
-              <p className="text-xl font-heading font-bold tabular-nums leading-tight" style={{ color: i === 0 ? ACCENT : i === 1 ? "#059669" : i === 2 ? "#dc2626" : undefined }}>{n}</p>
-              <p className="text-[0.6875rem] text-muted-foreground">{label}</p>
-            </div>
-          ))}
+      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "HR and Payroll", path: "/hr-payroll" }, { label: "Setup" }, { label: "Employees" }]} />
+      <HrPayrollShell title="Employees" subtitle="Employees, roles, statutory & bank details" icon={Profile2User}>
+        {isLoading ? (
+          <HrSkeleton rows={2} />
+        ) : error ? (
+          <HrError text="Failed to load employees." />
+        ) : (
+        <>
+        <div className="mb-4">
+          <HrStatStrip items={summary.map(([label, n], i) => ({ label, value: n, tone: i === 1 ? TONE.blue : i === 2 && n ? TONE.red : undefined }))} />
         </div>
         <MasterPage
           canCreate={rights.canCreate}
@@ -625,10 +629,19 @@ export default function EmployeeMaster() {
           columnRenderers={columnRenderers}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          onFieldChange={(next, fieldName) => {
+            if (fieldName !== "department") return next;
+            const dept = String(next.department ?? "");
+            const des = String(next.designation ?? "");
+            if (!des) return next;
+            const d = designationList.find((x) => x.DesignationName === des);
+            // Keep the designation if it is unassigned or belongs to the chosen department; otherwise clear it.
+            return !dept || !d || !d.DepartmentName || d.DepartmentName === dept ? next : { ...next, designation: "" };
+          }}
           externalFormPatch={candidatePatch}
           externalFormPatchKey={pickedCandidateId || null}
           exportConfig={rights.canExport ? {
-            title: "Employee Master",
+            title: "Employees",
             filename: "employee-master",
             columns: [
               { header: "Employee Code", accessor: "employeeCode" },
@@ -649,6 +662,8 @@ export default function EmployeeMaster() {
             ],
           } : undefined}
         />
+        </>
+        )}
       </HrPayrollShell>
       {docsFor && (
         <EmployeeDocumentsModal

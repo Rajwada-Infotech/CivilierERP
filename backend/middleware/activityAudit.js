@@ -130,7 +130,9 @@ async function write(req, res, payload) {
   if (text.length > MAX_DETAILS) text = JSON.stringify({ ...details, fields: { "…": "too large to record in full" } });
 
   const ip = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "") || "unknown";
-  const ua = (req.headers["user-agent"] || "unknown").slice(0, 255);
+  // A mobile app names itself (X-Client, e.g. "mobile-admin"); its User-Agent alone is just the phone's HTTP library.
+  const client = /^[a-z0-9-]{1,40}$/i.test(String(req.headers["x-client"] || "")) ? String(req.headers["x-client"]) : null;
+  const ua = `${client ? `${client} · ` : ""}${req.headers["user-agent"] || "unknown"}`.slice(0, 255);
   const id = crypto.randomUUID();
   const row = {
     id,

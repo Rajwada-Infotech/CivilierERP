@@ -505,8 +505,10 @@ router.post("/", authMiddleware, async (req, res) => {
     // Prefer the real User-Agent header over whatever the client sent in the
     // body, since the body value is just a JS-parsed string anyway.
     const serverUA = req.headers["user-agent"] || null;
+    // A mobile app names itself (X-Client, e.g. "mobile-admin") — kept in front so the Activity Browser shows the app.
+    const client = /^[a-z0-9-]{1,40}$/i.test(String(req.headers["x-client"] || "")) ? String(req.headers["x-client"]) : null;
     const resolvedDeviceInfo =
-      serverUA || normalizeNullableString(rest.deviceInfo, 255) || "unknown";
+      `${client ? `${client} · ` : ""}${serverUA || normalizeNullableString(rest.deviceInfo, 255) || "unknown"}`;
 
     const activityId = crypto.randomUUID();
 

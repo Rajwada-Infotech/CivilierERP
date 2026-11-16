@@ -19,7 +19,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { ASSET_CATEGORIES } from "../assetCategories";
 import {
   ASSET_STATUS_OPTIONS, Block, Field, Figures, INP, KEY_INK, KEY_LINE, LBL, READ_ONLY, RULE, ValueBar,
-  type FormState, detailToForm, emptyForm, ensureArray, estimateDepreciation, fmt, fmtCur,
+  type FormState, detailToForm, emptyForm, ensureArray, estimateDepreciation, faTax, fmt, fmtCur,
 } from "./config";
 
 // ── FA Item Code picker: the unassigned codes generated in FA Inventory ──
@@ -173,6 +173,10 @@ export function AssetForm({ editingId, onClose, onSaved }: { editingId: number |
       projectId: c.ProjectId ? String(c.ProjectId) : "",
       godownId: c.GodownId ? String(c.GodownId) : "",
       godownName: c.GodownName || "",
+      // From the received batch: its date (which decides VAT or GST), tax rate and one unit's cost before tax.
+      purchaseDate: c.BatchPurchaseDate ? c.BatchPurchaseDate.slice(0, 10) : p.purchaseDate,
+      taxPct: c.BatchTaxPct != null ? String(Number(c.BatchTaxPct)) : p.taxPct,
+      purchaseCost: c.BatchUnitCost != null && Number(c.BatchUnitCost) > 0 ? String(Math.round(Number(c.BatchUnitCost) * 100) / 100) : p.purchaseCost,
     }));
     // The category was captured at FA Inventory import: take it (and its rate) when it has an active Depreciation Setup.
     const inv = (c.AssetCategory || "").trim().toLowerCase();
@@ -240,7 +244,8 @@ export function AssetForm({ editingId, onClose, onSaved }: { editingId: number |
       activationDate: form.activationDate || undefined,
       purchaseInvoiceRef: form.purchaseInvoiceRef || undefined,
       supplierId: form.supplierId ? Number(form.supplierId) : undefined,
-      purchaseCost: parseFloat(form.purchaseCost) || 0,
+      purchaseCost: parseFloat(form.purchaseCost) || 0, // before tax; the server adds VAT for a pre-July-2017 purchase
+      taxPct: form.taxPct === "" ? null : parseFloat(form.taxPct) || 0,
       quantity: parseFloat(form.quantity) || 1,
       depreciationSetupId: form.depreciationSetupId ? Number(form.depreciationSetupId) : undefined,
       depreciationType: form.depreciationType || undefined,
@@ -258,11 +263,15 @@ export function AssetForm({ editingId, onClose, onSaved }: { editingId: number |
     else createMut.mutate(payload);
   };
 
-  const cost = parseFloat(form.purchaseCost) || 0;
-  // Before anything is posted the form can only estimate: straight line from the purchase date.
+  // VAT (before 1 July 2017) is part of the cost and is depreciated; GST isn't.
+  const tax = faTax(parseFloat(form.purchaseCost) || 0, form.taxPct, form.purchaseDate);
+  const cost = tax.cost;
+  // Before anything is posted the form can only estimate, month by month from the start date as the engine posts
+  // (SLM on cost, WDV on the book value at the start of each financial year).
+  const depStart = form.activationDate || form.purchaseDate;
   const estimate = useMemo(
-    () => (cost && form.depreciationRate && form.purchaseDate ? estimateDepreciation(cost, parseFloat(form.depreciationRate), form.purchaseDate) : null),
-    [cost, form.depreciationRate, form.purchaseDate],
+    () => (cost && form.depreciationRate && depStart ? estimateDepreciation(cost, parseFloat(form.depreciationRate), depStart, form.depreciationType || "SLM") : null),
+    [cost, form.depreciationRate, depStart, form.depreciationType],
   );
   // An asset already on the books sells against what is left after posted depreciation.
   const saleBookValue = isEdit && detail ? Math.max(0, cost - (detail.Depreciated || 0)) : estimate?.bookValue ?? null;
@@ -380,8 +389,20 @@ export function AssetForm({ editingId, onClose, onSaved }: { editingId: number |
 
         <Block title="Purchase">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
-            <Field label="Purchase cost (₹)" required>
+            <Field label="Purchase cost before tax (₹)" required>
               <input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={(e) => setField("purchaseCost", e.target.value)} placeholder="0.00" className={`${INP} font-semibold tabular-nums`} />
+            </Field>
+            <Field
+              label={tax.type ? `${tax.type} %` : "Tax %"}
+              note={
+                !tax.type
+                  ? "Enter the purchase date: before 1 July 2017 it is VAT, from then GST."
+                  : tax.type === "VAT"
+                    ? `Bought before GST (1 July 2017): VAT ₹${fmt(tax.amount)} is added to the cost — depreciated on ₹${fmt(tax.cost)}.`
+                    : `GST ₹${fmt(tax.amount)} is claimed as input credit, so it isn't part of the cost.`
+              }
+            >
+              <input type="number" min="0" max="100" step="0.01" value={form.taxPct} onChange={(e) => setField("taxPct", e.target.value)} placeholder="0" className={`${INP} tabular-nums`} />
             </Field>
             <Field label="Purchase date">
               <DateInput value={form.purchaseDate} onChange={(e) => setField("purchaseDate", e.target.value)} className={INP} />
@@ -432,7 +453,7 @@ export function AssetForm({ editingId, onClose, onSaved }: { editingId: number |
               ]} />
               <ValueBar value={estimate.bookValue} cost={cost} />
               <p className="text-[0.6875rem] text-muted-foreground">
-                Straight-line estimate over {estimate.years} years since purchase. The books change only when depreciation is posted.
+                {(form.depreciationType || "SLM").toUpperCase() === "WDV" ? "Written-down-value" : "Straight-line"} estimate over {estimate.years} years of posted months. The books change only when depreciation is posted.
               </p>
             </>
           ) : null}

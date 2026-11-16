@@ -79,7 +79,11 @@ export function openPrintWindow(html: string) {
   }
   setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
   win.onload = () => {
-    win.focus();
-    win.print();
+    // Wait for any web fonts the document asks for, so the printout is not drawn in the fallback face.
+    const fontsReady = win.document.fonts?.ready ?? Promise.resolve();
+    fontsReady.catch(() => undefined).then(() => {
+      win.focus();
+      win.print();
+    });
   };
 }

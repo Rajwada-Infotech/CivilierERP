@@ -369,10 +369,20 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (remarks) request.input("remarks", sql.NVarChar(200), `%${remarks}%`);
     if (chequeNo) request.input("chequeNo", sql.NVarChar(60), `%${chequeNo}%`);
 
+    // Totals over every payment matching the filters (not just this page) — the list's Total paid / By cheque / By cash.
     const countResult = await request.query(
-      `SELECT COUNT(*) AS total FROM dbo.NewPayment np ${SUPPLIER_JOINS_SQL} ${whereClause}`,
+      `SELECT COUNT(*) AS total,
+              ISNULL(SUM(np.PAmount), 0) AS totalAmount,
+              SUM(CASE WHEN np.PMode IN ('Cheque', 'Post-Dated Cheque') THEN 1 ELSE 0 END) AS chequeCount,
+              SUM(CASE WHEN np.PMode = 'Cash' THEN 1 ELSE 0 END) AS cashCount
+       FROM dbo.NewPayment np ${SUPPLIER_JOINS_SQL} ${whereClause}`,
     );
     const total = parseInt(countResult.recordset[0].total);
+    const summary = {
+      totalAmount: Number(countResult.recordset[0].totalAmount) || 0,
+      chequeCount: Number(countResult.recordset[0].chequeCount) || 0,
+      cashCount: Number(countResult.recordset[0].cashCount) || 0,
+    };
 
     const dataRequest = pool
       .request()
@@ -590,6 +600,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       limit,
       total,
       totalPages: Math.ceil(total / limit),
+      summary,
     });
   } catch (err) {
     console.error("PAYMENT GET ERROR:", err.message);
@@ -1471,13 +1482,45 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const existingLinkRes = await pool.request().input("id", sql.Int, id)
       .query("SELECT TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount FROM dbo.NewPayment WHERE PPaymentID = @id");
     const existingLink = existingLinkRes.recordset[0] || {};
-    const tdsSnapshotPut = {
+    let tdsSnapshotPut = {
       tdsId: existingLink.TDSId ?? null,
       tdsNature: existingLink.TDSNature ?? null,
       tdsName: existingLink.TDSName ?? null,
       tdsPercentage: existingLink.TDSPercentage ?? null,
       tdsAmount: existingLink.TDSAmount ?? null,
     };
+    // A direct payment (no invoice, JV line or merged invoices behind it — a party / Expense Head / contract payment)
+    // takes its TDS from the form, the same as on create, whenever the TDS picked, the amount or the party changed.
+    // Kept as it was otherwise, so a small edit (a UTR, a remark) never re-runs the TDS check. Without this, a TDS
+    // picked while editing was silently dropped and the payment posted its whole amount to the bank.
+    const contractIdPut = beforeSnapshot?.ContractId ?? null;
+    const isDirectForTds = !(PExpenseRef && !contractIdPut) && !nextJvLineId && nextInvoiceLinks.length === 0 && !oldJvLinks;
+    const pickedTdsId = req.body.TDSId ? parseInt(req.body.TDSId, 10) : null;
+    const tdsChanged = (pickedTdsId ?? null) !== (existingLink.TDSId ?? null)
+      || amountChanged
+      || (nextPartyId ?? null) !== (beforeSnapshot?.PPartyId ?? null);
+    if (isDirectForTds && "TDSId" in req.body && tdsChanged) {
+      try {
+        const { resolveTds } = require("../services/tds");
+        const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
+        const directPartyId = await resolvePaymentSupplierHeadId(pool, { ContractId: contractIdPut, PExpenseRef: null, PPartyId: nextPartyId });
+        const flags = directPartyId
+          ? (await pool.request().input("Id", sql.Int, directPartyId).query(
+              "SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")).recordset[0]
+          : null;
+        tdsSnapshotPut = await resolveTds(pool, sql, {
+          partyHeadId: directPartyId,
+          tdsApplicableFlag: !!flags?.IsTdsApplicable,
+          tdsLimitApplicable: !!flags?.TdsLimitApplicable,
+          billAmount: PAmount,
+          companyId: await resolvePaymentCompanyId(pool, PCompany),
+          finYearId: await resolveFinYearId(pool, PDate),
+          selectedTdsId: pickedTdsId,
+        });
+      } catch (tdsErr) {
+        return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
+      }
+    }
 
     // Re-resolve the Financial Year whenever the payment date is edited — it
     // always tracks the payment's own PDate, same as on create.
@@ -3042,7 +3085,14 @@ router.get("/:id/posting", async (req, res) => {
       // TDS (migration 304) — only present when this payment actually
       // deducted TDS; Dr side (supplier/Expense Head) stays at the full
       // amount, the credit side splits into Bank + TDS Payable.
-      tdsPayable: tdsAmount > 0 ? { label: "TDS Payable A/c", code: "TDSPAY" } : null,
+      // credited to TDS Payable A/c
+      tdsPayable: tdsAmount > 0 ? await (async () => {
+        const { getPaymentTdsHeadId } = require("../services/tds");
+        const headId = await getPaymentTdsHeadId(pool, sql, pmt.TDSId);
+        const name = headId ? (await pool.request().input("Id", sql.Int, headId)
+          .query("SELECT LHeadName, LHeadCode FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")).recordset[0] : null;
+        return { id: headId, label: name?.LHeadName || "TDS Payable A/c", code: name?.LHeadCode || "TDSPAY" };
+      })() : null,
     };
 
     // Check if already posted
@@ -3114,7 +3164,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
              np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.PProject, np.JVLineId,
-             ISNULL(np.TDSAmount, 0) AS TDSAmount,
+             ISNULL(np.TDSAmount, 0) AS TDSAmount, np.TDSId,
              -- A merged payment (migration 501) has no single PExpenseRef to
              -- join ExpenseBooking through — fall back to its first merged
              -- invoice's own Company/Project (every merged invoice shares
@@ -3201,8 +3251,9 @@ router.post("/:id/post-to-gl", async (req, res) => {
     }
     let tdsPayableId = null;
     if (tdsAmount > 0) {
-      const { GL_ACCOUNTS: TDS_GL } = require("../services/tds");
-      tdsPayableId = await getGLHeadId(pool, TDS_GL.TDS_PAYABLE).catch(() => null);
+      // TDS withheld on the payment is credited to TDS Payable A/c.
+      const { getPaymentTdsHeadId } = require("../services/tds");
+      tdsPayableId = await getPaymentTdsHeadId(pool, sql, pmt.TDSId);
       if (!tdsPayableId) return res.status(422).json({ error: "TDS Payable system ledger not configured." });
     }
 
@@ -3229,7 +3280,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
         : [{ lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` }]),
       { lHeadId: bankId,     debit: 0, credit: amount - tdsAmount, narration: `Payment: ${narrationRef} — ${bankNarration}` },
       ...(tdsAmount > 0
-        ? [{ lHeadId: tdsPayableId, debit: 0, credit: tdsAmount, narration: `Payment: ${narrationRef} — TDS Payable` }]
+        ? [{ lHeadId: tdsPayableId, debit: 0, credit: tdsAmount, narration: `Payment: ${narrationRef} — TDS` }]
         : []),
     ];
 

@@ -12,6 +12,7 @@ import {
   type PropsWithChildren,
 } from "react";
 import { fetchWithAuth, ApiError } from "@/services/fetchWithAuth";
+import { endAppSession, startAppSession } from "@/services/appSession";
 import { queryClient } from "@/services/queryClient";
 import { onSessionExpired } from "@/services/sessionEvents";
 import {
@@ -79,12 +80,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
 
     await Promise.all([persistToken(data.token), setStoredUser(user)]);
+    // A new session, and its sign-in on the Activity Browser — the web app logs the same from its login.
+    const sessionId = startAppSession();
+    void fetchWithAuth("/api/user-activity", {
+      method: "POST",
+      body: JSON.stringify({ event: "login", sessionId, userId: user.id, userName: user.name, userEmail: user.email, userRole: user.role }),
+      skipActivityLog: true,
+    }).catch(() => {});
     setCurrentUser(user);
   }, []);
 
   const logout = useCallback(async () => {
     await unregisterPushAsync(); // while the session token still exists
     await clearAuthStorage();
+    endAppSession();
     queryClient.clear();
     setCurrentUser(null);
   }, []);

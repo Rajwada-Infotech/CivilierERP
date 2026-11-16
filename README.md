@@ -16,6 +16,7 @@
 - [Documentation](#documentation)
 - [About Rajwada Infotech](#about-rajwada-infotech)
 - [Core Modules](#core-modules)
+- [Legal Module](#legal-module)
 - [Key Features](#key-features)
 - [Tech Stack](#tech-stack)
 - [Mobile Apps](#mobile-apps)
@@ -70,6 +71,7 @@ The documentation covers:
 | Document Numbering | Three-tier format, atomic locking, lineage |
 | Approval Workflow Engine | Multi-level approvals, audit trail, guardEdit |
 | Reports & Widgets | Data export, dashboard widgets, access control |
+| Legal Module | Land enquiry → deed registry search → land records → due diligence → deed process → deed registration & payments → post-registration (see [Legal Module](#legal-module)) |
 
 ---
 
@@ -97,6 +99,7 @@ CivilierERP is our flagship product tailored for the construction and infrastruc
 | 📦 **Material** | Material requests, quotations & L1 chart, purchase orders, GRN, issues & returns, stock, stock update, transfers, debit notes, short close, vehicle in/out, expense booking |
 | 🏗️ **Engineering** | BOQ, work orders, work done, DPR |
 | 🧱 **Civil Work DPR** | Work allocation & transfer, activity reporting with photos/checkpoints/daily log, quality check, dependencies, attendance |
+| ⚖️ **Legal (Company Land Records)** | Project-wise land enquiries, deed registry search per registration office, land profile & title chain, due diligence, final verification, deed process (L1 / L2), deed registration with consideration & instalment payments, post-registration, land ↔ project |
 | 🤝 **CRM** | Applications, bookings, agreements, legal milestones, project auto-setup, customer portal |
 | 📣 **Sales Automation** | Campaigns, ads, leads, sales/marketing/team-lead dashboards |
 | ✅ **Follow-Up** | Tasks, sub-tasks, follow-ups, chat & files, closed/cancelled tasks, task transfer, performance reports |
@@ -108,6 +111,40 @@ CivilierERP is our flagship product tailored for the construction and infrastruc
 | 🚚 **Supplier & Customer portals** | Separate logins for vendors (orders) and customers (bookings / owner portal) |
 | 🛡️ **Admin / Super Admin / DBA** | Enterprise, companies, projects, masters, users & rights, approval setup & inbox, security, communicator, integrations |
 | 📊 **Reports & Widgets** | Report builder, exports (PDF / Excel / CSV), dashboard widgets |
+
+---
+
+## Legal Module
+
+Company land acquisition and land records, from the first enquiry to a registered, mapped land. Every list (offices,
+office types, payment modes, templates, statuses…) comes from **Setup → Legal masters**, so the module can be set up for
+any state in India.
+
+**Flow**
+
+| # | Stage | What happens |
+|---|---|---|
+| 1 | **Land Enquiries** | Raised under a **project** (searchable picker; also *All projects* / *Without a project*). Total & deed area, RS / LR records (several Dags). |
+| 2 | **Deed Registry Search** | Saving an enquiry starts a timeline for every registration office type of its state (Setup → *Registration Office Types*: time limit, first year). Each office is searched year by year (1956 → now; a range can be marked *Not found*) and completed. Overdue offices alert on the dashboard and by notification. |
+| 3 | **Land Conversion** | Allowed only when every office search is complete. Creates the Land ID (`<district code>/<no>/<FY>`), copies project and RS / LR records. |
+| 4 | **Land profile (data entry)** | The land's **history**: ownership history & title chain, RS / LR, documents, legal disputes, loans, mutation, tax, survey. |
+| 5 | **Due Diligence → Final Verify** | Area checks, risk, legal review; the verifier sets the deed timeline and sends the land to Deed Process. |
+| 6 | **Deed Process** | Deed copy, re-verification of changes, **L1** then **L2** approval (Setup → *Approval Control*, several users per role). |
+| 7 | **Deed Registration** | Consideration (dated, revisions kept) → **Payments** (instalment schedule from *Instalment Schedule Templates* as % or ₹, payments made) → stamp duty → apply → **Final Registration** (only when fully paid, not before the last payment) → registered deed → physical deed / IGR tracking. |
+| 8 | **Post-Registration** | Mutation, RoR, tax and other tasks. The company's purchase is written into the ownership chain automatically. |
+| 9 | **Land & Projects** | Registered land under its project (taken from the enquiry). |
+
+**Where things are**
+
+| Part | Location |
+|---|---|
+| Pages | `src/pages/legal/` (land pages in `src/pages/legal/land/`), components in `src/components/legal/` |
+| APIs | `backend/routes/legal/` — `landPipeline.js` (`/api/legal/land`), `enquirySearch.js` (`/api/legal/enquiry-search`), `deedRegistration.js` (`/api/legal/deed-reg`), `dueDiligence.js`, `legalMasters.js` + `masterConfig.js` (all Setup masters) |
+| Background jobs | `backend/services/legalDeedOverdue.js` (deed timeline and deed-search overdue alerts, run by the worker) |
+| Migrations | `backend/migrations/5xx–6xx-legal-*.sql` (tracked by file name; schema and reference lists only — no sample data) |
+
+Notes: website links (IGR, government portals) open in a new tab; documents and maps open in the side panel. Legal
+layouts size themselves by the space available (`legal-cq` container-query classes in `src/index.css`).
 
 ---
 

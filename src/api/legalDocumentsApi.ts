@@ -8,7 +8,7 @@ export type ReviewStatus = "Pending" | "Verified" | "Rejected" | "Reattachment R
 export interface LandDocument {
   DocumentId: number; DocumentCode: string; DocTypeId: number; DocTypeName: string; RelatedSection: string; Title: string;
   DocumentNo: string | null; DocumentDate: string | null; IssuingAuthority: string | null; CurrentVersionNo: number; Remarks: string | null;
-  VersionId: number; FileId: number; FileName: string; UploadedAt: string; UploadedByName: string | null;
+  VersionId: number; FileId: number; FileName: string; UploadedAt: string; UploadedByName: string | null; ExpiresOn?: string | null;
   ReviewStatus: ReviewStatus; ReviewedAt: string | null; ReviewedByName: string | null; ReviewRemarks: string | null; Versions: number;
   RegistrationDate?: string | null; RelatedOwner?: string | null; Description?: string | null;
   RelatedLegalRecordId?: number | null; RelatedLegalRecord?: string | null; RelatedMortgageId?: number | null; RelatedMortgage?: string | null;
