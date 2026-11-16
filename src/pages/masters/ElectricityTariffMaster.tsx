@@ -4,6 +4,10 @@ import { toast } from "sonner";
 import { Receipt, Plus, Pencil, Trash2, Loader2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaintenanceShell } from "@/components/maintenance/MaintenanceShell";
+import { ICON_ACT, ICON_ACT_RED, TD, TH } from "@/components/maintenance/maintParts";
+import { HR_FIELD, HR_HEAD, HR_LBL } from "@/components/hrpayroll/HrUi";
+import { SheetMark, type MarkTone } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE, KEY_RED_SOLID } from "@/components/sheet/sheetParts";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -17,8 +21,8 @@ import {
 import { DateInput } from "@/components/ui/date-input";
 
 const PAGE_KEY = "electricity-tariff-master";
-const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
-const fieldCls = "w-full px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground";
+const labelCls = `block mb-1.5 ${HR_LBL}`;
+const fieldCls = HR_FIELD;
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 const fmt = (n: number) => `₹${(Number(n) || 0).toLocaleString("en-IN")}`;
 
@@ -40,50 +44,50 @@ export default function ElectricityTariffMaster() {
         icon={Receipt}
         action={
           rights.canCreate && (
-            <button onClick={() => { setEditingId(null); setFormOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white">
+            <button onClick={() => { setEditingId(null); setFormOpen(true); }} className={`${KEY_INK} h-9 px-4`}>
               <Plus size={13} /> Add Tariff
             </button>
           )
         }
       >
         {isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-        {error && <div className="text-sm text-red-500">Failed to load tariffs.</div>}
+        {error && <div className="text-sm text-destructive">Failed to load tariffs.</div>}
 
         {!isLoading && !error && rows.length === 0 && (
-          <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">No tariffs configured yet.</div>
+          <div className="bg-card border border-dashed border-foreground/40 py-10 text-center text-sm text-muted-foreground">No tariffs configured yet.</div>
         )}
 
         {rows.length > 0 && (
-          <div className="rounded-xl border border-border overflow-x-auto">
+          <div className="bg-card border border-foreground overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-2.5">Provider</th>
-                  <th className="text-left px-4 py-2.5">Tariff Name</th>
-                  <th className="text-left px-4 py-2.5">Effective From</th>
-                  <th className="text-left px-4 py-2.5">Effective To</th>
-                  <th className="text-left px-4 py-2.5">Billing Cycle</th>
-                  <th className="text-left px-4 py-2.5">Slabs</th>
-                  <th className="text-left px-4 py-2.5">Status</th>
-                  <th className="text-right px-4 py-2.5">Actions</th>
+                  <th className={TH}>Provider</th>
+                  <th className={TH}>Tariff Name</th>
+                  <th className={TH}>Effective From</th>
+                  <th className={TH}>Effective To</th>
+                  <th className={TH}>Billing Cycle</th>
+                  <th className={TH}>Slabs</th>
+                  <th className={TH}>Status</th>
+                  <th className={`${TH} text-right`}>Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {rows.map((t) => (
-                  <tr key={t.Id} className="hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-medium text-foreground">{t.ProviderName}</td>
-                    <td className="px-4 py-2.5">{t.TariffName}</td>
-                    <td className="px-4 py-2.5">{fmtDate(t.EffectiveFrom)}</td>
-                    <td className="px-4 py-2.5">{fmtDate(t.EffectiveTo)}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{t.BillingCycle}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{t.SlabCount}</td>
-                    <td className="px-4 py-2.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${t.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>{t.Status}</span>
+                  <tr key={t.Id} className="hover:bg-primary/5">
+                    <td className={`${TD} font-medium text-foreground`}>{t.ProviderName}</td>
+                    <td className={TD}>{t.TariffName}</td>
+                    <td className={TD}>{fmtDate(t.EffectiveFrom)}</td>
+                    <td className={TD}>{fmtDate(t.EffectiveTo)}</td>
+                    <td className={`${TD} text-muted-foreground`}>{t.BillingCycle}</td>
+                    <td className={`${TD} text-muted-foreground`}>{t.SlabCount}</td>
+                    <td className={TD}>
+                      <SheetMark text={t.Status} tone={t.Status === "Active" ? "done" : "draft"} />
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className={TD}>
                       <div className="flex items-center justify-end gap-1">
                         {rights.canEdit && (
-                          <button onClick={() => { setEditingId(t.Id); setFormOpen(true); }} title="Edit" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                          <button onClick={() => { setEditingId(t.Id); setFormOpen(true); }} title="Edit" className={ICON_ACT}>
                             <Pencil size={14} />
                           </button>
                         )}
@@ -185,8 +189,8 @@ function TariffFormDialog({ tariffId, onClose, onSaved }: { tariffId: number | n
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-xl max-h-[88vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-heading text-base">{isEdit ? "Edit Tariff" : "Add Tariff"}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-xl max-h-[88vh] overflow-y-auto" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>{isEdit ? "Edit Tariff" : "Add Tariff"}</DialogTitle></DialogHeader>
         {isEdit && loadingExisting ? (
           <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>
         ) : (
@@ -235,22 +239,22 @@ function TariffFormDialog({ tariffId, onClose, onSaved }: { tariffId: number | n
                 <label className={labelCls} style={{ marginBottom: 0 }}>Slabs</label>
                 <button onClick={addSlab} type="button" className="text-xs font-heading font-medium text-primary hover:underline">+ Add Slab</button>
               </div>
-              <div className="rounded-lg border border-border overflow-hidden">
+              <div className="border border-foreground">
                 <table className="w-full text-xs">
-                  <thead className="bg-muted/30">
+                  <thead>
                     <tr>
-                      <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">From (units)</th>
-                      <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">To (units, blank = open-ended)</th>
-                      <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Rate / Unit (₹)</th>
+                      <th className={TH}>From (units)</th>
+                      <th className={TH}>To (units, blank = open-ended)</th>
+                      <th className={TH}>Rate / Unit (₹)</th>
                       <th className="w-8" />
                     </tr>
                   </thead>
                   <tbody>
                     {slabs.map((s, i) => (
-                      <tr key={i} className="border-t border-border/60">
-                        <td className="px-2 py-1.5"><input type="number" value={s.slabFrom} onChange={(e) => updateSlab(i, { slabFrom: e.target.value })} className="w-full bg-transparent border border-border rounded px-2 py-1 text-foreground" /></td>
-                        <td className="px-2 py-1.5"><input type="number" value={s.slabTo} onChange={(e) => updateSlab(i, { slabTo: e.target.value })} placeholder="open-ended" className="w-full bg-transparent border border-border rounded px-2 py-1 text-foreground" /></td>
-                        <td className="px-2 py-1.5"><input type="number" step="0.01" value={s.ratePerUnit} onChange={(e) => updateSlab(i, { ratePerUnit: e.target.value })} className="w-full bg-transparent border border-border rounded px-2 py-1 text-foreground" /></td>
+                      <tr key={i} className="border-t border-foreground/10">
+                        <td className="px-2 py-1.5"><input type="number" value={s.slabFrom} onChange={(e) => updateSlab(i, { slabFrom: e.target.value })} className="w-full h-8 bg-card border border-foreground/40 focus:border-foreground outline-none px-2 text-foreground font-heading tabular-nums" /></td>
+                        <td className="px-2 py-1.5"><input type="number" value={s.slabTo} onChange={(e) => updateSlab(i, { slabTo: e.target.value })} placeholder="open-ended" className="w-full h-8 bg-card border border-foreground/40 focus:border-foreground outline-none px-2 text-foreground font-heading tabular-nums" /></td>
+                        <td className="px-2 py-1.5"><input type="number" step="0.01" value={s.ratePerUnit} onChange={(e) => updateSlab(i, { ratePerUnit: e.target.value })} className="w-full h-8 bg-card border border-foreground/40 focus:border-foreground outline-none px-2 text-foreground font-heading tabular-nums" /></td>
                         <td className="px-1 py-1.5 text-center">
                           {slabs.length > 1 && (
                             <button onClick={() => removeSlab(i)} type="button" className="text-muted-foreground hover:text-destructive"><Trash2 size={12} /></button>
@@ -264,9 +268,9 @@ function TariffFormDialog({ tariffId, onClose, onSaved }: { tariffId: number | n
               <p className="text-[0.625rem] text-muted-foreground mt-1">e.g. 0–100 units @ ₹5/unit, 100–200 units @ ₹7/unit, 200+ units @ ₹9/unit.</p>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+            <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+              <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+              <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
                 {saving ? <Loader2 size={13} className="animate-spin" /> : null} Save
               </button>
             </div>

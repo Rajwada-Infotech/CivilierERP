@@ -6,9 +6,12 @@ import {
   CheckCircle2, Ban, Loader2, History as HistoryIcon, BarChart3, ShieldAlert,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
+import { MaintenanceShell } from "@/components/maintenance/MaintenanceShell";
+import { ICON_ACT, ICON_ACT_RED, SheetTabs, TD, TH } from "@/components/maintenance/maintParts";
+import { HrStatStrip, HR_FIELD, HR_HEAD, HR_LBL } from "@/components/hrpayroll/HrUi";
+import { SheetMark, type MarkTone } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE, KEY_RED_SOLID } from "@/components/sheet/sheetParts";
 import { usePageRights } from "@/hooks/usePageRights";
-import { GlassCard } from "@/components/dashboard/GlassShell";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ExportMenu } from "@/components/ExportMenu";
 import { getMaintenanceBills } from "@/api/maintenanceBillApi";
@@ -25,28 +28,26 @@ const TABS = ["overview", "meters", "bills", "reports", "audit"] as const;
 type Tab = (typeof TABS)[number];
 const TAB_LABEL: Record<Tab, string> = { overview: "Overview", meters: "Meters & Readings", bills: "Billing", reports: "Reports", audit: "Audit Log" };
 
-const inputCls = "px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
-const fieldCls = "w-full px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground";
+const inputCls = `${HR_FIELD} w-auto`;
+const labelCls = `block mb-1.5 ${HR_LBL}`;
+const fieldCls = HR_FIELD;
 const fmt = (n: number | null | undefined) => `₹${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 const fmtDateTime = (d: string | null | undefined) => (d ? new Date(d).toLocaleString("en-IN") : "—");
 
-const BILL_STATUS_STYLE: Record<BillStatus, string> = {
-  PendingVerification: "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
-  Verified: "bg-sky-500/10 border-sky-500/20 text-sky-600",
-  AddedToCustomerBill: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
-  Cancelled: "bg-red-500/10 border-red-500/20 text-red-600",
-  Revised: "bg-violet-500/10 border-violet-500/20 text-violet-600",
+// Status as sheet marks: solid = settled, hatched = waiting, half = under way, red = stopped, empty = not started.
+const BILL_STATUS_TONE: Record<BillStatus, MarkTone> = {
+  PendingVerification: "waiting", Verified: "moving", AddedToCustomerBill: "done", Cancelled: "stopped", Revised: "draft",
+};
+const BILL_STATUS_LABEL: Record<BillStatus, string> = {
+  PendingVerification: "Pending Verification", Verified: "Verified", AddedToCustomerBill: "Added to Bill", Cancelled: "Cancelled", Revised: "Revised",
 };
 function BillStatusBadge({ status }: { status: BillStatus }) {
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${BILL_STATUS_STYLE[status] || ""}`}>{status}</span>;
+  return <SheetMark text={BILL_STATUS_LABEL[status] ?? status} tone={BILL_STATUS_TONE[status] ?? "draft"} />;
 }
 function HandoverBadge({ status }: { status: string }) {
-  const style = status === "Handover Completed" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
-    : status === "Handover Scheduled" ? "bg-[#ffe2021a] border-amber-500/20 text-amber-600"
-    : "bg-muted border-border text-muted-foreground";
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${style}`}>{status}</span>;
+  const tone: MarkTone = status === "Handover Completed" ? "done" : status === "Handover Scheduled" ? "waiting" : "draft";
+  return <SheetMark text={status} tone={tone} />;
 }
 
 export default function ElectricityMaintenance() {
@@ -56,16 +57,8 @@ export default function ElectricityMaintenance() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Maintenance", "Electricity Maintenance"]} />
-      <MaintenanceShell title="Electricity Maintenance" subtitle="Meter readings, tariff-based billing and the Rajwada/handover split" icon={Zap}>
-        <div className="flex flex-wrap gap-1.5 border-b border-border pb-2">
-          {TABS.map((t) => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-all ${tab === t ? "text-white" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
-              style={tab === t ? { background: ACCENT } : undefined}>
-              {TAB_LABEL[t]}
-            </button>
-          ))}
-        </div>
+      <MaintenanceShell title="Electricity Maintenance" subtitle="Meter readings, tariff-based billing and the Rajwada/handover split">
+        <SheetTabs<Tab> tabs={TABS.map((t) => ({ value: t, label: TAB_LABEL[t] }))} value={tab} onChange={setTab} />
 
         {tab === "overview" && <OverviewTab />}
         {tab === "meters" && <MetersTab rights={rights} />}
@@ -81,12 +74,12 @@ export default function ElectricityMaintenance() {
 function OverviewTab() {
   const { data, isLoading } = useQuery({ queryKey: ["electricity-dashboard"], queryFn: getElectricityDashboard, refetchInterval: 60_000 });
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-      <GlassCard label="Total Meters" value={isLoading ? "…" : data?.totalMeters ?? 0} icon={Gauge} accentColor={ACCENT} />
-      <GlassCard label="Reading Pending" value={isLoading ? "…" : data?.readingPending ?? 0} icon={Clock3} accentColor="#f59e0b" />
-      <GlassCard label="Bills Generated" value={isLoading ? "…" : data?.billsGenerated ?? 0} icon={Receipt} accentColor="#0ea5e9" />
-      <GlassCard label="Current Amount" value={isLoading ? "…" : fmt(data?.currentAmount)} icon={Wallet} accentColor="#22c55e" />
-    </div>
+    <HrStatStrip items={[
+      { label: "Total Meters", value: isLoading ? "…" : data?.totalMeters ?? 0 },
+      { label: "Reading Pending", value: isLoading ? "…" : data?.readingPending ?? 0, tone: (data?.readingPending ?? 0) > 0 ? "hsl(var(--destructive))" : undefined },
+      { label: "Bills Generated", value: isLoading ? "…" : data?.billsGenerated ?? 0 },
+      { label: "Current Amount", value: isLoading ? "…" : fmt(data?.currentAmount) },
+    ]} />
   );
 }
 
@@ -167,64 +160,64 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       </div>
 
       {isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-      {error && <div className="text-sm text-red-500">Failed to load meters.</div>}
+      {error && <div className="text-sm text-destructive">Failed to load meters.</div>}
       {!isLoading && !error && rows.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+        <div className="bg-card border border-dashed border-foreground/40 py-10 text-center text-sm text-muted-foreground">
           No meters match these filters. Add meters via Maintenance Setup → Meter Reading Master.
         </div>
       )}
 
       {rows.length > 0 && (
-        <div className="rounded-xl border border-border overflow-x-auto">
+        <div className="bg-card border border-foreground overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-2.5">Customer</th>
-                <th className="text-left px-4 py-2.5">Flat</th>
-                <th className="text-left px-4 py-2.5">Meter Box</th>
-                <th className="text-left px-4 py-2.5">Meter No.</th>
-                <th className="text-left px-4 py-2.5">Provider</th>
-                <th className="text-left px-4 py-2.5">Previous</th>
-                <th className="text-left px-4 py-2.5">Current</th>
-                <th className="text-left px-4 py-2.5">Units</th>
-                <th className="text-left px-4 py-2.5">Handover</th>
-                <th className="text-left px-4 py-2.5">Bill Status</th>
-                <th className="text-left px-4 py-2.5">Status</th>
-                <th className="text-right px-4 py-2.5">Actions</th>
+                <th className={TH}>Customer</th>
+                <th className={TH}>Flat</th>
+                <th className={TH}>Meter Box</th>
+                <th className={TH}>Meter No.</th>
+                <th className={TH}>Provider</th>
+                <th className={TH}>Previous</th>
+                <th className={TH}>Current</th>
+                <th className={TH}>Units</th>
+                <th className={TH}>Handover</th>
+                <th className={TH}>Bill Status</th>
+                <th className={TH}>Status</th>
+                <th className={`${TH} text-right`}>Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {rows.map((m) => (
-                <tr key={m.Id} className="hover:bg-muted/20">
-                  <td className="px-4 py-2.5 font-medium text-foreground">{m.CustomerName}</td>
-                  <td className="px-4 py-2.5">{[m.BlockName, m.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{m.MeterBoxNumber || "—"}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{m.MeterNumber}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{m.ProviderName}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{m.LatestPreviousReading ?? "—"}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{m.LatestCurrentReading ?? "—"}</td>
-                  <td className="px-4 py-2.5">{m.LatestUnitsConsumed ?? "—"}</td>
-                  <td className="px-4 py-2.5"><HandoverBadge status={m.HandoverStatus} /></td>
-                  <td className="px-4 py-2.5">{m.LatestBillStatus ? <BillStatusBadge status={m.LatestBillStatus} /> : <span className="text-muted-foreground text-xs">Pending</span>}</td>
-                  <td className="px-4 py-2.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${m.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>{m.Status}</span>
+                <tr key={m.Id} className="hover:bg-primary/5">
+                  <td className={`${TD} font-medium text-foreground`}>{m.CustomerName}</td>
+                  <td className={TD}>{[m.BlockName, m.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{m.MeterBoxNumber || "—"}</td>
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{m.MeterNumber}</td>
+                  <td className={`${TD} text-muted-foreground`}>{m.ProviderName}</td>
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{m.LatestPreviousReading ?? "—"}</td>
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{m.LatestCurrentReading ?? "—"}</td>
+                  <td className={TD}>{m.LatestUnitsConsumed ?? "—"}</td>
+                  <td className={TD}><HandoverBadge status={m.HandoverStatus} /></td>
+                  <td className={TD}>{m.LatestBillStatus ? <BillStatusBadge status={m.LatestBillStatus} /> : <span className="text-muted-foreground text-xs">Pending</span>}</td>
+                  <td className={TD}>
+                    <SheetMark text={m.Status} tone={m.Status === "Active" ? "done" : m.Status === "Disconnected" ? "stopped" : "draft"} />
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className={TD}>
                     <div className="flex items-center justify-end gap-1.5">
                       {rights.canCreate && m.Status === "Active" && (
-                        <button onClick={() => setReadingFor(m)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold gradient-maintenance text-white">
+                        <button onClick={() => setReadingFor(m)} className={`${KEY_INK} h-8 px-3`}>
                           <Plus size={12} /> Reading
                         </button>
                       )}
                       {rights.canCreate && m.Status === "Active" && (
-                        <button onClick={() => setBillingFor(m)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-medium border border-border text-foreground hover:bg-muted">
+                        <button onClick={() => setBillingFor(m)} className={`${KEY_LINE} h-8 px-3`}>
                           <FileText size={12} /> Generate Bill
                         </button>
                       )}
-                      <button onClick={() => setHistoryFor(m)} title="View History" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                      <button onClick={() => setHistoryFor(m)} title="View History" className={ICON_ACT}>
                         <HistoryIcon size={14} />
                       </button>
-                      <button onClick={() => setAuditFor(m)} title="View Audit Log" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                      <button onClick={() => setAuditFor(m)} title="View Audit Log" className={ICON_ACT}>
                         <ShieldAlert size={14} />
                       </button>
                     </div>
@@ -271,17 +264,17 @@ function AddReadingDialog({ meter, onClose }: { meter: MeterRow; onClose: () => 
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading text-base">Add Meter Reading</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-sm" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Add Meter Reading</DialogTitle></DialogHeader>
         {isLoading || !info ? (
           <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>
         ) : (
           <div className="space-y-3 pt-1">
-            <div className="grid grid-cols-2 gap-2 text-xs rounded-lg bg-muted/30 p-2.5">
+            <div className="grid grid-cols-2 gap-2 text-xs border border-foreground/20 bg-foreground/5 p-2.5">
               <div><p className="text-muted-foreground">Customer</p><p className="font-medium text-foreground">{meter.CustomerName}</p></div>
               <div><p className="text-muted-foreground">Flat</p><p className="font-medium text-foreground">{[meter.BlockName, meter.UnitNo].filter(Boolean).join(" / ") || "—"}</p></div>
               <div><p className="text-muted-foreground">Meter Box</p><p className="font-medium text-foreground">{meter.MeterBoxNumber || "—"}</p></div>
-              <div><p className="text-muted-foreground">Meter No.</p><p className="font-mono font-medium text-foreground">{meter.MeterNumber}</p></div>
+              <div><p className="text-muted-foreground">Meter No.</p><p className="font-heading tabular-nums font-medium text-foreground">{meter.MeterNumber}</p></div>
               <div><p className="text-muted-foreground">Provider</p><p className="font-medium text-foreground">{meter.ProviderName}</p></div>
               <div><p className="text-muted-foreground">Billing Period</p><p className="font-medium text-foreground">{fmtDate(info.periodFrom)} → {fmtDate(info.periodTo)}</p></div>
             </div>
@@ -298,7 +291,7 @@ function AddReadingDialog({ meter, onClose }: { meter: MeterRow; onClose: () => 
 
             <div>
               <label className={labelCls}>Previous Reading</label>
-              <input value={info.previousReading} disabled className={`${fieldCls} disabled:opacity-70 font-mono`} />
+              <input value={info.previousReading} disabled className={`${fieldCls} disabled:opacity-70 font-heading tabular-nums`} />
             </div>
             <div>
               <label className={labelCls}>Current Reading</label>
@@ -309,9 +302,9 @@ function AddReadingDialog({ meter, onClose }: { meter: MeterRow; onClose: () => 
               <DateInput value={readingDate} onChange={(e) => setReadingDate(e.target.value)} className={fieldCls} />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleSubmit} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+            <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+              <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+              <button onClick={handleSubmit} disabled={saving} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
                 {saving ? <Loader2 size={13} className="animate-spin" /> : null} Save Reading
               </button>
             </div>
@@ -365,57 +358,57 @@ function GenerateBillDialog({ meter, onClose }: { meter: MeterRow; onClose: () =
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-heading text-base">Generate Electricity Bill</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-md max-h-[88vh] overflow-y-auto" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Generate Electricity Bill</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           <div className="grid grid-cols-2 gap-3">
             <div><label className={labelCls}>Period From</label><DateInput value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} className={fieldCls} /></div>
             <div><label className={labelCls}>Period To</label><DateInput value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} className={fieldCls} /></div>
           </div>
-          <button onClick={loadPreview} disabled={loadingPreview} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted disabled:opacity-60">
+          <button onClick={loadPreview} disabled={loadingPreview} className={`${KEY_LINE} h-9 px-3`}>
             {loadingPreview ? <Loader2 size={13} className="animate-spin" /> : null} Preview
           </button>
 
           {previewError && (
-            <div className="rounded-lg border border-amber-500/30 bg-[#ffe2021a] px-3 py-2.5 text-xs text-amber-700 flex items-start gap-2">
+            <div className="border border-destructive bg-destructive/10 px-3 py-2.5 text-xs text-destructive flex items-start gap-2">
               <ShieldAlert size={14} className="shrink-0 mt-0.5" /> {previewError}
             </div>
           )}
 
           {preview && (
-            <div className="rounded-lg border border-border p-3 text-xs space-y-2">
+            <div className="border border-foreground/20 p-3 text-xs space-y-2">
               <div className="grid grid-cols-2 gap-2">
                 <div><p className="text-muted-foreground">Customer</p><p className="font-medium text-foreground">{preview.customerName}</p></div>
                 <div><p className="text-muted-foreground">Flat</p><p className="font-medium text-foreground">{[preview.blockName, preview.unitNo].filter(Boolean).join(" / ") || "—"}</p></div>
-                <div><p className="text-muted-foreground">Meter</p><p className="font-mono font-medium text-foreground">{preview.meterNumber}</p></div>
+                <div><p className="text-muted-foreground">Meter</p><p className="font-heading tabular-nums font-medium text-foreground">{preview.meterNumber}</p></div>
                 <div><p className="text-muted-foreground">Provider</p><p className="font-medium text-foreground">{preview.providerName}</p></div>
               </div>
-              <div className="border-t border-border pt-2 grid grid-cols-2 gap-2">
-                <div><p className="text-muted-foreground">Previous Reading</p><p className="font-mono font-medium text-foreground">{preview.previousReading}</p></div>
-                <div><p className="text-muted-foreground">Current Reading</p><p className="font-mono font-medium text-foreground">{preview.currentReading}</p></div>
+              <div className="border-t border-foreground/15 pt-2 grid grid-cols-2 gap-2">
+                <div><p className="text-muted-foreground">Previous Reading</p><p className="font-heading tabular-nums font-medium text-foreground">{preview.previousReading}</p></div>
+                <div><p className="text-muted-foreground">Current Reading</p><p className="font-heading tabular-nums font-medium text-foreground">{preview.currentReading}</p></div>
                 <div><p className="text-muted-foreground">Consumption</p><p className="font-medium text-foreground">{preview.totalUnits} Units</p></div>
                 <div><p className="text-muted-foreground">Handover Status</p><HandoverBadge status={preview.handoverStatus} /></div>
               </div>
               {preview.handoverDate && (
-                <div className="border-t border-border pt-2 grid grid-cols-2 gap-2">
+                <div className="border-t border-foreground/15 pt-2 grid grid-cols-2 gap-2">
                   <div><p className="text-muted-foreground">Handover Date</p><p className="font-medium text-foreground">{fmtDate(preview.handoverDate)}</p></div>
-                  <div><p className="text-muted-foreground">Handover Reading</p><p className="font-mono font-medium text-foreground">{preview.handoverReading ?? "—"}</p></div>
+                  <div><p className="text-muted-foreground">Handover Reading</p><p className="font-heading tabular-nums font-medium text-foreground">{preview.handoverReading ?? "—"}</p></div>
                   <div><p className="text-muted-foreground">Rajwada Consumption</p><p className="font-semibold text-foreground">{preview.rajwadaUnits} Units</p></div>
                   <div><p className="text-muted-foreground">Post-Handover</p><p className="font-medium text-foreground">{preview.postHandoverUnits} Units</p></div>
                 </div>
               )}
-              <div className="border-t border-border pt-2 space-y-1">
-                <div className="flex justify-between"><span className="text-muted-foreground">Energy Charge</span><span className="font-mono">{fmt(preview.energyCharge)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Fixed Charge</span><span className="font-mono">{fmt(preview.fixedCharge)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Other Charge</span><span className="font-mono">{fmt(preview.otherCharge)}</span></div>
-                <div className="flex justify-between font-heading font-bold text-foreground border-t border-border pt-1"><span>Electricity Amount</span><span className="font-mono">{fmt(preview.totalAmount)}</span></div>
+              <div className="border-t border-foreground/15 pt-2 space-y-1">
+                <div className="flex justify-between"><span className="text-muted-foreground">Energy Charge</span><span className="font-heading tabular-nums">{fmt(preview.energyCharge)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Fixed Charge</span><span className="font-heading tabular-nums">{fmt(preview.fixedCharge)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Other Charge</span><span className="font-heading tabular-nums">{fmt(preview.otherCharge)}</span></div>
+                <div className="flex justify-between font-heading font-bold text-foreground border-t border-foreground/15 pt-1"><span>Electricity Amount</span><span className="font-heading tabular-nums">{fmt(preview.totalAmount)}</span></div>
               </div>
             </div>
           )}
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleGenerate} disabled={!preview || generating} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleGenerate} disabled={!preview || generating} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {generating ? <Loader2 size={13} className="animate-spin" /> : null} Generate Bill
             </button>
           </div>
@@ -444,24 +437,24 @@ function MeterHistoryDialog({ meter, onClose }: { meter: MeterRow; onClose: () =
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-heading text-base">Reading History — {meter.MeterNumber}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-2xl max-h-[85vh] overflow-y-auto" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Reading History — {meter.MeterNumber}</DialogTitle></DialogHeader>
         {isLoading ? (
           <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>
         ) : rows.length === 0 ? (
           <div className="py-6 text-center text-sm text-muted-foreground">No readings recorded yet.</div>
         ) : (
-          <div className="rounded-lg border border-border overflow-x-auto">
+          <div className="bg-card border border-foreground overflow-x-auto">
             <table className="w-full text-xs">
-              <thead className="bg-muted/30">
+              <thead>
                 <tr>
-                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Date</th>
-                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Type</th>
-                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Previous</th>
-                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Current</th>
-                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Units</th>
-                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Bill</th>
-                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Status</th>
+                  <th className={TH}>Date</th>
+                  <th className={TH}>Type</th>
+                  <th className={TH}>Previous</th>
+                  <th className={TH}>Current</th>
+                  <th className={TH}>Units</th>
+                  <th className={TH}>Bill</th>
+                  <th className={TH}>Status</th>
                   <th className="w-8" />
                 </tr>
               </thead>
@@ -469,17 +462,17 @@ function MeterHistoryDialog({ meter, onClose }: { meter: MeterRow; onClose: () =
                 {rows.map((r) => {
                   const bill = billForReading(r);
                   return (
-                  <tr key={r.Id} className={`border-t border-border/60 ${r.IsSuperseded ? "opacity-50" : ""}`}>
+                  <tr key={r.Id} className={`border-t border-foreground/10 ${r.IsSuperseded ? "opacity-50" : ""}`}>
                     <td className="px-2 py-1.5">{fmtDate(r.ReadingDate)}</td>
                     <td className="px-2 py-1.5">{r.ReadingType}</td>
-                    <td className="px-2 py-1.5 font-mono">{r.PreviousReading}</td>
-                    <td className="px-2 py-1.5 font-mono">{r.CurrentReading}</td>
+                    <td className="px-2 py-1.5 font-heading tabular-nums">{r.PreviousReading}</td>
+                    <td className="px-2 py-1.5 font-heading tabular-nums">{r.CurrentReading}</td>
                     <td className="px-2 py-1.5">{r.UnitsConsumed}</td>
-                    <td className="px-2 py-1.5 font-mono">{bill ? fmt(bill.TotalAmount) : "—"}</td>
+                    <td className="px-2 py-1.5 font-heading tabular-nums">{bill ? fmt(bill.TotalAmount) : "—"}</td>
                     <td className="px-2 py-1.5">{r.IsSuperseded ? "Superseded" : "Active"}</td>
                     <td className="px-1 py-1.5 text-center">
                       {!r.IsSuperseded && (
-                        <button onClick={() => setCorrecting(r)} title="Correct" className="text-muted-foreground hover:text-foreground">
+                        <button onClick={() => setCorrecting(r)} title="Correct" className={ICON_ACT}>
                           <Receipt size={12} />
                         </button>
                       )}
@@ -525,16 +518,16 @@ function CorrectReadingDialog({ reading, onClose, onDone }: { reading: MeterRead
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading text-base">Correct Reading</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-sm" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Correct Reading</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
-          <p className="text-xs text-muted-foreground">Original current reading: <span className="font-mono text-foreground">{reading.CurrentReading}</span>. The original is kept in history, never deleted.</p>
+          <p className="text-xs text-muted-foreground">Original current reading: <span className="font-heading tabular-nums text-foreground">{reading.CurrentReading}</span>. The original is kept in history, never deleted.</p>
           <div><label className={labelCls}>Corrected Current Reading</label><input type="number" value={correctedCurrentReading} onChange={(e) => setCorrectedCurrentReading(e.target.value)} className={fieldCls} /></div>
-          <div><label className={labelCls}>Reason</label><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" /></div>
+          <div><label className={labelCls}>Reason</label><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className={`${HR_FIELD} h-auto py-2 resize-none`} /></div>
           <div><label className={labelCls}>Approved By</label><input value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} className={fieldCls} /></div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSubmit} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleSubmit} disabled={saving} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : null} Save Correction
             </button>
           </div>
@@ -603,52 +596,52 @@ function BillsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       </div>
 
       {isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-      {error && <div className="text-sm text-red-500">Failed to load bills.</div>}
+      {error && <div className="text-sm text-destructive">Failed to load bills.</div>}
       {!isLoading && !error && rows.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">No electricity bills match these filters.</div>
+        <div className="bg-card border border-dashed border-foreground/40 py-10 text-center text-sm text-muted-foreground">No electricity bills match these filters.</div>
       )}
 
       {rows.length > 0 && (
-        <div className="rounded-xl border border-border overflow-x-auto">
+        <div className="bg-card border border-foreground overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-2.5">Customer</th>
-                <th className="text-left px-4 py-2.5">Flat</th>
-                <th className="text-left px-4 py-2.5">Period</th>
-                <th className="text-left px-4 py-2.5">Rajwada Units</th>
-                <th className="text-left px-4 py-2.5">Amount</th>
-                <th className="text-left px-4 py-2.5">Status</th>
-                <th className="text-right px-4 py-2.5">Actions</th>
+                <th className={TH}>Customer</th>
+                <th className={TH}>Flat</th>
+                <th className={TH}>Period</th>
+                <th className={TH}>Rajwada Units</th>
+                <th className={TH}>Amount</th>
+                <th className={TH}>Status</th>
+                <th className={`${TH} text-right`}>Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {rows.map((b) => (
-                <tr key={b.Id} className="hover:bg-muted/20">
-                  <td className="px-4 py-2.5 font-medium text-foreground">{b.CustomerName}</td>
-                  <td className="px-4 py-2.5">{[b.BlockName, b.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
-                  <td className="px-4 py-2.5">{fmtDate(b.BillingPeriodFrom)} – {fmtDate(b.BillingPeriodTo)}</td>
-                  <td className="px-4 py-2.5">{b.RajwadaUnits}</td>
-                  <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{fmt(b.TotalAmount)}</td>
-                  <td className="px-4 py-2.5"><BillStatusBadge status={b.BillStatus} /></td>
-                  <td className="px-4 py-2.5">
+                <tr key={b.Id} className="hover:bg-primary/5">
+                  <td className={`${TD} font-medium text-foreground`}>{b.CustomerName}</td>
+                  <td className={TD}>{[b.BlockName, b.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
+                  <td className={TD}>{fmtDate(b.BillingPeriodFrom)} – {fmtDate(b.BillingPeriodTo)}</td>
+                  <td className={TD}>{b.RajwadaUnits}</td>
+                  <td className={`${TD} font-heading tabular-nums font-semibold text-foreground`}>{fmt(b.TotalAmount)}</td>
+                  <td className={TD}><BillStatusBadge status={b.BillStatus} /></td>
+                  <td className={TD}>
                     <div className="flex items-center justify-end gap-1.5">
                       {rights.canEdit && b.BillStatus === "PendingVerification" && (
-                        <button onClick={() => handleVerify(b)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold border border-border text-foreground hover:bg-muted">
+                        <button onClick={() => handleVerify(b)} className={`${KEY_LINE} h-8 px-3`}>
                           <CheckCircle2 size={12} /> Verify
                         </button>
                       )}
                       {rights.canEdit && b.BillStatus === "Verified" && (
-                        <button onClick={() => setAddingTo(b)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold gradient-maintenance text-white">
+                        <button onClick={() => setAddingTo(b)} className={`${KEY_INK} h-8 px-3`}>
                           Add to Bill
                         </button>
                       )}
                       {rights.canDelete && (b.BillStatus === "PendingVerification" || b.BillStatus === "Verified") && (
-                        <button onClick={() => setCancelling(b)} title="Cancel" className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                        <button onClick={() => setCancelling(b)} title="Cancel" className={ICON_ACT_RED}>
                           <Ban size={14} />
                         </button>
                       )}
-                      <button onClick={() => setAuditFor(b)} title="View Audit Log" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                      <button onClick={() => setAuditFor(b)} title="View Audit Log" className={ICON_ACT}>
                         <ShieldAlert size={14} />
                       </button>
                     </div>
@@ -692,10 +685,10 @@ function AddToCustomerBillDialog({ bill, onClose, onDone }: { bill: ElectricityB
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading text-base">Add to Customer's Bill</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-sm" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Add to Customer's Bill</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
-          <div className="rounded-lg bg-muted/30 p-2.5 text-xs">
+          <div className="border border-foreground/20 bg-foreground/5 p-2.5 text-xs">
             <p className="text-muted-foreground">Electricity Amount</p>
             <p className="font-heading font-bold text-foreground text-base">{fmt(bill.TotalAmount)}</p>
           </div>
@@ -712,9 +705,9 @@ function AddToCustomerBillDialog({ bill, onClose, onDone }: { bill: ElectricityB
               </select>
             </div>
           )}
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSubmit} disabled={saving || rows.length === 0} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleSubmit} disabled={saving || rows.length === 0} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : null} Add to Bill
             </button>
           </div>
@@ -742,13 +735,13 @@ function CancelBillDialog({ bill, onClose, onDone }: { bill: ElectricityBillRow;
   };
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading text-base">Cancel Electricity Bill</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-sm" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Cancel Electricity Bill</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
-          <div><label className={labelCls}>Reason</label><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" /></div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Back</button>
-            <button onClick={handleSubmit} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-destructive text-destructive-foreground disabled:opacity-60">
+          <div><label className={labelCls}>Reason</label><textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className={`${HR_FIELD} h-auto py-2 resize-none`} /></div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Back</button>
+            <button onClick={handleSubmit} disabled={saving} className={`${KEY_RED_SOLID} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : <Ban size={13} />} Cancel Bill
             </button>
           </div>
@@ -775,24 +768,28 @@ function ReportsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       </div>
 
       <div>
-        <h3 className="text-xs font-heading font-semibold text-foreground mb-2 flex items-center gap-1.5"><BarChart3 size={13} /> Summary</h3>
+        <h3 className={`${HR_HEAD} mb-2`}>Summary</h3>
         {monthlyLoading ? (
-          <div className="text-sm text-muted-foreground">Loading…</div>
+          <div className="skel" style={{ height: 150 }} />
         ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-            <GlassCard label="Total Meters" value={monthly?.totalMeters ?? 0} icon={Gauge} accentColor={ACCENT} />
-            <GlassCard label="Readings Completed" value={monthly?.readingsCompleted ?? 0} icon={CheckCircle2} accentColor="#0ea5e9" />
-            <GlassCard label="Total Units Consumed" value={monthly?.totalUnitsConsumed ?? 0} icon={Zap} accentColor="#f59e0b" />
-            <GlassCard label="Rajwada Supply Units" value={monthly?.rajwadaSupplyUnits ?? 0} icon={Users} accentColor="#8b5cf6" />
-            <GlassCard label="Post-Handover Units" value={monthly?.postHandoverUnits ?? 0} icon={Users} accentColor="#94a3b8" />
-            <GlassCard label="Total Electricity" value={fmt(monthly?.totalElectricityAmount)} icon={Wallet} accentColor="#22c55e" />
+          <div className="space-y-px">
+            <HrStatStrip items={[
+              { label: "Total Meters", value: monthly?.totalMeters ?? 0 },
+              { label: "Readings Completed", value: monthly?.readingsCompleted ?? 0 },
+              { label: "Total Units Consumed", value: monthly?.totalUnitsConsumed ?? 0 },
+            ]} />
+            <HrStatStrip items={[
+              { label: "Rajwada Supply Units", value: monthly?.rajwadaSupplyUnits ?? 0 },
+              { label: "Post-Handover Units", value: monthly?.postHandoverUnits ?? 0 },
+              { label: "Total Electricity", value: fmt(monthly?.totalElectricityAmount) },
+            ]} />
           </div>
         )}
       </div>
 
       <div>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xs font-heading font-semibold text-foreground">Provider-wise</h3>
+          <h3 className={HR_HEAD}>Provider-wise</h3>
           {rights.canExport && providerWise && providerWise.length > 0 && (
             <ExportMenu
               data={providerWise as unknown as Record<string, unknown>[]}
@@ -810,25 +807,25 @@ function ReportsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
         {providerLoading ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : !providerWise?.length ? (
-          <div className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">No billed data in this range.</div>
+          <div className="bg-card border border-dashed border-foreground/40 py-6 text-center text-sm text-muted-foreground">No billed data in this range.</div>
         ) : (
-          <div className="rounded-xl border border-border overflow-x-auto">
+          <div className="bg-card border border-foreground overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-2.5">Provider</th>
-                  <th className="text-left px-4 py-2.5">Meters</th>
-                  <th className="text-left px-4 py-2.5">Units</th>
-                  <th className="text-left px-4 py-2.5">Amount</th>
+                  <th className={TH}>Provider</th>
+                  <th className={TH}>Meters</th>
+                  <th className={TH}>Units</th>
+                  <th className={TH}>Amount</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {providerWise.map((p) => (
                   <tr key={p.ProviderName}>
-                    <td className="px-4 py-2.5 font-medium text-foreground">{p.ProviderName}</td>
-                    <td className="px-4 py-2.5">{p.MeterCount}</td>
-                    <td className="px-4 py-2.5">{p.TotalUnits}</td>
-                    <td className="px-4 py-2.5 font-mono">{fmt(p.TotalAmount)}</td>
+                    <td className={`${TD} font-medium text-foreground`}>{p.ProviderName}</td>
+                    <td className={TD}>{p.MeterCount}</td>
+                    <td className={TD}>{p.TotalUnits}</td>
+                    <td className={`${TD} font-heading tabular-nums`}>{fmt(p.TotalAmount)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -839,7 +836,7 @@ function ReportsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
 
       <div>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xs font-heading font-semibold text-foreground">Customer-wise</h3>
+          <h3 className={HR_HEAD}>Customer-wise</h3>
           {rights.canExport && customerWise && customerWise.length > 0 && (
             <ExportMenu
               data={customerWise as unknown as Record<string, unknown>[]}
@@ -863,35 +860,35 @@ function ReportsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
         {customerLoading ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
         ) : !customerWise?.length ? (
-          <div className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">No billed data in this range.</div>
+          <div className="bg-card border border-dashed border-foreground/40 py-6 text-center text-sm text-muted-foreground">No billed data in this range.</div>
         ) : (
-          <div className="rounded-xl border border-border overflow-x-auto">
+          <div className="bg-card border border-foreground overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-2.5">Customer</th>
-                  <th className="text-left px-4 py-2.5">Flat</th>
-                  <th className="text-left px-4 py-2.5">Meter</th>
-                  <th className="text-left px-4 py-2.5">Period</th>
-                  <th className="text-left px-4 py-2.5">Units</th>
-                  <th className="text-left px-4 py-2.5">Handover Date</th>
-                  <th className="text-left px-4 py-2.5">Rajwada Units</th>
-                  <th className="text-left px-4 py-2.5">Amount</th>
-                  <th className="text-left px-4 py-2.5">Status</th>
+                  <th className={TH}>Customer</th>
+                  <th className={TH}>Flat</th>
+                  <th className={TH}>Meter</th>
+                  <th className={TH}>Period</th>
+                  <th className={TH}>Units</th>
+                  <th className={TH}>Handover Date</th>
+                  <th className={TH}>Rajwada Units</th>
+                  <th className={TH}>Amount</th>
+                  <th className={TH}>Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {customerWise.map((b) => (
                   <tr key={b.Id}>
-                    <td className="px-4 py-2.5 font-medium text-foreground">{b.CustomerName}</td>
-                    <td className="px-4 py-2.5">{[b.BlockName, b.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{b.MeterNumber}</td>
-                    <td className="px-4 py-2.5">{fmtDate(b.BillingPeriodFrom)} – {fmtDate(b.BillingPeriodTo)}</td>
-                    <td className="px-4 py-2.5">{b.TotalUnits}</td>
-                    <td className="px-4 py-2.5">{fmtDate(b.HandoverDate)}</td>
-                    <td className="px-4 py-2.5">{b.RajwadaUnits}</td>
-                    <td className="px-4 py-2.5 font-mono">{fmt(b.TotalAmount)}</td>
-                    <td className="px-4 py-2.5"><BillStatusBadge status={b.BillStatus} /></td>
+                    <td className={`${TD} font-medium text-foreground`}>{b.CustomerName}</td>
+                    <td className={TD}>{[b.BlockName, b.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
+                    <td className={`${TD} font-heading tabular-nums text-xs`}>{b.MeterNumber}</td>
+                    <td className={TD}>{fmtDate(b.BillingPeriodFrom)} – {fmtDate(b.BillingPeriodTo)}</td>
+                    <td className={TD}>{b.TotalUnits}</td>
+                    <td className={TD}>{fmtDate(b.HandoverDate)}</td>
+                    <td className={TD}>{b.RajwadaUnits}</td>
+                    <td className={`${TD} font-heading tabular-nums`}>{fmt(b.TotalAmount)}</td>
+                    <td className={TD}><BillStatusBadge status={b.BillStatus} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -906,12 +903,12 @@ function ReportsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
 // ─── Audit Log ───────────────────────────────────────────────────────────
 function AuditLogList({ rows }: { rows: { Id: number; Action: string; PerformedAt: string; PerformedBy: string | null; Remarks: string | null }[] }) {
   if (rows.length === 0) {
-    return <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">No audit entries yet.</div>;
+    return <div className="bg-card border border-dashed border-foreground/40 py-10 text-center text-sm text-muted-foreground">No audit entries yet.</div>;
   }
   return (
     <div className="space-y-2">
       {rows.map((l) => (
-        <div key={l.Id} className="rounded-lg border border-border p-3 text-xs">
+        <div key={l.Id} className="border border-foreground/20 p-3 text-xs">
           <div className="flex items-center justify-between">
             <span className="font-heading font-semibold text-foreground">{l.Action}</span>
             <span className="text-muted-foreground">{fmtDateTime(l.PerformedAt)}</span>
@@ -942,8 +939,8 @@ function AuditLogModal({ title, filters, onClose }: { title: string; filters: { 
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-heading text-base">{title}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-lg max-h-[80vh] overflow-y-auto" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>{title}</DialogTitle></DialogHeader>
         <div className="pt-1">
           {isLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : <AuditLogList rows={rows} />}
         </div>

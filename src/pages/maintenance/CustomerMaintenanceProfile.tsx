@@ -3,13 +3,19 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  UserCircle2, Phone, Mail, Home, Building2, ArrowLeft,
-  History, Wallet, ListChecks, Receipt, Ticket, Plus, X,
+  Phone, Mail, Home, Building2, ArrowLeft,
+  Wallet, ListChecks, Receipt, Ticket, Plus, X,
   Loader2, CheckCircle2, Clock, AlertCircle, Calendar,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { GlassSection } from "@/components/dashboard/GlassShell";
-import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
+import { MaintenanceShell } from "@/components/maintenance/MaintenanceShell";
+import {
+  ICON_ACT, ICON_ACT_RED, SHEET_DIALOG, SheetBox, TAG, TD, TH,
+  TICKET_PRIORITY_TONE, TICKET_STATUS_TONE, ticketStatusLabel,
+} from "@/components/maintenance/maintParts";
+import { HrEmpty, HrError, HrStatStrip, HR_FIELD, HR_HEAD, HR_LBL, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { SheetMark } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   getMaintenanceCustomer, getMaintenanceCharges, addMaintenanceCharge, removeMaintenanceCharge,
@@ -25,41 +31,13 @@ import { getActiveChargeHeads, type ChargeHeadRow } from "@/api/chargeHeadApi";
 import { usePageRights } from "@/hooks/usePageRights";
 
 const INR = (n: number | null | undefined) =>
-  `\u20B9${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "\u2014");
-
-const STATUS_COLOR: Record<string, string> = {
-  Open:       "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
-  Assigned:   "bg-sky-500/10 border-sky-500/20 text-sky-600",
-  InProgress: "bg-violet-500/10 border-violet-500/20 text-violet-600",
-  Resolved:   "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
-  Closed:     "bg-muted border-border text-muted-foreground",
-  Reopened:   "bg-orange-500/10 border-orange-500/20 text-orange-600",
-};
-const PRIORITY_COLOR: Record<string, string> = {
-  Urgent: "bg-red-500/10 border-red-500/20 text-red-600",
-  High:   "bg-orange-500/10 border-orange-500/20 text-orange-600",
-  Normal: "bg-sky-500/10 border-sky-500/20 text-sky-600",
-  Low:    "bg-muted border-border text-muted-foreground",
-};
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${STATUS_COLOR[status] || "bg-muted border-border text-muted-foreground"}`}>
-      {status}
-    </span>
-  );
-}
-function PriorityBadge({ priority }: { priority: string }) {
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${PRIORITY_COLOR[priority] || "bg-muted border-border text-muted-foreground"}`}>
-      {priority}
-    </span>
-  );
-}
+  `₹${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 
 const TICKET_CATEGORIES: TicketCategory[] = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 const TICKET_PRIORITIES: TicketPriority[] = ["Low", "Normal", "High", "Urgent"];
 
+const billMark = (status: string) => <SheetMark text={status} tone={status === "Active" ? "done" : "stopped"} />;
 
 export default function CustomerMaintenanceProfile() {
   const { bookingId } = useParams<{ bookingId: string }>();
@@ -101,9 +79,9 @@ export default function CustomerMaintenanceProfile() {
     enabled: addChargeOpen,
   });
 
-  if (customerLoading) return <div className="p-6 text-muted-foreground">Loading\u2026</div>;
+  if (customerLoading) return <div className="skel m-6" style={{ height: 320 }} />;
   if (customerError || !customer)
-    return <div className="p-6 text-red-500">This customer is not eligible for Maintenance yet \u2014 the unit has not been handed over.</div>;
+    return <HrError text={"This customer is not eligible for Maintenance yet — the unit has not been handed over."} />;
 
   const chargeRows: MaintenanceCustomerCharge[] = Array.isArray(charges) ? charges : [];
   const billRows:   MaintenanceBillListRow[]    = Array.isArray(bills)   ? bills   : [];
@@ -163,89 +141,79 @@ export default function CustomerMaintenanceProfile() {
     finally { setActionLoading(false); }
   };
 
+  const info: { icon: typeof Phone; label: string; value: string; num?: boolean }[] = [
+    { icon: Phone,     label: "Contact",     value: customer.ContactNumber || "—", num: true },
+    { icon: Mail,      label: "Email",       value: customer.Email || "—" },
+    { icon: Home,      label: "Unit",        value: [customer.BlockName, customer.UnitNo].filter(Boolean).join(" / ") || "—" },
+    { icon: Building2, label: "Project",     value: customer.ProjectName || "—" },
+    { icon: Calendar,  label: "Handed Over", value: fmtDate((customer as { HandoverDate?: string }).HandoverDate), num: true },
+  ];
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Maintenance", "Customer Directory", customer.CustomerName || "Profile"]} />
       <MaintenanceShell
         title={customer.CustomerName || "Customer"}
-        subtitle={`${customer.BookingNo} \u2014 ${[customer.BlockName, customer.UnitNo].filter(Boolean).join(" / ") || "Unit not set"}`}
-        icon={UserCircle2}
+        subtitle={`${customer.BookingNo} — ${[customer.BlockName, customer.UnitNo].filter(Boolean).join(" / ") || "Unit not set"}`}
         action={
-          <button onClick={() => navigate("/maintenance/directory")} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+          <button onClick={() => navigate("/maintenance/directory")} className={`${KEY_LINE} h-9 px-3`}>
             <ArrowLeft size={13} /> Directory
           </button>
         }
       >
         {/* Customer info */}
-        <div className="rounded-xl border border-border bg-muted/10 px-4 py-3.5">
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-            <InfoField icon={Phone}     label="Contact"     value={customer.ContactNumber || "\u2014"} />
-            <InfoField icon={Mail}      label="Email"       value={customer.Email || "\u2014"} />
-            <InfoField icon={Home}      label="Unit"        value={[customer.BlockName, customer.UnitNo].filter(Boolean).join(" / ") || "\u2014"} />
-            <InfoField icon={Building2} label="Project"     value={customer.ProjectName || "\u2014"} />
-            <InfoField icon={Calendar}  label="Handed Over" value={fmtDate((customer as { HandoverDate?: string }).HandoverDate)} />
-          </div>
-        </div>
-
-        {/* Quick stats */}
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: "Assigned Charges", value: chargesLoading ? "\u2026" : String(chargeRows.length),  color: ACCENT,     icon: ListChecks },
-            { label: "Total Billed",     value: billsLoading   ? "\u2026" : INR(totalBilled),          color: "#f59e0b",  icon: Wallet     },
-            { label: "Open Tickets",     value: ticketsLoading ? "\u2026" : String(openTickets.length), color: "#a78bfa",  icon: Ticket     },
-          ].map((s) => (
-            <div key={s.label} className="rounded-xl border bg-card/40 px-4 py-3 flex items-center gap-3" style={{ borderColor: `${s.color}30` }}>
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${s.color}18` }}>
-                <s.icon size={15} style={{ color: s.color }} />
-              </div>
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">{s.label}</p>
-                <p className="text-lg font-heading font-bold text-foreground">{s.value}</p>
-              </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 bg-card" style={{ border: HR_RULE }}>
+          {info.map((f, i) => (
+            <div key={f.label} className="px-4 py-3 min-w-0" style={{ borderLeft: i ? "1px solid hsl(var(--foreground) / 0.15)" : undefined }}>
+              <p className={`flex items-center gap-1.5 ${HR_LBL}`}><f.icon size={11} /> {f.label}</p>
+              <p className={`mt-1 text-sm font-medium text-foreground truncate ${f.num ? HR_NUM : ""}`} title={f.value}>{f.value}</p>
             </div>
           ))}
         </div>
 
+        {/* Quick stats */}
+        <HrStatStrip items={[
+          { label: "Assigned Charges", value: chargesLoading ? "…" : String(chargeRows.length) },
+          { label: "Total Billed",     value: billsLoading   ? "…" : INR(totalBilled) },
+          { label: "Open Tickets",     value: ticketsLoading ? "…" : String(openTickets.length), tone: openTickets.length ? "hsl(var(--destructive))" : undefined },
+        ]} />
+
         {/* Assigned Charges */}
-        <GlassSection
-          title="Assigned Charges" icon={ListChecks} accentColor={ACCENT}
+        <SheetBox
+          title="Assigned Charges" note={chargesLoading ? undefined : chargeRows.length} flush
           action={chargesRights.canCreate && (
-            <button onClick={() => setAddChargeOpen(true)} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-heading font-semibold border transition-all" style={{ borderColor: `${ACCENT}50`, color: ACCENT, background: `${ACCENT}10` }}>
+            <button onClick={() => setAddChargeOpen(true)} className={`${KEY_LINE} h-8 px-3`}>
               <Plus size={12} /> Add Charge
             </button>
           )}
         >
-          {chargesLoading ? <div className="text-sm text-muted-foreground">Loading\u2026</div>
+          {chargesLoading ? <div className="skel m-4" style={{ height: 80 }} />
           : chargeRows.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border py-8 flex flex-col items-center gap-2">
-              <ListChecks size={18} className="text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No charges assigned to this unit yet.</p>
-            </div>
+            <HrEmpty icon={ListChecks} title="No charges" text="No charges assigned to this unit yet." />
           ) : (
-            <div className="rounded-xl border border-border overflow-x-auto">
+            <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+                <thead>
                   <tr>
-                    <th className="text-left px-4 py-2">Charge</th>
-                    <th className="text-right px-4 py-2">Base</th>
-                    <th className="text-right px-4 py-2">Tax %</th>
-                    <th className="text-right px-4 py-2">Tax</th>
-                    <th className="text-right px-4 py-2">Total</th>
-                    {chargesRights.canDelete && <th className="w-8" />}
+                    <th className={TH}>Charge</th>
+                    <th className={`${TH} text-right`}>Base</th>
+                    <th className={`${TH} text-right`}>Tax %</th>
+                    <th className={`${TH} text-right`}>Tax</th>
+                    <th className={`${TH} text-right`}>Total</th>
+                    {chargesRights.canDelete && <th className={`${TH} w-10`} />}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {chargeRows.map((c) => (
-                    <tr key={c.Id} className="hover:bg-muted/20">
-                      <td className="px-4 py-2 font-medium text-foreground">{c.ChargeHeadName}</td>
-                      <td className="px-4 py-2 text-right font-mono">{INR(c.BaseAmount)}</td>
-                      <td className="px-4 py-2 text-right text-muted-foreground">{Number(c.TaxPct) || 0}%</td>
-                      <td className="px-4 py-2 text-right font-mono">{INR(c.TaxAmount)}</td>
-                      <td className="px-4 py-2 text-right font-mono font-semibold">{INR(c.TotalAmount)}</td>
+                    <tr key={c.Id} className="hover:bg-primary/5">
+                      <td className={`${TD} font-medium text-foreground`}>{c.ChargeHeadName}</td>
+                      <td className={`${TD} text-right ${HR_NUM}`}>{INR(c.BaseAmount)}</td>
+                      <td className={`${TD} text-right text-muted-foreground ${HR_NUM}`}>{Number(c.TaxPct) || 0}%</td>
+                      <td className={`${TD} text-right ${HR_NUM}`}>{INR(c.TaxAmount)}</td>
+                      <td className={`${TD} text-right font-semibold ${HR_NUM}`}>{INR(c.TotalAmount)}</td>
                       {chargesRights.canDelete && (
-                        <td className="px-2 py-2">
-                          <button onClick={() => handleRemoveCharge(c.Id)} disabled={removingChargeId === c.Id} className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40">
+                        <td className={`${TD} text-right`}>
+                          <button onClick={() => handleRemoveCharge(c.Id)} disabled={removingChargeId === c.Id} title="Remove" className={ICON_ACT_RED}>
                             {removingChargeId === c.Id ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
                           </button>
                         </td>
@@ -256,95 +224,84 @@ export default function CustomerMaintenanceProfile() {
               </table>
             </div>
           )}
-        </GlassSection>
-
+        </SheetBox>
 
         {/* Bills */}
-        <GlassSection title="Bills" icon={Receipt} accentColor="#f59e0b">
-          {billsLoading ? <div className="text-sm text-muted-foreground">Loading\u2026</div>
+        <SheetBox title="Bills" note={billsLoading ? undefined : billRows.length} flush>
+          {billsLoading ? <div className="skel m-4" style={{ height: 80 }} />
           : billRows.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border py-8 flex flex-col items-center gap-2">
-              <Receipt size={18} className="text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No bills raised for this customer yet.</p>
-            </div>
+            <HrEmpty icon={Receipt} title="No bills" text="No bills raised for this customer yet." />
           ) : (
-            <div className="rounded-xl border border-border overflow-x-auto">
+            <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+                <thead>
                   <tr>
-                    <th className="text-left px-4 py-2">Bill No</th>
-                    <th className="text-left px-4 py-2">Bill Date</th>
-                    <th className="text-left px-4 py-2">Due Date</th>
-                    <th className="text-right px-4 py-2">Grand Total</th>
-                    <th className="text-left px-4 py-2">Status</th>
+                    <th className={TH}>Bill No</th>
+                    <th className={TH}>Bill Date</th>
+                    <th className={TH}>Due Date</th>
+                    <th className={`${TH} text-right`}>Grand Total</th>
+                    <th className={TH}>Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {billRows.map((b) => (
-                    <tr key={b.Id} onClick={() => navigate("/maintenance/bills")} className="hover:bg-muted/20 cursor-pointer">
-                      <td className="px-4 py-2 font-mono text-xs font-medium">{b.BillNo}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{fmtDate(b.BillDate)}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{fmtDate(b.DueDate)}</td>
-                      <td className="px-4 py-2 text-right font-mono font-semibold">{INR(b.GrandTotal)}</td>
-                      <td className="px-4 py-2">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${b.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}>
-                          {b.Status}
-                        </span>
-                      </td>
+                    <tr key={b.Id} onClick={() => navigate("/maintenance/bills")} className="hover:bg-primary/5 cursor-pointer">
+                      <td className={`${TD} text-xs font-medium ${HR_NUM}`}>{b.BillNo}</td>
+                      <td className={`${TD} text-muted-foreground ${HR_NUM}`}>{fmtDate(b.BillDate)}</td>
+                      <td className={`${TD} text-muted-foreground ${HR_NUM}`}>{fmtDate(b.DueDate)}</td>
+                      <td className={`${TD} text-right font-semibold ${HR_NUM}`}>{INR(b.GrandTotal)}</td>
+                      <td className={TD}>{billMark(b.Status)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-        </GlassSection>
+        </SheetBox>
 
         {/* Service Tickets */}
         {ticketRights.canView && (
-          <GlassSection
-            title="Service Tickets" icon={Ticket} accentColor="#a78bfa"
+          <SheetBox
+            title="Service Tickets" note={ticketsLoading ? undefined : ticketRows.length} flush
             action={ticketRights.canCreate && (
-              <button onClick={() => setRaiseTicketOpen(true)} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-heading font-semibold border transition-all" style={{ borderColor: "#a78bfa50", color: "#a78bfa", background: "#a78bfa10" }}>
+              <button onClick={() => setRaiseTicketOpen(true)} className={`${KEY_LINE} h-8 px-3`}>
                 <Plus size={12} /> Raise Ticket
               </button>
             )}
           >
-            {ticketsLoading ? <div className="text-sm text-muted-foreground">Loading\u2026</div>
+            {ticketsLoading ? <div className="skel m-4" style={{ height: 80 }} />
             : ticketRows.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border py-8 flex flex-col items-center gap-2">
-                <Ticket size={18} className="text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">No service tickets for this customer yet.</p>
-              </div>
+              <HrEmpty icon={Ticket} title="No tickets" text="No service tickets for this customer yet." />
             ) : (
-              <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
+              <div className="divide-y divide-foreground/15">
                 {ticketRows.map((t) => (
-                  <div key={t.Id} className="px-4 py-3 hover:bg-muted/20">
+                  <div key={t.Id} className="px-4 py-3 hover:bg-primary/5">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <span className="font-mono text-xs text-muted-foreground">{t.TicketNo}</span>
-                          <StatusBadge status={t.Status} />
-                          <PriorityBadge priority={t.Priority} />
-                          <span className="text-xs text-muted-foreground border border-border rounded-full px-2 py-0.5">{t.Category}</span>
+                        <div className="flex flex-wrap items-center gap-3 mb-1">
+                          <span className={`text-xs text-foreground ${HR_NUM}`}>{t.TicketNo}</span>
+                          <SheetMark text={ticketStatusLabel(t.Status)} tone={TICKET_STATUS_TONE[t.Status] ?? "waiting"} />
+                          <SheetMark text={t.Priority} tone={TICKET_PRIORITY_TONE[t.Priority] ?? "draft"} />
+                          {t.Category && <span className={TAG}>{t.Category}</span>}
                         </div>
                         <p className="text-sm font-heading font-semibold text-foreground truncate">{t.Subject}</p>
                         {t.AssigneeName && <p className="text-xs text-muted-foreground mt-0.5">Assigned to: {t.AssigneeName}</p>}
-                        {t.SlaDueDate && <p className="text-xs text-muted-foreground mt-0.5">SLA: {fmtDate(t.SlaDueDate)}</p>}
+                        {t.SlaDueDate && <p className="text-xs text-muted-foreground mt-0.5">SLA: <span className={HR_NUM}>{fmtDate(t.SlaDueDate)}</span></p>}
                       </div>
                       {ticketRights.canEdit && (
                         <div className="flex items-center gap-1 shrink-0">
                           {t.Status === "Assigned" && (
-                            <button onClick={() => handleMarkInProgress(t.Id)} disabled={actionLoading} title="Mark In Progress" className="p-1.5 rounded-md text-muted-foreground hover:text-violet-500 hover:bg-violet-500/10 transition-colors disabled:opacity-40">
+                            <button onClick={() => handleMarkInProgress(t.Id)} disabled={actionLoading} title="Mark In Progress" className={ICON_ACT}>
                               <Clock size={14} />
                             </button>
                           )}
                           {["Assigned", "InProgress", "Reopened"].includes(t.Status) && (
-                            <button onClick={() => setResolveTicketId(t.Id)} disabled={actionLoading} title="Resolve" className="p-1.5 rounded-md text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 transition-colors disabled:opacity-40">
+                            <button onClick={() => setResolveTicketId(t.Id)} disabled={actionLoading} title="Resolve" className={ICON_ACT}>
                               <CheckCircle2 size={14} />
                             </button>
                           )}
                           {t.Status === "Resolved" && (
-                            <button onClick={() => handleClose(t.Id)} disabled={actionLoading} title="Close" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40">
+                            <button onClick={() => handleClose(t.Id)} disabled={actionLoading} title="Close" className={ICON_ACT}>
                               <AlertCircle size={14} />
                             </button>
                           )}
@@ -355,60 +312,60 @@ export default function CustomerMaintenanceProfile() {
                 ))}
               </div>
             )}
-          </GlassSection>
+          </SheetBox>
         )}
 
         {/* Payment History */}
-        <GlassSection title="Payment History (Bills)" icon={History} accentColor={ACCENT}>
-          {billsLoading ? <div className="text-sm text-muted-foreground">Loading\u2026</div>
+        <SheetBox title="Payment History (Bills)" flush>
+          {billsLoading ? <div className="skel m-4" style={{ height: 80 }} />
           : billRows.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border py-8 flex flex-col items-center gap-2 text-center px-6">
-              <Wallet size={18} className="text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No maintenance bills recorded yet.</p>
-              <p className="text-xs text-muted-foreground max-w-sm">Bills raised for this customer appear here as payment demand notices. Payment is collected offline and settled externally.</p>
-            </div>
+            <HrEmpty
+              icon={Wallet}
+              title="No maintenance bills"
+              text="Bills raised for this customer appear here as payment demand notices. Payment is collected offline and settled externally."
+            />
           ) : (
-            <div className="space-y-2">
+            <div>
               {billRows.map((b) => (
-                <div key={b.Id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5 bg-card/40 hover:bg-muted/20">
+                <div key={b.Id} className="flex items-center justify-between px-4 py-2.5 border-b border-foreground/10 hover:bg-primary/5">
                   <div>
-                    <p className="text-xs font-mono font-medium text-foreground">{b.BillNo}</p>
-                    <p className="text-[0.6875rem] text-muted-foreground">{fmtDate(b.BillDate)}{b.DueDate ? ` \u00B7 Due ${fmtDate(b.DueDate)}` : ""}</p>
+                    <p className={`text-xs font-medium text-foreground ${HR_NUM}`}>{b.BillNo}</p>
+                    <p className={`text-[0.6875rem] text-muted-foreground ${HR_NUM}`}>{fmtDate(b.BillDate)}{b.DueDate ? ` · Due ${fmtDate(b.DueDate)}` : ""}</p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-heading font-semibold text-foreground">{INR(b.GrandTotal)}</p>
-                    <span className={`text-[0.6875rem] font-heading ${b.Status === "Active" ? "text-emerald-600" : "text-red-500"}`}>{b.Status}</span>
+                  <div className="text-right space-y-1">
+                    <p className={`text-sm font-semibold text-foreground ${HR_NUM}`}>{INR(b.GrandTotal)}</p>
+                    {billMark(b.Status)}
                   </div>
                 </div>
               ))}
-              <div className="flex justify-between items-center pt-2 border-t border-border">
-                <span className="text-xs text-muted-foreground">Total billed (active)</span>
-                <span className="text-sm font-heading font-bold text-foreground">{INR(totalBilled)}</span>
+              <div className="flex justify-between items-center px-4 py-2.5">
+                <span className={HR_LBL}>Total billed (active)</span>
+                <span className={`text-sm font-bold text-foreground ${HR_NUM}`}>{INR(totalBilled)}</span>
               </div>
             </div>
           )}
-        </GlassSection>
+        </SheetBox>
       </MaintenanceShell>
 
       {/* Add Charge Dialog */}
       <Dialog open={addChargeOpen} onOpenChange={(o) => !o && setAddChargeOpen(false)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading text-base">Add Charge Head</DialogTitle></DialogHeader>
+        <DialogContent className={`${SHEET_DIALOG} max-w-sm`} style={{ margin: 0 }}>
+          <DialogHeader><DialogTitle className={HR_HEAD}>Add Charge Head</DialogTitle></DialogHeader>
           <div className="space-y-3 pt-1">
             {availableChargeHeads.length === 0 ? (
-              <p className="text-sm text-muted-foreground italic">{chargeHeadRows.length === 0 ? "Loading charge heads\u2026" : "All charge heads already assigned."}</p>
+              <p className="text-sm text-muted-foreground">{chargeHeadRows.length === 0 ? "Loading charge heads…" : "All charge heads already assigned."}</p>
             ) : (
-              <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
+              <div className="divide-y divide-foreground/15" style={{ border: HR_RULE }}>
                 {availableChargeHeads.map((ch) => (
-                  <button key={ch.Id} onClick={() => handleAddCharge(ch.Id)} className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted/40 transition-colors text-left">
+                  <button key={ch.Id} onClick={() => handleAddCharge(ch.Id)} className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-primary/5 transition-colors text-left">
                     <span className="text-sm font-medium text-foreground">{ch.Name}</span>
-                    <span className="text-xs font-mono text-muted-foreground">{INR(ch.Rate)}</span>
+                    <span className={`text-xs text-muted-foreground ${HR_NUM}`}>{INR(ch.Rate)}</span>
                   </button>
                 ))}
               </div>
             )}
-            <div className="flex justify-end pt-1 border-t border-border">
-              <button onClick={() => setAddChargeOpen(false)} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">Close</button>
+            <div className="flex justify-end pt-3 border-t border-foreground/15">
+              <button onClick={() => setAddChargeOpen(false)} className={`${KEY_LINE} h-9 px-4`}>Close</button>
             </div>
           </div>
         </DialogContent>
@@ -425,16 +382,16 @@ export default function CustomerMaintenanceProfile() {
 
       {/* Resolve Dialog */}
       <Dialog open={resolveTicketId !== null} onOpenChange={(o) => !o && setResolveTicketId(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading text-base">Resolve Ticket</DialogTitle></DialogHeader>
+        <DialogContent className={`${SHEET_DIALOG} max-w-sm`} style={{ margin: 0 }}>
+          <DialogHeader><DialogTitle className={HR_HEAD}>Resolve Ticket</DialogTitle></DialogHeader>
           <div className="space-y-3 pt-1">
             <div>
-              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Resolution Notes *</label>
-              <textarea value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} rows={3} placeholder="Describe what was done\u2026" className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground resize-none" />
+              <label className={`block mb-1.5 ${HR_LBL}`}>Resolution Notes *</label>
+              <textarea value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} rows={3} placeholder={"Describe what was done…"} className={`${HR_FIELD} h-auto py-2 resize-none`} />
             </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <button onClick={() => setResolveTicketId(null)} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">Cancel</button>
-              <button onClick={handleResolve} disabled={actionLoading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-emerald-600 text-white hover:opacity-90 transition-all disabled:opacity-60">
+            <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+              <button onClick={() => setResolveTicketId(null)} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+              <button onClick={handleResolve} disabled={actionLoading} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
                 {actionLoading ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} Resolve
               </button>
             </div>
@@ -442,17 +399,6 @@ export default function CustomerMaintenanceProfile() {
         </DialogContent>
       </Dialog>
     </>
-  );
-}
-
-function InfoField({ icon: Icon, label, value }: { icon: typeof Phone; label: string; value: string }) {
-  return (
-    <div>
-      <p className="flex items-center gap-1.5 text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-        <Icon size={11} /> {label}
-      </p>
-      <p className="text-sm font-medium text-foreground truncate" title={value}>{value}</p>
-    </div>
   );
 }
 
@@ -476,35 +422,35 @@ function RaiseTicketDialog({ bookingId, customerName, onClose, onSaved }: { book
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle className="font-heading text-base">Raise Service Ticket</DialogTitle></DialogHeader>
+      <DialogContent className={`${SHEET_DIALOG} max-w-md`} style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Raise Service Ticket</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           <p className="text-xs text-muted-foreground">For: <span className="font-medium text-foreground">{customerName}</span></p>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Category</label>
-              <select value={category} onChange={(e) => setCategory(e.target.value as TicketCategory)} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none text-foreground">
+              <label className={`block mb-1.5 ${HR_LBL}`}>Category</label>
+              <select value={category} onChange={(e) => setCategory(e.target.value as TicketCategory)} className={HR_FIELD}>
                 {TICKET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Priority</label>
-              <select value={priority} onChange={(e) => setPriority(e.target.value as TicketPriority)} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none text-foreground">
+              <label className={`block mb-1.5 ${HR_LBL}`}>Priority</label>
+              <select value={priority} onChange={(e) => setPriority(e.target.value as TicketPriority)} className={HR_FIELD}>
                 {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
           </div>
           <div>
-            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Subject *</label>
-            <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Brief subject line\u2026" className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" />
+            <label className={`block mb-1.5 ${HR_LBL}`}>Subject *</label>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={"Brief subject line…"} className={HR_FIELD} />
           </div>
           <div>
-            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Description</label>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Detailed description (optional)\u2026" className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground resize-none" />
+            <label className={`block mb-1.5 ${HR_LBL}`}>Description</label>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={"Detailed description (optional)…"} className={`${HR_FIELD} h-auto py-2 resize-none`} />
           </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">Cancel</button>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:opacity-90 transition-all disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : <Ticket size={13} />} Raise Ticket
             </button>
           </div>

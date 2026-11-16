@@ -1,40 +1,24 @@
 ﻿import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Ticket, Search, CheckCircle2, Clock, AlertCircle, Loader2, Plus } from "lucide-react";
+import { Ticket, Search, CheckCircle2, Clock, AlertCircle, Loader2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
+import { MaintenanceShell } from "@/components/maintenance/MaintenanceShell";
+import {
+  ICON_ACT, SHEET_DIALOG, SheetTabs, TAG, TICKET_PRIORITY_TONE, TICKET_STATUS_TONE, ticketStatusLabel,
+} from "@/components/maintenance/maintParts";
+import { HrEmpty, HrError, HR_FIELD, HR_HEAD, HR_LBL, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { SheetMark } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
-  getServiceTickets, markTicketInProgress, resolveServiceTicket, closeServiceTicket, reopenServiceTicket,
-  type ServiceTicketRow, type TicketStatus,
+  getServiceTickets, markTicketInProgress, resolveServiceTicket, closeServiceTicket,
+  type ServiceTicketRow,
 } from "@/api/serviceTicketApi";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
-const TICKET_VIOLET = "#a78bfa";
-const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "\u2014");
-
-const STATUS_COLOR: Record<string, string> = {
-  Open:       "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
-  Assigned:   "bg-sky-500/10 border-sky-500/20 text-sky-600",
-  InProgress: "bg-violet-500/10 border-violet-500/20 text-violet-600",
-  Resolved:   "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
-  Closed:     "bg-muted border-border text-muted-foreground",
-  Reopened:   "bg-orange-500/10 border-orange-500/20 text-orange-600",
-};
-const PRIORITY_COLOR: Record<string, string> = {
-  Urgent: "bg-red-500/10 border-red-500/20 text-red-600",
-  High:   "bg-orange-500/10 border-orange-500/20 text-orange-600",
-  Normal: "bg-sky-500/10 border-sky-500/20 text-sky-600",
-  Low:    "bg-muted border-border text-muted-foreground",
-};
-function StatusBadge({ status }: { status: string }) {
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${STATUS_COLOR[status] || "bg-muted border-border text-muted-foreground"}`}>{status}</span>;
-}
-function PriorityBadge({ priority }: { priority: string }) {
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${PRIORITY_COLOR[priority] || "bg-muted border-border text-muted-foreground"}`}>{priority}</span>;
-}
+const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 
 const STATUS_TABS: { label: string; value: string }[] = [
   { label: "All", value: "" },
@@ -56,7 +40,7 @@ export default function MaintenanceServiceRequests() {
 
   // Always fetch WITHOUT pagination so we get a simple array; handedOverOnly
   // restricts results to post-handover (maintenance-eligible) customers.
-  const { data, isLoading, error, refetch } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["maint-service-tickets", { search, statusFilter }],
     queryFn: () =>
       getServiceTickets({
@@ -102,89 +86,73 @@ export default function MaintenanceServiceRequests() {
     finally { setActionLoading(false); }
   };
 
+  const meta = (label: string, value: React.ReactNode) => (
+    <p className="text-xs text-muted-foreground">{label}: <span className="text-foreground">{value}</span></p>
+  );
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Maintenance", "Service Requests"]} />
       <MaintenanceShell
         title="Service Requests"
         subtitle="Warranty, complaints and service requests for handed-over residents only"
-        icon={Ticket}
-      >
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-48">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        action={
+          <div className="relative w-full sm:w-72">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by customer, ticket no, subject\u2026"
-              className="w-full pl-8 pr-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
+              placeholder="Search by customer, ticket no, subject…"
+              className={`${HR_FIELD} pl-8`}
             />
           </div>
-        </div>
+        }
+      >
+        <SheetTabs tabs={STATUS_TABS} value={statusFilter} onChange={setStatusFilter} />
 
-        {/* Status tabs */}
-        <div className="flex flex-wrap gap-1.5 border-b border-border pb-2">
-          {STATUS_TABS.map((tab) => {
-            const active = statusFilter === tab.value;
-            return (
-              <button
-                key={tab.value}
-                onClick={() => setStatusFilter(tab.value)}
-                className="px-3 py-1 rounded-md text-xs font-heading font-medium transition-all"
-                style={active ? { background: `${TICKET_VIOLET}20`, color: TICKET_VIOLET, borderColor: `${TICKET_VIOLET}50`, border: "1px solid" } : {}}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Ticket list */}
         {isLoading ? (
-          <div className="py-12 flex justify-center"><Loader2 size={22} className="animate-spin text-muted-foreground" /></div>
+          <div className="skel" style={{ height: 240 }} />
         ) : error ? (
-          <div className="py-8 text-center text-sm text-destructive">Failed to load tickets.</div>
+          <HrError text="Failed to load tickets." />
         ) : rows.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border py-12 flex flex-col items-center gap-3">
-            <Ticket size={24} className="text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">No service requests found for handed-over residents.</p>
+          <div className="bg-card" style={{ border: HR_RULE }}>
+            <HrEmpty icon={Ticket} title="No service requests" text="No service requests found for handed-over residents." />
           </div>
         ) : (
-          <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
+          <div className="bg-card divide-y divide-foreground/15" style={{ border: HR_RULE }}>
             {rows.map((t) => (
-              <div key={t.Id} className="px-4 py-3 hover:bg-muted/20">
+              <div key={t.Id} className="px-4 py-3 hover:bg-primary/5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2 mb-1">
-                      <span className="font-mono text-xs text-muted-foreground">{t.TicketNo}</span>
-                      <StatusBadge status={t.Status} />
-                      <PriorityBadge priority={t.Priority} />
-                      <span className="text-xs text-muted-foreground border border-border rounded-full px-2 py-0.5">{t.Category}</span>
+                    <div className="flex flex-wrap items-center gap-3 mb-1">
+                      <span className={`text-xs text-foreground ${HR_NUM}`}>{t.TicketNo}</span>
+                      <SheetMark text={ticketStatusLabel(t.Status)} tone={TICKET_STATUS_TONE[t.Status] ?? "waiting"} />
+                      <SheetMark text={t.Priority} tone={TICKET_PRIORITY_TONE[t.Priority] ?? "draft"} />
+                      {t.Category && <span className={TAG}>{t.Category}</span>}
                     </div>
                     <p className="text-sm font-heading font-semibold text-foreground truncate">{t.Subject}</p>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 mt-1">
-                      {t.ApplicantName && <p className="text-xs text-muted-foreground">Customer: <span className="text-foreground"><ApplicantNames name={t.ApplicantName} bookingId={t.BookingId} /></span></p>}
-                      {t.UnitNo && <p className="text-xs text-muted-foreground">Unit: <span className="text-foreground">{t.UnitNo}</span></p>}
-                      {t.ProjectName && <p className="text-xs text-muted-foreground">Project: <span className="text-foreground">{t.ProjectName}</span></p>}
-                      {t.AssigneeName && <p className="text-xs text-muted-foreground">Assigned: <span className="text-foreground">{t.AssigneeName}</span></p>}
-                      {t.SlaDueDate && <p className="text-xs text-muted-foreground">SLA: <span className="text-foreground">{fmtDate(t.SlaDueDate)}</span></p>}
+                      {t.ApplicantName && meta("Customer", <ApplicantNames name={t.ApplicantName} bookingId={t.BookingId} />)}
+                      {t.UnitNo && meta("Unit", t.UnitNo)}
+                      {t.ProjectName && meta("Project", t.ProjectName)}
+                      {t.AssigneeName && meta("Assigned", t.AssigneeName)}
+                      {t.SlaDueDate && meta("SLA", <span className={HR_NUM}>{fmtDate(t.SlaDueDate)}</span>)}
                     </div>
                   </div>
                   {rights.canEdit && (
                     <div className="flex items-center gap-1 shrink-0">
                       {t.Status === "Assigned" && (
-                        <button onClick={() => handleMarkInProgress(t.Id)} disabled={actionLoading} title="Mark In Progress" className="p-1.5 rounded-md text-muted-foreground hover:text-violet-500 hover:bg-violet-500/10 transition-colors disabled:opacity-40">
+                        <button onClick={() => handleMarkInProgress(t.Id)} disabled={actionLoading} title="Mark In Progress" className={ICON_ACT}>
                           <Clock size={14} />
                         </button>
                       )}
                       {["Assigned", "InProgress", "Reopened"].includes(t.Status) && (
-                        <button onClick={() => setResolveId(t.Id)} disabled={actionLoading} title="Resolve" className="p-1.5 rounded-md text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 transition-colors disabled:opacity-40">
+                        <button onClick={() => setResolveId(t.Id)} disabled={actionLoading} title="Resolve" className={ICON_ACT}>
                           <CheckCircle2 size={14} />
                         </button>
                       )}
                       {t.Status === "Resolved" && (
-                        <button onClick={() => handleClose(t.Id)} disabled={actionLoading} title="Close" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40">
+                        <button onClick={() => handleClose(t.Id)} disabled={actionLoading} title="Close" className={ICON_ACT}>
                           <AlertCircle size={14} />
                         </button>
                       )}
@@ -199,16 +167,22 @@ export default function MaintenanceServiceRequests() {
 
       {/* Resolve Dialog */}
       <Dialog open={resolveId !== null} onOpenChange={(o) => !o && setResolveId(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading text-base">Resolve Ticket</DialogTitle></DialogHeader>
+        <DialogContent className={`${SHEET_DIALOG} max-w-sm`} style={{ margin: 0 }}>
+          <DialogHeader><DialogTitle className={HR_HEAD}>Resolve Ticket</DialogTitle></DialogHeader>
           <div className="space-y-3 pt-1">
             <div>
-              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Resolution Notes *</label>
-              <textarea value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} rows={3} placeholder="Describe what was done to resolve this issue\u2026" className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground resize-none" />
+              <label className={`block mb-1.5 ${HR_LBL}`}>Resolution Notes *</label>
+              <textarea
+                value={resolutionNotes}
+                onChange={(e) => setResolutionNotes(e.target.value)}
+                rows={3}
+                placeholder="Describe what was done to resolve this issue…"
+                className={`${HR_FIELD} h-auto py-2 resize-none`}
+              />
             </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <button onClick={() => setResolveId(null)} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">Cancel</button>
-              <button onClick={handleResolve} disabled={actionLoading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-emerald-600 text-white hover:opacity-90 transition-all disabled:opacity-60">
+            <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+              <button onClick={() => setResolveId(null)} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+              <button onClick={handleResolve} disabled={actionLoading} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
                 {actionLoading ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} Resolve
               </button>
             </div>
