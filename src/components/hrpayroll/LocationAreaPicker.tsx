@@ -75,7 +75,8 @@ function MapBehaviour({ point, radius, onPick }: { point: [number, number] | nul
   useEffect(() => {
     if (!point) return;
     // Fit the whole marked area on screen (at least street level), not just the pin.
-    const bounds = L.circle(point, { radius: Math.max(radius, 30) }).getBounds();
+    // (Not L.circle().getBounds(): that needs the circle to be on a map already.)
+    const bounds = L.latLng(point[0], point[1]).toBounds(Math.max(radius, 30) * 2);
     map.fitBounds(bounds, { padding: [24, 24], maxZoom: 18, animate: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, map]);
