@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getPortalHolidays, getPortalLeaveBalances, getPortalLeaves, getPortalPayslips, getPortalProfile } from "@/api/employeePortalApi";
 import PunchCard from "./PunchCard";
+import { EmployeeAvatar } from "./EmployeeAvatar";
 import { Card, Loading, MONTHS, Mark, Note, PageHeader, Stat, fmtDate, inr, labelCls } from "./employeeUi";
 
 export default function EmployeeDashboard() {
@@ -23,7 +24,12 @@ export default function EmployeeDashboard() {
 
   return (
     <>
-      <PageHeader title={p ? `Welcome, ${p.EmployeeName.split(" ")[0]}` : "Welcome"} subtitle={p ? `${p.Designation || "Employee"}${p.Department ? ` · ${p.Department}` : ""} · ${p.EmployeeCode}` : undefined} />
+      <div className="flex items-center gap-4 mb-2">
+        {p && <EmployeeAvatar initials={p.EmployeeName.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase()} size={72} className="border border-foreground/30" />}
+        <div className="flex-1 min-w-0">
+          <PageHeader title={p ? `Welcome, ${p.EmployeeName.split(" ")[0]}` : "Welcome"} subtitle={p ? `${p.Designation || "Employee"}${p.Department ? ` · ${p.Department}` : ""} · ${p.EmployeeCode}` : undefined} />
+        </div>
+      </div>
 
       <PunchCard />
 

@@ -7,6 +7,7 @@ import { Logout } from "iconsax-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { LogoFull } from "@/components/Logo";
+import { EmployeeAvatar } from "@/pages/employee/EmployeeAvatar";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 
 const NAV = [
@@ -32,11 +33,12 @@ function UserMenu({ onSignOut }: { onSignOut: () => void }) {
 
   return (
     <div className="relative shrink-0" ref={ref}>
-      <button onClick={() => setOpen((o) => !o)} aria-label="Account menu" className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-primary-foreground gradient-accent ring-2 ring-border hover:opacity-90">
-        {currentUser?.initials || "E"}
+      <button onClick={() => setOpen((o) => !o)} aria-label="Account menu" className="rounded-full ring-2 ring-border hover:opacity-90">
+        <EmployeeAvatar initials={currentUser?.initials} size={32} />
       </button>
       <div className={`absolute top-full right-0 mt-2.5 z-50 w-60 p-1 border border-border bg-card shadow-2xl transition-all duration-150 origin-top-right ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}>
         <div className="px-4 py-3">
+          <EmployeeAvatar initials={currentUser?.initials} size={56} className="mb-2" />
           <p className="text-sm font-semibold truncate">{currentUser?.name}</p>
           <p className="text-xs text-muted-foreground truncate">{currentUser?.email}</p>
           <span className="inline-flex items-center gap-1 mt-2 text-[0.625rem] px-2 py-0.5 font-semibold border border-foreground/30"><UserRound size={9} /> Employee Portal</span>
