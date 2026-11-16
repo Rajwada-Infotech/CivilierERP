@@ -198,6 +198,39 @@ router.put("/leave-policy", async (req, res) => {
   }
 });
 
+// ── Break rules: allowed minutes and whether the time comes off working time ─
+router.get("/break-types", async (req, res) => {
+  try {
+    const r = await getPool().request().query("SELECT BreakType, DeductFromWork, AllowedMinutes, RequiresNote, IsActive FROM dbo.AttendanceBreakType ORDER BY SortOrder");
+    res.json(r.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put("/break-types", async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) return bad(res, "Nothing to save");
+  for (const it of items) {
+    const m = it.AllowedMinutes;
+    if (m !== null && m !== "" && m !== undefined && !(Number.isInteger(Number(m)) && Number(m) >= 0 && Number(m) <= 1440)) return bad(res, "Allowed minutes must be a whole number from 0 to 1440, or empty for no limit");
+  }
+  try {
+    const pool = getPool();
+    for (const it of items) {
+      const limit = it.AllowedMinutes === null || it.AllowedMinutes === "" || it.AllowedMinutes === undefined ? null : Number(it.AllowedMinutes);
+      const r = await pool.request().input("T", sql.NVarChar(40), String(it.BreakType))
+        .input("M", sql.Int, limit).input("D", sql.Bit, it.DeductFromWork ? 1 : 0).input("A", sql.Bit, it.IsActive === false ? 0 : 1).input("By", sql.Int, req.user?.userId ?? null)
+        .query("UPDATE dbo.AttendanceBreakType SET AllowedMinutes = @M, DeductFromWork = @D, IsActive = @A, UpdatedBy = @By, UpdatedAt = SYSUTCDATETIME() WHERE BreakType = @T");
+      if (!r.rowsAffected[0]) return bad(res, `Unknown break reason: ${it.BreakType}`, 404);
+    }
+    res.json({ message: "Break rules saved" });
+  } catch (err) {
+    console.error("[employee-portal-admin] PUT /break-types:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/employees/:id/entitlements", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const year = parseInt(req.query.year, 10) || new Date().getFullYear();

@@ -29,12 +29,13 @@ export default function EmployeeAttendance() {
 
       <PunchCard />
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-6">
         <Stat label="Present" value={s?.Present ?? "—"} />
         <Stat label="Absent" value={s?.Absent ?? "—"} />
         <Stat label="Half day" value={s?.HalfDay ?? "—"} />
         <Stat label="On leave" value={s?.OnLeave ?? "—"} />
         <Stat label="Holidays" value={s?.Holiday ?? "—"} />
+        <Stat label="Break time" value={s ? `${s.BreakMinutes} min` : "—"} note={s && s.ExtraMinutes ? `${s.ExtraMinutes} min extra this month` : "no extra time"} />
       </div>
 
       <Card>
@@ -44,7 +45,7 @@ export default function EmployeeAttendance() {
         {data && data.Days.length > 0 && (
           <div className="overflow-x-auto"><table className="w-full text-sm">
             <thead><tr className="text-left text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-muted-foreground border-b border-foreground/30">
-              <th className="px-4 py-2">Date</th><th className="px-4 py-2">Status</th><th className="px-4 py-2">In</th><th className="px-4 py-2">Out</th><th className="px-4 py-2 text-right">Hours</th><th className="px-4 py-2">Note</th>
+              <th className="px-4 py-2">Date</th><th className="px-4 py-2">Status</th><th className="px-4 py-2">In</th><th className="px-4 py-2">Out</th><th className="px-4 py-2 text-right">Hours</th><th className="px-4 py-2 text-right">Break</th><th className="px-4 py-2 text-right">Extra</th><th className="px-4 py-2">Note</th>
             </tr></thead>
             <tbody className="divide-y divide-foreground/15">
               {data.Days.map((d) => (
@@ -54,6 +55,8 @@ export default function EmployeeAttendance() {
                   <td className="px-4 py-2 tabular-nums">{d.CheckIn ? fmtTime(d.CheckIn) : d.CheckInText || "—"}</td>
                   <td className="px-4 py-2 tabular-nums">{d.CheckOut ? fmtTime(d.CheckOut) : d.CheckOutText || "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{d.Hours != null ? d.Hours.toFixed(2) : "—"}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{d.BreakMinutes || d.OfficialMinutes ? `${d.BreakMinutes ?? 0} min${d.OfficialMinutes ? ` + ${d.OfficialMinutes} work` : ""}` : "—"}</td>
+                  <td className={`px-4 py-2 text-right tabular-nums ${d.ExtraMinutes ? "text-red-600 dark:text-red-400 font-semibold" : ""}`}>{d.ExtraMinutes ? `${d.ExtraMinutes} min` : "—"}</td>
                   <td className="px-4 py-2 text-muted-foreground">{d.Note || ""}</td>
                 </tr>
               ))}

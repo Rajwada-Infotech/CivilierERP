@@ -17,6 +17,7 @@ export const hrPayrollNavItems: NavItem[] = [
       { label: "Salary Calculation", path: "/hr-payroll/salary-calculation", pageKey: "salary-calculation" },
       { label: "Incentives", path: "/hr-payroll/incentive", pageKey: "incentive" },
       { label: "Payroll Run", path: "/hr-payroll/payroll-run", pageKey: "payroll-run" },
+      { label: "Daily Attendance Check", path: "/hr-payroll/daily-attendance", pageKey: "hr-attendance-management" },
     ],
   },
 

@@ -209,11 +209,21 @@ router.get("/attendance", async (req, res) => {
   try {
     const pool = getPool();
     const q = (extra = (r) => r) => extra(pool.request().input("E", sql.Int, req.employee.EmployeeId).input("From", sql.Date, from).input("To", sql.Date, to));
-    const [self, hr, leave, hol] = await Promise.all([
+    const [self, hr, leave, hol, brk] = await Promise.all([
       q().query(`SELECT AttendanceDate, InTime, OutTime FROM dbo.EmployeeAttendance WHERE EmployeeId = @E AND AttendanceDate BETWEEN @From AND @To`),
       q().query(`SELECT AttendanceDate, Status, CheckIn, CheckOut, Remarks FROM dbo.AttendanceRecord WHERE EmployeeId = @E AND IsActive = 1 AND AttendanceDate BETWEEN @From AND @To`),
       q().query(`SELECT FromDate, ToDate, LeaveType FROM dbo.LeaveRecord WHERE EmployeeId = @E AND IsActive = 1 AND Status = N'Approved' AND ToDate >= @From AND FromDate <= @To`),
       q().query(`SELECT HolidayDate, HolidayName FROM dbo.HolidayMaster WHERE IsActive = 1 AND HolidayDate BETWEEN @From AND @To`),
+      // Break time per day (finished breaks only): taken off work, counted as official work, and beyond the allowance.
+      q().query(`
+        SELECT a.AttendanceDate,
+               SUM(CASE WHEN b.DeductFromWork = 1 THEN DATEDIFF(SECOND, b.BreakStart, b.BreakEnd) ELSE 0 END) AS BreakSec,
+               SUM(CASE WHEN b.DeductFromWork = 0 THEN DATEDIFF(SECOND, b.BreakStart, b.BreakEnd) ELSE 0 END) AS OfficialSec,
+               SUM(CASE WHEN b.AllowedMinutes IS NOT NULL AND DATEDIFF(SECOND, b.BreakStart, b.BreakEnd) > b.AllowedMinutes * 60
+                        THEN DATEDIFF(SECOND, b.BreakStart, b.BreakEnd) - b.AllowedMinutes * 60 ELSE 0 END) AS ExtraSec
+        FROM dbo.EmployeeAttendance a JOIN dbo.EmployeeAttendanceBreak b ON b.AttendanceId = a.AttendanceId
+        WHERE a.EmployeeId = @E AND a.AttendanceDate BETWEEN @From AND @To AND b.BreakEnd IS NOT NULL
+        GROUP BY a.AttendanceDate`),
     ]);
 
     const days = new Map();
@@ -230,6 +240,9 @@ router.get("/attendance", async (req, res) => {
       const hours = s.OutTime ? Math.round(((new Date(s.OutTime) - new Date(s.InTime)) / 3600000) * 100) / 100 : null;
       put(ymd(s.AttendanceDate), { Status: "Present", CheckIn: new Date(s.InTime).toISOString(), CheckOut: s.OutTime ? new Date(s.OutTime).toISOString() : null, Hours: hours, Note: s.OutTime ? null : "Not clocked out" });
     }
+    for (const b of brk.recordset) {
+      put(ymd(b.AttendanceDate), { BreakMinutes: Math.round(b.BreakSec / 60), OfficialMinutes: Math.round(b.OfficialSec / 60), ExtraMinutes: Math.round(b.ExtraSec / 60) });
+    }
     for (const a of hr.recordset) {
       put(ymd(a.AttendanceDate), { Status: a.Status, CheckInText: a.CheckIn, CheckOutText: a.CheckOut, Note: a.Remarks || null });
     }
@@ -238,7 +251,8 @@ router.get("/attendance", async (req, res) => {
     const count = (s) => rows.filter((r) => r.Status === s).length;
     res.json({
       Month: `${year}-${String(month).padStart(2, "0")}`,
-      Summary: { Present: count("Present"), Absent: count("Absent"), HalfDay: count("Half Day"), OnLeave: count("On Leave"), Holiday: count("Holiday"), WeekOff: count("Week Off") },
+      Summary: { Present: count("Present"), Absent: count("Absent"), HalfDay: count("Half Day"), OnLeave: count("On Leave"), Holiday: count("Holiday"), WeekOff: count("Week Off"),
+        BreakMinutes: rows.reduce((t, r) => t + (r.BreakMinutes || 0), 0), ExtraMinutes: rows.reduce((t, r) => t + (r.ExtraMinutes || 0), 0) },
       Days: rows,
     });
   } catch (err) {
@@ -261,6 +275,15 @@ router.get("/attendance/today", async (req, res) => {
 });
 router.post("/attendance/in", async (req, res) => {
   try { res.json(await attendanceSvc.clockIn(getPool(), req.user, { evidence: req.body, requireEvidence: true })); } catch (e) { punchFail(res, e, "POST /attendance/in"); }
+});
+router.get("/attendance/break-types", async (req, res) => {
+  try { res.json(await attendanceSvc.getBreakTypes(getPool())); } catch (e) { punchFail(res, e, "GET /attendance/break-types"); }
+});
+router.post("/attendance/break-start", async (req, res) => {
+  try { res.json(await attendanceSvc.breakStart(getPool(), req.user, { type: req.body?.type, note: req.body?.note })); } catch (e) { punchFail(res, e, "POST /attendance/break-start"); }
+});
+router.post("/attendance/break-stop", async (req, res) => {
+  try { res.json(await attendanceSvc.breakStop(getPool(), req.user)); } catch (e) { punchFail(res, e, "POST /attendance/break-stop"); }
 });
 router.post("/attendance/out", async (req, res) => {
   try { res.json(await attendanceSvc.clockOut(getPool(), req.user, { evidence: req.body, requireEvidence: true })); } catch (e) { punchFail(res, e, "POST /attendance/out"); }

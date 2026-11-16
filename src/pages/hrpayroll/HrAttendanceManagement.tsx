@@ -193,6 +193,12 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                 </div>
               ))}
             </div>
+            {((rec.officialSeconds ?? 0) > 0 || (rec.extraSeconds ?? 0) > 0) && (
+              <p className="text-xs text-muted-foreground">
+                Official work out of office (counted as work): <b className={NUM}>{fmtDuration(rec.officialSeconds ?? 0)}</b>
+                {" · "}Extra break time beyond the allowance: <b className={`${NUM} ${(rec.extraSeconds ?? 0) > 0 ? "text-destructive" : ""}`}>{fmtDuration(rec.extraSeconds ?? 0)}</b>
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <StatusBadge r={rec} />
               <span className="text-xs text-muted-foreground">{[rec.companyName, rec.department, rec.projectName].filter(Boolean).join(" · ") || "—"}</span>
@@ -234,8 +240,10 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                     ) : (
                       <div className="flex flex-wrap gap-x-6 gap-y-1">
                         <span className={`font-medium ${NUM}`}>#{b.no}</span>
+                        <span>{b.type ?? "Break"}{b.note ? <span className="text-muted-foreground"> — {b.note}</span> : null}</span>
                         <span className={NUM}>{fmtTimeIst(b.start)} → {b.end ? fmtTimeIst(b.end) : <b className="text-destructive">not stopped</b>}</span>
-                        <span className={`text-muted-foreground ${NUM}`}>{b.end ? fmtDuration(b.seconds) : "—"}</span>
+                        <span className={`text-muted-foreground ${NUM}`}>{b.end ? fmtDuration(b.seconds) : "—"}{b.deduct === false ? " (work)" : ""}</span>
+                        {(b.overSeconds ?? 0) > 0 && <span className={`text-destructive font-semibold ${NUM}`}>{fmtDuration(b.overSeconds)} extra</span>}
                       </div>
                     )}
                   </div>
@@ -395,13 +403,13 @@ export default function HrAttendanceManagement() {
                   <tr>
                     <th className="font-semibold px-4 py-2.5 text-left">Employee</th><th className="font-semibold px-4 py-2.5 text-left">Company / Dept</th><th className="font-semibold px-4 py-2.5 text-left">Project</th>
                     <th className="font-semibold px-4 py-2.5 text-left">Date</th><th className="font-semibold px-4 py-2.5 text-left">In</th><th className="font-semibold px-4 py-2.5 text-left">Out</th>
-                    <th className="font-semibold px-4 py-2.5 text-right">Breaks</th><th className="font-semibold px-4 py-2.5 text-right">Break Time</th><th className="font-semibold px-4 py-2.5 text-right">Working</th>
+                    <th className="font-semibold px-4 py-2.5 text-right">Breaks</th><th className="font-semibold px-4 py-2.5 text-right">Break Time</th><th className="font-semibold px-4 py-2.5 text-right">Extra</th><th className="font-semibold px-4 py-2.5 text-right">Working</th>
                     <th className="font-semibold px-4 py-2.5 text-right">Net Hours</th><th className="font-semibold px-4 py-2.5 text-left">Status</th>
                     {rights.canEdit && <th className="font-semibold px-4 py-2.5 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-foreground/15">
-                  {records.length === 0 && <tr><td colSpan={12} className="p-8 text-center text-muted-foreground">No attendance records for these filters.</td></tr>}
+                  {records.length === 0 && <tr><td colSpan={13} className="p-8 text-center text-muted-foreground">No attendance records for these filters.</td></tr>}
                   {records.map((r) => (
                     <tr key={r.attendanceId} onClick={() => setOpenId(r.attendanceId)} className={`cursor-pointer transition-colors hover:bg-primary/5 ${r.flags.length ? "bg-destructive/5" : ""}`}>
                       <td className="px-4 py-3"><p className="font-medium">{r.employeeName}</p><p className={`text-xs text-muted-foreground ${NUM}`}>{r.employeeCode}</p></td>
@@ -412,6 +420,7 @@ export default function HrAttendanceManagement() {
                       <td className={`px-4 py-3 ${NUM}`}>{r.outTime ? fmtTimeIst(r.outTime) : <span className="text-destructive">—</span>}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{r.breakCount}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{fmtDuration(r.breakSeconds)}</td>
+                      <td className={`px-4 py-3 text-right font-heading tabular-nums ${(r.extraSeconds ?? 0) > 0 ? "text-destructive font-semibold" : ""}`}>{(r.extraSeconds ?? 0) > 0 ? fmtDuration(r.extraSeconds) : "—"}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{fmtDuration(r.totalSeconds)}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums font-medium">{fmtDuration(r.netSeconds)}</td>
                       <td className="px-4 py-3"><StatusBadge r={r} /></td>
@@ -449,6 +458,7 @@ export default function HrAttendanceManagement() {
                 { label: "Employees", value: summary.totals.employees },
                 { label: "Working Duration", value: fmtDuration(summary.totals.totalSeconds) },
                 { label: "Break Duration", value: fmtDuration(summary.totals.breakSeconds) },
+                { label: "Extra Break Time", value: fmtDuration(summary.totals.extraSeconds ?? 0), tone: (summary.totals.extraSeconds ?? 0) > 0 ? "hsl(var(--destructive))" : undefined },
                 { label: "Net Working Hours", value: fmtDuration(summary.totals.netSeconds) },
                 { label: "Incomplete Days", value: summary.totals.incompleteDays, tone: summary.totals.incompleteDays ? "hsl(var(--destructive))" : undefined },
               ]} />
@@ -457,7 +467,7 @@ export default function HrAttendanceManagement() {
               <table className="w-full text-sm">
                 <thead className={HR_LBL} style={{ borderBottom: HR_RULE }}>
                   <tr><th className="font-semibold px-4 py-2.5 text-left">Employee</th><th className="font-semibold px-4 py-2.5 text-left">Department</th><th className="font-semibold px-4 py-2.5 text-right">Days</th><th className="font-semibold px-4 py-2.5 text-right">Incomplete</th>
-                    <th className="font-semibold px-4 py-2.5 text-right">Breaks</th><th className="font-semibold px-4 py-2.5 text-right">Break Time</th><th className="font-semibold px-4 py-2.5 text-right">Working</th><th className="font-semibold px-4 py-2.5 text-right">Net Hours</th></tr>
+                    <th className="font-semibold px-4 py-2.5 text-right">Breaks</th><th className="font-semibold px-4 py-2.5 text-right">Break Time</th><th className="font-semibold px-4 py-2.5 text-right">Extra</th><th className="font-semibold px-4 py-2.5 text-right">Working</th><th className="font-semibold px-4 py-2.5 text-right">Net Hours</th></tr>
                 </thead>
                 <tbody className="divide-y divide-foreground/15">
                   {(summary?.employees ?? []).length === 0 && <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No attendance in this period.</td></tr>}
@@ -469,6 +479,7 @@ export default function HrAttendanceManagement() {
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{s.incompleteDays ? <span className="text-destructive font-medium">{s.incompleteDays}</span> : 0}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{s.breakCount}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{fmtDuration(s.breakSeconds)}</td>
+                      <td className={`px-4 py-3 text-right font-heading tabular-nums ${(s.extraSeconds ?? 0) > 0 ? "text-destructive font-semibold" : ""}`}>{(s.extraSeconds ?? 0) > 0 ? fmtDuration(s.extraSeconds) : "—"}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{fmtDuration(s.totalSeconds)}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums font-medium">{fmtDuration(s.netSeconds)}</td>
                     </tr>
