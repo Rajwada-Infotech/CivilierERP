@@ -61,9 +61,12 @@ const check = (name, cond, extra) => {
     ORDER BY p.Id`, { p: [sql.Int, PROJECT] }))[0];
   if (!plot) { console.error("no free plot in the project"); process.exit(2); }
   const otherProject = (await q("SELECT TOP 1 id FROM dbo.enterprise WHERE id <> @p ORDER BY id", { p: [sql.Int, PROJECT] }))[0]?.id;
-  const unitType = (await q(`SELECT TOP 1 t.Label FROM dbo.RoomLayoutType t WHERE t.IsActive = 1
-    AND EXISTS (SELECT 1 FROM dbo.RoomLayoutComposition c WHERE c.LayoutTypeId = t.Id) ORDER BY t.SortOrder`).catch(() => []))[0]?.Label
-    ?? (await q("SELECT TOP 1 UnitType FROM dbo.UnitMaster WHERE UnitType IS NOT NULL AND IsActive = 1"))[0]?.UnitType;
+  // A villa is built from its type's room layout, so the type needs one (a layout that has rooms).
+  const layout = (await q(`SELECT TOP 1 t.Id, t.Label FROM dbo.RoomLayoutType t WHERE t.IsActive = 1 AND t.OwnerVillaTypeId IS NULL
+    AND EXISTS (SELECT 1 FROM dbo.UnitRoomConfig cfg JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id
+                WHERE cfg.LayoutTypeId = t.Id AND cfg.IsActive = 1 AND rc.Quantity > 0) ORDER BY t.SortOrder`))[0];
+  if (!layout) { console.error("no active room layout with rooms"); process.exit(2); }
+  const unitType = layout.Label;
 
   let typeId = null, foreignTypeId = null, unitId = null;
   try {
@@ -71,7 +74,9 @@ const check = (name, cond, extra) => {
     check("built-up area is required", r.status === 400, r);
     r = await call("POST", "/api/villa-type-master", { ProjectId: PROJECT, Code: `${TAG}4`, Name: `${TAG} Villa Type 4`, BuiltUpAreaSqFt: 2286.72, SuperBuiltUpAreaSqFt: 2000 });
     check("super built-up below built-up refused", r.status === 400, r);
-    r = await call("POST", "/api/villa-type-master", { ProjectId: PROJECT, Code: `${TAG}4`, Name: `${TAG} Villa Type 4`, BaseLandAreaSqFt: 1591.11, BuiltUpAreaSqFt: 2286.72, SuperBuiltUpAreaSqFt: 2600 });
+    r = await call("POST", "/api/villa-type-master", { ProjectId: PROJECT, Code: `${TAG}N`, Name: `${TAG} No layout`, BuiltUpAreaSqFt: 1000 });
+    const noLayoutTypeId = r.body.id;
+    r = await call("POST", "/api/villa-type-master", { ProjectId: PROJECT, Code: `${TAG}4`, Name: `${TAG} Villa Type 4`, LayoutTypeId: layout.Id, BaseLandAreaSqFt: 1591.11, BuiltUpAreaSqFt: 2286.72, SuperBuiltUpAreaSqFt: 2600 });
     check("villa type created", r.status === 201, r);
     typeId = r.body.id;
     r = await call("POST", "/api/villa-type-master", { ProjectId: PROJECT, Code: `${TAG}4`, Name: "dup", BuiltUpAreaSqFt: 100 });
@@ -101,22 +106,25 @@ const check = (name, cond, extra) => {
       check("several plots are not merged without Combine", r.status === 400 && /Combine/.test(r.body.error || ""), r);
     }
     r = await call("POST", "/api/crm/project-auto-setup/plots/convert", {
+      PlotIds: [plot.Id], UnitName: `${TAG} Villa NL`, UnitType: unitType, UnitKind: "VILLA", RatePerSqFt: 3000, VillaTypeId: noLayoutTypeId,
+    });
+    check("a villa type without a room layout cannot be built", r.status === 400 && /room layout/.test(r.body.error || ""), r);
+    r = await call("POST", "/api/crm/project-auto-setup/plots/convert", {
       PlotIds: [plot.Id], UnitName: `${TAG} Villa VT`, UnitType: unitType, UnitKind: "VILLA", RatePerSqFt: 3000, VillaTypeId: typeId,
     });
     check("converted naming only the villa type", r.status === 200 || r.status === 201, r);
-    const unit = (await q("SELECT Id, AreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, VillaTypeId FROM dbo.UnitMaster WHERE UnitName = @n AND IsActive = 1", { n: [sql.NVarChar, `${TAG} Villa VT`] }))[0];
+    const unit = (await q("SELECT Id, AreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, VillaTypeId FROM dbo.UnitMaster WHERE UnitName LIKE @n AND IsActive = 1", { n: [sql.NVarChar, `%${TAG} Villa VT`] }))[0]; // the naming pattern may prefix the name
     unitId = unit?.Id ?? null;
     check("villa takes the type's areas (BU 2286.72, SBU 2600 = saleable area) and records the type",
       unit && Number(unit.BuiltUpAreaSqFt) === 2286.72 && Number(unit.SuperBuiltUpAreaSqFt) === 2600 && Number(unit.AreaSqFt) === 2600 && unit.VillaTypeId === typeId, unit);
 
-    r = await call("PUT", `/api/villa-type-master/${typeId}`, { Code: `${TAG}4`, Name: `${TAG} Villa Type 4`, BuiltUpAreaSqFt: 2300 });
+    r = await call("PUT", `/api/villa-type-master/${typeId}`, { Code: `${TAG}4`, Name: `${TAG} Villa Type 4`, LayoutTypeId: layout.Id, BuiltUpAreaSqFt: 2300 });
     const after = (await q("SELECT BuiltUpAreaSqFt FROM dbo.UnitMaster WHERE Id = @id", { id: [sql.Int, unitId ?? 0] }))[0];
     check("editing the type leaves the built villa unchanged", r.status === 200 && after && Number(after.BuiltUpAreaSqFt) === 2286.72, { r, after });
   } finally {
     if (unitId) {
-      await q("DELETE FROM dbo.RoomMaster WHERE UnitId = @id", { id: [sql.Int, unitId] }).catch(() => {});
-      await q("UPDATE dbo.PlotMaster SET ConvertedUnitId = NULL, ConvertedAt = NULL WHERE ConvertedUnitId = @id", { id: [sql.Int, unitId] });
-      await q("DELETE FROM dbo.UnitMaster WHERE Id = @id", { id: [sql.Int, unitId] }).catch((e) => console.log("unit cleanup:", e.message));
+      // The villa, its rooms and the DPR chains the conversion made for it.
+      await require("./e2eCrmPlotLifecycleCleanup").cleanupVillaUnits(getPool(), TAG, [unitId]).catch((e) => { failures++; console.log("unit cleanup:", e.message); });
     }
     await q("UPDATE dbo.PlotMaster SET PlannedVillaTypeId = @v WHERE Id = @id", { id: [sql.Int, plot.Id], v: [sql.Int, plot.PlannedVillaTypeId] });
     await q(`DELETE FROM dbo.VillaTypeMaster WHERE Code LIKE '${TAG}%'`);

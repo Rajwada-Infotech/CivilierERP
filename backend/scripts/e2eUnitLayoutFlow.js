@@ -235,8 +235,10 @@ const check = (name, cond, extra) => {
     check("unit switched to temp layout -> exactly Bedroom + Kitchen", r.status === 200 && u1Active.join() === "Bedroom,Kitchen", { r: r.data, u1Active });
     r = await call("POST", `/api/unit-bhk-config/template/${encodeURIComponent(TEMP_TYPE)}`, comp(2));
     u1Active = (await roomsOf(u1.Id)).filter((x) => x.IsActive).map((x) => x.RoomName).sort();
-    check("layout edit (Bedroom 1->2) propagated: 1 unit updated, 1 room added", r.data?.roomSync?.unitsUpdated === 1 && r.data?.roomSync?.roomsAdded === 1, r.data);
-    check("unit now Bedroom 1, Bedroom 2, Kitchen", u1Active.join() === "Bedroom 1,Bedroom 2,Kitchen", u1Active);
+    // A layout is shared company-wide, so saving it never touches rooms already built (9dc71f464); Flat Master's
+    // generate brings units up to it.
+    check("layout edit (1 -> 2 bedrooms) saved without touching built rooms", r.status === 200 && r.data?.roomSync == null, r.data);
+    check("the unit still has Bedroom + Kitchen until Flat Master generates", u1Active.join() === "Bedroom,Kitchen", u1Active);
     const types2 = await call("GET", "/api/unit-bhk-config/types");
     check("CRM dropdown now offers the temp type with its summary", types2.data.find((t) => t.id === tempTypeId)?.summary === "2 Bedroom · 1 Kitchen", types2.data.find((t) => t.id === tempTypeId));
 
@@ -246,10 +248,19 @@ const check = (name, cond, extra) => {
     await q("DELETE FROM dbo.RoomMaster WHERE UnitId = @u", { u: [sql.Int, u2.Id] });
     r = await call("POST", "/api/room-master/generate-bulk", { ProjectId: PROJECT_ID, BlockId: blockId });
     console.log(`   ${r.data?.message}`);
-    check("bulk rebuilt only the unit that had no rooms (renamed nothing elsewhere)", r.status === 200 && r.data.unitsUpdated === 1 && r.data.roomsAdded === t3.roomCount, r.data);
-    check("bulk reports the 2 no-layout units as skipped", r.data.skippedNoLayout === 2, r.data);
+    // Bulk generate brings every unit to its layout and removes surplus EMPTY rooms (69ec8349d); free-text rooms
+    // (no category) are never touched.
+    check("bulk ran without failures", r.status === 200 && !(r.data.failed || []).length, r.data);
+    const u2Preview = (await call("GET", `/api/room-master/unit-rooms/${u2.Id}`)).data;
+    const u2Active = (await roomsOf(u2.Id)).filter((x) => x.IsActive).length;
+    check("the unit whose rooms were deleted is rebuilt to its layout", u2Active === u2Preview.template.reduce((s, x) => s + x.quantity, 0), { u2Active, template: u2Preview.template });
+    const u1Now = (await roomsOf(u1.Id)).filter((x) => x.IsActive).map((x) => x.RoomName).sort();
+    check("the unit on the edited layout now has Bedroom 1, Bedroom 2, Kitchen", u1Now.join() === "Bedroom 1,Bedroom 2,Kitchen", u1Now);
     const u0Names = (await roomsOf(units[0].Id)).filter((x) => x.IsActive).map((x) => x.RoomName);
-    check("hand-added 'Bedroom 9' untouched by the bulk run", u0Names.includes("Bedroom 9"), u0Names);
+    check("surplus empty 'Bedroom 9' removed; free-text 'Pooja Room' kept", !u0Names.includes("Bedroom 9") && u0Names.includes("Pooja Room"), u0Names);
+    const noLayoutRooms = (await q(`SELECT COUNT(*) c FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId
+      WHERE u.BlockId = @b AND u.LayoutTypeId = @t AND r.IsActive = 1`, { b: [sql.Int, blockId], t: [sql.Int, emptyTypeId] }))[0].c;
+    check("units whose layout has no rooms still get none", noLayoutRooms === 0, noLayoutRooms);
     r = await call("POST", "/api/room-master/generate-bulk", { ProjectId: PROJECT_ID, BlockId: blockId });
     check("bulk again = no-op", r.data.roomsAdded === 0, r.data);
 
