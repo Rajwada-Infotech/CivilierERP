@@ -157,7 +157,7 @@ export default function PunchCard() {
             </>
           )}
         </div>
-        {data && cur && <BreakPanel state={data} onChange={setState} />}
+        {data && <BreakPanel state={data} onChange={setState} />}
       </Card>
       {dialog && <CaptureDialog kind={dialog} onClose={() => setDialog(null)} onDone={done} />}
     </>

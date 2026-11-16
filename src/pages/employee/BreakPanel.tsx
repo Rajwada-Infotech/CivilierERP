@@ -96,7 +96,15 @@ export default function BreakPanel({ state, onChange }: { state: PunchState; onC
   const openBreak = cur?.breaks.find((b) => b.open);
   const skewMs = new Date(state.serverNow).getTime() - Date.now();
   const { elapsed, over } = useBreakReminder(openBreak, skewMs);
-  if (!cur) return null;
+  if (!cur) {
+    // Not punched in yet: the button is shown so it can be found, but a break can only start during a working day.
+    return (
+      <div className="border-t border-foreground/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">Breaks, meetings at another office and other reasons are tracked once you punch in.</p>
+        <button className={keyLine} disabled title="Punch in first"><Coffee size={13} /> Take a break</button>
+      </div>
+    );
+  }
 
   const finished = cur.breaks.filter((b) => !b.open);
   return (
