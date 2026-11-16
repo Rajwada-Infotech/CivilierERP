@@ -85,7 +85,8 @@ router.put("/:id", pageRightByMethod("attendance-leave-overtime"), async (req, r
         UPDATE dbo.AttendanceRecord SET
           EmployeeId = @EmployeeId, AttendanceDate = @AttendanceDate, Status = @Status,
           CheckIn = @CheckIn, CheckOut = @CheckOut, Remarks = @Remarks,
-          IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
+          IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME(),
+          Source = N'Manual' -- once HR edits a row here it is theirs; later punches no longer overwrite it
         WHERE AttendanceId = @Id
       `);
     await bumpCacheVersion("attendance-record");

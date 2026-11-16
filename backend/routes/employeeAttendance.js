@@ -86,6 +86,13 @@ router.get("/hr/records/:id", requirePageRight(HR, "view"), async (req, res) => 
   } catch (e) { fail(res, e, "GET /hr/records/:id"); }
 });
 
+// The live photo taken at a punch on the Employee Portal ("in" or "out"), kept out of the list payloads.
+router.get("/hr/records/:id/photo/:which", requirePageRight(HR, "view"), async (req, res) => {
+  const id = toInt(req.params.id);
+  if (!id || !["in", "out"].includes(req.params.which)) return res.status(400).json({ error: "Invalid request" });
+  try { res.json({ photo: await svc.getPhoto(getPool(), id, req.params.which) }); } catch (e) { fail(res, e, "GET /hr/records/:id/photo"); }
+});
+
 // Corrections — each needs a reason and is written to the audit trail.
 router.put("/hr/records/:id", requirePageRight(HR, "edit"), async (req, res) => {
   const id = toInt(req.params.id);
@@ -95,6 +102,15 @@ router.put("/hr/records/:id", requirePageRight(HR, "edit"), async (req, res) => 
     const record = await svc.hrUpdateRecord(getPool(), id, { inTime, outTime, reason }, actorOf(req));
     res.json({ record, audit: await svc.getAudit(getPool(), id) });
   } catch (e) { fail(res, e, "PUT /hr/records/:id"); }
+});
+
+router.delete("/hr/records/:id", requirePageRight(HR, "edit"), async (req, res) => {
+  const id = toInt(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  try {
+    await svc.hrDeleteRecord(getPool(), id, { reason: req.body?.reason }, actorOf(req));
+    res.json({ message: "Attendance record deleted" });
+  } catch (e) { fail(res, e, "DELETE /hr/records/:id"); }
 });
 
 router.post("/hr/records/:id/breaks", requirePageRight(HR, "edit"), async (req, res) => {

@@ -112,6 +112,7 @@ const mapLeave = (r: LeaveRow): RecordWithId => ({
   toDate: r.ToDate ? r.ToDate.slice(0, 10) : "",
   totalDays: r.TotalDays,
   reason: r.Reason || "",
+  hrRemarks: r.HrRemarks || "",
   status: r.Status,
   isActive: r.IsActive,
 });
@@ -123,6 +124,7 @@ const leaveFields: FieldDef[] = [
   { name: "toDate", label: "To Date", type: "date", required: true },
   { name: "reason", label: "Reason", type: "textarea", fullWidth: true },
   { name: "status", label: "Status", type: "select", options: APPROVAL_STATUSES, defaultValue: "Pending" },
+  { name: "hrRemarks", label: "HR Remarks (shown to the employee)", type: "textarea", fullWidth: true },
   { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
 ];
 
@@ -142,6 +144,7 @@ const leaveToPayload = (r: Record<string, any>) => ({
   ToDate: r.toDate,
   Reason: r.reason?.trim() || null,
   Status: r.status || "Pending",
+  HrRemarks: (r.hrRemarks ?? "").trim(),
   IsActive: r.isActive !== false,
 });
 

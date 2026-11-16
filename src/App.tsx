@@ -312,6 +312,17 @@ const L1ChartPage = lazy(() => import("./pages/material/L1Chart"));
 const SupplierDashboard = withCountUp(lazy(() => import("./pages/supplier/SupplierDashboard")));
 const SupplierLanding = lazy(() => import("./pages/supplier/SupplierLanding"));
 const SupplierLogin = lazy(() => import("./pages/supplier/SupplierLogin"));
+// Employee Portal (employees sign in with an Employee Portal login that HR enables)
+const EmployeeLayout = lazy(() => import("@/components/layout/EmployeeLayout").then((m) => ({ default: m.EmployeeLayout })));
+const EmployeeLogin = lazy(() => import("./pages/employee/EmployeeLogin"));
+const EmployeeDashboard = lazy(() => import("./pages/employee/EmployeeDashboard"));
+const EmployeeSalary = lazy(() => import("./pages/employee/EmployeeSalary"));
+const EmployeePayslips = lazy(() => import("./pages/employee/EmployeePayslips"));
+const EmployeePortalAttendance = lazy(() => import("./pages/employee/EmployeeAttendance"));
+const EmployeeLeave = lazy(() => import("./pages/employee/EmployeeLeave"));
+const EmployeeHolidays = lazy(() => import("./pages/employee/EmployeeHolidays"));
+const EmployeeLoginHistory = lazy(() => import("./pages/employee/EmployeeLoginHistory"));
+const EmployeePortalAccess = lazy(() => import("./pages/hrpayroll/EmployeePortalAccess"));
 const SupplierQuotationDetail = lazy(
   () => import("./pages/supplier/SupplierQuotationDetail"),
 );
@@ -568,6 +579,24 @@ function RequireRole({
   return <>{children}</>;
 }
 
+// ─── Employee Portal route ────────────────────────────────────────────────────
+// Only an Employee Portal login belongs here; anyone else is sent to the main app.
+function EmployeePortalRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <RequireAuth>
+      <RequireRole allowed={["employee portal"]}>
+        <Suspense fallback={<PageSkeleton />}>
+          <EmployeeLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+            </RouteErrorBoundary>
+          </EmployeeLayout>
+        </Suspense>
+      </RequireRole>
+    </RequireAuth>
+  );
+}
+
 // ─── Admin Protected Route ────────────────────────────────────────────────────
 function ProtectedProviders({ children }: { children: React.ReactNode }) {
   useModuleUsageTracker();
@@ -755,6 +784,11 @@ function AuthSessionBridge({ children }: { children: React.ReactNode }) {
 // ─── App Routes ───────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { currentUser } = useAuth();
+  const { pathname } = useLocation();
+  // An Employee Portal login only has the portal -- anywhere else goes back to it.
+  if (currentUser?.role === "employee portal" && !pathname.startsWith("/employee") && pathname !== "/download-android-app") {
+    return <Navigate to="/employee" replace />;
+  }
   return (
     <Routes>
       {/* CRM CUSTOMER PORTAL — separate token-based auth, not the staff ERP session */}
@@ -783,6 +817,8 @@ function AppRoutes() {
           currentUser
             ? currentUser.role === "supplier"
               ? <Navigate to="/supplier" replace />
+              : currentUser.role === "employee portal"
+              ? <Navigate to="/employee" replace />
               : currentUser.role === "customer"
                 ? <Navigate to={`/customer-portal/${currentUser.id}`} replace />
                 : currentUser.role === "dba"
@@ -1201,6 +1237,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="hr-attendance-management">
             <HrAttendanceManagement />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/employee-portal-access"
+        element={
+          <ProtectedRoute pageKey="employee-portal-access">
+            <EmployeePortalAccess />
           </ProtectedRoute>
         }
       />
@@ -2638,6 +2682,23 @@ function AppRoutes() {
           </RequireAuth>
         }
       />
+      {/* EMPLOYEE PORTAL */}
+      <Route
+        path="/employee-login"
+        element={
+          currentUser
+            ? <Navigate to={currentUser.role === "employee portal" ? "/employee" : "/"} replace />
+            : <Suspense fallback={<PageSkeleton />}><EmployeeLogin /></Suspense>
+        }
+      />
+      <Route path="/employee" element={<EmployeePortalRoute><EmployeeDashboard /></EmployeePortalRoute>} />
+      <Route path="/employee/salary" element={<EmployeePortalRoute><EmployeeSalary /></EmployeePortalRoute>} />
+      <Route path="/employee/payslips" element={<EmployeePortalRoute><EmployeePayslips /></EmployeePortalRoute>} />
+      <Route path="/employee/attendance" element={<EmployeePortalRoute><EmployeePortalAttendance /></EmployeePortalRoute>} />
+      <Route path="/employee/leave" element={<EmployeePortalRoute><EmployeeLeave /></EmployeePortalRoute>} />
+      <Route path="/employee/holidays" element={<EmployeePortalRoute><EmployeeHolidays /></EmployeePortalRoute>} />
+      <Route path="/employee/login-history" element={<EmployeePortalRoute><EmployeeLoginHistory /></EmployeePortalRoute>} />
+
       <Route
         path="/supplier-login"
         element={

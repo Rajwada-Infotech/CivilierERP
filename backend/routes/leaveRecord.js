@@ -13,7 +13,7 @@ const STATUSES = ["Pending", "Approved", "Rejected"];
 
 const SELECT_COLUMNS = `
   SELECT l.LeaveId, l.EmployeeId, e.EmployeeCode, e.EmployeeName, l.LeaveType,
-         l.FromDate, l.ToDate, l.TotalDays, l.Reason, l.Status, l.IsActive, l.CreatedAt, l.UpdatedAt
+         l.FromDate, l.ToDate, l.TotalDays, l.Reason, l.Status, l.HrRemarks, l.IsActive, l.CreatedAt, l.UpdatedAt
   FROM dbo.LeaveRecord l
   JOIN dbo.EmployeeMaster e ON e.EmployeeId = l.EmployeeId
 `;
@@ -71,7 +71,7 @@ router.post("/", pageRightByMethod("attendance-leave-overtime"), async (req, res
 router.put("/:id", pageRightByMethod("attendance-leave-overtime"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const { EmployeeId, LeaveType, FromDate, ToDate, Reason, Status, IsActive } = req.body;
+  const { EmployeeId, LeaveType, FromDate, ToDate, Reason, Status, IsActive, HrRemarks } = req.body;
   if (!EmployeeId) return res.status(400).json({ error: "Employee is required" });
   if (!LEAVE_TYPES.includes(LeaveType)) return res.status(400).json({ error: `Leave Type must be one of: ${LEAVE_TYPES.join(", ")}` });
   if (!FromDate || !ToDate) return res.status(400).json({ error: "From Date and To Date are required" });
@@ -91,11 +91,14 @@ router.put("/:id", pageRightByMethod("attendance-leave-overtime"), async (req, r
       .input("Reason", sql.NVarChar(500), Reason || null)
       .input("Status", sql.NVarChar(20), status)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
+      .input("HrRemarks", sql.NVarChar(500), HrRemarks === undefined ? null : String(HrRemarks).trim().slice(0, 500) || null)
+      .input("HrRemarksSet", sql.Bit, HrRemarks === undefined ? 0 : 1)
       .input("UpdatedBy", sql.Int, updatedBy)
       .query(`
         UPDATE dbo.LeaveRecord SET
           EmployeeId = @EmployeeId, LeaveType = @LeaveType, FromDate = @FromDate, ToDate = @ToDate,
           TotalDays = @TotalDays, Reason = @Reason, Status = @Status,
+          HrRemarks = CASE WHEN @HrRemarksSet = 1 THEN @HrRemarks ELSE HrRemarks END,
           IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
         WHERE LeaveId = @Id
       `);

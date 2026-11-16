@@ -196,6 +196,7 @@ const ALL_ROUTES = [
   { path: "/api/attendance-record", file: "./routes/attendanceRecord" },
   { path: "/api/employee-attendance", file: "./routes/employeeAttendance" },
   { path: "/api/leave-record", file: "./routes/leaveRecord" },
+  { path: "/api/employee-portal-admin", file: "./routes/employeePortalAdmin" },
   { path: "/api/overtime-record", file: "./routes/overtimeRecord" },
   { path: "/api/incentive-record", file: "./routes/incentiveRecord" },
   { path: "/api/interviews", file: "./routes/interview" },
@@ -682,6 +683,20 @@ async function createApp() {
   } catch (err) {
     logger.error(`[ERR] Route failed [supplier-portal]: ${err.message}`);
     routeResults.failed.push({ label: "supplier-portal", error: err.message });
+  }
+
+  // Employee Portal — the employee's own data, limited to the "employee" role
+  try {
+    app.use(
+      "/api/employee-portal",
+      authMiddleware,
+      require("./middleware/role")("employee portal"),
+      require("./routes/employeePortal"),
+    );
+    routeResults.loaded.push("employee-portal");
+  } catch (err) {
+    logger.error(`[ERR] Route failed [employee-portal]: ${err.message}`);
+    routeResults.failed.push({ label: "employee-portal", error: err.message });
   }
 
   if (!isTest) {
