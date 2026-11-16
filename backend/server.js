@@ -189,6 +189,7 @@ const ALL_ROUTES = [
   { path: "/api/legal/deed-reg", file: "./routes/legal/deedRegistration" },
   { path: "/api/legal", file: "./routes/legal/legalOperations" },
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
+  { path: "/api/work-location-master", file: "./routes/workLocationMaster" },
   { path: "/api/holiday-master", file: "./routes/holidayMaster" },
   { path: "/api/deduction-addition-master", file: "./routes/deductionAdditionMaster" },
   { path: "/api/salary-structure", file: "./routes/salaryStructure" },

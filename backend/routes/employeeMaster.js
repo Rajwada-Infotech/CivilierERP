@@ -16,7 +16,7 @@ const headFields = (body) => ({
   name: body.EmployeeName, phone: body.Mobile, email: body.Email, address: body.Address, isActive: body.IsActive !== false,
 });
 
-const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, cand.CandidateCode AS CandidateCode, cand.CandidateName AS CandidateName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.CTCAmount, e.CTCFrequency, e.SalaryStructureCode, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
+const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, (SELECT STRING_AGG(CAST(x.LocationId AS varchar(10)), ',') FROM dbo.EmployeeWorkLocation x WHERE x.EmployeeId = e.EmployeeId) AS WorkLocationIds, (SELECT STRING_AGG(w.LocationName, ', ') WITHIN GROUP (ORDER BY w.LocationName) FROM dbo.EmployeeWorkLocation x JOIN dbo.WorkLocationMaster w ON w.LocationId = x.LocationId WHERE x.EmployeeId = e.EmployeeId) AS WorkLocationNames, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, cand.CandidateCode AS CandidateCode, cand.CandidateName AS CandidateName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.CTCAmount, e.CTCFrequency, e.SalaryStructureCode, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
 
 
 // Rolls a transaction back without letting a failed rollback replace the ORIGINAL error: when SQL Server has already
@@ -54,6 +54,17 @@ router.get("/options", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// The employee's Work Locations (any number): replace the saved set with the ids sent. Left alone when the field is absent.
+async function saveWorkLocations(tx, employeeId, ids) {
+  if (!Array.isArray(ids)) return;
+  const clean = [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  await tx.request().input("EmployeeId", sql.Int, employeeId).query("DELETE FROM dbo.EmployeeWorkLocation WHERE EmployeeId = @EmployeeId");
+  for (const locId of clean) {
+    await tx.request().input("EmployeeId", sql.Int, employeeId).input("LocationId", sql.Int, locId)
+      .query("INSERT INTO dbo.EmployeeWorkLocation (EmployeeId, LocationId) VALUES (@EmployeeId, @LocationId)");
+  }
+}
 
 function bindEmployeeFields(request, body) {
   return request
@@ -126,6 +137,7 @@ router.post("/", requirePageRight("employee-master", "create"), async (req, res)
         "@NomineeName, @NomineeRelationship, @NomineeContact, @CTCAmount, @CTCFrequency, @SalaryStructureCode, @IsActive, @CreatedBy, SYSDATETIME())"
       );
     newId = result.recordset[0].EmployeeId;
+    await saveWorkLocations(tx, newId, req.body.WorkLocationIds);
     await createEmployeeAccountHead(tx, newId, headFields(req.body), actor);
     await tx.commit();
     } catch (e) { await safeRollback(tx); throw e; }
@@ -177,7 +189,10 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
         "IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() " +
         "WHERE EmployeeId = @EmployeeId"
       );
-    if (upd.rowsAffected[0] > 0) await syncEmployeeAccountHead(tx, id, headFields(req.body), actor);
+    if (upd.rowsAffected[0] > 0) {
+      await syncEmployeeAccountHead(tx, id, headFields(req.body), actor);
+      await saveWorkLocations(tx, id, req.body.WorkLocationIds);
+    }
     await tx.commit();
     } catch (e) { await safeRollback(tx); throw e; }
     await bumpCacheVersion("employee-master");
