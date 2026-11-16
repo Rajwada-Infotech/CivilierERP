@@ -1,5 +1,6 @@
 // BOQ (bill of quantities). Parts under ./boq: config (types, helpers, form state) · LineEditor · FormModal · DetailModal
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAmendMode } from "@/components/amendment/useAmendMode";
 import { projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useQuery } from "@tanstack/react-query";
@@ -397,6 +398,18 @@ export default function BOQ() {
       });
     }
   };
+
+  // Deep link from Linked Documents (and elsewhere): /engineering/boq?view=<BoqID> opens that BOQ.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const viewId = parseInt(searchParams.get("view") || "", 10);
+    if (!Number.isFinite(viewId)) return;
+    void openDetail({ BoqID: viewId } as BoqRecord);
+    const next = new URLSearchParams(searchParams);
+    next.delete("view");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // Amend (an approved BOQ): the form opens as for an edit; saving raises an amendment for approval instead.
   const amend = useAmendMode("boq", "BOQ", {

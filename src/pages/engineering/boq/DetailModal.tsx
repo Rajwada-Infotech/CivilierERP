@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { BoqRecord, Company, Project, UomOption, apiFetch, fmt, fmtDate, rowToItem, rowToActivity, DetailRow, canEditBoq, canOpenBoqEdit } from "./config";
 import { LineEditor } from "./LineEditor";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Detail / View Modal
@@ -240,6 +241,13 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               }}
             >
               {record.Description}
+            </div>
+          )}
+
+          {/* Linked documents: BOQ → Material Request → Quotation → PO → GRN → Invoice (once approved) */}
+          {record.Status === "Approved" && (
+            <div style={{ border: "1px solid hsl(var(--foreground) / 0.3)", background: "hsl(var(--card))" }} className="px-4 sm:px-5 pb-4 sm:pb-5">
+              <DocumentChainPanel docType="boq" id={record.BoqID} />
             </div>
           )}
 
