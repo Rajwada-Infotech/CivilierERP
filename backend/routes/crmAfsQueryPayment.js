@@ -31,6 +31,15 @@ function decodeBase64File(f, label) {
   return { fileName: f.fileName, mimeType, buffer };
 }
 
+function parseOptionalMoney(value, field) {
+  if (value == null || value === "") return null;
+  const raw = String(value).trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) throw new Error(`${field} must be a non-negative amount with up to 2 decimal places`);
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount > 9999999999999999.99) throw new Error(`${field} is outside the supported range`);
+  return amount;
+}
+
 // Amount (StampDuty + RegistrationFee) is stored on this record — unlike the
 // Sale Deed Query Payment which reads live from CrmSalesDeed, the AFS stamp
 // duty amounts are entered here at creation time (before or after AFS
@@ -146,46 +155,63 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
-    const bookingId = parseInt(b.BookingId, 10);
+    const bookingId = parseId(b.BookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid BookingId" });
+    let stampDuty, registrationFee;
+    try {
+      stampDuty = parseOptionalMoney(b.StampDuty, "Stamp Duty");
+      registrationFee = parseOptionalMoney(b.RegistrationFee, "Registration Fee");
+    } catch (e) { return res.status(400).json({ error: e.message }); }
 
-    // Same upgrade as crmQueryPayment.js — requireActiveBooking allowed
-    // Expired/Pending bookings through; this whole module only ever starts
-    // once an Agreement is Executed, so the booking should still be Approved.
-    const activeErr = await requireApprovedBooking(pool, bookingId);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-
-    // Agreement must exist and be at least Executed — that's when both sides
-    // have signed and it's ready to go for Sub-Registrar registration.
-    const agreement = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id, Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
-    if (!agreement.recordset.length) {
-      return res.status(400).json({ error: "Registration fees need an Agreement for Sale for this booking first" });
-    }
-    const agr = agreement.recordset[0];
-    if (![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.Status)) {
-      return res.status(400).json({ error: `Registration fees can start once the Agreement for Sale is executed (it is ${agr.Status})` });
-    }
-
-    // The amount may be left blank at creation (the UI now lets staff open the
-    // tracker first and fill the government-calculated figure in before it is
-    // sent to the customer). It is instead enforced at POST /:id/info below —
-    // paperwork cannot be sent to the customer with no fee on record — so a
-    // tracker with a blank amount can never actually reach them.
-
-    const aqpNo = await getNextDocNumber(pool, "AQP", "AQP");
-    const result = await pool.request()
-      .input("no",     sql.NVarChar(30),  aqpNo)
-      .input("bid",    sql.Int,           bookingId)
-      .input("agid",   sql.Int,           agr.Id)
-      .input("stamp",  sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
-      .input("regfee", sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
-      .input("cb",     sql.Int,           actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmAfsQueryPayment (AfsQPNo, BookingId, AgreementId, StampDuty, RegistrationFee, Status, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @agid, @stamp, @regfee, 'Pending', @cb, SYSDATETIME())
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      // The booking locked for this start, then the shared rule (approved, active, not frozen) read under that lock.
+      await tx.request().input("bid", sql.Int, bookingId).query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid");
+      const activeErr = await requireApprovedBooking(tx, bookingId);
+      if (activeErr) {
+        await tx.rollback();
+        return res.status(400).json({ error: activeErr });
+      }
+      const agreement = await tx.request().input("bid", sql.Int, bookingId).query(`
+        SELECT TOP 1 Id, Status FROM dbo.CrmAgreement WITH (UPDLOCK, HOLDLOCK)
+        WHERE BookingId = @bid ORDER BY CreatedAt DESC
       `);
-    res.status(201).json({ success: true, id: result.recordset[0].Id, AfsQPNo: aqpNo });
+      if (!agreement.recordset.length) {
+        await tx.rollback();
+        return res.status(400).json({ error: "Registration fees need an Agreement for Sale for this booking first" });
+      }
+      const agr = agreement.recordset[0];
+      if (![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.Status)) {
+        await tx.rollback();
+        return res.status(400).json({ error: `Registration fees can start once the Agreement for Sale is executed (it is ${agr.Status})` });
+      }
+      const existing = await tx.request().input("bid", sql.Int, bookingId).query(`
+        SELECT TOP 1 Id FROM dbo.CrmAfsQueryPayment WITH (UPDLOCK, HOLDLOCK) WHERE BookingId = @bid
+      `);
+      if (existing.recordset.length) {
+        await tx.rollback();
+        return res.status(409).json({ error: "Registration fees are already started for this booking" });
+      }
+      const aqpNo = await getNextDocNumber(tx, "AQP", "AQP");
+      const result = await tx.request()
+        .input("no", sql.NVarChar(30), aqpNo)
+        .input("bid", sql.Int, bookingId)
+        .input("agid", sql.Int, agr.Id)
+        .input("stamp", sql.Decimal(18,2), stampDuty)
+        .input("regfee", sql.Decimal(18,2), registrationFee)
+        .input("cb", sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAfsQueryPayment (AfsQPNo, BookingId, AgreementId, StampDuty, RegistrationFee, Status, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@no, @bid, @agid, @stamp, @regfee, 'Pending', @cb, SYSDATETIME())
+        `);
+      await tx.commit();
+      res.status(201).json({ success: true, id: result.recordset[0].Id, AfsQPNo: aqpNo });
+    } catch (txErr) {
+      await tx.rollback().catch(() => {});
+      throw txErr;
+    }
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
       return res.status(409).json({ error: "Registration fees are already started for this booking" });
@@ -212,10 +238,15 @@ router.put("/:id", requirePageRight("crm-afs-query-payment", "edit"), async (req
     if (row.Status !== CrmStatus.PENDING) {
       return res.status(400).json({ error: "Stamp Duty and Registration Fee can no longer be edited once the paperwork has been sent to the customer" });
     }
-    await pool.request()
+    let stampDuty, registrationFee;
+    try {
+      stampDuty = parseOptionalMoney(b.StampDuty, "Stamp Duty");
+      registrationFee = parseOptionalMoney(b.RegistrationFee, "Registration Fee");
+    } catch (e) { return res.status(400).json({ error: e.message }); }
+    const updated = await pool.request()
       .input("id",     sql.Int,           id)
-      .input("stamp",  sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
-      .input("regfee", sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
+      .input("stamp",  sql.Decimal(18,2), stampDuty)
+      .input("regfee", sql.Decimal(18,2), registrationFee)
       .input("rem",    sql.NVarChar(sql.MAX), b.Remarks !== undefined ? (b.Remarks || null) : null)
       .input("ub",     sql.Int,           actorId(req))
       .query(`
@@ -225,8 +256,11 @@ router.put("/:id", requirePageRight("crm-afs-query-payment", "edit"), async (req
           Remarks         = ISNULL(@rem, Remarks),
           UpdatedBy       = @ub,
           UpdatedAt       = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = '${CrmStatus.PENDING}'
       `);
+    if (updated.rowsAffected?.[0] !== 1) {
+      return res.status(409).json({ error: "Payment status changed; refresh and try again" });
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-afs-query-payment] PUT /:id error:", e.message);
@@ -274,6 +308,14 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
     const tx = pool.transaction();
     await tx.begin();
     try {
+      const locked = await tx.request().input("id", sql.Int, id).query(`
+        SELECT Status FROM dbo.CrmAfsQueryPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+      `);
+      if (!locked.recordset.length || ![CrmStatus.PENDING, "InfoSent"].includes(locked.recordset[0].Status)) {
+        await tx.rollback();
+        return res.status(409).json({ error: "Payment status changed; refresh before sending information" });
+      }
+      const currentStatus = locked.recordset[0].Status;
       for (const file of files) {
         await tx.request()
           .input("aqpid", sql.Int,            id)
@@ -289,11 +331,15 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
           `);
       }
 
-      if (row.Status === CrmStatus.PENDING) {
-        await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
+      if (currentStatus === CrmStatus.PENDING) {
+        const sent = await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
           UPDATE dbo.CrmAfsQueryPayment SET Status = 'InfoSent', InfoSentAt = SYSDATETIME(), InfoSentBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-          WHERE Id = @id
+          WHERE Id = @id AND Status = '${CrmStatus.PENDING}'
         `);
+        if (sent.rowsAffected?.[0] !== 1) {
+          await tx.rollback();
+          return res.status(409).json({ error: "Payment status changed; refresh before sending information" });
+        }
       }
 
       await logCommunication(tx, {
@@ -365,6 +411,13 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     const tx = pool.transaction();
     await tx.begin();
     try {
+      const locked = await tx.request().input("id", sql.Int, id).query(`
+        SELECT Status FROM dbo.CrmAfsQueryPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+      `);
+      if (!locked.recordset.length || locked.recordset[0].Status !== "InfoSent") {
+        await tx.rollback();
+        return res.status(409).json({ error: "Payment status changed; refresh before confirming" });
+      }
       if (proof) {
         await tx.request()
           .input("aqpid", sql.Int,            id)
@@ -380,7 +433,7 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
           `);
       }
 
-      await tx.request()
+      const confirmedResult = await tx.request()
         .input("id",  sql.Int,           id)
         .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null && b.ConfirmedAmount !== "" ? parseFloat(b.ConfirmedAmount) : null)
         .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
@@ -390,8 +443,12 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
             Status = 'Confirmed', ConfirmedAt = SYSDATETIME(), ConfirmedBy = @ub,
             ConfirmedAmount = @amt, Remarks = ISNULL(@rem, Remarks),
             UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-          WHERE Id = @id
+          WHERE Id = @id AND Status = 'InfoSent'
         `);
+      if (confirmedResult.rowsAffected?.[0] !== 1) {
+        await tx.rollback();
+        return res.status(409).json({ error: "Payment status changed; refresh before confirming" });
+      }
 
       await logCommunication(tx, {
         bookingId: row.BookingId, direction: "Inbound",

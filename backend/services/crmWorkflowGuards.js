@@ -701,7 +701,7 @@ async function acceptAgreementDate(pool, agreementId, acceptedBy) {
   // own earlier approvals counted toward the date approval's levels. A fresh
   // cycle marker makes it start at level 1, like every other submission.
   await require("./approvalService").restartApprovalCycle("crm-agreement-date", agreementId, null, null,
-    `Agreement date accepted by the ${acceptedBy === "Company" ? "company" : "customer"} — sent for date approval`);
+    `Agreement date accepted by the ${acceptedBy === "Company" ? "company" : "customer"} — sent for date approval`, pool);
 
   await pool.request()
     .input("agid", sql.Int, agreementId)
@@ -725,10 +725,15 @@ async function finalizeAgreementDate(pool, agreementId) {
   const ag = row.recordset[0];
   if (!ag) return null;
 
-  await pool.request()
+  const updated = await pool.request()
     .input("id", sql.Int, agreementId)
     .input("adt", sql.Date, ag.ProposedDate)
-    .query("UPDATE dbo.CrmAgreement SET AgreementDate = @adt WHERE Id = @id");
+    .query(`UPDATE dbo.CrmAgreement SET AgreementDate = @adt
+      WHERE Id = @id AND DateApprovalStatus = 'Approved' AND ProposedDateStatus = 'Matched'
+        AND AgreementDate IS NULL AND ProposedDate IS NOT NULL`);
+  if (!updated.rowsAffected?.some((count) => count > 0)) {
+    throw Object.assign(new Error("The agreed date changed; refresh and try again"), { status: 409 });
+  }
 
   await pool.request()
     .input("agid", sql.Int, agreementId)

@@ -195,7 +195,15 @@ const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmPrePossession) P, (SELECT COU
       const res = await call("PUT", `/h/${hid}`, { ...complete, [k]: v });
       check(`Complete refused without ${k}`, res.status === 400, `got ${res.status} ${res.json?.error}`);
     }
+    // The two attestations are yes/no: the text "false" must not be taken as a yes.
+    for (const k of ["FinalDuesCleared", "CustomerAcknowledged"]) {
+      expectCall(`${k} sent as text "false" is refused`, await call("PUT", `/h/${hid}`, { ...complete, [k]: "false" }), 400, "boolean");
+    }
+    check("Nothing was recorded by those", (await q(`SELECT Status FROM dbo.CrmHandover WHERE Id = ${hid}`))[0].Status === "SnagPending");
     expectCall("Complete the handover", await call("PUT", `/h/${hid}`, complete), 200);
+    expectCall("A snag can't be raised on a completed handover (after handover it is a service ticket)",
+      await call("POST", `/h/${hid}/snags`, { Category: "Civil", Description: "E2E late snag" }), 409, "Completed");
+    check("The handover stays Completed", (await q(`SELECT Status FROM dbo.CrmHandover WHERE Id = ${hid}`))[0].Status === "Completed");
     r0 = await row();
     check("Board shows Completed", r0.Stage === "Completed" && r0.HandoverStatus === "Completed", r0.Stage);
     expectCall("Completed cannot be cancelled", await call("PUT", `/h/${hid}`, { Status: "Cancelled" }), 400);

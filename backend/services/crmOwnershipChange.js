@@ -171,21 +171,27 @@ async function update(db, id, body, actorUserId) {
     ["value", (f.ConsiderationValue ?? null) !== (o.ConsiderationValue == null ? null : Number(o.ConsiderationValue))],
     ["notes", (f.Notes || null) !== (o.Notes || null)],
   ].filter(([, c]) => c).map(([n]) => n);
-  if (changed.length) await log(db, id, "Details changed", actorUserId, changed.join(", "));
-  await db.request().input("id", sql.Int, id).input("tc", sql.Int, toId)
+  const updated = await db.request().input("id", sql.Int, id).input("tc", sql.Int, toId)
     .input("dn", sql.NVarChar(100), f.DeedNo).input("dd", sql.Date, f.DeedDate).input("ro", sql.NVarChar(200), f.RegOffice)
     .input("cv", sql.Decimal(18, 2), f.ConsiderationValue).input("n", sql.NVarChar(1000), f.Notes).input("by", sql.Int, actorUserId)
     .query(`UPDATE dbo.CrmOwnershipChange SET ToCustomerId = ISNULL(@tc, ToCustomerId), DeedNo = @dn, DeedDate = @dd, RegOffice = @ro, ConsiderationValue = @cv,
-              Notes = @n, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+              Notes = @n, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status IN (N'Draft', N'Rejected')`);
+  if (!updated.rowsAffected?.some((count) => count > 0)) {
+    throw new OwnershipError("The ownership change is no longer editable; reload it before changing details", 409);
+  }
+  if (changed.length) await log(db, id, "Details changed", actorUserId, changed.join(", "));
   return load(db, id);
 }
 
 async function attachDeed(db, id, file, actorUserId) {
   const o = await load(db, id);
   editable(o);
-  await db.request().input("id", sql.Int, id).input("fn", sql.NVarChar(300), file.originalname).input("b", sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
+  const updated = await db.request().input("id", sql.Int, id).input("fn", sql.NVarChar(300), file.originalname).input("b", sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
     .input("fs", sql.BigInt, file.size).input("mt", sql.NVarChar(150), file.mimetype).input("by", sql.Int, actorUserId)
-    .query("UPDATE dbo.CrmOwnershipChange SET FileName = @fn, FileBase64 = @b, FileSize = @fs, MimeType = @mt, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    .query("UPDATE dbo.CrmOwnershipChange SET FileName = @fn, FileBase64 = @b, FileSize = @fs, MimeType = @mt, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status IN (N'Draft', N'Rejected')");
+  if (!updated.rowsAffected?.some((count) => count > 0)) {
+    throw new OwnershipError("The ownership change is no longer editable; reload it before replacing the deed copy", 409);
+  }
   await log(db, id, o.FileName ? "Sale deed copy replaced" : "Sale deed copy attached", actorUserId, file.originalname);
   return load(db, id);
 }
@@ -237,7 +243,19 @@ async function submit(db, id, user) {
     .query("SELECT a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @b")).recordset[0];
   if (!cur || Number(cur.CustomerId) !== Number(o.FromCustomerId)) throw new OwnershipError("The property's owner has changed since this was drafted — cancel it and start again", 409);
   const { transition } = require("./approvalService");
-  await transition("crm-ownership-changes", id, "Pending", user.email, user.role, null, user.userId);
+  await transition("crm-ownership-changes", id, "Pending", user.email, user.role, null, user.userId, null, null, async (tx) => {
+    // Recheck the deed and current owner while transition() holds the record
+    // lock. This keeps a concurrent edit from clearing required details after
+    // the earlier validation but before the status moves to Pending.
+    const current = await load(tx, id);
+    const stillMissing = missing(current);
+    if (stillMissing.length) throw new OwnershipError(`Add ${stillMissing.join(", ")} first`);
+    const owner = (await tx.request().input("b", sql.Int, current.BookingId)
+      .query("SELECT a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @b")).recordset[0];
+    if (!owner || Number(owner.CustomerId) !== Number(current.FromCustomerId)) {
+      throw new OwnershipError("The property's owner has changed since this was drafted — cancel it and start again", 409);
+    }
+  });
   await db.request().input("id", sql.Int, id).input("by", sql.Int, user.userId)
     .query("UPDATE dbo.CrmOwnershipChange SET SubmittedAt = SYSDATETIME(), SubmittedBy = @by, RejectionNote = NULL, UpdatedAt = SYSDATETIME() WHERE Id = @id");
   await log(db, id, o.Status === "Rejected" ? "Sent for approval again" : "Sent for approval", user.userId);
@@ -270,7 +288,10 @@ async function applyChange(pool, id, actorUserId) {
   let appId;
   try {
     const o = (await tx.request().input("id", sql.Int, id)
-      .query("SELECT * FROM dbo.CrmOwnershipChange WITH (UPDLOCK) WHERE Id = @id")).recordset[0];
+      .query("SELECT * FROM dbo.CrmOwnershipChange WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id")).recordset[0];
+    if (!o || o.Status !== "Approved") {
+      throw new OwnershipError("The ownership change is no longer Approved; reload it before applying the transfer", 409);
+    }
     const b = (await tx.request().input("b", sql.Int, o.BookingId).query(`
       SELECT b.Id, b.BookingNo, b.UnitId, b.UnitNo, b.ProjectId, b.CompanyId, b.ApplicationId, a.CustomerId,
              a.InterestedProject, a.InterestedUnit, a.PaymentPlanId
@@ -293,7 +314,7 @@ async function applyChange(pool, id, actorUserId) {
     // The approval stands but nothing moved: put it back to Pending so it can
     // be approved again once the cause is fixed.
     await pool.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), `Not applied: ${e.message}`.slice(0, 500))
-      .query("UPDATE dbo.CrmOwnershipChange SET Status = N'Pending', RejectionNote = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      .query("UPDATE dbo.CrmOwnershipChange SET Status = N'Pending', RejectionNote = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status = N'Approved'");
     throw e;
   }
   // The new owner can sign in to the portal; never blocks the change.
@@ -301,15 +322,29 @@ async function applyChange(pool, id, actorUserId) {
 }
 
 async function cancel(db, id, note, actorUserId) {
-  const o = await load(db, id);
-  if (!["Draft", "Rejected", "Pending"].includes(o.Status)) throw new OwnershipError(`It is ${o.Status.toLowerCase()} — it can't be cancelled`, 409);
   if (!String(note || "").trim()) throw new OwnershipError("Say why it is being cancelled");
-  await db.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), note).input("by", sql.Int, actorUserId)
-    .query("UPDATE dbo.CrmOwnershipChange SET Status = N'Cancelled', RejectionNote = @n, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
-  // The new owner's application opened for it never took the booking.
-  if (o.ToApplicationId) await db.request().input("a", sql.Int, o.ToApplicationId)
-    .query("UPDATE dbo.CrmApplication SET Status = N'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @a AND Status = N'Draft'");
-  await log(db, id, "Cancelled", actorUserId, note);
+  const tx = new sql.Transaction(db);
+  await tx.begin();
+  try {
+    const o = (await tx.request().input("id", sql.Int, id)
+      .query("SELECT Status, ToApplicationId FROM dbo.CrmOwnershipChange WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id AND IsActive = 1")).recordset[0];
+    if (!o) throw new OwnershipError("Ownership change not found", 404);
+    if (!["Draft", "Rejected", "Pending"].includes(o.Status)) {
+      throw new OwnershipError(`It is ${o.Status.toLowerCase()} — it can't be cancelled`, 409);
+    }
+    await tx.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), note).input("by", sql.Int, actorUserId)
+      .query(`UPDATE dbo.CrmOwnershipChange SET Status = N'Cancelled', RejectionNote = @n, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+              WHERE Id = @id AND Status IN (N'Draft', N'Rejected', N'Pending')`);
+    // The new owner's application never took the booking; cancel it in the
+    // same transaction as the ownership record to avoid leaving an orphan.
+    if (o.ToApplicationId) await tx.request().input("a", sql.Int, o.ToApplicationId)
+      .query("UPDATE dbo.CrmApplication SET Status = N'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @a AND Status = N'Draft'");
+    await log(tx, id, "Cancelled", actorUserId, note);
+    await tx.commit();
+  } catch (e) {
+    await tx.rollback().catch(() => {});
+    throw e;
+  }
   return load(db, id);
 }
 

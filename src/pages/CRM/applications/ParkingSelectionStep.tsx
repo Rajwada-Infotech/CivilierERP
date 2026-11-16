@@ -39,10 +39,11 @@ export const ParkingSelectionStep: React.FC<{
   // crmParking.js GET /available. Refetched alongside allotments so a slot
   // this step itself just took disappears from "available" immediately too.
   const { data: parkingAvailability, refetch: refetchAvailable } = useQuery({
-    queryKey: ["crm-parking-available", projectId, blockId],
+    queryKey: ["crm-parking-available", projectId, blockId, applicationId],
     queryFn: async () => {
       if (!projectId) return { rates: [], unratedTypesWithInventory: [] };
-      const params = new URLSearchParams({ projectId });
+      // applicationId: a unit change's application is offered the buyer's own slots from the old booking too.
+      const params = new URLSearchParams({ projectId, applicationId: String(applicationId) });
       if (blockId) params.set("blockId", blockId);
       const r = await fetchWithAuth(`${PARKING_API}/available?${params}`);
       return r.ok ? r.json() : { rates: [], unratedTypesWithInventory: [] };

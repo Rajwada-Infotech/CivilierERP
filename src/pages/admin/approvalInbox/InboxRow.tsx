@@ -236,6 +236,11 @@ export const InboxRow: React.FC<{
                 </span>
               )}
             </div>
+          ) : item.Module === "crm-unit-change" && item.JournalVoucherSummary ? (
+            <span className="flex flex-col gap-0.5 min-w-0">
+              <span className="truncate">{party}</span>
+              <span className="text-[0.6875rem] text-muted-foreground whitespace-normal leading-snug">{item.JournalVoucherSummary}</span>
+            </span>
           ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
             <span className="truncate" title={item.JournalVoucherSummary}>
               {item.JournalVoucherSummary}
@@ -360,6 +365,13 @@ export const InboxRow: React.FC<{
                 <span className="truncate">{item.ToGodownName}</span>
               </span>
             )}
+          </div>
+        ) : item.Module === "crm-unit-change" && item.JournalVoucherSummary ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="font-heading text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground font-semibold">
+              Unit change
+            </span>
+            <p className="text-xs text-foreground whitespace-normal leading-snug">{item.JournalVoucherSummary}</p>
           </div>
         ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
           <div className="flex flex-col gap-0.5 min-w-0">

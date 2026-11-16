@@ -439,6 +439,8 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
 
     const app = await pool.request().input("aid", sql.Int, aid).query("SELECT Id FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, aid);
+    if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
 
     if (!(await requireAssignedOrApprover(req, res, pool, { applicationId: aid }))) return;
     // What Data Review ticked, before this save (a changed item goes back to be verified).

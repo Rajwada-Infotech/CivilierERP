@@ -24,6 +24,8 @@ const CrmStatus = {
   // Legal / Agreements
   EXECUTED: 'Executed',
   REGISTERED: 'Registered',
+  // The customer asked for changes to a document sent to them (Agreement, Sale Deed): CustomerApprovalStatus.
+  RECHECK_REQUESTED: 'RecheckRequested',
   PENDING_CUSTOMER_REVIEW: 'PendingCustomerReview',
   
   // Tickets / Support
@@ -74,8 +76,10 @@ const DEAD_BOOKING_SQL = `(${DEAD_BOOKING_STATUSES.map((s) => `N'${s}'`).join(",
 // money is on its way to the new booking through a Fund Transfer (another company); Failed = approved but a step did
 // not finish (retried from the request); the rest are over. Must stay in step with UX_CrmPropertyChangeRequest_OpenSource
 // (migration 656).
+// Draft = the new unit is picked and its application is being filled in the application wizard; submitting that
+// application makes it Pending (waiting for its approval in Approval Setup).
 const UnitChangeStatus = Object.freeze({
-  PENDING: "Pending", APPROVED: "Approved", MOVING_MONEY: "MovingMoney", FAILED: "Failed",
+  DRAFT: "Draft", PENDING: "Pending", APPROVED: "Approved", MOVING_MONEY: "MovingMoney", FAILED: "Failed",
   COMPLETED: "Completed", REJECTED: "Rejected", WITHDRAWN: "Withdrawn",
 });
 // A request in one of these is over: it no longer locks its old or new booking.

@@ -280,10 +280,11 @@ async function applyEditParking(pool, id, b) {
   if (!qty || qty < 1) throw parkingError("Quantity must be at least 1");
 
   const row = await pool.request().input("id", sql.Int, id)
-    .query("SELECT BookingId, PaymentStatus, RateSnapshot, GstRateSnapshot FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
+    .query("SELECT BookingId, ApplicationId, PaymentStatus, RateSnapshot, GstRateSnapshot FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
   if (!row.recordset.length) throw parkingError("Allotment not found", 404);
-  const { BookingId, PaymentStatus, RateSnapshot, GstRateSnapshot } = row.recordset[0];
+  const { BookingId, ApplicationId, PaymentStatus, RateSnapshot, GstRateSnapshot } = row.recordset[0];
   if (PaymentStatus === CrmStatus.PAID) throw parkingError("This parking sale has already been paid and cannot be edited", 409);
+  if (BookingId == null && ApplicationId != null) await require("../services/crmUnitChangeGuards").assertUnitChangeApplicationEditable(pool, ApplicationId);
   if (BookingId != null) {
     const activeErr = await requireActiveBooking(pool, BookingId);
     if (activeErr) throw parkingError(activeErr);
@@ -552,6 +553,16 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
     const pool = getPool();
     const projectId = parseInt(req.query.projectId);
     const blockId = req.query.blockId ? parseInt(req.query.blockId) : null;
+    // applicationId (optional): the application asking. A slot allotted to a booking is still free for the
+    // application of an open unit change from that booking (the buyer can keep it; crmHoldService.assertEntityNotTaken).
+    const applicationId = req.query.applicationId ? parseInt(req.query.applicationId) || null : null;
+    const { PROPERTY_CHANGE_CLOSED_SQL } = require("../constants/crmStatuses");
+    const takenSlotsSql = `
+          SELECT pa.ParkingSlotId FROM dbo.CrmParkingAllotment pa WHERE pa.IsActive = 1 AND pa.ParkingSlotId IS NOT NULL
+            ${applicationId ? `AND NOT EXISTS (SELECT 1 FROM dbo.CrmPropertyChangeRequest r WHERE r.TargetApplicationId = ${applicationId}
+              AND r.SourceBookingId = pa.BookingId AND r.Status NOT IN ${PROPERTY_CHANGE_CLOSED_SQL})` : ""}
+          UNION
+          SELECT EntityId FROM dbo.CrmInventoryHold WHERE EntityType = 'Parking' AND Status = '${CrmStatus.ACTIVE}' AND HoldUntil >= SYSDATETIME()`;
     if (!projectId) return res.status(400).json({ error: "projectId is required" });
     if (!require("../services/projectScope").projectAllowed(req.projectScope, projectId)) {
       return res.status(403).json({ error: "You don't have access to this project" });
@@ -581,11 +592,7 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
         SELECT s.Id, s.SlotNo, s.ParkingType
         FROM dbo.ParkingSlot s
         WHERE s.ProjectId = @pid AND s.IsActive = 1 AND (@bid IS NULL OR s.BlockId IS NULL OR s.BlockId = @bid)
-        AND s.Id NOT IN (
-          SELECT ParkingSlotId FROM dbo.CrmParkingAllotment WHERE IsActive = 1 AND ParkingSlotId IS NOT NULL
-          UNION
-          SELECT EntityId FROM dbo.CrmInventoryHold WHERE EntityType = 'Parking' AND Status = '${CrmStatus.ACTIVE}' AND HoldUntil >= SYSDATETIME()
-        )
+        AND s.Id NOT IN (${takenSlotsSql})
         ORDER BY s.SlotNo
       `);
 
@@ -600,11 +607,7 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
         SELECT s.ParkingType, COUNT(*) AS FreeCount
         FROM dbo.ParkingSlot s
         WHERE s.ProjectId = @pid AND s.IsActive = 1
-        AND s.Id NOT IN (
-          SELECT ParkingSlotId FROM dbo.CrmParkingAllotment WHERE IsActive = 1 AND ParkingSlotId IS NOT NULL
-          UNION
-          SELECT EntityId FROM dbo.CrmInventoryHold WHERE EntityType = 'Parking' AND Status = '${CrmStatus.ACTIVE}' AND HoldUntil >= SYSDATETIME()
-        )
+        AND s.Id NOT IN (${takenSlotsSql})
         GROUP BY s.ParkingType
       `);
     const freeCountByType = new Map(slotsAnyBlock.recordset.map((r) => [r.ParkingType, r.FreeCount]));
@@ -768,6 +771,8 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
       .query("SELECT Id, ProjectId, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, b.ApplicationId);
+    if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
     if (!require("../services/projectScope").projectAllowed(req.projectScope, application.recordset[0].ProjectId)) {
       return res.status(403).json({ error: "You don't have access to this project" });
     }
@@ -914,6 +919,8 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
       return res.status(404).json({ error: "Active parking hold not found" });
     }
     if (row.recordset[0].ApplicationId) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, row.recordset[0].ApplicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
       const app = await pool.request().input("aid", sql.Int, row.recordset[0].ApplicationId)
         .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
       if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
@@ -975,9 +982,13 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "
     const b = req.body || {};
 
     const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
+      .query("SELECT BookingId, ApplicationId FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Allotment not found" });
     const bookingId = existing.recordset[0].BookingId;
+    if (bookingId == null && existing.recordset[0].ApplicationId != null) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, existing.recordset[0].ApplicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
+    }
 
     if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);
@@ -1026,10 +1037,14 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const row = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId, PaymentStatus FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
+      .query("SELECT BookingId, ApplicationId, PaymentStatus FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
     if (!row.recordset.length) return res.status(404).json({ error: "Allotment not found" });
     if (row.recordset[0].BookingId != null) {
       return res.status(400).json({ error: "This parking sale is linked to a booking — record payment through the booking's payment schedule instead" });
+    }
+    if (row.recordset[0].ApplicationId != null) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, row.recordset[0].ApplicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
     }
     if (row.recordset[0].PaymentStatus === CrmStatus.PAID) {
       return res.status(409).json({ error: "This parking sale is already marked paid" });
@@ -1089,9 +1104,13 @@ router.delete("/:id", async (req, res) => {
     const reason = (req.query.reason || req.body?.Reason || "").trim();
 
     const row = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
+      .query("SELECT BookingId, ApplicationId FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
     if (!row.recordset.length) return res.status(404).json({ error: "Allotment not found" });
     const bookingId = row.recordset[0].BookingId;
+    if (bookingId == null && row.recordset[0].ApplicationId != null) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, row.recordset[0].ApplicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
+    }
 
     if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);

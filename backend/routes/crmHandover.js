@@ -340,6 +340,14 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
 
     const currentStatus = cur0.recordset[0].Status;
 
+    // These attestations are persisted as SQL BITs. Reject strings and other
+    // truthy values so e.g. JSON "false" cannot be recorded as true below.
+    for (const field of ["FinalDuesCleared", "CustomerAcknowledged"]) {
+      if (b[field] !== undefined && typeof b[field] !== "boolean") {
+        return res.status(400).json({ error: `${field} must be a boolean` });
+      }
+    }
+
     // Enforce forward-only state machine transitions when a new Status is requested
     if (b.Status && b.Status !== currentStatus) {
       const ALLOWED_TRANSITIONS = {
@@ -371,7 +379,7 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       if (!b.KeyHandoverBy) {
         return res.status(400).json({ error: "KeyHandoverBy (the staff member who handed the key) is required" });
       }
-      if (!b.FinalDuesCleared) {
+      if (b.FinalDuesCleared !== true) {
         return res.status(400).json({ error: "FinalDuesCleared must be confirmed before completing handover" });
       }
       // Recheck net funding at completion because new charges or a bounced
@@ -393,7 +401,7 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
           return res.status(400).json({ error: `Cannot complete handover — Pre-Possession is currently ${pp.recordset[0].Status}, not Ready. Resolve the open item there first.` });
         }
       }
-      if (!b.CustomerAcknowledged) {
+      if (b.CustomerAcknowledged !== true) {
         return res.status(400).json({ error: "CustomerAcknowledged must be confirmed before completing handover" });
       }
     }
@@ -402,29 +410,64 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       .query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");
     const handoverBookingId = hRow.recordset[0]?.BookingId;
 
-    await pool.request()
-      .input("id",   sql.Int,  id)
-      .input("sdt",  sql.Date, b.ScheduledDate || null)
-      .input("adt",  sql.Date, b.ActualHandoverDate || null)
-      .input("khb",  sql.Int,  b.KeyHandoverBy ? parseInt(b.KeyHandoverBy) : null)
-      // A field the caller didn't send keeps its value (a stage move sends
-      // only Status) — it used to reset both ticks to "no" and wipe the notes.
-      .input("fdc",  sql.Bit,  b.FinalDuesCleared === undefined ? null : (b.FinalDuesCleared ? 1 : 0))
-      .input("ack",  sql.Bit,  b.CustomerAcknowledged === undefined ? null : (b.CustomerAcknowledged ? 1 : 0))
-      .input("st",   sql.NVarChar(30), b.Status || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes === undefined ? null : (b.Notes || ""))
-      .input("keepNote", sql.Bit, b.Notes === undefined ? 1 : 0)
-      .input("ub",   sql.Int,  actorId(req))
-      .query(`
-        UPDATE dbo.CrmHandover SET
-          ScheduledDate = ISNULL(@sdt, ScheduledDate),
-          ActualHandoverDate = ISNULL(@adt, ActualHandoverDate),
-          KeyHandoverBy = ISNULL(@khb, KeyHandoverBy),
-          FinalDuesCleared = ISNULL(@fdc, FinalDuesCleared), CustomerAcknowledged = ISNULL(@ack, CustomerAcknowledged),
-          Status = ISNULL(@st, Status), Notes = CASE WHEN @keepNote = 1 THEN Notes ELSE NULLIF(@note, N'') END,
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    if (b.Status === "Completed") {
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        const current = (await tx.request().input("id", sql.Int, id).query(`
+          SELECT Status FROM dbo.CrmHandover WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+        `)).recordset[0];
+        if (!current || current.Status !== currentStatus) throw Object.assign(new Error("The handover status changed; reload before completing it"), { status: 409 });
+        const open = (await tx.request().input("id", sql.Int, id).query(`
+          SELECT COUNT(*) AS cnt FROM dbo.CrmSnagItem WITH (UPDLOCK, HOLDLOCK)
+          WHERE HandoverId = @id AND Status IN ('${CrmStatus.OPEN}', '${CrmStatus.IN_PROGRESS}')
+        `)).recordset[0].cnt;
+        if (Number(open) > 0) throw Object.assign(new Error("Cannot complete handover — unresolved snag items remain"), { status: 409 });
+        const updated = await tx.request()
+          .input("id", sql.Int, id).input("expected", sql.NVarChar(30), currentStatus)
+          .input("sdt", sql.Date, b.ScheduledDate || null)
+          .input("adt", sql.Date, b.ActualHandoverDate || null)
+          .input("khb", sql.Int, b.KeyHandoverBy ? parseInt(b.KeyHandoverBy) : null)
+          .input("fdc", sql.Bit, b.FinalDuesCleared === undefined ? null : (b.FinalDuesCleared ? 1 : 0))
+          .input("ack", sql.Bit, b.CustomerAcknowledged === undefined ? null : (b.CustomerAcknowledged ? 1 : 0))
+          .input("st", sql.NVarChar(30), b.Status)
+          .input("note", sql.NVarChar(sql.MAX), b.Notes === undefined ? null : (b.Notes || ""))
+          .input("keepNote", sql.Bit, b.Notes === undefined ? 1 : 0)
+          .input("ub", sql.Int, actorId(req)).query(`
+          UPDATE dbo.CrmHandover SET
+            ScheduledDate = ISNULL(@sdt, ScheduledDate), ActualHandoverDate = ISNULL(@adt, ActualHandoverDate),
+            KeyHandoverBy = ISNULL(@khb, KeyHandoverBy), FinalDuesCleared = ISNULL(@fdc, FinalDuesCleared),
+            CustomerAcknowledged = ISNULL(@ack, CustomerAcknowledged), Status = @st,
+            Notes = CASE WHEN @keepNote = 1 THEN Notes ELSE NULLIF(@note, N'') END,
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id AND Status = @expected AND NOT EXISTS (
+            SELECT 1 FROM dbo.CrmSnagItem s WHERE s.HandoverId = @id AND s.Status IN ('${CrmStatus.OPEN}', '${CrmStatus.IN_PROGRESS}')
+          )
+        `);
+        if (!updated.rowsAffected?.some((count) => count > 0)) throw Object.assign(new Error("Handover changed while completing; reload and try again"), { status: 409 });
+        await tx.commit();
+      } catch (e) {
+        await tx.rollback().catch(() => {});
+        throw e;
+      }
+    } else {
+      await pool.request().input("id", sql.Int, id).input("sdt", sql.Date, b.ScheduledDate || null)
+        .input("adt", sql.Date, b.ActualHandoverDate || null)
+        .input("khb", sql.Int, b.KeyHandoverBy ? parseInt(b.KeyHandoverBy) : null)
+        .input("fdc", sql.Bit, b.FinalDuesCleared === undefined ? null : (b.FinalDuesCleared ? 1 : 0))
+        .input("ack", sql.Bit, b.CustomerAcknowledged === undefined ? null : (b.CustomerAcknowledged ? 1 : 0))
+        .input("st", sql.NVarChar(30), b.Status || null)
+        .input("note", sql.NVarChar(sql.MAX), b.Notes === undefined ? null : (b.Notes || ""))
+        .input("keepNote", sql.Bit, b.Notes === undefined ? 1 : 0)
+        .input("ub", sql.Int, actorId(req))
+        .query(`
+          UPDATE dbo.CrmHandover SET ScheduledDate = ISNULL(@sdt, ScheduledDate), ActualHandoverDate = ISNULL(@adt, ActualHandoverDate),
+            KeyHandoverBy = ISNULL(@khb, KeyHandoverBy), FinalDuesCleared = ISNULL(@fdc, FinalDuesCleared),
+            CustomerAcknowledged = ISNULL(@ack, CustomerAcknowledged), Status = ISNULL(@st, Status),
+            Notes = CASE WHEN @keepNote = 1 THEN Notes ELSE NULLIF(@note, N'') END, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+    }
 
     // Auto-create the Sale Deed shell when handover is completed — the deed
     // is now the next legal document in the sequence (post-possession).
@@ -437,6 +480,7 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-handover] PUT error:", e.message);
+    if (e.status) return res.status(e.status).json({ error: e.message });
     res.status(500).json({ error: e.message });
   }
 });
@@ -466,6 +510,12 @@ router.post("/:id/snags", requirePageRight("crm-handover", "create"), async (req
     await tx.begin();
     let newId;
     try {
+      const handover = (await tx.request().input("hid", sql.Int, handoverId).query(`
+        SELECT Status FROM dbo.CrmHandover WITH (UPDLOCK, HOLDLOCK) WHERE Id = @hid
+      `)).recordset[0];
+      if (!handover || !["Scheduled", "SnagInspection", "SnagPending"].includes(handover.Status)) {
+        throw Object.assign(new Error(`Cannot raise a snag for a handover in status '${handover?.Status || "missing"}'`), { status: 409 });
+      }
       const result = await tx.request()
         .input("hid",  sql.Int,            handoverId)
         .input("cat",  sql.NVarChar(50),   b.Category)
@@ -492,6 +542,7 @@ router.post("/:id/snags", requirePageRight("crm-handover", "create"), async (req
     res.status(201).json({ success: true, id: newId });
   } catch (e) {
     console.error("[crm-handover] POST snags error:", e.message);
+    if (e.status) return res.status(e.status).json({ error: e.message });
     res.status(500).json({ error: e.message });
   }
 });

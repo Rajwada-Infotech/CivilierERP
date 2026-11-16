@@ -25,9 +25,9 @@ import { BAND_DOT, BAND_KEY, BandNext, MoneyBand, StepBar, asName, personName, t
 import { fmtShort } from "./payments/config";
 
 const API = "/api/crm/bookings/unit-changes";
-const TABS = ["Open", "Pending", "MovingMoney", "Failed", "Completed", "Rejected", "Withdrawn", "All"];
+const TABS = ["Open", "Draft", "Pending", "MovingMoney", "Failed", "Completed", "Rejected", "Withdrawn", "All"];
 const STATUS_TEXT: Record<string, string> = {
-  Open: "Open", Pending: "Awaiting approval", Approved: "Being carried out", MovingMoney: "Money on its way", Failed: "Stopped part-way",
+  Open: "Open", Draft: "Application in progress", Pending: "Awaiting approval", Approved: "Being carried out", MovingMoney: "Money on its way", Failed: "Stopped part-way",
   Completed: "Completed", Rejected: "Rejected", Withdrawn: "Withdrawn", All: "All",
 };
 const statusText = (s: string) => STATUS_TEXT[s] ?? s;
@@ -43,13 +43,14 @@ async function putJson(url: string, body: any) {
   return d;
 }
 
-/** The request's steps: raised, approval, new booking, money moved. */
+/** The request's steps: application, approval, new booking, money moved. */
 function changeBar(r: any): { label: string; state: StepState }[] {
   const dropped = r.Status === "Rejected" || r.Status === "Withdrawn";
   const approved = ["Approved", "MovingMoney", "Failed", "Completed"].includes(r.Status);
+  const draft = r.Status === "Draft";
   return [
-    { label: "Raised", state: "done" },
-    { label: "Approval", state: approved ? "done" : dropped ? "stopped" : "active" },
+    { label: "Application", state: draft ? "active" : "done" },
+    { label: "Approval", state: approved ? "done" : dropped ? "stopped" : draft ? "off" : "active" },
     { label: "New booking", state: r.TargetBookingId ? "done" : r.Status === "Failed" ? "stopped" : approved ? "active" : "off" },
     { label: "Money moved", state: r.Status === "Completed" ? "done" : r.Status === "Failed" && r.TargetBookingId ? "stopped" : r.TargetBookingId ? "active" : "off" },
   ];
@@ -94,7 +95,8 @@ function UnitChangeRecord({ id, canEdit, onBack, onWithdraw }: { id: number; can
   const addOns = addOnsOf(r);
 
   let next = ""; let action: { label: string; run: () => void } | null = null; let finished = false;
-  if (r.Status === "Pending") { next = `Waiting for approval (Approval Inbox). ${r.TargetUnitName} is held for it; the booking carries on as it is until then.`; action = { label: "Go to Approval", run: go("approval") }; }
+  if (r.Status === "Draft") { next = `Started: the buyer's application ${r.TargetApplicationNo || ""} for ${r.TargetUnitName} is being filled in. Agree the rate and set the payment plan, parking and extra charges there, then submit it for approval. The rate starts at the unit's current rate and can be changed.`; action = r.TargetApplicationId ? { label: "Continue in Application", run: () => navigate(`/crm/applications?edit=${r.TargetApplicationId}&step=1`) } : null; }
+  else if (r.Status === "Pending") { next = `Waiting for approval (Approval Inbox). ${r.TargetUnitName} is held for it; the booking carries on as it is until then.`; action = { label: "Go to Approval", run: go("approval") }; }
   else if (r.Status === "MovingMoney") { next = `New booking ${r.TargetBookingNo} is open. ${fmt(r.MoneyStillToMove)} moves to it once Finance approves Fund Transfer ${r.FundTransferDocNo || ""}.`.replace(/\s+\./, "."); action = r.TargetBookingId ? { label: "Open New Booking", run: () => navigate(`/crm/bookings?view=${r.TargetBookingId}`) } : null; }
   else if (r.Status === "Failed") { next = `Approved, but it stopped part-way: ${r.Note || "see the details"}. Fix the cause, then Retry${r.TargetBookingId ? "" : ", or Withdraw it (nothing has changed yet)"}.`; action = r.canApprove ? { label: retrying ? "Retrying…" : "Retry", run: retry } : null; }
   else if (r.Status === "Completed") { next = `Done: booking ${r.SourceBookingNo} is closed and the sale carries on in ${r.TargetBookingNo}, with ${fmt(r.CreditCarriedAmount)} moved to it.`; action = r.TargetBookingId ? { label: "Open New Booking", run: () => navigate(`/crm/bookings?view=${r.TargetBookingId}`) } : null; finished = true; }
@@ -109,7 +111,8 @@ function UnitChangeRecord({ id, canEdit, onBack, onWithdraw }: { id: number; can
           <button type="button" onClick={onBack} className={BAND_KEY}><ArrowLeft size={13} /> All Unit Changes</button>
           {r.SourceBookingId && <button type="button" onClick={() => navigate(`/crm/bookings?view=${r.SourceBookingId}`)} className={BAND_KEY}><Home size={13} /> Old Booking</button>}
           {r.TargetBookingId && <button type="button" onClick={() => navigate(`/crm/bookings?view=${r.TargetBookingId}`)} className={BAND_KEY}><Home size={13} /> New Booking</button>}
-          {canEdit && (r.Status === "Pending" || (r.Status === "Failed" && !r.TargetBookingId)) && <button type="button" onClick={() => onWithdraw(r)} className={cn(BAND_KEY, "!text-rose-300")}><XCircle size={13} /> Withdraw</button>}
+          {r.TargetApplicationId && <button type="button" onClick={() => navigate(r.Status === "Draft" ? `/crm/applications?edit=${r.TargetApplicationId}&step=1` : `/crm/applications?id=${r.TargetApplicationId}`)} className={BAND_KEY}><FileText size={13} /> Application</button>}
+          {canEdit && (r.Status === "Draft" || r.Status === "Pending" || (r.Status === "Failed" && !r.TargetBookingId)) && <button type="button" onClick={() => onWithdraw(r)} className={cn(BAND_KEY, "!text-rose-300")}><XCircle size={13} /> Withdraw</button>}
           {r.canApprove && ["Failed", "MovingMoney"].includes(r.Status) && <button type="button" onClick={retry} disabled={retrying} className={BAND_KEY}><RotateCcw size={13} /> Retry</button>}
           <button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
         </>}
@@ -145,10 +148,10 @@ function UnitChangeRecord({ id, canEdit, onBack, onWithdraw }: { id: number; can
       </GridRelated>
 
       <GridRelated icon={ArrowRightLeft} title="Parking and extra charges">
-        {addOns.length === 0 ? <p className="px-4 py-4 text-xs text-muted-foreground">The old booking has no parking or extra charges.</p> : (
+        {addOns.length === 0 ? <p className="px-4 py-4 text-xs text-muted-foreground">No parking or extra charges.</p> : (
           <GridFields fields={addOns.map((a: any) => ({
             label: `${a.kind === "Parking" ? "Parking" : "Extra charge"} · ${a.label}`,
-            value: <span className="tabular-nums">{fmt(a.amount)} · {a.keep ? (a.done ? "Moved to the new booking" : "Stays the same") : "Changed: chosen again on the new booking"}</span>,
+            value: <span className="tabular-nums">{fmt(a.amount)} before GST · {a.change === "kept" ? "kept from the old booking" : a.change === "added" ? "added on the application" : "dropped: stays with the old booking"}</span>,
           }))} />
         )}
       </GridRelated>
@@ -212,7 +215,7 @@ export default function CrmUnitChanges() {
   });
   const [prefs, setPrefs] = useGridPrefs("crm-unit-changes-cols", COLS);
   const counts: Record<string, number> = data?.counts ?? {};
-  const openCount = (counts.Pending ?? 0) + (counts.Approved ?? 0) + (counts.MovingMoney ?? 0) + (counts.Failed ?? 0);
+  const openCount = (counts.Draft ?? 0) + (counts.Pending ?? 0) + (counts.Approved ?? 0) + (counts.MovingMoney ?? 0) + (counts.Failed ?? 0);
   const allCount = Object.values(counts).reduce((n, v) => n + Number(v), 0);
   const tabs = TABS.map((k) => ({ key: k, label: statusText(k), count: data ? (k === "Open" ? openCount : k === "All" ? allCount : counts[k] ?? 0) : null }));
   const doWithdraw = async () => {
@@ -230,7 +233,7 @@ export default function CrmUnitChanges() {
       ) : (
         <>
           <MoneyBand eyebrow="CRM · Buyers & Bookings" title="Unit Changes"
-            sub="A buyer moving to another unit, in the same project or another one. Raise it from the booking (Change Unit); on approval a new booking opens on the new unit and every rupee received moves to it, with no charge."
+            sub="Start from the booking, then complete the buyer's application for the new unit: agree its rate, payment plan, parking and extra charges. Approval opens the new booking; received money follows the linked change. No separate unit-change fee is charged."
             actions={<button type="button" onClick={() => refetch()} disabled={isFetching} className={cn(BAND_KEY, "w-9 !px-0")} title="Refresh" aria-label="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>}
             lead={String(openCount)} leadNote="Open"
             bar={<StepBar steps={[{ label: "Awaiting approval", state: counts.Pending ? "active" : "off" }, { label: "Money on its way", state: counts.MovingMoney ? "active" : "off" }, { label: "Completed", state: counts.Completed ? "done" : "off" }]} onDark />}

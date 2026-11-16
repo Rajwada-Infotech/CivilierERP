@@ -1,8 +1,7 @@
 const { sql } = require("../db");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_STATUSES, REFUND_CLOSED_SQL } = require("../constants/crmStatuses");
 const { round2, sumMoney } = require("./bookingUnits");
 const { onAccountWithAvailableSql, recordedMoneySql } = require("./crmPaymentFunding");
-const { DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 
 // Business rule (confirmed 2026-09-15): every rupee a customer pays lands in
 // On Account and stays there, on hold — it is never swept onto a specific
@@ -111,11 +110,15 @@ async function getBookingMoneyTrail(pool, bookingId) {
     bid().query(`SELECT rp.RPPaymentID, rp.RPDocNo, rp.RPAmount, rp.RPStatus, rp.RPMode, rp.RPTransactionID, rp.RPDocDate, rp.RPRejectionNote, m.MilestoneName
                  FROM dbo.ReceivedPayment rp LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
                  WHERE rp.CrmBookingId = @bid ORDER BY rp.RPDocDate, rp.RPPaymentID`),
-    bid().query(`SELECT o.Id, o.ReceiptNo, o.Amount, o.AppliedAmount, o.AvailableAmount, o.Status, o.PaymentMode, o.ReceivedDate, o.SourceReceivedPaymentId
+    bid().query(`SELECT o.Id, o.ReceiptNo, o.Amount, o.AppliedAmount, o.AvailableAmount, o.Status, o.PaymentMode, o.ReceivedDate, o.SourceReceivedPaymentId,
+                       o.HeldSourceType, o.HeldSourceRefId, o.HeldFromBookingId
                  FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = @bid ORDER BY o.ReceivedDate, o.Id`),
-    bid().query(`SELECT r.SourceOnAccountId, SUM(r.GrossAmount) AS Paid FROM dbo.CrmRefund r
+    bid().query(`SELECT r.SourceOnAccountId,
+                   SUM(CASE WHEN r.Status = N'Paid' THEN r.GrossAmount ELSE 0 END) AS Paid,
+                   SUM(CASE WHEN r.Status NOT IN ${REFUND_CLOSED_SQL} THEN r.GrossAmount ELSE 0 END) AS Reserved
+                 FROM dbo.CrmRefund r
                  JOIN dbo.CrmOnAccountPayment o ON o.Id = r.SourceOnAccountId
-                 WHERE o.BookingId = @bid AND r.Status = N'Paid' GROUP BY r.SourceOnAccountId`),
+                 WHERE o.BookingId = @bid GROUP BY r.SourceOnAccountId`),
   ]);
   const booking = bkRes.recordset[0] || {};
   const receipts = mrRes.recordset;
@@ -124,15 +127,18 @@ async function getBookingMoneyTrail(pool, bookingId) {
   const usedDeposits = new Set();
   const closed = DEAD_BOOKING_STATUSES.includes(booking.Status);
   const refundedOf = new Map(refundRes.recordset.map((r) => [r.SourceOnAccountId, Number(r.Paid) || 0]));
-  const row = (x) => ({ settled: 0, held: 0, out: 0, note: null, milestone: null, ...x });
+  const reservedRefundOf = new Map(refundRes.recordset.map((r) => [r.SourceOnAccountId, Number(r.Reserved) || 0]));
+  const row = (x) => ({ settled: 0, held: 0, refunded: 0, out: 0, otherOut: 0, reservedRefund: 0, note: null, milestone: null, ...x });
   // A deposit's money: settled on milestones, still held, or gone out (refunded, reserved for a refund or transfer). A
   // paid refund also counts in the deposit's applied figure, and on a closed booking nothing stays settled: the
   // cancellation moved it on.
   const fromDeposit = (o) => {
     const amount = Number(o.Amount) || 0;
     const held = Number(o.AvailableAmount) || 0;
-    const settled = closed ? 0 : round2(Math.max(0, (Number(o.AppliedAmount) || 0) - (refundedOf.get(o.Id) || 0)));
-    return { settled, held, out: round2(Math.max(0, amount - settled - held)) };
+    const refunded = round2(Math.min(amount, refundedOf.get(o.Id) || 0));
+    const settled = closed ? 0 : round2(Math.max(0, (Number(o.AppliedAmount) || 0) - refunded));
+    const out = round2(Math.max(0, amount - settled - held));
+    return { settled, held, refunded, out, otherOut: round2(Math.max(0, out - refunded)), reservedRefund: reservedRefundOf.get(o.Id) || 0 };
   };
   const whereNow = ({ settled, held, out }) => {
     if (out > 0 && !settled && !held) return "out";
@@ -151,9 +157,12 @@ async function getBookingMoneyTrail(pool, bookingId) {
     if (o) {
       usedDeposits.add(o.Id);
       const money = fromDeposit(o);
-      rows.push(row({ ...base, docs: [...docs, o.ReceiptNo], ...money, stage: whereNow(money) }));
+      const unitChangeCredit = closed && deposits.find((d) => d.HeldSourceType === "UnitChange" && Number(d.HeldFromBookingId) === Number(bookingId));
+      rows.push(row({ ...base, docs: [...docs, o.ReceiptNo, unitChangeCredit?.ReceiptNo].filter(Boolean), ...money,
+        stage: unitChangeCredit && money.out > 0 ? "unitChange" : whereNow(money),
+        note: unitChangeCredit ? `Moved to unit-change credit ${unitChangeCredit.ReceiptNo}; this is the same receipt, not another payment.` : null }));
     } else {
-      const money = closed ? { out: base.amount } : { settled: base.amount };
+      const money = closed ? { out: base.amount, otherOut: base.amount } : { settled: base.amount };
       rows.push(row({ ...base, docs, ...money, stage: closed ? "out" : "settled" }));
     }
   }
@@ -162,12 +171,14 @@ async function getBookingMoneyTrail(pool, bookingId) {
     const base = { id: `mr-${mr.Id}`, date: mr.ReceivedDate, docs: [mr.ReceiptNo], mode: mr.PaymentMode, ref: mr.ChequeNo || mr.TransactionRef, amount: Number(mr.Amount) || 0 };
     if (mr.Status === "Bounced") rows.push(row({ ...base, stage: "bounced", note: mr.BouncedReason }));
     else if (mr.Status === "Pending") rows.push(row({ ...base, stage: "recorded" }));
-    else rows.push(row({ ...base, ...(closed ? { out: base.amount } : { settled: base.amount }), stage: closed ? "out" : "settled" }));
+    else rows.push(row({ ...base, ...(closed ? { out: base.amount, otherOut: base.amount } : { settled: base.amount }), stage: closed ? "out" : "settled" }));
   }
   // On-account lines Finance never received as a payment (a credit note, a cancellation's hold): the system's own
   // moves, listed so nothing is hidden, but not money the customer paid.
   for (const o of deposits) {
     if (usedDeposits.has(o.Id)) continue;
+    // A unit-change held credit is an internal movement of the receipt above, not a second receipt line.
+    if (closed && o.HeldSourceType === "UnitChange" && Number(o.HeldFromBookingId) === Number(bookingId)) continue;
     rows.push(row({ id: `oa-${o.Id}`, date: o.ReceivedDate, docs: [o.ReceiptNo], mode: o.PaymentMode, ref: null, amount: Number(o.Amount) || 0, stage: "adjustment" }));
   }
   const token = booking.TokenType === "Amount" ? Number(booking.TokenValue) || 0 : 0;
@@ -181,6 +192,7 @@ async function getBookingMoneyTrail(pool, bookingId) {
     rows,
     totals: {
       received: sumMoney(counted, (r) => r.amount), settled: sumMoney(counted, (r) => r.settled), held: sumMoney(counted, (r) => r.held), out: sumMoney(counted, (r) => r.out),
+      refunded: sumMoney(counted, (r) => r.refunded), otherOut: sumMoney(counted, (r) => r.otherOut),
       finance: sumMoney(counted.filter((r) => r.stage === "finance"), (r) => r.amount), recorded: sumMoney(counted.filter((r) => r.stage === "recorded"), (r) => r.amount),
     },
     // What the application said, against the Money Receipt actually made.

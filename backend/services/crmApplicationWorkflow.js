@@ -108,7 +108,7 @@ async function advanceApplicationStatus(pool, applicationId, toStatus, trigger, 
   if (toStatus === "Cancelled") {
     await pool.request().input("aid", sql.Int, applicationId)
       .query(`UPDATE dbo.CrmPropertyChangeRequest SET Status = N'Withdrawn', Note = N'Its new application was cancelled', UpdatedAt = SYSDATETIME()
-        WHERE TargetApplicationId = @aid AND Status = N'Pending'`);
+        WHERE TargetApplicationId = @aid AND Status IN (N'Draft', N'Pending')`);
   }
 
   // A dead application lets go of what it applied for. One Active line per
