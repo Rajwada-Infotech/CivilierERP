@@ -24,6 +24,8 @@ export interface PunchEvidence {
   inTime: string | null; outTime: string | null;
   inLocation: PunchLocation | null; outLocation: PunchLocation | null;
   inPhoto: string | null; outPhoto: string | null;
+  breaks: { type: string; note: string | null; start: string; end: string | null; seconds: number | null; deduct: boolean; allowedSeconds: number | null; overSeconds: number }[];
+  breakSeconds: number; officialSeconds: number; extraSeconds: number; totalSeconds: number | null; netSeconds: number | null;
 }
 /** The punch (times, device location, live photo) behind one Attendance Record, or null for a day entered by hand. */
 export const getAttendancePunch = async (id: number): Promise<PunchEvidence | null> => {

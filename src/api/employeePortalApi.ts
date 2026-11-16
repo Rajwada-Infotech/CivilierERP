@@ -30,8 +30,8 @@ export interface Payslip {
 export interface SalaryDetails { CTCAmount: number | null; CTCFrequency: string | null; SalaryStructureName: string | null; Latest: Payslip | null; History: PayslipSummary[] }
 export interface LoginHistoryRow { LoginHistoryId: string; LoginAt: string; Success: boolean; FailureReason: string | null; IpAddress: string | null; UserAgent: string | null; Portal: string | null }
 export interface Holiday { HolidayId: number; HolidayName: string; HolidayDate: string }
-export interface AttendanceDay { Date: string; Status: string | null; CheckIn: string | null; CheckOut: string | null; CheckInText?: string | null; CheckOutText?: string | null; Hours: number | null; Note: string | null }
-export interface AttendanceMonth { Month: string; Summary: { Present: number; Absent: number; HalfDay: number; OnLeave: number; Holiday: number; WeekOff: number }; Days: AttendanceDay[] }
+export interface AttendanceDay { BreakMinutes?: number; OfficialMinutes?: number; ExtraMinutes?: number; Date: string; Status: string | null; CheckIn: string | null; CheckOut: string | null; CheckInText?: string | null; CheckOutText?: string | null; Hours: number | null; Note: string | null }
+export interface AttendanceMonth { Month: string; Summary: { Present: number; Absent: number; HalfDay: number; OnLeave: number; Holiday: number; WeekOff: number; BreakMinutes: number; ExtraMinutes: number }; Days: AttendanceDay[] }
 export interface LeaveBalance { LeaveType: string; Entitled: number | null; Used: number; Pending: number; Balance: number | null }
 export interface LeaveApplication { LeaveId: number; LeaveType: string; FromDate: string; ToDate: string; TotalDays: number; Reason: string | null; Status: string; HrRemarks: string | null; CreatedAt: string }
 
@@ -43,13 +43,26 @@ export const getPortalLoginHistory = () => get<LoginHistoryRow[]>(`${PORTAL}/log
 export const getPortalHolidays = (year: number) => get<Holiday[]>(`${PORTAL}/holidays?year=${year}`);
 export const getPortalAttendance = (month: string) => get<AttendanceMonth>(`${PORTAL}/attendance?month=${month}`);
 export interface PunchLocation { lat: number; lng: number; accuracyM: number | null }
+export interface PunchBreak {
+  breakId: number; no: number; start: string; end: string | null; seconds: number | null; open: boolean;
+  type: string; note: string | null; deduct: boolean; allowedSeconds: number | null; overSeconds: number;
+}
+export interface BreakType { type: string; deduct: boolean; allowedMinutes: number | null; requiresNote: boolean }
 export interface PunchState {
   serverNow: string; today: string; state: "NOT_STARTED" | "WORKING" | "ON_BREAK" | "COMPLETED";
-  allowed: { in: boolean; out: boolean };
-  current: { attendanceId: number; inTime: string; outTime: string | null; status: string; inLocation: PunchLocation | null; outLocation: PunchLocation | null; hasInPhoto: boolean; hasOutPhoto: boolean } | null;
+  allowed: { in: boolean; out: boolean; breakStart: boolean; breakStop: boolean };
+  current: {
+    attendanceId: number; inTime: string; outTime: string | null; status: string;
+    inLocation: PunchLocation | null; outLocation: PunchLocation | null; hasInPhoto: boolean; hasOutPhoto: boolean;
+    breaks: PunchBreak[]; breakSeconds: number; officialSeconds: number; extraSeconds: number; totalSeconds: number | null; netSeconds: number | null;
+    live: { sessionSeconds: number; breakSeconds: number; netSeconds: number } | null;
+  } | null;
 }
 export interface PunchEvidence { photo: string; latitude: number; longitude: number; accuracy: number | null }
 export const getPortalPunchState = () => get<PunchState>(`${PORTAL}/attendance/today`);
+export const getPortalBreakTypes = () => get<BreakType[]>(`${PORTAL}/attendance/break-types`);
+export const portalBreakStart = (type: string, note: string) => send<PunchState>(`${PORTAL}/attendance/break-start`, "POST", { type, note });
+export const portalBreakStop = () => send<PunchState>(`${PORTAL}/attendance/break-stop`, "POST");
 export const portalPunch = (kind: "in" | "out", evidence: PunchEvidence) => send<PunchState>(`${PORTAL}/attendance/${kind}`, "POST", evidence);
 export const getPortalLeaveBalances = (year: number) => get<{ Year: number; Balances: LeaveBalance[] }>(`${PORTAL}/leave/balances?year=${year}`);
 export const getPortalLeaves = () => get<LeaveApplication[]>(`${PORTAL}/leave`);
@@ -72,6 +85,10 @@ export const resetPortalPassword = (id: number, password: string) => send<{ mess
 export const disablePortalAccess = (id: number) => send<{ message: string }>(`${ADMIN}/employees/${id}/disable`, "POST");
 export const getLeavePolicy = () => get<LeavePolicyRow[]>(`${ADMIN}/leave-policy`);
 export const saveLeavePolicy = (items: LeavePolicyRow[]) => send<{ message: string }>(`${ADMIN}/leave-policy`, "PUT", { items });
+export interface BreakRule { BreakType: string; DeductFromWork: boolean; AllowedMinutes: number | null; RequiresNote: boolean; IsActive: boolean }
+export const getBreakRules = () => get<BreakRule[]>(`${ADMIN}/break-types`);
+export const saveBreakRules = (items: { BreakType: string; AllowedMinutes: number | null; DeductFromWork: boolean; IsActive: boolean }[]) =>
+  send<{ message: string }>(`${ADMIN}/break-types`, "PUT", { items });
 export const getEntitlements = (id: number, year: number) => get<{ Year: number; Items: EntitlementRow[] }>(`${ADMIN}/employees/${id}/entitlements?year=${year}`);
 export const saveEntitlements = (id: number, year: number, items: { LeaveType: string; Days: number | null }[]) =>
   send<{ message: string }>(`${ADMIN}/employees/${id}/entitlements`, "PUT", { year, items });

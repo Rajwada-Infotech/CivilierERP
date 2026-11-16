@@ -24,7 +24,23 @@ export const AttendancePunchEvidence: React.FC<{ attendanceId: number }> = ({ at
     { label: "In", time: data.inTime, photo: data.inPhoto, loc: data.inLocation },
     { label: "Out", time: data.outTime, photo: data.outPhoto, loc: data.outLocation },
   ];
+  const dur = (sec: number | null) => { const m = Math.round((sec ?? 0) / 60); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : `${m} min`; };
   return (
+    <div className="space-y-4">
+    {(data.breaks.length > 0) && (
+      <div className="text-sm space-y-2">
+        <p className="text-xs uppercase tracking-widest text-muted-foreground">Breaks</p>
+        <ul className="divide-y divide-foreground/15 border border-foreground/20">
+          {data.breaks.map((b, i) => (
+            <li key={i} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+              <span><b>{b.type}</b>{b.note ? <span className="text-muted-foreground"> — {b.note}</span> : null}<span className="text-muted-foreground tabular-nums"> · {ist(b.start)}–{ist(b.end)}</span></span>
+              <span className="tabular-nums">{dur(b.seconds)}{!b.deduct ? " (work)" : ""}{b.overSeconds > 0 && <b className="text-red-600 dark:text-red-400"> · {dur(b.overSeconds)} extra</b>}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-muted-foreground">Break time {dur(data.breakSeconds)} · Official work out {dur(data.officialSeconds)} · Extra {dur(data.extraSeconds)} · Net working {data.netSeconds != null ? dur(data.netSeconds) : "—"}</p>
+      </div>
+    )}
     <div className="grid sm:grid-cols-2 gap-4">
       {sides.map((s) => (
         <div key={s.label} className="space-y-2">
@@ -39,6 +55,7 @@ export const AttendancePunchEvidence: React.FC<{ attendanceId: number }> = ({ at
           ) : <p className="text-xs text-muted-foreground">No location</p>}
         </div>
       ))}
+    </div>
     </div>
   );
 };

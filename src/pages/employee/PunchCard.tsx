@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, LogIn, LogOut, MapPin, X } from "lucide-react";
 import { toast } from "sonner";
-import { getPortalPunchState, portalPunch, type PunchLocation } from "@/api/employeePortalApi";
+import { getPortalPunchState, portalPunch, type PunchLocation, type PunchState } from "@/api/employeePortalApi";
+import BreakPanel from "./BreakPanel";
 import { Card, Mark, fmtTime, keyInk, keyLine, labelCls } from "./employeeUi";
 
 const MAX_WIDTH = 640;
@@ -135,10 +136,11 @@ export default function PunchCard() {
   const [dialog, setDialog] = useState<"in" | "out" | null>(null);
   const done = () => { setDialog(null); qc.invalidateQueries({ queryKey: ["ep-punch"] }); qc.invalidateQueries({ queryKey: ["ep-attendance"] }); };
   const cur = data?.current;
+  const setState = (s: PunchState) => { qc.setQueryData(["ep-punch"], s); qc.invalidateQueries({ queryKey: ["ep-attendance"] }); };
 
   return (
     <>
-      <Card title="Today" className="mb-6" right={cur ? <Mark text={cur.outTime ? "Present" : "Pending"} label={cur.outTime ? "Day complete" : "Working"} /> : undefined}>
+      <Card title="Today" className="mb-6" right={cur ? <Mark text={cur.outTime ? "Present" : data?.state === "ON_BREAK" ? "Half Day" : "Pending"} label={cur.outTime ? "Day complete" : data?.state === "ON_BREAK" ? "On break" : "Working"} /> : undefined}>
         <div className="p-4 flex flex-wrap items-center justify-between gap-4">
           {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : isError ? <p className="text-sm text-destructive">{(error as Error).message}</p> : (
             <>
@@ -155,6 +157,7 @@ export default function PunchCard() {
             </>
           )}
         </div>
+        {data && cur && <BreakPanel state={data} onChange={setState} />}
       </Card>
       {dialog && <CaptureDialog kind={dialog} onClose={() => setDialog(null)} onDone={done} />}
     </>

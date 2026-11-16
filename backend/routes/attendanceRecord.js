@@ -65,6 +65,7 @@ router.get("/:id/punch", pageRightByMethod("attendance-leave-overtime"), async (
     `);
     const p = r.recordset[0];
     if (!p) return res.json({ punch: null });
+    const rec = await attendanceSvc.getRecord(getPool(), p.PunchId); // breaks with reason, allowance and extra time
     const loc = (lat, lng, acc) => (lat != null ? { lat: Number(lat), lng: Number(lng), accuracyM: acc ?? null } : null);
     res.json({
       punch: {
@@ -74,6 +75,9 @@ router.get("/:id/punch", pageRightByMethod("attendance-leave-overtime"), async (
         outLocation: loc(p.OutLatitude, p.OutLongitude, p.OutAccuracyM),
         inPhoto: p.InPhoto || null,
         outPhoto: p.OutPhoto || null,
+        breaks: (rec?.breaks ?? []).map((b) => ({ type: b.type, note: b.note, start: b.start, end: b.end, seconds: b.seconds, deduct: b.deduct, allowedSeconds: b.allowedSeconds, overSeconds: b.overSeconds })),
+        breakSeconds: rec?.breakSeconds ?? 0, officialSeconds: rec?.officialSeconds ?? 0, extraSeconds: rec?.extraSeconds ?? 0,
+        totalSeconds: rec?.totalSeconds ?? null, netSeconds: rec?.netSeconds ?? null,
       },
     });
   } catch (err) {
