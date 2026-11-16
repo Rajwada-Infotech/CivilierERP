@@ -19,7 +19,7 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
     const user = (await q("SELECT TOP 1 id FROM dbo.Users WHERE id IS NOT NULL ORDER BY id"))[0].id;
     h.setActor({ userId: user, id: user, role: "super_admin", email: "e2e@civilier.test", name: "E2E" });
     const rawSql = `
-      SELECT dm.TowerId, dm.FlatId, am.group_id AS GroupId, dma.SequenceNo, daa.Id AS AsgId, dma.Id AS RungId, daa.Status, daa.ProgressPercent, daa.Days, am.days_of_completion
+      SELECT dm.TowerId, dm.FlatId, am.group_id AS GroupId, dma.SequenceNo, daa.Id AS AsgId, dma.Id AS RungId, daa.Status, daa.ProgressPercent, daa.Days, daa.EndDate, am.days_of_completion
       FROM dbo.DependencyMaster dm JOIN dbo.DependencyMasterActivity dma ON dma.DependencyMasterId = dm.Id
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       LEFT JOIN dbo.DependencyActivityAssignment daa ON daa.DependencyMasterActivityId = dma.Id AND daa.IsCurrent = 1
@@ -30,16 +30,20 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
       : ["IN_PROGRESS", "HOLD", "REWORK"].includes(r.Status) ? Math.min(100, Math.max(0, Number(r.ProgressPercent) || 0)) : 0);
     const wOf = (r) => Number(r.Days) || Number(r.days_of_completion) || 1;
     const expected = (rows) => { const w = rows.reduce((n, r) => n + wOf(r), 0); return w ? round1(rows.reduce((n, r) => n + wOf(r) * pctOf(r), 0) / w) : null; };
+    const yesterday = new Date(); yesterday.setHours(0, 0, 0, 0); yesterday.setDate(yesterday.getDate() - 1);
+    const lateCount = (rows) => rows.filter((r) => pctOf(r) < 100 && r.EndDate && new Date(r.EndDate) >= new Date("2000-01-01") && new Date(r.EndDate) <= yesterday).length;
     const list = async () => (await call("GET", "/cu/progress")).json?.projects?.find((x) => x.projectId === PROJECT);
 
     section("The roll-up matches the DPR rows");
     let p = await list();
     check("Project %: every step weighted by its planned days", p && near(p.pct, expected(raw)), `${p?.pct} vs ${expected(raw)}`);
+    check("Project behind schedule", p.late === lateCount(raw), `${p.late} vs ${lateCount(raw)}`);
     check("Steps, done and under way", p.steps === raw.length && p.done === raw.filter((r) => pctOf(r) >= 100).length
       && p.moving === raw.filter((r) => ["IN_PROGRESS", "HOLD", "REWORK"].includes(r.Status)).length, `${p.steps}/${p.done}/${p.moving}`);
     for (const t of p.towers) {
       const rows = raw.filter((r) => Number(r.TowerId) === Number(t.blockId));
       check(`Tower ${t.blockName}: %`, near(t.pct, expected(rows)) && t.steps === rows.length, `${t.pct} vs ${expected(rows)}`);
+      check(`Tower ${t.blockName}: behind schedule`, t.late === lateCount(rows), `${t.late} vs ${lateCount(rows)}`);
     }
     for (const w of p.works) {
       const rows = raw.filter((r) => r.GroupId === w.groupId);
@@ -96,6 +100,7 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
       const du = (await call("GET", `/cu/progress/${PROJECT}?blockId=${tower.blockId}&unitId=${selectedUnit.unitId}`)).json;
       check("A selected unit returns its own progress and construction stages", du.selectedUnit?.unitId === selectedUnit.unitId
         && near(du.pct, selectedUnit.pct) && du.works.length > 0, JSON.stringify({ pct: du.pct, expected: selectedUnit.pct, stages: du.works?.length }));
+      check("A selected unit's behind-schedule count is its own", du.late === lateCount(raw.filter((r) => r.FlatId === selectedUnit.unitId)), `${du.late}`);
       check("A selected unit's recent activity is limited to that unit", du.feed.every((event) => !event.unit || event.unit === selectedUnit.unitName), JSON.stringify(du.feed.slice(0, 3)));
       expectCall("A unit outside the selected block is refused", await call("GET", `/cu/progress/${PROJECT}?blockId=${tower.blockId}&unitId=999999`), 404);
     } else check("A unit with DPR work exists in the selected block", false);

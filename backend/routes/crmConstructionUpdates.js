@@ -72,27 +72,26 @@ function worksLine(byGroup, order, names) {
 
 /**
  * Live progress of the given projects. Returns Map(projectId -> { hasDpr, pct, steps, done, moving, late, works, now,
- * next, allDone, towers: [{ blockId, blockName, pct, steps, done, works, now, next }], flats: Map(unitId -> { pct, steps, done, works, now, next }) }).
+ * next, allDone, towers: [{ blockId, blockName, pct, steps, done, moving, late, works, now, next }],
+ * flats: Map(unitId -> { pct, steps, done, moving, late, works, now, next }) }). late = steps not finished past their end date.
  */
 async function constructionProgress(pool, projectIds) {
   const ids = idList(projectIds);
   const out = new Map();
   if (!ids.length) return out;
   const list = ids.join(",");
-  const [rows, late, groupOrder, blocks] = await Promise.all([
+  const [rows, groupOrder, blocks] = await Promise.all([
     pool.request().query(`
       WITH step AS (${stepsSql(list)})
       SELECT ProjectId, TowerId, FlatId, GroupId, GROUPING(TowerId) AS gT, GROUPING(FlatId) AS gF, GROUPING(GroupId) AS gG,
              SUM(W * Pct) / NULLIF(SUM(W), 0) AS Pct, COUNT(*) AS Steps,
              SUM(CASE WHEN Pct >= 100 THEN 1 ELSE 0 END) AS Done,
-             SUM(CASE WHEN Status IN ${MOVING_SQL} THEN 1 ELSE 0 END) AS Moving
+             SUM(CASE WHEN Status IN ${MOVING_SQL} THEN 1 ELSE 0 END) AS Moving,
+             -- Behind schedule: not finished and past its planned end date (at every level: project, tower, unit).
+             SUM(CASE WHEN Pct < 100 AND EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE)) THEN 1 ELSE 0 END) AS Late
       FROM step
       GROUP BY GROUPING SETS ((ProjectId), (ProjectId, GroupId), (ProjectId, TowerId), (ProjectId, TowerId, GroupId),
                               (ProjectId, FlatId), (ProjectId, FlatId, GroupId))`),
-    pool.request().query(`
-      WITH step AS (${stepsSql(list)})
-      SELECT ProjectId, COUNT(*) AS Late FROM step
-      WHERE Pct < 100 AND EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE)) GROUP BY ProjectId`),
     // Site order of each DPR work: where its steps sit in the chains, on average.
     pool.request().query(`
       SELECT dm.ProjectId, am.group_id AS GroupId, g.activity_name AS GroupName, AVG(CAST(dma.SequenceNo AS FLOAT)) AS Ord
@@ -102,18 +101,17 @@ async function constructionProgress(pool, projectIds) {
     pool.request().query(`SELECT Id, BlockName FROM dbo.BlockMaster WHERE Id IN (SELECT DISTINCT TowerId FROM dbo.DependencyMaster WHERE IsActive = 1 AND ProjectId IN (${list}))`),
   ]);
   const blockName = new Map(blocks.recordset.map((b) => [b.Id, b.BlockName]));
-  const lateOf = new Map(late.recordset.map((r) => [r.ProjectId, r.Late]));
   const orderOf = new Map(); const names = new Map();
   for (const g of groupOrder.recordset) {
     if (!orderOf.has(g.ProjectId)) orderOf.set(g.ProjectId, new Map());
     orderOf.get(g.ProjectId).set(g.GroupId, g.Ord);
     names.set(g.GroupId, g.GroupName);
   }
-  const bucket = () => ({ pct: 0, steps: 0, done: 0, moving: 0, byGroup: new Map() });
+  const bucket = () => ({ pct: 0, steps: 0, done: 0, moving: 0, late: 0, byGroup: new Map() });
   const P = new Map(); const T = new Map(); const F = new Map();
   const at = (m, k) => { if (!m.has(k)) m.set(k, bucket()); return m.get(k); };
   for (const r of rows.recordset) {
-    const fig = { pct: Number(r.Pct) || 0, steps: r.Steps, done: r.Done, moving: r.Moving };
+    const fig = { pct: Number(r.Pct) || 0, steps: r.Steps, done: r.Done, moving: r.Moving, late: r.Late };
     const target = r.gT && r.gF ? at(P, r.ProjectId) : !r.gT ? at(T, `${r.ProjectId}:${r.TowerId}`) : at(F, `${r.ProjectId}:${r.FlatId}`);
     if (r.gG) Object.assign(target, fig); else target.byGroup.set(r.GroupId, fig);
   }
@@ -121,13 +119,13 @@ async function constructionProgress(pool, projectIds) {
     const p = P.get(pid);
     if (!p) { out.set(pid, { hasDpr: false, pct: null, steps: 0, done: 0, moving: 0, late: 0, works: [], now: [], next: null, allDone: false, towers: [], flats: new Map() }); continue; }
     const order = orderOf.get(pid) || new Map();
-    const line = (b) => ({ pct: round1(b.pct), steps: b.steps, done: b.done, moving: b.moving, ...worksLine(b.byGroup, order, names) });
+    const line = (b) => ({ pct: round1(b.pct), steps: b.steps, done: b.done, moving: b.moving, late: b.late, ...worksLine(b.byGroup, order, names) });
     const towers = [...T.entries()].filter(([k]) => k.startsWith(`${pid}:`)).map(([k, t]) => {
       const blockId = Number(k.split(":")[1]) || null;
       return { blockId, blockName: blockName.get(blockId) || null, ...line(t) };
     }).sort((a, b) => String(a.blockName || "").localeCompare(String(b.blockName || "")));
     const flats = new Map([...F.entries()].filter(([k]) => k.startsWith(`${pid}:`)).map(([k, f]) => [Number(k.split(":")[1]), line(f)]));
-    out.set(pid, { hasDpr: true, late: lateOf.get(pid) || 0, ...line(p), towers, flats });
+    out.set(pid, { hasDpr: true, ...line(p), towers, flats });
   }
   return out;
 }
@@ -200,7 +198,7 @@ router.get("/progress", requirePageRight("crm-construction-updates", "view"), as
       const g = prog.get(p.ProjectId);
       return { projectId: p.ProjectId, projectName: p.ProjectName, hasDpr: g.hasDpr, pct: g.pct, steps: g.steps, done: g.done, moving: g.moving,
         late: g.late, works: g.works, now: g.now, next: g.next, allDone: g.allDone,
-        towers: g.towers.map(({ blockId, blockName, pct, steps, done, now, next }) => ({ blockId, blockName, pct, steps, done, now, next })) };
+        towers: g.towers.map(({ blockId, blockName, pct, steps, done, moving, late, now, next }) => ({ blockId, blockName, pct, steps, done, moving, late, now, next })) };
     }) });
   } catch (e) {
     console.error("[crm-construction-updates] GET /progress error:", e.message);
@@ -222,7 +220,7 @@ router.get("/progress/:projectId", requirePageRight("crm-construction-updates", 
     const g = (await constructionProgress(pool, [pid])).get(pid);
     const unitNames = g.flats.size ? new Map((await pool.request().query(`SELECT Id, UnitName, BlockId FROM dbo.UnitMaster WHERE Id IN (${[...g.flats.keys()].join(",")})`)).recordset.map((u) => [u.Id, u])) : new Map();
     const units = [...g.flats.entries()]
-      .map(([id, f]) => ({ unitId: id, unitName: unitNames.get(id)?.UnitName || `Unit ${id}`, blockId: unitNames.get(id)?.BlockId ?? null, pct: f.pct, now: f.now, next: f.next, works: f.works, done: f.done, moving: f.moving, steps: f.steps }))
+      .map(([id, f]) => ({ unitId: id, unitName: unitNames.get(id)?.UnitName || `Unit ${id}`, blockId: unitNames.get(id)?.BlockId ?? null, pct: f.pct, now: f.now, next: f.next, works: f.works, done: f.done, moving: f.moving, late: f.late, steps: f.steps }))
       .filter((u) => !blockId || Number(u.blockId) === blockId)
       .sort((a, b) => b.pct - a.pct || a.unitName.localeCompare(b.unitName));
     const tower = blockId ? g.towers.find((t) => Number(t.blockId) === blockId) : null;
@@ -230,9 +228,9 @@ router.get("/progress/:projectId", requirePageRight("crm-construction-updates", 
     const unit = unitId ? units.find((u) => Number(u.unitId) === unitId) : null;
     if (unitId && !unit) return res.status(404).json({ error: "Unit has no DPR progression in this project or block" });
     const base = unit || tower || g;
-    res.json({ projectId: pid, hasDpr: g.hasDpr, pct: base.pct, steps: base.steps, done: base.done, moving: base.moving, late: g.late,
+    res.json({ projectId: pid, hasDpr: g.hasDpr, pct: base.pct, steps: base.steps, done: base.done, moving: base.moving, late: base.late,
       works: base.works, now: base.now, next: base.next, allDone: base.allDone,
-      towers: g.towers.map(({ blockId: b, blockName, pct, steps, done, now, next }) => ({ blockId: b, blockName, pct, steps, done, now, next })),
+      towers: g.towers.map(({ blockId: b, blockName, pct, steps, done, moving, late, now, next }) => ({ blockId: b, blockName, pct, steps, done, moving, late, now, next })),
       selectedUnit: unit ? { unitId: unit.unitId, unitName: unit.unitName, blockId: unit.blockId } : null,
       units, feed: g.hasDpr ? await siteFeed(pool, { projectId: pid, blockId, unitId, days: 14, top: 40 }) : [] });
   } catch (e) {
