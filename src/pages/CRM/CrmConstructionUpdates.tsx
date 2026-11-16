@@ -217,18 +217,21 @@ const CrmConstructionUpdates: React.FC = () => {
                   const blocks = (detail?.towers ?? selected.towers ?? []).filter((tower: any) => tower.blockId != null);
                   const units = detail?.units ?? [];
                   const tasks = level("Construction tasks", { total: steps, done, moving });
+                  const remaining = { label: "Tasks remaining", value: Math.max(0, steps - done), note: "Not yet finished" };
+                  // Behind schedule is counted at whichever level is open (project, block or unit).
+                  const late = { label: "Behind schedule", value: Number(detail?.late ?? selected.late ?? 0), note: "Past planned finish date" };
                   const metrics: { label: string; value: number; note: string; bar?: number }[] = selectedUnitId ? [
                     { label: "Construction tasks", value: steps, note: "Tasks being tracked" },
                     { label: "Finished", value: done, note: "Tasks completed", bar: steps ? (done / steps) * 100 : 0 },
                     { label: "Underway", value: moving, note: "Tasks currently active" },
-                    { label: "Tasks remaining", value: Math.max(0, steps - done), note: "Not yet finished" },
+                    remaining,
+                    late,
                   ] : [
                     ...(!selectedBlockId && blocks.length ? [level("Blocks", tally(blocks))] : []),
                     ...(units.length ? [level("Units", tally(units))] : []),
                     tasks,
-                    selectedBlockId
-                      ? { label: "Tasks remaining", value: Math.max(0, steps - done), note: "Not yet finished" }
-                      : { label: "Behind schedule", value: Number(detail?.late ?? selected.late ?? 0), note: "Past planned finish date" },
+                    ...(selectedBlockId ? [remaining] : []),
+                    late,
                   ];
                   const cols = ["", "", "", "", "four", "five"][metrics.length] ?? "";
                   return (
