@@ -423,7 +423,7 @@ router.get("/timeline", async (req, res) => {
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT b.Id, b.BookingNo,
              COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
-             b.ProjectId,
+             b.ProjectId, b.UnitId, (SELECT TOP 1 um.BlockId FROM dbo.UnitMaster um WHERE um.Id = b.UnitId) AS BlockId,
              COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
              b.TotalValue, b.BookingAmount,
              b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate,
@@ -488,10 +488,10 @@ router.get("/timeline", async (req, res) => {
         SELECT TOP 1 Id, NoticeNo, Status, OfferedDate, ResponseDeadline, SentAt, AcknowledgedAt, DisputedAt, DisputeReason
         FROM dbo.CrmPossessionNotice WHERE BookingId = @bid AND Status <> 'Draft' ORDER BY CreatedAt DESC
       `),
-      // Construction progress is project-wide, matched on the booking's real ProjectId.
+      // Notes the team wrote for the booking's project (the live progress itself comes from DPR, below).
       bk.ProjectId
         ? pool.request().input("pid", sql.Int, bk.ProjectId)
-            .query("SELECT UpdateDate, PercentComplete, Stage, Summary FROM dbo.CrmConstructionUpdate WHERE ProjectId = @pid ORDER BY UpdateDate DESC")
+            .query("SELECT Id, UpdateDate, PercentComplete, Stage, Summary FROM dbo.CrmConstructionUpdate WHERE ProjectId = @pid ORDER BY UpdateDate DESC, Id DESC")
         : Promise.resolve({ recordset: [] }),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT OverallStatus FROM dbo.CrmLegalMilestone WHERE BookingId = @bid"),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT NocType, Status, NocNo, IssuedDate FROM dbo.CrmNoc WHERE BookingId = @bid"),
@@ -530,6 +530,10 @@ router.get("/timeline", async (req, res) => {
       handover: handover.recordset[0] || null,
       possessionNotice: possessionNotice.recordset[0] || null,
       constructionUpdates: constructionUpdates.recordset,
+      // The buyer's own unit as the site records it (DPR), with its tower and project for context.
+      constructionProgress: bk.ProjectId && !bk.IsPlotSale
+        ? await require("./crmConstructionUpdates").unitProgress(pool, { projectId: bk.ProjectId, unitId: bk.UnitId, blockId: bk.BlockId }).catch(() => null)
+        : null,
       holds: holds.recordset,
       // Customer-facing framing of internal process trackers — raw step
       // names (DocCollection/LegalReview/etc) and NOC bank details are never
