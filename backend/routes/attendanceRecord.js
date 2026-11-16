@@ -29,6 +29,39 @@ router.get("/", cache("attendance-record", 300), async (req, res) => {
   }
 });
 
+// The punch behind one Attendance Record (same employee, same day): In / Out time, device location and live photo --
+// present when the day was punched (Employee Portal or staff Attendance), null for a day entered by hand.
+router.get("/:id/punch", pageRightByMethod("attendance-leave-overtime"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const r = await getPool().request().input("Id", sql.Int, id).query(`
+      SELECT p.AttendanceId AS PunchId, p.InTime, p.OutTime,
+             p.InLatitude, p.InLongitude, p.InAccuracyM, p.OutLatitude, p.OutLongitude, p.OutAccuracyM,
+             p.InPhoto, p.OutPhoto
+      FROM dbo.AttendanceRecord a
+      JOIN dbo.EmployeeAttendance p ON p.EmployeeId = a.EmployeeId AND p.AttendanceDate = a.AttendanceDate
+      WHERE a.AttendanceId = @Id
+    `);
+    const p = r.recordset[0];
+    if (!p) return res.json({ punch: null });
+    const loc = (lat, lng, acc) => (lat != null ? { lat: Number(lat), lng: Number(lng), accuracyM: acc ?? null } : null);
+    res.json({
+      punch: {
+        inTime: p.InTime ? new Date(p.InTime).toISOString() : null,
+        outTime: p.OutTime ? new Date(p.OutTime).toISOString() : null,
+        inLocation: loc(p.InLatitude, p.InLongitude, p.InAccuracyM),
+        outLocation: loc(p.OutLatitude, p.OutLongitude, p.OutAccuracyM),
+        inPhoto: p.InPhoto || null,
+        outPhoto: p.OutPhoto || null,
+      },
+    });
+  } catch (err) {
+    console.error("[attendance-record] GET /:id/punch error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post("/", pageRightByMethod("attendance-leave-overtime"), async (req, res) => {
   const { EmployeeId, AttendanceDate, Status, CheckIn, CheckOut, Remarks, IsActive } = req.body;
   if (!EmployeeId) return res.status(400).json({ error: "Employee is required" });

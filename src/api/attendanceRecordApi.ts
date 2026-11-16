@@ -19,6 +19,20 @@ export interface AttendanceRow {
   UpdatedAt: string | null;
 }
 
+export interface PunchLocation { lat: number; lng: number; accuracyM: number | null }
+export interface PunchEvidence {
+  inTime: string | null; outTime: string | null;
+  inLocation: PunchLocation | null; outLocation: PunchLocation | null;
+  inPhoto: string | null; outPhoto: string | null;
+}
+/** The punch (times, device location, live photo) behind one Attendance Record, or null for a day entered by hand. */
+export const getAttendancePunch = async (id: number): Promise<PunchEvidence | null> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/punch`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string })?.error || "Failed to load the punch details");
+  return (data as { punch: PunchEvidence | null }).punch;
+};
+
 export interface AttendancePayload {
   EmployeeId: number;
   AttendanceDate: string;

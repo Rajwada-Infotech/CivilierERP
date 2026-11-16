@@ -197,6 +197,8 @@ interface MasterPageProps {
       /** Custom display for this field in the view modal (e.g. a download
        *  link for an attached file) instead of the plain stringified value. */
       render?: (value: unknown, row: RecordWithId) => React.ReactNode;
+      /** Span both columns of the view modal (for wide content such as a photo or a map). */
+      wide?: boolean;
     }[];
   };
   /**
@@ -1364,7 +1366,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </DialogHeader>
             {viewRow && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
-                {viewConfig.fields.map(({ key, label, mono, render }) => {
+                {viewConfig.fields.map(({ key, label, mono, render, wide }) => {
                   const val = viewRow[key];
                   const display =
                     typeof val === "boolean"
@@ -1375,7 +1377,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         ? String(val)
                         : "—";
                   return (
-                    <div key={key}>
+                    <div key={key} className={wide ? "sm:col-span-2" : undefined}>
                       <p className={sx("text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-0.5", "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1")}>
                         {label}
                       </p>
