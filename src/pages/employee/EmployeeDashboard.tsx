@@ -2,6 +2,7 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getPortalHolidays, getPortalLeaveBalances, getPortalLeaves, getPortalPayslips, getPortalProfile } from "@/api/employeePortalApi";
+import PunchCard from "./PunchCard";
 import { Card, Loading, MONTHS, Mark, Note, PageHeader, Stat, fmtDate, inr, labelCls } from "./employeeUi";
 
 export default function EmployeeDashboard() {
@@ -23,6 +24,8 @@ export default function EmployeeDashboard() {
   return (
     <>
       <PageHeader title={p ? `Welcome, ${p.EmployeeName.split(" ")[0]}` : "Welcome"} subtitle={p ? `${p.Designation || "Employee"}${p.Department ? ` · ${p.Department}` : ""} · ${p.EmployeeCode}` : undefined} />
+
+      <PunchCard />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <Stat label="Latest net pay" value={latest ? inr(latest.NetSalary) : "—"} note={latest ? `${MONTHS[latest.PeriodMonth - 1]} ${latest.PeriodYear}` : "No payslip yet"} />

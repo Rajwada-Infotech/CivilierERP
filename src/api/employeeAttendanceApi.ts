@@ -39,6 +39,11 @@ export interface AttendanceRecord {
   status: AttendanceStatus;
   flags: AttendanceFlag[];
   hrEdited: boolean;
+  /** Device location and live photo captured at an Employee Portal punch (null for other punches). */
+  inLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
+  outLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
+  hasInPhoto?: boolean;
+  hasOutPhoto?: boolean;
   live: { sessionSeconds: number; breakSeconds: number; netSeconds: number } | null;
 }
 
@@ -139,6 +144,9 @@ export const getHrSummary = async (f: HrFilters) => parse<AttendanceSummary>(awa
 export const getNotMarked = async (f: HrFilters & { date: string }) => parse<NotMarkedEmployee[]>(await fetchWithAuth(`${BASE}/hr/not-marked?${qs(f)}`), "Failed to load employees");
 export const getHrRecord = async (id: number) =>
   parse<{ record: AttendanceRecord; audit: AuditEntry[] }>(await fetchWithAuth(`${BASE}/hr/records/${id}`), "Failed to load the record");
+
+export const getHrPunchPhoto = async (id: number, which: "in" | "out") =>
+  parse<{ photo: string | null }>(await fetchWithAuth(`${BASE}/hr/records/${id}/photo/${which}`), "Failed to load the photo");
 
 type Corrected = { record: AttendanceRecord; audit: AuditEntry[] };
 export const hrUpdateRecord = async (id: number, body: { inTime?: string; outTime?: string | null; reason: string }) =>

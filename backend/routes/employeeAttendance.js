@@ -86,6 +86,13 @@ router.get("/hr/records/:id", requirePageRight(HR, "view"), async (req, res) => 
   } catch (e) { fail(res, e, "GET /hr/records/:id"); }
 });
 
+// The live photo taken at a punch on the Employee Portal ("in" or "out"), kept out of the list payloads.
+router.get("/hr/records/:id/photo/:which", requirePageRight(HR, "view"), async (req, res) => {
+  const id = toInt(req.params.id);
+  if (!id || !["in", "out"].includes(req.params.which)) return res.status(400).json({ error: "Invalid request" });
+  try { res.json({ photo: await svc.getPhoto(getPool(), id, req.params.which) }); } catch (e) { fail(res, e, "GET /hr/records/:id/photo"); }
+});
+
 // Corrections — each needs a reason and is written to the audit trail.
 router.put("/hr/records/:id", requirePageRight(HR, "edit"), async (req, res) => {
   const id = toInt(req.params.id);

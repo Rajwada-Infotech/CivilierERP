@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { getPortalAttendance } from "@/api/employeePortalApi";
+import PunchCard from "./PunchCard";
 import { Card, Loading, MONTHS, Mark, Note, PageHeader, Stat, fmtDate, fmtTime, fmtWeekday, keyLine } from "./employeeUi";
 
 const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, "0")}`;
@@ -17,7 +18,7 @@ export default function EmployeeAttendance() {
 
   return (
     <>
-      <PageHeader title="Attendance" subtitle="Your daily attendance records"
+      <PageHeader title="Attendance" subtitle="Punch in and out, and see your daily attendance records"
         action={
           <div className="flex items-center gap-2">
             <button className={keyLine} onClick={() => step(-1)} aria-label="Previous month"><ChevronLeft size={14} /></button>
@@ -25,6 +26,8 @@ export default function EmployeeAttendance() {
             <button className={keyLine} onClick={() => step(1)} aria-label="Next month"><ChevronRight size={14} /></button>
           </div>
         } />
+
+      <PunchCard />
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
         <Stat label="Present" value={s?.Present ?? "—"} />

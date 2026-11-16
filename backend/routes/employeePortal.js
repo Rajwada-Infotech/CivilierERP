@@ -27,6 +27,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
+const attendanceSvc = require("../services/employeeAttendance");
 
 const LEAVE_TYPES = ["Casual", "Sick", "Earned", "Unpaid"];
 const LIMITED_TYPES = ["Casual", "Sick", "Earned"];
@@ -244,6 +245,25 @@ router.get("/attendance", async (req, res) => {
     console.error("[employee-portal] GET /attendance:", err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Punch In / Out with a live photo and the device location ─────────────────
+// The same clock the staff Attendance page uses (services/employeeAttendance.js -- times come from the database clock,
+// one record a day), but a portal punch must carry { photo, latitude, longitude, accuracy }, which are stored with it.
+function punchFail(res, err, where) {
+  if (err instanceof attendanceSvc.AttendanceError) return res.status(err.status).json({ error: err.message });
+  console.error(`[employee-portal] ${where}:`, err.message);
+  return res.status(500).json({ error: err.message });
+}
+
+router.get("/attendance/today", async (req, res) => {
+  try { res.json(await attendanceSvc.getMyState(getPool(), req.user)); } catch (e) { punchFail(res, e, "GET /attendance/today"); }
+});
+router.post("/attendance/in", async (req, res) => {
+  try { res.json(await attendanceSvc.clockIn(getPool(), req.user, { evidence: req.body, requireEvidence: true })); } catch (e) { punchFail(res, e, "POST /attendance/in"); }
+});
+router.post("/attendance/out", async (req, res) => {
+  try { res.json(await attendanceSvc.clockOut(getPool(), req.user, { evidence: req.body, requireEvidence: true })); } catch (e) { punchFail(res, e, "POST /attendance/out"); }
 });
 
 // ── Leave ────────────────────────────────────────────────────────────────────

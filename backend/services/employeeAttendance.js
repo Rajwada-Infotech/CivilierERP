@@ -100,6 +100,11 @@ function compute(rec, breaks, now = new Date()) {
     status,
     flags,
     hrEdited: !!rec.IsHrEdited,
+    // Evidence captured at the punch on the Employee Portal (photos are fetched separately, see getPhoto).
+    inLocation: rec.InLatitude != null ? { lat: Number(rec.InLatitude), lng: Number(rec.InLongitude), accuracyM: rec.InAccuracyM ?? null } : null,
+    outLocation: rec.OutLatitude != null ? { lat: Number(rec.OutLatitude), lng: Number(rec.OutLongitude), accuracyM: rec.OutAccuracyM ?? null } : null,
+    hasInPhoto: !!rec.HasInPhoto,
+    hasOutPhoto: !!rec.HasOutPhoto,
     live: !outT && !stale ? { sessionSeconds: sessionSoFar, breakSeconds: liveBreakSec, netSeconds: Math.max(0, sessionSoFar - liveBreakSec) } : null,
   };
 }
@@ -109,7 +114,9 @@ function compute(rec, breaks, now = new Date()) {
 const RECORD_SELECT = `
   SELECT a.AttendanceId, a.EmployeeId, e.EmployeeCode, e.EmployeeName, e.CompanyId, comp.name AS CompanyName,
          e.Department, a.ProjectId, pr.name AS ProjectName, CONVERT(NVARCHAR(10), a.AttendanceDate, 23) AS AttendanceDate,
-         a.InTime, a.OutTime, a.IsHrEdited
+         a.InTime, a.OutTime, a.IsHrEdited,
+         a.InLatitude, a.InLongitude, a.InAccuracyM, a.OutLatitude, a.OutLongitude, a.OutAccuracyM,
+         CASE WHEN a.InPhoto IS NULL THEN 0 ELSE 1 END AS HasInPhoto, CASE WHEN a.OutPhoto IS NULL THEN 0 ELSE 1 END AS HasOutPhoto
   FROM dbo.EmployeeAttendance a
   JOIN dbo.EmployeeMaster e ON e.EmployeeId = a.EmployeeId
   LEFT JOIN dbo.enterprise comp ON comp.id = e.CompanyId
@@ -246,11 +253,41 @@ async function getMyState(pool, user) {
   };
 }
 
+// ─── Punch evidence (live photo + device location) ──────────────────────────
+
+const MAX_PHOTO_CHARS = 700_000; // a ~640px JPEG is ~60 KB; this is a generous ceiling on the base64 text
+
+/**
+ * Validates what the Employee Portal sends with a punch: { photo, latitude, longitude, accuracy }.
+ * The photo must be a JPEG data URL; coordinates must be real. Throws AttendanceError(400) otherwise.
+ */
+function cleanEvidence(raw) {
+  const e = raw || {};
+  const photo = typeof e.photo === "string" ? e.photo : "";
+  if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(photo)) throw new AttendanceError("A live photo is required — allow camera access and take the picture.", 400);
+  if (photo.length > MAX_PHOTO_CHARS) throw new AttendanceError("The photo is too large — please try again.", 400);
+  const lat = Number(e.latitude);
+  const lng = Number(e.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) {
+    throw new AttendanceError("Your location is required — allow location access on this device.", 400);
+  }
+  const acc = Number.isFinite(Number(e.accuracy)) ? Math.min(Math.max(Math.round(Number(e.accuracy)), 0), 1_000_000) : null;
+  return { photo, lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6, acc };
+}
+
+/** The punch photo of one record ("in" or "out") as a data URL, or null. */
+async function getPhoto(pool, attendanceId, which) {
+  const col = which === "out" ? "OutPhoto" : "InPhoto";
+  const r = await pool.request().input("Id", sql.Int, attendanceId).query(`SELECT ${col} AS Photo FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id`);
+  return r.recordset[0]?.Photo ?? null;
+}
+
 const isUnique = (e) => /UQ_EmployeeAttendance_EmployeeDate|UX_EmployeeAttendanceBreak_OneOpen|duplicate key/i.test(e.message || "");
 const isCheck = (e) => /CK_EmployeeAttendance_OutAfterIn|CK_EmployeeAttendanceBreak_EndAfterStart/i.test(e.message || "");
 const TOO_FAST = "That was too quick after the previous punch — wait a few seconds and try again.";
 
-async function clockIn(pool, user, { projectId } = {}) {
+async function clockIn(pool, user, { projectId, evidence, requireEvidence } = {}) {
+  const ev = evidence || requireEvidence ? cleanEvidence(evidence) : null;
   const employee = await resolveEmployee(pool, user);
   const state = await getMyState(pool, user);
   if (!state.allowed.in) {
@@ -265,11 +302,13 @@ async function clockIn(pool, user, { projectId } = {}) {
     projId = Number(projectId);
   }
   try {
-    const r = await pool.request().input("E", sql.Int, employee.EmployeeId).input("P", sql.Int, projId).query(`
+    const r = await pool.request().input("E", sql.Int, employee.EmployeeId).input("P", sql.Int, projId)
+      .input("Photo", sql.NVarChar(sql.MAX), ev?.photo ?? null).input("Lat", sql.Decimal(9, 6), ev?.lat ?? null)
+      .input("Lng", sql.Decimal(9, 6), ev?.lng ?? null).input("Acc", sql.Int, ev?.acc ?? null).query(`
       DECLARE @now DATETIME2(0) = SYSUTCDATETIME();
-      INSERT INTO dbo.EmployeeAttendance (EmployeeId, AttendanceDate, InTime, ProjectId)
+      INSERT INTO dbo.EmployeeAttendance (EmployeeId, AttendanceDate, InTime, ProjectId, InPhoto, InLatitude, InLongitude, InAccuracyM)
       OUTPUT INSERTED.AttendanceId
-      VALUES (@E, CAST(DATEADD(MINUTE, ${IST_OFFSET_MIN}, @now) AS DATE), @now, @P)
+      VALUES (@E, CAST(DATEADD(MINUTE, ${IST_OFFSET_MIN}, @now) AS DATE), @now, @P, @Photo, @Lat, @Lng, @Acc)
     `);
     await audit(pool, { attendanceId: r.recordset[0].AttendanceId, employeeId: employee.EmployeeId, action: "IN", by: user.email });
   } catch (e) {
@@ -279,15 +318,19 @@ async function clockIn(pool, user, { projectId } = {}) {
   return getMyState(pool, user);
 }
 
-async function clockOut(pool, user) {
+async function clockOut(pool, user, { evidence, requireEvidence } = {}) {
+  const ev = evidence || requireEvidence ? cleanEvidence(evidence) : null;
   const employee = await resolveEmployee(pool, user);
   const state = await getMyState(pool, user);
   if (state.state === "NOT_STARTED") throw new AttendanceError("Record In Time first — Out Time can only follow it.");
   if (state.state === "COMPLETED") throw new AttendanceError("Out Time is already recorded for today.");
   if (state.state === "ON_BREAK") throw new AttendanceError("Stop your current break before recording Out Time.");
   try {
-    const r = await pool.request().input("Id", sql.Int, state.current.attendanceId).query(`
-      UPDATE dbo.EmployeeAttendance SET OutTime = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME()
+    const r = await pool.request().input("Id", sql.Int, state.current.attendanceId)
+      .input("Photo", sql.NVarChar(sql.MAX), ev?.photo ?? null).input("Lat", sql.Decimal(9, 6), ev?.lat ?? null)
+      .input("Lng", sql.Decimal(9, 6), ev?.lng ?? null).input("Acc", sql.Int, ev?.acc ?? null).query(`
+      UPDATE dbo.EmployeeAttendance SET OutTime = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME(),
+        OutPhoto = @Photo, OutLatitude = @Lat, OutLongitude = @Lng, OutAccuracyM = @Acc
       WHERE AttendanceId = @Id AND OutTime IS NULL
         AND NOT EXISTS (SELECT 1 FROM dbo.EmployeeAttendanceBreak WHERE AttendanceId = @Id AND BreakEnd IS NULL)
     `);
@@ -540,7 +583,7 @@ async function hrDeleteBreak(pool, breakId, { reason }, actor) {
 
 module.exports = {
   AttendanceError, STALE_HOURS, compute, istDate,
-  getMyState, clockIn, clockOut, breakStart, breakStop,
+  getMyState, clockIn, clockOut, breakStart, breakStop, getPhoto, cleanEvidence,
   listRecords, getRecord, getAudit, summary, notMarked, hrFilterOptions,
   hrUpdateRecord, hrAddBreak, hrUpdateBreak, hrDeleteBreak,
 };

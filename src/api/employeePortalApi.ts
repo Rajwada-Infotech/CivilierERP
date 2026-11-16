@@ -42,6 +42,15 @@ export const getPortalPayslip = (runId: number) => get<Payslip>(`${PORTAL}/paysl
 export const getPortalLoginHistory = () => get<LoginHistoryRow[]>(`${PORTAL}/login-history`);
 export const getPortalHolidays = (year: number) => get<Holiday[]>(`${PORTAL}/holidays?year=${year}`);
 export const getPortalAttendance = (month: string) => get<AttendanceMonth>(`${PORTAL}/attendance?month=${month}`);
+export interface PunchLocation { lat: number; lng: number; accuracyM: number | null }
+export interface PunchState {
+  serverNow: string; today: string; state: "NOT_STARTED" | "WORKING" | "ON_BREAK" | "COMPLETED";
+  allowed: { in: boolean; out: boolean };
+  current: { attendanceId: number; inTime: string; outTime: string | null; status: string; inLocation: PunchLocation | null; outLocation: PunchLocation | null; hasInPhoto: boolean; hasOutPhoto: boolean } | null;
+}
+export interface PunchEvidence { photo: string; latitude: number; longitude: number; accuracy: number | null }
+export const getPortalPunchState = () => get<PunchState>(`${PORTAL}/attendance/today`);
+export const portalPunch = (kind: "in" | "out", evidence: PunchEvidence) => send<PunchState>(`${PORTAL}/attendance/${kind}`, "POST", evidence);
 export const getPortalLeaveBalances = (year: number) => get<{ Year: number; Balances: LeaveBalance[] }>(`${PORTAL}/leave/balances?year=${year}`);
 export const getPortalLeaves = () => get<LeaveApplication[]>(`${PORTAL}/leave`);
 export const applyPortalLeave = (body: { LeaveType: string; FromDate: string; ToDate: string; Reason: string }) =>

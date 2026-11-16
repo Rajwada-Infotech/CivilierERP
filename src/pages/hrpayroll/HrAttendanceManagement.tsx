@@ -12,7 +12,7 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { DateInput, DateTimeInput } from "@/components/ui/date-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  getHrFilterOptions, getHrRecord, getHrRecords, getHrSummary, getNotMarked,
+  getHrFilterOptions, getHrPunchPhoto, getHrRecord, getHrRecords, getHrSummary, getNotMarked,
   hrAddBreak, hrDeleteBreak, hrUpdateBreak, hrUpdateRecord,
   type AttendanceRecord, type HrFilters,
 } from "@/api/employeeAttendanceApi";
@@ -60,6 +60,39 @@ function StatusBadge({ r }: { r: AttendanceRecord }) {
 }
 
 // ── Record detail + HR correction ───────────────────────────────────────────
+
+// The live photo and device location captured at an Employee Portal punch (In and Out), when there are any.
+function PunchEvidence({ rec }: { rec: AttendanceRecord }) {
+  const sides = ([["In", rec.hasInPhoto, rec.inLocation, "in"], ["Out", rec.hasOutPhoto, rec.outLocation, "out"]] as const).filter(([, photo, loc]) => photo || loc);
+  const photos = useQuery({
+    queryKey: ["hr-attendance-photos", rec.attendanceId, rec.hasInPhoto, rec.hasOutPhoto],
+    queryFn: async () => ({
+      in: rec.hasInPhoto ? (await getHrPunchPhoto(rec.attendanceId, "in")).photo : null,
+      out: rec.hasOutPhoto ? (await getHrPunchPhoto(rec.attendanceId, "out")).photo : null,
+    }),
+    enabled: !!(rec.hasInPhoto || rec.hasOutPhoto),
+    staleTime: 5 * 60_000,
+  });
+  if (!sides.length) return null;
+  return (
+    <div className="bg-card p-4" style={{ border: HR_RULE }}>
+      <p className={`${HR_HEAD} mb-3`}>Punch photo and location <span className="text-xs text-muted-foreground font-normal normal-case tracking-normal">— captured live on the Employee Portal</span></p>
+      <div className="grid sm:grid-cols-2 gap-4">
+        {sides.map(([label, , loc, key]) => (
+          <div key={label} className="space-y-2">
+            <p className={HR_LBL}>{label}</p>
+            {photos.data?.[key] ? <img src={photos.data[key]!} alt={`${label} photo`} className="w-full max-w-[16rem] border border-foreground/30" /> : <div className="w-full max-w-[16rem] aspect-[4/3] bg-muted/40 flex items-center justify-center text-xs text-muted-foreground">{photos.isLoading ? "Loading…" : "No photo"}</div>}
+            {loc ? (
+              <a href={`https://www.google.com/maps?q=${loc.lat},${loc.lng}`} target="_blank" rel="noreferrer" className="text-xs underline underline-offset-2 block">
+                {loc.lat.toFixed(6)}, {loc.lng.toFixed(6)}{loc.accuracyM != null ? ` (±${loc.accuracyM} m)` : ""} — open map
+              </a>
+            ) : <p className="text-xs text-muted-foreground">No location</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; onClose: () => void }) {
   const qc = useQueryClient();
@@ -133,6 +166,8 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
               <StatusBadge r={rec} />
               <span className="text-xs text-muted-foreground">{[rec.companyName, rec.department, rec.projectName].filter(Boolean).join(" · ") || "—"}</span>
             </div>
+
+            <PunchEvidence rec={rec} />
 
             {canEdit && (
               <div className="bg-card p-4 space-y-3" style={{ border: HR_RULE }}>
