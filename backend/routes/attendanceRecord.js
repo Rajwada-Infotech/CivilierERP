@@ -7,9 +7,29 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
+const attendanceSvc = require("../services/employeeAttendance");
 
 const STATUSES = ["Present", "Absent", "Half Day", "On Leave", "Holiday", "Week Off"];
 const isUniqueViolation = (err) => /UQ_AttendanceRecord_EmployeeDate/i.test(err.message || "");
+
+// A day that was punched (Employee Portal / staff Attendance) has a punch behind its Attendance Record, and the employee sees
+// the punch. So deleting or retiming the record here must change the punch too, or the employee keeps seeing the old one.
+const HHMM = /^([01]?\d|2[0-3]):[0-5]\d$/;
+const istHHMM = (d) => new Date(new Date(d).getTime() + 330 * 60_000).toISOString().slice(11, 16);
+const istMoment = (date, hhmm) => new Date(`${date}T${hhmm.padStart(5, "0")}:00+05:30`);
+
+async function loadRow(pool, id) {
+  const r = await pool.request().input("Id", sql.Int, id).query(
+    "SELECT AttendanceId, EmployeeId, CONVERT(NVARCHAR(10), AttendanceDate, 23) AS D FROM dbo.AttendanceRecord WHERE AttendanceId = @Id",
+  );
+  return r.recordset[0] || null;
+}
+async function findPunch(pool, employeeId, date) {
+  const r = await pool.request().input("E", sql.Int, employeeId).input("D", sql.Date, date).query(
+    "SELECT AttendanceId, InTime, OutTime FROM dbo.EmployeeAttendance WHERE EmployeeId = @E AND AttendanceDate = @D",
+  );
+  return r.recordset[0] || null;
+}
 
 const SELECT_COLUMNS = `
   SELECT a.AttendanceId, a.EmployeeId, e.EmployeeCode, e.EmployeeName, a.AttendanceDate,
@@ -103,6 +123,29 @@ router.put("/:id", pageRightByMethod("attendance-leave-overtime"), async (req, r
   const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
+
+    const current = await loadRow(pool, id);
+    if (!current) return res.status(404).json({ error: "Attendance record not found" });
+    const punch = await findPunch(pool, current.EmployeeId, current.D);
+    if (punch) {
+      if (Number(EmployeeId) !== current.EmployeeId || String(AttendanceDate).slice(0, 10) !== current.D) {
+        return res.status(409).json({ error: "This day was punched by the employee, so its employee and date can't be changed here. Change the times, or delete the day and add it again." });
+      }
+      if (CheckIn && !HHMM.test(String(CheckIn).trim())) return res.status(400).json({ error: "Check In must be a time like 09:30" });
+      if (CheckOut && !HHMM.test(String(CheckOut).trim())) return res.status(400).json({ error: "Check Out must be a time like 18:30" });
+      const wantIn = CheckIn ? String(CheckIn).trim().padStart(5, "0") : istHHMM(punch.InTime);
+      const wantOut = CheckOut ? String(CheckOut).trim().padStart(5, "0") : null;
+      const sameIn = wantIn === istHHMM(punch.InTime);
+      const sameOut = wantOut === (punch.OutTime ? istHHMM(punch.OutTime) : null);
+      if (!sameIn || !sameOut) {
+        await attendanceSvc.hrUpdateRecord(
+          pool, punch.AttendanceId,
+          { inTime: istMoment(current.D, wantIn).toISOString(), outTime: wantOut ? istMoment(current.D, wantOut).toISOString() : null, reason: "Edited on Attendance Records" },
+          req.user?.email || "unknown",
+        );
+      }
+    }
+
     await pool
       .request()
       .input("Id", sql.Int, id)
@@ -125,6 +168,7 @@ router.put("/:id", pageRightByMethod("attendance-leave-overtime"), async (req, r
     await bumpCacheVersion("attendance-record");
     res.json({ message: "Attendance updated successfully" });
   } catch (err) {
+    if (err instanceof attendanceSvc.AttendanceError) return res.status(err.status).json({ error: err.message });
     if (isUniqueViolation(err)) return res.status(409).json({ error: "Attendance for this employee and date already exists" });
     console.error("[attendance-record] PUT error:", err.message);
     res.status(500).json({ error: err.message });
@@ -136,13 +180,16 @@ router.delete("/:id", pageRightByMethod("attendance-leave-overtime"), async (req
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
-    const existing = await pool.request().input("Id", sql.Int, id)
-      .query("SELECT AttendanceId FROM dbo.AttendanceRecord WHERE AttendanceId = @Id");
-    if (!existing.recordset.length) return res.status(404).json({ error: "Attendance record not found" });
+    const existing = await loadRow(pool, id);
+    if (!existing) return res.status(404).json({ error: "Attendance record not found" });
+    // A punched day: remove the punch (and its photos / breaks) too, so the employee no longer sees it.
+    const punch = await findPunch(pool, existing.EmployeeId, existing.D);
+    if (punch) await attendanceSvc.hrDeleteRecord(pool, punch.AttendanceId, { reason: "Deleted from Attendance Records" }, req.user?.email || "unknown");
     await pool.request().input("Id", sql.Int, id).query("DELETE FROM dbo.AttendanceRecord WHERE AttendanceId = @Id");
     await bumpCacheVersion("attendance-record");
     res.json({ message: "Attendance record deleted" });
   } catch (err) {
+    if (err instanceof attendanceSvc.AttendanceError) return res.status(err.status).json({ error: err.message });
     console.error("[attendance-record] DELETE error:", err.message);
     res.status(500).json({ error: err.message });
   }
