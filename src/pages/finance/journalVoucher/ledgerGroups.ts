@@ -1,4 +1,5 @@
 import type { JournalVoucherLedgerOption, JournalVoucherLine } from "@/api/journalVoucherApi";
+import { naturalCompare } from "@/lib/utils";
 
 /** "Investment" / "Drawing" badge for a Partner Master line — a Partner has
  *  two heads sharing one LHeadName (Capital vs Current Account), told apart
@@ -71,6 +72,6 @@ export function groupLedgerOptions(options: JournalVoucherLedgerOption[]): Ledge
     .map(([key, opts]) => ({
       key,
       label: ledgerGroupLabel(key),
-      options: [...opts].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" })),
+      options: [...opts].sort((a, b) => naturalCompare(a.label, b.label)),
     }));
 }

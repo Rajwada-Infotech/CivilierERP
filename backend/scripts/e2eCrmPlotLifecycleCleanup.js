@@ -34,6 +34,8 @@ async function cleanup(pool, tag) {
   const mrs = ids(await one(`SELECT Id FROM dbo.CrmMoneyReceipt WHERE BookingId IN (${inList(bookings)})`));
   const rps = ids(await one(`SELECT RPPaymentID FROM dbo.ReceivedPayment WHERE CrmBookingId IN (${inList(bookings)}) OR CrmApplicationId IN (${inList(apps)})`), "RPPaymentID");
   const heads = ids(await one("SELECT LHeadId FROM dbo.AccountHeadMaster WHERE LHeadName LIKE @t AND LHeadType = 'RC'", { t: like }), "LHeadId");
+  // Resale cases between tagged customers (their deeds and fee records hang off them through foreign keys).
+  const resales = ids(await one(`SELECT Id FROM dbo.CrmUnitResale WHERE FromCustomerId IN (${inList(customers)}) OR ToCustomerId IN (${inList(customers)})`));
   if (!apps.length && !customers.length && !heads.length) { console.log("[cleanup] nothing tagged — clean"); return; }
   console.log(`[cleanup] applications ${apps} | bookings ${bookings} | customers ${customers} | receipts ${rps} | deposits ${oas} | invoices ${invoices} | ledger heads ${heads}`);
 
@@ -48,6 +50,7 @@ async function cleanup(pool, tag) {
          OR (SourceType LIKE '%Invoice%' AND SourceId IN (${inList(invoices)}))
          OR (SourceType LIKE '%Receipt%' AND SourceId IN (${inList([...rps, ...mrs])}))
          OR (SourceType LIKE '%Milestone%' AND SourceId IN (${inList(milestones)}))
+         OR (SourceType LIKE '%Resale%' AND SourceId IN (${inList(resales)}))
          OR LHeadId IN (${inList(heads)})`)).recordset.map((r) => r.VoucherNo);
     if (vouchers.length) {
       const list = vouchers.map((v) => `'${String(v).replace(/'/g, "''")}'`).join(",");
@@ -58,8 +61,11 @@ async function cleanup(pool, tag) {
       OR (Module = 'crm-on-account-payment' AND RecordId IN (${inList(oas)}))
       OR (Module IN ('crm-received-payment', 'received-payment') AND RecordId IN (${inList(rps)}))
       OR (Module LIKE '%invoice%' AND RecordId IN (${inList(invoices)}))
-      OR (Module LIKE '%money-receipt%' AND RecordId IN (${inList(mrs)}))`);
-    await q(`DELETE FROM dbo.ApprovalAuditLog WHERE (TableName = 'CrmApplication' AND RecordId IN (${inList(apps)}))
+      OR (Module LIKE '%money-receipt%' AND RecordId IN (${inList(mrs)}))
+      OR (Module LIKE 'crm-resale%' AND RecordId IN (${inList(resales)}))`);
+    await q(`DELETE FROM dbo.ApprovalAuditLog WHERE (TableName = 'CrmUnitResale' AND RecordId IN (${inList(resales)}))
+      OR (TableName = 'CrmTransferDeed' AND RecordId IN (SELECT Id FROM dbo.CrmTransferDeed WHERE ResaleId IN (${inList(resales)})))
+      OR (TableName = 'CrmApplication' AND RecordId IN (${inList(apps)}))
       OR (TableName = 'CrmBooking' AND RecordId IN (${inList(bookings)})) OR (TableName = 'ReceivedPayment' AND RecordId IN (${inList(rps)}))`);
     await q(`DELETE FROM dbo.CrmAuditLog WHERE (EntityType = 'Booking' AND EntityId IN (${inList(bookings)}))
       OR (EntityType = 'Application' AND EntityId IN (${inList(apps)})) OR (EntityType = 'ReceivedPayment' AND EntityId IN (${inList(rps)}))
@@ -98,6 +104,17 @@ async function cleanup(pool, tag) {
       if (n) console.log(`[cleanup] ${table}: ${n}`);
     };
 
+    // Resale cases first: they point at the bookings, the fee invoice and the fee receipt. Their transfer deeds link
+    // by plain column (ResaleId, and DeedId on the deed's own tables), so they are removed by name.
+    if (resales.length) {
+      const deeds = `SELECT Id FROM dbo.CrmTransferDeed WHERE ResaleId IN (${inList(resales)})`;
+      for (const t of ["CrmTransferDeedDocument", "CrmTransferDeedLog", "CrmTransferDeedPayment", "CrmTransferDeedRegistry"]) {
+        await q(`DELETE FROM dbo.[${t}] WHERE DeedId IN (${deeds})`);
+      }
+      const n = await q(`DELETE FROM dbo.CrmTransferDeed WHERE ResaleId IN (${inList(resales)})`);
+      if (n) console.log(`[cleanup] CrmTransferDeed: ${n}`);
+    }
+    await purge("CrmUnitResale", "Id", resales);
     // Rows that point at the sale by plain column (no FK) — in dependency order.
     for (const t of ["CrmRefund", "CrmCancellation"]) {
       const n = await q(`DELETE FROM dbo.[${t}] WHERE BookingId IN (${inList(bookings)})`);
@@ -136,7 +153,41 @@ async function cleanup(pool, tag) {
   console.log("[cleanup] done — no tagged rows remain");
 }
 
-module.exports = { cleanup };
+/**
+ * Removes villa units a test built (plot -> villa conversion) with what the conversion generated for them: rooms,
+ * room overrides and the DPR chains with their untouched steps. One transaction; it stops (and rolls back) if any
+ * work was logged on those steps or anything else still refers to the units. Only units named with the tag.
+ */
+async function cleanupVillaUnits(pool, tag, unitIds) {
+  const list = (unitIds || []).map(Number).filter(Number.isInteger);
+  if (!tag || tag.length < 4) throw new Error("refusing to clean without a specific tag");
+  if (!list.length) return 0;
+  const U = `SELECT Id FROM dbo.UnitMaster WHERE Id IN (${list.join(",")}) AND UnitName LIKE '%${tag.replace(/'/g, "''")}%'`;
+  const DM = `SELECT Id FROM dbo.DependencyMaster WHERE FlatId IN (${U}) OR RoomId IN (SELECT Id FROM dbo.RoomMaster WHERE UnitId IN (${U}))`;
+  const DMA = `SELECT Id FROM dbo.DependencyMasterActivity WHERE DependencyMasterId IN (${DM})`;
+  const tx = pool.transaction();
+  await tx.begin();
+  const q = async (t) => (await tx.request().query(t)).rowsAffected[0];
+  try {
+    const logged = (await tx.request().query(`SELECT COUNT(*) AS n FROM dbo.DependencyActivityProgressLog
+      WHERE AssignmentId IN (SELECT Id FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId IN (${DMA}))`)).recordset[0].n;
+    if (logged) throw new Error(`${logged} DPR progress entries on the test villas - not removing them`);
+    await q(`DELETE FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId IN (${DMA})`);
+    await q(`DELETE FROM dbo.DependencyMasterActivity WHERE DependencyMasterId IN (${DM})`);
+    await q(`DELETE FROM dbo.DependencyMaster WHERE Id IN (${DM})`);
+    await q(`DELETE FROM dbo.RoomMaster WHERE UnitId IN (${U})`);
+    await q(`DELETE FROM dbo.RoomLayoutOverride WHERE UnitId IN (${U})`);
+    await q(`UPDATE dbo.PlotMaster SET ConvertedUnitId = NULL, ConvertedAt = NULL WHERE ConvertedUnitId IN (${U})`);
+    const n = await q(`DELETE FROM dbo.UnitMaster WHERE Id IN (${U})`);
+    await tx.commit();
+    return n;
+  } catch (e) {
+    await tx.rollback();
+    throw e;
+  }
+}
+
+module.exports = { cleanup, cleanupVillaUnits };
 
 if (require.main === module) {
   const BACKEND = path.join(__dirname, "..");

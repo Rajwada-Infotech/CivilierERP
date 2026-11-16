@@ -16,6 +16,7 @@ const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { floorsForBlock } = require("../services/projectFloors");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { sortNatural } = require("../utils/routeHelpers");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -363,6 +364,7 @@ router.get("/location-options", async (req, res) => {
     const pool = getPool();
     const blocks = (await pool.request().input("P", sql.Int, projectId).query(
       "SELECT Id AS id, BlockName AS name FROM dbo.BlockMaster WHERE ProjectId = @P AND IsActive = 1 ORDER BY BlockName")).recordset;
+    sortNatural(blocks, "name");
     const floors = blockId ? await floorsForBlock(pool, projectId, blockId) : [];
     res.json({ blocks, floors });
   } catch (err) {

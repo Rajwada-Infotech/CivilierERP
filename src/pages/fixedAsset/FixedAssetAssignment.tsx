@@ -12,6 +12,7 @@ import { INP, KEY_INK, KEY_LINE, RULE, ensureArray, fmt, fmtDate } from "./recor
 import { AssignmentForm } from "./assignment/AssignmentForm";
 import { AssignmentPanel, DeleteAssignmentDialog } from "./assignment/AssignmentPanel";
 import { UserMark } from "./assignment/pickers";
+import { naturalCompare } from "@/lib/utils";
 
 export default function FixedAssetAssignment() {
   const rights = usePageRights("fixed-asset-assignment");
@@ -29,7 +30,7 @@ export default function FixedAssetAssignment() {
   const projects = useMemo(() => {
     const m = new Map<number, string>();
     all.forEach((a) => a.ProjectId && m.set(a.ProjectId, a.ProjectName || `Project ${a.ProjectId}`));
-    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => naturalCompare(a.name, b.name));
   }, [all]);
   const rows = useMemo(
     () => all.filter((a) => (show === "all" || (show === "current") === !!a.IsCurrent) && (!projectId || String(a.ProjectId) === projectId)),

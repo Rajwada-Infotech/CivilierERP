@@ -51,6 +51,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { naturalCompare } from "@/lib/utils";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
@@ -1029,7 +1030,7 @@ const SupplierMaster: React.FC = () => {
           : sortField === "LHeadContactPerson"
             ? b.LHeadContactPerson
             : b.LHeadPhone) ?? "";
-      return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortAsc ? naturalCompare(av, bv) : naturalCompare(bv, av);
     });
   }, [suppliers, search, filterCategory, filterStatus, sortField, sortAsc]);
 

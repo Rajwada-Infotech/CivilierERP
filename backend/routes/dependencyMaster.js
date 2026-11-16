@@ -12,6 +12,7 @@ const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { sortNatural, naturalCompare } = require("../utils/routeHelpers");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dependency Master — a task scope (Project > Tower > Floor > Flat > Room)
@@ -62,7 +63,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
         WHERE ProjectId = @ProjectId AND IsActive = 1
         ORDER BY BlockName
       `);
-      return res.json(r.recordset);
+      return res.json(sortNatural(r.recordset, "label"));
     }
 
     if (level === "floor") {
@@ -88,7 +89,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
           const label = FloorNo === 0 ? "G" : String(FloorNo);
           return { id: label, label };
         }),
-        ...villas.recordset.filter((v) => v.Label).sort((a, b) => a.Label.localeCompare(b.Label, undefined, { numeric: true }))
+        ...villas.recordset.filter((v) => v.Label).sort((a, b) => naturalCompare(a.Label, b.Label))
           .map((v) => ({ id: v.Label, label: v.Label })),
       ]);
     }
@@ -105,7 +106,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
           SELECT u.Id AS id, u.UnitName AS label FROM dbo.UnitMaster u
           WHERE u.BlockId = @TowerId AND u.IsActive = 1 AND u.FloorNo IS NULL AND ${PLOT_LABEL_SQL} = @Label
           ORDER BY u.UnitName`);
-        return res.json(v.recordset);
+        return res.json(sortNatural(v.recordset, "label"));
       }
       const r = await pool.request().input("TowerId", sql.Int, towerId).input("FloorNo", sql.Int, floorNo).query(`
         SELECT Id AS id, UnitName AS label
@@ -113,7 +114,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
         WHERE BlockId = @TowerId AND FloorNo = @FloorNo AND IsActive = 1
         ORDER BY UnitName
       `);
-      return res.json(r.recordset);
+      return res.json(sortNatural(r.recordset, "label"));
     }
 
     if (level === "room") {

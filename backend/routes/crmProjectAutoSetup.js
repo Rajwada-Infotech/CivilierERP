@@ -20,6 +20,7 @@ const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
 const { getEffectiveType } = require("../services/projectType");
 const { assertProjectAllowed } = require("../services/projectScope");
+const { sortNatural } = require("../utils/routeHelpers");
 
 const PLOT_CONVERSION_TIMEOUT_MS = 120000;
 
@@ -1250,7 +1251,7 @@ router.get("/projects/:projectId/parking-slots", requirePageRight("crm-auto-proj
     const projectId = parseId(req.params.projectId);
     if (projectId === null) return res.status(400).json({ error: "Invalid project id" });
     const slots = await getPool().request().input("pid", sql.Int, projectId).query(parkingSlotsSql("s.ProjectId = @pid"));
-    res.json({ slots: slots.recordset });
+    res.json({ slots: sortNatural(slots.recordset, "BlockId", "SlotNo") });
   } catch (e) {
     console.error("[crm-project-auto-setup] GET /projects/:projectId/parking-slots error:", e.message);
     res.status(500).json({ error: e.message });
@@ -1523,7 +1524,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
           ORDER BY u.UnitName
         `);
     const units = await unitsQuery;
-    res.json({ units: units.recordset });
+    res.json({ units: sortNatural(units.recordset, "UnitName") });
   } catch (e) {
     console.error("[crm-project-auto-setup] GET /floors/:id/units error:", e.message);
     res.status(500).json({ error: e.message });
@@ -2314,7 +2315,7 @@ router.get("/blocks/:blockId/plots", requirePageRight("crm-auto-project-setup", 
       WHERE p.BlockId = @bid AND p.IsActive = 1
       ORDER BY p.PlotName
     `);
-    res.json({ plots: r.recordset });
+    res.json({ plots: sortNatural(r.recordset, "PlotName") });
   } catch (e) {
     console.error("[auto-setup] GET /blocks/:blockId/plots:", e.message);
     res.status(500).json({ error: e.message });

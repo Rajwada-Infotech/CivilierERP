@@ -18,6 +18,7 @@ const { recordGLPosting } = require("../services/approvalService");
 const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus, requireNotMidApproval, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn, gstOn } = require("../services/crmGst");
+const { sortNatural } = require("../utils/routeHelpers");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -597,7 +598,7 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
       `);
 
     const slotsByType = new Map();
-    for (const s of slots.recordset) {
+    for (const s of sortNatural(slots.recordset, "SlotNo")) {
       if (!slotsByType.has(s.ParkingType)) slotsByType.set(s.ParkingType, []);
       slotsByType.get(s.ParkingType).push({ Id: s.Id, SlotNo: s.SlotNo });
     }

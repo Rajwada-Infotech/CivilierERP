@@ -16,6 +16,7 @@ import { Block, Field, INP, KEY_INK, KEY_LINE, LBL, READ_ONLY, RULE, ensureArray
 import { MAINT_REFRESH, emptyForm, fmtAmt, localPostingPreview, round2, type FormState } from "./config";
 import { CodePicker, ItemPicker } from "./pickers";
 import { PostingTable } from "./PostingTable";
+import { naturalCompare } from "@/lib/utils";
 
 export function MaintenanceForm({ editingId, onClose }: { editingId: number | null; onClose: () => void }) {
   const qc = useQueryClient();
@@ -72,7 +73,7 @@ export function MaintenanceForm({ editingId, onClose }: { editingId: number | nu
     return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects).filter((p) => projectBelongsToCompany(p, form.companyId));
   }, [allProjects, form.companyId]);
   const itemNames = useMemo(
-    () => Array.from(new Set(ensureArray<FAMaintAsset>(assets).map((a) => a.AssetName))).sort(),
+    () => Array.from(new Set(ensureArray<FAMaintAsset>(assets).map((a) => a.AssetName))).sort(naturalCompare),
     [assets],
   );
   const vendorList = ensureArray<{ id: number; label: string; code: string | null }>(vendors);

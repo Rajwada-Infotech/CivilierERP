@@ -26,6 +26,7 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 const { actorId } = require("../services/saAccess");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { parseId } = require("../middleware/validateRequest");
+const { naturalCompare } = require("../utils/routeHelpers");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -123,7 +124,7 @@ async function constructionProgress(pool, projectIds) {
     const towers = [...T.entries()].filter(([k]) => k.startsWith(`${pid}:`)).map(([k, t]) => {
       const blockId = Number(k.split(":")[1]) || null;
       return { blockId, blockName: blockName.get(blockId) || null, ...line(t) };
-    }).sort((a, b) => String(a.blockName || "").localeCompare(String(b.blockName || "")));
+    }).sort((a, b) => naturalCompare(a.blockName, b.blockName)); // 1, 2, ... 10, not 1, 10, 2
     const flats = new Map([...F.entries()].filter(([k]) => k.startsWith(`${pid}:`)).map(([k, f]) => [Number(k.split(":")[1]), line(f)]));
     out.set(pid, { hasDpr: true, ...line(p), towers, flats });
   }
@@ -222,7 +223,7 @@ router.get("/progress/:projectId", requirePageRight("crm-construction-updates", 
     const units = [...g.flats.entries()]
       .map(([id, f]) => ({ unitId: id, unitName: unitNames.get(id)?.UnitName || `Unit ${id}`, blockId: unitNames.get(id)?.BlockId ?? null, pct: f.pct, now: f.now, next: f.next, works: f.works, done: f.done, moving: f.moving, late: f.late, steps: f.steps }))
       .filter((u) => !blockId || Number(u.blockId) === blockId)
-      .sort((a, b) => b.pct - a.pct || a.unitName.localeCompare(b.unitName));
+      .sort((a, b) => b.pct - a.pct || naturalCompare(a.unitName, b.unitName));
     const tower = blockId ? g.towers.find((t) => Number(t.blockId) === blockId) : null;
     if (blockId && !tower) return res.status(404).json({ error: "Block has no construction progress in this project" });
     const unit = unitId ? units.find((u) => Number(u.unitId) === unitId) : null;

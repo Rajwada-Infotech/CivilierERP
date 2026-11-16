@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { naturalCompare } from "@/lib/utils";
 
 export const inputCls =
   "w-full px-3 py-2.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none";
@@ -538,7 +539,7 @@ const WorkerAttendance: React.FC = () => {
   // down further — never an option that would empty it out.
   const floorOptions = useMemo(
     () =>
-      Array.from(new Set(activities.map((a: ActivityOption) => a.floor).filter((f): f is string => !!f))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      Array.from(new Set(activities.map((a: ActivityOption) => a.floor).filter((f): f is string => !!f))).sort(naturalCompare),
     [activities],
   );
   const activitiesForFloor = useMemo(

@@ -6,14 +6,13 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { naturalCompare } from "@/lib/utils";
 
 const PLOT_API = "/api/plot-master";
 const MAX_GRID = 60;
 const DEFAULT_COLS = 8;
 
 // "P-2" before "P-10". Used by the page and the editor so every list agrees on order.
-const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
-export const naturalCompare = (a: unknown, b: unknown) => collator.compare(String(a ?? ""), String(b ?? ""));
 export const plotOrder = (a: { PlotName: string; PlotNo: string }, b: { PlotName: string; PlotNo: string }) =>
   naturalCompare(a.PlotName, b.PlotName) || naturalCompare(a.PlotNo, b.PlotNo);
 

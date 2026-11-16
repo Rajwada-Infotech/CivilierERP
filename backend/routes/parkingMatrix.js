@@ -6,6 +6,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
+const { sortNatural } = require("../utils/routeHelpers");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -42,7 +43,7 @@ router.get("/blocks", requirePageRight("crm-parking-matrix", "view"), async (req
     query += projectPredicate(req.projectScope, "ProjectId");
     query += " ORDER BY BlockName";
     const result = await request.query(query);
-    res.json(result.recordset);
+    res.json(sortNatural(result.recordset, "BlockName"));
   } catch (err) {
     console.error("[parking-matrix] GET /blocks error:", err.message);
     res.status(500).json({ error: err.message });
@@ -98,7 +99,7 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
       ORDER BY s.SlotNo
     `);
 
-    const slots = result.recordset.map((r) => {
+    const slots = sortNatural(result.recordset, "SlotNo").map((r) => {
       // Two different "Booked" definitions depending on how this slot was
       // sold (see crmParking.js POST /standalone's Immediate flag):
       //   - Unit-linked (BookingId set): rides the SAME Approved+Milestone1

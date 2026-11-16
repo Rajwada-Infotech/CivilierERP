@@ -30,6 +30,7 @@ import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 import { isSuperAdminRole } from "@/contexts/auth.utils";
+import { naturalCompare } from "@/lib/utils";
 const API = "/api/room-master";
 
 const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
@@ -353,7 +354,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
     const m = new Map<string, string>();
     units.filter((u) => String(u.ProjectId) === projectId)
       .forEach((u) => m.set(String(u.BlockId), u.BlockName ?? `Block ${u.BlockId}`));
-    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    return [...m.entries()].sort((a, b) => naturalCompare(a[1], b[1]));
   }, [units, projectId]);
   const unitCount = units.filter((u) => String(u.ProjectId) === projectId && (!blockId || String(u.BlockId) === blockId)).length;
 
@@ -537,7 +538,7 @@ const fields: FieldDef[] = [
           if (u.BlockId != null) seen.set(String(u.BlockId), u.BlockName || `Block ${u.BlockId}`);
         });
       return Array.from(seen, ([value, label]) => ({ value, label }))
-        .sort((a, b) => a.label.localeCompare(b.label));
+        .sort((a, b) => naturalCompare(a.label, b.label));
     },
   },
   {
@@ -773,7 +774,7 @@ const RoomMaster: React.FC = () => {
   // Room Records as a tree: Project > Block > Floor > Unit > Rooms. Every
   // level collapsible, collapsed by default; counts roll up at each level.
   const roomTree = React.useMemo(() => {
-    const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    const natural = naturalCompare;
     const projects = new Map<string, { key: string; name: string; blocks: Map<string, { key: string; name: string; floors: Map<string, { key: string; floorNo: number | null; units: UnitRoomGroup[] }> }> }>();
     for (const g of roomGroups) {
       if (!projects.has(g.projectId)) projects.set(g.projectId, { key: `p:${g.projectId}`, name: g.projectName || `Project #${g.projectId}`, blocks: new Map() });
@@ -830,7 +831,7 @@ const RoomMaster: React.FC = () => {
     for (const u of units) if (u.bhkType) counts.set(u.bhkType, (counts.get(u.bhkType) || 0) + 1);
     return [...counts.entries()].map(([label, n]) => typeByLabel.get(label) && ({
       layoutTypeId: typeByLabel.get(label)!.id, label, units: n, global: typeByLabel.get(label)!.composition ?? [],
-    })).filter(Boolean).sort((a, b) => (a as NodeType).label.localeCompare((b as NodeType).label, undefined, { numeric: true })) as NodeType[];
+    })).filter(Boolean).sort((a, b) => naturalCompare((a as NodeType).label, (b as NodeType).label)) as NodeType[];
   }, [typeByLabel]);
 
   // What each type gets AT this level (ignoring exceptions below it).

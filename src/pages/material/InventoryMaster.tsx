@@ -12,6 +12,7 @@ import { DeleteDialog } from "./inventoryMaster/DeleteDialog";
 import { GodownStockPanel } from "./inventoryMaster/GodownStockPanel";
 import { GodownCard } from "./inventoryMaster/GodownCard";
 import { EmptyState } from "./inventoryMaster/EmptyState";
+import { naturalCompare } from "@/lib/utils";
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function InventoryMaster() {
@@ -41,7 +42,7 @@ export default function InventoryMaster() {
 
   // Sort alphabetically
   const sorted = [...filtered].sort((a, b) => {
-    return a.GodownName.localeCompare(b.GodownName);
+    return naturalCompare(a.GodownName, b.GodownName);
   });
 
   const handleEdit = (g: Godown) => {

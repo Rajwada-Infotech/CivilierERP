@@ -14,6 +14,7 @@ import { todayLocal } from "./tagging/config";
 import { TransferForm } from "./transfer/TransferForm";
 import { DeleteTransferDialog, TransferPanel } from "./transfer/TransferPanel";
 import { UserMark } from "./assignment/pickers";
+import { naturalCompare } from "@/lib/utils";
 
 export default function AssetTransfer() {
   const rights = usePageRights("asset-transfer");
@@ -30,7 +31,7 @@ export default function AssetTransfer() {
   const projects = useMemo(() => {
     const m = new Map<number, string>();
     all.forEach((t) => t.ProjectId && m.set(t.ProjectId, t.ProjectName || `Project ${t.ProjectId}`));
-    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => naturalCompare(a.name, b.name));
   }, [all]);
   const rows = useMemo(() => all.filter((t) => (!projectId || String(t.ProjectId) === projectId) && (!finYear || t.FinYear === finYear)), [all, projectId, finYear]);
 

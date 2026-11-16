@@ -5,6 +5,7 @@ import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Warehouse, ClipboardList } from "lucide-react";
 import { type ExportColumn } from "@/lib/export";
+import { naturalCompare } from "@/lib/utils";
 
 export const ISSUES_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "DocNo" },
@@ -210,7 +211,7 @@ export function WorkOrderComparePanel({
         else state = balance < 0 ? "over" : balance === 0 ? "done" : "left";
         return { ...r, balance, state };
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => naturalCompare(a.name, b.name));
   }, [data, cart]);
 
   const listed = rows.filter((r) => r.woQty > 0);

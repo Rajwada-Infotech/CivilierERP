@@ -10,6 +10,7 @@ const { requireAnyPageRight } = require("../middleware/requirePageRight");
 const { getPool, sql } = require("../db");
 const { getParkingSlotLockReason, getParkingSlotHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { PARKING_TYPES } = require("../constants/parkingTypes");
+const { sortNatural } = require("../utils/routeHelpers");
 
 bumpCacheVersion("parking-slot-master").catch(() => {});
 
@@ -42,7 +43,7 @@ router.get("/", cache("parking-slot-master", 300), async (req, res) => {
       ${req.projectScope ? `WHERE ${require("../services/projectScope").projectPredicate(req.projectScope, "s.ProjectId", "").trim()}` : ""}
       ORDER BY e.name, b.BlockName, s.SlotNo
     `);
-    res.json(result.recordset);
+    res.json(sortNatural(result.recordset, "ProjectName", "BlockName", "SlotNo"));
   } catch (err) {
     console.error("[parking-slot-master] GET error:", err.message);
     res.status(500).json({ error: err.message });

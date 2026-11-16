@@ -29,6 +29,7 @@ import {
 import { DateInput } from "@/components/ui/date-input";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { useInSheet } from "@/components/sheet/useInSheet";
+import { naturalCompare } from "@/lib/utils";
 
 export interface FieldDef {
   name: string;
@@ -672,7 +673,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     const an = Number(av), bn = Number(bv);
     const cmp = (Number.isFinite(an) && Number.isFinite(bn) && av !== "" && bv !== "")
       ? an - bn
-      : String(av).localeCompare(String(bv), undefined, { numeric: true });
+      : naturalCompare(av, bv);
     return sortDir === "asc" ? cmp : -cmp;
   });
 

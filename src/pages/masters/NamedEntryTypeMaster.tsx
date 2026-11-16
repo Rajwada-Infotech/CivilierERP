@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { Tag } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { SheetShell } from "@/components/sheet/Sheet";
+import { naturalCompare } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface DbEntryType {
@@ -221,7 +222,7 @@ const NamedEntryTypeMaster: React.FC = () => {
     return projectsData
       .filter((p: any) => p?.id && p?.name)
       .map((p: any) => ({ value: String(p.id), label: p.name }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+      .sort((a, b) => naturalCompare(a.label, b.label));
   }, [projectsData]);
 
   // Entry type options come exclusively from Menu Master — no hardcoded fallback.

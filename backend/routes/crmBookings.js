@@ -45,6 +45,7 @@ const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, ge
 const { logStatusChange, advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 const { getBookingFunding, onAccountWithAvailableSql } = require("../services/crmPaymentFunding");
 const { requireApprover } = require("../middleware/requireApprover");
+const { sortNatural } = require("../utils/routeHelpers");
 // Data Review (checklist + Verify & Send for Approval): whoever Approval Setup names for
 // "crm-booking-verification", or a super admin. Fixing a flagged item (resubmit) stays with Edit.
 const VERIFY = requireApprover("crm-booking-verification", "a booking's data review");
@@ -425,7 +426,7 @@ router.get("/villa-offers", requirePageRight("crm-bookings", "view"), async (req
                           AND va.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted'))
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmUnitResale r WHERE r.PlotId = p.Id AND r.IsActive = 1 AND r.Status NOT IN (N'Completed', N'Cancelled'))
       ORDER BY e.name, u.UnitName`)).recordset;
-    res.json(rows);
+    res.json(sortNatural(rows, "ProjectName", "UnitName"));
   } catch (e) {
     console.error("[crm-bookings] GET villa-offers error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -675,7 +676,7 @@ router.get("/:id/unit-change-units", requirePageRight("crm-bookings", "view"), a
     const { unitChangeRate } = require("../services/crmEntityCreation");
     res.json({
       projectId, currentUnitValue: bk.TotalValue,
-      units: rows.map((u) => {
+      units: sortNatural(rows, "BlockName", "FloorNo", "UnitName").map((u) => {
         const rate = unitChangeRate({ unitRate: u.RatePerSqFt, bookingRate: bk.RatePerSqFt });
         return { id: u.Id, unitNo: u.UnitName, blockName: u.BlockName, unitType: u.UnitType, floorNo: u.FloorNo, areaSqFt: u.AreaSqFt,
           ratePerSqFt: rate, ownRate: u.RatePerSqFt != null && Number(u.RatePerSqFt) > 0,
