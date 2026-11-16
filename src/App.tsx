@@ -156,6 +156,7 @@ const DesignationMaster = lazy(() => import("./pages/hrpayroll/DesignationMaster
 const CandidateMaster = lazy(() => import("./pages/hrpayroll/CandidateMaster"));
 const ShiftMaster = lazy(() => import("./pages/hrpayroll/ShiftMaster"));
 const GraceTimeMaster = lazy(() => import("./pages/hrpayroll/GraceTimeMaster"));
+const WorkLocationMaster = lazy(() => import("./pages/hrpayroll/WorkLocationMaster"));
 const HolidayMaster = lazy(() => import("./pages/hrpayroll/HolidayMaster"));
 const DeductionAdditionMaster = lazy(() => import("./pages/hrpayroll/DeductionAdditionMaster"));
 const SalaryStructure = lazy(() => import("./pages/hrpayroll/SalaryStructure"));
@@ -1190,6 +1191,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="grace-time-master">
             <GraceTimeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/work-location-master"
+        element={
+          <ProtectedRoute pageKey="work-location-master">
+            <WorkLocationMaster />
           </ProtectedRoute>
         }
       />
