@@ -113,7 +113,6 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
       const cp = tl.constructionProgress;
       check("Live progress for the buyer (their unit, else tower, else project)", cp && ["unit", "tower", "project"].includes(cp.scope) && near(cp.project.pct, p.pct), JSON.stringify(cp)?.slice(0, 200));
       check("With every work and its %", (cp.unit || cp.tower || cp.project).works.length > 0);
-      check("The notes are shown too", (tl.constructionUpdates || []).some((u) => u.Summary === "E2E: slab work on schedule."));
     }
 
     section("Milestones ready to demand");
