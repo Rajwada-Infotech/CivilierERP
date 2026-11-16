@@ -18,6 +18,7 @@
 //   • HR corrections require a reason and are written to EmployeeAttendanceAudit.
 
 const { sql } = require("../db");
+const { bumpCacheVersion } = require("../redis");
 
 const STALE_HOURS = 18;
 const IST_OFFSET_MIN = 330;
@@ -185,6 +186,45 @@ async function audit(pool, { attendanceId, employeeId, action, detail, reason, b
     .query(`INSERT INTO dbo.EmployeeAttendanceAudit (AttendanceId, EmployeeId, Action, Detail, Reason, ChangedBy) VALUES (@A, @E, @Act, @D, @R, @By)`);
 }
 
+// ─── Keep Attendance Records (the payroll sheet) in step with punches ────────
+
+const hhmmIst = (d) => new Date(new Date(d).getTime() + IST_OFFSET_MIN * 60_000).toISOString().slice(11, 16);
+
+/**
+ * Makes dbo.AttendanceRecord (migration 672) show this employee's punch for `date` (IST YYYY-MM-DD): a 'Punch' row is
+ * created / updated to Present with the In and Out time, or removed if the punch is gone. A row somebody entered by hand
+ * (Source 'Manual') is never changed. Never throws -- the punch itself has already succeeded.
+ */
+async function syncAttendanceRecord(pool, employeeId, date) {
+  try {
+    const punch = (await pool.request().input("E", sql.Int, employeeId).input("D", sql.Date, date)
+      .query("SELECT InTime, OutTime FROM dbo.EmployeeAttendance WHERE EmployeeId = @E AND AttendanceDate = @D")).recordset[0];
+    const row = (await pool.request().input("E", sql.Int, employeeId).input("D", sql.Date, date)
+      .query("SELECT AttendanceId, Source FROM dbo.AttendanceRecord WHERE EmployeeId = @E AND AttendanceDate = @D")).recordset[0];
+    if (!punch) {
+      if (row?.Source === "Punch") await pool.request().input("Id", sql.Int, row.AttendanceId).query("DELETE FROM dbo.AttendanceRecord WHERE AttendanceId = @Id");
+    } else if (!row) {
+      await pool.request().input("E", sql.Int, employeeId).input("D", sql.Date, date)
+        .input("In", sql.NVarChar(10), hhmmIst(punch.InTime)).input("Out", sql.NVarChar(10), punch.OutTime ? hhmmIst(punch.OutTime) : null)
+        .query(`INSERT INTO dbo.AttendanceRecord (EmployeeId, AttendanceDate, Status, CheckIn, CheckOut, Remarks, IsActive, Source)
+                VALUES (@E, @D, N'Present', @In, @Out, N'Employee punch', 1, N'Punch')`);
+    } else if (row.Source === "Punch") {
+      await pool.request().input("Id", sql.Int, row.AttendanceId)
+        .input("In", sql.NVarChar(10), hhmmIst(punch.InTime)).input("Out", sql.NVarChar(10), punch.OutTime ? hhmmIst(punch.OutTime) : null)
+        .query("UPDATE dbo.AttendanceRecord SET Status = N'Present', CheckIn = @In, CheckOut = @Out, IsActive = 1, UpdatedAt = SYSUTCDATETIME() WHERE AttendanceId = @Id");
+    }
+    await bumpCacheVersion("attendance-record");
+  } catch (err) {
+    console.warn("[employeeAttendance] attendance-record sync:", err.message);
+  }
+}
+
+async function syncById(pool, attendanceId) {
+  const r = (await pool.request().input("Id", sql.Int, attendanceId)
+    .query("SELECT EmployeeId, CONVERT(NVARCHAR(10), AttendanceDate, 23) AS D FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id")).recordset[0];
+  if (r) await syncAttendanceRecord(pool, r.EmployeeId, r.D);
+}
+
 // ─── Employee self-service ───────────────────────────────────────────────────
 
 /** The Employee Master record of the logged-in user, matched on e-mail. */
@@ -311,6 +351,7 @@ async function clockIn(pool, user, { projectId, evidence, requireEvidence } = {}
       VALUES (@E, CAST(DATEADD(MINUTE, ${IST_OFFSET_MIN}, @now) AS DATE), @now, @P, @Photo, @Lat, @Lng, @Acc)
     `);
     await audit(pool, { attendanceId: r.recordset[0].AttendanceId, employeeId: employee.EmployeeId, action: "IN", by: user.email });
+    await syncById(pool, r.recordset[0].AttendanceId);
   } catch (e) {
     if (isUnique(e)) throw new AttendanceError("In Time for today is already recorded.");
     throw e;
@@ -340,6 +381,7 @@ async function clockOut(pool, user, { evidence, requireEvidence } = {}) {
     throw e;
   }
   await audit(pool, { attendanceId: state.current.attendanceId, employeeId: employee.EmployeeId, action: "OUT", by: user.email });
+  await syncById(pool, state.current.attendanceId);
   return getMyState(pool, user);
 }
 
@@ -521,6 +563,8 @@ async function hrUpdateRecord(pool, attendanceId, { inTime, outTime, reason }, a
     throw e;
   }
   await audit(pool, { attendanceId, employeeId: rec.EmployeeId, action: "HR_EDIT", detail: changes.join("; "), reason: why, by: actor });
+  await syncAttendanceRecord(pool, rec.EmployeeId, istDate(rec.InTime)); // the old day (if the In Time moved to another)
+  await syncById(pool, attendanceId);
   return getRecord(pool, attendanceId);
 }
 
@@ -596,6 +640,7 @@ async function hrDeleteRecord(pool, attendanceId, { reason }, actor) {
     DELETE FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id;
   `);
   await audit(pool, { attendanceId, employeeId: rec.EmployeeId, action: "HR_DELETE", detail, reason: why, by: actor });
+  await syncAttendanceRecord(pool, rec.EmployeeId, istDate(rec.InTime));
 }
 
 module.exports = {
