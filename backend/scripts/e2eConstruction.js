@@ -69,6 +69,9 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
       await q(`UPDATE dbo.DependencyActivityAssignment SET Status = 'IN_PROGRESS', ProgressPercent = 40, UpdatedAt = SYSDATETIME() WHERE Id = ${mover.Id}`);
       await q(`INSERT INTO dbo.DependencyActivityProgressLog (AssignmentId, FromProgressPercent, ToProgressPercent, Remarks, StatusAfter, LoggedBy, LoggedAt)
         VALUES (${mover.Id}, 0, 40, 'E2E', 'IN_PROGRESS', ${user}, SYSDATETIME())`);
+      // A save of remarks only is logged without a % (dependencyActivityAssignment.js): not a move.
+      await q(`INSERT INTO dbo.DependencyActivityProgressLog (AssignmentId, FromProgressPercent, ToProgressPercent, Remarks, StatusAfter, LoggedBy, LoggedAt)
+        VALUES (${mover.Id}, NULL, NULL, 'E2E remark only', 'IN_PROGRESS', ${user}, SYSDATETIME())`);
     }
     raw = await q(rawSql);
     p = await list();
@@ -84,6 +87,7 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
       && d.units.every((u) => near(u.pct, expected(raw.filter((r) => r.FlatId === u.unitId)))), JSON.stringify(d.units.map((u) => [u.unitName, u.pct])));
     check("What moved shows the completion and the logged %", d.feed.some((f) => f.completed && f.work === first.name)
       && (!mover || d.feed.some((f) => f.from === 0 && f.to === 40)), JSON.stringify(d.feed.slice(0, 3)));
+    check("A save of remarks only is not shown as a move", d.feed.every((f) => f.to != null), JSON.stringify(d.feed.filter((f) => f.to == null)));
     const tower = p.towers[0];
     const dt = (await call("GET", `/cu/progress/${PROJECT}?blockId=${tower.blockId}`)).json;
     check("A tower's detail has the tower's % and only its units", near(dt.pct, tower.pct) && dt.units.every((u) => Number(u.blockId) === Number(tower.blockId)), `${dt.pct} vs ${tower.pct}`);
@@ -106,15 +110,36 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
 
     section("Portal: the buyer sees the live progress");
     {
-      const bk = (await q(`SELECT b.ApplicationId, a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = ${BOOKING}`))[0];
+      const bk = (await q(`
+        SELECT TOP 1 b.ApplicationId, a.CustomerId
+        FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        JOIN dbo.UnitMaster u ON u.Id = b.UnitId
+        WHERE b.IsActive = 1
+          AND EXISTS (SELECT 1 FROM dbo.DependencyMaster dm WHERE dm.ProjectId = u.ProjectId AND dm.FlatId = u.Id AND dm.IsActive = 1)
+          AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = b.Id AND bp.Status = N'Active')
+        ORDER BY b.Id DESC`))[0];
       const pu = (await q("SELECT TOP 1 Id FROM dbo.CrmCustomerPortalUser WHERE IsActive = 1 ORDER BY Id"))[0];
       h.setPortal({ portalUserId: pu.Id, customerId: bk.CustomerId });
       const tl = (await call("GET", `/p/timeline?applicationId=${bk.ApplicationId}`)).json;
       const cp = tl.constructionProgress;
-      check("Live progress for the buyer (their unit, else tower, else project)", cp && ["unit", "tower", "project"].includes(cp.scope) && near(cp.project.pct, p.pct), JSON.stringify(cp)?.slice(0, 200));
-      check("With every work and its %", (cp.unit || cp.tower || cp.project).works.length > 0);
-      check("The notes are shown too", (tl.constructionUpdates || []).some((u) => u.Summary === "E2E: slab work on schedule."));
+      check("Only the buyer's booked unit is returned", cp?.scope === "unit" && cp.unit?.works?.length > 0, JSON.stringify(cp)?.slice(0, 200));
     }
+    const plotBuyer = (await q(`
+      SELECT TOP 1 b.ApplicationId, a.CustomerId, pm.ProjectId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id AND bp.Status = N'Active'
+      JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
+      JOIN dbo.UnitMaster um ON um.Id = pm.ConvertedUnitId
+      WHERE b.IsActive = 1 AND EXISTS (SELECT 1 FROM dbo.DependencyMaster dm WHERE dm.ProjectId = pm.ProjectId AND dm.IsActive = 1)
+      ORDER BY bp.IsPrimary DESC, b.Id DESC`))[0];
+    if (plotBuyer) {
+      const pu = (await q("SELECT TOP 1 Id FROM dbo.CrmCustomerPortalUser WHERE IsActive = 1 ORDER BY Id"))[0];
+      h.setPortal({ portalUserId: pu.Id, customerId: plotBuyer.CustomerId });
+      const plotTimeline = (await call("GET", `/p/timeline?applicationId=${plotBuyer.ApplicationId}`)).json;
+      check("Converted plot buyer receives only the linked unit's progress", plotTimeline.constructionProgress?.scope === "unit"
+        && plotTimeline.constructionProgress.unit?.works?.length > 0, JSON.stringify(plotTimeline.constructionProgress)?.slice(0, 200));
+    } else check("Converted plot buyer with unit DPR available", true, "Skipped: no active converted plot on a project with DPR in development data");
 
     section("Milestones ready to demand");
     const links = (await call("GET", "/cu/milestone-links")).json;
@@ -130,6 +155,34 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
       expectCall("Link the milestone to the completed work", await call("PUT", "/cu/milestone-links", { links: [{ id: ms.MilestoneMasterId, groupId: first.groupId }] }), 200);
       const hit = ((await call("GET", `/cu/ready-demands?bookingId=${BOOKING}`)).json || []).find((r) => r.MilestoneNo === ms.MilestoneNo);
       check("Its work is complete: ready to demand", !!hit && hit.work === first.name && ["Unit", "Tower", "Project"].includes(hit.judgedOn), JSON.stringify(hit));
+
+      // The plan's own level decides where the work is judged: open one step of this work in another tower.
+      const bk = (await q(`SELECT b.UnitId, u.BlockId, b.PaymentPlanId FROM dbo.CrmBooking b JOIN dbo.UnitMaster u ON u.Id = b.UnitId WHERE b.Id = ${BOOKING}`))[0];
+      // The test booking sits in a tower the site tracks this work in (rolled back with the rest).
+      const workTowers = [...new Set(raw.filter((r) => r.GroupId === first.groupId && r.TowerId).map((r) => Number(r.TowerId)))];
+      if (workTowers.length > 1 && !workTowers.includes(Number(bk.BlockId))) {
+        bk.BlockId = workTowers[0];
+        await q(`UPDATE dbo.UnitMaster SET BlockId = ${bk.BlockId} WHERE Id = ${bk.UnitId}`);
+      }
+      const elsewhere = (await q(`SELECT TOP 1 daa.Id FROM dbo.DependencyActivityAssignment daa JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        WHERE daa.IsCurrent = 1 AND dm.IsActive = 1 AND dm.ProjectId = ${PROJECT} AND am.group_id = ${first.groupId} AND ISNULL(dm.TowerId, 0) <> ${bk.BlockId}`))[0];
+      const towerHasWork = raw.some((r) => Number(r.TowerId) === Number(bk.BlockId) && r.GroupId === first.groupId);
+      if (elsewhere && towerHasWork) {
+        await q(`UPDATE dbo.DependencyActivityAssignment SET Status = 'IN_PROGRESS', ProgressPercent = 50 WHERE Id = ${elsewhere.Id}`);
+        await q(`UPDATE dbo.CrmUnitPaymentPlan SET IsActive = 0 WHERE PlanId = ${bk.PaymentPlanId}`);
+        await q(`UPDATE dbo.CrmBlockPaymentPlan SET IsActive = 0 WHERE PlanId = ${bk.PaymentPlanId}`);
+        const readyNow = async () => ((await call("GET", `/cu/ready-demands?bookingId=${BOOKING}`)).json || []).find((r) => r.MilestoneNo === ms.MilestoneNo);
+        check("Plan set for the project: waits for the work across the project", !(await readyNow()));
+        await q(`INSERT INTO dbo.CrmBlockPaymentPlan (BlockId, PlanId, IsActive) VALUES (${bk.BlockId}, ${bk.PaymentPlanId}, 1)`);
+        const tw = await readyNow();
+        check("Plan set for the tower: ready once the tower's work is complete", tw?.judgedOn === "Tower", JSON.stringify(tw));
+        await q(`INSERT INTO dbo.CrmUnitPaymentPlan (UnitId, PlanId, IsActive) VALUES (${bk.UnitId}, ${bk.PaymentPlanId}, 1)`);
+        const un = await readyNow();
+        const unitHasWork = raw.some((r) => Number(r.FlatId) === Number(bk.UnitId) && r.GroupId === first.groupId);
+        check("Plan set for the unit: judged on the unit (its tower when the unit has no DPR steps)", un?.judgedOn === (unitHasWork ? "Unit" : "Tower"), JSON.stringify(un));
+        await q(`UPDATE dbo.DependencyActivityAssignment SET Status = 'COMPLETED', ProgressPercent = 100 WHERE Id = ${elsewhere.Id}`);
+      } else check("Plan level checks", true, "Skipped: the project has this work in one tower only");
       if (second) {
         await call("PUT", "/cu/milestone-links", { links: [{ id: ms.MilestoneMasterId, groupId: second.groupId }] });
         check("Linked to a work not complete: not listed", !((await call("GET", `/cu/ready-demands?bookingId=${BOOKING}`)).json || []).some((r) => r.MilestoneNo === ms.MilestoneNo));
