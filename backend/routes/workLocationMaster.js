@@ -98,6 +98,7 @@ router.delete("/:id", pageRightByMethod("work-location-master"), async (req, res
     await bumpCacheVersion("work-location-master");
     res.json({ message: `Work location "${ex.recordset[0].LocationName}" deleted successfully` });
   } catch (err) {
+    if (err.number === 547) return res.status(409).json({ error: "This work location is assigned to employees. Set it Inactive instead of deleting it, or move those employees first." });
     console.error("[work-location-master] DELETE error:", err.message);
     res.status(500).json({ error: err.message });
   }

@@ -21,6 +21,8 @@ export interface EmployeeRow {
   Department: string | null;
   Designation: string | null;
   BranchLocation: string | null;
+  WorkLocationId: number | null;
+  WorkLocationName: string | null;
   ReportingManagerId: number | null;
   ReportingManagerName: string | null;
   EmploymentType: string | null;
@@ -69,6 +71,7 @@ export interface EmployeePayload {
   Department?: string | null;
   Designation?: string | null;
   BranchLocation?: string | null;
+  WorkLocationId?: number | null;
   ReportingManagerId?: number | null;
   EmploymentType?: string | null;
   GradeLevel?: string | null;

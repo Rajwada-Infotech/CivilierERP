@@ -26,6 +26,7 @@ import { getCostCenterOptions } from "@/api/costCenterApi";
 import { getUnlinkedEmployeeCandidates, type UnlinkedEmployeeCandidate } from "@/api/offerLetterApi";
 import { getSalaryStructureFamilies } from "@/api/salaryStructureApi";
 import { getDepartmentOptions } from "@/api/departmentMasterApi";
+import { getWorkLocations } from "@/api/workLocationMasterApi";
 import { getDesignations } from "@/api/designationMasterApi";
 import { Wallet3 } from "iconsax-react";
 import { BodyPortal } from "@/components/ui/body-portal";
@@ -54,6 +55,8 @@ const mapRow = (r: EmployeeRow): RecordWithId => ({
   department: r.Department || "",
   designation: r.Designation || "",
   branchLocation: r.BranchLocation || "",
+  workLocationId: r.WorkLocationId ? String(r.WorkLocationId) : "",
+  workLocationName: r.WorkLocationName || "-",
   reportingManagerId: r.ReportingManagerId ? String(r.ReportingManagerId) : "",
   reportingManagerName: r.ReportingManagerName || "-",
   employmentType: r.EmploymentType || "",
@@ -98,6 +101,7 @@ const toPayload = (form: Record<string, unknown>): EmployeePayload => ({
   Department: (form.department as string) || null,
   Designation: (form.designation as string) || null,
   BranchLocation: (form.branchLocation as string) || null,
+  WorkLocationId: form.workLocationId ? Number(form.workLocationId) : null,
   ReportingManagerId: form.reportingManagerId ? Number(form.reportingManagerId) : null,
   EmploymentType: (form.employmentType as string) || null,
   GradeLevel: (form.gradeLevel as string) || null,
@@ -464,6 +468,13 @@ export default function EmployeeMaster() {
         return Array.from(new Set(names)).map((n) => ({ value: n, label: n }));
       },
     },
+    {
+      name: "workLocationId", label: "Work Location", type: "select",
+      asyncOptions: async () =>
+        (await queryClient.fetchQuery({ queryKey: ["work-location-master"], queryFn: getWorkLocations, staleTime: 60 * 1000 }))
+          // Inactive ones stay listed (marked) so an employee already placed there keeps showing it.
+          .map((l) => ({ value: String(l.LocationId), label: l.LocationName + " (" + l.LocationCode + ")" + (l.IsActive ? "" : " - inactive") })),
+    },
     { name: "branchLocation", label: "Branch / Location", type: "text" },
     {
       name: "reportingManagerId",
@@ -529,6 +540,7 @@ export default function EmployeeMaster() {
     { key: "candidateCode", label: "Candidate", hideOnMobile: true, sortable: false },
     { key: "designation", label: "Designation", hideOnMobile: true },
     { key: "department", label: "Department", hideOnMobile: true },
+    { key: "workLocationName", label: "Work Location", hideOnMobile: true, sortable: false },
     { key: "employmentType", label: "Type", hideOnMobile: true },
     { key: "reportingManagerName", label: "Reporting To", hideOnMobile: true, sortable: false },
     { key: "documents", label: "Documents", sortable: false },
@@ -653,6 +665,7 @@ export default function EmployeeMaster() {
               { header: "Company", accessor: "companyName" },
               { header: "Department", accessor: "department" },
               { header: "Designation", accessor: "designation" },
+              { header: "Work Location", accessor: "workLocationName" },
               { header: "Branch / Location", accessor: "branchLocation" },
               { header: "Reporting To", accessor: "reportingManagerName" },
               { header: "Employment Type", accessor: "employmentType" },
