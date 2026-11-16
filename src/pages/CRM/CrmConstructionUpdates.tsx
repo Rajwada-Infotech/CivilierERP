@@ -202,16 +202,46 @@ const CrmConstructionUpdates: React.FC = () => {
               </div>
               {detailQ.isError && <div className="bg-card px-5 py-4 text-sm text-destructive" style={{ border: RULE }}>{(detailQ.error as Error).message}</div>}
               <div className="bg-card" style={{ border: RULE }}>
-                <div className="statrow four px-4 py-4 sm:px-5">
-                  {[
-                    { label: "Construction tasks", value: detail?.steps ?? selected.steps ?? 0, note: "Tasks being tracked" },
-                    { label: "Finished", value: detail?.done ?? selected.done ?? 0, note: "Tasks completed" },
-                    { label: "Underway", value: detail?.moving ?? selected.moving ?? 0, note: "Tasks currently active" },
-                    selectedBlockId || selectedUnitId
-                      ? { label: "Tasks remaining", value: Math.max(0, Number(detail?.steps ?? selected.steps ?? 0) - Number(detail?.done ?? selected.done ?? 0)), note: "Not yet finished" }
-                      : { label: "Behind schedule", value: detail?.late ?? selected.late ?? 0, note: "Past planned finish date" },
-                  ].map((metric) => <div key={metric.label}><span className="label">{metric.label}</span><div className="figure mt-2 text-2xl">{metric.value.toLocaleString("en-IN")}</div><div className="mt-1 text-xs text-muted-foreground">{metric.note}</div></div>)}
-                </div>
+                {(() => {
+                  // Figures follow the hierarchy: a project counts its blocks and units, a block its units, a unit its tasks.
+                  const steps = Number(detail?.steps ?? selected.steps ?? 0);
+                  const done = Number(detail?.done ?? selected.done ?? 0);
+                  const moving = Number(detail?.moving ?? selected.moving ?? 0);
+                  const tally = (items: any[]) => ({
+                    total: items.length,
+                    done: items.filter((x) => pct(x.pct) >= 100).length,
+                    moving: items.filter((x) => pct(x.pct) < 100 && (pct(x.pct) > 0 || Number(x.moving) > 0)).length,
+                  });
+                  const level = (label: string, t: { total: number; done: number; moving: number }) =>
+                    ({ label, value: t.total, note: `${t.done.toLocaleString("en-IN")} finished · ${t.moving.toLocaleString("en-IN")} underway`, bar: t.total ? (t.done / t.total) * 100 : 0 });
+                  const blocks = (detail?.towers ?? selected.towers ?? []).filter((tower: any) => tower.blockId != null);
+                  const units = detail?.units ?? [];
+                  const tasks = level("Construction tasks", { total: steps, done, moving });
+                  const metrics: { label: string; value: number; note: string; bar?: number }[] = selectedUnitId ? [
+                    { label: "Construction tasks", value: steps, note: "Tasks being tracked" },
+                    { label: "Finished", value: done, note: "Tasks completed", bar: steps ? (done / steps) * 100 : 0 },
+                    { label: "Underway", value: moving, note: "Tasks currently active" },
+                    { label: "Tasks remaining", value: Math.max(0, steps - done), note: "Not yet finished" },
+                  ] : [
+                    ...(!selectedBlockId && blocks.length ? [level("Blocks", tally(blocks))] : []),
+                    ...(units.length ? [level("Units", tally(units))] : []),
+                    tasks,
+                    selectedBlockId
+                      ? { label: "Tasks remaining", value: Math.max(0, steps - done), note: "Not yet finished" }
+                      : { label: "Behind schedule", value: Number(detail?.late ?? selected.late ?? 0), note: "Past planned finish date" },
+                  ];
+                  const cols = ["", "", "", "", "four", "five"][metrics.length] ?? "";
+                  return (
+                    <div className={`statrow ${cols} px-4 py-4 sm:px-5`}>
+                      {metrics.map((metric) => <div key={metric.label}>
+                        <span className="label">{metric.label}</span>
+                        <div className="figure mt-2 text-2xl">{metric.value.toLocaleString("en-IN")}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{metric.note}</div>
+                        {metric.bar != null && <ProgressBar value={metric.bar} className="mt-2 h-1" />}
+                      </div>)}
+                    </div>
+                  );
+                })()}
               </div>
 
               <section className="bg-card" style={{ border: RULE }}>
