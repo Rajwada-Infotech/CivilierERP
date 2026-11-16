@@ -135,6 +135,9 @@ async function constructionProgress(pool, projectIds) {
 /**
  * What moved on site: every % change a site engineer recorded (DPR progress log) and steps completed, newest first.
  * Scoped to a project, and optionally one tower or one flat.
+ * The DPR daily log (DependencyActivityDailyLog) is written by the same save as the progress log
+ * (dependencyActivityAssignment.js), as one snapshot per day: reading it too would show each change twice. A save of
+ * remarks only is logged without a % and is not a move.
  */
 async function siteFeed(pool, { projectId, blockId = null, unitId = null, days = 14, top = 40 }) {
   const r = await pool.request().input("pid", sql.Int, projectId).input("bid", sql.Int, blockId).input("uid", sql.Int, unitId)
@@ -143,6 +146,7 @@ async function siteFeed(pool, { projectId, blockId = null, unitId = null, days =
       SELECT l.LoggedAt AS At, l.FromProgressPercent AS FromPct, l.ToProgressPercent AS ToPct, l.StatusAfter AS Status, daa.DependencyMasterActivityId AS RungId
       FROM dbo.DependencyActivityProgressLog l JOIN dbo.DependencyActivityAssignment daa ON daa.Id = l.AssignmentId
       WHERE l.LoggedAt >= DATEADD(DAY, -@days, SYSDATETIME())
+        AND l.ToProgressPercent IS NOT NULL AND ISNULL(l.FromProgressPercent, -1) <> l.ToProgressPercent
       UNION ALL
       -- Steps completed without a progress entry for it (finished in one go).
       SELECT daa.UpdatedAt, NULL, 100, daa.Status, daa.DependencyMasterActivityId
@@ -285,8 +289,10 @@ router.put("/milestone-links", requirePageRight("crm-construction-updates", "edi
 
 /**
  * Payment milestones whose DPR work is complete and are not demanded or paid yet. A booking milestone reaches its
- * milestone master through the booking's plan template item. The work is judged on the booking's unit when the site
- * tracks that work there, else on its tower, else on the project.
+ * milestone master through the booking's plan template item. The work is judged at the level the booking's payment
+ * plan was set for (the same tags getApplicablePaymentPlans reads): a plan set for the unit -> the unit; for its tower
+ * -> the tower; for the project, or not tagged -> the project. Only where that level has no DPR steps for the work is
+ * it judged one level up.
  */
 async function readyDemands(pool, { bookingId = null, projectId = null, scope = null } = {}) {
   const links = new Map((await milestoneLinks(pool)).milestones.filter((m) => m.groupId).map((m) => [m.id, m.groupId]));
@@ -298,7 +304,10 @@ async function readyDemands(pool, { bookingId = null, projectId = null, scope = 
   if (projectId) { r.input("pid", sql.Int, projectId); conds.push("b.ProjectId = @pid"); }
   const rows = (await r.query(`
     SELECT m.Id AS MilestoneId, m.MilestoneNo, m.MilestoneName, m.AmountDue, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.UnitId, u.BlockId,
-           b.UnitNo, a.ApplicantName, ti.MilestoneMasterId
+           b.UnitNo, a.ApplicantName, ti.MilestoneMasterId,
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmUnitPaymentPlan x WHERE x.UnitId = b.UnitId AND x.PlanId = b.PaymentPlanId AND x.IsActive = 1) THEN 'Unit'
+                WHEN EXISTS (SELECT 1 FROM dbo.CrmBlockPaymentPlan x WHERE x.BlockId = u.BlockId AND x.PlanId = b.PaymentPlanId AND x.IsActive = 1) THEN 'Tower'
+                ELSE 'Project' END AS PlanLevel
     FROM dbo.CrmPaymentMilestone m
     JOIN dbo.CrmBooking b ON b.Id = m.BookingId
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -313,11 +322,15 @@ async function readyDemands(pool, { bookingId = null, projectId = null, scope = 
     const p = prog.get(x.ProjectId); if (!p?.hasDpr) continue;
     const gid = links.get(x.MilestoneMasterId);
     const workIn = (place) => place?.works.find((w) => w.groupId === gid) || null;
-    const flat = workIn(p.flats.get(Number(x.UnitId)));
-    const tower = workIn(p.towers.find((t) => Number(t.blockId) === Number(x.BlockId)));
-    const project = workIn(p);
-    const [w, level] = flat ? [flat, "Unit"] : tower ? [tower, "Tower"] : project ? [project, "Project"] : [null, null];
-    if (w && w.pct >= 100) out.push({ ...x, work: w.name, judgedOn: level });
+    const levels = [
+      ["Unit", workIn(p.flats.get(Number(x.UnitId)))],
+      ["Tower", workIn(p.towers.find((t) => Number(t.blockId) === Number(x.BlockId)))],
+      ["Project", workIn(p)],
+    ];
+    // From the plan's own level upward, the first place the site tracks this work.
+    const from = levels.findIndex(([lvl]) => lvl === x.PlanLevel);
+    const hit = levels.slice(from < 0 ? 2 : from).find(([, w]) => w);
+    if (hit && hit[1].pct >= 100) out.push({ ...x, work: hit[1].name, judgedOn: hit[0] });
   }
   return out;
 }

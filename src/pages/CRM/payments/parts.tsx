@@ -546,8 +546,10 @@ function milestoneDetails(m: any) {
   return lines;
 }
 
-export function MilestoneTable({ milestones, canEdit, closed = false, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, nextMilestone, canManuallyApply, activeId, pendingWaivers, onPay, onApply, onWaive, onRemarks }: {
+export function MilestoneTable({ milestones, canEdit, closed = false, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, nextMilestone, canManuallyApply, activeId, pendingWaivers, readyToDemand, onPay, onApply, onWaive, onRemarks }: {
   milestones: any[]; canEdit: boolean;
+  /** Construction-linked milestones whose DPR work is complete: milestone id -> the work. */
+  readyToDemand?: Map<number, string>;
   /** The booking is closed (cancelled, unit changed …): its schedule is history, nothing on it is due or overdue. */
   closed?: boolean; onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; fullPaymentShortfall: number;
   nextMilestone: any; canManuallyApply: boolean; activeId: number | null; pendingWaivers?: Set<number>;
@@ -604,7 +606,12 @@ export function MilestoneTable({ milestones, canEdit, closed = false, onAccountD
                   <td className={cn(td, "text-right tabular-nums whitespace-nowrap font-medium")}>{noAmount ? <span className="text-xs font-normal text-muted-foreground">No amount due</span> : fmt(m.AmountDue)}</td>
                   <td className={cn(td, "text-xs")}>{moneyWords(m)}</td>
                   <td className={cn(td, "text-right tabular-nums whitespace-nowrap", f.missing > 0 && "font-semibold")}>{closed || f.waived || f.missing <= 0 ? dash : fmt(f.missing)}</td>
-                  <td className={td} title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={pendingWaivers?.has(m.Id) ? "waiting" : overdue ? "stopped" : stage?.tone ?? "waiting"} />}</td>
+                  <td className={td} title={stage?.hint}>{m.Status === "Waived" ? <GridStatusPill status="Waived" /> : <GridToneMark text={pendingWaivers?.has(m.Id) ? "Waiver awaiting approval" : status} tone={pendingWaivers?.has(m.Id) ? "waiting" : overdue ? "stopped" : stage?.tone ?? "waiting"} />}
+                    {!closed && readyToDemand?.has(m.Id) && (
+                      <span className="block mt-1 text-[0.6875rem] font-medium text-emerald-700 dark:text-emerald-400" title="The DPR work this milestone waits for is complete on site">
+                        Ready to demand · {readyToDemand.get(m.Id)} complete
+                      </span>
+                    )}</td>
                   <td className={cn(td, "whitespace-nowrap")}>
                     {canEdit && open && (
                       <div className="flex items-center justify-end gap-1.5">
