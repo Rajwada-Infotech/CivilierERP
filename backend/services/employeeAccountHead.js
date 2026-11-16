@@ -15,6 +15,10 @@ const HEAD_TYPE = "E";
 
 const headCode = (employeeId) => `EMPAH-${employeeId}`;
 
+// Account group for employee heads: SUNDRY CREDITORS (AccountGroup Code 'SCS', as brokers use — see
+// accountHeadMaster.js getSundryCreditorsGroupId), so their balances sit in the Trial Balance / Balance Sheet.
+const SCS_GROUP = "(SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SCS')";
+
 function bindHead(request, emp) {
   return request
     .input("Name", sql.VarChar(200), String(emp.name || "").trim().slice(0, 200))
@@ -33,11 +37,11 @@ async function createEmployeeAccountHead(tx, employeeId, emp, createdBy) {
     .query(`
       INSERT INTO dbo.AccountHeadMaster
         (LHeadName, LHeadCode, LHeadType, LHeadAddress, LHeadContactPerson, LHeadPhone, LHeadEmail,
-         LHeadStatus, Status, CreatedBy, CreatedAt, ApprovedBy, ApprovedAt)
+         LHeadStatus, Status, CreatedBy, CreatedAt, ApprovedBy, ApprovedAt, LBelongsTo)
       OUTPUT INSERTED.LHeadId
       VALUES
         (@Name, @Code, @Type, @Address, N'N/A', @Phone, @Email,
-         @Active, N'Approved', @CreatedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
+         @Active, N'Approved', @CreatedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME(), ${SCS_GROUP})
     `);
   const headId = ins.recordset[0].LHeadId;
   await tx.request()
@@ -60,7 +64,8 @@ async function syncEmployeeAccountHead(tx, employeeId, emp, updatedBy) {
     .query(`
       UPDATE dbo.AccountHeadMaster
       SET LHeadName = @Name, LHeadAddress = @Address, LHeadPhone = @Phone, LHeadEmail = @Email,
-          LHeadStatus = @Active, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+          LHeadStatus = @Active, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME(),
+          LBelongsTo = ISNULL(LBelongsTo, ${SCS_GROUP}) -- a head made before groups were set gets one; a chosen group stays
       WHERE LHeadId = @HeadId AND LHeadType = 'E'
     `);
   return headId;
