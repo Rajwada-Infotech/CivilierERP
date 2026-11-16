@@ -155,5 +155,7 @@ export const hrAddBreak = async (id: number, body: { start: string; end?: string
   parse<Corrected>(await post(`/hr/records/${id}/breaks`, body), "Could not add the break");
 export const hrUpdateBreak = async (breakId: number, body: { start?: string; end?: string | null; reason: string }) =>
   parse<Corrected>(await post(`/hr/breaks/${breakId}`, body, "PUT"), "Could not save the break");
+export const hrDeleteRecord = async (id: number, reason: string) =>
+  parse<{ message: string }>(await post(`/hr/records/${id}`, { reason }, "DELETE"), "Could not delete the record");
 export const hrDeleteBreak = async (breakId: number, reason: string) =>
   parse<Corrected>(await post(`/hr/breaks/${breakId}`, { reason }, "DELETE"), "Could not delete the break");

@@ -104,6 +104,15 @@ router.put("/hr/records/:id", requirePageRight(HR, "edit"), async (req, res) => 
   } catch (e) { fail(res, e, "PUT /hr/records/:id"); }
 });
 
+router.delete("/hr/records/:id", requirePageRight(HR, "edit"), async (req, res) => {
+  const id = toInt(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  try {
+    await svc.hrDeleteRecord(getPool(), id, { reason: req.body?.reason }, actorOf(req));
+    res.json({ message: "Attendance record deleted" });
+  } catch (e) { fail(res, e, "DELETE /hr/records/:id"); }
+});
+
 router.post("/hr/records/:id/breaks", requirePageRight(HR, "edit"), async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });

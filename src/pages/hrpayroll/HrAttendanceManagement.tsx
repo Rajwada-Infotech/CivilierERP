@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarCheck, Loader2, Plus, Trash2, Save } from "lucide-react";
+import { AlertTriangle, CalendarCheck, Loader2, Pencil, Plus, Trash2, Save } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
@@ -13,7 +13,7 @@ import { DateInput, DateTimeInput } from "@/components/ui/date-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   getHrFilterOptions, getHrPunchPhoto, getHrRecord, getHrRecords, getHrSummary, getNotMarked,
-  hrAddBreak, hrDeleteBreak, hrUpdateBreak, hrUpdateRecord,
+  hrAddBreak, hrDeleteBreak, hrDeleteRecord, hrUpdateBreak, hrUpdateRecord,
   type AttendanceRecord, type HrFilters,
 } from "@/api/employeeAttendanceApi";
 import { fmtDateIst, fmtDateTimeIst, fmtDuration, fmtTimeIst, fromIstInput, toIstInput, todayIstDate } from "@/lib/attendanceFormat";
@@ -56,6 +56,37 @@ function StatusBadge({ r }: { r: AttendanceRecord }) {
       ))}
       {r.hrEdited && <span className="text-[0.625rem] text-muted-foreground">HR corrected</span>}
     </div>
+  );
+}
+
+// ── Delete a whole day's record (reason required, kept in the audit trail) ──
+function DeleteRecordDialog({ rec, onClose }: { rec: AttendanceRecord; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [reason, setReason] = useState("");
+  const del = useMutation({
+    mutationFn: () => hrDeleteRecord(rec.attendanceId, reason.trim()),
+    onSuccess: () => { toast.success("Attendance record deleted"); qc.invalidateQueries({ queryKey: ["hr-attendance"] }); onClose(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sheet-frame max-w-md" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Delete attendance</DialogTitle></DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p>Delete <b>{rec.employeeName}</b>'s attendance for <b>{fmtDateIst(rec.attendanceDate)}</b> (In {fmtTimeIst(rec.inTime)}{rec.outTime ? `, Out ${fmtTimeIst(rec.outTime)}` : ""})? Its breaks, punch photos and locations are removed too. The deletion and your reason stay in the audit trail.</p>
+          <div>
+            <label className={labelCls}>Reason (required) *</label>
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Punched by mistake" className={`${inputCls} w-full`} autoFocus />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+            <button onClick={() => reason.trim().length >= 3 ? del.mutate() : toast.error("Enter the reason for the deletion first")} disabled={del.isPending} className={`${KEY_RED} h-9 px-4`}>
+              {del.isPending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete record
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -256,6 +287,7 @@ export default function HrAttendanceManagement() {
   const [anchor, setAnchor] = useState(today);
   const [missingDate, setMissingDate] = useState(today);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<AttendanceRecord | null>(null);
 
   const filters: HrFilters = useMemo(() => ({
     from, to,
@@ -365,10 +397,11 @@ export default function HrAttendanceManagement() {
                     <th className="font-semibold px-4 py-2.5 text-left">Date</th><th className="font-semibold px-4 py-2.5 text-left">In</th><th className="font-semibold px-4 py-2.5 text-left">Out</th>
                     <th className="font-semibold px-4 py-2.5 text-right">Breaks</th><th className="font-semibold px-4 py-2.5 text-right">Break Time</th><th className="font-semibold px-4 py-2.5 text-right">Working</th>
                     <th className="font-semibold px-4 py-2.5 text-right">Net Hours</th><th className="font-semibold px-4 py-2.5 text-left">Status</th>
+                    {rights.canEdit && <th className="font-semibold px-4 py-2.5 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-foreground/15">
-                  {records.length === 0 && <tr><td colSpan={11} className="p-8 text-center text-muted-foreground">No attendance records for these filters.</td></tr>}
+                  {records.length === 0 && <tr><td colSpan={12} className="p-8 text-center text-muted-foreground">No attendance records for these filters.</td></tr>}
                   {records.map((r) => (
                     <tr key={r.attendanceId} onClick={() => setOpenId(r.attendanceId)} className={`cursor-pointer transition-colors hover:bg-primary/5 ${r.flags.length ? "bg-destructive/5" : ""}`}>
                       <td className="px-4 py-3"><p className="font-medium">{r.employeeName}</p><p className={`text-xs text-muted-foreground ${NUM}`}>{r.employeeCode}</p></td>
@@ -382,6 +415,14 @@ export default function HrAttendanceManagement() {
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{fmtDuration(r.totalSeconds)}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums font-medium">{fmtDuration(r.netSeconds)}</td>
                       <td className="px-4 py-3"><StatusBadge r={r} /></td>
+                      {rights.canEdit && (
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => setOpenId(r.attendanceId)} className={`${KEY_LINE} h-8 px-2.5`} title="Edit In / Out time" aria-label="Edit"><Pencil size={13} /></button>
+                            <button onClick={() => setDeleting(r)} className={`${KEY_RED} h-8 px-2.5`} title="Delete record" aria-label="Delete"><Trash2 size={13} /></button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -457,6 +498,7 @@ export default function HrAttendanceManagement() {
         )}
       </HrPayrollShell>
 
+      {deleting && <DeleteRecordDialog rec={deleting} onClose={() => setDeleting(null)} />}
       {openId != null && <RecordDialog id={openId} canEdit={rights.canEdit} onClose={() => setOpenId(null)} />}
     </>
   );

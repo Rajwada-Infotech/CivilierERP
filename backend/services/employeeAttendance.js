@@ -486,7 +486,7 @@ function assertBreaksValid(inT, outT, breaks) {
 }
 
 async function loadRaw(pool, attendanceId) {
-  const a = await pool.request().input("Id", sql.Int, attendanceId).query("SELECT AttendanceId, EmployeeId, InTime, OutTime FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id");
+  const a = await pool.request().input("Id", sql.Int, attendanceId).query("SELECT AttendanceId, EmployeeId, InTime, OutTime, InLatitude, InLongitude, OutLatitude, OutLongitude FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id");
   const rec = a.recordset[0];
   if (!rec) throw new AttendanceError("Attendance record not found.", 404);
   const b = await pool.request().input("Id", sql.Int, attendanceId).query("SELECT BreakId, BreakStart, BreakEnd FROM dbo.EmployeeAttendanceBreak WHERE AttendanceId = @Id");
@@ -581,7 +581,25 @@ async function hrDeleteBreak(pool, breakId, { reason }, actor) {
   return getRecord(pool, cur.AttendanceId);
 }
 
+/**
+ * HR removes a whole day's record (e.g. a punch made by mistake). The breaks go with it; the audit trail keeps what
+ * was removed (employee, day, In / Out, location) and the reason -- it has no foreign key, so it outlives the record.
+ */
+async function hrDeleteRecord(pool, attendanceId, { reason }, actor) {
+  const why = needReason(reason);
+  const { rec } = await loadRaw(pool, attendanceId);
+  if (!rec) throw new AttendanceError("Attendance record not found.", 404);
+  const where = (lat, lng) => (lat != null ? ` @ ${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}` : "");
+  const detail = `Deleted ${istDate(rec.InTime)}: In ${fmtIst(rec.InTime)}${where(rec.InLatitude, rec.InLongitude)} -> Out ${rec.OutTime ? fmtIst(rec.OutTime) : "(open)"}${where(rec.OutLatitude, rec.OutLongitude)}`;
+  await pool.request().input("Id", sql.Int, attendanceId).query(`
+    DELETE FROM dbo.EmployeeAttendanceBreak WHERE AttendanceId = @Id;
+    DELETE FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id;
+  `);
+  await audit(pool, { attendanceId, employeeId: rec.EmployeeId, action: "HR_DELETE", detail, reason: why, by: actor });
+}
+
 module.exports = {
+  hrDeleteRecord,
   AttendanceError, STALE_HOURS, compute, istDate,
   getMyState, clockIn, clockOut, breakStart, breakStop, getPhoto, cleanEvidence,
   listRecords, getRecord, getAudit, summary, notMarked, hrFilterOptions,
