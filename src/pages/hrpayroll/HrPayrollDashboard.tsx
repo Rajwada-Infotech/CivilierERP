@@ -43,6 +43,7 @@ const PAGES: { group: string; items: { label: string; path: string }[] }[] = [
       { label: "Candidates", path: "/hr-payroll/setup/candidate-master" },
       { label: "Shifts", path: "/hr-payroll/setup/shift-master" },
       { label: "Grace time", path: "/hr-payroll/setup/grace-time-master" },
+      { label: "Work location", path: "/hr-payroll/setup/work-location-master" },
       { label: "Holidays", path: "/hr-payroll/setup/holiday-master" },
       { label: "Deductions & additions", path: "/hr-payroll/setup/deduction-addition-master" },
     ],

@@ -16,6 +16,7 @@ export interface LeaveRow {
   TotalDays: number;
   Reason: string | null;
   Status: LeaveStatus;
+  HrRemarks?: string | null;
   IsActive: boolean;
   CreatedAt: string;
   UpdatedAt: string | null;
@@ -28,6 +29,7 @@ export interface LeavePayload {
   ToDate: string;
   Reason?: string | null;
   Status?: LeaveStatus;
+  HrRemarks?: string | null;
   IsActive?: boolean;
 }
 

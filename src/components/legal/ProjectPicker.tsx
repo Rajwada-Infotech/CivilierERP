@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getLegalLookup } from "@/api/legalMastersApi";
 import { Check, ChevronsUpDown } from "lucide-react";
@@ -7,33 +7,57 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 const KEY = "legal.projectId";
+const SCOPE_KEY = "legal.projectScope";
 
-/** The project the Legal pages work under (Land Enquiries, Deed Registry Search). Remembered between pages. */
-export function useLegalProject(): [number | null, (id: number | null) => void] {
-  // A project named in the link (?project=, e.g. from the dashboard report) wins over the remembered one.
-  const [id, setId] = useState<number | null>(() => {
-    const fromUrl = Number(new URLSearchParams(window.location.search).get("project"));
-    if (fromUrl > 0) return fromUrl;
-    try { const v = Number(localStorage.getItem(KEY)); return v > 0 ? v : null; } catch { return null; }
-  });
-  useEffect(() => {
-    try { if (id) localStorage.setItem(KEY, String(id)); else localStorage.removeItem(KEY); } catch { /* storage off */ }
-  }, [id]);
-  return [id, setId];
+export type ProjectScope = number | "all" | "none";
+type ScopeInput = number | null | "all" | "none";
+
+// One project scope for the whole Legal module, picked in the page header (top right). Every Legal page reads it, so
+// changing it changes every list at once. Remembered between visits; a link's ?project= (dashboard reports) wins.
+const parse = (v: string | null): ProjectScope | null => (v === "all" || v === "none" ? v : Number(v) > 0 ? Number(v) : null);
+let current: ProjectScope = (() => {
+  try { return parse(new URLSearchParams(window.location.search).get("project")) ?? parse(localStorage.getItem(SCOPE_KEY)) ?? parse(localStorage.getItem(KEY)) ?? "all"; }
+  catch { return "all"; }
+})();
+const listeners = new Set<() => void>();
+export function setLegalScope(v: ScopeInput) {
+  const next: ProjectScope = v ?? "all";
+  if (next === current) return;
+  current = next;
+  try { localStorage.setItem(SCOPE_KEY, String(next)); if (typeof next === "number") localStorage.setItem(KEY, String(next)); } catch { /* storage off */ }
+  listeners.forEach((l) => l());
+}
+const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
+
+/** The Legal module's project scope: `inScope(row.ProjectId)` tells whether a row belongs to what is picked. */
+export function useProjectScope(): { scope: ProjectScope; setScope: (id: ScopeInput) => void; inScope: (projectId: unknown) => boolean } {
+  const scope = useSyncExternalStore(subscribe, () => current);
+  const inScope = (projectId: unknown) => {
+    const p = Number(projectId) || 0;
+    return scope === "all" ? true : scope === "none" ? !p : p === scope;
+  };
+  return { scope, setScope: setLegalScope, inScope };
+}
+
+/** Header picker (top right of every Legal page). A link's ?project= is applied when the page opens. */
+export function LegalProjectSwitch() {
+  const { scope } = useProjectScope();
+  useEffect(() => { const v = parse(new URLSearchParams(window.location.search).get("project")); if (v !== null) setLegalScope(v); }, []);
+  return <ProjectPicker value={scope} onChange={setLegalScope} allowAll compact />;
 }
 
 /**
  * Project picker with search: type to narrow the list (by name), pick with a click or the keyboard.
  * `allowAll`: offer "All projects" (value "all") — for pages that read across projects.
  */
-export function ProjectPicker({ value, onChange, allowAll, children }: { value: number | "all" | "none" | null; onChange: (id: number | null | "all" | "none") => void; allowAll?: boolean; children?: React.ReactNode }) {
+export function ProjectPicker({ value, onChange, allowAll, compact, children }: { value: number | "all" | "none" | null; onChange: (id: number | null | "all" | "none") => void; allowAll?: boolean; compact?: boolean; children?: React.ReactNode }) {
   const { data: projects = [], isLoading } = useQuery({ queryKey: ["legal-lookup", "project"], queryFn: () => getLegalLookup("project"), staleTime: 5 * 60_000 });
   const [open, setOpen] = useState(false);
   const shown = value === "all" ? "All projects" : value === "none" ? "Without a project" : projects.find((p) => Number(p.value) === value)?.label;
   const pick = (v: number | "all" | "none") => { onChange(v); setOpen(false); };
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-3 border border-border bg-card px-4 py-3">
-      <span className="text-sm font-semibold">Project</span>
+    <div className={compact ? "flex items-center gap-2" : "mb-4 flex flex-wrap items-center gap-3 border border-border bg-card px-4 py-3"}>
+      <span className={compact ? "label" : "text-sm font-semibold"}>Project</span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button type="button" role="combobox" aria-expanded={open}
@@ -73,3 +97,4 @@ export function ProjectPicker({ value, onChange, allowAll, children }: { value: 
     </div>
   );
 }
+

@@ -145,6 +145,7 @@ const LandReportsPage = lazy(() => import("./pages/legal/land/LandReportsPage"))
 const LandDetailsPage = lazy(() => import("./pages/legal/land/LandDetailsPage"));
 const LandDeedProcessPage = lazy(() => import("./pages/legal/land/LandDeedProcessPage"));
 const LandPostRegistrationPage = lazy(() => import("./pages/legal/land/LandPostRegistrationPage"));
+const LandClearancePage = lazy(() => import("./pages/legal/land/LandClearancePage"));
 const LandProfilePage = lazy(() => import("./pages/legal/land/LandProfilePage"));
 const LandSalesPage = lazy(() => import("./pages/legal/land/LandSalesPage"));
 const LandProjectMapPage = lazy(() => import("./pages/legal/land/LandProjectMapPage"));
@@ -156,6 +157,7 @@ const DesignationMaster = lazy(() => import("./pages/hrpayroll/DesignationMaster
 const CandidateMaster = lazy(() => import("./pages/hrpayroll/CandidateMaster"));
 const ShiftMaster = lazy(() => import("./pages/hrpayroll/ShiftMaster"));
 const GraceTimeMaster = lazy(() => import("./pages/hrpayroll/GraceTimeMaster"));
+const WorkLocationMaster = lazy(() => import("./pages/hrpayroll/WorkLocationMaster"));
 const HolidayMaster = lazy(() => import("./pages/hrpayroll/HolidayMaster"));
 const DeductionAdditionMaster = lazy(() => import("./pages/hrpayroll/DeductionAdditionMaster"));
 const SalaryStructure = lazy(() => import("./pages/hrpayroll/SalaryStructure"));
@@ -172,6 +174,7 @@ const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills
 const SecurityAttendance = lazy(() => import("./pages/maintenance/SecurityAttendance"));
 const ElectricityMaintenance = lazy(() => import("./pages/maintenance/ElectricityMaintenance"));
 const MaintenanceServiceRequests = lazy(() => import("./pages/maintenance/MaintenanceServiceRequests"));
+const KeyCustodian = lazy(() => import("./pages/maintenance/KeyCustodian"));
 const MeterReadingMaster = lazy(() => import("./pages/masters/MeterReadingMaster"));
 const ElectricityProviderMaster = lazy(() => import("./pages/masters/ElectricityProviderMaster"));
 const ElectricityTariffMaster = lazy(() => import("./pages/masters/ElectricityTariffMaster"));
@@ -312,6 +315,19 @@ const L1ChartPage = lazy(() => import("./pages/material/L1Chart"));
 const SupplierDashboard = withCountUp(lazy(() => import("./pages/supplier/SupplierDashboard")));
 const SupplierLanding = lazy(() => import("./pages/supplier/SupplierLanding"));
 const SupplierLogin = lazy(() => import("./pages/supplier/SupplierLogin"));
+// Employee Portal (employees sign in with an Employee Portal login that HR enables)
+const EmployeeLayout = lazy(() => import("@/components/layout/EmployeeLayout").then((m) => ({ default: m.EmployeeLayout })));
+const EmployeeLogin = lazy(() => import("./pages/employee/EmployeeLogin"));
+const EmployeeView = lazy(() => import("./pages/employee/EmployeeView"));
+const EmployeeDashboard = lazy(() => import("./pages/employee/EmployeeDashboard"));
+const EmployeeSalary = lazy(() => import("./pages/employee/EmployeeSalary"));
+const EmployeePayslips = lazy(() => import("./pages/employee/EmployeePayslips"));
+const EmployeePortalAttendance = lazy(() => import("./pages/employee/EmployeeAttendance"));
+const EmployeeLeave = lazy(() => import("./pages/employee/EmployeeLeave"));
+const EmployeeHolidays = lazy(() => import("./pages/employee/EmployeeHolidays"));
+const EmployeeLoginHistory = lazy(() => import("./pages/employee/EmployeeLoginHistory"));
+const EmployeePortalAccess = lazy(() => import("./pages/hrpayroll/EmployeePortalAccess"));
+const DailyAttendanceCheck = lazy(() => import("./pages/hrpayroll/DailyAttendanceCheck"));
 const SupplierQuotationDetail = lazy(
   () => import("./pages/supplier/SupplierQuotationDetail"),
 );
@@ -568,6 +584,24 @@ function RequireRole({
   return <>{children}</>;
 }
 
+// ─── Employee Portal route ────────────────────────────────────────────────────
+// Only an Employee Portal login belongs here; anyone else is sent to the main app.
+function EmployeePortalRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <RequireAuth>
+      <RequireRole allowed={["employee portal"]}>
+        <Suspense fallback={<PageSkeleton />}>
+          <EmployeeLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+            </RouteErrorBoundary>
+          </EmployeeLayout>
+        </Suspense>
+      </RequireRole>
+    </RequireAuth>
+  );
+}
+
 // ─── Admin Protected Route ────────────────────────────────────────────────────
 function ProtectedProviders({ children }: { children: React.ReactNode }) {
   useModuleUsageTracker();
@@ -755,6 +789,11 @@ function AuthSessionBridge({ children }: { children: React.ReactNode }) {
 // ─── App Routes ───────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { currentUser } = useAuth();
+  const { pathname } = useLocation();
+  // An Employee Portal login only has the portal -- anywhere else goes back to it.
+  if (currentUser?.role === "employee portal" && !pathname.startsWith("/employee") && pathname !== "/download-android-app") {
+    return <Navigate to="/employee" replace />;
+  }
   return (
     <Routes>
       {/* CRM CUSTOMER PORTAL — separate token-based auth, not the staff ERP session */}
@@ -783,6 +822,8 @@ function AppRoutes() {
           currentUser
             ? currentUser.role === "supplier"
               ? <Navigate to="/supplier" replace />
+              : currentUser.role === "employee portal"
+              ? <Navigate to="/employee" replace />
               : currentUser.role === "customer"
                 ? <Navigate to={`/customer-portal/${currentUser.id}`} replace />
                 : currentUser.role === "dba"
@@ -1087,6 +1128,7 @@ function AppRoutes() {
       <Route path="/legal/land/properties/:id/details" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id/final-verify" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage verify /></ProtectedRoute>} />
       <Route path="/legal/land/deed-process" element={<ProtectedRoute pageKey="legal-land-master"><LandDeedProcessPage /></ProtectedRoute>} />
+      <Route path="/legal/land/la-ulc" element={<ProtectedRoute pageKey="legal-land-master"><LandClearancePage /></ProtectedRoute>} />
       <Route path="/legal/land/post-registration" element={<ProtectedRoute pageKey="legal-land-master"><LandPostRegistrationPage /></ProtectedRoute>} />
       <Route path="/legal/land/post-registration/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage from="post-registration" /></ProtectedRoute>} />
       <Route path="/legal/land/deed-process/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage from="deed-process" /></ProtectedRoute>} />
@@ -1157,6 +1199,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/hr-payroll/setup/work-location-master"
+        element={
+          <ProtectedRoute pageKey="work-location-master">
+            <WorkLocationMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/hr-payroll/setup/deduction-addition-master"
         element={
           <ProtectedRoute pageKey="deduction-addition-master">
@@ -1201,6 +1251,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="hr-attendance-management">
             <HrAttendanceManagement />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/daily-attendance"
+        element={
+          <ProtectedRoute pageKey="hr-attendance-management">
+            <DailyAttendanceCheck />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/employee-portal-access"
+        element={
+          <ProtectedRoute pageKey="employee-portal-access">
+            <EmployeePortalAccess />
           </ProtectedRoute>
         }
       />
@@ -1281,6 +1347,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="maintenance-security-attendance">
             <SecurityAttendance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/key-custodian"
+        element={
+          <ProtectedRoute pageKey="maintenance-key-custodian">
+            <KeyCustodian />
           </ProtectedRoute>
         }
       />
@@ -2638,6 +2712,24 @@ function AppRoutes() {
           </RequireAuth>
         }
       />
+      {/* EMPLOYEE PORTAL */}
+      <Route
+        path="/employee-login"
+        element={
+          currentUser
+            ? <Navigate to={currentUser.role === "employee portal" ? "/employee" : "/"} replace />
+            : <Suspense fallback={<PageSkeleton />}><EmployeeLogin /></Suspense>
+        }
+      />
+      <Route path="/employee-view" element={<Suspense fallback={<PageSkeleton />}><EmployeeView /></Suspense>} />
+      <Route path="/employee" element={<EmployeePortalRoute><EmployeeDashboard /></EmployeePortalRoute>} />
+      <Route path="/employee/salary" element={<EmployeePortalRoute><EmployeeSalary /></EmployeePortalRoute>} />
+      <Route path="/employee/payslips" element={<EmployeePortalRoute><EmployeePayslips /></EmployeePortalRoute>} />
+      <Route path="/employee/attendance" element={<EmployeePortalRoute><EmployeePortalAttendance /></EmployeePortalRoute>} />
+      <Route path="/employee/leave" element={<EmployeePortalRoute><EmployeeLeave /></EmployeePortalRoute>} />
+      <Route path="/employee/holidays" element={<EmployeePortalRoute><EmployeeHolidays /></EmployeePortalRoute>} />
+      <Route path="/employee/login-history" element={<EmployeePortalRoute><EmployeeLoginHistory /></EmployeePortalRoute>} />
+
       <Route
         path="/supplier-login"
         element={

@@ -17,6 +17,7 @@ export const hrPayrollNavItems: NavItem[] = [
       { label: "Salary Calculation", path: "/hr-payroll/salary-calculation", pageKey: "salary-calculation" },
       { label: "Incentives", path: "/hr-payroll/incentive", pageKey: "incentive" },
       { label: "Payroll Run", path: "/hr-payroll/payroll-run", pageKey: "payroll-run" },
+      { label: "Daily Attendance Check", path: "/hr-payroll/daily-attendance", pageKey: "hr-attendance-management" },
     ],
   },
 
@@ -28,6 +29,7 @@ export const hrPayrollNavItems: NavItem[] = [
       { label: "Interviews", path: "/hr-payroll/interviews", pageKey: "interview" },
       { label: "Offers & Joining", path: "/hr-payroll/offer-letter-joining", pageKey: "offer-letter-joining" },
       { label: "Team Attendance", path: "/hr-payroll/hr-attendance", pageKey: "hr-attendance-management" },
+      { label: "Employee Portal", path: "/hr-payroll/employee-portal-access", pageKey: "employee-portal-access" },
     ],
   },
 ];

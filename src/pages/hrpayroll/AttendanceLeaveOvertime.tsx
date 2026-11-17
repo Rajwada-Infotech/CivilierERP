@@ -8,6 +8,7 @@ import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { HrSkeleton, HR_RULE, HR_LBL, HR_NUM } from "@/components/hrpayroll/HrUi";
 import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent, type RecordWithId } from "@/components/MasterPage";
+import { AttendancePunchEvidence } from "./AttendancePunchEvidence";
 import { getEmployeeOptions } from "@/api/employeeMasterApi";
 import {
   getAttendanceRecords,
@@ -81,6 +82,20 @@ const attendanceFields: FieldDef[] = [
   { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
 ];
 
+// The Eye button on a row: the day's details, and (for a punched day) the live photo and location of In and Out.
+const attendanceView = {
+  title: "Attendance details",
+  fields: [
+    { key: "employeeName", label: "Employee" },
+    { key: "attendanceDate", label: "Date" },
+    { key: "status", label: "Status" },
+    { key: "checkIn", label: "Check In" },
+    { key: "checkOut", label: "Check Out" },
+    { key: "remarks", label: "Remarks" },
+    { key: "punch", label: "Punch photo and location", wide: true, render: (_v: unknown, row: RecordWithId) => <AttendancePunchEvidence attendanceId={Number(row._id)} /> },
+  ],
+};
+
 const attendanceColumns: ColumnDef[] = [
   { key: "employeeName", label: "Employee" },
   { key: "attendanceDate", label: "Date" },
@@ -112,6 +127,7 @@ const mapLeave = (r: LeaveRow): RecordWithId => ({
   toDate: r.ToDate ? r.ToDate.slice(0, 10) : "",
   totalDays: r.TotalDays,
   reason: r.Reason || "",
+  hrRemarks: r.HrRemarks || "",
   status: r.Status,
   isActive: r.IsActive,
 });
@@ -123,6 +139,7 @@ const leaveFields: FieldDef[] = [
   { name: "toDate", label: "To Date", type: "date", required: true },
   { name: "reason", label: "Reason", type: "textarea", fullWidth: true },
   { name: "status", label: "Status", type: "select", options: APPROVAL_STATUSES, defaultValue: "Pending" },
+  { name: "hrRemarks", label: "HR Remarks (shown to the employee)", type: "textarea", fullWidth: true },
   { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
 ];
 
@@ -142,6 +159,7 @@ const leaveToPayload = (r: Record<string, any>) => ({
   ToDate: r.toDate,
   Reason: r.reason?.trim() || null,
   Status: r.status || "Pending",
+  HrRemarks: (r.hrRemarks ?? "").trim(),
   IsActive: r.isActive !== false,
 });
 
@@ -313,6 +331,7 @@ const AttendanceLeaveOvertime: React.FC = () => {
                 fields={attendanceFields}
                 columns={attendanceColumns}
                 initialData={attendanceRows}
+                viewConfig={attendanceView}
                 onDataEvent={handleAttendanceEvent}
                 collapsibleAddForm
               />

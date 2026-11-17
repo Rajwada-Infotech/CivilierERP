@@ -54,7 +54,7 @@ router.get("/list", requirePageRight(PAGE, "view"), async (req, res) => {
     if (!(await ready(pool))) return notReady(res);
     const tab = req.query.tab === "registered" ? "registered" : "active";
     const rows = (await pool.request().query(`
-      SELECT l.LandId, l.LandCode, l.LandName, d.DistrictName, m.MouzaName, l.WorkflowStatus, l.RsDagNo, l.LrDagNo,
+      SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, d.DistrictName, m.MouzaName, l.WorkflowStatus, l.RsDagNo, l.LrDagNo,
              CONVERT(char(10), l.DeedTargetDate, 23) AS DeedTargetDate, l.L2ApprovedAt,
              l.ConsTotalAmount, l.ConsAdvanceAmount, ${PAID()} AS Paid,
              (SELECT COUNT(*) FROM dbo.LegalPaymentSchedule s WHERE s.LandId = l.LandId AND s.DueDate < CAST(GETDATE() AS DATE)

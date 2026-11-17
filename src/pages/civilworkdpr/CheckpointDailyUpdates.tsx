@@ -10,6 +10,7 @@ import {
   type CheckpointUpdate,
 } from "@/api/dependencyActivityAssignmentApi";
 import { CameraCaptureDialog } from "./CameraCaptureDialog";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 /** Local calendar date as YYYY-MM-DD (never via toISOString — that shifts the day in IST). */
@@ -96,6 +97,10 @@ export function CheckpointDailyUpdates({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Same rule as the server: Delete on Reporting or Work Done.
+  const canDeleteReporting = usePageRights("civilworkdpr-activity-reporting").canDelete;
+  const canDeleteWorkDone = usePageRights("civilworkdpr-work-done").canDelete;
+  const canDelete = canDeleteReporting || canDeleteWorkDone;
   const remove = useMutation({
     mutationFn: (id: number) => deleteCheckpointUpdate(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: key }),
@@ -153,7 +158,7 @@ export function CheckpointDailyUpdates({
             {current.loggedTime && <p>Logged at {fmtTime(current.loggedTime)}</p>}
             {current.createdBy && <p className="truncate">by {current.createdBy}</p>}
           </div>
-          <button
+          {canDelete && <button
             type="button"
             onClick={() => remove.mutate(current.id)}
             disabled={remove.isPending}
@@ -161,7 +166,7 @@ export function CheckpointDailyUpdates({
             title="Remove this day's update"
           >
             {remove.isPending ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-          </button>
+          </button>}
         </div>
       )}
 

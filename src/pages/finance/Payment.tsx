@@ -4315,8 +4315,8 @@ const Payment: React.FC = () => {
                             <Truck size={10} /> Supplier / Contractor / Broker
                           </label>
                           <div className="relative">
-                            {/* One dropdown of every party, grouped, with its own search box; the server matches the
-                                picked name. */}
+                            {/* One dropdown of every party, grouped, with its own search box; the value is the party's
+                                id, which the server matches against the payment's party and its invoice's supplier. */}
                             <SearchableNativeSelect
                               value={supplierFilter}
                               searchPlaceholder="Search supplier, contractor, broker…"
@@ -4330,7 +4330,7 @@ const Payment: React.FC = () => {
                               {partyGroups.map((g) => (
                                 <optgroup key={g.label} label={g.label}>
                                   {g.parties.map((s) => (
-                                    <option key={s.id} value={s.label}>
+                                    <option key={s.id} value={String(s.id)}>
                                       {s.label}
                                     </option>
                                   ))}
@@ -4447,7 +4447,7 @@ const Payment: React.FC = () => {
                       {supplierFilter && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-none text-[0.625rem] font-heading bg-primary/10 text-foreground border border-foreground/40">
                           <Truck size={9} />
-                          {supplierFilter}
+                          {supplierOptions.find((s) => String(s.id) === supplierFilter)?.label ?? supplierFilter}
                           <button
                             onClick={() => {
                               setSupplierFilter("");

@@ -189,6 +189,7 @@ const ALL_ROUTES = [
   { path: "/api/legal/deed-reg", file: "./routes/legal/deedRegistration" },
   { path: "/api/legal", file: "./routes/legal/legalOperations" },
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
+  { path: "/api/work-location-master", file: "./routes/workLocationMaster" },
   { path: "/api/holiday-master", file: "./routes/holidayMaster" },
   { path: "/api/deduction-addition-master", file: "./routes/deductionAdditionMaster" },
   { path: "/api/salary-structure", file: "./routes/salaryStructure" },
@@ -196,6 +197,7 @@ const ALL_ROUTES = [
   { path: "/api/attendance-record", file: "./routes/attendanceRecord" },
   { path: "/api/employee-attendance", file: "./routes/employeeAttendance" },
   { path: "/api/leave-record", file: "./routes/leaveRecord" },
+  { path: "/api/employee-portal-admin", file: "./routes/employeePortalAdmin" },
   { path: "/api/overtime-record", file: "./routes/overtimeRecord" },
   { path: "/api/incentive-record", file: "./routes/incentiveRecord" },
   { path: "/api/interviews", file: "./routes/interview" },
@@ -213,6 +215,7 @@ const ALL_ROUTES = [
   { path: "/api/charge-head", file: "./routes/chargeHead" },
   { path: "/api/maintenance", file: "./routes/maintenance" },
   { path: "/api/maintenance-bills", file: "./routes/maintenanceBill" },
+  { path: "/api/maintenance-key-custodian", file: "./routes/maintenanceKeyCustodian" },
   { path: "/api/security-attendance", file: "./routes/securityAttendance" },
   { path: "/api/electricity-maintenance", file: "./routes/electricityMaintenance" },
   { path: "/api/item-groups", file: "./routes/itemGroup" },
@@ -682,6 +685,20 @@ async function createApp() {
   } catch (err) {
     logger.error(`[ERR] Route failed [supplier-portal]: ${err.message}`);
     routeResults.failed.push({ label: "supplier-portal", error: err.message });
+  }
+
+  // Employee Portal — the employee's own data, limited to the "employee" role
+  try {
+    app.use(
+      "/api/employee-portal",
+      authMiddleware,
+      require("./middleware/role")("employee portal"),
+      require("./routes/employeePortal"),
+    );
+    routeResults.loaded.push("employee-portal");
+  } catch (err) {
+    logger.error(`[ERR] Route failed [employee-portal]: ${err.message}`);
+    routeResults.failed.push({ label: "employee-portal", error: err.message });
   }
 
   if (!isTest) {

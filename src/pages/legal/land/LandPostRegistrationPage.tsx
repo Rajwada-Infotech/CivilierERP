@@ -6,10 +6,12 @@ import { toast } from "sonner";
 import { Upload } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
+import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getPostRegistration, updatePostRegTask, type PostRegTask } from "@/api/legalLandApi";
 import { uploadLegalFile } from "@/api/legalMastersApi";
+import { LandClearancePanel } from "@/components/legal/LandClearancePanel";
 
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const today = new Date().toISOString().slice(0, 10);
@@ -69,7 +71,8 @@ export default function LandPostRegistrationPage() {
   const canEdit = usePageRights("legal-land-master").canEdit;
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-post-registration"], queryFn: getPostRegistration });
   const refresh = () => qc.invalidateQueries({ queryKey: ["legal-post-registration"] });
-  const lands = data?.lands ?? [];
+  const { inScope } = useProjectScope();
+  const lands = (data?.lands ?? []).filter((l) => inScope(l.ProjectId));
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Post-Registration" }]} />
@@ -101,6 +104,12 @@ export default function LandPostRegistrationPage() {
                       <tbody>{l.tasks.map((t) => <TaskRow key={`${t.TaskId}-${t.UpdatedAt ?? ""}`} t={t} statuses={data!.statuses} canEdit={canEdit} onSaved={refresh} />)}</tbody>
                     </table>
                   </div>
+                  {l.clearances?.length ? (
+                    <div className="border-t border-border p-3">
+                      <p className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">LA &amp; ULC clearance certificate</p>
+                      <LandClearancePanel landId={l.LandId} canEdit={canEdit} mode="certificate" items={l.clearances} onSaved={refresh} />
+                    </div>
+                  ) : null}
                 </section>
               );
             })}

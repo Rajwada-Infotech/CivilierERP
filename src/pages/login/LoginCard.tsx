@@ -1,9 +1,9 @@
-// The sign-in side: logo and name, "Welcome back", email and password, then the supplier and customer portals and
+// The sign-in side: logo and name, "Welcome back", email and password, then the supplier, employee and customer portals and
 // the Android app. The nesting (p-6 > text-center > logo first) is what the black-and-white theme's CSS hooks into
 // to keep the logo in colour. Each part hops in after the one before (./motion); a wrong password shakes the form.
 import React, { useEffect, useState } from "react";
 import { AnimatePresence, motion, useAnimationControls } from "framer-motion";
-import { AlertCircle, Building2, Eye, EyeOff, Truck } from "lucide-react";
+import { AlertCircle, Building2, Eye, EyeOff, Truck, UserRound } from "lucide-react";
 import { BOUNCE, cascade, hop, pop } from "./motion";
 
 export interface LoginCardProps {
@@ -153,13 +153,19 @@ export function LoginCard(p: LoginCardProps) {
             Or
             <motion.span className="h-px flex-1 origin-left" style={{ background: "var(--line)" }} variants={{ hidden: { scaleX: 0 }, show: { scaleX: 1, transition: { duration: 0.6, ease: "easeOut" } } }} />
           </motion.div>
-          <div className="mt-[min(1.25rem,2.2vh)] space-y-3">
-            <motion.button type="button" onClick={() => p.onNavigate("/supplier-login")} className="ls-outline" title="Vendor & order portal" variants={hop} {...press}>
-              <Truck size={17} style={{ color: "var(--brand)" }} /> Supplier Portal
-            </motion.button>
-            <motion.button type="button" onClick={() => p.onNavigate("/crm-client-portal/login")} className="ls-outline" title="Booking & owner portal" variants={hop} {...press}>
-              <Building2 size={17} style={{ color: "var(--brand)" }} /> Customer Portal
-            </motion.button>
+          <div className="mt-[min(1.25rem,2.2vh)] grid grid-cols-3 gap-3">
+            {[
+              { to: "/supplier-login", label: "Supplier Portal", title: "Vendor & order portal", Icon: Truck },
+              { to: "/employee-login", label: "Employee Portal", title: "Salary, payslips, attendance & leave", Icon: UserRound },
+              { to: "/crm-client-portal/login", label: "Customer Portal", title: "Booking & owner portal", Icon: Building2 },
+            ].map(({ to, label, title, Icon }) => (
+              <motion.button key={to} type="button" onClick={() => p.onNavigate(to)} className="ls-portal" title={title} aria-label={label} variants={hop} {...press}>
+                <span className="ls-portal-dot">
+                  <Icon size={20} style={{ color: "var(--brand)" }} />
+                </span>
+                {label}
+              </motion.button>
+            ))}
           </div>
         </motion.div>
 

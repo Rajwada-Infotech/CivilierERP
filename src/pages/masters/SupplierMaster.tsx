@@ -71,7 +71,7 @@ const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both"] as const;
 // Goods/Services/Both implies Type="Supplier" (with that as the
 // sub-category); the literal values "Vendor"/"Landlord" ARE the Type,
 // stored the same column, with no sub-category underneath them.
-const VENDOR_TYPES = ["Vendor", "Supplier", "Landlord"] as const;
+const VENDOR_TYPES = ["Vendor", "Supplier", "Landlord", "Consultant"] as const;
 type VendorType = (typeof VENDOR_TYPES)[number] | "";
 
 function vendorTypeFromCategory(category: string): VendorType {
@@ -80,18 +80,18 @@ function vendorTypeFromCategory(category: string): VendorType {
   // picked but no Goods/Services/Both sub-category has been chosen yet —
   // without this, the derived Type would snap back to "" on every render
   // and the Type dropdown would appear to do nothing.
-  if (category === "Supplier" || category === "Vendor" || category === "Landlord") return category;
+  if (category === "Supplier" || category === "Vendor" || category === "Landlord" || category === "Consultant") return category;
   return "";
 }
 // Every value the shared category/type column can actually hold — used for
 // CSV import validation, which doesn't otherwise know about the Type/
 // Category split.
-const ALL_CATEGORY_VALUES = [...SUPPLIER_CATEGORIES, "Vendor", "Landlord"] as const;
+const ALL_CATEGORY_VALUES = [...SUPPLIER_CATEGORIES, "Vendor", "Landlord", "Consultant"] as const;
 
-// LHeadType to persist on save: Vendor gets its own 'V'; Supplier and
-// Landlord both remain 'S' (Landlord is only distinguished via LHeadCategory).
+// LHeadType to persist on save: Vendor and Consultant get 'V' (a Consultant is told apart by
+// LHeadCategory='Consultant'); Supplier and Landlord both remain 'S' (Landlord only via LHeadCategory).
 function lheadTypeForVendorType(type: VendorType): string {
-  return type === "Vendor" ? VENDOR_TYPE : SUPPLIER_TYPE;
+  return type === "Vendor" || type === "Consultant" ? VENDOR_TYPE : SUPPLIER_TYPE;
 }
 const GST_TYPES = ["Registered", "Unregistered"] as const;
 const GST_STATES = [
@@ -481,7 +481,7 @@ const SupplierMaster: React.FC = () => {
             ((SUPPLIER_CATEGORIES as readonly string[]).includes(p.supplierCategory)
               ? p.supplierCategory
               : "Supplier")
-          : next, // "Vendor" / "Landlord" — the Type IS the stored value
+          : next, // "Vendor" / "Landlord" / "Consultant" — the Type IS the stored value
       isTdsApplicable: next === "Supplier" ? p.isTdsApplicable : false,
       // Switching away from Supplier hides the login-password field — clear
       // any half-typed value so it can't linger in state and get submitted

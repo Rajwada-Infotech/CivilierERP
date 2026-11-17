@@ -13,6 +13,12 @@ export interface AttendanceBreak {
   seconds: number | null;
   open: boolean;
   hrEdited: boolean;
+  /** Why the break was taken (Break / Meeting at other office / Other reason), its note, whether it comes off working time, the allowance and the time beyond it. */
+  type?: string;
+  note?: string | null;
+  deduct?: boolean;
+  allowedSeconds?: number | null;
+  overSeconds?: number;
 }
 
 export interface AttendanceRecord {
@@ -31,7 +37,11 @@ export interface AttendanceRecord {
   outTime: string | null;
   breakCount: number;
   breaks: AttendanceBreak[];
+  /** Break time that comes off working time (a Meeting at other office counts as work and is in officialSeconds). */
   breakSeconds: number;
+  officialSeconds?: number;
+  /** Time beyond the allowed minutes, summed over the day's breaks. */
+  extraSeconds?: number;
   /** Out − In; null until Out Time is recorded. */
   totalSeconds: number | null;
   /** Total − breaks; null until Out Time is recorded. */
@@ -39,6 +49,11 @@ export interface AttendanceRecord {
   status: AttendanceStatus;
   flags: AttendanceFlag[];
   hrEdited: boolean;
+  /** Device location and live photo captured at an Employee Portal punch (null for other punches). */
+  inLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
+  outLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
+  hasInPhoto?: boolean;
+  hasOutPhoto?: boolean;
   live: { sessionSeconds: number; breakSeconds: number; netSeconds: number } | null;
 }
 
@@ -91,13 +106,15 @@ export interface EmployeeSummary {
   incompleteDays: number;
   breakCount: number;
   breakSeconds: number;
+  officialSeconds?: number;
+  extraSeconds?: number;
   totalSeconds: number;
   netSeconds: number;
 }
 
 export interface AttendanceSummary {
   employees: EmployeeSummary[];
-  totals: { employees: number; days: number; completeDays: number; incompleteDays: number; breakCount: number; breakSeconds: number; totalSeconds: number; netSeconds: number };
+  totals: { employees: number; days: number; completeDays: number; incompleteDays: number; breakCount: number; breakSeconds: number; officialSeconds?: number; extraSeconds?: number; totalSeconds: number; netSeconds: number };
 }
 
 export interface NotMarkedEmployee {
@@ -140,6 +157,9 @@ export const getNotMarked = async (f: HrFilters & { date: string }) => parse<Not
 export const getHrRecord = async (id: number) =>
   parse<{ record: AttendanceRecord; audit: AuditEntry[] }>(await fetchWithAuth(`${BASE}/hr/records/${id}`), "Failed to load the record");
 
+export const getHrPunchPhoto = async (id: number, which: "in" | "out") =>
+  parse<{ photo: string | null }>(await fetchWithAuth(`${BASE}/hr/records/${id}/photo/${which}`), "Failed to load the photo");
+
 type Corrected = { record: AttendanceRecord; audit: AuditEntry[] };
 export const hrUpdateRecord = async (id: number, body: { inTime?: string; outTime?: string | null; reason: string }) =>
   parse<Corrected>(await post(`/hr/records/${id}`, body, "PUT"), "Could not save the correction");
@@ -147,5 +167,7 @@ export const hrAddBreak = async (id: number, body: { start: string; end?: string
   parse<Corrected>(await post(`/hr/records/${id}/breaks`, body), "Could not add the break");
 export const hrUpdateBreak = async (breakId: number, body: { start?: string; end?: string | null; reason: string }) =>
   parse<Corrected>(await post(`/hr/breaks/${breakId}`, body, "PUT"), "Could not save the break");
+export const hrDeleteRecord = async (id: number, reason: string) =>
+  parse<{ message: string }>(await post(`/hr/records/${id}`, { reason }, "DELETE"), "Could not delete the record");
 export const hrDeleteBreak = async (breakId: number, reason: string) =>
   parse<Corrected>(await post(`/hr/breaks/${breakId}`, { reason }, "DELETE"), "Could not delete the break");

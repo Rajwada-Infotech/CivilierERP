@@ -21,6 +21,21 @@ const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
 const dayKeyIst = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: IST });
 
+const KINDS: [string, string][] = [["create", "Created"], ["update", "Updated"], ["delete", "Deleted"], ["export", "Exported"], ["settings_change", "Settings"], ["read", "Pages opened"], ["login", "Sign-ins"], ["logout", "Sign-outs"]];
+const H = (v: string): XlsxCell => ({ v, s: "header" });
+const kindCounts = (items: SessionEvent[]) => KINDS.map(([k]) => items.filter((e) => describeActivity(e).kind === k).length);
+
+/** Every activity of one person in the period (all pages, not just what's loaded on screen). */
+async function fetchAllActivity(userId: string, params: { dateFrom?: string; dateTo?: string; type: UserActivityType }) {
+  const all: SessionEvent[] = [];
+  for (let page = 1; page <= 100; page++) {
+    const res = await getUserActivity(userId, { ...params, page, limit: 500 });
+    all.push(...res.data);
+    if (page >= res.pages) break;
+  }
+  return all;
+}
+
 function rangeDates(key: RangeKey): { dateFrom?: string; dateTo?: string } {
   const today = new Date();
   if (key === "today") return { dateFrom: isoDay(today), dateTo: isoDay(today) };
@@ -36,6 +51,7 @@ export default function ActivityByUser() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportingAll, setExportingAll] = useState<string | null>(null); // progress text while the everyone export runs
   const dates = useMemo(() => rangeDates(range), [range]);
 
   const { data: users = [], isLoading: loadingUsers } = useQuery({
@@ -84,12 +100,7 @@ export default function ActivityByUser() {
     if (!selected || !current) return;
     setExporting(true);
     try {
-      const all: SessionEvent[] = [];
-      for (let page = 1; page <= 100; page++) {
-        const res = await getUserActivity(selected, { ...dates, type, page, limit: 500 });
-        all.push(...res.data);
-        if (page >= res.pages) break;
-      }
+      const all = await fetchAllActivity(selected, { ...dates, type });
       if (!all.length) {
         toast.info("Nothing to export for this period.");
         return;
@@ -100,16 +111,14 @@ export default function ActivityByUser() {
         const k = dayKeyIst(e.timestamp);
         byDay.set(k, [...(byDay.get(k) ?? []), e]);
       }
-      const H = (v: string): XlsxCell => ({ v, s: "header" });
       const period = dates.dateFrom ? `${dates.dateFrom} to ${dates.dateTo}` : "all time";
       const typeLabel = TYPES.find((t) => t.key === type)?.label ?? type;
       const title = `${current.userName} — ${typeLabel}, ${period} (times in IST)`;
 
-      const KINDS: [string, string][] = [["create", "Created"], ["update", "Updated"], ["delete", "Deleted"], ["export", "Exported"], ["settings_change", "Settings"], ["read", "Pages opened"], ["login", "Sign-ins"], ["logout", "Sign-outs"]];
       const dayRows: XlsxCell[][] = [[{ v: title, s: "title" }], [], ["Date", "Total", ...KINDS.map(([, l]) => l)].map(H)];
       const totals = new Array(KINDS.length).fill(0);
       for (const [key, items] of byDay) {
-        const counts = KINDS.map(([k]) => items.filter((e) => describeActivity(e).kind === k).length);
+        const counts = kindCounts(items);
         counts.forEach((c, i) => (totals[i] += c));
         dayRows.push([dayLabelIst(key), items.length, ...counts]);
       }
@@ -138,6 +147,94 @@ export default function ActivityByUser() {
     }
   };
 
+  // Everyone in the list (the period, kind and name search on screen) as one Excel file: per day, each person's counts;
+  // per person, their totals; and every activity, day by day. People are fetched four at a time.
+  const handleExportAll = async () => {
+    if (!filteredUsers.length) return;
+    setExportingAll(`0 / ${filteredUsers.length}`);
+    try {
+      const per: { user: UserActivitySummary; events: SessionEvent[] }[] = [];
+      let done = 0;
+      const queue = [...filteredUsers];
+      await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
+        for (let u = queue.shift(); u; u = queue.shift()) {
+          per.push({ user: u, events: await fetchAllActivity(u.userId, { ...dates, type }) });
+          setExportingAll(`${++done} / ${filteredUsers.length}`);
+        }
+      }));
+      const withEvents = per.filter((p) => p.events.length).sort((a, b) => a.user.userName.localeCompare(b.user.userName));
+      const everything = withEvents.flatMap((p) => p.events.map((e) => ({ e, user: p.user })));
+      if (!everything.length) {
+        toast.info("Nothing to export for this period.");
+        return;
+      }
+      const period = dates.dateFrom ? `${dates.dateFrom} to ${dates.dateTo}` : "all time";
+      const typeLabel = TYPES.find((t) => t.key === type)?.label ?? type;
+      const who = search.trim() ? `Everyone matching "${search.trim()}"` : "Everyone";
+      const title = `${who} — ${typeLabel}, ${period} (times in IST)`;
+
+      // Day -> person -> their events that day, oldest day first.
+      everything.sort((a, b) => Date.parse(a.e.timestamp) - Date.parse(b.e.timestamp));
+      const byDay = new Map<string, Map<string, { user: UserActivitySummary; items: SessionEvent[] }>>();
+      for (const { e, user } of everything) {
+        const k = dayKeyIst(e.timestamp);
+        if (!byDay.has(k)) byDay.set(k, new Map());
+        const people = byDay.get(k)!;
+        if (!people.has(user.userId)) people.set(user.userId, { user, items: [] });
+        people.get(user.userId)!.items.push(e);
+      }
+
+      const dayRows: XlsxCell[][] = [[{ v: title, s: "title" }], [], ["Date", "Person", "Email", "Total", ...KINDS.map(([, l]) => l)].map(H)];
+      for (const [key, people] of byDay) {
+        const dayItems: SessionEvent[] = [];
+        for (const { user, items } of [...people.values()].sort((a, b) => a.user.userName.localeCompare(b.user.userName))) {
+          dayItems.push(...items);
+          dayRows.push([dayLabelIst(key), user.userName, user.userEmail || "", items.length, ...kindCounts(items)]);
+        }
+        dayRows.push([
+          { v: `${dayLabelIst(key)} total`, s: "label" },
+          { v: `${people.size} ${people.size === 1 ? "person" : "people"}`, s: "label" },
+          "",
+          { v: dayItems.length, s: "label" },
+          ...kindCounts(dayItems).map((c) => ({ v: c, s: "label" as const })),
+        ]);
+        dayRows.push([]);
+      }
+
+      const personRows: XlsxCell[][] = [[{ v: title, s: "title" }], [], ["Person", "Email", "Days active", "Total", ...KINDS.map(([, l]) => l)].map(H)];
+      for (const { user, events: ev } of withEvents) {
+        personRows.push([user.userName, user.userEmail || "", new Set(ev.map((e) => dayKeyIst(e.timestamp))).size, ev.length, ...kindCounts(ev)]);
+      }
+      const allEv = everything.map((x) => x.e);
+      personRows.push([{ v: "Total", s: "label" }, "", "", { v: allEv.length, s: "label" }, ...kindCounts(allEv).map((c) => ({ v: c, s: "label" as const }))]);
+
+      const actRows: XlsxCell[][] = [[{ v: title, s: "title" }], [], ["Date", "Time (IST)", "Person", "Kind", "Action", "Subject", "Where", "Record", "IP"].map(H)];
+      for (const [key, people] of byDay) {
+        const items = [...people.values()]
+          .flatMap((p) => p.items.map((e) => ({ e, user: p.user })))
+          .sort((a, b) => Date.parse(a.e.timestamp) - Date.parse(b.e.timestamp));
+        actRows.push([{ v: `${dayLabelIst(key)}  (${items.length})`, s: "label" }]);
+        for (const { e, user } of items) {
+          const d = describeActivity(e);
+          actRows.push([dayLabelIst(key), timeIst(e.timestamp), user.userName, d.kind, d.verb, d.subject || "", d.where || "", d.record || "", e.ipAddress && e.ipAddress !== "unknown" ? e.ipAddress : ""]);
+        }
+      }
+
+      const blob = await buildWorkbook([
+        { name: "By day", rows: dayRows, widths: [28, 24, 28, 8, ...KINDS.map(() => 12)], freezeBelowRow: 4 },
+        { name: "By person", rows: personRows, widths: [24, 28, 11, 8, ...KINDS.map(() => 12)], freezeBelowRow: 4 },
+        { name: "Activity", rows: actRows, widths: [28, 11, 22, 10, 22, 34, 30, 34, 16], freezeBelowRow: 4 },
+      ]);
+      downloadBlob(blob, `activity-everyone-${dates.dateFrom ?? "all"}-to-${dates.dateTo ?? "all"}.xlsx`);
+      const n = withEvents.length;
+      toast.success(`Exported ${allEv.length.toLocaleString("en-IN")} activities by ${n} ${n === 1 ? "person" : "people"} over ${byDay.size} day${byDay.size === 1 ? "" : "s"}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setExportingAll(null);
+    }
+  };
+
   return (
     <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
       <PeopleList
@@ -149,6 +246,8 @@ export default function ActivityByUser() {
         setRange={setRange}
         selected={selected}
         setSelected={setSelected}
+        onExportAll={handleExportAll}
+        exportingAll={exportingAll}
       />
       <PersonActivity
         current={current}

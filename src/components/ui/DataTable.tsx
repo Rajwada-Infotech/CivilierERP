@@ -74,6 +74,9 @@ interface DataTableProps<TData extends RowData> {
   emptyMessage?: string;
   /** Extra className on the wrapper div */
   className?: string;
+  /** Fixed column widths (from each column's `size`) instead of sizing to content — keeps several tables
+   *  of the same columns (e.g. one per group) lined up with each other. */
+  fixedLayout?: boolean;
   /**
    * Row className — receives the row and returns a className string.
    * Use this for highlight-on-edit patterns: (row) => isEditing(row.original.id) ? "bg-primary/5 border-l-2 border-l-primary" : ""
@@ -133,6 +136,7 @@ export function DataTable<TData extends RowData>({
   defaultPageSize = 10,
   emptyMessage = "No records found.",
   className,
+  fixedLayout = false,
   rowClassName,
   onRowClick,
   getRowId,
@@ -330,7 +334,7 @@ export function DataTable<TData extends RowData>({
           // breaking IDs, dates and badges onto several lines.
           const widthOf = (size: number | undefined) => `${(size ?? 150) / 16}rem`;
           return (
-        <table className="text-sm font-body" style={{ tableLayout: "auto", width: "100%", minWidth: `${totalSize / 16}rem` }}>
+        <table className="text-sm font-body" style={{ tableLayout: fixedLayout ? "fixed" : "auto", width: "100%", minWidth: `${totalSize / 16}rem` }}>
           <thead>
             <tr className="border-b border-border bg-muted">
               {table.getHeaderGroups().map((hg) =>

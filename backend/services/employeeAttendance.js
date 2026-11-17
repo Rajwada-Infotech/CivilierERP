@@ -18,6 +18,7 @@
 //   • HR corrections require a reason and are written to EmployeeAttendanceAudit.
 
 const { sql } = require("../db");
+const { bumpCacheVersion } = require("../redis");
 
 const STALE_HOURS = 18;
 const IST_OFFSET_MIN = 330;
@@ -42,26 +43,39 @@ function istDate(d) {
 /**
  * Derived figures for one attendance record + its breaks.
  *   totalSec = Out − In            (null until Out is recorded)
- *   breakSec = Σ completed breaks
+ *   breakSec = Σ completed breaks that come off working time (a "Meeting at other office" is work, so it doesn't)
  *   netSec   = totalSec − breakSec
+ *   extraSec = Σ time beyond each break's allowance (copied onto the break when it started; migration 673)
  * Plus live figures for a session still running, a status and review flags.
  */
 function compute(rec, breaks, now = new Date()) {
   const inT = new Date(rec.InTime);
   const outT = rec.OutTime ? new Date(rec.OutTime) : null;
   const sorted = [...breaks].sort((a, b) => new Date(a.BreakStart) - new Date(b.BreakStart));
-  const list = sorted.map((b, i) => ({
-    breakId: b.BreakId,
-    no: i + 1,
-    start: toIso(b.BreakStart),
-    end: toIso(b.BreakEnd),
-    seconds: b.BreakEnd ? secs(b.BreakStart, b.BreakEnd) : null,
-    open: !b.BreakEnd,
-    hrEdited: !!b.IsHrEdited,
-  }));
-  const openBreak = list.find((b) => b.open) || null;
-  const breakSec = list.reduce((s, b) => s + (b.seconds || 0), 0);
   const stale = !outT && now - inT > STALE_HOURS * 3_600_000;
+  const list = sorted.map((b, i) => {
+    const allowedSeconds = b.AllowedMinutes != null ? Number(b.AllowedMinutes) * 60 : null;
+    const seconds = b.BreakEnd ? secs(b.BreakStart, b.BreakEnd) : null;
+    const running = !b.BreakEnd && !outT && !stale ? secs(b.BreakStart, now) : 0; // a break still going on, up to now
+    return {
+      breakId: b.BreakId,
+      no: i + 1,
+      start: toIso(b.BreakStart),
+      end: toIso(b.BreakEnd),
+      seconds,
+      open: !b.BreakEnd,
+      hrEdited: !!b.IsHrEdited,
+      type: b.BreakType ?? "Break",
+      note: b.BreakNote ?? null,
+      deduct: b.DeductFromWork == null ? true : !!b.DeductFromWork,
+      allowedSeconds,
+      overSeconds: allowedSeconds != null ? Math.max(0, (seconds ?? running) - allowedSeconds) : 0,
+    };
+  });
+  const openBreak = list.find((b) => b.open) || null;
+  const breakSec = list.reduce((s, b) => s + (b.deduct ? b.seconds || 0 : 0), 0);
+  const officialSec = list.reduce((s, b) => s + (!b.deduct ? b.seconds || 0 : 0), 0);
+  const extraSec = list.reduce((s, b) => s + b.overSeconds, 0);
 
   const flags = [];
   if (!outT && stale) flags.push("MISSING_OUT");
@@ -77,7 +91,7 @@ function compute(rec, breaks, now = new Date()) {
 
   // Live figures for a running session (shown ticking on the employee's screen).
   const sessionSoFar = !outT ? secs(inT, now) : null;
-  const liveBreakSec = breakSec + (openBreak && !outT ? secs(openBreak.start, now) : 0);
+  const liveBreakSec = breakSec + (openBreak && openBreak.deduct && !outT ? secs(openBreak.start, now) : 0);
 
   return {
     attendanceId: rec.AttendanceId,
@@ -95,11 +109,18 @@ function compute(rec, breaks, now = new Date()) {
     breakCount: list.length,
     breaks: list,
     breakSeconds: breakSec,
+    officialSeconds: officialSec,
+    extraSeconds: extraSec,
     totalSeconds: totalSec,
     netSeconds: netSec,
     status,
     flags,
     hrEdited: !!rec.IsHrEdited,
+    // Evidence captured at the punch on the Employee Portal (photos are fetched separately, see getPhoto).
+    inLocation: rec.InLatitude != null ? { lat: Number(rec.InLatitude), lng: Number(rec.InLongitude), accuracyM: rec.InAccuracyM ?? null } : null,
+    outLocation: rec.OutLatitude != null ? { lat: Number(rec.OutLatitude), lng: Number(rec.OutLongitude), accuracyM: rec.OutAccuracyM ?? null } : null,
+    hasInPhoto: !!rec.HasInPhoto,
+    hasOutPhoto: !!rec.HasOutPhoto,
     live: !outT && !stale ? { sessionSeconds: sessionSoFar, breakSeconds: liveBreakSec, netSeconds: Math.max(0, sessionSoFar - liveBreakSec) } : null,
   };
 }
@@ -109,7 +130,9 @@ function compute(rec, breaks, now = new Date()) {
 const RECORD_SELECT = `
   SELECT a.AttendanceId, a.EmployeeId, e.EmployeeCode, e.EmployeeName, e.CompanyId, comp.name AS CompanyName,
          e.Department, a.ProjectId, pr.name AS ProjectName, CONVERT(NVARCHAR(10), a.AttendanceDate, 23) AS AttendanceDate,
-         a.InTime, a.OutTime, a.IsHrEdited
+         a.InTime, a.OutTime, a.IsHrEdited,
+         a.InLatitude, a.InLongitude, a.InAccuracyM, a.OutLatitude, a.OutLongitude, a.OutAccuracyM,
+         CASE WHEN a.InPhoto IS NULL THEN 0 ELSE 1 END AS HasInPhoto, CASE WHEN a.OutPhoto IS NULL THEN 0 ELSE 1 END AS HasOutPhoto
   FROM dbo.EmployeeAttendance a
   JOIN dbo.EmployeeMaster e ON e.EmployeeId = a.EmployeeId
   LEFT JOIN dbo.enterprise comp ON comp.id = e.CompanyId
@@ -132,7 +155,7 @@ async function loadBreaks(pool, attendanceIds) {
   if (!attendanceIds.length) return map;
   // Ids are integers we just read from the DB; inlined to avoid a 2,100-parameter limit.
   const r = await pool.request().query(`
-    SELECT BreakId, AttendanceId, BreakStart, BreakEnd, IsHrEdited
+    SELECT BreakId, AttendanceId, BreakStart, BreakEnd, IsHrEdited, BreakType, BreakNote, AllowedMinutes, DeductFromWork
     FROM dbo.EmployeeAttendanceBreak WHERE AttendanceId IN (${attendanceIds.map((i) => Number(i)).join(",")})
   `);
   for (const b of r.recordset) {
@@ -176,6 +199,45 @@ async function audit(pool, { attendanceId, employeeId, action, detail, reason, b
     .input("Act", sql.NVarChar(30), action).input("D", sql.NVarChar(sql.MAX), detail ?? null)
     .input("R", sql.NVarChar(500), reason ?? null).input("By", sql.NVarChar(150), by)
     .query(`INSERT INTO dbo.EmployeeAttendanceAudit (AttendanceId, EmployeeId, Action, Detail, Reason, ChangedBy) VALUES (@A, @E, @Act, @D, @R, @By)`);
+}
+
+// ─── Keep Attendance Records (the payroll sheet) in step with punches ────────
+
+const hhmmIst = (d) => new Date(new Date(d).getTime() + IST_OFFSET_MIN * 60_000).toISOString().slice(11, 16);
+
+/**
+ * Makes dbo.AttendanceRecord (migration 672) show this employee's punch for `date` (IST YYYY-MM-DD): a 'Punch' row is
+ * created / updated to Present with the In and Out time, or removed if the punch is gone. A row somebody entered by hand
+ * (Source 'Manual') is never changed. Never throws -- the punch itself has already succeeded.
+ */
+async function syncAttendanceRecord(pool, employeeId, date) {
+  try {
+    const punch = (await pool.request().input("E", sql.Int, employeeId).input("D", sql.Date, date)
+      .query("SELECT InTime, OutTime FROM dbo.EmployeeAttendance WHERE EmployeeId = @E AND AttendanceDate = @D")).recordset[0];
+    const row = (await pool.request().input("E", sql.Int, employeeId).input("D", sql.Date, date)
+      .query("SELECT AttendanceId, Source FROM dbo.AttendanceRecord WHERE EmployeeId = @E AND AttendanceDate = @D")).recordset[0];
+    if (!punch) {
+      if (row?.Source === "Punch") await pool.request().input("Id", sql.Int, row.AttendanceId).query("DELETE FROM dbo.AttendanceRecord WHERE AttendanceId = @Id");
+    } else if (!row) {
+      await pool.request().input("E", sql.Int, employeeId).input("D", sql.Date, date)
+        .input("In", sql.NVarChar(10), hhmmIst(punch.InTime)).input("Out", sql.NVarChar(10), punch.OutTime ? hhmmIst(punch.OutTime) : null)
+        .query(`INSERT INTO dbo.AttendanceRecord (EmployeeId, AttendanceDate, Status, CheckIn, CheckOut, Remarks, IsActive, Source)
+                VALUES (@E, @D, N'Present', @In, @Out, N'Employee punch', 1, N'Punch')`);
+    } else if (row.Source === "Punch") {
+      await pool.request().input("Id", sql.Int, row.AttendanceId)
+        .input("In", sql.NVarChar(10), hhmmIst(punch.InTime)).input("Out", sql.NVarChar(10), punch.OutTime ? hhmmIst(punch.OutTime) : null)
+        .query("UPDATE dbo.AttendanceRecord SET Status = N'Present', CheckIn = @In, CheckOut = @Out, IsActive = 1, UpdatedAt = SYSUTCDATETIME() WHERE AttendanceId = @Id");
+    }
+    await bumpCacheVersion("attendance-record");
+  } catch (err) {
+    console.warn("[employeeAttendance] attendance-record sync:", err.message);
+  }
+}
+
+async function syncById(pool, attendanceId) {
+  const r = (await pool.request().input("Id", sql.Int, attendanceId)
+    .query("SELECT EmployeeId, CONVERT(NVARCHAR(10), AttendanceDate, 23) AS D FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id")).recordset[0];
+  if (r) await syncAttendanceRecord(pool, r.EmployeeId, r.D);
 }
 
 // ─── Employee self-service ───────────────────────────────────────────────────
@@ -246,11 +308,41 @@ async function getMyState(pool, user) {
   };
 }
 
+// ─── Punch evidence (live photo + device location) ──────────────────────────
+
+const MAX_PHOTO_CHARS = 700_000; // a ~640px JPEG is ~60 KB; this is a generous ceiling on the base64 text
+
+/**
+ * Validates what the Employee Portal sends with a punch: { photo, latitude, longitude, accuracy }.
+ * The photo must be a JPEG data URL; coordinates must be real. Throws AttendanceError(400) otherwise.
+ */
+function cleanEvidence(raw) {
+  const e = raw || {};
+  const photo = typeof e.photo === "string" ? e.photo : "";
+  if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(photo)) throw new AttendanceError("A live photo is required — allow camera access and take the picture.", 400);
+  if (photo.length > MAX_PHOTO_CHARS) throw new AttendanceError("The photo is too large — please try again.", 400);
+  const lat = Number(e.latitude);
+  const lng = Number(e.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) {
+    throw new AttendanceError("Your location is required — allow location access on this device.", 400);
+  }
+  const acc = Number.isFinite(Number(e.accuracy)) ? Math.min(Math.max(Math.round(Number(e.accuracy)), 0), 1_000_000) : null;
+  return { photo, lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6, acc };
+}
+
+/** The punch photo of one record ("in" or "out") as a data URL, or null. */
+async function getPhoto(pool, attendanceId, which) {
+  const col = which === "out" ? "OutPhoto" : "InPhoto";
+  const r = await pool.request().input("Id", sql.Int, attendanceId).query(`SELECT ${col} AS Photo FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id`);
+  return r.recordset[0]?.Photo ?? null;
+}
+
 const isUnique = (e) => /UQ_EmployeeAttendance_EmployeeDate|UX_EmployeeAttendanceBreak_OneOpen|duplicate key/i.test(e.message || "");
 const isCheck = (e) => /CK_EmployeeAttendance_OutAfterIn|CK_EmployeeAttendanceBreak_EndAfterStart/i.test(e.message || "");
 const TOO_FAST = "That was too quick after the previous punch — wait a few seconds and try again.";
 
-async function clockIn(pool, user, { projectId } = {}) {
+async function clockIn(pool, user, { projectId, evidence, requireEvidence } = {}) {
+  const ev = evidence || requireEvidence ? cleanEvidence(evidence) : null;
   const employee = await resolveEmployee(pool, user);
   const state = await getMyState(pool, user);
   if (!state.allowed.in) {
@@ -265,13 +357,16 @@ async function clockIn(pool, user, { projectId } = {}) {
     projId = Number(projectId);
   }
   try {
-    const r = await pool.request().input("E", sql.Int, employee.EmployeeId).input("P", sql.Int, projId).query(`
+    const r = await pool.request().input("E", sql.Int, employee.EmployeeId).input("P", sql.Int, projId)
+      .input("Photo", sql.NVarChar(sql.MAX), ev?.photo ?? null).input("Lat", sql.Decimal(9, 6), ev?.lat ?? null)
+      .input("Lng", sql.Decimal(9, 6), ev?.lng ?? null).input("Acc", sql.Int, ev?.acc ?? null).query(`
       DECLARE @now DATETIME2(0) = SYSUTCDATETIME();
-      INSERT INTO dbo.EmployeeAttendance (EmployeeId, AttendanceDate, InTime, ProjectId)
+      INSERT INTO dbo.EmployeeAttendance (EmployeeId, AttendanceDate, InTime, ProjectId, InPhoto, InLatitude, InLongitude, InAccuracyM)
       OUTPUT INSERTED.AttendanceId
-      VALUES (@E, CAST(DATEADD(MINUTE, ${IST_OFFSET_MIN}, @now) AS DATE), @now, @P)
+      VALUES (@E, CAST(DATEADD(MINUTE, ${IST_OFFSET_MIN}, @now) AS DATE), @now, @P, @Photo, @Lat, @Lng, @Acc)
     `);
     await audit(pool, { attendanceId: r.recordset[0].AttendanceId, employeeId: employee.EmployeeId, action: "IN", by: user.email });
+    await syncById(pool, r.recordset[0].AttendanceId);
   } catch (e) {
     if (isUnique(e)) throw new AttendanceError("In Time for today is already recorded.");
     throw e;
@@ -279,15 +374,19 @@ async function clockIn(pool, user, { projectId } = {}) {
   return getMyState(pool, user);
 }
 
-async function clockOut(pool, user) {
+async function clockOut(pool, user, { evidence, requireEvidence } = {}) {
+  const ev = evidence || requireEvidence ? cleanEvidence(evidence) : null;
   const employee = await resolveEmployee(pool, user);
   const state = await getMyState(pool, user);
   if (state.state === "NOT_STARTED") throw new AttendanceError("Record In Time first — Out Time can only follow it.");
   if (state.state === "COMPLETED") throw new AttendanceError("Out Time is already recorded for today.");
   if (state.state === "ON_BREAK") throw new AttendanceError("Stop your current break before recording Out Time.");
   try {
-    const r = await pool.request().input("Id", sql.Int, state.current.attendanceId).query(`
-      UPDATE dbo.EmployeeAttendance SET OutTime = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME()
+    const r = await pool.request().input("Id", sql.Int, state.current.attendanceId)
+      .input("Photo", sql.NVarChar(sql.MAX), ev?.photo ?? null).input("Lat", sql.Decimal(9, 6), ev?.lat ?? null)
+      .input("Lng", sql.Decimal(9, 6), ev?.lng ?? null).input("Acc", sql.Int, ev?.acc ?? null).query(`
+      UPDATE dbo.EmployeeAttendance SET OutTime = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME(),
+        OutPhoto = @Photo, OutLatitude = @Lat, OutLongitude = @Lng, OutAccuracyM = @Acc
       WHERE AttendanceId = @Id AND OutTime IS NULL
         AND NOT EXISTS (SELECT 1 FROM dbo.EmployeeAttendanceBreak WHERE AttendanceId = @Id AND BreakEnd IS NULL)
     `);
@@ -297,24 +396,39 @@ async function clockOut(pool, user) {
     throw e;
   }
   await audit(pool, { attendanceId: state.current.attendanceId, employeeId: employee.EmployeeId, action: "OUT", by: user.email });
+  await syncById(pool, state.current.attendanceId);
   return getMyState(pool, user);
 }
 
-async function breakStart(pool, user) {
+/** The break reasons an employee can pick (migration 673), with their rules. */
+async function getBreakTypes(pool) {
+  const r = await pool.request().query("SELECT BreakType, DeductFromWork, AllowedMinutes, RequiresNote FROM dbo.AttendanceBreakType WHERE IsActive = 1 ORDER BY SortOrder");
+  return r.recordset.map((x) => ({ type: x.BreakType, deduct: !!x.DeductFromWork, allowedMinutes: x.AllowedMinutes, requiresNote: !!x.RequiresNote }));
+}
+
+async function breakStart(pool, user, { type, note } = {}) {
+  const types = await getBreakTypes(pool);
+  const rule = types.find((t) => t.type === (type || "Break"));
+  if (!rule) throw new AttendanceError("Choose a valid break reason.", 400);
+  const cleanNote = String(note ?? "").trim().slice(0, 300);
+  if (rule.requiresNote && cleanNote.length < 3) throw new AttendanceError("Please write the reason for this break.", 400);
   const employee = await resolveEmployee(pool, user);
   const state = await getMyState(pool, user);
   if (state.state === "NOT_STARTED") throw new AttendanceError("Record In Time before starting a break.");
   if (state.state === "COMPLETED") throw new AttendanceError("You have already clocked out for today.");
   if (state.state === "ON_BREAK") throw new AttendanceError("A break is already running — stop it before starting another.");
   try {
-    await pool.request().input("Id", sql.Int, state.current.attendanceId).query(`
-      INSERT INTO dbo.EmployeeAttendanceBreak (AttendanceId, BreakStart) VALUES (@Id, SYSUTCDATETIME())
+    await pool.request().input("Id", sql.Int, state.current.attendanceId)
+      .input("Type", sql.NVarChar(40), rule.type).input("Note", sql.NVarChar(300), cleanNote || null)
+      .input("Allowed", sql.Int, rule.allowedMinutes).input("Deduct", sql.Bit, rule.deduct ? 1 : 0).query(`
+      INSERT INTO dbo.EmployeeAttendanceBreak (AttendanceId, BreakStart, BreakType, BreakNote, AllowedMinutes, DeductFromWork)
+      VALUES (@Id, SYSUTCDATETIME(), @Type, @Note, @Allowed, @Deduct)
     `);
   } catch (e) {
     if (isUnique(e)) throw new AttendanceError("A break is already running — stop it before starting another.");
     throw e;
   }
-  await audit(pool, { attendanceId: state.current.attendanceId, employeeId: employee.EmployeeId, action: "BREAK_START", by: user.email });
+  await audit(pool, { attendanceId: state.current.attendanceId, employeeId: employee.EmployeeId, action: "BREAK_START", detail: `${rule.type}${cleanNote ? `: ${cleanNote}` : ""}`, by: user.email });
   return getMyState(pool, user);
 }
 
@@ -348,13 +462,15 @@ async function summary(pool, filters = {}, now = new Date()) {
       s = {
         employeeId: r.employeeId, employeeCode: r.employeeCode, employeeName: r.employeeName, companyName: r.companyName,
         department: r.department, days: 0, completeDays: 0, incompleteDays: 0, breakCount: 0,
-        breakSeconds: 0, totalSeconds: 0, netSeconds: 0,
+        breakSeconds: 0, officialSeconds: 0, extraSeconds: 0, totalSeconds: 0, netSeconds: 0,
       };
       byEmp.set(r.employeeId, s);
     }
     s.days++;
     s.breakCount += r.breakCount;
     s.breakSeconds += r.breakSeconds;
+    s.officialSeconds += r.officialSeconds || 0;
+    s.extraSeconds += r.extraSeconds || 0;
     if (r.status === "Present") {
       s.completeDays++;
       s.totalSeconds += r.totalSeconds || 0;
@@ -367,7 +483,7 @@ async function summary(pool, filters = {}, now = new Date()) {
     employees,
     totals: {
       employees: employees.length, days: sum("days"), completeDays: sum("completeDays"), incompleteDays: sum("incompleteDays"),
-      breakCount: sum("breakCount"), breakSeconds: sum("breakSeconds"), totalSeconds: sum("totalSeconds"), netSeconds: sum("netSeconds"),
+      breakCount: sum("breakCount"), breakSeconds: sum("breakSeconds"), officialSeconds: sum("officialSeconds"), extraSeconds: sum("extraSeconds"), totalSeconds: sum("totalSeconds"), netSeconds: sum("netSeconds"),
     },
   };
 }
@@ -443,7 +559,7 @@ function assertBreaksValid(inT, outT, breaks) {
 }
 
 async function loadRaw(pool, attendanceId) {
-  const a = await pool.request().input("Id", sql.Int, attendanceId).query("SELECT AttendanceId, EmployeeId, InTime, OutTime FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id");
+  const a = await pool.request().input("Id", sql.Int, attendanceId).query("SELECT AttendanceId, EmployeeId, InTime, OutTime, InLatitude, InLongitude, OutLatitude, OutLongitude FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id");
   const rec = a.recordset[0];
   if (!rec) throw new AttendanceError("Attendance record not found.", 404);
   const b = await pool.request().input("Id", sql.Int, attendanceId).query("SELECT BreakId, BreakStart, BreakEnd FROM dbo.EmployeeAttendanceBreak WHERE AttendanceId = @Id");
@@ -478,6 +594,8 @@ async function hrUpdateRecord(pool, attendanceId, { inTime, outTime, reason }, a
     throw e;
   }
   await audit(pool, { attendanceId, employeeId: rec.EmployeeId, action: "HR_EDIT", detail: changes.join("; "), reason: why, by: actor });
+  await syncAttendanceRecord(pool, rec.EmployeeId, istDate(rec.InTime)); // the old day (if the In Time moved to another)
+  await syncById(pool, attendanceId);
   return getRecord(pool, attendanceId);
 }
 
@@ -538,9 +656,28 @@ async function hrDeleteBreak(pool, breakId, { reason }, actor) {
   return getRecord(pool, cur.AttendanceId);
 }
 
+/**
+ * HR removes a whole day's record (e.g. a punch made by mistake). The breaks go with it; the audit trail keeps what
+ * was removed (employee, day, In / Out, location) and the reason -- it has no foreign key, so it outlives the record.
+ */
+async function hrDeleteRecord(pool, attendanceId, { reason }, actor) {
+  const why = needReason(reason);
+  const { rec } = await loadRaw(pool, attendanceId);
+  if (!rec) throw new AttendanceError("Attendance record not found.", 404);
+  const where = (lat, lng) => (lat != null ? ` @ ${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}` : "");
+  const detail = `Deleted ${istDate(rec.InTime)}: In ${fmtIst(rec.InTime)}${where(rec.InLatitude, rec.InLongitude)} -> Out ${rec.OutTime ? fmtIst(rec.OutTime) : "(open)"}${where(rec.OutLatitude, rec.OutLongitude)}`;
+  await pool.request().input("Id", sql.Int, attendanceId).query(`
+    DELETE FROM dbo.EmployeeAttendanceBreak WHERE AttendanceId = @Id;
+    DELETE FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id;
+  `);
+  await audit(pool, { attendanceId, employeeId: rec.EmployeeId, action: "HR_DELETE", detail, reason: why, by: actor });
+  await syncAttendanceRecord(pool, rec.EmployeeId, istDate(rec.InTime));
+}
+
 module.exports = {
+  hrDeleteRecord,
   AttendanceError, STALE_HOURS, compute, istDate,
-  getMyState, clockIn, clockOut, breakStart, breakStop,
+  getMyState, clockIn, clockOut, breakStart, breakStop, getPhoto, cleanEvidence, getBreakTypes,
   listRecords, getRecord, getAudit, summary, notMarked, hrFilterOptions,
   hrUpdateRecord, hrAddBreak, hrUpdateBreak, hrDeleteBreak,
 };

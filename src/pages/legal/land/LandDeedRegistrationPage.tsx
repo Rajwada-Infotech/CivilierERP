@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { DocumentText } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
+import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { LegalFileLink, openLegalLink } from "@/components/legal/LegalDocumentPreview";
 import { RegistrySearchPanel } from "@/components/legal/RegistrySearchPanel";
@@ -57,9 +58,10 @@ export default function LandDeedRegistrationPage() {
   const [q, setQ] = useState("");
   const [pickedId, setPickedId] = useState<number | null>(null);
   const { data, isFetching, error } = useQuery({ queryKey: ["legal-deed-reg", tab], queryFn: () => getDeedRegList(tab) });
-  const lands = data?.lands ?? [];
+  const { inScope } = useProjectScope();
+  const lands = (data?.lands ?? []).filter((l) => inScope(l.ProjectId));
   const { data: other } = useQuery({ queryKey: ["legal-deed-reg", tab === "active" ? "registered" : "active"], queryFn: () => getDeedRegList(tab === "active" ? "registered" : "active") });
-  const counts = { active: tab === "active" ? lands.length : other?.lands.length ?? 0, registered: tab === "registered" ? lands.length : other?.lands.length ?? 0 };
+  const counts = { active: tab === "active" ? lands.length : other?.lands.filter((l) => inScope(l.ProjectId)).length ?? 0, registered: tab === "registered" ? lands.length : other?.lands.filter((l) => inScope(l.ProjectId)).length ?? 0 };
   const term = q.trim().toLowerCase();
   const list = lands.filter((l) => !term || [l.LandCode, l.LandName, l.MouzaName, l.RsDagNo, l.LrDagNo, l.RegDeedNo].some((v) => String(v ?? "").toLowerCase().includes(term)));
   useEffect(() => { if (pickedId && !lands.some((l) => l.LandId === pickedId)) setPickedId(null); }, [lands, pickedId]);
@@ -458,7 +460,7 @@ function Payments({ l, payments, schedule, editable, onSaved }: { l: DeedRegLand
               <div className="flex gap-2">
                 <button className={primary} disabled={busy || !i.dueDate || !typedAmt}
                   onClick={() => run(() => addInstalment(l.LandId, { ...i, percent: i.by === "pct" ? i.percent : "", amount: i.by === "amt" ? i.amount : "" }),
-                    () => { setI({ ...i, dueDate: "", amount: "", percent: "", label: "", remarks: "" }); setForm(null); })}>Add instalment</button>
+                    () => { setI({ ...i, dueDate: "", amount: "", percent: "", label: "", remarks: "" }); setForm(null); })}>New instalment</button>
                 <button className="text-xs underline" onClick={() => setForm(null)}>Cancel</button>
               </div>
             </div>
@@ -591,7 +593,7 @@ function StampDuty({ id, rows, editable, onSaved }: { id: number; rows: StampQue
           <label className="text-xs">Fee type<Pick list={fees} value={f.feeTypeId} onChange={(v) => setF({ ...f, feeTypeId: v })} placeholder="Stamp duty, registration…" /></label>
           <label className="text-xs">Amount (₹)<input className={field} inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
           <label className="text-xs">Remarks<input className={field} value={f.remarks} maxLength={1000} onChange={(e) => setF({ ...f, remarks: e.target.value })} /></label>
-          <button className={`${primary} h-9`} disabled={busy || !f.amount || !f.queryDate} onClick={add}>Add</button>
+          <button className={`${primary} h-9`} disabled={busy || !f.amount || !f.queryDate} onClick={add}>Save</button>
         </div>
       )}
     </div>

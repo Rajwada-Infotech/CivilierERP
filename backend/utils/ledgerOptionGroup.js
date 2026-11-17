@@ -16,6 +16,9 @@ const GROUP_BY_TYPE = {
   BR: "broker",
   P: "partner",
   V: "vendor",
+  E: "employee", // services/employeeAccountHead.js — one head per employee (EMPAH-<id>)
+  RC: "crmCustomer", // services/crmLedger.js — a flat buyer (CRMCUST-<id>), kept apart from Customer Master (A)
+  IC: "interCompany", // services/interCompanyStockTransferGL.js — "Inter-Company A/c - <company>"
 };
 
 function ledgerOptionGroup(type, category, code) {

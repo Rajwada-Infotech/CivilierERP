@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -6,7 +6,7 @@ import { SearchStatus } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
-import { ProjectPicker, useLegalProject } from "@/components/legal/ProjectPicker";
+import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
@@ -38,12 +38,8 @@ function Counter({ due, done }: { due: string | null; done: boolean }) {
 export default function LandDeedSearchPage() {
   const rights = usePageRights("legal-land-enquiry");
   const navigate = useNavigate();
-  const [remembered, setRemembered] = useLegalProject();
-  // "All projects" comes only from the link (?project=all, the dashboard report) or the picker; it is not remembered.
-  // "All projects" / "Without a project" come from the link (dashboard report) or the picker; they are not remembered.
-  const [scope, setScope] = useState<"all" | "none" | null>(() => { const v = new URLSearchParams(window.location.search).get("project"); return v === "all" || v === "none" ? v : null; });
-  const projectId: number | "all" | "none" | null = scope ?? remembered;
-  const setProjectId = (id: number | null | "all" | "none") => { if (id === "all" || id === "none") setScope(id); else { setScope(null); setRemembered(id); } };
+  // The project comes from the Legal header picker (top right); a search here can switch it.
+  const { scope: projectId, setScope: setProjectId } = useProjectScope();
   const start = new URLSearchParams(window.location.search).get("q") ?? "";
   const [q, setQ] = useState(start);
   const [pickedId, setPickedId] = useState<number | null>(null);
@@ -75,7 +71,17 @@ export default function LandDeedSearchPage() {
   // drops them from the address so a refresh or the next pick does not bring them back.
   const dropLink = () => { if (window.location.search) navigate("/legal/land/deed-search", { replace: true }); };
   // Switching the project by hand starts clean: no search text, no open enquiry, the Pending list.
-  const changeProject = (id: number | null | "all" | "none") => { setProjectId(id); setPickedId(null); setQ(""); setTab("pending"); dropLink(); };
+  // The project changed in the header: start clean (no search text, no open enquiry, the Pending list) — unless the
+  // change came from Search below, which picks the project of what it found.
+  const fromSearch = useRef(false);
+  const firstScope = useRef(projectId);
+  useEffect(() => {
+    if (firstScope.current === projectId) return;
+    firstScope.current = projectId;
+    if (fromSearch.current) { fromSearch.current = false; return; }
+    setPickedId(null); setQ(""); setTab("pending"); dropLink();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
   const pick = (id: number) => { setPickedId(id); dropLink(); };
 
   // Search across every project (enquiry no, Land ID, RS / LR Dag or Khatian): the project of what is found is opened
@@ -89,7 +95,9 @@ export default function LandDeedSearchPage() {
       const hits = await findEnquiries("all", text, "all");
       if (!hits.length) { toast.error(`No enquiry found for "${text}" in any project`); return; }
       const projects = [...new Set(hits.map((h) => h.ProjectId ?? 0))];
-      setProjectId(projects.length === 1 ? (projects[0] || "none") : "all");
+      const target = projects.length === 1 ? (projects[0] || "none") : "all";
+      if (target !== projectId) fromSearch.current = true;
+      setProjectId(target);
       setTab("all");
       setPickedId(hits.length === 1 ? hits[0].EnquiryId : null);
       dropLink();
@@ -105,14 +113,14 @@ export default function LandDeedSearchPage() {
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", "Deed Registry Search"]} />
       <LegalShell title="Deed Registry Search" subtitle="Each enquiry gets a timeline per registration office when it is saved. Pick an enquiry, then search each office year by year; what you find is stored on the enquiry." icon={SearchStatus}>
-        <ProjectPicker value={projectId} allowAll onChange={changeProject}>
+        <div className="mb-4 flex flex-wrap items-center gap-3 border border-border bg-card px-4 py-3">
           <form className="flex min-w-[18rem] flex-1 items-center gap-2" onSubmit={(e) => { e.preventDefault(); findEverywhere(); }}>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Enquiry no, Land ID, RS / LR Dag or Khatian, mouza — filters this list; Search looks in all projects"
               className="h-9 flex-1 border border-border bg-background px-3 text-sm" />
             <button disabled={finding || !q.trim()} className="h-9 border border-foreground bg-foreground px-4 text-sm font-semibold text-card disabled:opacity-40">{finding ? "Searching…" : "Search"}</button>
             {q && <button type="button" className="text-xs underline" onClick={() => { setQ(""); setPickedId(null); dropLink(); }}>Clear</button>}
           </form>
-        </ProjectPicker>
+        </div>
         {projectId && (
           <div className="legal-cq"><div className="legal-split">
             {/* ── Queue ── */}

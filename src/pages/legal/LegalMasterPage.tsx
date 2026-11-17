@@ -489,8 +489,9 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
     <MasterPage
       title={master.title}
       canCreate={rights.canCreate && !noAdd && !locked}
-      collapsibleAddForm={noAdd || !!parentId || !!addButton}
-      addButtonLabel={addButton}
+      collapsibleAddForm
+      addButtonLabel={addButton ?? `New ${master.title}`}
+      addWord="New"
       statusTabs
       canEdit={rights.canEdit && !locked}
       canDelete={!locked && ((rights.canDelete && !master.noDelete) || (!!master.superAdminDelete && isSuperAdminRole(currentUser?.role)))}
@@ -521,7 +522,7 @@ export default function LegalMasterPage({ entry }: { entry: LegalMasterEntry }) 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", entry.area === "land" ? "Land Management" : "Setup", entry.label]} />
-      <LegalShell title={entry.label} subtitle={master?.desc ?? entry.desc} icon={entry.icon}>
+      <LegalShell title={entry.label} subtitle={master?.desc ?? entry.desc} icon={entry.icon} noProject>
         {/* Approval routes & SLA (the "approval-workflow" master) are kept in the database for Registration Task
             Type, but not shown until SLA and escalation are actually used. */}
         {/* Approval Control: one row per role, its users side by side. */}

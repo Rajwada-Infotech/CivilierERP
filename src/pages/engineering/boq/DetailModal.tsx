@@ -1,14 +1,18 @@
 // One BOQ opened: details, lines, approval, print, edit / delete.
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { getMaterialRequestPrefillFromBoq, MaterialRequestExistsError, getMRSourceStatus } from "@/api/workOrderApi";
+import { useQuery } from "@tanstack/react-query";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { Trash2, Edit3, Printer, ArrowLeft, Send, FilePenLine } from "lucide-react";
+import { Trash2, Edit3, Printer, ArrowLeft, Send, FilePenLine, ShoppingCart } from "lucide-react";
 import { KEY_INK, KEY_LINE, KEY_RED } from "@/components/sheet/sheetParts";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { BoqRecord, Company, Project, UomOption, apiFetch, fmt, fmtDate, rowToItem, rowToActivity, DetailRow, canEditBoq, canOpenBoqEdit } from "./config";
 import { LineEditor } from "./LineEditor";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Detail / View Modal
@@ -42,6 +46,35 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 }) => {
   const [lineTab, setLineTab] = useState<"items" | "activities">("activities");
   const [acting, setActing] = useState(false);
+  const [creatingMR, setCreatingMR] = useState(false);
+  const navigate = useNavigate();
+  // One request per BOQ and its work orders: its own (opened instead), or one from a work order made from it (blocks).
+  const { data: mrSource } = useQuery({
+    queryKey: ["mr-source-status", "boq", record.BoqID],
+    queryFn: () => getMRSourceStatus("boq", record.BoqID),
+    enabled: record.Status === "Approved",
+    staleTime: 0, // a request raised a moment ago must show at once
+  });
+  const mrBlocked = !mrSource?.own && !!mrSource?.blockedBy;
+
+  // Opens the Material Request form pre-filled with this BOQ's items; nothing is saved until the user saves there.
+  // If a live request already exists for the BOQ, it opens that one instead.
+  const createMaterialRequest = async () => {
+    setCreatingMR(true);
+    try {
+      const boqPrefill = await getMaterialRequestPrefillFromBoq(record.BoqID);
+      navigate("/material/material-request", { state: { boqPrefill } });
+    } catch (err: unknown) {
+      if (err instanceof MaterialRequestExistsError) {
+        toast.info(err.message);
+        navigate(`/material/material-request?view=${err.mrId}`);
+      } else {
+        toast.error(err instanceof Error ? err.message : "Could not open the Material Request.");
+      }
+    } finally {
+      setCreatingMR(false);
+    }
+  };
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const doDelete = async () => {
@@ -138,6 +171,28 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                 <Edit3 size={12} /> Edit
               </button>
             )}
+            {record.Status === "Approved" && (
+              <button
+                type="button"
+                disabled={creatingMR || mrBlocked}
+                title={mrBlocked ? mrSource?.reason ?? undefined : undefined}
+                onClick={() => (mrSource?.own ? navigate(`/material/material-request?view=${mrSource.own.mrId}`) : void createMaterialRequest())}
+                className={`${KEY_LINE} h-8 px-3`}
+              >
+                <ShoppingCart size={12} />{" "}
+                {creatingMR ? "Opening…" : mrSource?.own ? `View Material Request ${mrSource.own.docNo ?? ""}`.trim() : "Create Material Request"}
+              </button>
+            )}
+            {record.Status === "Approved" && mrBlocked && mrSource?.blockedBy && (
+              <button
+                type="button"
+                onClick={() => navigate(`/material/material-request?view=${mrSource.blockedBy!.mrId}`)}
+                title={mrSource.reason ?? undefined}
+                className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              >
+                Requested via Work Order {mrSource.blockedBy.viaDocNo ?? ""} in {mrSource.blockedBy.docNo ?? `#${mrSource.blockedBy.mrId}`}
+              </button>
+            )}
             {record.Status === "Draft" && (
               <button type="button" disabled={acting} onClick={() => doTransition("submit")} className={`${KEY_INK} h-8 px-3`}>
                 <Send size={12} /> Submit for approval
@@ -212,6 +267,13 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               }}
             >
               {record.Description}
+            </div>
+          )}
+
+          {/* Linked documents: BOQ → Material Request → Quotation → PO → GRN → Invoice (once approved) */}
+          {record.Status === "Approved" && (
+            <div style={{ border: "1px solid hsl(var(--foreground) / 0.3)", background: "hsl(var(--card))" }} className="px-4 sm:px-5 pb-4 sm:pb-5">
+              <DocumentChainPanel docType="boq" id={record.BoqID} />
             </div>
           )}
 

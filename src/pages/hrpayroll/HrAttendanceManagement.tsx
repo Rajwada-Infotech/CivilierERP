@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarCheck, Loader2, Plus, Trash2, Save } from "lucide-react";
+import { AlertTriangle, CalendarCheck, Loader2, Pencil, Plus, Trash2, Save } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
@@ -12,8 +12,8 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { DateInput, DateTimeInput } from "@/components/ui/date-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  getHrFilterOptions, getHrRecord, getHrRecords, getHrSummary, getNotMarked,
-  hrAddBreak, hrDeleteBreak, hrUpdateBreak, hrUpdateRecord,
+  getHrFilterOptions, getHrPunchPhoto, getHrRecord, getHrRecords, getHrSummary, getNotMarked,
+  hrAddBreak, hrDeleteBreak, hrDeleteRecord, hrUpdateBreak, hrUpdateRecord,
   type AttendanceRecord, type HrFilters,
 } from "@/api/employeeAttendanceApi";
 import { fmtDateIst, fmtDateTimeIst, fmtDuration, fmtTimeIst, fromIstInput, toIstInput, todayIstDate } from "@/lib/attendanceFormat";
@@ -59,7 +59,71 @@ function StatusBadge({ r }: { r: AttendanceRecord }) {
   );
 }
 
+// ── Delete a whole day's record (reason required, kept in the audit trail) ──
+function DeleteRecordDialog({ rec, onClose }: { rec: AttendanceRecord; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [reason, setReason] = useState("");
+  const del = useMutation({
+    mutationFn: () => hrDeleteRecord(rec.attendanceId, reason.trim()),
+    onSuccess: () => { toast.success("Attendance record deleted"); qc.invalidateQueries({ queryKey: ["hr-attendance"] }); onClose(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sheet-frame max-w-md" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Delete attendance</DialogTitle></DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p>Delete <b>{rec.employeeName}</b>'s attendance for <b>{fmtDateIst(rec.attendanceDate)}</b> (In {fmtTimeIst(rec.inTime)}{rec.outTime ? `, Out ${fmtTimeIst(rec.outTime)}` : ""})? Its breaks, punch photos and locations are removed too. The deletion and your reason stay in the audit trail.</p>
+          <div>
+            <label className={labelCls}>Reason (required) *</label>
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Punched by mistake" className={`${inputCls} w-full`} autoFocus />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+            <button onClick={() => reason.trim().length >= 3 ? del.mutate() : toast.error("Enter the reason for the deletion first")} disabled={del.isPending} className={`${KEY_RED} h-9 px-4`}>
+              {del.isPending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete record
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Record detail + HR correction ───────────────────────────────────────────
+
+// The live photo and device location captured at an Employee Portal punch (In and Out), when there are any.
+function PunchEvidence({ rec }: { rec: AttendanceRecord }) {
+  const sides = ([["In", rec.hasInPhoto, rec.inLocation, "in"], ["Out", rec.hasOutPhoto, rec.outLocation, "out"]] as const).filter(([, photo, loc]) => photo || loc);
+  const photos = useQuery({
+    queryKey: ["hr-attendance-photos", rec.attendanceId, rec.hasInPhoto, rec.hasOutPhoto],
+    queryFn: async () => ({
+      in: rec.hasInPhoto ? (await getHrPunchPhoto(rec.attendanceId, "in")).photo : null,
+      out: rec.hasOutPhoto ? (await getHrPunchPhoto(rec.attendanceId, "out")).photo : null,
+    }),
+    enabled: !!(rec.hasInPhoto || rec.hasOutPhoto),
+    staleTime: 5 * 60_000,
+  });
+  if (!sides.length) return null;
+  return (
+    <div className="bg-card p-4" style={{ border: HR_RULE }}>
+      <p className={`${HR_HEAD} mb-3`}>Punch photo and location <span className="text-xs text-muted-foreground font-normal normal-case tracking-normal">— captured live on the Employee Portal</span></p>
+      <div className="grid sm:grid-cols-2 gap-4">
+        {sides.map(([label, , loc, key]) => (
+          <div key={label} className="space-y-2">
+            <p className={HR_LBL}>{label}</p>
+            {photos.data?.[key] ? <img src={photos.data[key]!} alt={`${label} photo`} className="w-full max-w-[16rem] border border-foreground/30" /> : <div className="w-full max-w-[16rem] aspect-[4/3] bg-muted/40 flex items-center justify-center text-xs text-muted-foreground">{photos.isLoading ? "Loading…" : "No photo"}</div>}
+            {loc ? (
+              <a href={`https://www.google.com/maps?q=${loc.lat},${loc.lng}`} target="_blank" rel="noreferrer" className="text-xs underline underline-offset-2 block">
+                {loc.lat.toFixed(6)}, {loc.lng.toFixed(6)}{loc.accuracyM != null ? ` (±${loc.accuracyM} m)` : ""} — open map
+              </a>
+            ) : <p className="text-xs text-muted-foreground">No location</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; onClose: () => void }) {
   const qc = useQueryClient();
@@ -129,10 +193,18 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                 </div>
               ))}
             </div>
+            {((rec.officialSeconds ?? 0) > 0 || (rec.extraSeconds ?? 0) > 0) && (
+              <p className="text-xs text-muted-foreground">
+                Official work out of office (counted as work): <b className={NUM}>{fmtDuration(rec.officialSeconds ?? 0)}</b>
+                {" · "}Extra break time beyond the allowance: <b className={`${NUM} ${(rec.extraSeconds ?? 0) > 0 ? "text-destructive" : ""}`}>{fmtDuration(rec.extraSeconds ?? 0)}</b>
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <StatusBadge r={rec} />
               <span className="text-xs text-muted-foreground">{[rec.companyName, rec.department, rec.projectName].filter(Boolean).join(" · ") || "—"}</span>
             </div>
+
+            <PunchEvidence rec={rec} />
 
             {canEdit && (
               <div className="bg-card p-4 space-y-3" style={{ border: HR_RULE }}>
@@ -168,8 +240,10 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                     ) : (
                       <div className="flex flex-wrap gap-x-6 gap-y-1">
                         <span className={`font-medium ${NUM}`}>#{b.no}</span>
+                        <span>{b.type ?? "Break"}{b.note ? <span className="text-muted-foreground"> — {b.note}</span> : null}</span>
                         <span className={NUM}>{fmtTimeIst(b.start)} → {b.end ? fmtTimeIst(b.end) : <b className="text-destructive">not stopped</b>}</span>
-                        <span className={`text-muted-foreground ${NUM}`}>{b.end ? fmtDuration(b.seconds) : "—"}</span>
+                        <span className={`text-muted-foreground ${NUM}`}>{b.end ? fmtDuration(b.seconds) : "—"}{b.deduct === false ? " (work)" : ""}</span>
+                        {(b.overSeconds ?? 0) > 0 && <span className={`text-destructive font-semibold ${NUM}`}>{fmtDuration(b.overSeconds)} extra</span>}
                       </div>
                     )}
                   </div>
@@ -221,6 +295,7 @@ export default function HrAttendanceManagement() {
   const [anchor, setAnchor] = useState(today);
   const [missingDate, setMissingDate] = useState(today);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<AttendanceRecord | null>(null);
 
   const filters: HrFilters = useMemo(() => ({
     from, to,
@@ -328,12 +403,13 @@ export default function HrAttendanceManagement() {
                   <tr>
                     <th className="font-semibold px-4 py-2.5 text-left">Employee</th><th className="font-semibold px-4 py-2.5 text-left">Company / Dept</th><th className="font-semibold px-4 py-2.5 text-left">Project</th>
                     <th className="font-semibold px-4 py-2.5 text-left">Date</th><th className="font-semibold px-4 py-2.5 text-left">In</th><th className="font-semibold px-4 py-2.5 text-left">Out</th>
-                    <th className="font-semibold px-4 py-2.5 text-right">Breaks</th><th className="font-semibold px-4 py-2.5 text-right">Break Time</th><th className="font-semibold px-4 py-2.5 text-right">Working</th>
+                    <th className="font-semibold px-4 py-2.5 text-right">Breaks</th><th className="font-semibold px-4 py-2.5 text-right">Break Time</th><th className="font-semibold px-4 py-2.5 text-right">Extra</th><th className="font-semibold px-4 py-2.5 text-right">Working</th>
                     <th className="font-semibold px-4 py-2.5 text-right">Net Hours</th><th className="font-semibold px-4 py-2.5 text-left">Status</th>
+                    {rights.canEdit && <th className="font-semibold px-4 py-2.5 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-foreground/15">
-                  {records.length === 0 && <tr><td colSpan={11} className="p-8 text-center text-muted-foreground">No attendance records for these filters.</td></tr>}
+                  {records.length === 0 && <tr><td colSpan={13} className="p-8 text-center text-muted-foreground">No attendance records for these filters.</td></tr>}
                   {records.map((r) => (
                     <tr key={r.attendanceId} onClick={() => setOpenId(r.attendanceId)} className={`cursor-pointer transition-colors hover:bg-primary/5 ${r.flags.length ? "bg-destructive/5" : ""}`}>
                       <td className="px-4 py-3"><p className="font-medium">{r.employeeName}</p><p className={`text-xs text-muted-foreground ${NUM}`}>{r.employeeCode}</p></td>
@@ -344,9 +420,18 @@ export default function HrAttendanceManagement() {
                       <td className={`px-4 py-3 ${NUM}`}>{r.outTime ? fmtTimeIst(r.outTime) : <span className="text-destructive">—</span>}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{r.breakCount}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{fmtDuration(r.breakSeconds)}</td>
+                      <td className={`px-4 py-3 text-right font-heading tabular-nums ${(r.extraSeconds ?? 0) > 0 ? "text-destructive font-semibold" : ""}`}>{(r.extraSeconds ?? 0) > 0 ? fmtDuration(r.extraSeconds) : "—"}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{fmtDuration(r.totalSeconds)}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums font-medium">{fmtDuration(r.netSeconds)}</td>
                       <td className="px-4 py-3"><StatusBadge r={r} /></td>
+                      {rights.canEdit && (
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => setOpenId(r.attendanceId)} className={`${KEY_LINE} h-8 px-2.5`} title="Edit In / Out time" aria-label="Edit"><Pencil size={13} /></button>
+                            <button onClick={() => setDeleting(r)} className={`${KEY_RED} h-8 px-2.5`} title="Delete record" aria-label="Delete"><Trash2 size={13} /></button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -373,6 +458,7 @@ export default function HrAttendanceManagement() {
                 { label: "Employees", value: summary.totals.employees },
                 { label: "Working Duration", value: fmtDuration(summary.totals.totalSeconds) },
                 { label: "Break Duration", value: fmtDuration(summary.totals.breakSeconds) },
+                { label: "Extra Break Time", value: fmtDuration(summary.totals.extraSeconds ?? 0), tone: (summary.totals.extraSeconds ?? 0) > 0 ? "hsl(var(--destructive))" : undefined },
                 { label: "Net Working Hours", value: fmtDuration(summary.totals.netSeconds) },
                 { label: "Incomplete Days", value: summary.totals.incompleteDays, tone: summary.totals.incompleteDays ? "hsl(var(--destructive))" : undefined },
               ]} />
@@ -381,7 +467,7 @@ export default function HrAttendanceManagement() {
               <table className="w-full text-sm">
                 <thead className={HR_LBL} style={{ borderBottom: HR_RULE }}>
                   <tr><th className="font-semibold px-4 py-2.5 text-left">Employee</th><th className="font-semibold px-4 py-2.5 text-left">Department</th><th className="font-semibold px-4 py-2.5 text-right">Days</th><th className="font-semibold px-4 py-2.5 text-right">Incomplete</th>
-                    <th className="font-semibold px-4 py-2.5 text-right">Breaks</th><th className="font-semibold px-4 py-2.5 text-right">Break Time</th><th className="font-semibold px-4 py-2.5 text-right">Working</th><th className="font-semibold px-4 py-2.5 text-right">Net Hours</th></tr>
+                    <th className="font-semibold px-4 py-2.5 text-right">Breaks</th><th className="font-semibold px-4 py-2.5 text-right">Break Time</th><th className="font-semibold px-4 py-2.5 text-right">Extra</th><th className="font-semibold px-4 py-2.5 text-right">Working</th><th className="font-semibold px-4 py-2.5 text-right">Net Hours</th></tr>
                 </thead>
                 <tbody className="divide-y divide-foreground/15">
                   {(summary?.employees ?? []).length === 0 && <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No attendance in this period.</td></tr>}
@@ -393,6 +479,7 @@ export default function HrAttendanceManagement() {
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{s.incompleteDays ? <span className="text-destructive font-medium">{s.incompleteDays}</span> : 0}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{s.breakCount}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{fmtDuration(s.breakSeconds)}</td>
+                      <td className={`px-4 py-3 text-right font-heading tabular-nums ${(s.extraSeconds ?? 0) > 0 ? "text-destructive font-semibold" : ""}`}>{(s.extraSeconds ?? 0) > 0 ? fmtDuration(s.extraSeconds) : "—"}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums">{fmtDuration(s.totalSeconds)}</td>
                       <td className="px-4 py-3 text-right font-heading tabular-nums font-medium">{fmtDuration(s.netSeconds)}</td>
                     </tr>
@@ -422,6 +509,7 @@ export default function HrAttendanceManagement() {
         )}
       </HrPayrollShell>
 
+      {deleting && <DeleteRecordDialog rec={deleting} onClose={() => setDeleting(null)} />}
       {openId != null && <RecordDialog id={openId} canEdit={rights.canEdit} onClose={() => setOpenId(null)} />}
     </>
   );

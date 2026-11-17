@@ -1,6 +1,7 @@
 import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaintenanceShell } from "@/components/maintenance/MaintenanceShell";
+import { SheetMark } from "@/components/sheet/Sheet";
 import { MasterPage, type DataChangeEvent, type RecordWithId } from "@/components/MasterPage";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -58,15 +59,12 @@ const ElectricityProviderMaster: React.FC = () => {
 
   const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
     status: (value) => (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}>
-        <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value ? "bg-emerald-500" : "bg-red-500"}`} />
-        {value ? "Active" : "Inactive"}
-      </span>
+      <SheetMark text={value ? "Active" : "Inactive"} tone={value ? "done" : "draft"} />
     ),
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load Electricity Providers.</div>;
+  if (isLoading) return <div className="skel m-6" style={{ height: 240 }} />;
+  if (error) return <div className="m-6 border border-destructive bg-destructive/5 p-6 text-sm text-destructive">Failed to load Electricity Providers.</div>;
 
   return (
     <>

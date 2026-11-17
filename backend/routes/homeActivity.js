@@ -176,7 +176,7 @@ const SOURCES = {
         CAST(NULL AS DECIMAL(18,2)) AS Amount,
         grn.Status AS Status,
         CAST(COALESCE(grn.CreatedDate, grn.GRNDate, '2000-01-01') AS DATETIME2) AS At,
-        '/goods-receipt-notes' AS Href
+        CONCAT('/material/grn?view=', grn.GRNID) AS Href
       FROM dbo.GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
       ORDER BY grn.GRNID DESC`,
@@ -193,7 +193,7 @@ const SOURCES = {
         CAST(po.TotalAmount AS DECIMAL(18,2)) AS Amount,
         po.Status AS Status,
         CAST(COALESCE(po.CreatedAt, po.PODate, '2000-01-01') AS DATETIME2) AS At,
-        '/purchase-orders' AS Href
+        CONCAT('/material/purchase-order?view=', po.PurchaseOrderID) AS Href
       FROM dbo.PurchaseOrders po
       LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
       ORDER BY po.PurchaseOrderID DESC`,
@@ -210,7 +210,7 @@ const SOURCES = {
         CAST(eb.EAmount AS DECIMAL(18,2)) AS Amount,
         eb.EStatus AS Status,
         CAST(COALESCE(eb.ECreatedAt, eb.EDocDate, '2000-01-01') AS DATETIME2) AS At,
-        '/expense-booking' AS Href
+        CONCAT('/material/expense-booking?view=', eb.Eid) AS Href
       FROM dbo.ExpenseBooking eb
       LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = eb.LHeadId
       WHERE ISNULL(eb.EStatus, '') <> 'Draft'
@@ -228,7 +228,7 @@ const SOURCES = {
         CAST(h.TotalAmount AS DECIMAL(18,2)) AS Amount,
         h.Status AS Status,
         CAST(COALESCE(h.DocumentDate, '2000-01-01') AS DATETIME2) AS At,
-        '/work-orders' AS Href
+        CONCAT('/engineering/work-order?view=', h.Id) AS Href
       FROM dbo.WorkOrderHeader h
       LEFT JOIN dbo.enterprise ep ON ep.id = h.ProjectId
       LEFT JOIN dbo.AccountHeadMaster con ON con.LHeadId = h.ContractorId
