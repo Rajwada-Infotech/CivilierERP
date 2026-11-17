@@ -75,7 +75,8 @@ export function MoneyBand({ eyebrow, title, sub, status, actions, lead, leadNote
   return (
     <section className="rounded-xl bg-slate-900 text-white px-6 py-5" aria-label={eyebrow}>
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
+        {/* The title block takes the room left beside the buttons (a long subtitle wraps), so the buttons stay top right. */}
+        <div className="min-w-0 flex-1 basis-80">
           <div className="text-xs font-medium text-slate-400">{eyebrow}</div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2.5">
             <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
@@ -83,7 +84,7 @@ export function MoneyBand({ eyebrow, title, sub, status, actions, lead, leadNote
           </div>
           {sub && <div className="mt-0.5 text-[0.8125rem] text-slate-400">{sub}</div>}
         </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
       </div>
       <div className="mt-5 grid grid-cols-1 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,2fr)] gap-x-10 gap-y-4 items-end">
         <div className="min-w-0">
@@ -98,7 +99,7 @@ export function MoneyBand({ eyebrow, title, sub, status, actions, lead, leadNote
             <div key={f.label} className="min-w-0 border-l border-white/10 pl-4" title={f.exact}>
               <dt className="flex items-center gap-1.5 text-xs text-slate-400">{f.dot && <span className={cn("w-2 h-2 rounded-full shrink-0", f.dot)} />}{f.label}</dt>
               <dd className={cn("mt-1 text-lg xl:text-xl font-semibold tabular-nums tracking-tight whitespace-nowrap", f.alert && "text-rose-300")}>{f.value}</dd>
-              <dd className="mt-0.5 text-[0.6875rem] text-slate-400 truncate">{f.note}</dd>
+              <dd className="mt-0.5 text-[0.6875rem] leading-snug text-slate-400 line-clamp-2" title={f.note}>{f.note}</dd>
             </div>
           ))}
         </dl>

@@ -331,6 +331,16 @@ const BOOKING_SELECT = `
 // Bookings page's own right, and those pickers came up empty without it).
 const BOOKING_PICKER_RIGHTS = ["crm-bookings", "crm-payments", "crm-money-receipts", "crm-invoices", "crm-refunds",
   "crm-loan-details", "crm-brokerage", "crm-parking-booking", "crm-customer-bank-details", "crm-afs-query-payment", "crm-afs-registry"];
+// The columns the bookings list sorts by (?sortKey=), each a fixed expression — never the raw parameter.
+const BOOKING_SORT = {
+  CreatedAt: "b.CreatedAt",
+  BookingNo: "b.BookingNo",
+  BookingDate: "b.BookingDate",
+  Customer: "a.ApplicantName",
+  Status: "b.Status",
+  Value: "b.GrandTotal",
+};
+
 router.get("/", requireAnyPageRight(BOOKING_PICKER_RIGHTS, "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -377,8 +387,11 @@ router.get("/", requireAnyPageRight(BOOKING_PICKER_RIGHTS, "view"), async (req, 
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
     const FROM = `FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    // Sorted by a column the list offers (?sortKey=&sortDir=), newest first by default.
+    const sortCol = Object.hasOwn(BOOKING_SORT, req.query.sortKey) ? BOOKING_SORT[req.query.sortKey] : BOOKING_SORT.CreatedAt;
+    const ORDER = `ORDER BY ${sortCol} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, b.Id DESC`;
     const [result, countResult, statusResult] = await Promise.all([
-      req0.query(`${BOOKING_SELECT} ${where} ORDER BY b.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      req0.query(`${BOOKING_SELECT} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
       reqs[2].query(`SELECT b.Status, COUNT(*) AS n, SUM(CASE WHEN b.IsFrozen = 1 THEN 1 ELSE 0 END) AS frozen ${FROM} ${countsWhere} GROUP BY b.Status`),
     ]);

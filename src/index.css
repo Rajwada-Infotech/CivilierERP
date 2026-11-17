@@ -1471,6 +1471,9 @@
   }
   table.auto-cards tbody td {
     display: block;
+    /* A grid cell's fixed row height and no-wrap are for the table; a card field takes the lines it needs. */
+    height: auto !important;
+    white-space: normal !important;
     padding: 0 !important;
     border: 0 !important;
     text-align: left;
