@@ -82,3 +82,9 @@ const TONES: Record<string, string> = {
 export function Mark({ text, label }: { text: string; label?: string }) {
   return <span className={`inline-block px-2.5 py-0.5 rounded-full text-[0.625rem] font-bold uppercase tracking-[0.08em] ${TONES[text] ?? "text-muted-foreground bg-muted"}`}>{label ?? text}</span>;
 }
+
+/** True in the tab HR / Super Admin opened with "View employee portal": the portal is read-only there. */
+export const isViewOnly = (): boolean => typeof window !== "undefined" && sessionStorage.getItem("ep_view_as") != null;
+export const viewOnlyInfo = (): { employeeName: string; viewer: string } | null => {
+  try { const raw = typeof window !== "undefined" ? sessionStorage.getItem("ep_view_as") : null; return raw ? JSON.parse(raw) : null; } catch { return null; }
+};

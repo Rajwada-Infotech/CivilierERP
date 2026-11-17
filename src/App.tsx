@@ -317,6 +317,7 @@ const SupplierLogin = lazy(() => import("./pages/supplier/SupplierLogin"));
 // Employee Portal (employees sign in with an Employee Portal login that HR enables)
 const EmployeeLayout = lazy(() => import("@/components/layout/EmployeeLayout").then((m) => ({ default: m.EmployeeLayout })));
 const EmployeeLogin = lazy(() => import("./pages/employee/EmployeeLogin"));
+const EmployeeView = lazy(() => import("./pages/employee/EmployeeView"));
 const EmployeeDashboard = lazy(() => import("./pages/employee/EmployeeDashboard"));
 const EmployeeSalary = lazy(() => import("./pages/employee/EmployeeSalary"));
 const EmployeePayslips = lazy(() => import("./pages/employee/EmployeePayslips"));
@@ -2718,6 +2719,7 @@ function AppRoutes() {
             : <Suspense fallback={<PageSkeleton />}><EmployeeLogin /></Suspense>
         }
       />
+      <Route path="/employee-view" element={<Suspense fallback={<PageSkeleton />}><EmployeeView /></Suspense>} />
       <Route path="/employee" element={<EmployeePortalRoute><EmployeeDashboard /></EmployeePortalRoute>} />
       <Route path="/employee/salary" element={<EmployeePortalRoute><EmployeeSalary /></EmployeePortalRoute>} />
       <Route path="/employee/payslips" element={<EmployeePortalRoute><EmployeePayslips /></EmployeePortalRoute>} />

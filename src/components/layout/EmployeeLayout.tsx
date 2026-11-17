@@ -3,13 +3,14 @@
 // shared by every portal page.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { CalendarCheck, CalendarDays, CalendarRange, FileText, History, Home, UserRound, Wallet } from "lucide-react";
+import { CalendarCheck, CalendarDays, CalendarRange, Eye, FileText, History, Home, UserRound, Wallet } from "lucide-react";
 import { Logout } from "iconsax-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { LogoFull } from "@/components/Logo";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import { EmployeeAvatar } from "@/pages/employee/EmployeeAvatar";
+import { viewOnlyInfo } from "@/pages/employee/employeeUi";
 
 const NAV = [
   { label: "Dashboard", short: "Home", to: "/employee", icon: Home, exact: true, mobile: true },
@@ -99,6 +100,13 @@ export function EmployeeLayout({ children }: { children: React.ReactNode }) {
   const [themeOpen, setThemeOpen] = useState(false);
   const toggleTheme = useCallback(() => setThemeOpen((p) => !p), []);
   const closeTheme = useCallback(() => setThemeOpen(false), []);
+  const preview = viewOnlyInfo();
+  const closePreview = () => {
+    sessionStorage.clear();
+    window.close();
+    // A tab the browser will not close (opened another way) goes to the sign-in page instead.
+    setTimeout(() => { window.location.href = "/employee-login"; }, 300);
+  };
   const active = (n: (typeof NAV)[number]) => (n.exact ? location.pathname === n.to : location.pathname.startsWith(n.to));
 
   return (
@@ -123,7 +131,14 @@ export function EmployeeLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="pt-16 pb-24 lg:pb-8">
+      {preview && (
+        <div className="fixed top-16 left-0 right-0 z-40 flex items-center justify-center gap-3 px-3 py-1.5 text-xs font-semibold ep-ink" role="status">
+          <Eye size={14} className="shrink-0" />
+          <span className="truncate">Viewing {preview.employeeName}'s portal — view only, nothing can be changed.</span>
+          <button onClick={closePreview} className="ep-btn ep-btn-light !h-6 !px-3 !text-[0.6875rem] shrink-0">Close preview</button>
+        </div>
+      )}
+      <main className={`${preview ? "pt-[6.25rem]" : "pt-16"} pb-24 lg:pb-8`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4">{children}</div>
       </main>
 

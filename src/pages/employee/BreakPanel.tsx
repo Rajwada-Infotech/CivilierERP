@@ -7,7 +7,7 @@ import { AlarmClock, Coffee, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 import { getPortalBreakTypes, portalBreakStart, portalBreakStop, type BreakType, type PunchBreak, type PunchState } from "@/api/employeePortalApi";
 import { BodyPortal } from "@/components/ui/body-portal";
-import { fieldCls, fmtTime, keyInk, keyLine, labelCls } from "./employeeUi";
+import { fieldCls, fmtTime, isViewOnly, keyInk, keyLine, labelCls } from "./employeeUi";
 
 export const fmtDur = (sec: number | null | undefined) => {
   const s = Math.max(0, Math.round(sec ?? 0));
@@ -126,7 +126,7 @@ export default function BreakPanel({ state, onChange }: { state: PunchState; onC
           </div>
           <div className="flex items-center gap-3">
             <span className="font-heading text-2xl font-bold tabular-nums">{clock(elapsed)}</span>
-            <button className={keyInk} onClick={() => stop.mutate()} disabled={stop.isPending}><Pause size={13} /> {stop.isPending ? "Ending…" : "End break"}</button>
+            <button className={keyInk} onClick={() => stop.mutate()} disabled={stop.isPending || isViewOnly()}><Pause size={13} /> {stop.isPending ? "Ending…" : "End break"}</button>
           </div>
         </div>
       )}
@@ -138,7 +138,7 @@ export default function BreakPanel({ state, onChange }: { state: PunchState; onC
           <div><p className={labelCls}>Extra time</p><p className={`font-heading font-bold tabular-nums ${cur.extraSeconds > 0 ? "text-red-600 dark:text-red-400" : ""}`}>{fmtDur(cur.extraSeconds)}</p></div>
           {cur.netSeconds != null && <div><p className={labelCls}>Net working</p><p className="font-heading font-bold tabular-nums">{fmtDur(cur.netSeconds)}</p></div>}
         </div>
-        {state.allowed.breakStart && <button className={keyLine} onClick={() => setStarting(true)} disabled={!types.data?.length}><Coffee size={13} /> Take a break</button>}
+        {state.allowed.breakStart && <button className={keyLine} onClick={() => setStarting(true)} disabled={!types.data?.length || isViewOnly()}><Coffee size={13} /> Take a break</button>}
       </div>
 
       {finished.length > 0 && (
