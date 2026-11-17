@@ -47,6 +47,7 @@ const { parseId } = require("../middleware/validateRequest");
 const { actorId } = require("../services/saAccess");
 const { LineStatus, ResaleStatus } = require("../constants/crmStatuses");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const { sortNatural } = require("../utils/routeHelpers");
 
 router.use(authMiddleware);
 
@@ -404,6 +405,7 @@ router.get("/holdings", requirePageRight("crm-resales", "view"), async (req, res
       LEFT JOIN dbo.UnitMaster u ON u.Id = b.UnitId
       WHERE ${conds.join(" AND ")}
       ORDER BY b.ProjectName, b.UnitNo`)).recordset;
+    sortNatural(rows, "ProjectName", "UnitNo"); // stable
     // A villa's land booking folds into the villa's row.
     const { propertyOfBooking } = require("../services/villaLand");
     const seen = new Set();

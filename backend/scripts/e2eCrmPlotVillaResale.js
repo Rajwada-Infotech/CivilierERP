@@ -61,6 +61,7 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
   app.use("/api/crm/bookings", require(path.join(BACKEND, "routes/crmBookings")));
   app.use("/api/crm/customers", require(path.join(BACKEND, "routes/crmCustomers")));
   app.use("/api/crm/resales", require(path.join(BACKEND, "routes/crmResales")));
+  app.use("/api/crm/transfer-deeds", require(path.join(BACKEND, "routes/crmTransferDeeds")));
   app.use("/api/crm/project-auto-setup", require(path.join(BACKEND, "routes/crmProjectAutoSetup")));
   app.use("/api/crm/payments", require(path.join(BACKEND, "routes/crmPayments")));
   app.use("/api/received-payment", require(path.join(BACKEND, "routes/receivedPayment")));
@@ -74,6 +75,16 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
     return { status: res.status, data };
   };
   const ok = (r) => r.status >= 200 && r.status < 300;
+  // A small PDF for the document steps (multipart, field "file", like the pages send it).
+  const upload = async (url, fields = {}) => {
+    const fd = new FormData();
+    fd.append("file", new Blob([Buffer.from(`%PDF-1.4\n% ${TAG} test document\n`)], { type: "application/pdf" }), `${TAG}.pdf`);
+    for (const [k, v] of Object.entries(fields)) fd.append(k, String(v));
+    const res = await fetch(base + url, { method: "POST", body: fd });
+    let data = null; try { data = await res.json(); } catch { /* empty */ }
+    return { status: res.status, data };
+  };
+  const PROXY = { ProxyMethod: "Phone", ProxyRemarks: `${TAG}: confirmed on a call` };
 
   const run = { plotRestore: [], villaUnitIds: [], resaleIds: [] };
   const glStart = (await q("SELECT ISNULL(MAX(EntryId), 0) AS m FROM dbo.GeneralLedgerEntry"))[0].m;
@@ -125,13 +136,17 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
 
     console.log("\n[2] The developer builds villas on the SOLD plots");
     let r = await convert(X, "Villa X");
-    check("conversion without a construction rate is refused (no land-rate fallback)", r.status === 400 && /construction rate/i.test(r.data?.error || ""), r);
+    check("conversion without the villa's built-up area is refused", r.status === 400 && /built-up area/i.test(r.data?.error || ""), r);
     r = await convert(X, "Villa X", { RatePerSqFt: 3000, AreaSqFt: 1800 });
     check("villa built on sold plot X", r.status === 201 && r.data?.UnitId, r);
     const villaX = r.data?.UnitId; if (villaX) run.villaUnitIds.push(villaX);
-    r = await convert(Y, "Villa Y", { RatePerSqFt: 3000, AreaSqFt: 1800 });
+    // The construction rate is optional (0 until set) and never the plot's land rate (2,500 here).
+    r = await convert(Y, "Villa Y", { AreaSqFt: 1800 });
     const villaY = r.data?.UnitId; if (villaY) run.villaUnitIds.push(villaY);
     check("villa built on sold plot Y", r.status === 201 && villaY, r);
+    const vyRate = (await q("SELECT RatePerSqFt FROM dbo.UnitMaster WHERE Id = @u", { u: [sql.Int, villaY || 0] }))[0];
+    check("a villa built without a rate gets 0, not the plot's land rate", vyRate && Number(vyRate.RatePerSqFt) === 0, vyRate);
+    await q("UPDATE dbo.UnitMaster SET RatePerSqFt = 3000 WHERE Id = @u", { u: [sql.Int, villaY || 0] }); // the rate staff set before selling it
     const vx = (await q("SELECT AreaSqFt, RatePerSqFt FROM dbo.UnitMaster WHERE Id = @u", { u: [sql.Int, villaX || 0] }))[0];
     check("villa priced on its construction rate and built-up area", vx && Number(vx.RatePerSqFt) === 3000 && Number(vx.AreaSqFt) === 1800, vx);
     const landStill = (await q("SELECT COUNT(*) n FROM dbo.CrmBookingPlot WHERE BookingId = @b AND PlotId = @p AND Status = N'Active'", { b: [sql.Int, ax.bookingId], p: [sql.Int, X.Id] }))[0].n;
@@ -187,7 +202,12 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
         if (oa.data?.ReceivedPaymentId) await approveRp(oa.data.ReceivedPaymentId);
       }
       const vmsPaid = await q("SELECT Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @b", { b: [sql.Int, vbid] });
-      check("villa paid in full", vmsPaid.every((m) => m.Status === "Paid"), vmsPaid);
+      // One property: the plot's balance is settled before any villa milestone, so while A's plot Y is unpaid the
+      // villa money waits on account.
+      const heldOnAccount = money((await q(`SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) s FROM dbo.CrmOnAccountPayment
+        WHERE BookingId = @b AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')`, { b: [sql.Int, vbid] }))[0].s);
+      check("villa money waits on account while the plot's balance is unpaid (plot first)",
+        vmsPaid.every((m) => m.Status !== "Paid") && heldOnAccount === money(vbk.GrandTotal), { vmsPaid, heldOnAccount, grand: vbk.GrandTotal });
       const inv = await call("POST", "/api/crm/bookings/invoices/bulk-generate", { items: vms.map((m) => ({ bookingId: vbid, milestoneId: m.Id })) });
       check("villa invoiced", okr(inv) && inv.data?.succeeded?.length === vms.length, inv);
 
@@ -212,30 +232,91 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
       check("every villa voucher balanced", Object.values(byV).every((d) => Math.abs(d) < 0.01), byV);
     }
 
-    console.log("\n[5] Branch 2 — A resells plot X to buyer B");
+    console.log("\n[5] Branch 2 — A resells plot X to buyer B (a Resale Case)");
     r = await call("POST", "/api/crm/resales", { PlotId: X.Id, ToCustomerId: B, AgreedValue: 4500000, DeveloperFeeAmount: 25000, ResaleDate: today, Notes: TAG });
+    check("the old one-step resale is retired (points to Resale Cases)", r.status === 410, r);
+    // The case reads the new buyer's KYC from the customer record (individual PAN -> Aadhaar needed too).
+    const digits = String(Date.now()).slice(-4);
+    await q("UPDATE dbo.CrmCustomer SET PanNo = @p, AadhaarNo = @a, Address = @ad WHERE Id = @id", {
+      p: [sql.NVarChar(20), `ZZEPB${digits}E`], a: [sql.NVarChar(20), `9999${digits}0000`], ad: [sql.NVarChar(500), `${TAG} Street 1`], id: [sql.Int, B] });
+    r = await call("POST", "/api/crm/resales/deal", { FromBookingId: ax.bookingId, ToCustomerId: B, AgreedValue: 4500000, DeveloperFeeAmount: 25000, ResaleDate: today, Notes: TAG });
     const resaleId = r.data?.id; if (resaleId) run.resaleIds.push(resaleId);
-    check("resale recorded", r.status === 201 && resaleId, r);
-    r = await call("PUT", `/api/crm/resales/${resaleId}/complete`, {});
-    check("resale completes without B needing a booking first", ok(r) && r.data?.holdingCreated === true && r.data?.ToBookingId, r);
-    const holdId = r.data?.ToBookingId;
-    const hold = (await q(`SELECT b.TotalValue, b.GrandTotal, b.Status, a.CustomerId,
-        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id) AS Milestones
-      FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @b`, { b: [sql.Int, holdId || 0] }))[0];
-    check("B owns plot X: nothing owed to the developer, no schedule", hold && hold.CustomerId === B && money(hold.TotalValue) === 0 && money(hold.GrandTotal) === 0 && hold.Milestones === 0 && hold.Status === "Approved", hold);
-    const lines = await q("SELECT BookingId, Status FROM dbo.CrmBookingPlot WHERE PlotId = @p ORDER BY Id", { p: [sql.Int, X.Id] });
-    check("A's line Transferred, B's line Active", lines.some((l) => l.BookingId === ax.bookingId && l.Status === "Transferred") && lines.some((l) => l.BookingId === holdId && l.Status === "Active"), lines);
-    const feeRow = (await q("SELECT DeveloperFeeGstAmount, DeveloperFeeHsnCode, DeveloperFeeGstRate FROM dbo.CrmUnitResale WHERE Id = @r", { r: [sql.Int, resaleId || 0] }))[0];
+    check("resale case opened as a draft", r.status === 201 && resaleId, r);
+    const feeRow = (await q("SELECT DeveloperFeeGstAmount, DeveloperFeeHsnCode, DeveloperFeeGstRate, Status FROM dbo.CrmUnitResale WHERE Id = @r", { r: [sql.Int, resaleId || 0] }))[0];
     check("plot resale fee: no GST (RESALE_FEE_LAND rule -> HSN LANDNIL 0%)", feeRow && feeRow.DeveloperFeeHsnCode === "LANDNIL" && Number(feeRow.DeveloperFeeGstRate) === 0 && money(feeRow.DeveloperFeeGstAmount) === 0, feeRow);
-    const feeGl = await q(`SELECT h.LHeadCode, h.LHeadName, g.DebitAmount, g.CreditAmount FROM dbo.GeneralLedgerEntry g
-      JOIN dbo.AccountHeadMaster h ON h.LHeadId = g.LHeadId WHERE g.SourceType = 'CrmUnitResale' AND g.SourceId = @r`, { r: [sql.Int, resaleId || 0] });
-    console.table(feeGl);
-    check("fee voucher: Dr original buyer 25,000 / Cr fee income 25,000, no GST leg",
-      feeGl.length === 2 && feeGl.some((g) => /^CRMCUST-/.test(g.LHeadCode) && money(g.DebitAmount) === 25000)
-        && feeGl.some((g) => g.LHeadCode === "CRM-RESALE-FEE" && money(g.CreditAmount) === 25000)
-        && !feeGl.some((g) => g.LHeadCode === "CRM-GST-OUTPUT"), feeGl);
-    const aOriginal = (await q("SELECT Status, TotalValue FROM dbo.CrmBooking WHERE Id = @b", { b: [sql.Int, ax.bookingId] }))[0];
-    check("A's original sale stands (not cancelled)", aOriginal.Status !== "Cancelled", aOriginal);
+    const R = `/api/crm/resales/${resaleId}`;
+    const step = async (label, method, url, body) => { const x = await call(method, url, body); check(label, ok(x), x); return x; };
+    const statusOf = async () => (await q("SELECT Status FROM dbo.CrmUnitResale WHERE Id = @r", { r: [sql.Int, resaleId || 0] }))[0]?.Status;
+    r = await call("PUT", `${R}/transfer`, {});
+    check("the property can't pass before the case is approved", r.status === 400 || r.status === 409, r);
+    await step("seller marked as having no home loan", "PUT", `${R}/case/seller-loan`, { hasLoan: false });
+    await step("seller clearance confirmed", "PUT", `${R}/case/clearance`);
+    await step("developer NOC issued", "PUT", `${R}/case/noc`);
+    await step("buyer's application opened from the case", "PUT", `${R}/case/buyer-application`);
+    await step("case sent for approval", "PUT", `${R}/case/submit`);
+    for (let i = 0; i < 5 && (await statusOf()) !== "Approved"; i++) if (!ok(await call("PUT", `${R}/approve`, {}))) break;
+    check("case approved (every level in Approval Setup)", (await statusOf()) === "Approved", await statusOf());
+
+    // The buyer's transfer fee: invoice, payment, Finance approval.
+    await step("transfer-fee invoice issued to the buyer", "PUT", `${R}/case/fee-invoice`);
+    await step("buyer's fee payment recorded", "PUT", `${R}/case/fee-payment`, { PaymentMode: "NEFT", TransactionRef: `${TAG}-FEE`, ReceivedDate: today, Notes: TAG });
+    const feeRp = (await q("SELECT FeeReceivedPaymentId FROM dbo.CrmUnitResale WHERE Id = @r", { r: [sql.Int, resaleId || 0] }))[0]?.FeeReceivedPaymentId;
+    if (feeRp) {
+      await call("PATCH", `/api/received-payment/${feeRp}/deposit-bank`, { RPDepositBankId: BANK });
+      await step("Finance approves the fee payment", "PUT", `/api/received-payment/${feeRp}/approve`);
+    } else check("fee payment went to Finance", false);
+
+    // The deed of assignment, through its own legal chain (Transfer Deeds).
+    r = await call("POST", `/api/crm/transfer-deeds/for-case/${resaleId}`);
+    const deedId = r.data?.deed?.Id;
+    check("deed of assignment opened for the case", r.status === 201 && deedId, r);
+    const D = `/api/crm/transfer-deeds/${deedId}`;
+    await step("legal executive assigned", "PUT", `${D}/legal-executive`, { LegalExecutiveId: USER });
+    for (const doc of (await call("GET", D)).data?.documents || []) {
+      if (doc.Status === "Verified") continue;
+      const up = await upload(`${D}/documents/${doc.Id}/upload`);
+      const rv = await call("PUT", `${D}/documents/${doc.Id}/review`, { decision: "Verified" });
+      if (!ok(up) || !ok(rv)) check(`deed paper ${doc.DocumentType} uploaded and verified`, false, { up, rv });
+    }
+    await step("papers verified; deed sent to the Legal Head", "PUT", `${D}/submit`);
+    const deedStatus = async () => (await call("GET", D)).data?.deed?.Status;
+    for (let i = 0; i < 5 && (await deedStatus()) === "UnderReview"; i++) if (!ok(await call("PUT", `${D}/legal/approve`, { remarks: TAG }))) break;
+    check("Legal Head approved the draft", (await deedStatus()) !== "UnderReview", await deedStatus());
+    await step("draft sent to the seller and buyer", "PUT", `${D}/send-to-parties`);
+    await step("seller approved the draft (recorded by staff)", "PUT", `${D}/parties/Seller/respond`, { decision: "Approved", ...PROXY });
+    await step("buyer approved the draft (recorded by staff)", "PUT", `${D}/parties/Buyer/respond`, { decision: "Approved", ...PROXY });
+    await step("signing date proposed", "PUT", `${D}/date/propose`, { ProposedBy: "Company", Date: today });
+    await step("seller accepted the date", "PUT", `${D}/date/accept/Seller`, PROXY);
+    await step("buyer accepted the date", "PUT", `${D}/date/accept/Buyer`, PROXY);
+    for (let i = 0; i < 5; i++) {
+      const s = (await call("GET", D)).data?.deed;
+      if (!s || s.DateApprovalStatus !== "Pending") break;
+      if (!ok(await call("PUT", `${D}/date/approve`, { remarks: TAG }))) break;
+    }
+    await step("stamp duty and registration fee sent to the buyer", "PUT", `${D}/duty/info`, { StampDuty: 270000, RegistrationFee: 30000, PayableBy: "Buyer" });
+    r = await upload(`${D}/duty/proof`, { PaidRef: `${TAG}-GRN`, AmountPaid: 300000, PaidOn: today });
+    check("duty payment proof uploaded", ok(r), r);
+    await step("duty payment confirmed", "PUT", `${D}/duty/confirm`, { remarks: TAG });
+    await step("deed executed (signed)", "PUT", `${D}/execute`);
+    await step("Sub-Registrar visit scheduled", "PUT", `${D}/registry/schedule`, { Office: `${TAG} SRO`, ScheduledAt: new Date().toISOString() });
+    r = await upload(`${D}/registry/copy`);
+    check("registered copy uploaded", ok(r), r);
+    await step("registered copy verified", "PUT", `${D}/registry/copy/verify`, { remarks: TAG });
+    await step("deed registered", "PUT", `${D}/registry/complete`, { RegNo: `${TAG}-REG-${digits}`, RegDate: today });
+
+    r = await call("PUT", `${R}/transfer`, {});
+    check("transfer: plot X passes to B", ok(r), r);
+    const xb = (await q(`SELECT b.Status, a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @b`, { b: [sql.Int, ax.bookingId] }))[0];
+    check("the same booking now belongs to B (endorsed, not cancelled)", xb && xb.CustomerId === B && xb.Status !== "Cancelled", xb);
+    const lines = await q("SELECT BookingId, Status FROM dbo.CrmBookingPlot WHERE PlotId = @p AND Status = N'Active'", { p: [sql.Int, X.Id] });
+    check("plot X stays on that booking", lines.length === 1 && lines[0].BookingId === ax.bookingId, lines);
+    check("case completed", (await statusOf()) === "Completed", await statusOf());
+    const feeGl = await q(`SELECT g.VoucherNo, h.LHeadCode, h.LHeadName, g.DebitAmount, g.CreditAmount FROM dbo.GeneralLedgerEntry g
+      JOIN dbo.AccountHeadMaster h ON h.LHeadId = g.LHeadId WHERE g.SourceType LIKE '%Resale%' AND g.SourceId = @r`, { r: [sql.Int, resaleId || 0] });
+    console.table(feeGl.map((g) => ({ v: g.VoucherNo, head: g.LHeadName, dr: g.DebitAmount, cr: g.CreditAmount })));
+    const byFeeV = {};
+    for (const g of feeGl) byFeeV[g.VoucherNo] = (byFeeV[g.VoucherNo] || 0) + Number(g.DebitAmount) - Number(g.CreditAmount);
+    check("resale vouchers balance and carry no GST", feeGl.length > 0 && Object.values(byFeeV).every((d) => Math.abs(d) < 0.01) && !feeGl.some((g) => g.LHeadCode === "CRM-GST-OUTPUT"), feeGl);
 
     console.log("\n[6] After the resale only B can buy villa X");
     r = await applyForVilla(A, villaX);
@@ -248,10 +329,14 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
       check("villa X booked for B at construction price", vb?.UnitId === villaX && money(vb.TotalValue) === 1800 * 3000, vb);
     }
 
-    console.log("\n[7] A plot with a booked villa can't be resold as bare land");
-    r = await call("POST", "/api/crm/resales", { PlotId: X.Id, ToCustomerId: C, AgreedValue: 1, ResaleDate: today, Notes: TAG });
-    if (r.data?.id) run.resaleIds.push(r.data.id);
-    check("resale of plot X refused once its villa is booked", r.status === 409 && /villa on this plot is already booked/i.test(r.data?.error || ""), r);
+    console.log("\n[7] Once its villa is booked, plot X resells only together with the villa");
+    r = await call("POST", "/api/crm/resales/deal", { FromBookingId: ax.bookingId, ToCustomerId: C, AgreedValue: 1, ResaleDate: today, Notes: TAG });
+    const second = r.data?.id; if (second) run.resaleIds.push(second);
+    const sc = (await q("SELECT BookingIds, UnitId, PlotId FROM dbo.CrmUnitResale WHERE Id = @r", { r: [sql.Int, second || 0] }))[0];
+    const villaXBooking = (await q("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE UnitId = @u AND IsActive = 1 ORDER BY Id DESC", { u: [sql.Int, villaX || 0] }))[0]?.Id;
+    check("the case moves the plot and its villa as one (not bare land)", r.status === 201 && sc && sc.UnitId === villaX
+      && String(sc.BookingIds).split(",").map(Number).includes(ax.bookingId) && String(sc.BookingIds).split(",").map(Number).includes(villaXBooking), { r, sc, villaXBooking });
+    if (second) await call("PUT", `/api/crm/resales/${second}/cancel`, { reason: TAG });
 
     console.log("\n[8] Trial balance and P&L show the new heads");
     r = await call("GET", `/api/trial-balance?projectId=${PROJECT}`);
@@ -268,8 +353,7 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
   } finally {
     server.close();
     if (!KEEP) {
-      // Resales and villa units first (they reference bookings / plots), then the tagged CRM data.
-      if (run.resaleIds.length) await q(`DELETE FROM dbo.CrmUnitResale WHERE Id IN (${run.resaleIds.join(",")})`);
+      // The tagged CRM data (resale cases and their deeds first, inside cleanup), then plots and villa units.
       const { cleanup } = require("./e2eCrmPlotLifecycleCleanup");
       try { await cleanup(getPool(), TAG); } catch (e) { failures++; console.error("CLEANUP ERROR:", e.stack || e.message); }
       for (const p of run.plotRestore) {
@@ -277,12 +361,9 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
           { a: [sql.Decimal(18, 2), p.AreaSqFt], r: [sql.Decimal(18, 2), p.RatePerSqFt], id: [sql.Int, p.Id] });
       }
       if (run.villaUnitIds.length) {
-        const ids = run.villaUnitIds.join(",");
-        // syncUnitRooms gave each villa its rooms; they go with it.
-        for (const t of ["RoomLayoutOverride", "RoomMaster"]) {
-          await q(`DELETE FROM dbo.${t} WHERE UnitId IN (${ids})`).catch((e) => { failures++; console.error(`${t} cleanup:`, e.message); });
-        }
-        await q(`DELETE FROM dbo.UnitMaster WHERE Id IN (${ids}) AND UnitName LIKE '${TAG}%'`).catch((e) => { failures++; console.error("villa cleanup:", e.message); });
+        // The villas with the rooms and DPR chains their conversion made (the naming pattern may prefix their names).
+        const { cleanupVillaUnits } = require("./e2eCrmPlotLifecycleCleanup");
+        await cleanupVillaUnits(getPool(), TAG, run.villaUnitIds).catch((e) => { failures++; console.error("villa cleanup:", e.message); });
       }
       console.log(`restored plots ${run.plotRestore.map((p) => p.Id).join(", ")}; removed villas ${run.villaUnitIds.join(", ") || "none"}`);
     }

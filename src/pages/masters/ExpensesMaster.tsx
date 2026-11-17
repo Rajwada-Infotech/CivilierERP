@@ -26,6 +26,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { naturalCompare } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -368,7 +369,7 @@ const ExpensesMaster: React.FC = () => {
           : sortField === "LHeadType"
             ? b.LHeadType
             : b.GroupName) ?? "";
-      return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortAsc ? naturalCompare(av, bv) : naturalCompare(bv, av);
     });
   }, [ledgers, search, filterGroup, sortField, sortAsc]);
 

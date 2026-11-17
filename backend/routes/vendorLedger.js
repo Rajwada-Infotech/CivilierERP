@@ -15,6 +15,7 @@
 const express = require("express");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
+const { naturalCompare } = require("../utils/routeHelpers");
 router.use(apiRateLimit);
 const authenticateToken = require("../middleware/auth");
 router.use(authenticateToken);
@@ -367,8 +368,8 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
       const dt = new Date(a.VoucherDate).getTime() - new Date(b.VoucherDate).getTime();
       if (dt !== 0) return dt;
       // Stable tiebreak — GL EntryId is numeric, OnAccountLedger's synthetic
-      // id is a string; a plain string compare keeps ties deterministic.
-      return String(a.EntryId).localeCompare(String(b.EntryId));
+      // id is a string; a number-aware compare keeps ties deterministic and in posting order (9 before 10).
+      return naturalCompare(a.EntryId, b.EntryId);
     });
 
     let running = windowOpening;
@@ -488,7 +489,7 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
     merged.sort((a, b) => {
       const dt = new Date(b.VoucherDate).getTime() - new Date(a.VoucherDate).getTime();
       if (dt !== 0) return dt;
-      return String(b.EntryId).localeCompare(String(a.EntryId));
+      return naturalCompare(b.EntryId, a.EntryId);
     });
 
     res.json({ transactions: merged.slice(0, limit) });

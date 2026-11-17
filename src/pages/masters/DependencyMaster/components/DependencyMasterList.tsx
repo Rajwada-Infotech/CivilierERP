@@ -2,6 +2,7 @@ import type { DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import { useDependencyMasterList } from "../hooks/useDependencyMasterList";
 import { DependencyMasterListItem } from "./DependencyMasterListItem";
 import { ScopeLocationTree } from "@/components/civilworkdpr/ScopeLocationTree";
+import { naturalCompare } from "@/lib/utils";
 
 interface Props {
   rows: DependencyMasterListRow[];
@@ -13,7 +14,6 @@ interface Props {
   forceExpand?: boolean;
 }
 
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 export function DependencyMasterList({ rows, canEdit, canDelete, onEdit, onDelete, forceExpand = false }: Props) {
   const list = useDependencyMasterList();
@@ -25,7 +25,7 @@ export function DependencyMasterList({ rows, canEdit, canDelete, onEdit, onDelet
       forceExpand={forceExpand}
       renderLeaf={(items) => (
         <div className="space-y-1.5 py-1">
-          {[...items].sort((a, b) => collator.compare(a.alias, b.alias)).map((row) => (
+          {[...items].sort((a, b) => naturalCompare(a.alias, b.alias)).map((row) => (
             <DependencyMasterListItem
               key={row.id}
               row={row}

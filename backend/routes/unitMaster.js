@@ -12,6 +12,7 @@ const { getPool, sql } = require("../db");
 const { getUnitLockReason, getUnitHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, removeUnitRoomsForDelete, removeOverridesFor, moveUnitOverrides, bumpFlatMasterCaches } = require("../services/unitLayout");
+const { sortNatural } = require("../utils/routeHelpers");
 
 // Compact, client-facing view of a syncUnitRooms() result.
 function summarizeRoomSync(r) {
@@ -127,7 +128,7 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
       ${where}
       ORDER BY ep.name, b.BlockName, u.UnitName
     `);
-    res.json(result.recordset);
+    res.json(sortNatural(result.recordset, "ProjectName", "BlockName", "UnitName"));
   } catch (err) {
     console.error("[unit-master] GET error:", err.message);
     res.status(500).json({ error: err.message });
@@ -169,7 +170,7 @@ router.get("/blocks", async (req, res) => {
     }
     query += ` ORDER BY BlockName`;
     const result = await request.query(query);
-    res.json(result.recordset);
+    res.json(sortNatural(result.recordset, "BlockName"));
   } catch (err) {
     console.error("[unit-master] GET /blocks error:", err.message);
     res.status(500).json({ error: err.message });

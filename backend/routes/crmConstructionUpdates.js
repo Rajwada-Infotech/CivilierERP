@@ -26,6 +26,7 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 const { actorId } = require("../services/saAccess");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { parseId } = require("../middleware/validateRequest");
+const { naturalCompare } = require("../utils/routeHelpers");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -72,27 +73,26 @@ function worksLine(byGroup, order, names) {
 
 /**
  * Live progress of the given projects. Returns Map(projectId -> { hasDpr, pct, steps, done, moving, late, works, now,
- * next, allDone, towers: [{ blockId, blockName, pct, steps, done, works, now, next }], flats: Map(unitId -> { pct, steps, done, works, now, next }) }).
+ * next, allDone, towers: [{ blockId, blockName, pct, steps, done, moving, late, works, now, next }],
+ * flats: Map(unitId -> { pct, steps, done, moving, late, works, now, next }) }). late = steps not finished past their end date.
  */
 async function constructionProgress(pool, projectIds) {
   const ids = idList(projectIds);
   const out = new Map();
   if (!ids.length) return out;
   const list = ids.join(",");
-  const [rows, late, groupOrder, blocks] = await Promise.all([
+  const [rows, groupOrder, blocks] = await Promise.all([
     pool.request().query(`
       WITH step AS (${stepsSql(list)})
       SELECT ProjectId, TowerId, FlatId, GroupId, GROUPING(TowerId) AS gT, GROUPING(FlatId) AS gF, GROUPING(GroupId) AS gG,
              SUM(W * Pct) / NULLIF(SUM(W), 0) AS Pct, COUNT(*) AS Steps,
              SUM(CASE WHEN Pct >= 100 THEN 1 ELSE 0 END) AS Done,
-             SUM(CASE WHEN Status IN ${MOVING_SQL} THEN 1 ELSE 0 END) AS Moving
+             SUM(CASE WHEN Status IN ${MOVING_SQL} THEN 1 ELSE 0 END) AS Moving,
+             -- Behind schedule: not finished and past its planned end date (at every level: project, tower, unit).
+             SUM(CASE WHEN Pct < 100 AND EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE)) THEN 1 ELSE 0 END) AS Late
       FROM step
       GROUP BY GROUPING SETS ((ProjectId), (ProjectId, GroupId), (ProjectId, TowerId), (ProjectId, TowerId, GroupId),
                               (ProjectId, FlatId), (ProjectId, FlatId, GroupId))`),
-    pool.request().query(`
-      WITH step AS (${stepsSql(list)})
-      SELECT ProjectId, COUNT(*) AS Late FROM step
-      WHERE Pct < 100 AND EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE)) GROUP BY ProjectId`),
     // Site order of each DPR work: where its steps sit in the chains, on average.
     pool.request().query(`
       SELECT dm.ProjectId, am.group_id AS GroupId, g.activity_name AS GroupName, AVG(CAST(dma.SequenceNo AS FLOAT)) AS Ord
@@ -102,18 +102,17 @@ async function constructionProgress(pool, projectIds) {
     pool.request().query(`SELECT Id, BlockName FROM dbo.BlockMaster WHERE Id IN (SELECT DISTINCT TowerId FROM dbo.DependencyMaster WHERE IsActive = 1 AND ProjectId IN (${list}))`),
   ]);
   const blockName = new Map(blocks.recordset.map((b) => [b.Id, b.BlockName]));
-  const lateOf = new Map(late.recordset.map((r) => [r.ProjectId, r.Late]));
   const orderOf = new Map(); const names = new Map();
   for (const g of groupOrder.recordset) {
     if (!orderOf.has(g.ProjectId)) orderOf.set(g.ProjectId, new Map());
     orderOf.get(g.ProjectId).set(g.GroupId, g.Ord);
     names.set(g.GroupId, g.GroupName);
   }
-  const bucket = () => ({ pct: 0, steps: 0, done: 0, moving: 0, byGroup: new Map() });
+  const bucket = () => ({ pct: 0, steps: 0, done: 0, moving: 0, late: 0, byGroup: new Map() });
   const P = new Map(); const T = new Map(); const F = new Map();
   const at = (m, k) => { if (!m.has(k)) m.set(k, bucket()); return m.get(k); };
   for (const r of rows.recordset) {
-    const fig = { pct: Number(r.Pct) || 0, steps: r.Steps, done: r.Done, moving: r.Moving };
+    const fig = { pct: Number(r.Pct) || 0, steps: r.Steps, done: r.Done, moving: r.Moving, late: r.Late };
     const target = r.gT && r.gF ? at(P, r.ProjectId) : !r.gT ? at(T, `${r.ProjectId}:${r.TowerId}`) : at(F, `${r.ProjectId}:${r.FlatId}`);
     if (r.gG) Object.assign(target, fig); else target.byGroup.set(r.GroupId, fig);
   }
@@ -121,13 +120,13 @@ async function constructionProgress(pool, projectIds) {
     const p = P.get(pid);
     if (!p) { out.set(pid, { hasDpr: false, pct: null, steps: 0, done: 0, moving: 0, late: 0, works: [], now: [], next: null, allDone: false, towers: [], flats: new Map() }); continue; }
     const order = orderOf.get(pid) || new Map();
-    const line = (b) => ({ pct: round1(b.pct), steps: b.steps, done: b.done, moving: b.moving, ...worksLine(b.byGroup, order, names) });
+    const line = (b) => ({ pct: round1(b.pct), steps: b.steps, done: b.done, moving: b.moving, late: b.late, ...worksLine(b.byGroup, order, names) });
     const towers = [...T.entries()].filter(([k]) => k.startsWith(`${pid}:`)).map(([k, t]) => {
       const blockId = Number(k.split(":")[1]) || null;
       return { blockId, blockName: blockName.get(blockId) || null, ...line(t) };
-    }).sort((a, b) => String(a.blockName || "").localeCompare(String(b.blockName || "")));
+    }).sort((a, b) => naturalCompare(a.blockName, b.blockName)); // 1, 2, ... 10, not 1, 10, 2
     const flats = new Map([...F.entries()].filter(([k]) => k.startsWith(`${pid}:`)).map(([k, f]) => [Number(k.split(":")[1]), line(f)]));
-    out.set(pid, { hasDpr: true, late: lateOf.get(pid) || 0, ...line(p), towers, flats });
+    out.set(pid, { hasDpr: true, ...line(p), towers, flats });
   }
   return out;
 }
@@ -135,6 +134,9 @@ async function constructionProgress(pool, projectIds) {
 /**
  * What moved on site: every % change a site engineer recorded (DPR progress log) and steps completed, newest first.
  * Scoped to a project, and optionally one tower or one flat.
+ * The DPR daily log (DependencyActivityDailyLog) is written by the same save as the progress log
+ * (dependencyActivityAssignment.js), as one snapshot per day: reading it too would show each change twice. A save of
+ * remarks only is logged without a % and is not a move.
  */
 async function siteFeed(pool, { projectId, blockId = null, unitId = null, days = 14, top = 40 }) {
   const r = await pool.request().input("pid", sql.Int, projectId).input("bid", sql.Int, blockId).input("uid", sql.Int, unitId)
@@ -143,6 +145,7 @@ async function siteFeed(pool, { projectId, blockId = null, unitId = null, days =
       SELECT l.LoggedAt AS At, l.FromProgressPercent AS FromPct, l.ToProgressPercent AS ToPct, l.StatusAfter AS Status, daa.DependencyMasterActivityId AS RungId
       FROM dbo.DependencyActivityProgressLog l JOIN dbo.DependencyActivityAssignment daa ON daa.Id = l.AssignmentId
       WHERE l.LoggedAt >= DATEADD(DAY, -@days, SYSDATETIME())
+        AND l.ToProgressPercent IS NOT NULL AND ISNULL(l.FromProgressPercent, -1) <> l.ToProgressPercent
       UNION ALL
       -- Steps completed without a progress entry for it (finished in one go).
       SELECT daa.UpdatedAt, NULL, 100, daa.Status, daa.DependencyMasterActivityId
@@ -169,17 +172,17 @@ async function siteFeed(pool, { projectId, blockId = null, unitId = null, days =
   });
 }
 
-// One buyer's unit: its own figures, its tower and project for context, and what moved there lately.
-async function unitProgress(pool, { projectId, unitId, blockId }) {
+// A buyer sees only the unit attached to their booking; never fall back to block or project totals.
+async function unitProgress(pool, { projectId, unitId }) {
+  if (!projectId || !unitId) return null;
   const p = (await constructionProgress(pool, [projectId])).get(Number(projectId));
   if (!p || !p.hasDpr) return null;
   const flat = p.flats.get(Number(unitId)) || null;
-  const tower = p.towers.find((t) => Number(t.blockId) === Number(blockId)) || null;
-  const scope = flat ? { unitId } : tower ? { blockId } : {};
-  const feed = (await siteFeed(pool, { projectId, ...scope, days: 30, top: 15 }))
+  if (!flat) return null;
+  const feed = (await siteFeed(pool, { projectId, unitId, days: 30, top: 15 }))
     .map(({ work, activity, room, from, to, completed, at }) => ({ work, activity, room, from, to, completed, at }));
   const pick = (x) => x && { pct: x.pct, works: x.works.map(({ name, pct }) => ({ name, pct })), now: x.now, next: x.next, allDone: x.allDone };
-  return { unit: pick(flat), tower: tower ? { blockName: tower.blockName, ...pick(tower) } : null, project: pick(p), feed, scope: flat ? "unit" : tower ? "tower" : "project" };
+  return { unit: pick(flat), feed, scope: "unit" };
 }
 
 // GET /progress — every project the user may see that has DPR work (or notes): its figures, works and towers.
@@ -196,7 +199,7 @@ router.get("/progress", requirePageRight("crm-construction-updates", "view"), as
       const g = prog.get(p.ProjectId);
       return { projectId: p.ProjectId, projectName: p.ProjectName, hasDpr: g.hasDpr, pct: g.pct, steps: g.steps, done: g.done, moving: g.moving,
         late: g.late, works: g.works, now: g.now, next: g.next, allDone: g.allDone,
-        towers: g.towers.map(({ blockId, blockName, pct, steps, done, now, next }) => ({ blockId, blockName, pct, steps, done, now, next })) };
+        towers: g.towers.map(({ blockId, blockName, pct, steps, done, moving, late, now, next }) => ({ blockId, blockName, pct, steps, done, moving, late, now, next })) };
     }) });
   } catch (e) {
     console.error("[crm-construction-updates] GET /progress error:", e.message);
@@ -218,17 +221,17 @@ router.get("/progress/:projectId", requirePageRight("crm-construction-updates", 
     const g = (await constructionProgress(pool, [pid])).get(pid);
     const unitNames = g.flats.size ? new Map((await pool.request().query(`SELECT Id, UnitName, BlockId FROM dbo.UnitMaster WHERE Id IN (${[...g.flats.keys()].join(",")})`)).recordset.map((u) => [u.Id, u])) : new Map();
     const units = [...g.flats.entries()]
-      .map(([id, f]) => ({ unitId: id, unitName: unitNames.get(id)?.UnitName || `Unit ${id}`, blockId: unitNames.get(id)?.BlockId ?? null, pct: f.pct, now: f.now, next: f.next, works: f.works, done: f.done, moving: f.moving, steps: f.steps }))
+      .map(([id, f]) => ({ unitId: id, unitName: unitNames.get(id)?.UnitName || `Unit ${id}`, blockId: unitNames.get(id)?.BlockId ?? null, pct: f.pct, now: f.now, next: f.next, works: f.works, done: f.done, moving: f.moving, late: f.late, steps: f.steps }))
       .filter((u) => !blockId || Number(u.blockId) === blockId)
-      .sort((a, b) => b.pct - a.pct || a.unitName.localeCompare(b.unitName));
+      .sort((a, b) => b.pct - a.pct || naturalCompare(a.unitName, b.unitName));
     const tower = blockId ? g.towers.find((t) => Number(t.blockId) === blockId) : null;
     if (blockId && !tower) return res.status(404).json({ error: "Block has no construction progress in this project" });
     const unit = unitId ? units.find((u) => Number(u.unitId) === unitId) : null;
     if (unitId && !unit) return res.status(404).json({ error: "Unit has no DPR progression in this project or block" });
     const base = unit || tower || g;
-    res.json({ projectId: pid, hasDpr: g.hasDpr, pct: base.pct, steps: base.steps, done: base.done, moving: base.moving, late: g.late,
+    res.json({ projectId: pid, hasDpr: g.hasDpr, pct: base.pct, steps: base.steps, done: base.done, moving: base.moving, late: base.late,
       works: base.works, now: base.now, next: base.next, allDone: base.allDone,
-      towers: g.towers.map(({ blockId: b, blockName, pct, steps, done, now, next }) => ({ blockId: b, blockName, pct, steps, done, now, next })),
+      towers: g.towers.map(({ blockId: b, blockName, pct, steps, done, moving, late, now, next }) => ({ blockId: b, blockName, pct, steps, done, moving, late, now, next })),
       selectedUnit: unit ? { unitId: unit.unitId, unitName: unit.unitName, blockId: unit.blockId } : null,
       units, feed: g.hasDpr ? await siteFeed(pool, { projectId: pid, blockId, unitId, days: 14, top: 40 }) : [] });
   } catch (e) {
@@ -285,8 +288,10 @@ router.put("/milestone-links", requirePageRight("crm-construction-updates", "edi
 
 /**
  * Payment milestones whose DPR work is complete and are not demanded or paid yet. A booking milestone reaches its
- * milestone master through the booking's plan template item. The work is judged on the booking's unit when the site
- * tracks that work there, else on its tower, else on the project.
+ * milestone master through the booking's plan template item. The work is judged at the level the booking's payment
+ * plan was set for (the same tags getApplicablePaymentPlans reads): a plan set for the unit -> the unit; for its tower
+ * -> the tower; for the project, or not tagged -> the project. Only where that level has no DPR steps for the work is
+ * it judged one level up.
  */
 async function readyDemands(pool, { bookingId = null, projectId = null, scope = null } = {}) {
   const links = new Map((await milestoneLinks(pool)).milestones.filter((m) => m.groupId).map((m) => [m.id, m.groupId]));
@@ -298,7 +303,10 @@ async function readyDemands(pool, { bookingId = null, projectId = null, scope = 
   if (projectId) { r.input("pid", sql.Int, projectId); conds.push("b.ProjectId = @pid"); }
   const rows = (await r.query(`
     SELECT m.Id AS MilestoneId, m.MilestoneNo, m.MilestoneName, m.AmountDue, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.UnitId, u.BlockId,
-           b.UnitNo, a.ApplicantName, ti.MilestoneMasterId
+           b.UnitNo, a.ApplicantName, ti.MilestoneMasterId,
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmUnitPaymentPlan x WHERE x.UnitId = b.UnitId AND x.PlanId = b.PaymentPlanId AND x.IsActive = 1) THEN 'Unit'
+                WHEN EXISTS (SELECT 1 FROM dbo.CrmBlockPaymentPlan x WHERE x.BlockId = u.BlockId AND x.PlanId = b.PaymentPlanId AND x.IsActive = 1) THEN 'Tower'
+                ELSE 'Project' END AS PlanLevel
     FROM dbo.CrmPaymentMilestone m
     JOIN dbo.CrmBooking b ON b.Id = m.BookingId
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -313,11 +321,15 @@ async function readyDemands(pool, { bookingId = null, projectId = null, scope = 
     const p = prog.get(x.ProjectId); if (!p?.hasDpr) continue;
     const gid = links.get(x.MilestoneMasterId);
     const workIn = (place) => place?.works.find((w) => w.groupId === gid) || null;
-    const flat = workIn(p.flats.get(Number(x.UnitId)));
-    const tower = workIn(p.towers.find((t) => Number(t.blockId) === Number(x.BlockId)));
-    const project = workIn(p);
-    const [w, level] = flat ? [flat, "Unit"] : tower ? [tower, "Tower"] : project ? [project, "Project"] : [null, null];
-    if (w && w.pct >= 100) out.push({ ...x, work: w.name, judgedOn: level });
+    const levels = [
+      ["Unit", workIn(p.flats.get(Number(x.UnitId)))],
+      ["Tower", workIn(p.towers.find((t) => Number(t.blockId) === Number(x.BlockId)))],
+      ["Project", workIn(p)],
+    ];
+    // From the plan's own level upward, the first place the site tracks this work.
+    const from = levels.findIndex(([lvl]) => lvl === x.PlanLevel);
+    const hit = levels.slice(from < 0 ? 2 : from).find(([, w]) => w);
+    if (hit && hit[1].pct >= 100) out.push({ ...x, work: hit[1].name, judgedOn: hit[0] });
   }
   return out;
 }

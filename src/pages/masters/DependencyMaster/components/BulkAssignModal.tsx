@@ -13,6 +13,7 @@ import {
 import type { DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import { ApprovalLevelsEditor, UserMultiSelect } from "@/pages/civilworkdpr/RungAssignmentModal";
 import { useDebouncedValue } from "@/components/docfinder/useDocFinder";
+import { naturalCompare } from "@/lib/utils";
 
 const selectCls =
   "w-full px-3 py-2.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none";
@@ -69,14 +70,14 @@ export function BulkAssignModal({
   const projects = useMemo(() => {
     const m = new Map<number, string>();
     rows.forEach((r) => m.set(r.projectId, r.projectName || `Project ${r.projectId}`));
-    return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => naturalCompare(a.name, b.name));
   }, [rows]);
   const blocks = useMemo(() => {
     const m = new Map<number, string>();
     rows
       .filter((r) => String(r.projectId) === projectId)
       .forEach((r) => m.set(r.towerId, r.towerName || `Block ${r.towerId}`));
-    return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => naturalCompare(a.name, b.name));
   }, [rows, projectId]);
 
   const request: BulkAssignRequest | null = projectId

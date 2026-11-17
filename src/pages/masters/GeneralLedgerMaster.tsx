@@ -22,6 +22,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { BodyPortal } from "@/components/ui/body-portal";
 
 import { isSuperAdminRole } from "@/contexts/auth.utils";
+import { naturalCompare } from "@/lib/utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface AccountGroup {
   _id: string;        // String(AGId)
@@ -471,7 +472,7 @@ const GeneralLedgerMaster: React.FC = () => {
           : sortField === "LHeadCode"
             ? b.LHeadCode
             : b.GroupName) ?? "";
-      return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortAsc ? naturalCompare(av, bv) : naturalCompare(bv, av);
     });
   }, [ledgers, search, filterGroup, sortField, sortAsc]);
 

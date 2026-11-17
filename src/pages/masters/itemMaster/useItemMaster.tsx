@@ -20,6 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { type AlternateUomRow } from "../ItemUomAlternatesEditor";
 import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
 import { HsnCode, Item, dbToItem, itemToPayload, EMPTY_FORM, CSV_HEADERS, ITEM_CSV_TEMPLATE_COLUMNS, ImportRowResult } from "./config";
+import { naturalCompare } from "@/lib/utils";
 
 export function useItemMaster() {
   const queryClient = useQueryClient();
@@ -460,7 +461,7 @@ export function useItemMaster() {
         groups.set(g, [...(groups.get(g) ?? []), it]);
       }
       const names = [...groups.keys()].sort((a, b) =>
-        a === "(No group)" ? 1 : b === "(No group)" ? -1 : a.localeCompare(b, undefined, { sensitivity: "base" }),
+        a === "(No group)" ? 1 : b === "(No group)" ? -1 : naturalCompare(a, b),
       );
       const H = (v: string): XlsxCell => ({ v, s: "header" });
       const rows: XlsxCell[][] = [
@@ -470,7 +471,7 @@ export function useItemMaster() {
           "Default Supplier", "GL Account", "Cost Centre", "Days of Supply", "Description"].map(H),
       ];
       for (const g of names) {
-        const items = (groups.get(g) ?? []).sort((a, b) => a.itemName.localeCompare(b.itemName, undefined, { sensitivity: "base" }));
+        const items = (groups.get(g) ?? []).sort((a, b) => naturalCompare(a.itemName, b.itemName));
         rows.push([{ v: `${g}  (${items.length})`, s: "label" }]);
         for (const it of items) {
           rows.push([

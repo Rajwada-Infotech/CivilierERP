@@ -9,7 +9,7 @@ import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getLayoutTypes, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
-import { PlotLayoutEditor, naturalCompare, plotOrder } from "./PlotLayoutEditor";
+import { PlotLayoutEditor, plotOrder } from "./PlotLayoutEditor";
 import { VillaTypesDialog } from "./VillaTypesDialog";
 import { FacingsDialog } from "./plotMaster/FacingsDialog";
 import { ConvertDialog } from "./plotMaster/ConvertDialog";
@@ -19,6 +19,7 @@ import {
   ALL, INP, KEY_INK, KEY_LINE, LBL, NUM, PLOT_API, RULE, RULE_SOFT, TEXT_LINK,
   canConvert, fetchFacings, fetchPlotBlocks, fetchPlots, plotStatus, rupees, type Plot, type PlotBlock,
 } from "./plotMaster/config";
+import { naturalCompare } from "@/lib/utils";
 
 const CrmPlotMaster: React.FC = () => {
   const ask = useSheetAsk();

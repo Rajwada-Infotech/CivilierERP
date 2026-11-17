@@ -21,6 +21,7 @@ import {
   Facts, HOLDS_API, KEY_INK, KEY_LINE, KEY_RED, LBL, Legend, PlaceHoldDialog, RULE, RULE_SOFT, Section, TILE_GRID, Tile,
   fetchOptions, fmtMoney, holdCall, type Option, type TileStatus,
 } from "./matrix/shared";
+import { naturalCompare } from "@/lib/utils";
 
 const API = "/api/unit-matrix";
 
@@ -248,7 +249,7 @@ export function UnitMatrixPage() {
       if (!floors.has(floorKey)) floors.set(floorKey, []);
       floors.get(floorKey)!.push(u);
     }
-    const cmp = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+    const cmp = naturalCompare;
     return Array.from(byBlock.entries()).sort(([a], [b]) => cmp(a, b)).map(([blockName, floorMap]) => ({
       blockName,
       count: Array.from(floorMap.values()).reduce((n, l) => n + l.length, 0),

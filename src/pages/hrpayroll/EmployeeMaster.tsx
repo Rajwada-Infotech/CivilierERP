@@ -26,13 +26,15 @@ import { getCostCenterOptions } from "@/api/costCenterApi";
 import { getUnlinkedEmployeeCandidates, type UnlinkedEmployeeCandidate } from "@/api/offerLetterApi";
 import { getSalaryStructureFamilies } from "@/api/salaryStructureApi";
 import { getDepartmentOptions } from "@/api/departmentMasterApi";
+import { WorkLocationTags } from "./WorkLocationTags";
 import { getDesignations } from "@/api/designationMasterApi";
 import { Wallet3 } from "iconsax-react";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { PortalLoginField } from "./PortalLoginField";
 
-const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Contract", "Consultant", "Intern"];
+// Employment types offered on the form (stored as plain text, up to 30 characters).
+const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Part-time", "Contract", "Fixed-term", "Temporary", "Daily Wage", "Consultant", "Retainer", "Trainee", "Apprentice", "Intern"];
 const GENDERS = ["Male", "Female", "Other"];
 
 const mapRow = (r: EmployeeRow): RecordWithId => ({
@@ -54,6 +56,8 @@ const mapRow = (r: EmployeeRow): RecordWithId => ({
   department: r.Department || "",
   designation: r.Designation || "",
   branchLocation: r.BranchLocation || "",
+  workLocationIds: r.WorkLocationIds ? r.WorkLocationIds.split(",") : [],
+  workLocationNames: r.WorkLocationNames || "-",
   reportingManagerId: r.ReportingManagerId ? String(r.ReportingManagerId) : "",
   reportingManagerName: r.ReportingManagerName || "-",
   employmentType: r.EmploymentType || "",
@@ -98,6 +102,7 @@ const toPayload = (form: Record<string, unknown>): EmployeePayload => ({
   Department: (form.department as string) || null,
   Designation: (form.designation as string) || null,
   BranchLocation: (form.branchLocation as string) || null,
+  WorkLocationIds: Array.isArray(form.workLocationIds) ? (form.workLocationIds as string[]).map(Number) : [],
   ReportingManagerId: form.reportingManagerId ? Number(form.reportingManagerId) : null,
   EmploymentType: (form.employmentType as string) || null,
   GradeLevel: (form.gradeLevel as string) || null,
@@ -464,6 +469,10 @@ export default function EmployeeMaster() {
         return Array.from(new Set(names)).map((n) => ({ value: n, label: n }));
       },
     },
+    {
+      name: "workLocationIds", label: "Work Locations", type: "custom", fullWidth: true, defaultValue: [] as string[],
+      render: ({ value, onChange }) => <WorkLocationTags value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} />,
+    },
     { name: "branchLocation", label: "Branch / Location", type: "text" },
     {
       name: "reportingManagerId",
@@ -529,6 +538,7 @@ export default function EmployeeMaster() {
     { key: "candidateCode", label: "Candidate", hideOnMobile: true, sortable: false },
     { key: "designation", label: "Designation", hideOnMobile: true },
     { key: "department", label: "Department", hideOnMobile: true },
+    { key: "workLocationNames", label: "Work Locations", hideOnMobile: true, sortable: false },
     { key: "employmentType", label: "Type", hideOnMobile: true },
     { key: "reportingManagerName", label: "Reporting To", hideOnMobile: true, sortable: false },
     { key: "documents", label: "Documents", sortable: false },
@@ -653,6 +663,7 @@ export default function EmployeeMaster() {
               { header: "Company", accessor: "companyName" },
               { header: "Department", accessor: "department" },
               { header: "Designation", accessor: "designation" },
+              { header: "Work Locations", accessor: "workLocationNames" },
               { header: "Branch / Location", accessor: "branchLocation" },
               { header: "Reporting To", accessor: "reportingManagerName" },
               { header: "Employment Type", accessor: "employmentType" },

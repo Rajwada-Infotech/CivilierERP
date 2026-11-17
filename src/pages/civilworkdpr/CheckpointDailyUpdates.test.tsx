@@ -10,6 +10,10 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("@/api/dependencyActivityAssignmentApi", () => api);
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+// A user with Edit and Delete on the page (the delete button only shows with Delete).
+vi.mock("@/hooks/usePageRights", () => ({
+  usePageRights: () => ({ canView: true, canCreate: true, canEdit: true, canDelete: true, canPrint: true, canExport: true }),
+}));
 // The real dialog needs a camera; stand in a button that "captures" a photo.
 vi.mock("./CameraCaptureDialog", () => ({
   CameraCaptureDialog: ({ open, onConfirm }: { open: boolean; onConfirm: (b: Blob) => void }) =>

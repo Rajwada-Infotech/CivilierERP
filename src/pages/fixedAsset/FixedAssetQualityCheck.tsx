@@ -14,6 +14,7 @@ import { todayLocal } from "./tagging/config";
 import { QC_REFRESH, QualityCheckForm, type QCStart } from "./qualityCheck/QualityCheckForm";
 import { DeleteQualityCheckDialog, PictureViewer, QualityCheckPanel, conditionTone, followUpTone } from "./qualityCheck/QualityCheckPanel";
 import { UserMark } from "./assignment/pickers";
+import { naturalCompare } from "@/lib/utils";
 
 type Show = "all" | "Pending" | "Overdue" | "Completed" | "Cancelled";
 
@@ -34,7 +35,7 @@ export default function FixedAssetQualityCheck() {
   const projects = useMemo(() => {
     const m = new Map<number, string>();
     all.forEach((c) => c.ProjectId && m.set(c.ProjectId, c.ProjectName || `Project ${c.ProjectId}`));
-    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => naturalCompare(a.name, b.name));
   }, [all]);
   const rows = useMemo(
     () =>

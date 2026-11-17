@@ -7,6 +7,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
+const { sortNatural } = require("../utils/routeHelpers");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -43,7 +44,7 @@ router.get("/blocks", requirePageRight("crm-unit-matrix", "view"), async (req, r
     query += projectPredicate(req.projectScope, "ProjectId");
     query += " ORDER BY BlockName";
     const result = await request.query(query);
-    res.json(result.recordset);
+    res.json(sortNatural(result.recordset, "BlockName"));
   } catch (err) {
     console.error("[unit-matrix] GET /blocks error:", err.message);
     res.status(500).json({ error: err.message });
@@ -119,7 +120,7 @@ router.get("/plots", requirePageRight("crm-unit-matrix", "view"), async (req, re
       ORDER BY blk.BlockName, p.PlotName
     `);
 
-    const plots = result.recordset.map((r) => {
+    const plots = sortNatural(result.recordset, "BlockName", "PlotName").map((r) => {
       // Identical rule to the unit matrix below: a Booking existing is not
       // enough to call a plot "Booked" — it must have cleared approval AND had
       // its booking-amount milestone paid. Ids of 0 are real in this database,
@@ -245,7 +246,7 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
       ORDER BY u.FloorNo, blk.BlockName, u.UnitName
     `);
 
-    const units = result.recordset.map((r) => {
+    const units = sortNatural(result.recordset, "FloorNo", "BlockName", "UnitName").map((r) => {
       // A Booking existing is no longer enough to call a unit "Booked" — it
       // must have actually cleared its own approval gate AND had its
       // booking-amount milestone paid (checkBookingApprovalReadiness in

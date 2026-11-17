@@ -8,6 +8,7 @@ import { Download, FileSpreadsheet, ArrowUpDown, ArrowUp, ArrowDown, Search } fr
 import { DateInput } from "@/components/ui/date-input";
 import { formatINR } from "@/utils/formatCurrency";
 import { fmtPct } from "@/components/sa/saCells";
+import { naturalCompare } from "@/lib/utils";
 
 // Grouped by what the report is about; each report keeps its own key/cols.
 const REPORT_GROUPS = [
@@ -112,7 +113,7 @@ const SaReports: React.FC = () => {
         const x = a[sort.col], y = b[sort.col];
         const nx = Number(x), ny = Number(y);
         const cmp = x != null && y != null && !isNaN(nx) && !isNaN(ny) && kinds[sort.col] !== "text"
-          ? nx - ny : String(x ?? "").localeCompare(String(y ?? ""));
+          ? nx - ny : naturalCompare(x, y);
         return cmp * sort.dir;
       });
     }

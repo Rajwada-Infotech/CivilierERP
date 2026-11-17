@@ -2,9 +2,9 @@ import React, { useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { HardHat, Home, FileCheck2, CheckCircle2, AlertTriangle, FileText, ShieldCheck, ClipboardCheck } from "lucide-react";
+import { Home, FileCheck2, CheckCircle2, AlertTriangle, FileText, ShieldCheck, ClipboardCheck } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { fmtDate, fmtDateTime, openPossessionLetter, respondPossessionNotice } from "./portalApi";
+import { fmtDate, openPossessionLetter, respondPossessionNotice } from "./portalApi";
 import {
   PageHeader, Card, HAIRLINE, GOLD, GOLD_SOFT, TEXT, TEXT_MUTED, TEXT_FAINT, INK, serif,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
@@ -55,12 +55,10 @@ function DisputeDialog({ applicationId, onClose, onSubmitted }: { applicationId:
 const PortalConstruction: React.FC = () => {
   const { timeline, applicationId } = useOutletContext<Ctx>();
   const qc = useQueryClient();
-  const updates = timeline.constructionUpdates || [];
-  const latest = updates[0];
-  // The buyer's own unit as the site records it, with its tower and project for context.
+  // Show only the exact unit attached to this booking.
   const mine = timeline.constructionProgress;
-  const live = mine ? (mine.unit || mine.tower || mine.project) : null;
-  const liveLabel = !mine ? "" : mine.unit ? "Your home" : mine.tower ? `Your tower (${mine.tower.blockName})` : "The project";
+  const live = mine?.scope === "unit" ? mine.unit : null;
+  const bookedUnit = timeline.booking?.UnitNo || "Your booked unit";
   const handover = timeline.handover;
   const notice = timeline.possessionNotice;
   const legalDoc = timeline.legalDocumentation;
@@ -101,16 +99,17 @@ const PortalConstruction: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="My Property" title="Construction Progress" subtitle="Live updates from the site, shared as they happen." />
+      <PageHeader eyebrow="My Property" title="Construction Progress" subtitle={`Updates for your booked unit: ${bookedUnit}.`} />
 
       {live && (
-        <Card className="p-5 space-y-4">
+        <Card className="p-5 sm:p-6 space-y-5">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <p className="text-xs" style={{ color: TEXT_FAINT }}>{liveLabel}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Progress for your unit</p>
+              <p className="mt-1 text-lg font-semibold" style={{ ...serif, color: TEXT }}>{bookedUnit}</p>
               <p className="text-sm mt-1" style={{ color: TEXT }}>
-                {live.allDone ? "All work complete" : live.now.length ? <>Now: {live.now.slice(0, 2).map((w: any) => `${w.name} ${w.pct}%`).join(" · ")}</> : "Work not started yet"}
-                {!live.allDone && live.next ? <span style={{ color: TEXT_MUTED }}> · Next: {live.next}</span> : null}
+                {live.allDone ? "Construction complete" : live.now.length ? <>Underway: {live.now.slice(0, 2).map((w: any) => `${w.name} ${w.pct}%`).join(" · ")}</> : "Construction not started yet"}
+                {!live.allDone && live.next ? <span style={{ color: TEXT_MUTED }}> · Coming next: {live.next}</span> : null}
               </p>
             </div>
             <span className="text-2xl font-semibold tabular-nums" style={{ ...serif, color: TEXT }}>{live.pct}%</span>
@@ -129,12 +128,10 @@ const PortalConstruction: React.FC = () => {
               </div>
             ))}
           </div>
-          <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
-            Live from the site's daily progress records.{mine.scope === "unit" && mine.tower ? ` Tower ${mine.tower.blockName}: ${mine.tower.pct}%.` : ""}{mine.scope !== "project" ? ` Whole project: ${mine.project.pct}%.` : ""}
-          </p>
+          <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>Showing progress recorded for {bookedUnit} only.</p>
           {mine.feed?.length > 0 && (
             <div className="pt-3 space-y-1.5" style={{ borderTop: `1px solid ${HAIRLINE}` }}>
-              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Recent work</p>
+              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Recent updates for your unit</p>
               {mine.feed.slice(0, 6).map((f: any, i: number) => (
                 <div key={i} className="flex items-start justify-between gap-3 text-xs">
                   <span style={{ color: TEXT }}>{f.activity}{f.room ? <span style={{ color: TEXT_MUTED }}> · {f.room}</span> : null} — {f.completed ? "completed" : f.from != null ? `${f.from}% → ${f.to}%` : `${f.to}%`}</span>
@@ -143,19 +140,6 @@ const PortalConstruction: React.FC = () => {
               ))}
             </div>
           )}
-        </Card>
-      )}
-
-      {!live && latest?.PercentComplete != null && (
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs" style={{ color: TEXT_FAINT }}>Overall — {latest.Stage}</span>
-            <span className="text-xs font-semibold" style={{ color: TEXT }}>{latest.PercentComplete}%</span>
-          </div>
-          <div className="h-2.5 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
-            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, latest.PercentComplete)}%`, background: GOLD }} />
-          </div>
-          <p className="text-[0.6875rem] mt-2" style={{ color: TEXT_FAINT }}>Last updated {fmtDateTime(latest.UpdateDate)}</p>
         </Card>
       )}
 
@@ -242,36 +226,10 @@ const PortalConstruction: React.FC = () => {
         </Card>
       )}
 
-      {updates.length === 0 ? (
+      {!live && (
         <Card className="p-8 text-center text-sm" style={{ color: TEXT_MUTED }}>
-          No construction updates have been posted yet — check back soon.
+          "Unit-specific progress is not available yet. It will appear automatically when site updates are recorded for your booked unit."
         </Card>
-      ) : (
-        <div className="relative pl-6">
-          <div className="absolute left-[9px] top-2 bottom-2 w-0.5" style={{ background: HAIRLINE }} />
-          <div className="space-y-5">
-            {updates.map((u: any, i: number) => (
-              <div key={u.Id ?? i} className="relative">
-                <div className="absolute -left-6 top-1 w-4 h-4 rounded-full border-4" style={{ background: GOLD, borderColor: "#F3ECD8" }} />
-                <Card className="p-4">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-semibold flex items-center gap-1.5" style={{ ...serif, color: TEXT }}><HardHat size={14} style={{ color: GOLD }} /> {u.Stage}</span>
-                    <span className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{fmtDate(u.UpdateDate)}</span>
-                  </div>
-                  {u.PercentComplete != null && (
-                    <div className="mb-2">
-                      <div className="h-2 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
-                        <div className="h-full rounded-full" style={{ width: `${Math.min(100, u.PercentComplete)}%`, background: GOLD }} />
-                      </div>
-                      <p className="text-[0.6875rem] mt-1" style={{ color: TEXT_FAINT }}>{u.PercentComplete}% complete</p>
-                    </div>
-                  )}
-                  {u.Summary && <p className="text-sm" style={{ color: TEXT_MUTED }}>{u.Summary}</p>}
-                </Card>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
 
       {disputeOpen && (

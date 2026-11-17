@@ -3,6 +3,7 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
+const { sortNatural } = require("../utils/routeHelpers");
 const authMiddleware = require("../middleware/auth");
 const { projectPredicate, assertProjectAllowed, rungParamGuard, assertRungAllowed } = require("../services/projectScope");
 
@@ -74,7 +75,7 @@ router.get("/activities", async (req, res) => {
       WHERE dm.ProjectId = @projectId AND dm.IsActive = 1
       ORDER BY dm.Alias, dma.SequenceNo
     `);
-    res.json(r.recordset);
+    res.json(sortNatural(r.recordset, "alias", "sequenceNo"));
   } catch (err) {
     console.error("WorkerAttendance /activities error:", err);
     res.status(500).json({ error: "Failed to fetch activities" });

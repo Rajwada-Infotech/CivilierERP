@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Plus, X, Loader2, Users, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, naturalCompare } from "@/lib/utils";
 import { ApprovalLevel, ApprovalWorkflow } from "./config";
 import { AddLevelRow, LevelCard } from "./Levels";
 import { ModuleGroupSelector } from "./ModuleGroupSelector";
@@ -73,7 +73,7 @@ export function ConfigForm({
   const nextId = useRef(Date.now());
   // Role Master's roles, for "everyone with these roles" on each step.
   const { data: roleRows = [] } = useQuery({ queryKey: ["roles-list"], queryFn: getRolesList, staleTime: 5 * 60_000 });
-  const roleNames = (Array.isArray(roleRows) ? roleRows : []).map((r) => r.RName).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  const roleNames = (Array.isArray(roleRows) ? roleRows : []).map((r) => r.RName).filter(Boolean).sort(naturalCompare);
 
   function toggleModule(id: string) {
     setSelectedModules((prev) =>

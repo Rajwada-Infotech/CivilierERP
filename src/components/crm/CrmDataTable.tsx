@@ -7,7 +7,7 @@ import {
   Columns3, Search, Trash2, X, CheckCircle2, AlertTriangle, Info,
 
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, naturalCompare } from "@/lib/utils";
 import { exportToCsv } from "@/lib/export";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import type { CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
@@ -664,7 +664,7 @@ export function GridSavedViews({ storageKey, current, onApply }: { storageKey: s
   const save = () => {
     const n = name.trim();
     if (!n) return;
-    keep([...views.filter((v) => v.name !== n), { name: n, ...current }].sort((a, b) => a.name.localeCompare(b.name)));
+    keep([...views.filter((v) => v.name !== n), { name: n, ...current }].sort((a, b) => naturalCompare(a.name, b.name)));
     setName("");
   };
   return (

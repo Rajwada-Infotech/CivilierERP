@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Check, ChevronsUpDown, Search, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, naturalCompare } from "@/lib/utils";
 
 export interface MultiSelectOption {
   /** Stable identity. Coerced to string internally — `value` is always string[]. */
@@ -107,7 +107,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
     return Array.from(byGroup.entries()).sort(([a], [b]) => {
       if (a === "Other") return 1;
       if (b === "Other") return -1;
-      return a.localeCompare(b);
+      return naturalCompare(a, b);
     });
   }, [hasGroups, filtered]);
 

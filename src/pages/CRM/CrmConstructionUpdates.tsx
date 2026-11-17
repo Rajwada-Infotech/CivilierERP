@@ -6,6 +6,7 @@ import { Check, ChevronDown, HardHat, RefreshCw } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell } from "@/components/sheet/Sheet";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { KEY_LINE, RULE, RULE_SOFT } from "./customers/config";
 
 const API = "/api/crm/construction-updates";
@@ -24,7 +25,51 @@ async function getJson(url: string, what: string) {
 }
 
 function ProgressBar({ value, className = "" }: { value: number; className?: string }) {
-  return <div className={`h-2 overflow-hidden bg-muted ${className}`}><div className="h-full bg-primary transition-[width] duration-500" style={{ width: `${pct(value)}%` }} /></div>;
+  return <div className={`h-2 overflow-hidden bg-muted ${className}`}><div className={`h-full transition-[width] duration-500 ${pct(value) >= 100 ? "bg-emerald-600" : "bg-primary"}`} style={{ width: `${pct(value)}%` }} /></div>;
+}
+
+type PickOption = { value: string; label: string; pct?: number | null };
+
+// A project / block / unit picker whose every option shows its progress, so the list itself tells where work stands.
+function ProgressPicker({ id, label, value, options, onChange, hideLabel = false, className = "w-80" }: { id: string; label: string; value: string; options: PickOption[]; onChange: (value: string) => void; hideLabel?: boolean; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const [find, setFind] = useState("");
+  const current = options.find((o) => o.value === value) ?? options[0];
+  const shown = find.trim() ? options.filter((o, i) => i === 0 || o.label.toLowerCase().includes(find.trim().toLowerCase())) : options;
+  return (
+    <div>
+      {!hideLabel && <label htmlFor={id} className="mb-1 block label">{label}</label>}
+      <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setFind(""); }}>
+        <PopoverTrigger asChild>
+          <button id={id} type="button" aria-label={hideLabel ? label : undefined} className={`flex h-9 ${className} max-w-full items-center gap-3 border border-foreground/25 bg-background px-3 text-left text-sm outline-none focus:border-primary`}>
+            <span className="min-w-0 flex-1 truncate">{current?.label}</span>
+            {current?.pct != null && <><ProgressBar value={current.pct} className="h-1.5 w-20 shrink-0" /><span className="w-10 text-right text-xs font-semibold tabular-nums">{pct(current.pct)}%</span></>}
+            <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] rounded-none p-0">
+          {options.length > 8 && <div className="p-2" style={{ borderBottom: RULE_SOFT }}><input autoFocus value={find} onChange={(e) => setFind(e.target.value)} placeholder="Search…" className="h-8 w-full border border-foreground/25 bg-background px-2 text-sm outline-none focus:border-primary" /></div>}
+          <div role="listbox" aria-label={label} className="max-h-72 overflow-y-auto py-1">
+            {shown.map((o, i) => {
+              const on = o.value === value;
+              return (
+                <button key={o.value || "all"} type="button" role="option" aria-selected={on} onClick={() => { onChange(o.value); setOpen(false); setFind(""); }}
+                  className={`block w-full px-3 py-2 text-left hover:bg-primary/5 focus:bg-primary/5 focus:outline-none ${on ? "bg-primary/10" : ""} ${i === 0 ? "font-medium" : ""}`}
+                  style={i === 0 && shown.length > 1 ? { borderBottom: RULE_SOFT } : undefined}>
+                  <span className="flex items-center gap-3 text-sm">
+                    <span className="w-4 shrink-0">{on && <Check size={13} className="text-primary" />}</span>
+                    <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                    {o.pct != null && <><ProgressBar value={o.pct} className="h-1.5 w-20 shrink-0" />
+                    <span className="w-10 text-right text-xs font-semibold tabular-nums">{pct(o.pct)}%</span></>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
 }
 
 const CrmConstructionUpdates: React.FC = () => {
@@ -58,6 +103,7 @@ const CrmConstructionUpdates: React.FC = () => {
   });
   const detailQ = selectedUnitId ? unitDetailQ : baseDetailQ;
   const detail = detailQ.data;
+  const projectTowers: any[] | undefined = baseDetailQ.data?.towers ?? selected?.towers;
   const selectedBlockName = baseDetailQ.data?.towers?.find((tower: any) => String(tower.blockId) === selectedBlockId)?.blockName;
   const selectedUnitName = baseDetailQ.data?.units?.find((unit: any) => String(unit.unitId) === selectedUnitId)?.unitName;
   const focusName = selectedUnitName || selectedBlockName || selected?.projectName;
@@ -89,12 +135,11 @@ const CrmConstructionUpdates: React.FC = () => {
           <div className="bg-card" style={{ border: RULE }}>
             <div className="px-5 py-3 flex flex-wrap items-center justify-between gap-3" style={{ borderBottom: RULE_SOFT }}>
               <div><span className="label">{selected ? "Project" : "All projects"}</span><span className="ml-3 text-xs text-muted-foreground">{projects.length} project{projects.length === 1 ? "" : "s"}</span></div>
-              <div className="relative w-full sm:w-72">
-                <select aria-label="Select project" value={selected?.projectId ?? ""} onChange={(event) => { setSelectedId(event.target.value); setSelectedBlockId(""); setSelectedUnitId(""); }} className="h-9 w-full appearance-none border border-foreground/25 bg-background px-3 pr-9 text-sm outline-none focus:border-primary">
-                  <option value="">Select a project</option>
-                  {projects.map((project) => <option key={project.projectId} value={project.projectId}>{project.projectName}</option>)}
-                </select>
-                <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <div className="w-full sm:w-96">
+                <ProgressPicker id="construction-project" label="Select project" hideLabel className="w-full" value={selected ? String(selected.projectId) : ""}
+                  onChange={(value) => { setSelectedId(value); setSelectedBlockId(""); setSelectedUnitId(""); }}
+                  options={[{ value: "", label: "Select a project" },
+                    ...projects.map((project) => ({ value: String(project.projectId), label: project.projectName, pct: project.pct }))]} />
               </div>
             </div>
             {selected && <div className="px-5 py-4 flex flex-wrap items-end justify-between gap-4">
@@ -145,29 +190,61 @@ const CrmConstructionUpdates: React.FC = () => {
             <>
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div className="flex flex-wrap items-end gap-3">
-                  <div><label htmlFor="construction-block" className="mb-1 block label">Block</label><select id="construction-block" value={selectedBlockId} onChange={(event) => { setSelectedBlockId(event.target.value); setSelectedUnitId(""); }} className="h-9 min-w-44 border border-foreground/25 bg-background px-3 text-sm">
-                    <option value="">All blocks</option>
-                    {(baseDetailQ.data?.towers ?? []).map((tower: any) => <option key={tower.blockId} value={tower.blockId}>{tower.blockName || `Block ${tower.blockId}`}</option>)}
-                  </select></div>
-                  {selectedBlockId && <div><label htmlFor="construction-unit" className="mb-1 block label">Unit in this block</label><select id="construction-unit" value={selectedUnitId} onChange={(event) => setSelectedUnitId(event.target.value)} className="h-9 min-w-44 max-w-64 border border-foreground/25 bg-background px-3 text-sm">
-                    <option value="">All units</option>
-                    {(baseDetailQ.data?.units ?? []).map((unit: any) => <option key={unit.unitId} value={unit.unitId}>{unit.unitName}</option>)}
-                  </select></div>}
+                  <ProgressPicker id="construction-block" label="Block" value={selectedBlockId}
+                    onChange={(value) => { setSelectedBlockId(value); setSelectedUnitId(""); }}
+                    options={[{ value: "", label: "All blocks", pct: selected.pct },
+                      ...(projectTowers ?? []).map((tower: any) => ({ value: String(tower.blockId), label: tower.blockName || `Block ${tower.blockId}`, pct: tower.pct }))]} />
+                  {selectedBlockId && <ProgressPicker id="construction-unit" label="Unit in this block" value={selectedUnitId} onChange={setSelectedUnitId}
+                    options={[{ value: "", label: "All units", pct: baseDetailQ.data?.pct ?? 0 },
+                      ...(baseDetailQ.data?.units ?? []).map((unit: any) => ({ value: String(unit.unitId), label: unit.unitName, pct: unit.pct }))]} />}
                 </div>
                 <button onClick={() => { setSelectedId(""); setSelectedBlockId(""); setSelectedUnitId(""); }} className={`${KEY_LINE} h-9 px-3 text-xs`}>All projects</button>
               </div>
               {detailQ.isError && <div className="bg-card px-5 py-4 text-sm text-destructive" style={{ border: RULE }}>{(detailQ.error as Error).message}</div>}
               <div className="bg-card" style={{ border: RULE }}>
-                <div className="statrow four px-4 py-4 sm:px-5">
-                  {[
-                    { label: "Construction tasks", value: detail?.steps ?? selected.steps ?? 0, note: "Tasks being tracked" },
-                    { label: "Finished", value: detail?.done ?? selected.done ?? 0, note: "Tasks completed" },
-                    { label: "Underway", value: detail?.moving ?? selected.moving ?? 0, note: "Tasks currently active" },
-                    selectedBlockId || selectedUnitId
-                      ? { label: "Tasks remaining", value: Math.max(0, Number(detail?.steps ?? selected.steps ?? 0) - Number(detail?.done ?? selected.done ?? 0)), note: "Not yet finished" }
-                      : { label: "Behind schedule", value: detail?.late ?? selected.late ?? 0, note: "Past planned finish date" },
-                  ].map((metric) => <div key={metric.label}><span className="label">{metric.label}</span><div className="figure mt-2 text-2xl">{metric.value.toLocaleString("en-IN")}</div><div className="mt-1 text-xs text-muted-foreground">{metric.note}</div></div>)}
-                </div>
+                {(() => {
+                  // Figures follow the hierarchy: a project counts its blocks and units, a block its units, a unit its tasks.
+                  const steps = Number(detail?.steps ?? selected.steps ?? 0);
+                  const done = Number(detail?.done ?? selected.done ?? 0);
+                  const moving = Number(detail?.moving ?? selected.moving ?? 0);
+                  const tally = (items: any[]) => ({
+                    total: items.length,
+                    done: items.filter((x) => pct(x.pct) >= 100).length,
+                    moving: items.filter((x) => pct(x.pct) < 100 && (pct(x.pct) > 0 || Number(x.moving) > 0)).length,
+                  });
+                  const level = (label: string, t: { total: number; done: number; moving: number }) =>
+                    ({ label, value: t.total, note: `${t.done.toLocaleString("en-IN")} finished · ${t.moving.toLocaleString("en-IN")} underway`, bar: t.total ? (t.done / t.total) * 100 : 0 });
+                  const blocks = (detail?.towers ?? selected.towers ?? []).filter((tower: any) => tower.blockId != null);
+                  const units = detail?.units ?? [];
+                  const tasks = level("Construction tasks", { total: steps, done, moving });
+                  const remaining = { label: "Tasks remaining", value: Math.max(0, steps - done), note: "Not yet finished" };
+                  // Behind schedule is counted at whichever level is open (project, block or unit).
+                  const late = { label: "Behind schedule", value: Number(detail?.late ?? selected.late ?? 0), note: "Past planned finish date" };
+                  const metrics: { label: string; value: number; note: string; bar?: number }[] = selectedUnitId ? [
+                    { label: "Construction tasks", value: steps, note: "Tasks being tracked" },
+                    { label: "Finished", value: done, note: "Tasks completed", bar: steps ? (done / steps) * 100 : 0 },
+                    { label: "Underway", value: moving, note: "Tasks currently active" },
+                    remaining,
+                    late,
+                  ] : [
+                    ...(!selectedBlockId && blocks.length ? [level("Blocks", tally(blocks))] : []),
+                    ...(units.length ? [level("Units", tally(units))] : []),
+                    tasks,
+                    ...(selectedBlockId ? [remaining] : []),
+                    late,
+                  ];
+                  const cols = ["", "", "", "", "four", "five"][metrics.length] ?? "";
+                  return (
+                    <div className={`statrow ${cols} px-4 py-4 sm:px-5`}>
+                      {metrics.map((metric) => <div key={metric.label}>
+                        <span className="label">{metric.label}</span>
+                        <div className="figure mt-2 text-2xl">{metric.value.toLocaleString("en-IN")}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{metric.note}</div>
+                        {metric.bar != null && <ProgressBar value={metric.bar} className="mt-2 h-1" />}
+                      </div>)}
+                    </div>
+                  );
+                })()}
               </div>
 
               <section className="bg-card" style={{ border: RULE }}>

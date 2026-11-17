@@ -13,16 +13,16 @@ require("../services/projectScope").setupScopeGuard(router, { params: { blockId:
 
 const PAGE = "crm-auto-project-setup";
 const MAX_GRID = 60;
-const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+const { naturalCompare } = require("../utils/routeHelpers");
 
 // "P-2" must come before "P-10". SQL's ORDER BY on a string cannot do that, so the
 // natural ordering is applied here and every consumer of the list gets it.
 function sortPlots(rows) {
   return rows.sort((a, b) =>
-    collator.compare(a.ProjectName || "", b.ProjectName || "")
-    || collator.compare(a.BlockName || "", b.BlockName || "")
-    || collator.compare(a.PlotName || "", b.PlotName || "")
-    || collator.compare(a.PlotNo || "", b.PlotNo || ""));
+    naturalCompare(a.ProjectName || "", b.ProjectName || "")
+    || naturalCompare(a.BlockName || "", b.BlockName || "")
+    || naturalCompare(a.PlotName || "", b.PlotName || "")
+    || naturalCompare(a.PlotNo || "", b.PlotNo || ""));
 }
 
 function parseId(value) {
@@ -154,7 +154,7 @@ router.get("/:id/adjacent", requirePageRight("crm-auto-project-setup", "view"), 
       JOIN dbo.PlotMaster p ON p.Id = CASE WHEN pa.PlotId = @plotId THEN pa.AdjacentPlotId ELSE pa.PlotId END
       WHERE (pa.PlotId = @plotId OR pa.AdjacentPlotId = @plotId) AND p.IsActive = 1
     `);
-    res.json(result.recordset.sort((a, b) => collator.compare(a.PlotName, b.PlotName)));
+    res.json(result.recordset.sort((a, b) => naturalCompare(a.PlotName, b.PlotName)));
   } catch (error) {
     console.error("[plot-master] GET adjacency error:", error.message);
     res.status(500).json({ error: error.message });
@@ -272,7 +272,7 @@ router.get("/blocks", requirePageRight(PAGE, "view"), async (req, res) => {
       }
     }));
     res.json(checked.filter(Boolean).sort((a, b) =>
-      collator.compare(a.ProjectName, b.ProjectName) || collator.compare(a.BlockName, b.BlockName)));
+      naturalCompare(a.ProjectName, b.ProjectName) || naturalCompare(a.BlockName, b.BlockName)));
   } catch (error) {
     console.error("[plot-master] GET blocks error:", error.message);
     res.status(500).json({ error: error.message });

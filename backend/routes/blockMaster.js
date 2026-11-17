@@ -14,6 +14,7 @@ const { getPool, sql } = require("../db");
 const { getBlockLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 const { resolveLayoutType, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
+const { sortNatural } = require("../utils/routeHelpers");
 
 // A Block can be tagged with 1+ Payment Plans (dbo.CrmBlockPaymentPlan,
 // many-to-many) — the middle tier of the Project -> Block -> Unit cascade
@@ -102,7 +103,7 @@ router.get("/", cache("block-master", 300), async (req, res) => {
       ${req.projectScope ? `WHERE ${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()}` : ""}
       ORDER BY e.name, b.BlockName
     `);
-    res.json(result.recordset);
+    res.json(sortNatural(result.recordset, "ProjectName", "BlockName"));
   } catch (err) {
     console.error("[block-master] GET error:", err.message);
     res.status(500).json({ error: err.message });

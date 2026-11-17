@@ -2674,7 +2674,8 @@ router.get("/checkpoint/:cpId/updates", authMiddleware, async (req, res) => {
 
 // POST /checkpoint/:cpId/updates — log (or replace) the update for one date.
 // multipart: date (YYYY-MM-DD), note (optional), photo (optional file).
-router.post("/checkpoint/:cpId/updates", authMiddleware, upload.single("photo"), async (req, res) => {
+// Adding a day's update needs Edit on Reporting / Work Done (it had only a sign-in check).
+router.post("/checkpoint/:cpId/updates", authMiddleware, requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"), upload.single("photo"), async (req, res) => {
   const cpId = parseInt(req.params.cpId, 10);
   if (!Number.isFinite(cpId)) return res.status(400).json({ error: "Invalid checkpoint id" });
   const date = String(req.body?.date || "");
@@ -2772,7 +2773,8 @@ router.get("/checkpoint-update/:id/photo", authMiddleware, async (req, res) => {
 });
 
 // DELETE /checkpoint-update/:id — remove one day's update.
-router.delete("/checkpoint-update/:id", authMiddleware, async (req, res) => {
+// Removing one needs Delete on Reporting / Work Done (it had only a sign-in check, so anyone signed in could).
+router.delete("/checkpoint-update/:id", authMiddleware, requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -3104,7 +3106,9 @@ router.post("/:rungId/photos", authMiddleware, requireAnyPageRight(["civilworkdp
 });
 
 // DELETE /:rungId/photos/:photoId
-router.delete("/:rungId/photos/:photoId", authMiddleware, async (req, res) => {
+// Deleting a photo needs Delete on Reporting / Work Done. It had only a sign-in check, so anyone signed in
+// could delete photos (the button showed for everyone too); photos are removed outright, not archived.
+router.delete("/:rungId/photos/:photoId", authMiddleware, requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "delete"), async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
   const photoId = parseInt(req.params.photoId, 10);
   if (!Number.isFinite(rungId) || !Number.isFinite(photoId)) return res.status(400).json({ error: "Invalid id" });

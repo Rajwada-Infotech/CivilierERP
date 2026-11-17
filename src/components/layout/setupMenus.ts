@@ -248,6 +248,13 @@ export const hrPayrollSetupItems: SetupItem[] = [
   },
   {
     icon: UserSquare,
+    label: "Work Location",
+    path: "/hr-payroll/setup/work-location-master",
+    color: "text-yellow-500",
+    pageKey: "work-location-master",
+  },
+  {
+    icon: UserSquare,
     label: "Holidays",
     path: "/hr-payroll/setup/holiday-master",
     color: "text-yellow-500",

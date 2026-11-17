@@ -8,6 +8,7 @@ import { storeyDisplay, storeyRank as sharedStoreyRank } from "@/lib/floorLabel"
 import React, { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight, FolderTree, Building, Layers, Home, DoorOpen, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { naturalCompare } from "@/lib/utils";
 
 export interface ScopeLocatable {
   projectId: number;
@@ -40,7 +41,6 @@ const LEVELS = [
   { icon: DoorOpen, color: "text-foreground" },
 ] as const;
 
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const floorRank = (f: string) => (f === "G" ? -1 : Number.isFinite(Number(f)) ? Number(f) : Number.MAX_SAFE_INTEGER);
 // A villa's own floors, inside the unit (the reverse of a tower).
 // A villa room's own floor: shared naming/order (src/lib/floorLabel.ts).
@@ -81,7 +81,7 @@ function buildTree<T extends ScopeLocatable>(rows: T[], getCount: (item: T) => n
         ? floorRank(a.key.split("/f").pop()!) - floorRank(b.key.split("/f").pop()!)
         : isStorey(a) && isStorey(b)
           ? storeyRank(a.key.split("/s").pop()!) - storeyRank(b.key.split("/s").pop()!)
-          : collator.compare(a.label, b.label),
+          : naturalCompare(a.label, b.label),
     );
   };
   return finish(root, 0);

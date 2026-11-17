@@ -1,4 +1,4 @@
-import { Wrench, Users, Receipt, ShieldCheck, Zap, Ticket } from "lucide-react";
+import { Wrench, Users, Receipt, ShieldCheck, Zap, Ticket, KeyRound } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const maintenanceNavItems: NavItem[] = [
@@ -8,4 +8,5 @@ export const maintenanceNavItems: NavItem[] = [
   { label: "Service Requests", icon: Ticket, path: "/maintenance/service-requests", pageKey: "crm-service-tickets" },
   { label: "Security Attendance", icon: ShieldCheck, path: "/maintenance/security-attendance", pageKey: "maintenance-security-attendance" },
   { label: "Electricity Maintenance", icon: Zap, path: "/maintenance/electricity", pageKey: "maintenance-electricity" },
+  { label: "Key Custodian", icon: KeyRound, path: "/maintenance/key-custodian", pageKey: "maintenance-key-custodian" },
 ];

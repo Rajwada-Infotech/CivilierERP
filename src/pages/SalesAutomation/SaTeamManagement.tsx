@@ -13,6 +13,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { naturalCompare } from "@/lib/utils";
 
 // Sales teams master — "Team A, led by X, members Y and Z" — on the same
 // MasterPage as every other SA master. Saving moves people's open leads with
@@ -89,7 +90,7 @@ const MemberPicker: React.FC<{
         .filter((p) => !value.includes(String(p.Id)))
         .filter((p) => p.Name.toLowerCase().includes(needle) || (p.Email || "").toLowerCase().includes(needle))
         // Free people first — adding them moves no one.
-        .sort((a, b) => Number(!!a.TeamId) - Number(!!b.TeamId) || a.Name.localeCompare(b.Name))
+        .sort((a, b) => Number(!!a.TeamId) - Number(!!b.TeamId) || naturalCompare(a.Name, b.Name))
     : [];
   const shown = matches.slice(0, MAX_MATCHES);
   const from = (p: Person) => (p.TeamId && p.TeamId !== thisTeamId ? p.TeamName : null);

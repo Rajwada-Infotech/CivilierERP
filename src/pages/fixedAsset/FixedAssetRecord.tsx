@@ -17,6 +17,7 @@ import {
   ASSET_STATUS_OPTIONS, FA_REGISTER_EXPORT_COLUMNS, INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, ValueBar,
   assetTone, bookValue, ensureArray, fmt, fmtCur, fmtDate,
 } from "./record/config";
+import { naturalCompare } from "@/lib/utils";
 
 type View = "list" | "form" | "detail";
 
@@ -40,7 +41,7 @@ export default function FixedAssetRecord() {
   const projects = useMemo(() => {
     const m = new Map<number, string>();
     live.forEach((a) => a.ProjectId && m.set(a.ProjectId, a.ProjectName || `Project ${a.ProjectId}`));
-    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => naturalCompare(a.name, b.name));
   }, [live]);
 
   const filtered = useMemo(

@@ -153,16 +153,19 @@ export function LoginCard(p: LoginCardProps) {
             Or
             <motion.span className="h-px flex-1 origin-left" style={{ background: "var(--line)" }} variants={{ hidden: { scaleX: 0 }, show: { scaleX: 1, transition: { duration: 0.6, ease: "easeOut" } } }} />
           </motion.div>
-          <div className="mt-[min(1.25rem,2.2vh)] space-y-3">
-            <motion.button type="button" onClick={() => p.onNavigate("/supplier-login")} className="ls-outline" title="Vendor & order portal" variants={hop} {...press}>
-              <Truck size={17} style={{ color: "var(--brand)" }} /> Supplier Portal
-            </motion.button>
-            <motion.button type="button" onClick={() => p.onNavigate("/employee-login")} className="ls-outline" title="Salary, payslips, attendance & leave" variants={hop} {...press}>
-              <UserRound size={17} style={{ color: "var(--brand)" }} /> Employee Portal
-            </motion.button>
-            <motion.button type="button" onClick={() => p.onNavigate("/crm-client-portal/login")} className="ls-outline" title="Booking & owner portal" variants={hop} {...press}>
-              <Building2 size={17} style={{ color: "var(--brand)" }} /> Customer Portal
-            </motion.button>
+          <div className="mt-[min(1.25rem,2.2vh)] grid grid-cols-3 gap-3">
+            {[
+              { to: "/supplier-login", label: "Supplier Portal", title: "Vendor & order portal", Icon: Truck },
+              { to: "/employee-login", label: "Employee Portal", title: "Salary, payslips, attendance & leave", Icon: UserRound },
+              { to: "/crm-client-portal/login", label: "Customer Portal", title: "Booking & owner portal", Icon: Building2 },
+            ].map(({ to, label, title, Icon }) => (
+              <motion.button key={to} type="button" onClick={() => p.onNavigate(to)} className="ls-portal" title={title} aria-label={label} variants={hop} {...press}>
+                <span className="ls-portal-dot">
+                  <Icon size={20} style={{ color: "var(--brand)" }} />
+                </span>
+                {label}
+              </motion.button>
+            ))}
           </div>
         </motion.div>
 
