@@ -3,6 +3,7 @@ import { SheetShell } from "@/components/sheet/Sheet";
 import { LegalDocumentPreview, PANEL_DOCK_MIN_WIDTH } from "./LegalDocumentPreview";
 import { useElementWidth } from "./useElementWidth";
 import { LegalAskHost } from "./LegalAsk";
+import { LegalProjectSwitch } from "./ProjectPicker";
 
 // Legal pages use the same drawing-sheet look as Finance: ink on paper, no module colour inside the page.
 // The walnut brown stays only as the module's mark in the sidebar (moduleDefs.tsx / AppSidebar.tsx / index.css).
@@ -16,6 +17,8 @@ interface LegalShellProps {
   /** Kept for callers; the sheet title block has no icon. */
   icon?: React.ElementType;
   action?: React.ReactNode;
+  /** Hide the header's project picker (setup / master pages that are not per project). */
+  noProject?: boolean;
   children: React.ReactNode;
 }
 
@@ -32,14 +35,14 @@ const LEGAL_MOBILE_CSS = `
 /** Shared sheet wrapper for every Legal module page. */
 // The side panel docks on the right of the page; on phone-width pages it is a bottom sheet instead.
 // Decided from the real width of the page area, not the screen (the ERP sidebars take part of it).
-export const LegalShell: React.FC<LegalShellProps> = ({ title, subtitle, action, children }) => {
+export const LegalShell: React.FC<LegalShellProps> = ({ title, subtitle, action, noProject, children }) => {
   const ref = useRef<HTMLDivElement>(null);
   const width = useElementWidth(ref);
   const dock = width >= PANEL_DOCK_MIN_WIDTH;
   return (
     <div className="legal-sheet">
     <style>{LEGAL_MOBILE_CSS}</style>
-    <SheetShell eyebrow="CivilierERP · Legal" title={title} subtitle={subtitle} action={action}>
+    <SheetShell eyebrow="CivilierERP · Legal" title={title} subtitle={subtitle} action={noProject ? action : <div className="flex flex-wrap items-center justify-end gap-3"><LegalProjectSwitch />{action}</div>}>
       <div ref={ref} className={`flex gap-4 ${dock ? "flex-row items-start" : "flex-col"}`}>
         <div className="min-w-0 flex-1">{children}</div>
         <LegalDocumentPreview dock={dock} />

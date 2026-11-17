@@ -103,7 +103,7 @@ const AddDocument: React.FC<{
   return (
     <div className={`${card} p-4 sm:p-5`}>
       {up.inputEl}
-      <p className={eyebrow}>Add document</p>
+      <p className={eyebrow}>New document</p>
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="text-xs text-muted-foreground">Document type *
           <select className={`${input} mt-1`} value={f.docTypeId} onChange={set("docTypeId")}>
@@ -228,7 +228,7 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
       <div className={`${card} p-4 sm:p-5`}>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className={eyebrow}>Land documents · {data.documents.length}</p>
-          {rights.canEdit && adding === false && <button className={`${btn} mb-3`} onClick={() => setAdding(null)}><Plus size={12} /> Add document</button>}
+          {rights.canEdit && adding === false && <button className={`${btn} mb-3`} onClick={() => setAdding(null)}><Plus size={12} /> New document</button>}
         </div>
         {!data.documents.length ? <p className="text-sm text-muted-foreground">No documents uploaded yet.</p> : (
           <div className="overflow-x-auto">

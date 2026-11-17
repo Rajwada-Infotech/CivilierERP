@@ -255,6 +255,8 @@ interface MasterPageProps {
   collapsibleAddForm?: boolean;
   /** Label of the button that opens a collapsed add form (default "New Entry"). */
   addButtonLabel?: string;
+  /** Word before the title on the new-record form ("Add" by default; Legal uses "New"). */
+  addWord?: string;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -309,6 +311,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   isDeleteLocked,
   collapsibleAddForm = false,
   addButtonLabel = "New Entry",
+  addWord = "Add",
   statusTabs = false,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
@@ -722,7 +725,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         >
           <div>
             <h2 className={sx("font-heading font-semibold text-foreground text-sm", "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground")}>
-              {editingId !== null ? `Edit ${title}` : `Add ${title}`}
+              {editingId !== null ? `Edit ${title}` : `${addWord} ${title}`}
             </h2>
             <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
               {editingId !== null

@@ -8,6 +8,7 @@ import { NavItem } from "./SidebarPrimitives";
 // - Land Register (all company properties)
 // - Pending Verification (lands waiting for final verification)
 // - Deed Process (verified lands, with the verifier's deed timeline)
+// - LA & ULC Clearance (apply → obtain with dates; certificate attached at Post-Registration)
 // - Register Existing / Backlog Land
 // - Land & Projects (which land serves which project; complete vs under process)
 // - Land Sales (sale/disposal transactions)
@@ -23,6 +24,7 @@ export const legalNavItems: NavItem[] = [
   { label: "Land Register", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
   { label: "Pending Verification", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
   { label: "Deed Process", icon: Note1, path: "/legal/land/deed-process", pageKey: "legal-land-master" },
+  { label: "LA & ULC Clearance", icon: ClipboardTick, path: "/legal/land/la-ulc", pageKey: "legal-land-master" },
   { label: "Deed Registration", icon: DocumentText, path: "/legal/deed-registration", pageKey: "legal-approvals" },
   { label: "Post-Registration", icon: Note1, path: "/legal/land/post-registration", pageKey: "legal-land-master" },
   { label: "Land & Projects", icon: Building, path: "/legal/land/projects", pageKey: "legal-land-master" },

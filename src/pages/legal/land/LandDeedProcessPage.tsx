@@ -5,6 +5,7 @@ import { DocumentText } from "iconsax-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
+import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getDeedProcessLands, updateDeedProcess, approveDeedProcess, type DeedProcessLand } from "@/api/legalLandApi";
 import { askLegal } from "@/components/legal/LegalAsk";
@@ -32,7 +33,8 @@ export default function LandDeedProcessPage() {
       qc.invalidateQueries({ queryKey: ["legal-land-final", l.LandId] });
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   };
-  const lands = data?.lands ?? [];
+  const { inScope } = useProjectScope();
+  const lands = (data?.lands ?? []).filter((l) => inScope(l.ProjectId));
   const act = async (l: DeedProcessLand, level: 1 | 2, action: "Approve" | "Reject" | "Hold") => {
     let remarks: string | undefined;
     // Every decision carries remarks (Approve too); Hold / Reject give the reason.
