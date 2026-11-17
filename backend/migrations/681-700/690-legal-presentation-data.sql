@@ -7,6 +7,7 @@
 -- Uses what the database has: the first two projects, a district with mouzas, the Katha unit, admin users, an uploaded
 -- Legal file if any. Skips itself (changes nothing) if there are not two projects, a mouza and an admin user.
 -- One transaction: any error rolls everything back and the migration fails.
+-- A lookup named here but missing on a database falls back to the first value of that category.
 SET XACT_ABORT OFF;
 SET NOCOUNT ON;
 DECLARE @G INT, @R INT, @DIST INT, @M1 INT, @M2 INT, @KATHA INT, @UE INT, @UV INT, @U1 INT, @U2 INT, @FILE INT, @FILE2 INT, @ADSR INT;
@@ -72,43 +73,43 @@ IF EXISTS (SELECT 1 FROM @left) THROW 50001, 'Migration 690: could not clear eve
 -- 2. Enquiries, their RS / LR records and office timelines.
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-001', CAST(DATEADD(day, 0, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Broker'), N'Greens phase 2 — east corner, Rajarhat', @DIST, @M1, N'105', 6, @KATHA,
+VALUES (N'DEMO-ENQ-001', CAST(DATEADD(day, 0, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Broker'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Greens phase 2 — east corner, Rajarhat', @DIST, @M1, N'105', 6, @KATHA,
   N'Seller contact', N'9830012345', 3600000, @UE, N'New', @G, N'441', N'1410', N'221', N'2290', N'Demo enquiry — New.', 1, @UE);
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-002', CAST(DATEADD(day, -12, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Direct Owner'), N'Behind Rajarhat bus depot', @DIST, @M1, N'105', 4, @KATHA,
+VALUES (N'DEMO-ENQ-002', CAST(DATEADD(day, -12, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Direct Owner'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Behind Rajarhat bus depot', @DIST, @M1, N'105', 4, @KATHA,
   N'Seller contact', N'9830012345', 2600000, @UE, N'Under Review', @G, N'452', N'1433', N'226', N'2302', N'Demo enquiry — Under Review.', 1, @UE);
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-003', CAST(DATEADD(day, -5, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Reference'), N'Canal-side plot, Rajarhat', @DIST, @M1, N'105', 8, @KATHA,
+VALUES (N'DEMO-ENQ-003', CAST(DATEADD(day, -5, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Reference'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Canal-side plot, Rajarhat', @DIST, @M1, N'105', 8, @KATHA,
   N'Seller contact', N'9830012345', 4800000, @UE, N'Interested', @G, N'433', N'1402', N'219', N'2264', N'Demo enquiry — Interested.', 1, @UE);
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-004', CAST(DATEADD(day, -15, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Broker'), N'Kadampukur school road', @DIST, @M2, N'27', 10, @KATHA,
+VALUES (N'DEMO-ENQ-004', CAST(DATEADD(day, -15, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Broker'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Kadampukur school road', @DIST, @M2, N'27', 10, @KATHA,
   N'Seller contact', N'9830012345', 5500000, @UE, N'Interested', @R, N'162', N'611', N'91', N'958', N'Demo enquiry — Interested.', 1, @UE);
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-005', CAST(DATEADD(day, -3, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Website'), N'Kadampukur bus stand, east side', @DIST, @M2, N'27', 5, @KATHA,
+VALUES (N'DEMO-ENQ-005', CAST(DATEADD(day, -3, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Advertisement'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Kadampukur bus stand, east side', @DIST, @M2, N'27', 5, @KATHA,
   N'Seller contact', N'9830012345', 3100000, @UE, N'On Hold', @R, N'157', N'602', N'88', N'941', N'Demo enquiry — On Hold.', 1, @UE);
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-006', CAST(DATEADD(day, -20, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Walk-in'), N'Low land near Kadampukur bheri', @DIST, @M2, N'27', 12, @KATHA,
+VALUES (N'DEMO-ENQ-006', CAST(DATEADD(day, -20, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Walk-in'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Low land near Kadampukur bheri', @DIST, @M2, N'27', 12, @KATHA,
   N'Seller contact', N'9830012345', 2400000, @UE, N'Rejected', @R, N'171', N'630', N'95', N'977', N'Demo enquiry — Rejected.', 1, @UE);
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-007', CAST(DATEADD(day, -40, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Direct Owner'), N'Rajarhat main road, north plot', @DIST, @M1, N'105', 5, @KATHA,
+VALUES (N'DEMO-ENQ-007', CAST(DATEADD(day, -40, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Direct Owner'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Rajarhat main road, north plot', @DIST, @M1, N'105', 5, @KATHA,
   N'Seller contact', N'9830012345', 3000000, @UE, N'Converted to Land Record', @G, N'418', N'1376', N'94', N'2215', N'Demo enquiry — Converted to Land Record.', 1, @UE);
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-008', CAST(DATEADD(day, -55, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Broker'), N'Chowmatha junction plot, Rajarhat', @DIST, @M1, N'105', 7, @KATHA,
+VALUES (N'DEMO-ENQ-008', CAST(DATEADD(day, -55, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Broker'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Chowmatha junction plot, Rajarhat', @DIST, @M1, N'105', 7, @KATHA,
   N'Seller contact', N'9830012345', 4200000, @UE, N'Converted to Land Record', @G, N'425', N'1389', N'97', N'2241', N'Demo enquiry — Converted to Land Record.', 1, @UE);
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-009', CAST(DATEADD(day, -70, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Reference'), N'Kadampukur canal road', @DIST, @M2, N'27', 8, @KATHA,
+VALUES (N'DEMO-ENQ-009', CAST(DATEADD(day, -70, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Reference'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Kadampukur canal road', @DIST, @M2, N'27', 8, @KATHA,
   N'Seller contact', N'9830012345', 4800000, @UE, N'Converted to Land Record', @R, N'149', N'588', N'84', N'915', N'Demo enquiry — Converted to Land Record.', 1, @UE);
 INSERT INTO dbo.LegalLandEnquiry (EnquiryNo, EnquiryDate, FinYear, EnquirySourceId, LandLocation, DistrictId, MouzaId, JLNo, ApproxArea, AreaUnitId,
   ContactPerson, ContactNumber, ExpectedPrice, AssignedUserId, EnquiryStatus, ProjectId, RsDagNo, LrDagNo, RsKhatianNo, LrKhatianNo, InitialNotes, IsActive, CreatedBy)
-VALUES (N'DEMO-ENQ-010', CAST(DATEADD(day, -90, GETDATE()) AS DATE), N'2026-27', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Broker'), N'Kadampukur market back plot', @DIST, @M2, N'27', 6, @KATHA,
+VALUES (N'DEMO-ENQ-010', CAST(DATEADD(day, -90, GETDATE()) AS DATE), N'2026-27', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' AND Name = N'Broker'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'enquiry-source' ORDER BY LookupId)), N'Kadampukur market back plot', @DIST, @M2, N'27', 6, @KATHA,
   N'Seller contact', N'9830012345', 3600000, @UE, N'Converted to Land Record', @R, N'140', N'571', N'80', N'902', N'Demo enquiry — Converted to Land Record.', 1, @UE);
 UPDATE dbo.LegalLandEnquiry SET DeedArea = ApproxArea - 0.25;
 INSERT INTO dbo.LegalEnquiryRsRecord (EnquiryId, MouzaId, RsKhatianNo, RsDagNo, RecordedHolder, Area, AreaUnitId, CreatedBy)
@@ -361,16 +362,16 @@ FROM dbo.LegalLandEnquiry e WHERE e.EnquiryNo = N'DEMO-ENQ-007';
 SET @id = SCOPE_IDENTITY(); SET @L1 = @id;
 UPDATE dbo.LegalLandEnquiry SET LandId = @id WHERE EnquiryNo = N'DEMO-ENQ-007';
 INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, OwnershipTypeId, SharePct, ValidFrom, IsActive, CreatedBy) VALUES
-  (@id, N'Bimal Sarkar', N'Late Nitai Sarkar', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), 50, '2004-05-10', 1, @UE),
-  (@id, N'Kamal Sarkar', N'Late Nitai Sarkar', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), 50, '2004-05-10', 1, @UE);
+  (@id, N'Bimal Sarkar', N'Late Nitai Sarkar', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' ORDER BY LookupId)), 50, '2004-05-10', 1, @UE),
+  (@id, N'Kamal Sarkar', N'Late Nitai Sarkar', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' ORDER BY LookupId)), 50, '2004-05-10', 1, @UE);
 INSERT INTO dbo.LegalLandRsRecord (LandId, MouzaId, RsKhatianNo, RsDagNo, RecordedHolder, Area, AreaUnitId, IsActive, CreatedBy) VALUES (@id, @M1, N'94', N'418', N'Nitai Sarkar', 5, @KATHA, 1, @UE);
 INSERT INTO dbo.LegalLandLrRecord (LandId, MouzaId, LrKhatianNo, LrDagNo, IsActive, CreatedBy) VALUES (@id, @M1, N'2215', N'1376', 1, @UE);
 INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, IssuingAuthority, CurrentVersionNo, Remarks, IsActive, CreatedBy)
-VALUES (N'DEMO-DOC-00001', @id, (SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'Sale Deed'), N'Purchase / Sale', N'Parent sale deed', N'I-418/2004', N'ADSR', 1, N'Demo document', 1, @UE);
+VALUES (N'DEMO-DOC-00001', @id, ISNULL((SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'Sale Deed'), (SELECT MIN(DocTypeId) FROM dbo.LegalDocumentType)), N'Purchase / Sale', N'Parent sale deed', N'I-418/2004', N'ADSR', 1, N'Demo document', 1, @UE);
 SET @doc = SCOPE_IDENTITY();
 IF @FILE IS NOT NULL INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@doc, 1, @FILE, @UE, N'Verified');
 INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, IssuingAuthority, CurrentVersionNo, Remarks, IsActive, CreatedBy)
-VALUES (N'DEMO-DOC-00002', @id, (SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'LR Khatian'), N'Ownership', N'LR Khatian (RoR)', N'2215', N'ADSR', 1, N'Demo document', 1, @UE);
+VALUES (N'DEMO-DOC-00002', @id, ISNULL((SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'LR Khatian'), (SELECT MIN(DocTypeId) FROM dbo.LegalDocumentType)), N'Ownership', N'LR Khatian (RoR)', N'2215', N'ADSR', 1, N'Demo document', 1, @UE);
 SET @doc = SCOPE_IDENTITY();
 IF @FILE IS NOT NULL INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@doc, 1, @FILE, @UE, N'Verified');
 INSERT INTO dbo.LegalLand (LandCode, LandName, DistrictId, MouzaId, Area, AreaUnitId, LandStatus, EntryType, EnquiryId, ProjectId, LocationAddress,
@@ -383,16 +384,16 @@ FROM dbo.LegalLandEnquiry e WHERE e.EnquiryNo = N'DEMO-ENQ-008';
 SET @id = SCOPE_IDENTITY(); SET @L2 = @id;
 UPDATE dbo.LegalLandEnquiry SET LandId = @id WHERE EnquiryNo = N'DEMO-ENQ-008';
 INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, OwnershipTypeId, SharePct, ValidFrom, IsActive, CreatedBy) VALUES
-  (@id, N'Bimal Sarkar', N'Late Nitai Sarkar', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), 50, '2004-05-10', 1, @UE),
-  (@id, N'Kamal Sarkar', N'Late Nitai Sarkar', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), 50, '2004-05-10', 1, @UE);
+  (@id, N'Bimal Sarkar', N'Late Nitai Sarkar', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' ORDER BY LookupId)), 50, '2004-05-10', 1, @UE),
+  (@id, N'Kamal Sarkar', N'Late Nitai Sarkar', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' ORDER BY LookupId)), 50, '2004-05-10', 1, @UE);
 INSERT INTO dbo.LegalLandRsRecord (LandId, MouzaId, RsKhatianNo, RsDagNo, RecordedHolder, Area, AreaUnitId, IsActive, CreatedBy) VALUES (@id, @M1, N'97', N'425', N'Nitai Sarkar', 7, @KATHA, 1, @UE);
 INSERT INTO dbo.LegalLandLrRecord (LandId, MouzaId, LrKhatianNo, LrDagNo, IsActive, CreatedBy) VALUES (@id, @M1, N'2241', N'1389', 1, @UE);
 INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, IssuingAuthority, CurrentVersionNo, Remarks, IsActive, CreatedBy)
-VALUES (N'DEMO-DOC-00003', @id, (SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'Sale Deed'), N'Purchase / Sale', N'Parent sale deed', N'I-425/2004', N'ADSR', 1, N'Demo document', 1, @UE);
+VALUES (N'DEMO-DOC-00003', @id, ISNULL((SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'Sale Deed'), (SELECT MIN(DocTypeId) FROM dbo.LegalDocumentType)), N'Purchase / Sale', N'Parent sale deed', N'I-425/2004', N'ADSR', 1, N'Demo document', 1, @UE);
 SET @doc = SCOPE_IDENTITY();
 IF @FILE IS NOT NULL INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@doc, 1, @FILE, @UE, N'Verified');
 INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, IssuingAuthority, CurrentVersionNo, Remarks, IsActive, CreatedBy)
-VALUES (N'DEMO-DOC-00004', @id, (SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'LR Khatian'), N'Ownership', N'LR Khatian (RoR)', N'2241', N'ADSR', 1, N'Demo document', 1, @UE);
+VALUES (N'DEMO-DOC-00004', @id, ISNULL((SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'LR Khatian'), (SELECT MIN(DocTypeId) FROM dbo.LegalDocumentType)), N'Ownership', N'LR Khatian (RoR)', N'2241', N'ADSR', 1, N'Demo document', 1, @UE);
 SET @doc = SCOPE_IDENTITY();
 IF @FILE IS NOT NULL INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@doc, 1, @FILE, @UE, N'Verified');
 INSERT INTO dbo.LegalDiligenceArea (LandId, Area, Status, Remarks, CheckedBy, CheckedAt) VALUES
@@ -414,16 +415,16 @@ FROM dbo.LegalLandEnquiry e WHERE e.EnquiryNo = N'DEMO-ENQ-009';
 SET @id = SCOPE_IDENTITY(); SET @L3 = @id;
 UPDATE dbo.LegalLandEnquiry SET LandId = @id WHERE EnquiryNo = N'DEMO-ENQ-009';
 INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, OwnershipTypeId, SharePct, ValidFrom, IsActive, CreatedBy) VALUES
-  (@id, N'Bimal Sarkar', N'Late Nitai Sarkar', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), 50, '2004-05-10', 1, @UE),
-  (@id, N'Kamal Sarkar', N'Late Nitai Sarkar', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), 50, '2004-05-10', 1, @UE);
+  (@id, N'Bimal Sarkar', N'Late Nitai Sarkar', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' ORDER BY LookupId)), 50, '2004-05-10', 1, @UE),
+  (@id, N'Kamal Sarkar', N'Late Nitai Sarkar', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' ORDER BY LookupId)), 50, '2004-05-10', 1, @UE);
 INSERT INTO dbo.LegalLandRsRecord (LandId, MouzaId, RsKhatianNo, RsDagNo, RecordedHolder, Area, AreaUnitId, IsActive, CreatedBy) VALUES (@id, @M2, N'84', N'149', N'Nitai Sarkar', 8, @KATHA, 1, @UE);
 INSERT INTO dbo.LegalLandLrRecord (LandId, MouzaId, LrKhatianNo, LrDagNo, IsActive, CreatedBy) VALUES (@id, @M2, N'915', N'588', 1, @UE);
 INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, IssuingAuthority, CurrentVersionNo, Remarks, IsActive, CreatedBy)
-VALUES (N'DEMO-DOC-00005', @id, (SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'Sale Deed'), N'Purchase / Sale', N'Parent sale deed', N'I-149/2004', N'ADSR', 1, N'Demo document', 1, @UE);
+VALUES (N'DEMO-DOC-00005', @id, ISNULL((SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'Sale Deed'), (SELECT MIN(DocTypeId) FROM dbo.LegalDocumentType)), N'Purchase / Sale', N'Parent sale deed', N'I-149/2004', N'ADSR', 1, N'Demo document', 1, @UE);
 SET @doc = SCOPE_IDENTITY();
 IF @FILE IS NOT NULL INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@doc, 1, @FILE, @UE, N'Verified');
 INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, IssuingAuthority, CurrentVersionNo, Remarks, IsActive, CreatedBy)
-VALUES (N'DEMO-DOC-00006', @id, (SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'LR Khatian'), N'Ownership', N'LR Khatian (RoR)', N'915', N'ADSR', 1, N'Demo document', 1, @UE);
+VALUES (N'DEMO-DOC-00006', @id, ISNULL((SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'LR Khatian'), (SELECT MIN(DocTypeId) FROM dbo.LegalDocumentType)), N'Ownership', N'LR Khatian (RoR)', N'915', N'ADSR', 1, N'Demo document', 1, @UE);
 SET @doc = SCOPE_IDENTITY();
 IF @FILE IS NOT NULL INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@doc, 1, @FILE, @UE, N'Verified');
 INSERT INTO dbo.LegalDiligenceArea (LandId, Area, Status, Remarks, CheckedBy, CheckedAt) VALUES
@@ -445,16 +446,16 @@ FROM dbo.LegalLandEnquiry e WHERE e.EnquiryNo = N'DEMO-ENQ-010';
 SET @id = SCOPE_IDENTITY(); SET @L4 = @id;
 UPDATE dbo.LegalLandEnquiry SET LandId = @id WHERE EnquiryNo = N'DEMO-ENQ-010';
 INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, OwnershipTypeId, SharePct, ValidFrom, IsActive, CreatedBy) VALUES
-  (@id, N'Bimal Sarkar', N'Late Nitai Sarkar', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), 50, '2004-05-10', 1, @UE),
-  (@id, N'Kamal Sarkar', N'Late Nitai Sarkar', (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), 50, '2004-05-10', 1, @UE);
+  (@id, N'Bimal Sarkar', N'Late Nitai Sarkar', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' ORDER BY LookupId)), 50, '2004-05-10', 1, @UE),
+  (@id, N'Kamal Sarkar', N'Late Nitai Sarkar', ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' AND Name = N'Joint'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'ownership-type' ORDER BY LookupId)), 50, '2004-05-10', 1, @UE);
 INSERT INTO dbo.LegalLandRsRecord (LandId, MouzaId, RsKhatianNo, RsDagNo, RecordedHolder, Area, AreaUnitId, IsActive, CreatedBy) VALUES (@id, @M2, N'80', N'140', N'Nitai Sarkar', 6, @KATHA, 1, @UE);
 INSERT INTO dbo.LegalLandLrRecord (LandId, MouzaId, LrKhatianNo, LrDagNo, IsActive, CreatedBy) VALUES (@id, @M2, N'902', N'571', 1, @UE);
 INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, IssuingAuthority, CurrentVersionNo, Remarks, IsActive, CreatedBy)
-VALUES (N'DEMO-DOC-00007', @id, (SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'Sale Deed'), N'Purchase / Sale', N'Parent sale deed', N'I-140/2004', N'ADSR', 1, N'Demo document', 1, @UE);
+VALUES (N'DEMO-DOC-00007', @id, ISNULL((SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'Sale Deed'), (SELECT MIN(DocTypeId) FROM dbo.LegalDocumentType)), N'Purchase / Sale', N'Parent sale deed', N'I-140/2004', N'ADSR', 1, N'Demo document', 1, @UE);
 SET @doc = SCOPE_IDENTITY();
 IF @FILE IS NOT NULL INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@doc, 1, @FILE, @UE, N'Verified');
 INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, IssuingAuthority, CurrentVersionNo, Remarks, IsActive, CreatedBy)
-VALUES (N'DEMO-DOC-00008', @id, (SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'LR Khatian'), N'Ownership', N'LR Khatian (RoR)', N'902', N'ADSR', 1, N'Demo document', 1, @UE);
+VALUES (N'DEMO-DOC-00008', @id, ISNULL((SELECT TOP 1 DocTypeId FROM dbo.LegalDocumentType WHERE DocTypeName = N'LR Khatian'), (SELECT MIN(DocTypeId) FROM dbo.LegalDocumentType)), N'Ownership', N'LR Khatian (RoR)', N'902', N'ADSR', 1, N'Demo document', 1, @UE);
 SET @doc = SCOPE_IDENTITY();
 IF @FILE IS NOT NULL INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy, ReviewStatus) VALUES (@doc, 1, @FILE, @UE, N'Verified');
 INSERT INTO dbo.LegalDiligenceArea (LandId, Area, Status, Remarks, CheckedBy, CheckedAt) VALUES
@@ -472,35 +473,35 @@ UPDATE dbo.LegalLand SET DeedTargetDate = CAST(DATEADD(day, 5, GETDATE()) AS DAT
 -- Deed Registration: approved; consideration, stamp duty, applied; final registration still to do.
 UPDATE dbo.LegalLand SET DeedTargetDate = CAST(DATEADD(day, -4, GETDATE()) AS DATE), L1Status = N'Approved', L1ReviewerId = @U1, L1ReviewedAt = DATEADD(day, -7, SYSUTCDATETIME()),
   L2Status = N'Approved', L2ApproverId = @U2, L2ApprovedAt = DATEADD(day, -6, SYSUTCDATETIME()),
-  ConsTotalAmount = 4800000, ConsRate = 600000, ConsRateUnitId = @KATHA, ConsAdvanceAmount = 500000, ConsPaymentModeId = (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'payment-mode' AND Name = N'RTGS'),
+  ConsTotalAmount = 4800000, ConsRate = 600000, ConsRateUnitId = @KATHA, ConsAdvanceAmount = 500000, ConsPaymentModeId = ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'payment-mode' AND Name = N'Bank Transfer'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'payment-mode' ORDER BY LookupId)),
   ConsRemarks = N'8 katha @ ₹6 lakh per katha; advance on agreement, balance at registration.', RegAppliedBy = @U1, RegAppliedAt = DATEADD(day, -3, SYSUTCDATETIME())
 WHERE LandId = @L3;
 INSERT INTO dbo.LegalStampDutyQuery (LandId, QueryDate, FeeTypeId, Amount, Remarks, CreatedBy) VALUES
-  (@L3, CAST(DATEADD(day, -4, GETDATE()) AS DATE), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Stamp Duty'), 288000, N'6% on market value ₹48 lakh', @UE),
-  (@L3, CAST(DATEADD(day, -4, GETDATE()) AS DATE), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Registration Fee'), 52800, N'1.1% registration fee', @UE);
+  (@L3, CAST(DATEADD(day, -4, GETDATE()) AS DATE), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Stamp Duty'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' ORDER BY LookupId)), 288000, N'6% on market value ₹48 lakh', @UE),
+  (@L3, CAST(DATEADD(day, -4, GETDATE()) AS DATE), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Registration Fee'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' ORDER BY LookupId)), 52800, N'1.1% registration fee', @UE);
 -- Registered: every step done, deed tracked to the company locker, post-registration under way.
 UPDATE dbo.LegalLand SET DeedTargetDate = CAST(DATEADD(day, -30, GETDATE()) AS DATE), L1Status = N'Approved', L1ReviewerId = @U1, L1ReviewedAt = DATEADD(day, -35, SYSUTCDATETIME()),
   L2Status = N'Approved', L2ApproverId = @U2, L2ApprovedAt = DATEADD(day, -34, SYSUTCDATETIME()),
-  ConsTotalAmount = 3600000, ConsRate = 600000, ConsRateUnitId = @KATHA, ConsAdvanceAmount = 1000000, ConsPaymentModeId = (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'payment-mode' AND Name = N'Cheque'),
+  ConsTotalAmount = 3600000, ConsRate = 600000, ConsRateUnitId = @KATHA, ConsAdvanceAmount = 1000000, ConsPaymentModeId = ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'payment-mode' AND Name = N'Cheque'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'payment-mode' ORDER BY LookupId)),
   RegAppliedBy = @U1, RegAppliedAt = DATEADD(day, -30, SYSUTCDATETIME()),
-  RegFinalDate = CAST(DATEADD(day, -20, GETDATE()) AS DATE), RegOfficeId = @ADSR, RegModeId = (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'registration-mode' AND Name = N'Physical (at office)'), RegDeedNo = N'I-1504-08812/2026',
+  RegFinalDate = CAST(DATEADD(day, -20, GETDATE()) AS DATE), RegOfficeId = @ADSR, RegModeId = ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'registration-mode' AND Name = N'Physical (at office)'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'registration-mode' ORDER BY LookupId)), RegDeedNo = N'I-1504-08812/2026',
   RegDeedFileId = @FILE2, RegCompletedBy = @U2, RegCompletedAt = DATEADD(day, -19, SYSUTCDATETIME()),
-  IgrTrackingUrl = N'https://wbregistration.gov.in/', IgrStatusId = (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Delivered'), DeedLocationId = (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'In company locker / vault')
+  IgrTrackingUrl = N'https://wbregistration.gov.in/', IgrStatusId = ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Delivered'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' ORDER BY LookupId)), DeedLocationId = ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'In company locker / vault'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' ORDER BY LookupId))
 WHERE LandId = @L4;
 INSERT INTO dbo.LegalStampDutyQuery (LandId, QueryDate, FeeTypeId, Amount, CreatedBy) VALUES
-  (@L4, CAST(DATEADD(day, -26, GETDATE()) AS DATE), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Stamp Duty'), 216000, @UE), (@L4, CAST(DATEADD(day, -26, GETDATE()) AS DATE), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Registration Fee'), 39600, @UE), (@L4, CAST(DATEADD(day, -20, GETDATE()) AS DATE), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Scanning Fee'), 500, @UE);
+  (@L4, CAST(DATEADD(day, -26, GETDATE()) AS DATE), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Stamp Duty'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' ORDER BY LookupId)), 216000, @UE), (@L4, CAST(DATEADD(day, -26, GETDATE()) AS DATE), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Registration Fee'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' ORDER BY LookupId)), 39600, @UE), (@L4, CAST(DATEADD(day, -20, GETDATE()) AS DATE), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' AND Name = N'Scanning Fee'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'fee-type' ORDER BY LookupId)), 500, @UE);
 INSERT INTO dbo.LegalDeedTracking (LandId, StatusDate, IgrStatusId, DeedLocationId, TrackingUrl, Remarks, CreatedBy) VALUES
-  (@L4, CAST(DATEADD(day, -20, GETDATE()) AS DATE), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Registered — deed pending'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'In registration office'), N'https://wbregistration.gov.in/', N'Registered; original with the office for scanning.', @UE),
-  (@L4, CAST(DATEADD(day, -12, GETDATE()) AS DATE), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Ready for delivery'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'In registration office'), NULL, N'IGR shows ready for collection.', @UE),
-  (@L4, CAST(DATEADD(day, -10, GETDATE()) AS DATE), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Delivered'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'With advocate'), NULL, N'Collected by the advocate.', @UE),
-  (@L4, CAST(DATEADD(day, -8, GETDATE()) AS DATE), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Delivered'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'In company locker / vault'), NULL, N'Original kept in the head-office locker.', @UE);
+  (@L4, CAST(DATEADD(day, -20, GETDATE()) AS DATE), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Registered — deed pending'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' ORDER BY LookupId)), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'In registration office'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' ORDER BY LookupId)), N'https://wbregistration.gov.in/', N'Registered; original with the office for scanning.', @UE),
+  (@L4, CAST(DATEADD(day, -12, GETDATE()) AS DATE), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Ready for delivery'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' ORDER BY LookupId)), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'In registration office'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' ORDER BY LookupId)), NULL, N'IGR shows ready for collection.', @UE),
+  (@L4, CAST(DATEADD(day, -10, GETDATE()) AS DATE), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Delivered'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' ORDER BY LookupId)), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'With advocate'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' ORDER BY LookupId)), NULL, N'Collected by the advocate.', @UE),
+  (@L4, CAST(DATEADD(day, -8, GETDATE()) AS DATE), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' AND Name = N'Delivered'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'igr-status' ORDER BY LookupId)), ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' AND Name = N'In company locker / vault'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'deed-location' ORDER BY LookupId)), NULL, N'Original kept in the head-office locker.', @UE);
 INSERT INTO dbo.LegalPostRegTask (LandId, TaskNo, Task, Status) VALUES
   (@L4, 1, N'Registered deed verification', N'Completed'), (@L4, 2, N'Mutation application', N'Application Submitted'), (@L4, 3, N'Updated Khatian / RoR', N'Not Started'),
   (@L4, 4, N'Updated land records', N'Not Started'), (@L4, 5, N'Land tax / revenue update', N'Under Processing'), (@L4, 6, N'Ownership record update', N'Not Started'),
   (@L4, 7, N'Project mapping eligibility', N'Completed');
 
 -- 4. Payments: consideration history, advance, schedule (one instalment overdue), a later valuation, the final payment.
-DECLARE @adv INT = (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'txn-type' AND Name = N'Advance'), @pp INT = (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'txn-type' AND Name = N'Purchase Payment'), @fin INT = (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'txn-type' AND Name = N'Final Payment'), @rtgs INT = (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'payment-mode' AND Name = N'RTGS');
+DECLARE @adv INT = ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'txn-type' AND Name = N'Advance'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'txn-type' ORDER BY LookupId)), @pp INT = ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'txn-type' AND Name = N'Purchase Payment'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'txn-type' ORDER BY LookupId)), @fin INT = ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'txn-type' AND Name = N'Purchase Payment'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'txn-type' ORDER BY LookupId)), @rtgs INT = ISNULL((SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'payment-mode' AND Name = N'Bank Transfer'), (SELECT TOP 1 LookupId FROM dbo.LegalLookupValue WHERE Category = N'payment-mode' ORDER BY LookupId));
 UPDATE dbo.LegalLand SET ConsDate = CAST(DATEADD(month, -7, GETDATE()) AS DATE) WHERE LandId = @L3;
 UPDATE dbo.LegalLand SET ConsDate = CAST(DATEADD(day, -60, GETDATE()) AS DATE) WHERE LandId = @L4;
 INSERT INTO dbo.LegalConsiderationRevision (LandId, RevisionDate, NewTotal, NewRate, Reason, CreatedBy)
