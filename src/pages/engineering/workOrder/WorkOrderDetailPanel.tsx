@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Trash2, ChevronDown, ChevronRight, Building2, Calculator, IndianRupee, FileText, Calendar, User, Layers, Package, Hammer, Receipt, AlertCircle, PenSquare, ChevronUp, ClipboardList, ArrowLeft, BadgeCheck, Clock, ShoppingCart, Printer, FilePenLine } from "lucide-react";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
-import { getWorkOrder, deleteWorkOrder, getMaterialRequestPrefillFromWO, MaterialRequestExistsError } from "@/api/workOrderApi";
+import { getWorkOrder, deleteWorkOrder, getMaterialRequestPrefillFromWO, MaterialRequestExistsError, getMRSourceStatus } from "@/api/workOrderApi";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
@@ -122,6 +122,14 @@ export const WorkOrderDetailPanel: React.FC<{
   const existingMR = woChain?.downstream
     .filter((n) => n.docType === "mr" && n.status !== "Rejected" && n.status !== "Cancelled")
     .at(-1);
+  // A request raised from this work order's BOQ already covers its materials: no second one from here.
+  const { data: mrSource } = useQuery({
+    queryKey: ["mr-source-status", "wo", workOrderId],
+    queryFn: () => getMRSourceStatus("wo", workOrderId),
+    enabled: !!workOrderId && detail?.Status === "Approved",
+    staleTime: 0, // a request raised a moment ago must show at once
+  });
+  const mrBlocked = !existingMR && !!mrSource?.blockedBy;
 
   // Where the work order's materials stand in procurement, from the same chain.
   const procurement = (() => {
@@ -294,7 +302,8 @@ export const WorkOrderDetailPanel: React.FC<{
               {detail.Status === "Approved" && (
                 <button
                   onClick={() => (existingMR ? openMaterialRequest(existingMR.id) : void handleCreateMaterialRequest())}
-                  disabled={creatingMR}
+                  disabled={creatingMR || mrBlocked}
+                  title={mrBlocked ? mrSource?.reason ?? undefined : undefined}
                   className="flex items-center gap-1.5 px-3 py-1.5 border border-foreground/40 text-foreground text-xs font-medium hover:bg-primary/5 transition-colors disabled:opacity-60"
                 >
                   {creatingMR ? (
@@ -303,6 +312,16 @@ export const WorkOrderDetailPanel: React.FC<{
                     <ShoppingCart size={12} />
                   )}
                   {existingMR ? `View Material Request ${existingMR.docNo ?? ""}`.trim() : "Create Material Request"}
+                </button>
+              )}
+              {detail.Status === "Approved" && mrBlocked && mrSource?.blockedBy && (
+                <button
+                  type="button"
+                  onClick={() => openMaterialRequest(mrSource.blockedBy!.mrId)}
+                  title={mrSource.reason ?? undefined}
+                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                >
+                  Requested via BOQ {mrSource.blockedBy.viaDocNo ?? ""} in {mrSource.blockedBy.docNo ?? `#${mrSource.blockedBy.mrId}`}
                 </button>
               )}
               {rights.canDelete && (
