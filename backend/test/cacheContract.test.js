@@ -177,6 +177,9 @@ describe("a reply after the response was already sent", () => {
   test("is skipped quietly: the client keeps the first reply and the second never rejects", async () => {
     const express = require("express");
     const { cache } = require("../middleware/cache");
+    // The cache takes its refresh lock, so it wraps res.json (the path that crashed); the shared mock's lock
+    // otherwise reads as "Redis down" and the cache steps aside.
+    require("../redis").redisLock.mockResolvedValueOnce(true);
     let second;
     const mini = express();
     mini.use((req, _res, next) => { req.user = { id: 1, userId: 1, role: "Admin" }; next(); });

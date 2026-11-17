@@ -117,24 +117,27 @@ const CrmBooking: React.FC = () => {
   const total = listResult?.total ?? 0;
   const counts = listResult?.statusCounts ?? {};
 
-  // Deep links: ?view=<id> opens that booking; ?applicationId=X opens the booking made from that application. The
-  // one-shot guard stops closing the card from reopening it while the URL still carries the param.
+  // Deep links: ?view=<id> opens that booking — each time the URL names one, so a link on this page (the villa
+  // offers' plot booking) opens it even after another booking was opened and closed; closing drops ?view=.
+  // ?applicationId=X opens the booking made from that application, once (the one-shot guard).
+  const [handledView, setHandledView] = useState("");
   useEffect(() => {
-    if (viewFilter && !deepLinkOpened) {
+    if (viewFilter && viewFilter !== handledView) {
       const viewId = parseInt(viewFilter, 10);
       // 0 is a real booking Id (the identity was reseeded to 0 once, see migration 441).
       if (Number.isInteger(viewId) && viewId >= 0) setViewingBookingId(viewId);
       else navigate("/crm/bookings", { replace: true });
-      setDeepLinkOpened(true);
+      setHandledView(viewFilter);
       return;
     }
+    if (!viewFilter && handledView) setHandledView("");
     if (!appFilter || deepLinkOpened || isLoading) return;
     const row = (bookings as any[]).find((b: any) => String(b.ApplicationId) === appFilter);
     if (row) setViewingBookingId(row.Id);
     // No booking yet for that application: offer to make one, filled in from it.
     else if (canCreate) setNewOpen(true);
     setDeepLinkOpened(true);
-  }, [appFilter, viewFilter, bookings, deepLinkOpened, isLoading, canCreate, navigate]);
+  }, [appFilter, viewFilter, handledView, bookings, deepLinkOpened, isLoading, canCreate, navigate]);
 
   const canDeleteBooking = (b: any) =>
     canDeleteBookings

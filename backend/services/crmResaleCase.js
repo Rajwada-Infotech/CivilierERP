@@ -50,7 +50,7 @@ async function loadCase(db, id) {
   const r = (await db.request().input("id", sql.Int, id).query(`
     SELECT r.*, fc.CustomerName AS FromName, tc.CustomerName AS ToName, fc.PanNo AS FromPan,
            tc.PanNo AS ToPan, tc.AadhaarNo AS ToAadhaar, tc.Address AS ToAddress, tc.Mobile AS ToMobile,
-           b.BookingNo, COALESCE(b.UnitNo, b.BookingNo) AS Property,
+           b.BookingNo, ${require("./crmResaleTransfer").resalePropertySql("r", "b")} AS Property,
            fi.InvoiceNo AS FeeInvoiceNo, fi.Status AS FeeInvoiceStatus,
            frp.RPDocNo AS FeeReceiptNo, frp.RPStatus AS FeeReceiptStatus
     FROM dbo.CrmUnitResale r
@@ -127,6 +127,12 @@ async function caseState(db, id) {
   if (f.openRefund) clearanceBlockers.push(`Refund ${f.openRefund.RefundNo} is open on this property`);
   if (f.pendingReceipts.length) clearanceBlockers.push(`${f.pendingReceipts.map((x) => x.No || "A payment").join(", ")} waiting for Finance — approve or reject ${f.pendingReceipts.length === 1 ? "it" : "them"} first`);
   if (hasLoan && !verified(docs, "SellerLoanNoc")) clearanceBlockers.push("The seller has a home loan — upload and verify their bank's NOC / closure letter");
+  // Some plots of the booking: the sold plots' share of any sale invoice already issued comes off it first.
+  const { casePlotIds, partPlotInvoiceCheck } = require("./crmResaleTransfer");
+  const partPlots = isResale && !done ? casePlotIds(r) : [];
+  const partInvoices = partPlots.length ? (await partPlotInvoiceCheck(db, r.FromBookingId, partPlots)).invoices : [];
+  const creditDue = partInvoices.filter((i) => i.Short > 0.009);
+  if (creditDue.length) clearanceBlockers.push(`Issue a credit note for the sold plots' share of ${creditDue.map((i) => `${i.InvoiceNo} (${fmt(i.Short)})`).join(", ")}`);
 
   // 4 buyer
   const buyerBlockers = [];
@@ -206,6 +212,8 @@ async function caseState(db, id) {
         ? { label: "Seller's bank NOC / loan-closure letter verified", ok: verified(docs, "SellerLoanNoc"), doc: "SellerLoanNoc",
             hint: f.loans.length ? `Loan with ${f.loans.map((l) => l.BankName).join(", ")}` : "Marked as having a loan" }
         : { label: "No home loan on the property", ok: true, hint: "From Loan Tracking — change it if that's wrong" },
+      ...(partInvoices.length ? [{ label: "Sold plots' share taken off the invoices by a credit note", ok: !creditDue.length,
+        hint: creditDue.length ? `${creditDue.map((i) => `${i.InvoiceNo} ${fmt(i.Short)}`).join(" · ")} — CRM → Credit Notes` : null }] : []),
       { label: "Clearance confirmed by staff", ok: !!r.SellerClearedAt, action: "clearance" },
     ],
     noc: [{ label: "Developer NOC issued", ok: !!r.NocIssuedAt, action: "noc", hint: r.NocNo || null }],
@@ -237,6 +245,11 @@ async function caseState(db, id) {
     transfer: [{ label: "Booking passed to the buyer", ok: done, action: "transfer" }],
     payout: [{ label: "Payout sent to Finance and paid", ok: done, action: "send-to-finance", hint: r.PayoutNewPaymentId ? "With Finance" : null }],
   };
+  // A part sale under a registered agreement for the whole booking: Legal deals with it in the deed (decided 2026-11-17).
+  if (casePlotIds(r).length && f.agreement?.Status === "Registered" && isResale) {
+    checks.deed = [...checks.deed, { label: "The registered agreement covers every plot on the booking — the deed of assignment names only the plots sold", ok: true,
+      hint: f.agreement.AgreementNo || null }];
+  }
   stages.forEach((st) => { st.checks = checks[st.key] || []; });
 
   // Each stage needs every stage before it.
@@ -250,7 +263,7 @@ async function caseState(db, id) {
 
   return {
     case: {
-      Id: r.Id, Kind: r.Kind, Status: r.Status, Property: r.Property, BookingNo: r.BookingNo, BookingIds: idsOf(r),
+      Id: r.Id, Kind: r.Kind, Status: r.Status, Property: r.Property, BookingNo: r.BookingNo, BookingIds: idsOf(r), PlotIds: casePlotIds(r),
       FromCustomerId: r.FromCustomerId, FromName: r.FromName, ToCustomerId: r.ToCustomerId, ToName: r.ToName, FromPan: r.FromPan, ToPan: r.ToPan,
       AgreedValue: r.AgreedValue, OriginalValue: r.OriginalValue, DeveloperFeeAmount: r.DeveloperFeeAmount, DeveloperFeeGstAmount: r.DeveloperFeeGstAmount,
       SellerHasLoan: hasLoan, SellerHasLoanSetByStaff: r.SellerHasLoan != null, SellerClearedAt: r.SellerClearedAt,
@@ -322,7 +335,8 @@ async function openBuyerApplication(db, id, actorUserId) {
     .query("SELECT Id, CustomerName, Mobile, Email FROM dbo.CrmCustomer WHERE Id = @c AND IsActive = 1")).recordset[0];
   if (!buyer) throw new CaseError("The buyer's customer record was not found");
   const b = (await db.request().input("b", sql.Int, r.FromBookingId)
-    .query("SELECT ProjectId, CompanyId, UnitNo FROM dbo.CrmBooking WHERE Id = @b")).recordset[0] || {};
+    .query("SELECT ProjectId, CompanyId FROM dbo.CrmBooking WHERE Id = @b")).recordset[0] || {};
+  b.UnitNo = r.Property; // what the case sells: its plots on a part sale
   const { getNextDocNumber } = require("./docNumber");
   const appNo = await getNextDocNumber(db, "APP", "APP");
   const app = await db.request()

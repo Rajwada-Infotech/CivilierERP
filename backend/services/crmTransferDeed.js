@@ -74,7 +74,7 @@ async function loadDeed(db, id) {
   const d = (await db.request().input("id", sql.Int, id).query(`
     SELECT d.*, r.Kind, r.Status AS CaseStatus, r.FromCustomerId, r.ToCustomerId, r.AgreedValue,
            fc.CustomerName AS SellerName, fc.Mobile AS SellerMobile, tc.CustomerName AS BuyerName, tc.Mobile AS BuyerMobile,
-           b.BookingNo, COALESCE(b.UnitNo, b.BookingNo) AS Property, b.ProjectId, le.name AS LegalExecutiveName
+           b.BookingNo, ${require("./crmResaleTransfer").resalePropertySql("r", "b")} AS Property, b.ProjectId, le.name AS LegalExecutiveName
     FROM dbo.CrmTransferDeed d
     JOIN dbo.CrmUnitResale r ON r.Id = d.ResaleId
     LEFT JOIN dbo.CrmCustomer fc ON fc.Id = r.FromCustomerId
@@ -618,7 +618,7 @@ async function listDeeds(db, { status = null, projectScope = null } = {}) {
   return (await req.query(`
     SELECT d.Id, d.DeedNo, d.ResaleId, d.DeedType, d.Status, d.SeniorApprovalStatus, d.DateApprovalStatus, d.ProposedDate, d.DeedDate, d.CreatedAt, d.UpdatedAt,
            d.SellerApproval, d.BuyerApproval,
-           r.Kind, fc.CustomerName AS SellerName, tc.CustomerName AS BuyerName, b.BookingNo, COALESCE(b.UnitNo, b.BookingNo) AS Property,
+           r.Kind, fc.CustomerName AS SellerName, tc.CustomerName AS BuyerName, b.BookingNo, ${require("./crmResaleTransfer").resalePropertySql("r", "b")} AS Property,
            le.name AS LegalExecutiveName,
            (SELECT COUNT(*) FROM dbo.CrmTransferDeedDocument x WHERE x.DeedId = d.Id AND x.IsActive = 1 AND x.IsMandatory = 1 AND x.DocumentType <> N'RegisteredDeed') AS DocsRequired,
            (SELECT COUNT(*) FROM dbo.CrmTransferDeedDocument x WHERE x.DeedId = d.Id AND x.IsActive = 1 AND x.IsMandatory = 1 AND x.DocumentType <> N'RegisteredDeed' AND x.Status = N'Verified') AS DocsVerified,
