@@ -165,6 +165,10 @@ router.patch("/:id/preferences", async (req, res) => {
 
 // ── POST change-password ─────────────────────────────────────────────────────
 router.post("/:id/change-password", async (req, res) => {
+  // Employee Portal logins can't change their own password -- HR / Super Admin set and reset it from the Employee Master.
+  if (normalizeRole(req.user?.role) === "employee portal") {
+    return res.status(403).json({ error: "Your password is managed by HR. Ask HR to reset it." });
+  }
   if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
   const { current_password, new_password } = req.body;

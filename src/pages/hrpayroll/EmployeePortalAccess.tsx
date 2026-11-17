@@ -32,32 +32,72 @@ const newPassword = () => {
 };
 
 // ── Enable / reset password ──────────────────────────────────────────────────
+// Two ways to set it: an auto-generated password (Generate for another, Copy to share), or a custom one HR types
+// (entered twice). The employee can't change it afterwards -- only HR / Super Admin can reset it.
 export function PasswordDialog({ employee, mode, onClose }: { employee: PortalEmployee; mode: "enable" | "reset"; onClose: () => void }) {
   const qc = useQueryClient();
-  const [password, setPassword] = useState(newPassword);
+  const [kind, setKind] = useState<"auto" | "custom">("auto");
+  const [generated, setGenerated] = useState(newPassword);
+  const [custom, setCustom] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const password = kind === "auto" ? generated : custom;
+  const mismatch = kind === "custom" && confirm !== "" && confirm !== custom;
+  const ready = password.length >= 8 && (kind === "auto" || custom === confirm);
   const save = useMutation({
     mutationFn: () => (mode === "enable" ? enablePortalAccess(employee.EmployeeId, password) : resetPortalPassword(employee.EmployeeId, password)),
     onSuccess: (r) => { toast.success(r.message); qc.invalidateQueries({ queryKey: ["portal-employees"] }); },
     onError: (e: Error) => toast.error(e.message),
   });
+  const copy = () => navigator.clipboard?.writeText(generated).then(() => toast.success("Password copied"), () => toast.error("Could not copy. Select it and copy manually."));
+  const opt = (k: "auto" | "custom", text: string) => (
+    <label className={`flex-1 flex items-center gap-2 px-3 h-10 cursor-pointer text-sm font-semibold ${kind === k ? "bg-foreground text-card" : "hover:bg-muted/60"}`} style={{ border: HR_RULE }}>
+      <input type="radio" name="pw-kind" className="sr-only" checked={kind === k} disabled={save.isSuccess} onChange={() => setKind(k)} />{text}
+    </label>
+  );
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md rounded-none">
         <DialogHeader><DialogTitle>{mode === "enable" ? "Enable Employee Portal access" : "Reset password"}</DialogTitle></DialogHeader>
         <p className="text-sm text-muted-foreground">{employee.EmployeeName} signs in with <b>{employee.Email}</b>.</p>
-        <div>
-          <label className={labelCls} htmlFor="pw">Password (min. 8 characters)</label>
-          <div className="flex gap-2">
-            <input id="pw" className={HR_FIELD} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
-            <button type="button" className={`${KEY_LINE} h-9 px-3 shrink-0`} onClick={() => setPassword(newPassword())}>Generate</button>
-          </div>
-          {save.isSuccess
-            ? <p className="text-xs text-foreground mt-2">Saved. Give the employee this password now — it isn't shown again.</p>
-            : <p className="text-xs text-muted-foreground mt-2">Share it with the employee yourself; they can't see it afterwards.</p>}
+        <div className="flex gap-2" role="radiogroup" aria-label="Password type">
+          {opt("auto", "Auto-generate")}
+          {opt("custom", "Set custom password")}
         </div>
+
+        {kind === "auto" ? (
+          <div>
+            <label className={labelCls} htmlFor="pw-auto">Generated password</label>
+            <div className="flex gap-2">
+              <input id="pw-auto" className={`${HR_FIELD} font-mono`} value={generated} readOnly />
+              <button type="button" className={`${KEY_LINE} h-9 px-3 shrink-0`} disabled={save.isSuccess} onClick={() => setGenerated(newPassword())}>Generate</button>
+              <button type="button" className={`${KEY_LINE} h-9 px-3 shrink-0`} onClick={copy}>Copy</button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className={labelCls} htmlFor="pw-custom">New password (min. 8 characters)</label>
+              <div className="flex gap-2">
+                <input id="pw-custom" className={HR_FIELD} type={show ? "text" : "password"} value={custom} onChange={(e) => setCustom(e.target.value)} autoComplete="new-password" disabled={save.isSuccess} autoFocus />
+                <button type="button" className={`${KEY_LINE} h-9 px-3 shrink-0`} onClick={() => setShow((v) => !v)}>{show ? "Hide" : "Show"}</button>
+              </div>
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="pw-confirm">Confirm password</label>
+              <input id="pw-confirm" className={HR_FIELD} type={show ? "text" : "password"} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" disabled={save.isSuccess} />
+              {mismatch && <p className="text-xs text-destructive mt-1">The two passwords don't match.</p>}
+              {custom !== "" && custom.length < 8 && <p className="text-xs text-destructive mt-1">Use at least 8 characters.</p>}
+            </div>
+          </div>
+        )}
+
+        {save.isSuccess
+          ? <p className="text-xs text-foreground">Saved. Give the employee this password now — it isn't shown again.</p>
+          : <p className="text-xs text-muted-foreground">Share it with the employee yourself. They can't see or change it; only HR or Super Admin can reset it.</p>}
         <div className="flex justify-end gap-2">
           <button className={`${KEY_LINE} h-9 px-4`} onClick={onClose}>{save.isSuccess ? "Done" : "Cancel"}</button>
-          {!save.isSuccess && <button className={`${KEY_INK} h-9 px-4`} disabled={password.length < 8 || save.isPending} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : mode === "enable" ? "Enable access" : "Reset password"}</button>}
+          {!save.isSuccess && <button className={`${KEY_INK} h-9 px-4`} disabled={!ready || save.isPending} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : mode === "enable" ? "Enable access" : "Reset password"}</button>}
         </div>
       </DialogContent>
     </Dialog>
