@@ -151,6 +151,10 @@ function PhotoThumb({
   });
   const [deleting, setDeleting] = useState(false);
   const carriedForward = photo.phase === "before" && photo.note === CARRIED_FORWARD_NOTE;
+  // Same rule as the server: Delete on Reporting or Work Done.
+  const canDeleteReporting = usePageRights("civilworkdpr-activity-reporting").canDelete;
+  const canDeleteWorkDone = usePageRights("civilworkdpr-work-done").canDelete;
+  const canDelete = canDeleteReporting || canDeleteWorkDone;
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -189,7 +193,7 @@ function PhotoThumb({
           <RotateCcw size={9} />
         </div>
       )}
-      <button
+      {canDelete && <button
         type="button"
         onClick={handleDelete}
         disabled={deleting}
@@ -197,7 +201,7 @@ function PhotoThumb({
         className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
       >
         {deleting ? <Loader2 size={10} className="animate-spin" /> : <X size={10} />}
-      </button>
+      </button>}
     </div>
   );
 }
