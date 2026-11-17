@@ -33,7 +33,8 @@ import { BodyPortal } from "@/components/ui/body-portal";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { PortalLoginField } from "./PortalLoginField";
 
-const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Contract", "Consultant", "Intern"];
+// Employment types offered on the form (stored as plain text, up to 30 characters).
+const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Part-time", "Contract", "Fixed-term", "Temporary", "Daily Wage", "Consultant", "Retainer", "Trainee", "Apprentice", "Intern"];
 const GENDERS = ["Male", "Female", "Other"];
 
 const mapRow = (r: EmployeeRow): RecordWithId => ({
