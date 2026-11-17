@@ -46,7 +46,7 @@ export function PasswordDialog({ employee, mode, onClose }: { employee: PortalEm
         <DialogHeader><DialogTitle>{mode === "enable" ? "Enable Employee Portal access" : "Reset password"}</DialogTitle></DialogHeader>
         <p className="text-sm text-muted-foreground">{employee.EmployeeName} signs in with <b>{employee.Email}</b>.</p>
         <div>
-          <label className={labelCls} htmlFor="pw">Password (min. 8 characters)</label>
+          <label className={labelCls} htmlFor="pw">Password (min. 8 characters) — auto-generated below; press Generate for a new one, or type your own</label>
           <div className="flex gap-2">
             <input id="pw" className={HR_FIELD} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
             <button type="button" className={`${KEY_LINE} h-9 px-3 shrink-0`} onClick={() => setPassword(newPassword())}>Generate</button>
