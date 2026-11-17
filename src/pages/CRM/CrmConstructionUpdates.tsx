@@ -1,197 +1,234 @@
+// Read-only construction progression, sourced directly from DPR.
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { HardHat, Plus, RefreshCw } from "lucide-react";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DateInput } from "@/components/ui/date-input";
+import { Check, ChevronDown, HardHat, RefreshCw } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell } from "@/components/sheet/Sheet";
-import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
-import { localDay } from "./salesDeed/config";
+import { KEY_LINE, RULE, RULE_SOFT } from "./customers/config";
 
 const API = "/api/crm/construction-updates";
-const UNIT_API = "/api/unit-master";
-const STAGES = ["Foundation", "Superstructure", "Finishing", "Handover-Ready"];
+const pct = (value: unknown) => Math.min(100, Math.max(0, Number(value) || 0));
+const ago = (value: unknown) => {
+  if (!value) return "";
+  const days = Math.floor((Date.now() - new Date(String(value)).getTime()) / 86_400_000);
+  return days <= 0 ? "Today" : days === 1 ? "Yesterday" : `${days} days ago`;
+};
 
-const emptyForm = () => ({ ProjectId: "", UpdateDate: localDay(), PercentComplete: "", Stage: "Foundation", Summary: "" });
-
-async function fetchAll(): Promise<any[]> {
-  // A failed load used to read as "No construction updates logged".
-  const r = await fetchWithAuth(API);
-  const data = await r.json().catch(() => null);
-  if (!r.ok) throw new Error(data?.error || `Could not load the updates (${r.status}).`);
-  return Array.isArray(data) ? data : [];
+async function getJson(url: string, what: string) {
+  const response = await fetchWithAuth(url);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(payload?.error || `Could not load ${what} (${response.status}).`);
+  return payload;
 }
-async function fetchProjects(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${UNIT_API}/projects`); return r.ok ? r.json() : []; } catch { return []; }
+
+function ProgressBar({ value, className = "" }: { value: number; className?: string }) {
+  return <div className={`h-2 overflow-hidden bg-muted ${className}`}><div className="h-full bg-primary transition-[width] duration-500" style={{ width: `${pct(value)}%` }} /></div>;
 }
 
 const CrmConstructionUpdates: React.FC = () => {
   const qc = useQueryClient();
-  const rights = usePageRights("crm-construction-updates");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState(emptyForm);
-  const [saving, setSaving] = useState(false);
-  const [projectFilter, setProjectFilter] = useState("");
-
-  const { data: updates = [], isLoading, isError, error, isFetching, refetch } = useQuery({ queryKey: ["crm-construction-updates"], queryFn: fetchAll, staleTime: 30_000 });
-  const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
-
-  // The latest update per project: where each one stands.
-  const latest = useMemo(() => {
-    const m = new Map<number, any>();
-    for (const u of updates as any[]) if (!m.has(u.ProjectId)) m.set(u.ProjectId, u);
-    return [...m.values()];
-  }, [updates]);
-  const shown = useMemo(() => (projectFilter ? (updates as any[]).filter((u) => String(u.ProjectId) === projectFilter) : (updates as any[])), [updates, projectFilter]);
-
-  const handleCreate = async () => {
-    if (!form.ProjectId) { toast.error("Project is required"); return; }
-    const pct = form.PercentComplete === "" ? null : Number(form.PercentComplete);
-    if (pct != null && !(pct >= 0 && pct <= 100)) { toast.error("% complete must be between 0 and 100"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, ProjectId: parseInt(form.ProjectId), PercentComplete: pct }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Construction update logged");
-      setDialogOpen(false);
-      setForm(emptyForm());
-      qc.invalidateQueries({ queryKey: ["crm-construction-updates"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
+  usePageRights("crm-construction-updates");
+  const [selectedId, setSelectedId] = useState("");
+  const [selectedBlockId, setSelectedBlockId] = useState("");
+  const [selectedUnitId, setSelectedUnitId] = useState("");
+  const projectsQ = useQuery({
+    queryKey: ["crm-construction-progress"],
+    queryFn: () => getJson(`${API}/progress`, "construction progress"),
+    staleTime: 30_000,
+    refetchInterval: 120_000,
+  });
+  const projects: any[] = projectsQ.data?.projects?.filter((project: any) => project.hasDpr) ?? [];
+  const selected = selectedId ? projects.find((project) => String(project.projectId) === selectedId) : undefined;
+  const detailUrl = selected ? `${API}/progress/${selected.projectId}${selectedBlockId ? `?blockId=${selectedBlockId}` : ""}` : "";
+  const baseDetailQ = useQuery({
+    queryKey: ["crm-construction-detail", selected?.projectId, selectedBlockId],
+    queryFn: () => getJson(detailUrl, "project progression"),
+    enabled: Boolean(selected?.projectId),
+    staleTime: 30_000,
+    refetchInterval: 120_000,
+  });
+  const unitDetailQ = useQuery({
+    queryKey: ["crm-construction-unit-detail", selected?.projectId, selectedBlockId, selectedUnitId],
+    queryFn: () => getJson(`${detailUrl}${detailUrl.includes("?") ? "&" : "?"}unitId=${selectedUnitId}`, "unit progression"),
+    enabled: Boolean(selected?.projectId && selectedUnitId),
+    staleTime: 30_000,
+    refetchInterval: 120_000,
+  });
+  const detailQ = selectedUnitId ? unitDetailQ : baseDetailQ;
+  const detail = detailQ.data;
+  const selectedBlockName = baseDetailQ.data?.towers?.find((tower: any) => String(tower.blockId) === selectedBlockId)?.blockName;
+  const selectedUnitName = baseDetailQ.data?.units?.find((unit: any) => String(unit.unitId) === selectedUnitId)?.unitName;
+  const focusName = selectedUnitName || selectedBlockName || selected?.projectName;
+  const focusType = selectedUnitId ? "Unit" : selectedBlockId ? "Block" : "Project";
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["crm-construction-progress"] });
+    if (selected?.projectId) {
+      qc.invalidateQueries({ queryKey: ["crm-construction-detail", selected.projectId] });
+      qc.invalidateQueries({ queryKey: ["crm-construction-unit-detail", selected.projectId] });
     }
   };
-
-  const figures = [
-    { label: "Updates", value: updates.length, note: "Shared with buyers" },
-    { label: "Projects reported", value: latest.length, note: "With at least one update" },
-    { label: "Finishing", value: latest.filter((u) => u.Stage === "Finishing").length, note: "Latest stage" },
-    { label: "Handover-ready", value: latest.filter((u) => u.Stage === "Handover-Ready").length, note: "Latest stage" },
-  ];
+  const updatedAt = detail?.feed?.[0]?.at;
+  const completion = useMemo(() => pct(detail?.pct ?? selected?.pct), [detail?.pct, selected?.pct]);
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Construction Updates"]} />
       <SheetShell
         eyebrow="CivilierERP · CRM · After-sales"
-        title="Construction Updates"
-        subtitle="Progress logs for each project, from foundation to handover-ready, shared with its buyers."
+        title="Construction Progress"
+        subtitle="See how construction is progressing across your projects, blocks, and units."
         action={
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
-            {/* The server logs under the create right; the button was offered to everyone. */}
-            {rights.canCreate && <button onClick={() => setDialogOpen(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> Log update</button>}
-          </div>
+          <button onClick={refresh} disabled={projectsQ.isFetching || detailQ.isFetching} aria-label="Refresh progression" title="Refresh progression" className={`${KEY_LINE} inline-flex h-9 items-center gap-2 px-3 text-sm disabled:opacity-60`}>
+            <RefreshCw size={15} className={projectsQ.isFetching || detailQ.isFetching ? "animate-spin" : ""} /><span className="hidden sm:inline">Refresh</span>
+          </button>
         }
       >
-        <div className="space-y-5">
+        <div className="space-y-5 pb-2">
           <div className="bg-card" style={{ border: RULE }}>
-            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
-              {figures.map((x) => (
-                <div key={x.label}>
-                  <span className="label">{x.label}</span>
-                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
-                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-card" style={{ border: RULE }}>
-            <div className="px-5 py-4 flex items-center gap-3 flex-wrap" style={{ borderBottom: RULE }}>
-              <span className={LBL}>Project</span>
-              <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className={`${INP} max-w-xs text-xs`}>
-                <option value="">All projects ({updates.length})</option>
-                {latest.map((u) => <option key={u.ProjectId} value={String(u.ProjectId)}>{u.ProjectName}</option>)}
-              </select>
-            </div>
-            {isError ? (
-              <p className="p-6 text-center text-sm text-destructive">{(error as Error)?.message}</p>
-            ) : isLoading ? (
-              <p className="p-6 text-center text-sm text-muted-foreground">Loading…</p>
-            ) : shown.length === 0 ? (
-              <p className="p-6 text-center text-sm text-muted-foreground">No construction updates logged yet.</p>
-            ) : shown.map((u: any) => {
-              const pct = u.PercentComplete != null ? Math.min(100, Math.max(0, Number(u.PercentComplete))) : null;
-              const stageIdx = STAGES.indexOf(u.Stage);
-              return (
-                <div key={u.Id} className="px-5 py-4" style={{ borderBottom: RULE_SOFT }}>
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <HardHat size={15} className="shrink-0" />
-                      <span className="font-semibold">{u.ProjectName}</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground tabular-nums">{String(u.UpdateDate).slice(0, 10)}</span>
-                  </div>
-                  {/* The four stages, the reached ones inked */}
-                  <div className="mt-3 flex items-center gap-1 flex-wrap">
-                    {STAGES.map((s, i) => (
-                      <span key={s} className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border ${
-                        i < stageIdx ? "border-foreground/50" : i === stageIdx ? "bg-foreground text-card border-foreground" : "border-foreground/15 text-muted-foreground/60"}`}>{s}</span>
-                    ))}
-                  </div>
-                  {pct != null && (
-                    <div className="mt-3 flex items-center gap-3">
-                      <div className="h-2 flex-1" style={{ border: RULE_SOFT }}><div className="h-full bg-foreground" style={{ width: `${pct}%` }} /></div>
-                      <span className="font-heading text-sm font-semibold tabular-nums w-12 text-right">{pct}%</span>
-                    </div>
-                  )}
-                  {u.Summary && <p className="text-sm text-muted-foreground mt-3 leading-relaxed">{u.Summary}</p>}
-                  <div className="text-xs text-muted-foreground mt-2">By {u.CreatedByName || "—"}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm(emptyForm()); } }}>
-          <DialogContent className="max-w-md rounded-none p-5 gap-4" style={{ border: RULE }}>
-            <DialogHeader><DialogTitle className="font-heading">Log construction update</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className={`block ${LBL}`}>Project *</label>
-                <select value={form.ProjectId} onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value }))} className={INP}>
-                  <option value="">Select project</option>
-                  {(projects as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+            <div className="px-5 py-3 flex flex-wrap items-center justify-between gap-3" style={{ borderBottom: RULE_SOFT }}>
+              <div><span className="label">{selected ? "Project" : "All projects"}</span><span className="ml-3 text-xs text-muted-foreground">{projects.length} project{projects.length === 1 ? "" : "s"}</span></div>
+              <div className="relative w-full sm:w-72">
+                <select aria-label="Select project" value={selected?.projectId ?? ""} onChange={(event) => { setSelectedId(event.target.value); setSelectedBlockId(""); setSelectedUnitId(""); }} className="h-9 w-full appearance-none border border-foreground/25 bg-background px-3 pr-9 text-sm outline-none focus:border-primary">
+                  <option value="">Select a project</option>
+                  {projects.map((project) => <option key={project.projectId} value={project.projectId}>{project.projectName}</option>)}
                 </select>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className={`block ${LBL}`}>Date</label>
-                  <DateInput value={form.UpdateDate} max={localDay()} onChange={(e) => setForm((f) => ({ ...f, UpdateDate: e.target.value }))} className={INP} />
-                </div>
-                <div className="space-y-1">
-                  <label className={`block ${LBL}`}>Stage</label>
-                  <select value={form.Stage} onChange={(e) => setForm((f) => ({ ...f, Stage: e.target.value }))} className={INP}>
-                    {STAGES.map((s) => <option key={s}>{s}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className={`block ${LBL}`}>% complete</label>
-                  <input type="number" min={0} max={100} value={form.PercentComplete} onChange={(e) => setForm((f) => ({ ...f, PercentComplete: e.target.value }))} className={`${INP} tabular-nums`} />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className={`block ${LBL}`}>Summary</label>
-                <textarea value={form.Summary} onChange={(e) => setForm((f) => ({ ...f, Summary: e.target.value }))} rows={3} className={TEXTAREA} />
+                <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               </div>
             </div>
-            <DialogFooter className="gap-2">
-              <button onClick={() => { setDialogOpen(false); setForm(emptyForm()); }} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-              <button onClick={handleCreate} disabled={saving} className={`${KEY_INK} h-9 px-4`}>{saving ? "Logging…" : "Log update"}</button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            {selected && <div className="px-5 py-4 flex flex-wrap items-end justify-between gap-4">
+              <div><div className="label">{focusType} progress</div><div className="mt-1 font-heading text-xl font-semibold text-foreground">{focusName}</div><div className="mt-1 text-xs text-muted-foreground">Automatically updated from site progress</div></div>
+              <div className="text-right"><div className="font-heading text-4xl font-semibold tabular-nums text-foreground">{completion}%</div><div className="label mt-1">{focusType} complete</div></div>
+            </div>}
+          </div>
+
+          {projectsQ.isError ? (
+            <div className="bg-card px-5 py-4 text-sm text-destructive" style={{ border: RULE }}>{(projectsQ.error as Error).message}</div>
+          ) : projectsQ.isLoading ? (
+            <div className="bg-card p-10 text-center text-sm text-muted-foreground" style={{ border: RULE }}>Loading DPR progression…</div>
+          ) : projects.length === 0 ? (
+            <div className="bg-card px-6 py-16 text-center" style={{ border: RULE }}>
+              <HardHat size={22} className="mx-auto text-muted-foreground" />
+              <h2 className="mt-4 text-base font-semibold text-foreground">No DPR progression available</h2>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Project progress will appear here automatically when site updates are recorded.</p>
+            </div>
+          ) : !selected ? (
+            <>
+              <div className="bg-card" style={{ border: RULE }}>
+                <div className="px-5 py-3" style={{ borderBottom: RULE }}><span className="label text-foreground">All projects</span><span className="ml-3 text-xs text-muted-foreground">Portfolio overview</span></div>
+                <div className="statrow four px-4 py-4 sm:px-5">
+                  {[
+                    { label: "Projects", value: projects.length, note: "With construction progress" },
+                    { label: "Construction tasks", value: projects.reduce((n, p) => n + Number(p.steps || 0), 0), note: "Across all projects" },
+                    { label: "Finished", value: projects.reduce((n, p) => n + Number(p.done || 0), 0), note: "Construction tasks complete" },
+                    { label: "Underway", value: projects.reduce((n, p) => n + Number(p.moving || 0), 0), note: "Tasks currently active" },
+                  ].map((metric) => <div key={metric.label}><span className="label">{metric.label}</span><div className="figure mt-2 text-2xl">{metric.value.toLocaleString("en-IN")}</div><div className="mt-1 text-xs text-muted-foreground">{metric.note}</div></div>)}
+                </div>
+              </div>
+
+              <section className="bg-card" style={{ border: RULE }}>
+                <div className="flex items-center gap-3 px-5 py-3" style={{ borderBottom: RULE }}><h2 className="label m-0 text-foreground">Your projects</h2><span className="ml-auto label">Choose a project to see its progress</span></div>
+                <div className="grid gap-0 md:grid-cols-2">
+                  {projects.map((project, index) => <button key={project.projectId} onClick={() => { setSelectedId(String(project.projectId)); setSelectedBlockId(""); setSelectedUnitId(""); }} className={"group min-w-0 p-5 text-left transition-colors hover:bg-primary/5 " + (index % 2 ? "md:border-l" : "") + (index >= 2 ? " border-t" : "")} style={{ borderColor: "hsl(var(--foreground) / 0.15)" }}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0"><div className="truncate text-base font-semibold text-foreground">{project.projectName}</div><div className="mt-1 text-xs text-muted-foreground">{project.allDone ? "All construction tasks finished" : project.now?.length ? "Happening now · " + project.now.slice(0, 2).map((work: any) => work.name + " " + work.pct + "%").join(" · ") : project.next ? "Coming next · " + project.next : "Construction not started"}</div></div>
+                      <div className="shrink-0 text-right"><div className="font-heading text-2xl font-semibold tabular-nums">{pct(project.pct)}%</div><div className="label mt-1">complete</div></div>
+                    </div>
+                    <ProgressBar value={project.pct} className="mt-4" />
+                    <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground"><span>{Number(project.done || 0).toLocaleString("en-IN")} of {Number(project.steps || 0).toLocaleString("en-IN")} tasks finished</span><span className="font-semibold text-primary group-hover:underline">View project →</span></div>
+                  </button>)}
+                </div>
+              </section>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div className="flex flex-wrap items-end gap-3">
+                  <div><label htmlFor="construction-block" className="mb-1 block label">Block</label><select id="construction-block" value={selectedBlockId} onChange={(event) => { setSelectedBlockId(event.target.value); setSelectedUnitId(""); }} className="h-9 min-w-44 border border-foreground/25 bg-background px-3 text-sm">
+                    <option value="">All blocks</option>
+                    {(baseDetailQ.data?.towers ?? []).map((tower: any) => <option key={tower.blockId} value={tower.blockId}>{tower.blockName || `Block ${tower.blockId}`}</option>)}
+                  </select></div>
+                  {selectedBlockId && <div><label htmlFor="construction-unit" className="mb-1 block label">Unit in this block</label><select id="construction-unit" value={selectedUnitId} onChange={(event) => setSelectedUnitId(event.target.value)} className="h-9 min-w-44 max-w-64 border border-foreground/25 bg-background px-3 text-sm">
+                    <option value="">All units</option>
+                    {(baseDetailQ.data?.units ?? []).map((unit: any) => <option key={unit.unitId} value={unit.unitId}>{unit.unitName}</option>)}
+                  </select></div>}
+                </div>
+                <button onClick={() => { setSelectedId(""); setSelectedBlockId(""); setSelectedUnitId(""); }} className={`${KEY_LINE} h-9 px-3 text-xs`}>All projects</button>
+              </div>
+              {detailQ.isError && <div className="bg-card px-5 py-4 text-sm text-destructive" style={{ border: RULE }}>{(detailQ.error as Error).message}</div>}
+              <div className="bg-card" style={{ border: RULE }}>
+                <div className="statrow four px-4 py-4 sm:px-5">
+                  {[
+                    { label: "Construction tasks", value: detail?.steps ?? selected.steps ?? 0, note: "Tasks being tracked" },
+                    { label: "Finished", value: detail?.done ?? selected.done ?? 0, note: "Tasks completed" },
+                    { label: "Underway", value: detail?.moving ?? selected.moving ?? 0, note: "Tasks currently active" },
+                    selectedBlockId || selectedUnitId
+                      ? { label: "Tasks remaining", value: Math.max(0, Number(detail?.steps ?? selected.steps ?? 0) - Number(detail?.done ?? selected.done ?? 0)), note: "Not yet finished" }
+                      : { label: "Behind schedule", value: detail?.late ?? selected.late ?? 0, note: "Past planned finish date" },
+                  ].map((metric) => <div key={metric.label}><span className="label">{metric.label}</span><div className="figure mt-2 text-2xl">{metric.value.toLocaleString("en-IN")}</div><div className="mt-1 text-xs text-muted-foreground">{metric.note}</div></div>)}
+                </div>
+              </div>
+
+              <section className="bg-card" style={{ border: RULE }}>
+                <div className="flex items-center gap-3 px-5 py-3" style={{ borderBottom: RULE }}><h3 className="label m-0 text-foreground">Construction stages</h3><span className="ml-auto label">In build order</span></div>
+                {detailQ.isLoading ? <div className="px-5 py-8 text-sm text-muted-foreground">Loading work stages…</div> : (
+                  <div className="px-5 py-1">
+                    {(detail?.works ?? selected.works ?? []).map((work: any, index: number, list: any[]) => {
+                      const finished = pct(work.pct) >= 100;
+                      const active = !finished && ((detail?.now ?? selected.now ?? []).some((current: any) => current.name === work.name) || Number(work.moving) > 0);
+                      return <div key={work.groupId ?? work.name} className="grid grid-cols-[2rem_minmax(8rem,0.7fr)_minmax(8rem,1fr)_3.5rem] items-center gap-3 py-3" style={{ borderBottom: index < list.length - 1 ? RULE_SOFT : undefined }}>
+                        <span className={`grid h-7 w-7 place-items-center text-xs font-semibold ${finished ? "bg-emerald-50 text-emerald-700" : active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>{finished ? <Check size={14} /> : String(index + 1).padStart(2, "0")}</span>
+                        <div className="min-w-0"><div className="truncate text-sm font-medium">{work.name}</div><div className="mt-0.5 text-[11px] text-muted-foreground">{finished ? "Complete" : active ? "In progress" : "Upcoming"} · {work.done} of {work.steps} tasks</div></div>
+                        <ProgressBar value={work.pct} className="h-1.5" />
+                        <span className="text-right text-xs font-semibold tabular-nums">{pct(work.pct)}%</span>
+                      </div>;
+                    })}
+                    {!(detail?.works ?? selected.works ?? []).length && <p className="py-8 text-center text-sm text-muted-foreground">No work stages have been recorded in DPR.</p>}
+                  </div>
+                )}
+              </section>
+
+              <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+                <section className="bg-card" style={{ border: RULE }}>
+                <div className="flex items-center gap-3 px-5 py-3" style={{ borderBottom: RULE }}><h3 className="label m-0 text-foreground">{selectedUnitId ? "Selected block" : "Progress by block"}</h3></div>
+                  <div>
+                    {(selectedBlockId ? (detail?.towers ?? []).filter((tower: any) => String(tower.blockId) === selectedBlockId) : (detail?.towers ?? selected.towers ?? [])).length ? (selectedBlockId ? (detail?.towers ?? []).filter((tower: any) => String(tower.blockId) === selectedBlockId) : (detail?.towers ?? selected.towers)).map((tower: any) => (
+                      <div key={tower.blockId ?? tower.blockName} className="px-5 py-3" style={{ borderBottom: RULE_SOFT }}>
+                        <div className="mb-2 flex items-center justify-between gap-2"><span className="truncate text-sm font-medium">{tower.blockName || "Unassigned tower"}</span><span className="text-xs font-semibold tabular-nums">{pct(tower.pct)}%</span></div><ProgressBar value={tower.pct} />
+                      </div>
+                    )) : <p className="px-5 py-8 text-center text-sm text-muted-foreground">Tower-level progression is not recorded in DPR.</p>}
+                  </div>
+                </section>
+
+                <section className="bg-card" style={{ border: RULE }}>
+                  <div className="flex items-center gap-3 px-5 py-3" style={{ borderBottom: RULE }}><h3 className="label m-0 text-foreground">Latest site updates</h3></div>
+                  <div>
+                    {detailQ.isLoading ? <p className="px-5 py-8 text-sm text-muted-foreground">Loading recent activity…</p> : detail?.feed?.length ? detail.feed.slice(0, 8).map((event: any, index: number) => (
+                      <div key={`${event.at}-${event.activity}-${index}`} className="flex gap-3 px-5 py-3" style={{ borderBottom: RULE_SOFT }}>
+                        <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${event.completed ? "bg-emerald-600" : "bg-primary"}`} />
+                        <div className="min-w-0 flex-1"><div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><span className="text-sm font-medium">{event.activity}</span><time className="text-xs text-muted-foreground">{ago(event.at)}</time></div><p className="mt-0.5 truncate text-xs text-muted-foreground">{[event.tower && `Tower ${event.tower}`, event.unit, event.room, event.work].filter(Boolean).join(" · ")}</p></div>
+                        <span className="shrink-0 self-center text-xs font-semibold tabular-nums">{event.completed ? "Done" : event.from != null ? `${event.from}% → ${event.to}%` : `${event.to}%`}</span>
+                      </div>
+                    )) : <p className="px-5 py-8 text-center text-sm text-muted-foreground">No recent DPR progression records.</p>}
+                  </div>
+                  {updatedAt && <div className="px-5 py-2.5 text-[11px] text-muted-foreground" style={{ borderTop: RULE_SOFT }}>Latest recorded activity {ago(updatedAt).toLowerCase()}</div>}
+                </section>
+              </div>
+
+                <section className="bg-card" style={{ border: RULE }}>
+                  <div className="flex items-center gap-3 px-5 py-3" style={{ borderBottom: RULE }}><h3 className="label m-0 text-foreground">{selectedBlockId ? `Units in ${selectedBlockName || "this block"}` : "Unit progress"}</h3></div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[620px] text-left text-sm">
+                    <thead><tr><th className="px-5 py-3">Unit</th><th className="px-5 py-3">Progress</th><th className="px-5 py-3">Current work</th><th className="px-5 py-3 text-right">Complete</th></tr></thead>
+                    <tbody>{detail?.units?.length ? detail.units.filter((unit: any) => !selectedUnitId || String(unit.unitId) === selectedUnitId).map((unit: any) => <tr key={unit.unitId}><td className="px-5 py-3 font-medium">{unit.unitName}</td><td className="w-[30%] px-5 py-3"><ProgressBar value={unit.pct} /></td><td className="max-w-[20rem] truncate px-5 py-3 text-xs text-muted-foreground">{unit.now?.length ? unit.now.map((work: any) => `${work.name} ${work.pct}%`).join(" · ") : unit.next ? `Next: ${unit.next}` : "No active work"}</td><td className="px-5 py-3 text-right font-semibold tabular-nums">{pct(unit.pct)}%</td></tr>) : <tr><td colSpan={4} className="px-5 py-9 text-center text-sm text-muted-foreground">Unit-level progression is not recorded in DPR.</td></tr>}</tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          )}
+          <p className="text-right text-[11px] text-muted-foreground">Read-only · Automatically refreshed every 2 minutes</p>
+        </div>
       </SheetShell>
     </>
   );

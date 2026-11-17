@@ -7,7 +7,7 @@ import { generateUUID } from "@/utils/cryptoPolyfill";
 import { projectBelongsToCompany } from "@/lib/projectBelongsTo";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
-import { type WorkOrderMRPrefill } from "@/api/workOrderApi";
+import { type WorkOrderMRPrefill, type BoqMRPrefill } from "@/api/workOrderApi";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ItemPicker } from "../ItemPicker";
@@ -55,7 +55,8 @@ export function useMaterialRequest() {
   const [header, setHeader] = useState<FormHeader>(defaultHeader);
   const [cart, setCart] = useState<CartItem[]>([blankCartItem()]);
   // Set when the form was opened from an approved Work Order (items pre-filled, still fully editable).
-  const [woSource, setWoSource] = useState<{ id: number; docNo: string } | null>(null);
+  // Where a new request was raised from: an approved Work Order or an approved BOQ.
+  const [woSource, setWoSource] = useState<{ kind: "wo" | "boq"; id: number; docNo: string } | null>(null);
   const location = useLocation();
 
   const setH = <K extends keyof FormHeader>(k: K, v: FormHeader[K]) =>
@@ -454,21 +455,24 @@ export function useMaterialRequest() {
     setWoSource(null);
   };
 
-  // Opened from an approved Work Order: /material/material-request with { woPrefill } in the router state.
-  // The form is pre-filled but nothing is saved until the user presses Save, so every field can be changed.
-  useEffect(() => {
-    const woPrefill = (location.state as { woPrefill?: WorkOrderMRPrefill } | null)?.woPrefill;
-    if (!woPrefill) return;
-    setHeader({
-      ...defaultHeader,
-      companyId: String(woPrefill.CompanyId ?? ""),
-      projectId: String(woPrefill.ProjectId ?? ""),
-      reason: woPrefill.Reason,
-      remarks: woPrefill.Remarks,
-    });
+  // Fills the form from an approved Work Order or BOQ (their items, company, project, reason). Nothing is saved
+  // until the user presses Save, so every field can still be changed. `keepHeader` keeps what's already chosen
+  // (doc type, dates, priority) when the source is picked inside the form.
+  const applySourcePrefill = (
+    kind: "wo" | "boq",
+    pf: WorkOrderMRPrefill | BoqMRPrefill,
+    keepHeader = false,
+  ) => {
+    setHeader((prev) => ({
+      ...(keepHeader ? prev : defaultHeader),
+      companyId: String(pf.CompanyId ?? ""),
+      projectId: String(pf.ProjectId ?? ""),
+      reason: pf.Reason,
+      remarks: pf.Remarks,
+    }));
     setCart(
-      woPrefill.items.length > 0
-        ? woPrefill.items.map((it) => ({
+      pf.items.length > 0
+        ? pf.items.map((it) => ({
             _key: generateUUID(),
             ItemId: String(it.ItemId),
             ItemName: it.ItemName ?? undefined,
@@ -480,7 +484,17 @@ export function useMaterialRequest() {
           }))
         : [blankCartItem()],
     );
-    setWoSource({ id: woPrefill.WOId, docNo: woPrefill.WODocNo });
+    setWoSource(kind === "wo"
+      ? { kind, id: (pf as WorkOrderMRPrefill).WOId, docNo: (pf as WorkOrderMRPrefill).WODocNo }
+      : { kind, id: (pf as BoqMRPrefill).BoqId, docNo: (pf as BoqMRPrefill).BoqDocNo });
+  };
+
+  // Opened from an approved Work Order ({ woPrefill }) or BOQ ({ boqPrefill }) in the router state.
+  useEffect(() => {
+    const st = location.state as { woPrefill?: WorkOrderMRPrefill; boqPrefill?: BoqMRPrefill } | null;
+    if (!st?.woPrefill && !st?.boqPrefill) return;
+    if (st.woPrefill) applySourcePrefill("wo", st.woPrefill);
+    else applySourcePrefill("boq", st.boqPrefill!);
     setEditingId(null);
     setViewMode("form");
     // Clear the router state so a refresh doesn't re-apply it.
@@ -569,7 +583,7 @@ export function useMaterialRequest() {
       Reason: header.reason,
       Remarks: header.remarks || null,
       DocTypeId: header.docTypeId || null,
-      ...(editingId == null && woSource ? { SourceWOId: woSource.id } : {}),
+      ...(editingId == null && woSource ? (woSource.kind === "wo" ? { SourceWOId: woSource.id } : { SourceBoqId: woSource.id }) : {}),
       items: cart.map((ci) => ({
         ItemId: ci.ItemId,
         ItemName: ci.ItemName || itemMap[ci.ItemId]?.M_Name || null,
@@ -847,6 +861,7 @@ export function useMaterialRequest() {
     setCart,
     woSource,
     setWoSource,
+    applySourcePrefill,
     location,
     setH,
     ctxFinYears,

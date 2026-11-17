@@ -1236,53 +1236,8 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // that's guaranteed to run whenever that join's answer actually changes.
   bumpCacheVersion("unit-master").catch(() => {});
 
-  // Application-stage slot picks are now only a temporary hold, not a real
-  // allotment (see crmParking.js POST /standalone) — convert each one into a
-  // real CrmParkingAllotment against this Booking now that it exists, the
-  // same way the Unit itself goes from a soft PreferredUnitId + hold into
-  // this real Booking. applyAddParking does the hold-conversion
-  // (guardAndConvertHold), the insert, and the matching payment milestone in
-  // one call — reusing it here keeps this path byte-for-byte identical to a
-  // parking sale added any other way. Never blocks Booking creation if one
-  // slot's conversion fails (e.g. it expired in the seconds between wizard
-  // submit and admin approval) — same partial-failure tolerance as the rest
-  // of this function; the slot just goes back to Available and staff can
-  // re-add it manually from the Booking's own Parking tab.
-  const parkingHolds = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId)).query(`
-    SELECT h.Id, h.EntityId AS ParkingSlotId, h.RateOverride
-    FROM dbo.CrmInventoryHold h
-    WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active'
-  `);
-  for (const hold of parkingHolds.recordset) {
-    try {
-      const slot = await pool.request().input("sid", sql.Int, hold.ParkingSlotId)
-        .query("SELECT ProjectId, BlockId, ParkingType FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
-      if (!slot.recordset.length) continue;
-      const { ProjectId, BlockId, ParkingType } = slot.recordset[0];
-      const rate = await pool.request()
-        .input("pid", sql.Int, ProjectId).input("bid2", sql.Int, BlockId).input("pt", sql.NVarChar(50), ParkingType)
-        .query(`
-          SELECT TOP 1 Id FROM dbo.ParkingMaster
-          WHERE ProjectId = @pid AND ParkingType = @pt AND IsActive = 1 AND (BlockId = @bid2 OR BlockId IS NULL)
-          ORDER BY CASE WHEN BlockId = @bid2 THEN 0 ELSE 1 END
-        `);
-      if (rate.recordset.length) {
-        await applyAddParking(pool, bookingId, {
-          ParkingMasterId: rate.recordset[0].Id, ParkingSlotId: hold.ParkingSlotId, Quantity: 1,
-          RateOverride: hold.RateOverride,
-        }, actorUserId);
-      } else if (hold.RateOverride != null) {
-        // Unrated type — no ParkingMaster row; use the price staff entered in the wizard.
-        await applyAddParking(pool, bookingId, {
-          ParkingType, ParkingSlotId: hold.ParkingSlotId, Quantity: 1,
-          Charge: hold.RateOverride, GstRate: 0,
-        }, actorUserId);
-      }
-      // No rate AND no override: hold can't be converted — log and skip.
-    } catch (parkErr) {
-      console.error("[crm-entity-creation] parking hold conversion failed:", parkErr.message);
-    }
-  }
+  // The application's parking picks (holds) become allotments on this booking.
+  await convertApplicationParkingHolds(pool, bookingId, parseInt(b.ApplicationId), actorUserId);
 
   // ParkingTotal/GrandTotal were computed above with ParkingTotal = 0 since no
   // parking allotment had BookingId set yet — recompute now that the backfill
@@ -1302,6 +1257,61 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   const tokenWarning = await checkTokenVsFirstMilestone(pool, bookingId, bookingAmount);
 
   return { id: bookingId, BookingNo: bookingNo, tokenWarning };
+}
+
+// A parking slot and the Parking Master rate that prices it: the slot's type in its project, the slot's own block first.
+async function slotParkingRate(pool, slotId) {
+  const slot = (await pool.request().input("sid", sql.Int, slotId)
+    .query("SELECT Id, SlotNo, ProjectId, BlockId, ParkingType FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1")).recordset[0];
+  if (!slot) return { slot: null, master: null };
+  const master = (await pool.request()
+    .input("pid", sql.Int, slot.ProjectId).input("bid2", sql.Int, slot.BlockId).input("pt", sql.NVarChar(50), slot.ParkingType)
+    .query(`
+      SELECT TOP 1 Id, Charge, GstRate FROM dbo.ParkingMaster
+      WHERE ProjectId = @pid AND ParkingType = @pt AND IsActive = 1 AND (BlockId = @bid2 OR BlockId IS NULL)
+      ORDER BY CASE WHEN BlockId = @bid2 THEN 0 ELSE 1 END
+    `)).recordset[0] || null;
+  return { slot, master };
+}
+
+// Application-stage slot picks are only a temporary hold, not a real
+// allotment (see crmParking.js POST /standalone) — convert each one into a
+// real CrmParkingAllotment against the Booking, the same way the Unit itself
+// goes from a soft PreferredUnitId + hold into the Booking. applyAddParking
+// does the hold-conversion (guardAndConvertHold), the insert, and the matching
+// payment milestone in one call, so this path is identical to a parking sale
+// added any other way. One slot that can't convert never blocks the others:
+// its hold stays (applyAddParking is atomic), so a later call can convert it —
+// a unit change runs this again once the old booking has let go of its slots.
+async function convertApplicationParkingHolds(pool, bookingId, applicationId, actorUserId) {
+  const parkingHolds = await pool.request().input("aid", sql.Int, applicationId).query(`
+    SELECT h.Id, h.EntityId AS ParkingSlotId, h.RateOverride
+    FROM dbo.CrmInventoryHold h
+    WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active'
+      -- A slot still allotted (a unit change's slot, until the old booking lets go of it) waits for a later call.
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmParkingAllotment pa WHERE pa.ParkingSlotId = h.EntityId AND pa.IsActive = 1)
+  `);
+  for (const hold of parkingHolds.recordset) {
+    try {
+      const { slot, master } = await slotParkingRate(pool, hold.ParkingSlotId);
+      if (!slot) continue;
+      if (master) {
+        await applyAddParking(pool, bookingId, {
+          ParkingMasterId: master.Id, ParkingSlotId: hold.ParkingSlotId, Quantity: 1,
+          RateOverride: hold.RateOverride,
+        }, actorUserId);
+      } else if (hold.RateOverride != null) {
+        // Unrated type — no ParkingMaster row; use the price staff entered in the wizard.
+        await applyAddParking(pool, bookingId, {
+          ParkingType: slot.ParkingType, ParkingSlotId: hold.ParkingSlotId, Quantity: 1,
+          Charge: hold.RateOverride, GstRate: 0,
+        }, actorUserId);
+      }
+      // No rate AND no override: hold can't be converted — log and skip.
+    } catch (parkErr) {
+      console.error("[crm-entity-creation] parking hold conversion failed:", parkErr.message);
+    }
+  }
 }
 
 // The Booking form's own TokenType/TokenValue (-> BookingAmount) and the
@@ -1361,6 +1371,41 @@ async function applicationEditsClosedReason(pool, bookingId) {
 // The rate a booking takes when it moves to another unit (decided 2026-11-12): the rate typed in for the change, else
 // the new unit's own rate, else the booking's rate (a unit with no rate). Used by the preview, the same-project change
 // and the linked move to another project, so all three price alike.
+// What an approver needs to decide a unit change, in one line: the move, the rate (and any discount), each parking
+// slot / extra charge kept, changed or added, and the money. Shown in the Approval Inbox row and in the notification.
+async function unitChangeSummaries(pool, ids) {
+  const out = new Map();
+  const list = [...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!list.length) return out;
+  const rows = (await pool.request().query(`
+    SELECT r.Id, r.RatePerSqFt, r.AddOnsJson, r.ClearedAtRequest, r.AvailableCreditAtRequest,
+           r.TargetEstimateAtRequest, r.SourceProjectId, r.TargetProjectId, sb.UnitNo AS SourceUnit, sb.RatePerSqFt AS SourceRate,
+           tu.UnitName AS TargetUnit, tp.name AS TargetProject
+    FROM dbo.CrmPropertyChangeRequest r JOIN dbo.CrmBooking sb ON sb.Id = r.SourceBookingId
+    LEFT JOIN dbo.UnitMaster tu ON tu.Id = r.TargetUnitId LEFT JOIN dbo.enterprise tp ON tp.id = r.TargetProjectId
+    WHERE r.Id IN (${list.join(",")})`)).recordset;
+  const rs = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  for (const r of rows) {
+    let addOns = [];
+    try { addOns = JSON.parse(r.AddOnsJson || "[]"); } catch { addOns = []; }
+    const named = (xs) => xs.map((a) => `${a.label} ${rs(a.amount)}`).join(", ");
+    const received = Number(r.ClearedAtRequest || 0) + Number(r.AvailableCreditAtRequest || 0);
+    const left = Number(r.TargetEstimateAtRequest || 0) - received;
+    const parts = [
+      `${r.SourceUnit} → ${r.TargetUnit}${Number(r.SourceProjectId) !== Number(r.TargetProjectId) ? ` (${r.TargetProject})` : ""}`,
+      `rate ${rs(r.SourceRate)} → ${rs(r.RatePerSqFt)}/sq ft`,
+      addOns.some((a) => a.change === "kept") ? `keeps ${named(addOns.filter((a) => a.change === "kept"))}` : null,
+      addOns.some((a) => a.change === "dropped") ? `drops ${named(addOns.filter((a) => a.change === "dropped"))}` : null,
+      addOns.some((a) => a.change === "added") ? `adds ${named(addOns.filter((a) => a.change === "added"))}` : null,
+      `new price ${rs(r.TargetEstimateAtRequest)} incl. GST`,
+      `${rs(received)} received moves`,
+      left > 0.009 ? `${rs(left)} left to pay` : left < -0.009 ? `${rs(-left)} stays as credit` : "nothing left to pay",
+    ];
+    out.set(r.Id, parts.filter(Boolean).join(" · "));
+  }
+  return out;
+}
+
 function unitChangeRate({ typedRate = null, unitRate = null, bookingRate = null }) {
   if (typedRate != null && typedRate !== "") {
     const r = Number(typedRate);
@@ -1711,7 +1756,7 @@ async function parkingOutsideUnitBlock(pool, { applicationId = null, bookingId =
 // a request (dbo.CrmPropertyChangeRequest: the new unit, its rate and plan, and for each parking slot and extra charge
 // whether it stays the same or is changed) → approval in Approval Setup ("CRM Unit Change", module crm-unit-change;
 // super admin always) → executeUnitChange: the old booking closes as UnitChanged, a new booking opens on the new unit
-// for the same buyer (confirmed by this approval), the add-ons kept move to it, and every rupee received moves to it in
+// for the same buyer at Review (then the normal booking approvals), the add-ons kept move to it, and every rupee received moves to it in
 // full with no charge. Between companies the money goes through a Fund Transfer that Finance approves (MovingMoney).
 // Every step can run again: a request whose approval stopped part-way (Failed) is retried and picks up where it was.
 
@@ -1840,8 +1885,9 @@ async function executeUnitChange(pool, requestId, { actorUserId = null, userEmai
       if (await isLegalWorkStarted(pool, r.SourceBookingId)) throw unitChangeError(409, "The Agreement for Sale is signed and names this unit: cancel the agreement first.");
     }
 
-    // 1. The new booking, for the same buyer, confirmed by this approval (no separate booking approval, and no
-    //    booking-amount receipt: the buyer's money comes across from the old booking).
+    // 1. Create the new booking for the same buyer at Review. The unit-change approval only authorizes the move;
+    //    the new sale still needs its own checklist, Marketing Head and Director approvals. There is no new
+    //    booking-amount receipt: the buyer's money comes across from the old booking.
     if (!r.TargetBookingId) {
       if (r.TargetApplicationStatus === CrmStatus.DRAFT) {
         await require("./approvalService").transition("crm-applications", r.TargetApplicationId, CrmStatus.PENDING, userEmail, userRole);
@@ -1853,11 +1899,13 @@ async function executeUnitChange(pool, requestId, { actorUserId = null, userEmai
       }, actorUserId);
       await pool.request().input("rid", sql.Int, requestId).input("bid", sql.Int, bk.id).input("u", sql.Int, actorUserId)
         .query(`UPDATE dbo.CrmPropertyChangeRequest SET TargetBookingId = @bid, UpdatedBy = @u, UpdatedAt = SYSDATETIME() WHERE Id = @rid;
-                UPDATE dbo.CrmBooking SET Status = '${CrmStatus.APPROVED}', WorkflowStage = 'Confirmed',
-                  ConfirmedAt = ISNULL(ConfirmedAt, SYSDATETIME()), ConfirmedBy = ISNULL(ConfirmedBy, @u), UpdatedAt = SYSDATETIME()
+                UPDATE dbo.CrmBooking SET Status = '${CrmStatus.PENDING}', WorkflowStage = 'Review', ReadyForApprovalAt = NULL,
+                  MarketingHeadApprovedAt = NULL, MarketingHeadApprovedBy = NULL, DirectorApprovedAt = NULL, DirectorApprovedBy = NULL,
+                  ConfirmedAt = NULL, ConfirmedBy = NULL, UpdatedAt = SYSDATETIME()
                 WHERE Id = @bid`);
       const stage = require("./crmBookingStageService");
-      await stage.logStageAction(pool, bk.id, stage.STAGE_CONFIRMED, "Confirmed", `Confirmed by unit change ${r.RequestNo}`, actorUserId);
+      await stage.logStageAction(pool, bk.id, stage.STAGE_REVIEW, "CreatedFromUnitChange",
+        `Created by approved unit change ${r.RequestNo}. Complete the booking review and normal approval stages.`, actorUserId);
       try { await require("./crmPortalProvision").ensurePortalUser(pool, r.TargetApplicationId); } catch (e) { console.error("[unit-change] portal:", e.message); }
       r = await load();
     }
@@ -1918,35 +1966,11 @@ async function executeUnitChange(pool, requestId, { actorUserId = null, userEmai
       await require("./crmGstNotes").creditForUnitChange(pool, { bookingId: r.SourceBookingId, requestNo: r.RequestNo, newBookingNo: tb?.BookingNo || String(r.TargetBookingId), userEmail });
     }
 
-    // 3. Parking and extra charges the request keeps: allotted again on the new booking, at the same price.
-    const addOns = (() => { try { return JSON.parse(r.AddOnsJson || "[]"); } catch { return []; } })();
-    for (const a of addOns) {
-      if (!a.keep || a.done) continue;
-      if (a.kind === "Parking") {
-        const p = (await pool.request().input("id", sql.Int, a.id).query(
-          "SELECT ParkingMasterId, ParkingSlotId, Quantity, RateSnapshot, Notes FROM dbo.CrmParkingAllotment WHERE Id = @id")).recordset[0];
-        if (p) await require("../routes/crmParking").applyAddParking(pool, r.TargetBookingId, {
-          ParkingMasterId: p.ParkingMasterId, ParkingSlotId: p.ParkingSlotId, Quantity: p.Quantity, RateOverride: p.RateSnapshot,
-          Notes: [p.Notes, `Kept from booking ${r.SourceBookingNo} (${r.RequestNo})`].filter(Boolean).join(" · "),
-        }, actorUserId);
-      } else if (a.kind === "ExtraCharge") {
-        const c = (await pool.request().input("id", sql.Int, a.id).query(
-          "SELECT ExtraChargeMasterId, Description, Amount FROM dbo.CrmExtraCharge WHERE Id = @id")).recordset[0];
-        if (c) {
-          const tx = pool.transaction();
-          await tx.begin();
-          try {
-            await require("../routes/crmExtraCharges").applyAddExtraCharge(tx, r.TargetBookingId, {
-              ExtraChargeMasterId: c.ExtraChargeMasterId, Description: c.Description, Amount: c.Amount,
-            }, actorUserId);
-            await tx.commit();
-          } catch (e) { try { await tx.rollback(); } catch { /* already rolled back */ } throw e; }
-        }
-      }
-      a.done = true;
-      await pool.request().input("rid", sql.Int, requestId).input("j", sql.NVarChar(sql.MAX), JSON.stringify(addOns))
-        .query("UPDATE dbo.CrmPropertyChangeRequest SET AddOnsJson = @j, UpdatedAt = SYSDATETIME() WHERE Id = @rid");
-    }
+    // 3. Parking the buyer kept from the old booking: its holds on the new application could not become allotments
+    //    while the old booking still had the slots (step 1); step 2 let go of them, so they convert now. Extra charges
+    //    and new parking picked on the application came across with the booking itself (createCrmBookingRecord).
+    await convertApplicationParkingHolds(pool, r.TargetBookingId, r.TargetApplicationId, actorUserId);
+    await rollupBookingTotals(pool, r.TargetBookingId);
 
     // 4. The money: every rupee to the new booking.
     await pool.request().input("rid", sql.Int, requestId)
@@ -1965,19 +1989,27 @@ async function executeUnitChange(pool, requestId, { actorUserId = null, userEmai
 // The tables that describe the buyer of a booking (not the unit): copied to the new booking of a Unit Change. Each is
 // copied once (skipped when the new booking already has rows of it), every column as it is, with the new booking's ids.
 const BUYER_TABLES = ["CrmCoApplicant", "CrmBookingDocument", "CrmCustomerBankDetail", "CrmLoanDetail", "CrmWelcomeCallBankPreference"];
-async function copyBuyerDetails(pool, { fromBookingId, toBookingId, toApplicationId }) {
+// The buyer's details travel in two steps. When the unit change starts (toBookingId null), the details an application
+// holds (co-applicants, KYC documents, bank details: tables with an ApplicationId) are copied onto the new application,
+// where the application wizard shows them to check or change, and the new booking takes them over like any
+// application's. On approval (toBookingId set), the details only a booking holds (home loan, bank preferences) are
+// copied to the new booking, and the sales lead follows. Each table is copied once: not where the target has rows.
+async function copyBuyerDetails(pool, { fromBookingId, toBookingId = null, toApplicationId }) {
+  const toApp = toBookingId == null;
   for (const table of BUYER_TABLES) {
     const cols = (await pool.request().input("t", sql.NVarChar(128), table).query(`
       SELECT c.name FROM sys.columns c WHERE c.object_id = OBJECT_ID('dbo.' + @t) AND c.is_identity = 0 AND c.is_computed = 0
       ORDER BY c.column_id`)).recordset.map((c) => c.name);
     if (!cols.includes("BookingId")) continue;
-    const pick = (c) => (c === "BookingId" ? "@to" : c === "ApplicationId" ? "@app" : `[${c}]`);
+    if (cols.includes("ApplicationId") !== toApp) continue;
+    const pick = (c) => (c === "BookingId" ? (toApp ? "NULL" : "@to") : c === "ApplicationId" ? "@app" : `[${c}]`);
     const live = cols.includes("IsActive") ? " AND ISNULL(IsActive, 1) = 1" : "";
     await pool.request().input("from", sql.Int, fromBookingId).input("to", sql.Int, toBookingId).input("app", sql.Int, toApplicationId).query(`
-      IF NOT EXISTS (SELECT 1 FROM dbo.[${table}] WHERE BookingId = @to)
+      IF NOT EXISTS (SELECT 1 FROM dbo.[${table}] WHERE ${toApp ? "ApplicationId = @app" : "BookingId = @to"})
         INSERT INTO dbo.[${table}] (${cols.map((c) => `[${c}]`).join(", ")})
         SELECT ${cols.map(pick).join(", ")} FROM dbo.[${table}] WHERE BookingId = @from${live}`);
   }
+  if (toApp) return;
   await pool.request().input("from", sql.Int, fromBookingId).input("to", sql.Int, toBookingId).input("app", sql.Int, toApplicationId)
     .query("UPDATE dbo.SaLead SET CrmBookingId = @to, CrmApplicationId = @app WHERE CrmBookingId = @from");
 }
@@ -2063,7 +2095,7 @@ async function forwardIfUnitChanged(pool, bookingId, onAccountId, actorUserId, a
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  changeBookingUnit, unitChangeRate, openMilestoneInvoiceNos, openUnitChangeOn, executeUnitChange, moveUnitChangeCredit, forwardIfUnitChanged, bounceAfterUnitChange, copyBuyerDetails, applicationEditsClosedReason, parkingOutsideUnitBlock, assertNoBookingForApplicationLocked,
+  changeBookingUnit, unitChangeRate, unitChangeSummaries, slotParkingRate, openMilestoneInvoiceNos, openUnitChangeOn, executeUnitChange, moveUnitChangeCredit, forwardIfUnitChanged, bounceAfterUnitChange, copyBuyerDetails, applicationEditsClosedReason, parkingOutsideUnitBlock, assertNoBookingForApplicationLocked,
   generateMilestonesForBooking, planSchedule, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

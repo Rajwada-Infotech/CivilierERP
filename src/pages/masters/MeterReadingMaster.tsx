@@ -4,6 +4,10 @@ import { toast } from "sonner";
 import { Gauge, Search, Plus, Pencil, Loader2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaintenanceShell } from "@/components/maintenance/MaintenanceShell";
+import { ICON_ACT, ICON_ACT_RED, TD, TH } from "@/components/maintenance/maintParts";
+import { HR_FIELD, HR_HEAD, HR_LBL } from "@/components/hrpayroll/HrUi";
+import { SheetMark, type MarkTone } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE, KEY_RED_SOLID } from "@/components/sheet/sheetParts";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getMaintenanceDirectory } from "@/api/maintenanceApi";
@@ -19,15 +23,16 @@ import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const PAGE_KEY = "meter-reading-master";
 const STATUS_OPTIONS = ["Active", "Inactive", "Transferred", "Disconnected"] as const;
-const inputCls = "px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
-const fieldCls = "w-full px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground";
+const inputCls = `${HR_FIELD} w-auto`;
+const labelCls = `block mb-1.5 ${HR_LBL}`;
+const fieldCls = HR_FIELD;
 
-const STATUS_STYLE: Record<string, string> = {
-  Active: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
-  Inactive: "bg-muted border-border text-muted-foreground",
-  Transferred: "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
-  Disconnected: "bg-red-500/10 border-red-500/20 text-red-600",
+// Meter status as sheet marks: solid = active, hatched = transferred, red = disconnected, empty = inactive.
+const STATUS_TONE: Record<string, MarkTone> = {
+  Active: "done",
+  Inactive: "draft",
+  Transferred: "waiting",
+  Disconnected: "stopped",
 };
 
 export default function MeterReadingMaster() {
@@ -52,7 +57,7 @@ export default function MeterReadingMaster() {
         icon={Gauge}
         action={
           rights.canCreate && (
-            <button onClick={() => { setEditing(null); setFormOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white">
+            <button onClick={() => { setEditing(null); setFormOpen(true); }} className={`${KEY_INK} h-9 px-4`}>
               <Plus size={13} /> Add Meter
             </button>
           )
@@ -64,45 +69,45 @@ export default function MeterReadingMaster() {
         </div>
 
         {isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-        {error && <div className="text-sm text-red-500">Failed to load meters.</div>}
+        {error && <div className="text-sm text-destructive">Failed to load meters.</div>}
 
         {!isLoading && !error && rows.length === 0 && (
-          <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+          <div className="bg-card border border-dashed border-foreground/40 py-10 text-center text-sm text-muted-foreground">
             No meters registered yet.
           </div>
         )}
 
         {rows.length > 0 && (
-          <div className="rounded-xl border border-border overflow-x-auto">
+          <div className="bg-card border border-foreground overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-2.5">Customer</th>
-                  <th className="text-left px-4 py-2.5">Flat</th>
-                  <th className="text-left px-4 py-2.5">Meter Box</th>
-                  <th className="text-left px-4 py-2.5">Meter No.</th>
-                  <th className="text-left px-4 py-2.5">Provider</th>
-                  <th className="text-left px-4 py-2.5">Billing Cycle</th>
-                  <th className="text-left px-4 py-2.5">Status</th>
-                  <th className="text-right px-4 py-2.5">Actions</th>
+                  <th className={TH}>Customer</th>
+                  <th className={TH}>Flat</th>
+                  <th className={TH}>Meter Box</th>
+                  <th className={TH}>Meter No.</th>
+                  <th className={TH}>Provider</th>
+                  <th className={TH}>Billing Cycle</th>
+                  <th className={TH}>Status</th>
+                  <th className={`${TH} text-right`}>Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {rows.map((m) => (
-                  <tr key={m.Id} className="hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-medium text-foreground">{m.CustomerName}</td>
-                    <td className="px-4 py-2.5">{[m.BlockName, m.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{m.MeterBoxNumber || "—"}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{m.MeterNumber}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{m.ProviderName}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{m.BillingCycle}</td>
-                    <td className="px-4 py-2.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${STATUS_STYLE[m.Status] || ""}`}>{m.Status}</span>
+                  <tr key={m.Id} className="hover:bg-primary/5">
+                    <td className={`${TD} font-medium text-foreground`}>{m.CustomerName}</td>
+                    <td className={TD}>{[m.BlockName, m.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
+                    <td className={`${TD} font-heading tabular-nums text-xs`}>{m.MeterBoxNumber || "—"}</td>
+                    <td className={`${TD} font-heading tabular-nums text-xs`}>{m.MeterNumber}</td>
+                    <td className={`${TD} text-muted-foreground`}>{m.ProviderName}</td>
+                    <td className={`${TD} text-muted-foreground`}>{m.BillingCycle}</td>
+                    <td className={TD}>
+                      <SheetMark text={m.Status} tone={STATUS_TONE[m.Status] ?? "draft"} />
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className={TD}>
                       <div className="flex items-center justify-end gap-1">
                         {rights.canEdit && (
-                          <button onClick={() => { setEditing(m); setFormOpen(true); }} title="Edit" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                          <button onClick={() => { setEditing(m); setFormOpen(true); }} title="Edit" className={ICON_ACT}>
                             <Pencil size={14} />
                           </button>
                         )}
@@ -177,8 +182,8 @@ function MeterFormDialog({ meter, onClose, onSaved }: { meter: MeterRow | null; 
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-heading text-base">{isEdit ? "Edit Meter" : "Add Meter"}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-lg max-h-[88vh] overflow-y-auto" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>{isEdit ? "Edit Meter" : "Add Meter"}</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           {!isEdit ? (
             <div>
@@ -198,7 +203,7 @@ function MeterFormDialog({ meter, onClose, onSaved }: { meter: MeterRow | null; 
             </div>
           )}
           {!isEdit && selectedBooking && "ProjectName" in selectedBooking && (
-            <div className="grid grid-cols-3 gap-3 text-xs rounded-lg bg-muted/30 p-2.5">
+            <div className="grid grid-cols-3 gap-3 text-xs border border-foreground/20 bg-foreground/5 p-2.5">
               <div><p className="text-muted-foreground">Project</p><p className="font-medium text-foreground">{(selectedBooking as any).ProjectName || "—"}</p></div>
               <div><p className="text-muted-foreground">Tower</p><p className="font-medium text-foreground">{(selectedBooking as any).BlockName || "—"}</p></div>
               <div><p className="text-muted-foreground">Flat</p><p className="font-medium text-foreground">{(selectedBooking as any).UnitNo || "—"}</p></div>
@@ -249,12 +254,12 @@ function MeterFormDialog({ meter, onClose, onSaved }: { meter: MeterRow | null; 
 
           <div>
             <label className={labelCls}>Remarks</label>
-            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" />
+            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className={`${HR_FIELD} h-auto py-2 resize-none`} />
           </div>
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : null} Save
             </button>
           </div>

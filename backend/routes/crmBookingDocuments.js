@@ -215,6 +215,8 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
       const pool = getPool();
       const applicationId = parseId(req.params.applicationId);
       if (applicationId === null) return res.status(400).json({ error: "Invalid applicationId" });
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, applicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
@@ -329,8 +331,12 @@ router.put("/:id/verify", requirePageRight("crm-welcome-calls", "edit"), async (
     if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const docRow = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId FROM dbo.CrmBookingDocument WHERE Id = @id");
+      .query("SELECT BookingId, ApplicationId FROM dbo.CrmBookingDocument WHERE Id = @id");
     if (!docRow.recordset.length) return res.status(404).json({ error: "Document not found" });
+    if (!docRow.recordset[0].BookingId && docRow.recordset[0].ApplicationId) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, docRow.recordset[0].ApplicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
+    }
     if (docRow.recordset[0].BookingId) {
       const activeErr = await requireApprovedBooking(pool, docRow.recordset[0].BookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
@@ -361,8 +367,12 @@ router.delete("/:id", requireAnyPageRight(["crm-applications", "crm-welcome-call
     if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const docRow = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId FROM dbo.CrmBookingDocument WHERE Id = @id");
+      .query("SELECT BookingId, ApplicationId FROM dbo.CrmBookingDocument WHERE Id = @id");
     if (!docRow.recordset.length) return res.status(404).json({ error: "Document not found" });
+    if (!docRow.recordset[0].BookingId && docRow.recordset[0].ApplicationId) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, docRow.recordset[0].ApplicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
+    }
     if (docRow.recordset[0].BookingId) {
       const activeErr = await requireApprovedBooking(pool, docRow.recordset[0].BookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });

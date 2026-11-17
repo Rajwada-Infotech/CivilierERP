@@ -23,9 +23,12 @@ import {
   CalendarClock,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
+import { MaintenanceShell } from "@/components/maintenance/MaintenanceShell";
+import { ICON_ACT, ICON_ACT_RED, SheetBox, SheetTabs, TD, TH } from "@/components/maintenance/maintParts";
+import { HrStatStrip, HR_FIELD, HR_HEAD, HR_LBL } from "@/components/hrpayroll/HrUi";
+import { SheetMark, type MarkTone } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE, KEY_RED, KEY_RED_SOLID } from "@/components/sheet/sheetParts";
 import { usePageRights } from "@/hooks/usePageRights";
-import { GlassCard, GlassSection } from "@/components/dashboard/GlassShell";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   getSecurityAttendanceDashboard,
@@ -88,32 +91,21 @@ const fmtDate = (d: string | null | undefined) => {
   return `${day}/${m}/${y}`;
 };
 
-const STATUS_STYLE: Record<AttendanceStatus, string> = {
-  Present: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
-  Late: "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
-  Absent: "bg-red-500/10 border-red-500/20 text-red-600",
-  HalfDay: "bg-sky-500/10 border-sky-500/20 text-sky-600",
-};
+// Status as sheet marks: solid = settled, half = partly, hatched = waiting, red = absent / rejected.
+const STATUS_TONE: Record<AttendanceStatus, MarkTone> = { Present: "done", Late: "waiting", Absent: "stopped", HalfDay: "moving" };
 
 function StatusBadge({ status }: { status: AttendanceStatus }) {
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${STATUS_STYLE[status] || "bg-muted border-border text-muted-foreground"}`}>
-      {status}
-    </span>
-  );
+  return <SheetMark text={status === "HalfDay" ? "Half Day" : status} tone={STATUS_TONE[status] ?? "draft"} />;
 }
 
 function VerificationBadge({ status }: { status: string }) {
-  const style =
-    status === "Verified" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" :
-    status === "Rejected" ? "bg-red-500/10 border-red-500/20 text-red-600" :
-    "bg-[#ffe2021a] border-amber-500/20 text-amber-600";
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${style}`}>{status}</span>;
+  const tone: MarkTone = status === "Verified" ? "done" : status === "Rejected" ? "stopped" : "waiting";
+  return <SheetMark text={status} tone={tone} />;
 }
 
-const inputCls = "px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
-const fieldCls = "w-full px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground";
+const inputCls = `${HR_FIELD} w-auto`;
+const labelCls = `block mb-1.5 ${HR_LBL}`;
+const fieldCls = HR_FIELD;
 
 export default function SecurityAttendance() {
   const rights = usePageRights(PAGE_KEY);
@@ -125,22 +117,8 @@ export default function SecurityAttendance() {
       <MaintenanceShell
         title="Security Attendance"
         subtitle="Check-in/out, verification and audit trail for security personnel"
-        icon={ShieldCheck}
       >
-        <div className="flex flex-wrap gap-1.5 border-b border-border pb-2">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-all ${
-                tab === t ? "text-white" : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              }`}
-              style={tab === t ? { background: ACCENT } : undefined}
-            >
-              {TAB_LABEL[t]}
-            </button>
-          ))}
-        </div>
+        <SheetTabs<Tab> tabs={TABS.map((t) => ({ value: t, label: TAB_LABEL[t] }))} value={tab} onChange={setTab} />
 
         {tab === "overview" && <OverviewTab />}
         {tab === "checkinout" && <CheckInOutTab rights={rights} />}
@@ -168,20 +146,26 @@ function OverviewTab() {
 
   return (
     <div className="space-y-4 pt-1">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className={`flex items-center gap-2 ${HR_LBL}`}>
         <CalendarClock size={13} />
-        {now.toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
-        {" · "}
-        {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+        <span className="font-heading tabular-nums">
+          {now.toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}
+          {" · "}
+          {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+        </span>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <GlassCard label="Total Security Personnel" value={isLoading ? "…" : data?.totalPersonnel ?? 0} icon={Users} accentColor={ACCENT} />
-        <GlassCard label="Present Today" value={isLoading ? "…" : data?.presentToday ?? 0} icon={UserCheck} accentColor="#22c55e" />
-        <GlassCard label="Absent Today" value={isLoading ? "…" : data?.absentToday ?? 0} icon={UserX} accentColor="#ef4444" />
-        <GlassCard label="Late Today" value={isLoading ? "…" : data?.lateToday ?? 0} icon={Clock} accentColor="#f59e0b" />
-        <GlassCard label="Currently On Duty" value={isLoading ? "…" : data?.currentlyOnDuty ?? 0} icon={Timer} accentColor="#0ea5e9" />
-        <GlassCard label="Total Attendance Records" value={isLoading ? "…" : data?.totalAttendanceRecords ?? 0} icon={ClipboardList} accentColor="#8b5cf6" />
+      <div className="space-y-px">
+        <HrStatStrip items={[
+          { label: "Total Security Personnel", value: isLoading ? "…" : data?.totalPersonnel ?? 0 },
+          { label: "Present Today", value: isLoading ? "…" : data?.presentToday ?? 0 },
+          { label: "Absent Today", value: isLoading ? "…" : data?.absentToday ?? 0, tone: (data?.absentToday ?? 0) > 0 ? "hsl(var(--destructive))" : undefined },
+        ]} />
+        <HrStatStrip items={[
+          { label: "Late Today", value: isLoading ? "…" : data?.lateToday ?? 0, tone: (data?.lateToday ?? 0) > 0 ? "hsl(var(--destructive))" : undefined },
+          { label: "Currently On Duty", value: isLoading ? "…" : data?.currentlyOnDuty ?? 0 },
+          { label: "Total Attendance Records", value: isLoading ? "…" : data?.totalAttendanceRecords ?? 0 },
+        ]} />
       </div>
     </div>
   );
@@ -219,36 +203,37 @@ function CheckInOutTab({ rights }: { rights: ReturnType<typeof usePageRights> })
 
   return (
     <div className="space-y-5 pt-1">
-      <GlassSection title={`Not Yet Checked In — ${fmtDate(date)}`} icon={LogIn} accentColor={ACCENT}>
+      <section>
+        <h3 className={`${HR_HEAD} mb-2`}>Not Yet Checked In — <span className="font-heading tabular-nums">{fmtDate(date)}</span></h3>
         {personnelLoading ? (
-          <div className="text-sm text-muted-foreground">Loading…</div>
+          <div className="skel" style={{ height: 120 }} />
         ) : notYetAttended.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+          <div className="bg-card border border-dashed border-foreground/40 py-6 text-center text-sm text-muted-foreground">
             Everyone active has an attendance record for today.
           </div>
         ) : (
-          <div className="rounded-xl border border-border overflow-x-auto">
+          <div className="bg-card border border-foreground overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-2.5">Security ID</th>
-                  <th className="text-left px-4 py-2.5">Name</th>
-                  <th className="text-left px-4 py-2.5">Default Shift</th>
-                  <th className="text-right px-4 py-2.5">Actions</th>
+                  <th className={TH}>Security ID</th>
+                  <th className={TH}>Name</th>
+                  <th className={TH}>Default Shift</th>
+                  <th className={`${TH} text-right`}>Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {notYetAttended.map((p) => (
-                  <tr key={p.Id} className="hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-mono text-xs">{p.SecurityCode}</td>
-                    <td className="px-4 py-2.5 font-medium text-foreground">{p.Name}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{p.DefaultShiftName || "—"}</td>
-                    <td className="px-4 py-2.5">
+                  <tr key={p.Id} className="hover:bg-primary/5">
+                    <td className={`${TD} font-heading tabular-nums text-xs`}>{p.SecurityCode}</td>
+                    <td className={`${TD} font-medium text-foreground`}>{p.Name}</td>
+                    <td className={`${TD} text-muted-foreground`}>{p.DefaultShiftName || "—"}</td>
+                    <td className={TD}>
                       <div className="flex items-center justify-end gap-2">
                         {rights.canCreate && (
                           <button
                             onClick={() => setCheckInFor(p)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold gradient-maintenance text-white"
+                            className={`${KEY_INK} h-8 px-3`}
                           >
                             <LogIn size={12} /> Check-In
                           </button>
@@ -256,7 +241,7 @@ function CheckInOutTab({ rights }: { rights: ReturnType<typeof usePageRights> })
                         {rights.canEdit && (
                           <button
                             onClick={() => setAbsentFor(p)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-medium border border-border text-muted-foreground hover:text-destructive hover:border-destructive/40"
+                            className={`${KEY_RED} h-8 px-3`}
                           >
                             <UserX size={12} /> Mark Absent
                           </button>
@@ -269,44 +254,45 @@ function CheckInOutTab({ rights }: { rights: ReturnType<typeof usePageRights> })
             </table>
           </div>
         )}
-      </GlassSection>
+      </section>
 
-      <GlassSection title="Today's Attendance" icon={ClipboardList} accentColor={ACCENT}>
+      <section>
+        <h3 className={`${HR_HEAD} mb-2`}>Today's Attendance</h3>
         {rowsLoading ? (
-          <div className="text-sm text-muted-foreground">Loading…</div>
+          <div className="skel" style={{ height: 120 }} />
         ) : rows.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+          <div className="bg-card border border-dashed border-foreground/40 py-6 text-center text-sm text-muted-foreground">
             No attendance recorded yet today.
           </div>
         ) : (
-          <div className="rounded-xl border border-border overflow-x-auto">
+          <div className="bg-card border border-foreground overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-2.5">Security ID</th>
-                  <th className="text-left px-4 py-2.5">Name</th>
-                  <th className="text-left px-4 py-2.5">Shift</th>
-                  <th className="text-left px-4 py-2.5">Check-In</th>
-                  <th className="text-left px-4 py-2.5">Check-Out</th>
-                  <th className="text-left px-4 py-2.5">Status</th>
-                  <th className="text-right px-4 py-2.5">Actions</th>
+                  <th className={TH}>Security ID</th>
+                  <th className={TH}>Name</th>
+                  <th className={TH}>Shift</th>
+                  <th className={TH}>Check-In</th>
+                  <th className={TH}>Check-Out</th>
+                  <th className={TH}>Status</th>
+                  <th className={`${TH} text-right`}>Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {rows.map((r) => (
-                  <tr key={r.Id} className="hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-mono text-xs">{r.SecurityCode}</td>
-                    <td className="px-4 py-2.5 font-medium text-foreground">{r.SecurityName}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{r.ShiftName}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{fmtDateTime(r.CheckIn)}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{fmtDateTime(r.CheckOut)}</td>
-                    <td className="px-4 py-2.5"><StatusBadge status={r.Status} /></td>
-                    <td className="px-4 py-2.5">
+                  <tr key={r.Id} className="hover:bg-primary/5">
+                    <td className={`${TD} font-heading tabular-nums text-xs`}>{r.SecurityCode}</td>
+                    <td className={`${TD} font-medium text-foreground`}>{r.SecurityName}</td>
+                    <td className={`${TD} text-muted-foreground`}>{r.ShiftName}</td>
+                    <td className={`${TD} font-heading tabular-nums text-xs`}>{fmtDateTime(r.CheckIn)}</td>
+                    <td className={`${TD} font-heading tabular-nums text-xs`}>{fmtDateTime(r.CheckOut)}</td>
+                    <td className={TD}><StatusBadge status={r.Status} /></td>
+                    <td className={TD}>
                       <div className="flex items-center justify-end gap-2">
                         {rights.canEdit && r.CheckIn && !r.CheckOut && (
                           <button
                             onClick={() => setCheckOutFor(r)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold border border-border text-foreground hover:bg-muted"
+                            className={`${KEY_LINE} h-8 px-3`}
                           >
                             <LogOut size={12} /> Check-Out
                           </button>
@@ -319,7 +305,7 @@ function CheckInOutTab({ rights }: { rights: ReturnType<typeof usePageRights> })
             </table>
           </div>
         )}
-      </GlassSection>
+      </section>
 
       {checkInFor && (
         <CheckInDialog
@@ -372,8 +358,8 @@ function CheckInDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading text-base">Check-In — {person.Name}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-sm" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Check-In — {person.Name}</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           <p className="text-xs text-muted-foreground">
             Date &amp; time are recorded automatically and can't be edited after submission.
@@ -389,11 +375,11 @@ function CheckInDialog({
           </div>
           <div>
             <label className={labelCls}>Remarks (optional)</label>
-            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" />
+            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className={`${HR_FIELD} h-auto py-2 resize-none`} />
           </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSubmit} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleSubmit} disabled={saving} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : <LogIn size={13} />} Check-In
             </button>
           </div>
@@ -424,19 +410,19 @@ function CheckOutDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading text-base">Check-Out — {row.SecurityName}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-sm" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Check-Out — {row.SecurityName}</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           <p className="text-xs text-muted-foreground">
-            Checked in at <span className="font-mono text-foreground">{fmtDateTime(row.CheckIn)}</span>. Duty hours are computed automatically on submit.
+            Checked in at <span className="font-heading tabular-nums text-foreground">{fmtDateTime(row.CheckIn)}</span>. Duty hours are computed automatically on submit.
           </p>
           <div>
             <label className={labelCls}>Remarks (optional)</label>
-            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" />
+            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className={`${HR_FIELD} h-auto py-2 resize-none`} />
           </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSubmit} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleSubmit} disabled={saving} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : <LogOut size={13} />} Check-Out
             </button>
           </div>
@@ -469,8 +455,8 @@ function MarkAbsentDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading text-base">Mark Absent — {person.Name}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-sm" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Mark Absent — {person.Name}</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           <div>
             <label className={labelCls}>Shift</label>
@@ -481,11 +467,11 @@ function MarkAbsentDialog({
           </div>
           <div>
             <label className={labelCls}>Remarks</label>
-            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} placeholder="Reason for the documented no-show" className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" />
+            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} placeholder="Reason for the documented no-show" className={`${HR_FIELD} h-auto py-2 resize-none`} />
           </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSubmit} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-destructive text-destructive-foreground disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleSubmit} disabled={saving} className={`${KEY_RED_SOLID} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : <UserX size={13} />} Mark Absent
             </button>
           </div>
@@ -517,55 +503,53 @@ function PersonnelTab({ rights }: { rights: ReturnType<typeof usePageRights> }) 
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search code, name, phone…" className={`pl-8 pr-3 w-56 ${inputCls}`} />
         </div>
         {rights.canCreate && (
-          <button onClick={() => { setEditing(null); setFormOpen(true); }} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white">
+          <button onClick={() => { setEditing(null); setFormOpen(true); }} className={`${KEY_INK} h-9 px-4 ml-auto`}>
             <Plus size={13} /> Add Personnel
           </button>
         )}
       </div>
 
       {isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-      {error && <div className="text-sm text-red-500">Failed to load personnel.</div>}
+      {error && <div className="text-sm text-destructive">Failed to load personnel.</div>}
 
       {!isLoading && !error && rows.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border py-10 flex flex-col items-center gap-2 text-center px-6">
+        <div className="bg-card border border-dashed border-foreground/40 py-10 flex flex-col items-center gap-2 text-center px-6">
           <Users size={20} className="text-muted-foreground" />
           <p className="text-sm font-medium text-foreground">No security personnel yet</p>
         </div>
       )}
 
       {rows.length > 0 && (
-        <div className="rounded-xl border border-border overflow-x-auto">
+        <div className="bg-card border border-foreground overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-2.5">Security ID</th>
-                <th className="text-left px-4 py-2.5">Name</th>
-                <th className="text-left px-4 py-2.5">Phone</th>
-                <th className="text-left px-4 py-2.5">Vendor</th>
-                <th className="text-left px-4 py-2.5">Project</th>
-                <th className="text-left px-4 py-2.5">Default Shift</th>
-                <th className="text-left px-4 py-2.5">Status</th>
-                <th className="text-right px-4 py-2.5">Actions</th>
+                <th className={TH}>Security ID</th>
+                <th className={TH}>Name</th>
+                <th className={TH}>Phone</th>
+                <th className={TH}>Vendor</th>
+                <th className={TH}>Project</th>
+                <th className={TH}>Default Shift</th>
+                <th className={TH}>Status</th>
+                <th className={`${TH} text-right`}>Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {rows.map((p) => (
-                <tr key={p.Id} className="hover:bg-muted/20">
-                  <td className="px-4 py-2.5 font-mono text-xs">{p.SecurityCode}</td>
-                  <td className="px-4 py-2.5 font-medium text-foreground">{p.Name}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{p.Phone || "—"}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{p.VendorName || "—"}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{p.ProjectName || "—"}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{p.DefaultShiftName || "—"}</td>
-                  <td className="px-4 py-2.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${p.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>
-                      {p.Status}
-                    </span>
+                <tr key={p.Id} className="hover:bg-primary/5">
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{p.SecurityCode}</td>
+                  <td className={`${TD} font-medium text-foreground`}>{p.Name}</td>
+                  <td className={`${TD} text-muted-foreground`}>{p.Phone || "—"}</td>
+                  <td className={`${TD} text-muted-foreground`}>{p.VendorName || "—"}</td>
+                  <td className={`${TD} text-muted-foreground`}>{p.ProjectName || "—"}</td>
+                  <td className={`${TD} text-muted-foreground`}>{p.DefaultShiftName || "—"}</td>
+                  <td className={TD}>
+                    <SheetMark text={p.Status} tone={p.Status === "Active" ? "done" : "draft"} />
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className={TD}>
                     <div className="flex items-center justify-end gap-1">
                       {rights.canEdit && (
-                        <button onClick={() => { setEditing(p); setFormOpen(true); }} title="Edit" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                        <button onClick={() => { setEditing(p); setFormOpen(true); }} title="Edit" className={ICON_ACT}>
                           <Pencil size={14} />
                         </button>
                       )}
@@ -650,8 +634,8 @@ function PersonnelFormDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle className="font-heading text-base">{isEdit ? "Edit Personnel" : "Add Security Personnel"}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-lg" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>{isEdit ? "Edit Personnel" : "Add Security Personnel"}</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -689,7 +673,7 @@ function PersonnelFormDialog({
               className={fieldCls}
             />
             {vendorResultsOpen && vendorDebounced.length >= 2 && (
-              <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
+              <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto border border-foreground bg-card">
                 {vendorSearching ? (
                   <div className="px-3 py-2.5 text-xs text-muted-foreground">Searching…</div>
                 ) : vendorResults.length === 0 ? (
@@ -701,10 +685,10 @@ function PersonnelFormDialog({
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => { setVendorId(v.id); setVendorQuery(v.name); setVendorResultsOpen(false); }}
-                      className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/40 transition-colors"
+                      className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-primary/5 transition-colors"
                     >
                       <span className="text-xs text-foreground truncate">{v.name}</span>
-                      <span className="shrink-0 text-[0.5625rem] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{v.typeLabel}</span>
+                      <span className="shrink-0 px-1.5 py-0.5 border border-foreground/30 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{v.typeLabel}</span>
                     </button>
                   ))
                 )}
@@ -731,11 +715,11 @@ function PersonnelFormDialog({
           </div>
           <div>
             <label className={labelCls}>Remarks</label>
-            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" />
+            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className={`${HR_FIELD} h-auto py-2 resize-none`} />
           </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : null} Save
             </button>
           </div>
@@ -809,58 +793,58 @@ function HistoryTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       </div>
 
       {isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-      {error && <div className="text-sm text-red-500">Failed to load history.</div>}
+      {error && <div className="text-sm text-destructive">Failed to load history.</div>}
 
       {!isLoading && !error && rows.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+        <div className="bg-card border border-dashed border-foreground/40 py-10 text-center text-sm text-muted-foreground">
           No attendance records match these filters.
         </div>
       )}
 
       {rows.length > 0 && (
-        <div className="rounded-xl border border-border overflow-x-auto">
+        <div className="bg-card border border-foreground overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-2.5">Date</th>
-                <th className="text-left px-4 py-2.5">Security ID</th>
-                <th className="text-left px-4 py-2.5">Name</th>
-                <th className="text-left px-4 py-2.5">Shift</th>
-                <th className="text-left px-4 py-2.5">Check-In</th>
-                <th className="text-left px-4 py-2.5">Check-Out</th>
-                <th className="text-left px-4 py-2.5">Status</th>
-                <th className="text-left px-4 py-2.5">Verification</th>
-                <th className="text-right px-4 py-2.5">Actions</th>
+                <th className={TH}>Date</th>
+                <th className={TH}>Security ID</th>
+                <th className={TH}>Name</th>
+                <th className={TH}>Shift</th>
+                <th className={TH}>Check-In</th>
+                <th className={TH}>Check-Out</th>
+                <th className={TH}>Status</th>
+                <th className={TH}>Verification</th>
+                <th className={`${TH} text-right`}>Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {rows.map((r) => (
-                <tr key={r.Id} className="hover:bg-muted/20">
-                  <td className="px-4 py-2.5">{fmtDate(r.AttendanceDate)}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{r.SecurityCode}</td>
-                  <td className="px-4 py-2.5 font-medium text-foreground">{r.SecurityName}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{r.ShiftName}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{fmtDateTime(r.CheckIn)}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{fmtDateTime(r.CheckOut)}</td>
-                  <td className="px-4 py-2.5"><StatusBadge status={r.Status} /></td>
-                  <td className="px-4 py-2.5"><VerificationBadge status={r.VerificationStatus} /></td>
-                  <td className="px-4 py-2.5">
+                <tr key={r.Id} className="hover:bg-primary/5">
+                  <td className={TD}>{fmtDate(r.AttendanceDate)}</td>
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{r.SecurityCode}</td>
+                  <td className={`${TD} font-medium text-foreground`}>{r.SecurityName}</td>
+                  <td className={`${TD} text-muted-foreground`}>{r.ShiftName}</td>
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{fmtDateTime(r.CheckIn)}</td>
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{fmtDateTime(r.CheckOut)}</td>
+                  <td className={TD}><StatusBadge status={r.Status} /></td>
+                  <td className={TD}><VerificationBadge status={r.VerificationStatus} /></td>
+                  <td className={TD}>
                     <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => setViewingLogsFor(r)} title="View Logs" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                      <button onClick={() => setViewingLogsFor(r)} title="View Logs" className={ICON_ACT}>
                         <HistoryIcon size={14} />
                       </button>
                       {rights.canEdit && r.VerificationStatus === "Pending" && (
                         <>
-                          <button onClick={() => handleVerify(r)} title="Verify" className="p-1.5 rounded-md text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10">
+                          <button onClick={() => handleVerify(r)} title="Verify" className={ICON_ACT}>
                             <CheckCircle2 size={14} />
                           </button>
-                          <button onClick={() => setRejecting(r)} title="Reject" className="p-1.5 rounded-md text-muted-foreground hover:text-red-600 hover:bg-red-500/10">
+                          <button onClick={() => setRejecting(r)} title="Reject" className={ICON_ACT_RED}>
                             <XCircle size={14} />
                           </button>
                         </>
                       )}
                       {rights.canDelete && !r.IsCancelled && (
-                        <button onClick={() => setCancelling(r)} title="Cancel" className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                        <button onClick={() => setCancelling(r)} title="Cancel" className={ICON_ACT_RED}>
                           <Ban size={14} />
                         </button>
                       )}
@@ -932,19 +916,19 @@ function RemarkActionDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading text-base">{title}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-sm" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>{title}</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           <div>
             <label className={labelCls}>Remarks{requireRemarks ? "" : " (optional)"}</label>
-            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" />
+            <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} className={`${HR_FIELD} h-auto py-2 resize-none`} />
           </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Back</button>
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Back</button>
             <button
               onClick={handleSubmit}
               disabled={saving}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white disabled:opacity-60 ${destructive ? "bg-destructive" : "gradient-maintenance"}`}
+              className={`${destructive ? KEY_RED_SOLID : KEY_INK} h-9 px-5 flex-1 sm:flex-none`}
             >
               {saving ? <Loader2 size={13} className="animate-spin" /> : null} {actionLabel}
             </button>
@@ -964,8 +948,8 @@ function AttendanceLogsModal({ row, onClose }: { row: SecurityAttendanceRow; onC
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-heading text-base">Audit Log — {row.SecurityName} ({fmtDate(row.AttendanceDate)})</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-2xl max-h-[80vh] overflow-y-auto" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>Audit Log — {row.SecurityName} ({fmtDate(row.AttendanceDate)})</DialogTitle></DialogHeader>
         {isLoading ? (
           <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>
         ) : logs.length === 0 ? (
@@ -973,7 +957,7 @@ function AttendanceLogsModal({ row, onClose }: { row: SecurityAttendanceRow; onC
         ) : (
           <div className="space-y-2 pt-1">
             {logs.map((l) => (
-              <div key={l.Id} className="rounded-lg border border-border p-3 text-xs space-y-1">
+              <div key={l.Id} className="border border-foreground/20 p-3 text-xs space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="font-heading font-semibold text-foreground">{l.Action}</span>
                   <span className="text-muted-foreground">{new Date(l.PerformedAt).toLocaleString("en-IN")}</span>
@@ -1008,44 +992,42 @@ function ShiftsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
     <div className="space-y-4 pt-1">
       <div className="flex justify-end">
         {rights.canCreate && (
-          <button onClick={() => { setEditing(null); setFormOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white">
+          <button onClick={() => { setEditing(null); setFormOpen(true); }} className={`${KEY_INK} h-9 px-4`}>
             <Plus size={13} /> Add Shift
           </button>
         )}
       </div>
 
       {isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-      {error && <div className="text-sm text-red-500">Failed to load shifts.</div>}
+      {error && <div className="text-sm text-destructive">Failed to load shifts.</div>}
 
       {rows.length > 0 && (
-        <div className="rounded-xl border border-border overflow-x-auto">
+        <div className="bg-card border border-foreground overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-2.5">Name</th>
-                <th className="text-left px-4 py-2.5">Start</th>
-                <th className="text-left px-4 py-2.5">End</th>
-                <th className="text-left px-4 py-2.5">Grace (min)</th>
-                <th className="text-left px-4 py-2.5">Status</th>
-                <th className="text-right px-4 py-2.5">Actions</th>
+                <th className={TH}>Name</th>
+                <th className={TH}>Start</th>
+                <th className={TH}>End</th>
+                <th className={TH}>Grace (min)</th>
+                <th className={TH}>Status</th>
+                <th className={`${TH} text-right`}>Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {rows.map((s) => (
-                <tr key={s.Id} className="hover:bg-muted/20">
-                  <td className="px-4 py-2.5 font-medium text-foreground">{s.Name}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{fmtTimeOfDay(s.StartTime)}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{fmtTimeOfDay(s.EndTime)}</td>
-                  <td className="px-4 py-2.5">{s.GraceMinutes}</td>
-                  <td className="px-4 py-2.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${s.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>
-                      {s.Status}
-                    </span>
+                <tr key={s.Id} className="hover:bg-primary/5">
+                  <td className={`${TD} font-medium text-foreground`}>{s.Name}</td>
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{fmtTimeOfDay(s.StartTime)}</td>
+                  <td className={`${TD} font-heading tabular-nums text-xs`}>{fmtTimeOfDay(s.EndTime)}</td>
+                  <td className={TD}>{s.GraceMinutes}</td>
+                  <td className={TD}>
+                    <SheetMark text={s.Status} tone={s.Status === "Active" ? "done" : "draft"} />
                   </td>
-                  <td className="px-4 py-2.5">
+                  <td className={TD}>
                     <div className="flex items-center justify-end gap-1">
                       {rights.canEdit && (
-                        <button onClick={() => { setEditing(s); setFormOpen(true); }} title="Edit" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                        <button onClick={() => { setEditing(s); setFormOpen(true); }} title="Edit" className={ICON_ACT}>
                           <Pencil size={14} />
                         </button>
                       )}
@@ -1108,8 +1090,8 @@ function ShiftFormDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading text-base">{isEdit ? "Edit Shift" : "Add Shift"}</DialogTitle></DialogHeader>
+      <DialogContent className="sheet-frame rounded-none max-w-sm" style={{ margin: 0 }}>
+        <DialogHeader><DialogTitle className={HR_HEAD}>{isEdit ? "Edit Shift" : "Add Shift"}</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           <div>
             <label className={labelCls}>Name</label>
@@ -1138,9 +1120,9 @@ function ShiftFormDialog({
               </select>
             </div>
           )}
-          <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white disabled:opacity-60">
+          <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}>Cancel</button>
+            <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}>
               {saving ? <Loader2 size={13} className="animate-spin" /> : null} Save
             </button>
           </div>

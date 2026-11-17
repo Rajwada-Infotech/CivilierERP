@@ -261,6 +261,10 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     // String() coercion guards against Express parsing duplicate params as an
     // array (e.g. ?supplier[]=a&supplier[]=b), which would make .trim() throw.
     const search = req.query.supplier ? String(req.query.supplier).trim() : "";
+    // The party filter picks one AccountHeadMaster row, so it filters by that row's id: by name, two heads sharing
+    // a name (a partner who is also an employee, a vendor and an employee) matched each other's payments, and a
+    // payment against a direct invoice was only found through the payment's own party.
+    const supplierId = parseInt(req.query.supplierId, 10) || null;
     const companyId = req.query.company ? String(req.query.company).trim() : "";
     const project = req.query.project ? String(req.query.project).trim() : "";
     const finYear = req.query.finYear ? String(req.query.finYear).trim() : "";
@@ -305,6 +309,10 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster grn2_sup_s ON grn2_sup_s.LHeadId = grn2_s.SupplierID
       LEFT JOIN dbo.AccountHeadMaster party_head_s ON party_head_s.LHeadId = np.PPartyId
     `;
+    // A payment's party: the invoice's PO/GRN supplier, the supplier picked on a direct invoice (eb.LHeadId), or the
+    // party picked on the payment itself.
+    const SUPPLIER_ID_MATCH_SQL = `(np.PPartyId = @supplierId OR eb_s.LHeadId = @supplierId
+      OR grn_sup_s.LHeadId = @supplierId OR po_sup_s.LHeadId = @supplierId OR grn2_sup_s.LHeadId = @supplierId)`;
     const RESOLVED_SUPPLIER_SQL = `
       COALESCE(
         CASE
@@ -319,6 +327,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const conditions = [];
     if (req.projectScope) conditions.push(projectPredicate(req.projectScope, paymentProjectSql("np"), "").trim());
     if (idFilter) conditions.push(`np.PPaymentID = @idFilter`);
+    if (supplierId) conditions.push(SUPPLIER_ID_MATCH_SQL);
     if (search) {
       conditions.push(`(np.PPaymentName LIKE @search
           OR np.DocNo LIKE @search
@@ -355,6 +364,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
 
     const request = pool.request();
     if (idFilter) request.input("idFilter", sql.Int, idFilter);
+    if (supplierId) request.input("supplierId", sql.Int, supplierId);
     if (search) request.input("search", sql.NVarChar(200), `%${search}%`);
     if (companyId) request.input("companyId", sql.NVarChar(50), companyId);
     if (project) request.input("project", sql.NVarChar(200), `%${project}%`);
@@ -389,6 +399,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit);
     if (idFilter) dataRequest.input("idFilter", sql.Int, idFilter);
+    if (supplierId) dataRequest.input("supplierId", sql.Int, supplierId);
     if (search) dataRequest.input("search", sql.NVarChar(200), `%${search}%`);
     if (companyId) dataRequest.input("companyId", sql.NVarChar(50), companyId);
     if (project)

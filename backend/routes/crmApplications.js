@@ -76,6 +76,7 @@ const APP_SELECT = `
     a.AssignedTo, a.AssignedBy, a.Status, a.Notes, a.CurrentStep,
     a.RatePerSqFt, a.DateOfApply, a.PaymentPlanId, a.TokenType, a.TokenValue, a.BookingAmount, a.PaymentMode, a.DepositBankId,
     a.ReferredByApplicationId, a.IsActive, a.CreatedAt, a.UpdatedAt,
+    ucx.RequestNo AS UnitChangeNo, ucx.Status AS UnitChangeStatus,
     a.BrokerId, a.BrokerageRatePercent, a.BrokeragePaymentPlan, brk.LHeadName AS BrokerName,
     (
       SELECT TOP 1 CAST(Note AS NVARCHAR(MAX))
@@ -168,6 +169,10 @@ const APP_SELECT = `
     WHERE ApplicationId = a.Id
     ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL} THEN 0 ELSE 1 END, CreatedAt DESC
   ) bk
+  -- The unit change this application is for (its booking opens when the unit change is approved).
+  OUTER APPLY (
+    SELECT TOP 1 r.RequestNo, r.Status FROM dbo.CrmPropertyChangeRequest r WHERE r.TargetApplicationId = a.Id ORDER BY r.Id DESC
+  ) ucx
 `;
 
 // GET / — all applications. By default, Converted applications (one that
@@ -372,7 +377,13 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
       `),
     ]);
     if (!appRes.recordset[0]) return res.status(404).json({ error: "Application not found" });
-    res.json({ application: appRes.recordset[0], bookings: bookRes.recordset, statusLog: logRes.recordset });
+    // The unit change this application is for, if any: the wizard says so and its Submit sends it for approval.
+    const unitChange = (await pool.request().input("aid", sql.Int, id).query(`
+      SELECT TOP 1 r.Id, r.RequestNo, r.Status, r.Reason, sb.Id AS SourceBookingId, sb.BookingNo AS SourceBookingNo, sb.UnitNo AS SourceUnitNo,
+             sb.GrandTotal AS SourceGrandTotal, r.ClearedAtRequest + r.AvailableCreditAtRequest AS Received
+      FROM dbo.CrmPropertyChangeRequest r JOIN dbo.CrmBooking sb ON sb.Id = r.SourceBookingId
+      WHERE r.TargetApplicationId = @aid ORDER BY r.Id DESC`)).recordset[0] || null;
+    res.json({ application: appRes.recordset[0], bookings: bookRes.recordset, statusLog: logRes.recordset, unitChange });
   } catch (e) {
     console.error("[crm-applications] GET /:id error:", e.message);
     res.status(500).json({ error: e.message });
@@ -488,6 +499,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const beforeChecked = await checklistCols.snapshotColumns(pool, "CrmApplication", "Id", id, checklistCols.APPLICATION_ITEM_COLUMNS);
     const plotsBefore = (await getApplicationPlotIds(pool, id)).sort().join(",");
     if (!existing.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, id);
+    if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
     // A villa built on plots can only be picked by the plot's current owner.
     if (Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0) {
       try {
@@ -841,6 +854,15 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+    // A unit change's application: submitting it sends the unit change for its approval (no booking here; the new
+    // booking opens, confirmed, when the unit change is approved).
+    try {
+      const uc = await require("./crmBookings").submitUnitChangeApplication(getPool(), id, req);
+      if (uc) return res.json({ success: true, unitChange: uc });
+    } catch (e) {
+      if (e.status) return res.status(e.status).json({ error: e.message, blockers: e.blockers });
+      throw e;
+    }
     const current = await getPool().request().input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id");
     const currentStatus = current.recordset[0]?.Status;
@@ -1242,6 +1264,10 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
   try {
     const pool = getPool();
     const actor = actorId(req);
+    // A unit change's application becomes a booking only through the unit change's approval (one booking per sale).
+    const uc = (await pool.request().input("aid", sql.Int, id).query(`
+      SELECT TOP 1 RequestNo FROM dbo.CrmPropertyChangeRequest WHERE TargetApplicationId = @aid AND Status NOT IN ${require("../constants/crmStatuses").PROPERTY_CHANGE_CLOSED_SQL}`)).recordset[0];
+    if (uc) return res.status(409).json({ error: `This application belongs to unit change ${uc.RequestNo}: its booking opens when the unit change is approved.` });
 
     const app = await pool.request().input("id", sql.Int, id).query(`
       SELECT Status, PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply, TokenType, TokenValue,
@@ -1305,6 +1331,8 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const remarks = req.body?.Remarks || null;
+    const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, id);
+    if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
 
     // An Application with an active Booking must be cancelled through the
     // Booking's own cancellation flow (crmCancellations.js: request ->
@@ -1372,6 +1400,8 @@ router.delete("/:id", requirePageRight("crm-applications", "delete"), async (req
     `);
     const app = appRes.recordset[0];
     if (!app) return res.status(404).json({ error: "Application not found" });
+    const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, id);
+    if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
 
     // A booking not yet fully approved is deleted with its application (the
     // booking's own delete, same checks); a fully approved one needs Cancellation.

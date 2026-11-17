@@ -1,6 +1,5 @@
-// Types, the chain-status hook, number helpers, BOQ-style quantity logic, shared styles and status helpers for the Work Order page and its parts.
+// Types, the chain-status hook, number helpers, BOQ-style quantity logic, shared styles for the Work Order page and its parts.
 import React from "react";
-import { FileText, BadgeCheck, Clock, XCircle } from "lucide-react";
 import { type WOItemOption } from "@/api/workOrderApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
@@ -422,28 +421,3 @@ export const FieldLabel: React.FC<{
 export const SelectSkeleton: React.FC = () => (
   <div className="w-full h-10 border border-foreground/30 bg-card animate-pulse" />
 );
-
-// ─── Status helpers ───────────────────────────────────────────────────────────
-
-export const getStatusConfig = (status: string) => {
-  const s = (status || "Draft").toLowerCase();
-  if (s === "approved")
-    return {
-      icon: <BadgeCheck size={12} />,
-      cls: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
-    };
-  if (s === "pending")
-    return {
-      icon: <Clock size={12} />,
-      cls: "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800",
-    };
-  if (s === "rejected")
-    return {
-      icon: <XCircle size={12} />,
-      cls: "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800",
-    };
-  return {
-    icon: <FileText size={12} />,
-    cls: "bg-muted text-muted-foreground border-border",
-  };
-};

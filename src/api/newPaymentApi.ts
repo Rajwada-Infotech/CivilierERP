@@ -66,7 +66,8 @@ export const getPayments = async (
     page: String(page),
     limit: String(limit),
   });
-  if (supplier) params.set("supplier", supplier);
+  // The list's party filter sends the picked party's id (exact, any party type); text still searches by name.
+  if (supplier) params.set(/^\d+$/.test(supplier) ? "supplierId" : "supplier", supplier);
   if (company)  params.set("company",  company);
   if (project)  params.set("project",  project);
   if (finYear)  params.set("finYear",  finYear);

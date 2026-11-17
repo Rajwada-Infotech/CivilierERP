@@ -665,6 +665,9 @@ async function transition(
   userId = null,
   beforeApprove = null,
   onFullyApproved = null,
+  beforeSubmit = null,
+  onRejected = null,
+  beforeLock = null,
 ) {
   const map = MODULE_MAP[module];
   if (!map) throw new Error(`Unknown module: ${module}`);
@@ -706,12 +709,18 @@ async function transition(
   let fullyApproved = false;
   await tx.begin();
   try {
+    // A caller may need a parent/entity lock before this service locks its
+    // approval row (for example, booking lifecycle before Agreement review).
+    if (beforeLock) await beforeLock(tx);
     const currentStatus = await getRecordStatus(module, id, tx, { lock: true });
 
     if (targetStatus === "Pending") {
       if (!["Draft", "Rejected"].includes(currentStatus)) {
         throw new Error(`Cannot submit from status "${currentStatus}"`);
       }
+      // Modules with submission prerequisites can recheck them under the same
+      // row lock that changes Draft/Rejected to Pending.
+      if (beforeSubmit) await beforeSubmit(tx);
       await setRecordStatus(module, id, "Pending", tx);
       await writeAuditLog(
         tableName,
@@ -754,6 +763,7 @@ async function transition(
         tx,
         userId,
       );
+      if (onRejected) await onRejected(tx);
       result = { newStatus: "Rejected", level: rejectedAtLevel > totalLevels ? null : rejectedAtLevel };
     } else if (targetStatus === "Approved") {
       if (currentStatus !== "Pending") {

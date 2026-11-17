@@ -57,6 +57,10 @@ const PortalConstruction: React.FC = () => {
   const qc = useQueryClient();
   const updates = timeline.constructionUpdates || [];
   const latest = updates[0];
+  // The buyer's own unit as the site records it, with its tower and project for context.
+  const mine = timeline.constructionProgress;
+  const live = mine ? (mine.unit || mine.tower || mine.project) : null;
+  const liveLabel = !mine ? "" : mine.unit ? "Your home" : mine.tower ? `Your tower (${mine.tower.blockName})` : "The project";
   const handover = timeline.handover;
   const notice = timeline.possessionNotice;
   const legalDoc = timeline.legalDocumentation;
@@ -99,7 +103,50 @@ const PortalConstruction: React.FC = () => {
     <div className="space-y-6">
       <PageHeader eyebrow="My Property" title="Construction Progress" subtitle="Live updates from the site, shared as they happen." />
 
-      {latest?.PercentComplete != null && (
+      {live && (
+        <Card className="p-5 space-y-4">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-xs" style={{ color: TEXT_FAINT }}>{liveLabel}</p>
+              <p className="text-sm mt-1" style={{ color: TEXT }}>
+                {live.allDone ? "All work complete" : live.now.length ? <>Now: {live.now.slice(0, 2).map((w: any) => `${w.name} ${w.pct}%`).join(" · ")}</> : "Work not started yet"}
+                {!live.allDone && live.next ? <span style={{ color: TEXT_MUTED }}> · Next: {live.next}</span> : null}
+              </p>
+            </div>
+            <span className="text-2xl font-semibold tabular-nums" style={{ ...serif, color: TEXT }}>{live.pct}%</span>
+          </div>
+          <div className="h-2.5 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
+            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, live.pct || 0)}%`, background: GOLD }} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+            {live.works.map((w: any) => (
+              <div key={w.name} className="flex items-center gap-2 text-xs">
+                <span className="w-28 shrink-0 truncate" style={{ color: w.pct > 0 ? TEXT : TEXT_FAINT, fontWeight: w.pct > 0 && w.pct < 100 ? 600 : 400 }}>{w.pct >= 100 ? "✓ " : ""}{w.name}</span>
+                <div className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
+                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, w.pct)}%`, background: GOLD }} />
+                </div>
+                <span className="w-9 text-right tabular-nums" style={{ color: TEXT_MUTED }}>{w.pct}%</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
+            Live from the site's daily progress records.{mine.scope === "unit" && mine.tower ? ` Tower ${mine.tower.blockName}: ${mine.tower.pct}%.` : ""}{mine.scope !== "project" ? ` Whole project: ${mine.project.pct}%.` : ""}
+          </p>
+          {mine.feed?.length > 0 && (
+            <div className="pt-3 space-y-1.5" style={{ borderTop: `1px solid ${HAIRLINE}` }}>
+              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Recent work</p>
+              {mine.feed.slice(0, 6).map((f: any, i: number) => (
+                <div key={i} className="flex items-start justify-between gap-3 text-xs">
+                  <span style={{ color: TEXT }}>{f.activity}{f.room ? <span style={{ color: TEXT_MUTED }}> · {f.room}</span> : null} — {f.completed ? "completed" : f.from != null ? `${f.from}% → ${f.to}%` : `${f.to}%`}</span>
+                  <span className="shrink-0" style={{ color: TEXT_FAINT }}>{fmtDate(f.at)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {!live && latest?.PercentComplete != null && (
         <Card className="p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs" style={{ color: TEXT_FAINT }}>Overall — {latest.Stage}</span>
@@ -204,7 +251,7 @@ const PortalConstruction: React.FC = () => {
           <div className="absolute left-[9px] top-2 bottom-2 w-0.5" style={{ background: HAIRLINE }} />
           <div className="space-y-5">
             {updates.map((u: any, i: number) => (
-              <div key={i} className="relative">
+              <div key={u.Id ?? i} className="relative">
                 <div className="absolute -left-6 top-1 w-4 h-4 rounded-full border-4" style={{ background: GOLD, borderColor: "#F3ECD8" }} />
                 <Card className="p-4">
                   <div className="flex items-center justify-between mb-1.5">

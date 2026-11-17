@@ -1620,9 +1620,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                   <p className="text-xs">{[unitChange.SourceProjectName, unitChange.SourceUnitName].filter(Boolean).join(" · ") || "Old unit"} → {[unitChange.TargetProjectName, unitChange.TargetUnitName].filter(Boolean).join(" · ") || "New unit"}</p>
                   <p className="text-xs text-muted-foreground">{Number(unitChange.SourceBookingId) === Number(booking.Id)
-                    ? (unitChange.TargetBookingNo ? `The sale moved to booking ${unitChange.TargetBookingNo}.` : "A new booking opens on the new unit once this is approved.")
+                    ? (unitChange.TargetBookingNo ? `The sale moved to booking ${unitChange.TargetBookingNo}.`
+                      : unitChange.Status === "Draft" ? "Its application for the new unit is being filled in; submitting it sends the unit change for approval."
+                      : "A new booking opens on the new unit once this is approved.")
                     : `Opened from booking ${unitChange.SourceBookingNo || ""} by this unit change.`}</p>
-                  <Link to={`/crm/unit-changes?id=${unitChange.Id}`} className="inline-flex text-xs underline underline-offset-2">Open Unit Change</Link>
+                  {Number(unitChange.TargetBookingId) === Number(booking.Id) && currentStage !== "Confirmed" && <p className="text-xs font-medium text-foreground">
+                    This booking is at {bookingWorkflowStageLabel[currentStage] || currentStage}. Complete its normal booking review and Marketing Head and Director approvals; the unit-change approval did not approve this booking.
+                  </p>}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    <Link to={`/crm/unit-changes?id=${unitChange.Id}`} className="inline-flex text-xs underline underline-offset-2">Open Unit Change</Link>
+                    {unitChange.Status === "Draft" && unitChange.TargetApplicationId && <Link to={`/crm/applications?edit=${unitChange.TargetApplicationId}&step=1`} className="inline-flex text-xs underline underline-offset-2">Continue in application</Link>}
+                  </div>
                 </section>}
                 {unitChangeLog.length > 0 && <section className="border border-border p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">

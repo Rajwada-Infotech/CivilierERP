@@ -44,10 +44,15 @@ router.post("/", holdRight("create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body || {};
+    const applicationId = b.ApplicationId !== undefined && b.ApplicationId !== null && b.ApplicationId !== "" ? parseInt(b.ApplicationId) : null;
+    if (applicationId != null) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, applicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
+    }
     const result = await placeHold(pool, {
       entityType: b.EntityType,
       entityId: b.EntityId !== undefined && b.EntityId !== null && b.EntityId !== "" ? parseInt(b.EntityId) : null,
-      applicationId: b.ApplicationId !== undefined && b.ApplicationId !== null && b.ApplicationId !== "" ? parseInt(b.ApplicationId) : null,
+      applicationId,
       reason: b.Reason,
       userId: actorId(req),
     });
@@ -66,7 +71,14 @@ router.post("/", holdRight("create"), async (req, res) => {
 router.put("/:id/release", holdRight("edit"), async (req, res) => {
   try {
     const pool = getPool();
-    await releaseHold(pool, parseInt(req.params.id), actorId(req));
+    const id = parseInt(req.params.id);
+    const hold = (await pool.request().input("id", sql.Int, id)
+      .query("SELECT ApplicationId FROM dbo.CrmInventoryHold WHERE Id = @id AND Status = N'Active'")).recordset[0];
+    if (hold?.ApplicationId != null) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, hold.ApplicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
+    }
+    await releaseHold(pool, id, actorId(req));
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-holds] release error:", e.message);

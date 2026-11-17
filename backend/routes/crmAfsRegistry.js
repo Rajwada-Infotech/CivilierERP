@@ -74,6 +74,7 @@ router.get("/eligible-bookings", requirePageRight("crm-afs-registry", "create"),
       "  AND b.Status NOT IN " + require("../constants/crmStatuses").DEAD_BOOKING_SQL,
       "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmAfsRegistry ar WHERE ar.BookingId = b.Id)",
       "  AND EXISTS (SELECT 1 FROM dbo.CrmAfsQueryPayment aqp WHERE aqp.BookingId = b.Id AND aqp.Status = 'Confirmed')",
+      "  AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status <> 'Cancelled')",
       "ORDER BY b.BookingNo",
     ].join(" ");
     const result = await pool.request().query(q);
@@ -106,44 +107,57 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
-    const bookingId = parseInt(b.BookingId, 10);
-
-    const activeErr = await requireActiveBooking(pool, bookingId);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-
-    const aqp = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT Id, Status FROM dbo.CrmAfsQueryPayment WHERE BookingId = @bid");
-    if (!aqp.recordset.length || aqp.recordset[0].Status !== "Confirmed") {
-      return res.status(400).json({ error: "The Agreement Registry needs the registration fees confirmed first: the customer must pay the stamp duty before the Sub-Registrar visit" });
-    }
-
-    const agr = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
-
-    // Pre-check: guard against duplicate creation before consuming a doc-number
-    // sequence slot. UNIQUE(BookingId) exists (migration 371) but only fires at
-    // INSERT time — a concurrent double-submit would waste an AREG number and
-    // return an opaque error before our 409 catch could fire.
-    const existingReg = await pool.request().input("bid2", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id, AfsRegNo FROM dbo.CrmAfsRegistry WHERE BookingId = @bid2");
-    if (existingReg.recordset.length) {
-      return res.status(409).json({
-        error: `The Agreement Registry (${existingReg.recordset[0].AfsRegNo}) is already started for this booking`,
-      });
-    }
-
-    const afsRegNo = await getNextDocNumber(pool, "AREG", "AREG");
-    const result = await pool.request()
-      .input("no",    sql.NVarChar(30), afsRegNo)
-      .input("bid",   sql.Int, bookingId)
-      .input("agrid", sql.Int, agr.recordset[0]?.Id != null ? agr.recordset[0].Id : null)
-      .input("cb",    sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmAfsRegistry (AfsRegNo, BookingId, AgreementId, Status, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @agrid, 'Pending', @cb, SYSDATETIME())
+    const bookingId = parseId(b.BookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid BookingId" });
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      // The booking locked for this start, then the shared rule (active, not frozen) read under that lock.
+      await tx.request().input("bid", sql.Int, bookingId).query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid");
+      const activeErr = await requireActiveBooking(tx, bookingId);
+      if (activeErr) {
+        await tx.rollback();
+        return res.status(400).json({ error: activeErr });
+      }
+      const aqp = await tx.request().input("bid", sql.Int, bookingId).query(`
+        SELECT TOP 1 Id, Status FROM dbo.CrmAfsQueryPayment WITH (UPDLOCK, HOLDLOCK) WHERE BookingId = @bid
       `);
-    res.status(201).json({ success: true, id: result.recordset[0].Id, AfsRegNo: afsRegNo });
+      if (!aqp.recordset.length || aqp.recordset[0].Status !== "Confirmed") {
+        await tx.rollback();
+        return res.status(400).json({ error: "The Agreement Registry needs the registration fees confirmed first: the customer must pay the stamp duty before the Sub-Registrar visit" });
+      }
+      const agreement = await tx.request().input("bid", sql.Int, bookingId).query(`
+        SELECT TOP 1 Id FROM dbo.CrmAgreement WITH (UPDLOCK, HOLDLOCK)
+        WHERE BookingId = @bid AND Status <> 'Cancelled' ORDER BY CreatedAt DESC
+      `);
+      if (!agreement.recordset.length) {
+        await tx.rollback();
+        return res.status(400).json({ error: "Create an active Agreement for Sale before starting its registry" });
+      }
+      const existingReg = await tx.request().input("bid", sql.Int, bookingId).query(`
+        SELECT TOP 1 Id, AfsRegNo FROM dbo.CrmAfsRegistry WITH (UPDLOCK, HOLDLOCK) WHERE BookingId = @bid
+      `);
+      if (existingReg.recordset.length) {
+        await tx.rollback();
+        return res.status(409).json({ error: `The Agreement Registry (${existingReg.recordset[0].AfsRegNo}) is already started for this booking` });
+      }
+      const afsRegNo = await getNextDocNumber(tx, "AREG", "AREG");
+      const result = await tx.request()
+        .input("no", sql.NVarChar(30), afsRegNo)
+        .input("bid", sql.Int, bookingId)
+        .input("agrid", sql.Int, agreement.recordset[0]?.Id ?? null)
+        .input("cb", sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAfsRegistry (AfsRegNo, BookingId, AgreementId, Status, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@no, @bid, @agrid, 'Pending', @cb, SYSDATETIME())
+        `);
+      await tx.commit();
+      res.status(201).json({ success: true, id: result.recordset[0].Id, AfsRegNo: afsRegNo });
+    } catch (txErr) {
+      await tx.rollback().catch(() => {});
+      throw txErr;
+    }
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
       return res.status(409).json({ error: "The Agreement Registry is already started for this booking" });
@@ -163,20 +177,26 @@ router.put("/:id/schedule", requirePageRight("crm-afs-registry", "edit"), async 
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmAfsRegistry WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Agreement Registry not found" });
-    if (cur.recordset[0].Status === "Completed") return res.status(400).json({ error: "Already completed" });
+    if (!["Pending", "Scheduled"].includes(cur.recordset[0].Status)) {
+      return res.status(409).json({ error: `Cannot schedule registry in status '${cur.recordset[0].Status}'` });
+    }
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    await pool.request()
+    const updated = await pool.request()
       .input("id",  sql.Int, id)
+      .input("expected", sql.NVarChar(20), cur.recordset[0].Status)
       .input("dt",  sql.Date, b.ScheduledDate)
       .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
       .input("ub",  sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmAfsRegistry SET Status = 'Scheduled', ScheduledDate = @dt, Remarks = ISNULL(@rem, Remarks),
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = @expected
       `);
+    if (updated.rowsAffected?.[0] !== 1) {
+      return res.status(409).json({ error: "Registry status changed; refresh and try again" });
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-afs-registry] PUT /:id/schedule error:", e.message);
@@ -203,7 +223,18 @@ router.put("/:id/complete", requirePageRight("crm-afs-registry", "edit"), async 
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    await pool.request()
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const agreement = await tx.request().input("bid", sql.Int, cur.recordset[0].BookingId).query(`
+        SELECT TOP 1 Status FROM dbo.CrmAgreement WITH (UPDLOCK, HOLDLOCK)
+        WHERE BookingId = @bid ORDER BY CreatedAt DESC
+      `);
+      if (!agreement.recordset.length || agreement.recordset[0].Status === "Cancelled") {
+        await tx.rollback();
+        return res.status(409).json({ error: "Cannot complete registry for a cancelled or missing agreement" });
+      }
+      const completed = await tx.request()
       .input("id",  sql.Int, id)
       .input("dt",  sql.Date, b.CompletedDate || new Date().toISOString().slice(0, 10))
       .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
@@ -211,8 +242,17 @@ router.put("/:id/complete", requirePageRight("crm-afs-registry", "edit"), async 
       .query(`
         UPDATE dbo.CrmAfsRegistry SET Status = 'Completed', CompletedDate = @dt, Remarks = ISNULL(@rem, Remarks),
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = 'Scheduled'
       `);
+      if (completed.rowsAffected?.[0] !== 1) {
+        await tx.rollback();
+        return res.status(409).json({ error: "Registry status changed; refresh and try again" });
+      }
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback().catch(() => {});
+      throw txErr;
+    }
 
     await logCommunication(pool, {
       bookingId: cur.recordset[0].BookingId, direction: "Outbound",

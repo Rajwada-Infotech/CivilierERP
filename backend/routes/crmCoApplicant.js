@@ -148,6 +148,7 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
 // Shared with the amendment-approval replay path — see applyAddCoApplicant.
 async function applyEditCoApplicant(pool, id, b, actorUserId) {
   const where = (await pool.request().input("id", sql.Int, id).query("SELECT ApplicationId, BookingId FROM dbo.CrmCoApplicant WHERE Id = @id")).recordset[0] || {};
+  if (!where.BookingId && where.ApplicationId) await require("../services/crmUnitChangeGuards").assertUnitChangeApplicationEditable(pool, where.ApplicationId);
   if (where.BookingId) {
     const activeErr = await requireApprovedBooking(pool, where.BookingId);
     if (activeErr) throw Object.assign(new Error(activeErr), { status: 400 });
@@ -212,9 +213,13 @@ router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"]
     if (!b.Name?.trim()) return res.status(400).json({ error: "Name is required" });
 
     const row = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id");
+      .query("SELECT BookingId, ApplicationId FROM dbo.CrmCoApplicant WHERE Id = @id");
     if (!row.recordset.length) return res.status(404).json({ error: "Co-applicant not found" });
     const bookingId = row.recordset[0].BookingId;
+    if (!bookingId && row.recordset[0].ApplicationId) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, row.recordset[0].ApplicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
+    }
 
     if (bookingId) {
       const activeErr = await requireApprovedBooking(pool, bookingId);
@@ -245,8 +250,9 @@ router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"]
 
 // Shared with the amendment-approval replay path — see applyAddCoApplicant.
 async function applyRemoveCoApplicant(pool, id) {
-  const row = (await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id")).recordset[0];
+  const row = (await pool.request().input("id", sql.Int, id).query("SELECT BookingId, ApplicationId FROM dbo.CrmCoApplicant WHERE Id = @id")).recordset[0];
   const bookingId = row?.BookingId;
+  if (!bookingId && row?.ApplicationId) await require("../services/crmUnitChangeGuards").assertUnitChangeApplicationEditable(pool, row.ApplicationId);
   if (bookingId) {
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) throw Object.assign(new Error(activeErr), { status: 400 });
@@ -267,8 +273,12 @@ router.delete("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-application
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const row = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id");
+      .query("SELECT BookingId, ApplicationId FROM dbo.CrmCoApplicant WHERE Id = @id");
     const bookingId = row.recordset[0]?.BookingId;
+    if (!bookingId && row.recordset[0]?.ApplicationId) {
+      const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, row.recordset[0].ApplicationId);
+      if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
+    }
     if (bookingId) {
       const activeErr = await requireApprovedBooking(pool, bookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
@@ -342,6 +352,8 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
     const app = await pool.request().input("aid", sql.Int, applicationId)
       .query("SELECT Id FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const unitChangeBlock = await require("../services/crmUnitChangeGuards").unitChangeApplicationEditBlock(pool, applicationId);
+    if (unitChangeBlock) return res.status(409).json({ error: unitChangeBlock });
 
     const b = req.body;
     if (!b.Name?.trim()) return res.status(400).json({ error: "Co-applicant Name is required" });

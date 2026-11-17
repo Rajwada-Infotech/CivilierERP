@@ -1,4 +1,4 @@
-import { CrmStatus } from "@/constants/crmStatuses";
+import { CrmStatus, isBookingClosed } from "@/constants/crmStatuses";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -129,10 +129,27 @@ const CrmPaymentMilestones: React.FC = () => {
   const { data: onAccountData } = useQuery({ queryKey: ["crm-on-account", selectedBookingId], queryFn: () => fetchOnAccount(selectedBookingId), enabled: !!selectedBookingId, staleTime: 15_000 });
   const { data: moneyReceipts = [] } = useQuery({ queryKey: ["crm-money-receipts", selectedBookingId], queryFn: () => fetchMoneyReceipts(selectedBookingId), enabled: !!selectedBookingId, staleTime: 15_000 });
   const { data: customerBank } = useQuery({ queryKey: ["crm-customer-bank", selectedBookingId], queryFn: () => fetchCustomerBank(selectedBookingId), enabled: !!selectedBookingId, staleTime: 30_000 });
+  const { data: bookingUnitChange } = useQuery({
+    queryKey: ["crm-booking-unit-change", selectedBookingId],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${BKG_API}/${selectedBookingId}/unit-change`);
+      if (!res.ok) throw new Error("Could not load the unit change");
+      return res.json();
+    },
+    enabled: !!selectedBookingId,
+    staleTime: 30_000,
+  });
 
   const milestones: any[] = milestoneData?.milestones || [];
   const summary = milestoneData?.summary || {};
   const booking = milestoneData?.booking || null;
+  const unitChanged = booking?.BookingStatus === "UnitChanged";
+  const { data: destinationCreditData } = useQuery({
+    queryKey: ["crm-unit-change-destination-credit", bookingUnitChange?.TargetBookingId],
+    queryFn: () => fetchOnAccount(String(bookingUnitChange.TargetBookingId)),
+    enabled: unitChanged && !!bookingUnitChange?.TargetBookingId,
+    staleTime: 15_000,
+  });
   const onAccountBalance = onAccountData?.availableBalance || 0;
   // Funded = what's settled on milestones plus the on-account money still usable, against the dues that aren't
   // waived (the GrandTotal when there's no schedule yet) — the backend's gate in applyOnAccountToMilestone. Applied
@@ -353,6 +370,7 @@ const CrmPaymentMilestones: React.FC = () => {
   const nextUp = nextOpenMilestone(milestones);
   const nextSentence = (() => {
     if (!money || !milestones.length) return null;
+    if (unitChanged) return <>This booking closed when the unit changed. Its {fmt(summary.totalDue)} payment schedule is historical, not due for collection here. {bookingUnitChange?.Id ? <><Link to={`/crm/unit-changes?id=${bookingUnitChange.Id}`} className="underline underline-offset-2 hover:text-white">View {bookingUnitChange.RequestNo || "unit-change request"}</Link>{bookingUnitChange.TargetBookingId ? <> for the credit moved, and <Link to={`/crm/payments?bookingId=${bookingUnitChange.TargetBookingId}`} className="underline underline-offset-2 hover:text-white">open the new booking</Link> for its current balance.</> : " for its status and credit details."}</> : "The linked unit-change request contains the credit and destination booking details."}</>;
     if (!nextUp) return notFullyPaid ? `All milestones are covered, including ${fmt(money.inVerification + money.recorded)} pending Finance approval.` : "Full booking amount received. Deposits are adjusted to the milestones automatically, in order.";
     return `Next: ${nextUp.MilestoneName}, balance ${fmt(milestoneFill(nextUp).missing)}. Payments stay on account and are adjusted to the milestones once the full booking amount is received and approved.`;
   })();
@@ -421,6 +439,9 @@ const CrmPaymentMilestones: React.FC = () => {
   const financeRows = money?.entries || [];
   const returnedRows = money?.returned || [];
   const received = (money?.collected || 0) + (money?.inVerification || 0) + (money?.recorded || 0);
+  const movedReceipt = money?.trail?.rows?.find((r: any) => r.stage === "unitChange");
+  const heldUnitChangeCredit = onAccountData?.payments?.find((p: any) => p.PaymentMode === "HeldCredit");
+  const destinationUnitChangeCredit = destinationCreditData?.payments?.find((p: any) => p.PaymentMode === "RebookingCredit");
 
   const record = isLoading ? (
     <div className="py-16 text-center text-muted-foreground text-sm flex items-center justify-center gap-2"><RefreshCw size={14} className="animate-spin" /> Loading the plan…</div>
@@ -450,20 +471,47 @@ const CrmPaymentMilestones: React.FC = () => {
                 <RefreshCw size={13} className={resyncing ? "animate-spin" : ""} /> {resyncing ? "Resyncing…" : "Resync schedule"}
               </button>
             )}
-            {rights.canCreate && <button type="button" onClick={() => setAddDialog(true)} className={BAND_KEY}><Plus size={13} /> Add milestone</button>}
-            {rights.canCreate && <button type="button" onClick={openDeposit} className={BAND_KEY_MAIN}><Wallet size={13} /> Deposit on account</button>}
+            {rights.canCreate && !unitChanged && <button type="button" onClick={() => setAddDialog(true)} className={BAND_KEY}><Plus size={13} /> Add milestone</button>}
+            {rights.canCreate && !unitChanged && <button type="button" onClick={openDeposit} className={BAND_KEY_MAIN}><Wallet size={13} /> Deposit on account</button>}
             {refreshOnBand(() => refetch(), isFetching)}
           </>
         }
-        lead={fmtShort(received)} leadNote={`received of ${fmtShort(summary.totalDue)} · ${pct(received, summary.totalDue || 0)}%`}
-        bar={<PlanRibbon onDark plan={milestones} activeId={activeMilestone} onPick={pickMilestone} />}
+        lead={unitChanged ? "Unit changed" : fmtShort(received)} leadNote={unitChanged ? "Old booking closed · schedule shown for history" : `counted toward ${fmtShort(summary.totalDue)} due · ${pct(received, summary.totalDue || 0)}%`}
+        bar={unitChanged ? <div className="rounded-md border border-white/10 px-3 py-2 text-xs text-slate-300">Historical payment schedule · {fmt(summary.totalDue)} · not collectible on this closed booking</div> : <PlanRibbon onDark plan={milestones} activeId={activeMilestone} onPick={pickMilestone} />}
         figures={[
-          { label: "Approved by Finance", dot: BAND_DOT.collected, value: fmtShort(money?.collected), note: `${fmtShort(money?.held)} on account`, exact: `Adjusted ${fmt(money?.adjusted)} · On account ${fmt(money?.held)}` },
+          { label: unitChanged ? "Money carried forward" : "Approved by Finance", dot: BAND_DOT.collected, value: fmtShort(unitChanged ? bookingUnitChange?.MovedAmount : money?.collected), note: unitChanged ? "See unit-change request" : `${fmtShort(money?.held)} on account`, exact: unitChanged ? `Moved to new booking: ${fmt(bookingUnitChange?.MovedAmount)}` : `Adjusted ${fmt(money?.adjusted)} · On account ${fmt(money?.held)}` },
           { label: "Pending with Finance", dot: BAND_DOT.finance, value: fmtShort(money?.inVerification), note: money?.inVerificationCount ? `${money.inVerificationCount} pending` : "None pending", exact: fmt(money?.inVerification) },
           { label: "Not sent to Finance", dot: BAND_DOT.recorded, value: fmtShort(money?.recorded), note: "Sent on Director approval", exact: fmt(money?.recorded) },
-          { label: "Balance to collect", dot: BAND_DOT.notDue, value: fmtShort(money?.toCollect), note: "Yet to be received", exact: fmt(money?.toCollect) },
+          { label: unitChanged ? "Old schedule" : "Balance to collect", dot: BAND_DOT.notDue, value: fmtShort(unitChanged ? summary.totalDue : money?.toCollect), note: unitChanged ? "Historical · not collectible" : "Yet to be received", exact: fmt(unitChanged ? summary.totalDue : money?.toCollect) },
         ]}
         footer={<>{nextSentence}<WaiverNotes agreed={Number(booking.GrandTotal) || 0} waived={Number(summary.waivedDue) || 0} net={Number(summary.totalDue) || 0} excess={Number(money?.excess) || 0} bookingId={selectedBookingId} /></>} />
+      {unitChanged && (
+        <GridRelated icon={Wallet} title="One payment · movement across bookings">
+          <div className="px-4 py-3 border-b border-border/70 text-xs text-muted-foreground">
+            The customer paid once. The records below show that same money leaving this booking, being held for the unit change, and arriving on the new booking. Hold and transfer rows are internal steps, not extra payments.
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border">
+            <div className="p-4 min-w-0">
+              <div className="text-xs text-muted-foreground">Customer payment · counted once</div>
+              <div className="mt-1 font-semibold tabular-nums">{fmt(movedReceipt?.amount || 0)}</div>
+              <div className="mt-1 text-xs text-muted-foreground break-words">{movedReceipt?.docs?.join(" → ") || "Receipt documents loading"}</div>
+            </div>
+            <div className="p-4 min-w-0">
+              <div className="text-xs text-muted-foreground">Internal unit-change hold</div>
+              <div className="mt-1 font-semibold">No new payment</div>
+              <div className="mt-1 text-xs text-muted-foreground break-words">{heldUnitChangeCredit?.ReceiptNo || bookingUnitChange?.RequestNo || "Unit-change credit"}</div>
+            </div>
+            <div className="p-4 min-w-0">
+              <div className="text-xs text-muted-foreground">Same credit · now on the new booking</div>
+              <div className="mt-1 font-semibold tabular-nums">{fmt(Math.max(0, Number(destinationUnitChangeCredit?.Amount || bookingUnitChange?.CreditCarriedAmount || 0) - Number(destinationUnitChangeCredit?.AppliedAmount || 0)))} available</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {destinationUnitChangeCredit ? `${destinationUnitChangeCredit.ReceiptNo} · ${fmt(Math.max(0, Number(destinationUnitChangeCredit.Amount) - Number(destinationUnitChangeCredit.AppliedAmount || 0)))} still on account` : bookingUnitChange?.TargetBookingNo || "Destination credit"}
+                {bookingUnitChange?.TargetBookingId && <> · <Link to={`/crm/payments?bookingId=${bookingUnitChange.TargetBookingId}`} className="underline underline-offset-2">Open booking {bookingUnitChange.TargetBookingNo || ""}</Link></>}
+              </div>
+            </div>
+          </div>
+        </GridRelated>
+      )}
       {needsResync && (
         <GridGuidance tone="stopped" title={!milestone1 ? "No Booking Amount milestone" : "Milestone 1 doesn't match the booking amount"}
           text={!milestone1
@@ -475,21 +523,21 @@ const CrmPaymentMilestones: React.FC = () => {
         <MoneyTrail trail={money?.trail} totalDue={summary.totalDue || 0} />
       </GridRelated>
       <GridRelated icon={ListChecks} title="Payment schedule" count={milestones.length}>
-        <MilestoneTable milestones={milestones} canEdit={rights.canEdit} onAccountData={onAccountData} onAccountBalance={onAccountBalance}
+        <MilestoneTable milestones={milestones} canEdit={rights.canEdit && !unitChanged} closed={isBookingClosed(booking?.BookingStatus)} onAccountData={onAccountData} onAccountBalance={onAccountBalance}
           notFullyPaid={notFullyPaid} fullPaymentShortfall={fullPaymentShortfall} activeId={activeMilestone}
           pendingWaivers={pendingWaiverIds(milestoneData.waivers)}
           nextMilestone={nextOutstandingMilestone} canManuallyApply={canManuallyApplyOnAccount}
           onPay={handleOpenPayment} onApply={openApplyDialog} onWaive={(m) => setWaiveDialog({ milestone: m, reason: "" })} onRemarks={(m) => setRemarksDialog({ milestone: m })} />
       </GridRelated>
       <WaiverSection waivers={milestoneData.waivers || []} canEdit={rights.canEdit} onChanged={reloadMilestones} />
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 items-start">
-        <GridRelated icon={Landmark} title="On-account deposits" count={accountCount}>
+      <div className={cn("grid grid-cols-1 gap-4 items-start", !unitChanged && "xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]")}>
+        {!unitChanged && <GridRelated icon={Landmark} title="On-account deposits" count={accountCount}>
           <OnAccountPanel onAccountData={onAccountData} notFullyPaid={notFullyPaid}
             fundsOnHand={bookingFundsOnHand} requiredAmount={bookingRequiredAmount} fullPaymentShortfall={fullPaymentShortfall}
             inVerification={money?.inVerification || 0}
             milestones={milestones} canManuallyApply={canManuallyApplyOnAccount}
             canEdit={rights.canEdit} onApply={(p) => openApplyDialog(p, null)} />
-        </GridRelated>
+        </GridRelated>}
         <GridRelated icon={Receipt} title="Price"><PriceTable booking={booking} /></GridRelated>
       </div>
       {financeRows.length > 0 && <GridRelated icon={Hourglass} title="Pending with Finance" count={financeRows.length}><EntryTable rows={financeRows} /></GridRelated>}

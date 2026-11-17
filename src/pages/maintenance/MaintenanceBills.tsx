@@ -16,7 +16,11 @@ import {
 } from "lucide-react";
 import { numberToWordsIndian } from "@/lib/numberToWords";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
+import { MaintenanceShell } from "@/components/maintenance/MaintenanceShell";
+import { ICON_ACT, ICON_ACT_RED, SHEET_DIALOG, TD, TH } from "@/components/maintenance/maintParts";
+import { HrEmpty, HrError, HR_FIELD, HR_HEAD, HR_LBL, HR_NUM, HR_RULE } from "@/components/hrpayroll/HrUi";
+import { SheetMark } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE, KEY_RED_SOLID } from "@/components/sheet/sheetParts";
 import { usePageRights } from "@/hooks/usePageRights";
 import { ExportMenu } from "@/components/ExportMenu";
 import {
@@ -96,7 +100,6 @@ export default function MaintenanceBills() {
       <MaintenanceShell
         title="Maintenance Bills"
         subtitle="Generate and manage maintenance bills per customer/unit"
-        icon={Receipt}
         action={
           rights.canCreate && (
             <button
@@ -104,7 +107,7 @@ export default function MaintenanceBills() {
                 setEditingBillId(null);
                 setFormOpen(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white transition-all"
+              className={`${KEY_INK} h-9 px-4`}
             >
               <Plus size={13} /> Create Bill
             </button>
@@ -113,19 +116,19 @@ export default function MaintenanceBills() {
       >
         {/* ── Filters ─────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
+          <div className="relative w-full sm:w-64">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search customer, unit, bill no…"
-              className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground w-56"
+              className={`${HR_FIELD} pl-8`}
             />
           </div>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
+            className={`${HR_FIELD} w-auto`}
           >
             <option value="">All Status</option>
             {STATUS_OPTIONS.map((s) => (
@@ -135,13 +138,13 @@ export default function MaintenanceBills() {
           <DateInput
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
+            className={`${HR_FIELD} w-auto ${HR_NUM}`}
           />
-          <span className="text-xs text-muted-foreground">to</span>
+          <span className={HR_LBL}>to</span>
           <DateInput
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            className="px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
+            className={`${HR_FIELD} w-auto ${HR_NUM}`}
           />
           {rights.canExport && (
             <div className="ml-auto">
@@ -165,63 +168,54 @@ export default function MaintenanceBills() {
         </div>
 
         {/* ── List ────────────────────────────────────────────────────────── */}
-        {isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-        {error && <div className="text-sm text-red-500">Failed to load bills.</div>}
+        {isLoading && <div className="skel" style={{ height: 240 }} />}
+        {error && <HrError text="Failed to load bills." />}
 
         {!isLoading && !error && rows.length === 0 && (
-          <div className="rounded-xl border border-dashed border-border py-10 flex flex-col items-center gap-2 text-center px-6">
-            <Receipt size={20} className="text-muted-foreground" />
-            <p className="text-sm font-medium text-foreground">No bills found</p>
-            <p className="text-xs text-muted-foreground max-w-sm">
-              {rights.canCreate ? "Create a bill for a confirmed customer to get started." : "No maintenance bills match these filters."}
-            </p>
+          <div className="bg-card" style={{ border: HR_RULE }}>
+            <HrEmpty
+              icon={Receipt}
+              title="No bills found"
+              text={rights.canCreate ? "Create a bill for a confirmed customer to get started." : "No maintenance bills match these filters."}
+            />
           </div>
         )}
 
         {rows.length > 0 && (
-          <div className="rounded-xl border border-border overflow-x-auto">
+          <div className="bg-card overflow-x-auto" style={{ border: HR_RULE }}>
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-2.5">Bill No</th>
-                  <th className="text-left px-4 py-2.5">Customer</th>
-                  <th className="text-left px-4 py-2.5">Flat/Unit</th>
-                  <th className="text-left px-4 py-2.5">Bill Date</th>
-                  <th className="text-right px-4 py-2.5">Subtotal</th>
-                  <th className="text-right px-4 py-2.5">Total Tax</th>
-                  <th className="text-right px-4 py-2.5">Grand Total</th>
-                  <th className="text-left px-4 py-2.5">Status</th>
-                  <th className="text-right px-4 py-2.5">Actions</th>
+                  <th className={TH}>Bill No</th>
+                  <th className={TH}>Customer</th>
+                  <th className={TH}>Flat/Unit</th>
+                  <th className={TH}>Bill Date</th>
+                  <th className={`${TH} text-right`}>Subtotal</th>
+                  <th className={`${TH} text-right`}>Total Tax</th>
+                  <th className={`${TH} text-right`}>Grand Total</th>
+                  <th className={TH}>Status</th>
+                  <th className={`${TH} text-right`}>Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {rows.map((b) => (
-                  <tr key={b.Id} className="hover:bg-muted/20">
-                    <td className="px-4 py-2.5 font-mono text-xs font-medium text-foreground">{b.BillNo}</td>
-                    <td className="px-4 py-2.5">{b.CustomerName || "—"}</td>
-                    <td className="px-4 py-2.5">{[b.BlockName, b.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
-                    <td className="px-4 py-2.5">{fmtDate(b.BillDate)}</td>
-                    <td className="px-4 py-2.5 text-right font-mono">{fmt(b.Subtotal)}</td>
-                    <td className="px-4 py-2.5 text-right font-mono">{fmt(b.TotalTax)}</td>
-                    <td className="px-4 py-2.5 text-right font-mono font-semibold text-foreground">{fmt(b.GrandTotal)}</td>
-                    <td className="px-4 py-2.5">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
-                          b.Status === "Active"
-                            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
-                            : "bg-red-500/10 border-red-500/20 text-red-600"
-                        }`}
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${b.Status === "Active" ? "bg-emerald-500" : "bg-red-500"}`} />
-                        {b.Status}
-                      </span>
+                  <tr key={b.Id} className="hover:bg-primary/5">
+                    <td className={`${TD} text-xs font-medium text-foreground ${HR_NUM}`}>{b.BillNo}</td>
+                    <td className={TD}>{b.CustomerName || "—"}</td>
+                    <td className={TD}>{[b.BlockName, b.UnitNo].filter(Boolean).join(" / ") || "—"}</td>
+                    <td className={`${TD} ${HR_NUM}`}>{fmtDate(b.BillDate)}</td>
+                    <td className={`${TD} text-right ${HR_NUM}`}>{fmt(b.Subtotal)}</td>
+                    <td className={`${TD} text-right ${HR_NUM}`}>{fmt(b.TotalTax)}</td>
+                    <td className={`${TD} text-right font-semibold text-foreground ${HR_NUM}`}>{fmt(b.GrandTotal)}</td>
+                    <td className={TD}>
+                      <SheetMark text={b.Status} tone={b.Status === "Active" ? "done" : "stopped"} />
                     </td>
-                    <td className="px-2 py-2.5">
+                    <td className={TD}>
                       <div className="flex items-center justify-end gap-1">
                         <button data-row-view
                           onClick={() => setViewingBillId(b.Id)}
                           title="View"
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                          className={ICON_ACT}
                         >
                           <Eye size={14} />
                         </button>
@@ -232,7 +226,7 @@ export default function MaintenanceBills() {
                               setFormOpen(true);
                             }}
                             title="Edit"
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            className={ICON_ACT}
                           >
                             <Pencil size={14} />
                           </button>
@@ -241,7 +235,7 @@ export default function MaintenanceBills() {
                           <button
                             onClick={() => setCancellingBill(b)}
                             title="Cancel"
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            className={ICON_ACT_RED}
                           >
                             <Ban size={14} />
                           </button>
@@ -273,36 +267,36 @@ export default function MaintenanceBills() {
 
       {/* ── Cancel confirmation ─────────────────────────────────────────── */}
       <Dialog open={!!cancellingBill} onOpenChange={(open) => !open && setCancellingBill(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className={`${SHEET_DIALOG} max-w-sm`} style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle className="font-heading text-base">Cancel Bill</DialogTitle>
+            <DialogTitle className={HR_HEAD}>Cancel Bill</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 pt-1">
             <p className="text-sm text-muted-foreground">
-              Cancel bill <span className="font-mono font-medium text-foreground">{cancellingBill?.BillNo}</span>? This keeps the record for history but marks it Cancelled.
+              Cancel bill <span className={`font-medium text-foreground ${HR_NUM}`}>{cancellingBill?.BillNo}</span>? This keeps the record for history but marks it Cancelled.
             </p>
             <div>
-              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+              <label className={`block mb-1.5 ${HR_LBL}`}>
                 Reason (optional)
               </label>
               <textarea
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 rows={2}
-                className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
+                className={`${HR_FIELD} h-auto py-2 resize-none`}
               />
             </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-2 pt-3 border-t border-foreground/15">
               <button
                 onClick={() => setCancellingBill(null)}
-                className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}
               >
                 Back
               </button>
               <button
                 onClick={handleCancel}
                 disabled={cancelling}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-destructive text-destructive-foreground hover:opacity-90 transition-all disabled:opacity-60"
+                className={`${KEY_RED_SOLID} h-9 px-5 flex-1 sm:flex-none`}
               >
                 {cancelling ? <Loader2 size={13} className="animate-spin" /> : <Ban size={13} />}
                 Cancel Bill
@@ -366,54 +360,54 @@ function LedgerSheet({
   };
 }) {
   return (
-    <div className="border border-border rounded-lg overflow-hidden text-sm">
+    <div className="border border-foreground bg-card text-sm">
       {/* Society-style header */}
-      <div className="text-center px-4 py-3.5 border-b border-border">
+      <div className="text-center px-4 py-3.5 border-b border-foreground/20">
         <p className="font-heading font-bold text-base text-foreground">{companyName}</p>
         {companyAddress && <p className="text-xs text-muted-foreground mt-0.5">{companyAddress}</p>}
-        {companyGstNo && <p className="text-xs text-muted-foreground mt-0.5">GSTIN: {companyGstNo}</p>}
+        {companyGstNo && <p className={`text-xs text-muted-foreground mt-0.5 ${HR_NUM}`}>GSTIN: {companyGstNo}</p>}
       </div>
 
       {/* Bill No / Bill Date / Flat No / Due Date */}
-      <div className="grid grid-cols-4 divide-x divide-border border-b border-border">
+      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-foreground/20 border-b border-foreground/20">
         {[
-          { label: "Bill No.", value: billNo, mono: true },
-          { label: "Bill Date", value: billDate },
+          { label: "Bill No.", value: billNo, num: true },
+          { label: "Bill Date", value: billDate, num: true },
           { label: "Flat No.", value: unitLabel },
         ].map((f) => (
           <div key={f.label} className="px-3 py-2">
-            <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground">{f.label}</p>
-            <p className={`text-xs font-semibold text-foreground mt-0.5 ${f.mono ? "font-mono" : ""}`}>{f.value || "—"}</p>
+            <p className={HR_LBL}>{f.label}</p>
+            <p className={`text-xs font-semibold text-foreground mt-0.5 ${f.num ? HR_NUM : ""}`}>{f.value || "—"}</p>
           </div>
         ))}
         <div className="px-3 py-2">
-          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Due Date</p>
+          <p className={HR_LBL}>Due Date</p>
           {edit ? (
             <DateInput
               value={dueDate}
               onChange={(e) => edit.onDueDateChange(e.target.value)}
-              className="w-full mt-0.5 text-xs font-semibold bg-transparent border-none p-0 text-foreground focus:outline-none"
+              className={`w-full mt-0.5 text-xs font-semibold bg-transparent border-none p-0 text-foreground focus:outline-none ${HR_NUM}`}
             />
           ) : (
-            <p className="text-xs font-semibold text-foreground mt-0.5">{dueDate || "—"}</p>
+            <p className={`text-xs font-semibold text-foreground mt-0.5 ${HR_NUM}`}>{dueDate || "—"}</p>
           )}
         </div>
       </div>
 
       {/* Name */}
-      <div className="px-3 py-2 border-b border-border">
-        <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Name</p>
+      <div className="px-3 py-2 border-b border-foreground/20">
+        <p className={HR_LBL}>Name</p>
         <p className="text-sm font-semibold text-foreground mt-0.5">{customerName || "—"}</p>
       </div>
 
       {/* Sr.No / Description / Amount */}
       <table className="w-full text-xs">
-        <thead className="bg-muted/30">
+        <thead>
           <tr>
-            <th className="w-10 text-left px-2 py-1.5 border-b border-border text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Sr.</th>
-            <th className="text-left px-2 py-1.5 border-b border-border text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Description</th>
-            <th className="w-28 text-right px-3 py-1.5 border-b border-border text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Amount</th>
-            {edit && <th className="w-8 border-b border-border" />}
+            <th className={`${TH} w-10`}>Sr.</th>
+            <th className={TH}>Description</th>
+            <th className={`${TH} w-28 text-right`}>Amount</th>
+            {edit && <th className={`${TH} w-8`} />}
           </tr>
         </thead>
         <tbody>
@@ -425,14 +419,13 @@ function LedgerSheet({
             </tr>
           )}
           {lines.map((l, i) => (
-            <tr key={l.chargeHeadId} className="border-b border-border/60">
-              <td className="px-2 py-1.5 text-muted-foreground">{i + 1}</td>
-              <td className="px-2 py-1.5 text-foreground">{l.description}</td>
-              <td className="px-3 py-1.5 text-right font-mono tabular-nums">{fmt(l.amount)}</td>
+            <tr key={l.chargeHeadId} className="border-b border-foreground/10">
+              <td className={`px-3 py-1.5 text-muted-foreground ${HR_NUM}`}>{i + 1}</td>
+              <td className="px-3 py-1.5 text-foreground">{l.description}</td>
+              <td className={`px-3 py-1.5 text-right ${HR_NUM}`}>{fmt(l.amount)}</td>
               {edit && (
-                <td className="px-1 py-1.5 text-center">
-                  <button onClick={() => edit.onRemoveChargeHead(l.chargeHeadId)} title="Remove"
-                    className="text-muted-foreground hover:text-destructive transition-colors">
+                <td className="px-1 py-1 text-center">
+                  <button onClick={() => edit.onRemoveChargeHead(l.chargeHeadId)} title="Remove" className={ICON_ACT_RED}>
                     <Trash2 size={12} />
                   </button>
                 </td>
@@ -441,14 +434,14 @@ function LedgerSheet({
           ))}
           {edit && (
             <tr>
-              <td className="px-2 py-1.5" />
-              <td className="px-2 py-1.5" colSpan={edit ? 3 : 2}>
+              <td className="px-3 py-1.5" />
+              <td className="px-3 py-1.5" colSpan={edit ? 3 : 2}>
                 <select
                   value=""
                   onChange={(e) => {
                     if (e.target.value) edit.onAddChargeHead(Number(e.target.value));
                   }}
-                  className="w-full text-xs bg-muted/30 border border-dashed border-border rounded px-2 py-1 text-muted-foreground focus:outline-none"
+                  className={`${HR_FIELD} h-8 border-dashed text-xs text-muted-foreground`}
                 >
                   <option value="">+ Add Charge Head…</option>
                   {edit.availableChargeHeads.map((ch) => (
@@ -462,46 +455,46 @@ function LedgerSheet({
           )}
         </tbody>
         <tfoot>
-          <tr className="border-t-2 border-border bg-muted/20">
-            <td colSpan={2} className="px-2 py-2 text-right font-heading font-bold text-foreground">Total Payable</td>
-            <td className="px-3 py-2 text-right font-mono font-bold text-foreground tabular-nums">{fmt(totalPayable)}</td>
+          <tr className="border-t border-foreground bg-foreground/5">
+            <td colSpan={2} className="px-3 py-2 text-right font-heading font-bold uppercase tracking-[0.1em] text-[0.6875rem] text-foreground">Total Payable</td>
+            <td className={`px-3 py-2 text-right font-bold text-foreground ${HR_NUM}`}>{fmt(totalPayable)}</td>
             {edit && <td />}
           </tr>
         </tfoot>
       </table>
 
       {/* Amount in words */}
-      <div className="px-3 py-2 border-t border-border text-xs">
+      <div className="px-3 py-2 border-t border-foreground/20 text-xs">
         <span className="text-muted-foreground">Amount In Words: </span>
         <span className="font-medium text-foreground">{numberToWordsIndian(totalPayable)}</span>
       </div>
 
       {status === "Cancelled" && (
-        <div className="px-3 py-2 border-t border-border bg-destructive/5 text-xs text-destructive">
+        <div className="px-3 py-2 border-t border-foreground/20 bg-destructive/10 text-xs text-destructive">
           Cancelled{cancelReason ? ` — ${cancelReason}` : ""}
         </div>
       )}
 
       {/* Notes */}
-      <div className="px-3 py-2.5 border-t border-border">
-        <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">Notes</p>
+      <div className="px-3 py-2.5 border-t border-foreground/20">
+        <p className={`${HR_LBL} mb-1`}>Notes</p>
         {edit ? (
           <textarea
             value={notes}
             onChange={(e) => edit.onNotesChange(e.target.value)}
             rows={3}
             placeholder="e.g. Cheque should be drawn in favour of the society only. Interest @ 18% p.a. will be charged for delayed payments."
-            className="w-full text-xs bg-muted/20 border border-border rounded px-2 py-1.5 text-foreground focus:outline-none resize-none"
+            className={`${HR_FIELD} h-auto py-1.5 text-xs resize-none`}
           />
         ) : notes ? (
           <p className="text-xs text-foreground whitespace-pre-line">{notes}</p>
         ) : (
-          <p className="text-xs text-muted-foreground italic">—</p>
+          <p className="text-xs text-muted-foreground">—</p>
         )}
       </div>
 
       {/* Signature footer */}
-      <div className="px-3 py-4 border-t border-border text-right">
+      <div className="px-3 py-4 border-t border-foreground/20 text-right">
         <p className="text-sm font-heading font-bold text-foreground">For {companyName}</p>
         <p className="text-[0.625rem] text-muted-foreground mt-6">Secretary / Chairman / Treasurer</p>
       </div>
@@ -605,43 +598,31 @@ function BillFormDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        className="max-w-3xl max-h-[88vh] overflow-hidden p-0 gap-0 flex flex-col"
-        style={{ background: "hsl(var(--card))" }}
+        className={`${SHEET_DIALOG} max-w-3xl max-h-[88vh] overflow-hidden p-0 gap-0 flex flex-col`}
+        style={{ margin: 0 }}
       >
-        <div
-          className="shrink-0 border-b border-border pl-6 pr-12 py-4 flex items-center gap-3"
-          style={{ background: "hsl(var(--card))" }}
-        >
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: `${ACCENT}18`, border: `1px solid ${ACCENT}30` }}
-          >
-            <Receipt size={16} style={{ color: ACCENT }} />
-          </div>
-          <div>
-            <DialogTitle className="font-heading font-bold text-base leading-tight">
-              {isEdit ? "Edit Bill" : "Create Maintenance Bill"}
-            </DialogTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {isEdit ? "Update the applied charge heads" : "Pick a customer and the charges that apply"}
-            </p>
-          </div>
+        <div className="shrink-0 border-b border-foreground pl-6 pr-12 py-4 bg-card">
+          <DialogTitle className={HR_HEAD}>
+            {isEdit ? "Edit Bill" : "Create Maintenance Bill"}
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            {isEdit ? "Update the applied charge heads" : "Pick a customer and the charges that apply"}
+          </p>
         </div>
 
         {isEdit && loadingExisting ? (
-          <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
+          <div className="skel m-6" style={{ height: 240 }} />
         ) : (
           <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
             {!isEdit && (
               <div>
-                <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                <label className={`block mb-1.5 ${HR_LBL}`}>
                   Customer / Flat
                 </label>
                 <SearchableNativeSelect
                   value={bookingId}
                   onChange={(e) => setBookingId(e.target.value)}
-                  className="w-full appearance-none px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground"
-                  style={{ "--tw-ring-color": ACCENT } as React.CSSProperties}
+                  className={`${HR_FIELD} appearance-none`}
                 >
                   <option value="">Select customer…</option>
                   {directoryRows.map((c) => (
@@ -676,17 +657,17 @@ function BillFormDialog({
           </div>
         )}
 
-        <div className="shrink-0 border-t border-border px-6 py-3.5 flex justify-end gap-2" style={{ background: "hsl(var(--card))" }}>
+        <div className="shrink-0 border-t border-foreground/20 px-6 py-3.5 flex justify-end gap-2 bg-card">
           <button
             onClick={onClose}
-            className="px-3.5 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+            className={`${KEY_LINE} h-9 px-4 flex-1 sm:flex-none`}
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving || (isEdit && loadingExisting)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-maintenance text-white transition-all disabled:opacity-60"
+            className={`${KEY_INK} h-9 px-5 flex-1 sm:flex-none`}
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : null}
             {isEdit ? "Save Changes" : "Create Bill"}
@@ -716,7 +697,7 @@ function BillViewModal({
   });
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+    <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/70 p-0 sm:p-4">
       <style>{`
         @media print {
           body * { visibility: hidden; }
@@ -742,16 +723,12 @@ function BillViewModal({
         }
       `}</style>
       <div
-        className="mb-print-modal border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto"
-        style={{ background: "hsl(var(--card))" }}
+        className="mb-print-modal bg-card border border-foreground w-full max-w-xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto"
       >
-        <div
-          className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-border"
-          style={{ background: "hsl(var(--card))" }}
-        >
+        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-foreground bg-card">
           <div>
-            <h2 className="font-heading font-bold text-base">{bill?.BillNo || "Bill"}</h2>
-            <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">Maintenance Bill</p>
+            <h2 className={`${HR_HEAD} ${HR_NUM}`}>{bill?.BillNo || "Bill"}</h2>
+            <p className={`${HR_LBL} mt-1`}>Maintenance Bill</p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
             {canExport && bill && (
@@ -773,20 +750,20 @@ function BillViewModal({
               <button
                 onClick={() => window.print()}
                 title="Print Bill"
-                className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+                className={`${KEY_LINE} h-8 px-3`}
               >
-                <Printer size={18} />
+                <Printer size={12} /> Print
               </button>
             )}
-            <button onClick={onClose} className="p-2 hover:bg-muted rounded-lg transition-colors">
-              <X size={18} />
+            <button onClick={onClose} title="Close" className={ICON_ACT}>
+              <X size={16} />
             </button>
           </div>
         </div>
 
         <div className="p-5 sm:p-6">
           {isLoading || !bill ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>
+            <div className="skel" style={{ height: 320 }} />
           ) : (
             <LedgerSheet
               companyName={bill.CompanyName || "Maintenance Bill"}

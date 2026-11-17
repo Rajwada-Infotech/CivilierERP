@@ -278,8 +278,9 @@ router.delete("/:id", requirePageRight("crm-possession-notice", "edit"), async (
     if (cur.recordset[0].Status !== "Draft") {
       return res.status(400).json({ error: `Only Draft notices can be deleted. Current status: '${cur.recordset[0].Status}'` });
     }
-    await pool.request().input("id", sql.Int, id)
-      .query("DELETE FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    const deleted = await pool.request().input("id", sql.Int, id)
+      .query(`DELETE FROM dbo.CrmPossessionNotice WHERE Id = @id AND Status = '${CrmStatus.DRAFT}'`);
+    if (!deleted.rowsAffected?.some((count) => count > 0)) return res.status(409).json({ error: "The notice status changed; reload before deleting it" });
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-possession-notice] DELETE error:", e.message);
@@ -298,13 +299,16 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
     if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId FROM dbo.CrmPossessionNotice WHERE Id = @id");
+      .query("SELECT BookingId, Status FROM dbo.CrmPossessionNotice WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    if (cur.recordset[0].Status !== CrmStatus.DRAFT) {
+      return res.status(409).json({ error: `Only Draft possession notices can be edited. Current status: '${cur.recordset[0].Status}'` });
+    }
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const noteSet = "Notes" in b;
-    await pool.request()
+    const updated = await pool.request()
       .input("id", sql.Int, id)
       .input("odt", sql.Date, b.OfferedDate || null)
       .input("rdl", sql.Date, b.ResponseDeadline || null)
@@ -318,8 +322,9 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
           DeliveryMode = ISNULL(@mode, DeliveryMode),
           Notes = CASE WHEN @note_set = 1 THEN @note ELSE Notes END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = '${CrmStatus.DRAFT}'
       `);
+    if (!updated.rowsAffected?.some((count) => count > 0)) return res.status(409).json({ error: "The notice has been sent; reload before editing it" });
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-possession-notice] PUT error:", e.message);
@@ -347,7 +352,7 @@ router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), 
       return res.status(400).json({ error: "DeliveryMode is required to mark the notice sent" });
     }
 
-    await pool.request()
+    const sent = await pool.request()
       .input("id", sql.Int, id)
       .input("mode", sql.NVarChar(50), b.DeliveryMode || null)
       .input("ub", sql.Int, actor)
@@ -355,8 +360,9 @@ router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), 
         UPDATE dbo.CrmPossessionNotice SET
           Status = 'Sent', DeliveryMode = ISNULL(@mode, DeliveryMode),
           SentAt = SYSDATETIME(), UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = '${CrmStatus.DRAFT}'
       `);
+    if (!sent.rowsAffected?.some((count) => count > 0)) return res.status(409).json({ error: "The notice status changed; reload before marking it sent" });
     res.json({ success: true, status: "Sent" });
   } catch (e) {
     console.error("[crm-possession-notice] mark-sent error:", e.message);
@@ -379,14 +385,15 @@ router.put("/:id/mark-acknowledged", requirePageRight("crm-possession-notice", "
       return res.status(400).json({ error: `Cannot mark-acknowledged from status '${cur.recordset[0].Status}'` });
     }
 
-    await pool.request()
+    const acknowledged = await pool.request()
       .input("id", sql.Int, id)
       .input("ub", sql.Int, actor)
       .query(`
         UPDATE dbo.CrmPossessionNotice SET
           Status = 'Acknowledged', AcknowledgedAt = SYSDATETIME(), UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = 'Sent'
       `);
+    if (!acknowledged.rowsAffected?.some((count) => count > 0)) return res.status(409).json({ error: "The notice response changed; reload before acknowledging it" });
     res.json({ success: true, status: "Acknowledged" });
   } catch (e) {
     console.error("[crm-possession-notice] mark-acknowledged error:", e.message);
@@ -411,7 +418,7 @@ router.put("/:id/mark-disputed", requirePageRight("crm-possession-notice", "edit
       return res.status(400).json({ error: `Cannot mark-disputed from status '${cur.recordset[0].Status}'` });
     }
 
-    await pool.request()
+    const acknowledged = await pool.request()
       .input("id", sql.Int, id)
       .input("reason", sql.NVarChar(sql.MAX), b.DisputeReason)
       .input("ub", sql.Int, actor)
@@ -419,8 +426,9 @@ router.put("/:id/mark-disputed", requirePageRight("crm-possession-notice", "edit
         UPDATE dbo.CrmPossessionNotice SET
           Status = 'Disputed', DisputedAt = SYSDATETIME(), DisputeReason = @reason,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = 'Sent'
       `);
+    if (!acknowledged.rowsAffected?.some((count) => count > 0)) return res.status(409).json({ error: "The notice response changed; reload before recording acknowledgement" });
     res.json({ success: true, status: "Disputed" });
   } catch (e) {
     console.error("[crm-possession-notice] mark-disputed error:", e.message);
@@ -448,7 +456,7 @@ router.put("/:id/retract-dispute", requirePageRight("crm-possession-notice", "ed
       return res.status(400).json({ error: `Can only retract a Disputed notice (current status: '${cur.recordset[0].Status}')` });
     }
 
-    await pool.request()
+    const retracted = await pool.request()
       .input("id", sql.Int, id)
       .input("reason", sql.NVarChar(sql.MAX), b.RetractReason.trim())
       .input("ub", sql.Int, actorId(req))
@@ -457,8 +465,9 @@ router.put("/:id/retract-dispute", requirePageRight("crm-possession-notice", "ed
           Status = '${CrmStatus.DRAFT}', DisputedAt = NULL, DisputeReason = NULL,
           Notes = ISNULL(Notes + CHAR(10), '') + 'Dispute retracted: ' + @reason,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = 'Disputed'
       `);
+    if (!retracted.rowsAffected?.some((count) => count > 0)) return res.status(409).json({ error: "The notice status changed; reload before retracting the dispute" });
     res.json({ success: true, status: CrmStatus.DRAFT });
   } catch (e) {
     console.error("[crm-possession-notice] retract-dispute error:", e.message);
@@ -490,7 +499,7 @@ router.put("/:id/proxy-acknowledge", requirePageRight("crm-possession-notice", "
     }
 
     const proxyNote = `[Acknowledged via ${ProxyMethod} — recorded by staff] ${ProxyRemarks.trim()}`;
-    await pool.request()
+    const disputed = await pool.request()
       .input("id",   sql.Int, id)
       .input("note", sql.NVarChar(sql.MAX), proxyNote)
       .input("ub",   sql.Int, actorId(req))
@@ -499,8 +508,9 @@ router.put("/:id/proxy-acknowledge", requirePageRight("crm-possession-notice", "
           Status = 'Acknowledged', AcknowledgedAt = SYSDATETIME(),
           Notes = ISNULL(Notes + CHAR(10), '') + @note,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = 'Sent'
       `);
+    if (!disputed.rowsAffected?.some((count) => count > 0)) return res.status(409).json({ error: "The notice response changed; reload before recording the dispute" });
 
     res.json({ success: true, status: "Acknowledged" });
   } catch (e) {
@@ -529,7 +539,7 @@ router.put("/:id/proxy-dispute", requirePageRight("crm-possession-notice", "edit
       return res.status(400).json({ error: `Can only record a dispute for a Sent notice (current: '${cur.recordset[0].Status}')` });
     }
 
-    await pool.request()
+    const disputed = await pool.request()
       .input("id",     sql.Int, id)
       .input("reason", sql.NVarChar(sql.MAX), `[via ${ProxyMethod}] ${ProxyRemarks.trim()}`)
       .input("ub",     sql.Int, actorId(req))
@@ -538,8 +548,9 @@ router.put("/:id/proxy-dispute", requirePageRight("crm-possession-notice", "edit
           Status = 'Disputed', DisputedAt = SYSDATETIME(),
           DisputeReason = @reason,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = 'Sent'
       `);
+    if (!disputed.rowsAffected?.some((count) => count > 0)) return res.status(409).json({ error: "The notice response changed; reload before recording the dispute" });
 
     res.json({ success: true, status: "Disputed" });
   } catch (e) {

@@ -1,8 +1,8 @@
 // By User, left side: everyone with activity in the period, with how much they changed.
 import React from "react";
-import { Loader2, Search } from "lucide-react";
+import { Download, Loader2, Search } from "lucide-react";
 import type { UserActivitySummary } from "@/api/userActivityApi";
-import { INPUT, LBL, RULE, chip } from "./activityShared";
+import { INPUT, KEY_LINE, LBL, RULE, chip } from "./activityShared";
 
 export const RANGES = [
   { key: "today", label: "Today" },
@@ -30,7 +30,11 @@ export const PeopleList: React.FC<{
   setRange: (r: RangeKey) => void;
   selected: string | null;
   setSelected: (id: string) => void;
-}> = ({ users, loading, search, setSearch, range, setRange, selected, setSelected }) => (
+  /** Excel of everyone listed here, for the selected period and kind. */
+  onExportAll: () => void;
+  /** Progress ("3 / 12") while that export runs, else null. */
+  exportingAll: string | null;
+}> = ({ users, loading, search, setSearch, range, setRange, selected, setSelected, onExportAll, exportingAll }) => (
   <div className="bg-card flex flex-col lg:max-h-[calc(100vh-14rem)]" style={{ border: RULE }}>
     <div className="p-3 space-y-2.5" style={{ borderBottom: RULE }}>
       <div className="relative">
@@ -44,6 +48,16 @@ export const PeopleList: React.FC<{
           </button>
         ))}
       </div>
+      <button
+        type="button"
+        onClick={onExportAll}
+        disabled={!!exportingAll || loading || users.length === 0}
+        className={`${KEY_LINE} h-8 w-full justify-center`}
+        title="Download everyone listed, for this period and kind, day by day, as an Excel file"
+      >
+        {exportingAll ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+        {exportingAll ? `Exporting… ${exportingAll}` : `Export everyone (${users.length})`}
+      </button>
     </div>
     <div className="overflow-y-auto flex-1">
       {loading ? (
