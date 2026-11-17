@@ -10,6 +10,7 @@ const send = (method: string, body?: unknown): RequestInit => ({ method, headers
 type Msg = { message: string };
 
 export interface DeedRegRow {
+  ProjectId?: number | null;
   LandId: number; LandCode: string; LandName: string; DistrictName: string | null; MouzaName: string | null; WorkflowStatus: string;
   RsDagNo: string | null; LrDagNo: string | null; DeedTargetDate: string | null; L2ApprovedAt: string | null;
   ConsTotalAmount: number | null; ConsAdvanceAmount: number | null; Paid: number; InstalmentsOverdue?: number; Queries: number; QueryTotal: number | null;

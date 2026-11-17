@@ -342,7 +342,7 @@ const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
         {rights.canEdit && !adding && (
           <div className="mt-4 flex flex-wrap gap-2">
             <button className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-card" style={{ background: LEGAL_GRADIENT }} onClick={() => setAdding(true)}>
-              <Plus size={13} /> {current.length ? "Record ownership change" : "Add first owner"}
+              <Plus size={13} /> {current.length ? "Record ownership change" : "New first owner"}
             </button>
           </div>
         )}

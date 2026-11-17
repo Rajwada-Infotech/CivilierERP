@@ -2,6 +2,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Global } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
+import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { LegalMasterTable } from "../LegalMasterPage";
 import { legalMasterByKey } from "../legalMasters";
 import type { LegalRow } from "@/api/legalMastersApi";
@@ -32,6 +33,7 @@ export default function LandPropertyListPage() {
   const [params, setParams] = useSearchParams();
   const filterKey = params.get("filter") ?? "";
   const filter = FILTERS[filterKey];
+  const { inScope } = useProjectScope();
   const canDelete = usePageRights(entry.pageKey).canDelete;
   const queryClient = useQueryClient();
 
@@ -79,7 +81,7 @@ export default function LandPropertyListPage() {
       >
 
         <p className="mb-3 border border-border px-3 py-2 text-xs text-muted-foreground">
-          <b className="text-foreground">Add Land</b> here is for land the company already owns (existing / backlog). Enter what
+          <b className="text-foreground">New Land Property</b> here is for land the company already owns (existing / backlog). Enter what
           you have; ownership history, documents, legal records, loans, mutations, payments and tax can be added later from the
           Land Profile. <b className="text-foreground">Buying new land?</b> Start it from{" "}
           <button className="underline hover:text-foreground" onClick={() => navigate("/legal/land/enquiries")}>Land Enquiries</button>{" "}
@@ -110,7 +112,7 @@ export default function LandPropertyListPage() {
           defaults={{ LandStatus: "Owned" }}
           // Land added here is land the company already owns; new purchases come in through Land Enquiries.
           fixed={{ EntryType: BACKLOG }}
-          rowFilter={filter?.test}
+          rowFilter={(r) => inScope(r.ProjectId) && (!filter || filter.test(r))}
           onCreated={(newId) => navigate(`/legal/land/properties/${newId}?tab=overview`)}
           rowActions={(raw) => (
             <span className="inline-flex gap-1.5">

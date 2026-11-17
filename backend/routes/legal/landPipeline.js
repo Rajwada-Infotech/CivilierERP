@@ -523,7 +523,7 @@ router.put("/:id/project", requirePageRight(LAND_PAGE, "edit"), async (req, res)
 router.get("/pending-queue", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
   try {
     const r = await getPool().request().query(`
-      SELECT l.LandId, l.LandCode, l.LandName, l.EntryType, l.LandStatus,
+      SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, l.EntryType, l.LandStatus,
              ISNULL(l.VerificationStatus, N'Draft') AS VerificationStatus,
              ISNULL(l.L1Status, N'Pending') AS L1Status,
              ISNULL(l.L2Status, N'Pending') AS L2Status,
@@ -1784,7 +1784,7 @@ router.get("/deed-process/list", requirePageRight(LAND_PAGE, "view"), async (req
     const chg = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') AS c")).recordset[0].c;
     const appr = !!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedApprovalStatus') AS c")).recordset[0].c;
     const r = await pool.request().query(`
-      SELECT l.LandId, l.LandCode, l.LandName, l.WorkflowStatus, d.DistrictName, m.MouzaName, l.FinalVerifiedAt,
+      SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, l.WorkflowStatus, d.DistrictName, m.MouzaName, l.FinalVerifiedAt,
              CONVERT(char(10), l.DeedTargetDate, 23) AS DeedTargetDate, l.DeedCompletedAt,
              ISNULL(l.L1Status, N'Pending') AS L1Status, (SELECT name FROM dbo.users WHERE id = l.L1ReviewerId) AS L1By,
              ISNULL(l.L2Status, N'Pending') AS L2Status,
@@ -2190,7 +2190,7 @@ router.get("/post-registration/list", requirePageRight(LAND_PAGE, "view"), async
       "SELECT l.LandId FROM dbo.LegalLand l WHERE l.IsActive = 1 AND l.WorkflowStatus = N'Registered' AND NOT EXISTS (SELECT 1 FROM dbo.LegalPostRegTask t WHERE t.LandId = l.LandId)")).recordset;
     for (const m of missing) await createPostRegTasks(pool, { user: { userId: null }, ip: "" }, m.LandId);
     const lands = (await pool.request().query(`
-      SELECT l.LandId, l.LandCode, l.LandName, d.DistrictName, m.MouzaName, l.RegCompletedAt, l.RegDeedFileId,
+      SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, d.DistrictName, m.MouzaName, l.RegCompletedAt, l.RegDeedFileId,
              (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = l.RegDeedFileId) AS RegDeedFileName
       FROM dbo.LegalLand l LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
       WHERE l.IsActive = 1 AND l.WorkflowStatus = N'Registered' ORDER BY l.RegCompletedAt DESC`)).recordset;
@@ -2198,7 +2198,10 @@ router.get("/post-registration/list", requirePageRight(LAND_PAGE, "view"), async
       SELECT t.TaskId, t.LandId, t.TaskNo, t.Task, t.Status, t.RefNo, CONVERT(char(10), t.DueDate, 23) AS DueDate, t.Remarks, t.FileId,
              (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = t.FileId) AS FileName, t.UpdatedAt, (SELECT name FROM dbo.users WHERE id = t.UpdatedBy) AS UpdatedByName
       FROM dbo.LegalPostRegTask t JOIN dbo.LegalLand l ON l.LandId = t.LandId AND l.WorkflowStatus = N'Registered' ORDER BY t.LandId, t.TaskNo`)).recordset;
-    res.json({ lands: lands.map((l) => ({ ...l, tasks: tasks.filter((t) => t.LandId === l.LandId) })), statuses: POST_REG_STATUS });
+    const clearances = (await clearanceReady(pool)) ? (await pool.request().query(`${CLEARANCE_SELECT} WHERE c.Kind IN (N'LA', N'ULC')`)).recordset : [];
+    res.json({ lands: lands.map((l) => ({ ...l, tasks: tasks.filter((t) => t.LandId === l.LandId),
+      clearances: Object.keys(CLEARANCE_KINDS).map((k) => ({ Kind: k, Label: CLEARANCE_KINDS[k], Status: "Not Applied", LandId: l.LandId, ...clearances.find((c) => c.LandId === l.LandId && c.Kind === k) })) })),
+      statuses: POST_REG_STATUS });
   } catch (err) {
     console.error("[legal-land] post-reg list:", err.message);
     res.status(500).json({ error: "Could not load post-registration tasks" });
@@ -2225,6 +2228,124 @@ router.put("/post-registration/task/:taskId", requirePageRight(LAND_PAGE, "edit"
     res.json({ message: `${t.Task}: ${b.status}` });
   } catch (err) {
     console.error("[legal-land] post-reg task:", err.message);
+    res.status(500).json({ error: "Could not save" });
+  }
+});
+
+// ── LA (Land Acquisition) & ULC (Urban Land Ceiling) clearance ─────────────────────────────────────────────────
+// Tracked per land: Apply (date + application no.) → Obtain (date + certificate no.) or Reject. The certificate copy is
+// attached at Post-Registration once the clearance is obtained. Every change is written to the audit trail.
+const CLEARANCE_KINDS = { LA: "LA (Land Acquisition) clearance", ULC: "ULC (Urban Land Ceiling) clearance" };
+const CLEARANCE_STATUS = ["Not Applied", "Applied", "Under Processing", "Obtained", "Rejected"];
+const clearanceReady = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalLandClearance', 'U') AS t")).recordset[0].t;
+const CLEARANCE_SELECT = `
+  SELECT c.ClearanceId, c.LandId, c.Kind, c.Status, CONVERT(char(10), c.AppliedOn, 23) AS AppliedOn, c.ApplicationNo,
+         CONVERT(char(10), c.ObtainedOn, 23) AS ObtainedOn, c.CertificateNo, c.Remarks, c.FileId,
+         (SELECT FileName FROM dbo.LegalMasterFile f WHERE f.FileId = c.FileId) AS FileName,
+         c.UpdatedAt, (SELECT name FROM dbo.users WHERE id = c.UpdatedBy) AS UpdatedByName
+  FROM dbo.LegalLandClearance c`;
+const clearanceRows = async (pool, landId) => {
+  const rows = (await pool.request().input("Id", sql.Int, landId).query(`${CLEARANCE_SELECT} WHERE c.LandId = @Id`)).recordset;
+  return Object.keys(CLEARANCE_KINDS).map((k) => rows.find((r) => r.Kind === k) || { ClearanceId: null, LandId: landId, Kind: k, Status: "Not Applied" })
+    .map((r) => ({ ...r, Label: CLEARANCE_KINDS[r.Kind] }));
+};
+
+// GET /clearance/list — pipeline step between Deed Process and Deed Registration: every land from Deed Process on.
+router.get("/clearance/list", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await clearanceReady(pool))) return res.json({ lands: [], statuses: CLEARANCE_STATUS });
+    const lands = (await pool.request().query(`
+      SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, l.WorkflowStatus, d.DistrictName, m.MouzaName
+      FROM dbo.LegalLand l LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      WHERE l.IsActive = 1 AND l.WorkflowStatus IN (N'Deed Process', N'Deed Completed', N'Registered')
+      ORDER BY CASE l.WorkflowStatus WHEN N'Deed Process' THEN 0 WHEN N'Deed Completed' THEN 1 ELSE 2 END, l.LandCode`)).recordset;
+    const rows = (await pool.request().query(CLEARANCE_SELECT)).recordset;
+    res.json({ statuses: CLEARANCE_STATUS, lands: lands.map((l) => ({ ...l,
+      clearances: Object.keys(CLEARANCE_KINDS).map((k) => ({ Kind: k, Label: CLEARANCE_KINDS[k], Status: "Not Applied", LandId: l.LandId, ...rows.find((c) => c.LandId === l.LandId && c.Kind === k) })) })) });
+  } catch (err) {
+    console.error("[legal-land] clearance list:", err.message);
+    res.status(500).json({ error: "Could not load LA / ULC clearance" });
+  }
+});
+
+// GET /:id/clearance — the land's LA and ULC clearance.
+router.get("/:id/clearance", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const landId = idParam(req.params.id);
+  if (!landId) return res.status(400).json({ error: "Invalid land" });
+  try {
+    const pool = getPool();
+    if (!(await clearanceReady(pool))) return res.json({ items: [], statuses: CLEARANCE_STATUS });
+    res.json({ items: await clearanceRows(pool, landId), statuses: CLEARANCE_STATUS });
+  } catch (err) {
+    console.error("[legal-land] clearance get:", err.message);
+    res.status(500).json({ error: "Could not load LA / ULC clearance" });
+  }
+});
+
+// POST /:id/clearance/:kind { action: apply | progress | obtain | reject | attach, date, refNo, remarks, fileId }
+router.post("/:id/clearance/:kind", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  const landId = idParam(req.params.id);
+  const kind = String(req.params.kind || "").toUpperCase();
+  const b = req.body || {};
+  if (!landId || !CLEARANCE_KINDS[kind]) return res.status(400).json({ error: "Invalid clearance" });
+  const date = isoDate(b.date);
+  const refNo = text(b.refNo, 100);
+  const remarks = text(b.remarks, 1000);
+  const fileId = b.fileId ? idParam(b.fileId) : null;
+  try {
+    const pool = getPool();
+    if (!(await clearanceReady(pool))) return res.status(409).json({ error: "LA / ULC clearance is not set up on this database yet" });
+    const prev = (await clearanceRows(pool, landId)).find((r) => r.Kind === kind);
+    let set;
+    switch (b.action) {
+      case "apply":
+        if (!date) return res.status(400).json({ error: "Enter the application date" });
+        set = { Status: "Applied", AppliedOn: date, ApplicationNo: refNo ?? prev.ApplicationNo ?? null, ObtainedOn: null, CertificateNo: null };
+        break;
+      case "progress":
+        if (!["Applied", "Under Processing"].includes(prev.Status)) return res.status(409).json({ error: "Apply first" });
+        set = { Status: "Under Processing" };
+        break;
+      case "obtain":
+        if (!date) return res.status(400).json({ error: "Enter the date it was obtained" });
+        if (prev.AppliedOn && date < prev.AppliedOn) return res.status(400).json({ error: "Obtained date can't be before the application date" });
+        set = { Status: "Obtained", ObtainedOn: date, CertificateNo: refNo ?? prev.CertificateNo ?? null };
+        break;
+      case "reject":
+        if (!remarks) return res.status(400).json({ error: "Write the reason" });
+        set = { Status: "Rejected" };
+        break;
+      case "attach":
+        if (prev.Status !== "Obtained") return res.status(409).json({ error: "Attach the certificate once the clearance is obtained" });
+        if (!fileId) return res.status(400).json({ error: "Choose the file" });
+        set = {};
+        break;
+      default:
+        return res.status(400).json({ error: "Invalid action" });
+    }
+    const r = pool.request().input("Id", sql.Int, landId).input("K", sql.NVarChar(10), kind)
+      .input("S", sql.NVarChar(30), set.Status ?? prev.Status)
+      .input("A", sql.Date, "AppliedOn" in set ? set.AppliedOn : prev.AppliedOn ?? null)
+      .input("An", sql.NVarChar(100), "ApplicationNo" in set ? set.ApplicationNo : prev.ApplicationNo ?? null)
+      .input("O", sql.Date, "ObtainedOn" in set ? set.ObtainedOn : prev.ObtainedOn ?? null)
+      .input("Cn", sql.NVarChar(100), "CertificateNo" in set ? set.CertificateNo : prev.CertificateNo ?? null)
+      .input("R", sql.NVarChar(1000), remarks ?? prev.Remarks ?? null)
+      .input("F", sql.Int, fileId ?? prev.FileId ?? null)
+      .input("U", sql.Int, req.user?.userId || null);
+    await r.query(`
+      IF NOT EXISTS (SELECT 1 FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1) THROW 50001, 'Land not found', 1;
+      MERGE dbo.LegalLandClearance AS t USING (SELECT @Id AS LandId, @K AS Kind) AS s ON t.LandId = s.LandId AND t.Kind = s.Kind
+      WHEN MATCHED THEN UPDATE SET Status = @S, AppliedOn = @A, ApplicationNo = @An, ObtainedOn = @O, CertificateNo = @Cn, Remarks = @R, FileId = @F, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME()
+      WHEN NOT MATCHED THEN INSERT (LandId, Kind, Status, AppliedOn, ApplicationNo, ObtainedOn, CertificateNo, Remarks, FileId, UpdatedBy, UpdatedAt)
+        VALUES (@Id, @K, @S, @A, @An, @O, @Cn, @R, @F, @U, SYSUTCDATETIME());`);
+    const verb = { apply: "applied", progress: "under processing", obtain: "obtained", reject: "rejected", attach: "certificate attached" }[b.action];
+    await writeAudit(pool, req, { action: `${kind} clearance ${verb}`, entityType: "Land Property", entityId: landId, landId,
+      oldValue: { status: prev.Status }, newValue: { status: set.Status ?? prev.Status, date, refNo }, remarks, documentRef: fileId ? `File ${fileId}` : null });
+    res.json({ message: `${kind} clearance ${verb}`, items: await clearanceRows(pool, landId) });
+  } catch (err) {
+    if (err.number === 50001) return res.status(404).json({ error: "Land not found" });
+    console.error("[legal-land] clearance save:", err.message);
     res.status(500).json({ error: "Could not save" });
   }
 });

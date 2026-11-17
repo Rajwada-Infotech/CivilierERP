@@ -6,16 +6,19 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getLandPendingQueue } from "@/api/legalLandApi";
+import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { Button } from "@/components/ui/button";
 
 // Pending Verification: lands waiting for Final Verify. (Deed Registration has its own page — LandDeedRegistrationPage.)
 export default function LegalApprovalsInboxPage() {
   const landRights = usePageRights("legal-land-master");
   const navigate = useNavigate();
-  const { data: landQueue = [], isLoading: isLandLoading } = useQuery({
+  const { inScope } = useProjectScope();
+  const { data: allLandQueue = [], isLoading: isLandLoading } = useQuery({
     queryKey: ["legal-land-pending-queue"],
     queryFn: getLandPendingQueue,
   });
+  const landQueue = allLandQueue.filter((l) => inScope(l.ProjectId));
 
   return (
     <>

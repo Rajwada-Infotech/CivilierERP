@@ -14,7 +14,7 @@ import { LegalMasterTable } from "../LegalMasterPage";
 import { getLegalRows, type LegalRow } from "@/api/legalMastersApi";
 import { openLegalMap } from "@/components/legal/LegalDocumentPreview";
 import { legalMasterByKey } from "../legalMasters";
-import { ProjectPicker, useLegalProject } from "@/components/legal/ProjectPicker";
+import { useProjectScope } from "@/components/legal/ProjectPicker";
 
 // Land enquiries: a new land opportunity. Converting one creates the Land ID and opens its Land Profile;
 // a converted enquiry stays as it was, linked to its land.
@@ -24,7 +24,8 @@ export default function LandEnquiryPage() {
   const queryClient = useQueryClient();
   const landRights = usePageRights("legal-land-master");
   const rights = usePageRights(entry.pageKey);
-  const [projectId, setProjectId] = useLegalProject();
+  const { scope: legalScope, setScope: setLegalScope } = useProjectScope();
+  const projectId = typeof legalScope === "number" ? legalScope : null;
   const [filter, setFilter] = useState<string>("all");
   // The enquiry whose RS / LR records are open under the table (opens by itself after a new enquiry is saved).
   const [plotsId, setPlotsId] = useState<number | null>(null);
@@ -34,9 +35,9 @@ export default function LandEnquiryPage() {
   // so they never go missing — open one, set its project, and it moves under that project.
   // Scope: one project (remembered), "all" projects (the dashboard's figures cover every project) or "none" (enquiries
   // raised before a project was required). "all" / "none" come from the link or the picker and are not remembered.
-  const [scope, setScope] = useState<"all" | "none" | null>(() => { const v = new URLSearchParams(window.location.search).get("project"); return v === "all" || v === "none" ? v : null; });
+  const scope = typeof legalScope === "number" ? null : legalScope;
   const orphans = scope === "none";
-  const setOrphans = (on: boolean) => setScope(on ? "none" : null);
+  const setOrphans = (on: boolean) => setLegalScope(on ? "none" : "all");
   const isActive = (r: LegalRow) => r.IsActive !== false && r.IsActive !== 0;
   const orphanN = allRows.filter((r) => isActive(r) && (r.ProjectId == null || r.ProjectId === "")).length;
   const inScope = (r: LegalRow) => (scope === "all" ? true : orphans ? r.ProjectId == null || r.ProjectId === "" : Number(r.ProjectId) === projectId);
@@ -101,11 +102,6 @@ export default function LandEnquiryPage() {
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", entry.label]} />
       <LegalShell title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and Land Profile." icon={MessageQuestion}>
-        <ProjectPicker value={scope ?? projectId} allowAll onChange={(id) => {
-          // A choice made here replaces the one from the link.
-          if (window.location.search) navigate("/legal/land/enquiries", { replace: true });
-          if (id === "all" || id === "none") setScope(id); else { setScope(null); setProjectId(id); }
-        }} />
         {orphanN > 0 && scope !== "none" && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border border-amber-500/60 bg-amber-500/10 px-4 py-2 text-sm">
             <span><b>{orphanN} enquir{orphanN > 1 ? "ies have" : "y has"} no project</b> — raised before a project was required, so {orphanN > 1 ? "they don't" : "it doesn't"} show under any project but still count on the dashboard.</span>
@@ -139,7 +135,7 @@ export default function LandEnquiryPage() {
           // One project: a new enquiry is raised under it. All projects: the form asks for the project.
           fixed={scope ? undefined : { ProjectId: String(projectId) }}
           noAdd={orphans}
-          addButton={orphans ? undefined : "Add Land Enquiry"}
+          addButton={orphans ? undefined : "New Land Enquiry"}
           onCreated={(newId) => setPlotsId(newId)}
           rowClassName={(raw) => STATUS_ROW[String(raw.EnquiryStatus)]}
           // A converted enquiry is history: its details are kept and changed on the land it became.

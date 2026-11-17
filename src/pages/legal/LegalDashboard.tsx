@@ -264,7 +264,7 @@ export default function LegalDashboard() {
 
             {(!land?.allLands || land.allLands.length === 0) ? (
               <div className="py-10 text-center text-xs text-muted-foreground">
-                No lands recorded yet. Click "Add Land" to add your first property.
+                No lands recorded yet. Click "New Land" to add your first property.
               </div>
             ) : (
               <div className="overflow-x-auto">
