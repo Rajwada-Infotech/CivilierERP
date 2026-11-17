@@ -103,6 +103,15 @@ export const LOGIN_CSS = `
   transition: border-color .15s, background-color .15s;
 }
 .login-sheet .ls-outline:hover { border-color: #b7c3cc; background: #edf1f3; }
+/* The other portals: three round buttons in a row, the name under each. */
+.login-sheet .ls-portal { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; color: var(--ink); font-size: 12.5px; font-weight: 500; text-align: center; }
+.login-sheet .ls-portal-dot {
+  width: 58px; height: 58px; border-radius: 9999px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--frame-hi); border: 1px solid var(--line); transition: border-color .15s, background-color .15s, transform .15s;
+}
+.login-sheet .ls-portal:hover .ls-portal-dot { border-color: #b7c3cc; background: #edf1f3; }
+.login-sheet .ls-portal:focus-visible { outline: none; }
+.login-sheet .ls-portal:focus-visible .ls-portal-dot { outline: 2px solid var(--brand); outline-offset: 3px; }
 .login-sheet .ls-link { color: var(--brand); font-weight: 600; text-underline-offset: 3px; }
 .login-sheet .ls-link:hover { text-decoration: underline; }
 .login-sheet .ls-eye { color: var(--muted); transition: color .15s; }

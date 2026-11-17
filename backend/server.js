@@ -215,6 +215,7 @@ const ALL_ROUTES = [
   { path: "/api/charge-head", file: "./routes/chargeHead" },
   { path: "/api/maintenance", file: "./routes/maintenance" },
   { path: "/api/maintenance-bills", file: "./routes/maintenanceBill" },
+  { path: "/api/maintenance-key-custodian", file: "./routes/maintenanceKeyCustodian" },
   { path: "/api/security-attendance", file: "./routes/securityAttendance" },
   { path: "/api/electricity-maintenance", file: "./routes/electricityMaintenance" },
   { path: "/api/item-groups", file: "./routes/itemGroup" },

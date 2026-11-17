@@ -173,6 +173,7 @@ const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills
 const SecurityAttendance = lazy(() => import("./pages/maintenance/SecurityAttendance"));
 const ElectricityMaintenance = lazy(() => import("./pages/maintenance/ElectricityMaintenance"));
 const MaintenanceServiceRequests = lazy(() => import("./pages/maintenance/MaintenanceServiceRequests"));
+const KeyCustodian = lazy(() => import("./pages/maintenance/KeyCustodian"));
 const MeterReadingMaster = lazy(() => import("./pages/masters/MeterReadingMaster"));
 const ElectricityProviderMaster = lazy(() => import("./pages/masters/ElectricityProviderMaster"));
 const ElectricityTariffMaster = lazy(() => import("./pages/masters/ElectricityTariffMaster"));
@@ -1343,6 +1344,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="maintenance-security-attendance">
             <SecurityAttendance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/key-custodian"
+        element={
+          <ProtectedRoute pageKey="maintenance-key-custodian">
+            <KeyCustodian />
           </ProtectedRoute>
         }
       />
