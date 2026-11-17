@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { getPortalPunchState, portalPunch, type PunchLocation, type PunchState } from "@/api/employeePortalApi";
 import BreakPanel from "./BreakPanel";
 import { BodyPortal } from "@/components/ui/body-portal";
-import { fmtTime, keyInk, keyLine, labelCls } from "./employeeUi";
+import { fmtTime, isViewOnly, keyInk, keyLine, labelCls } from "./employeeUi";
 
 const MAX_WIDTH = 640;
 const JPEG_QUALITY = 0.72;
@@ -161,8 +161,8 @@ export default function PunchCard() {
                 <div><p className="text-[0.6875rem] font-bold uppercase tracking-[0.12em] text-white/75">Out time</p><p className="font-heading font-bold text-2xl tabular-nums">{cur?.outTime ? fmtTime(cur.outTime) : "—"}</p><p className="text-xs text-white/85">{place(cur?.outLocation ?? null)}</p></div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {data?.allowed.in && <button className="ep-btn ep-btn-light" onClick={() => setDialog("in")}><LogIn size={14} /> Punch in</button>}
-                {data?.allowed.out && <button className="ep-btn ep-btn-light" onClick={() => setDialog("out")}><LogOut size={14} /> Punch out</button>}
+                {data?.allowed.in && <button className="ep-btn ep-btn-light" disabled={isViewOnly()} onClick={() => setDialog("in")}><LogIn size={14} /> Punch in</button>}
+                {data?.allowed.out && <button className="ep-btn ep-btn-light" disabled={isViewOnly()} onClick={() => setDialog("out")}><LogOut size={14} /> Punch out</button>}
                 {data?.state === "COMPLETED" && <span className="text-sm text-white/90">Today's attendance is complete.</span>}
                 {data?.state === "ON_BREAK" && <span className="text-sm text-white/90">You are on a break — end it before punching out.</span>}
               </div>

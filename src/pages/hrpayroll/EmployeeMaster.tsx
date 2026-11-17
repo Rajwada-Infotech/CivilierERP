@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Profile2User, Camera } from "iconsax-react";
-import { FileText, X } from "lucide-react";
+import { Eye, FileText, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
@@ -27,6 +27,7 @@ import { getUnlinkedEmployeeCandidates, type UnlinkedEmployeeCandidate } from "@
 import { getSalaryStructureFamilies } from "@/api/salaryStructureApi";
 import { getDepartmentOptions } from "@/api/departmentMasterApi";
 import { WorkLocationTags } from "./WorkLocationTags";
+import { openEmployeePortalView } from "@/api/employeePortalApi";
 import { getDesignations } from "@/api/designationMasterApi";
 import { Wallet3 } from "iconsax-react";
 import { BodyPortal } from "@/components/ui/body-portal";
@@ -281,6 +282,7 @@ const SalaryBreakupModal: React.FC<{
 
 export default function EmployeeMaster() {
   const rights = usePageRights("employee-master");
+  const portalRights = usePageRights("employee-portal-access");
   const queryClient = useQueryClient();
   const [docsFor, setDocsFor] = useState<{ id: number; name: string } | null>(null);
   const [breakupFor, setBreakupFor] = useState<{ id: number; name: string } | null>(null);
@@ -635,6 +637,17 @@ export default function EmployeeMaster() {
           canCreate={rights.canCreate}
           canEdit={rights.canEdit}
           canDelete={rights.canDelete}
+          rowActions={(row) => portalRights.canEdit ? (
+            <button
+              type="button"
+              onClick={() => openEmployeePortalView(Number(row._id)).catch((e: Error) => toast.error(e.message))}
+              className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
+              title="View this employee's portal (view only, no login needed)"
+              aria-label="View employee portal"
+            >
+              <Eye size={13} />
+            </button>
+          ) : null}
           title="Employee"
           gridCols={3}
           collapsibleAddForm

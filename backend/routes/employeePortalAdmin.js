@@ -20,10 +20,46 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const authenticateToken = require("../middleware/auth");
-const { pageRightByMethod } = require("../middleware/requirePageRight");
+const jwt = require("jsonwebtoken");
+const { pageRightByMethod, requirePageRight } = require("../middleware/requirePageRight");
 const { getPool, sql } = require("../db");
 
 router.use(authenticateToken);
+
+// ── View an employee's portal (no password) ──────────────────────────────────
+// HR / Super Admin with edit right on this page get a short-lived, VIEW-ONLY session for one employee: it shows exactly
+// what the employee sees, and every write on the portal API is refused while it is used (see employeePortal.js).
+// Registered before the router-wide page-right check below so it carries its own explicit right.
+router.post("/employees/:id/view-session", requirePageRight("employee-portal-access", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return bad(res, "Invalid employee");
+  try {
+    const pool = getPool();
+    const emp = await loadEmployee(pool, id);
+    if (!emp) return bad(res, "Employee not found", 404);
+    const email = emailOf(emp.Email);
+    if (!email) return bad(res, "Set an e-mail address on the Employee Master record first. The portal is matched to the employee by it.");
+    const roleId = await employeeRoleId(pool);
+    const viewer = req.user?.email || req.user?.name || "unknown";
+    // The session belongs to the HR user (so it is valid and revocable like any other) but carries the Employee Portal role
+    // and the employee's identity, and the viewAs claim that makes it read-only.
+    const token = jwt.sign(
+      { userId: req.user.userId ?? req.user.id, roleId, role: "employee portal", email, name: emp.EmployeeName, viewAs: emp.EmployeeId, viewer },
+      process.env.JWT_SECRET,
+      { expiresIn: "2h" },
+    );
+    console.info(`[employee-portal-admin] ${viewer} opened the portal of employee ${emp.EmployeeId} (${emp.EmployeeName}) in view-only mode`);
+    res.json({
+      token,
+      user: { id: req.user.userId ?? req.user.id, name: emp.EmployeeName, email, role: "employee portal", roleId, can_accept_tickets: false, showLoginReminders: false, pagePermissions: [] },
+      viewer, employeeName: emp.EmployeeName,
+    });
+  } catch (err) {
+    console.error("[employee-portal-admin] POST view-session:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.use(pageRightByMethod("employee-portal-access"));
 
 const SALT_ROUNDS = 12;
@@ -44,6 +80,10 @@ async function loadEmployee(pool, id) {
   return r.recordset[0] || null;
 }
 
+// The portal credential's private e-mail in dbo.users: it never equals a real e-mail, so it can't collide with (or sign in as)
+// an ERP login. The employee still types their real e-mail at the Employee Portal.
+const placeholderEmail = (employeeId) => `employee-${employeeId}@portal.invalid`;
+
 async function employeeRoleId(pool) {
   const r = await pool.request().query("SELECT TOP 1 RId FROM dbo.Role WHERE LOWER(RName) = N'employee portal'");
   return r.recordset[0]?.RId ?? null;
@@ -54,11 +94,13 @@ router.get("/employees", async (req, res) => {
   try {
     const r = await getPool().request().query(`
       SELECT e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.Email, e.Department, e.Designation,
-             u.id AS UserId, u.discontinue AS Discontinued, LOWER(ro.RName) AS UserRole,
+             u.id AS UserId, u.discontinue AS Discontinued,
              (SELECT MAX(h.LoginAt) FROM dbo.UserLoginHistory h WHERE h.UserId = u.id AND h.Success = 1) AS LastLoginAt
       FROM dbo.EmployeeMaster e
-      LEFT JOIN dbo.users u ON LOWER(LTRIM(RTRIM(u.email))) = LOWER(LTRIM(RTRIM(e.Email)))
-      LEFT JOIN dbo.Role ro ON ro.RId = u.RoleId
+      -- The portal login is its own credential, linked to the employee (migration 677) -- not matched on e-mail,
+      -- so an ERP login on the same e-mail is irrelevant here.
+      LEFT JOIN dbo.EmployeePortalLogin l ON l.EmployeeId = e.EmployeeId
+      LEFT JOIN dbo.users u ON u.id = l.UserId
       WHERE e.IsActive = 1
       ORDER BY e.EmployeeName
     `);
@@ -66,9 +108,9 @@ router.get("/employees", async (req, res) => {
       r.recordset.map((x) => ({
         EmployeeId: x.EmployeeId, EmployeeCode: x.EmployeeCode, EmployeeName: x.EmployeeName, Email: x.Email,
         Department: x.Department, Designation: x.Designation, LastLoginAt: x.LastLoginAt,
-        // none: no login yet | active | disabled | other: this e-mail already belongs to a non-employee login
-        Access: !x.UserId ? "none" : x.UserRole !== "employee portal" ? "other" : x.Discontinued ? "disabled" : "active",
-        UserRole: x.UserId ? x.UserRole : null,
+        // none: no portal login yet | active | disabled. An e-mail that is also an ERP login no longer matters.
+        Access: !x.UserId ? "none" : x.Discontinued ? "disabled" : "active",
+        UserRole: null,
       })),
     );
   } catch (err) {
@@ -92,28 +134,37 @@ router.post("/employees/:id/enable", async (req, res) => {
     const roleId = await employeeRoleId(pool);
     if (!roleId) return bad(res, "The 'Employee Portal' role is missing. Run the latest database migration.", 500);
 
-    const existing = (await pool.request().input("Email", sql.NVarChar(150), email).query(
-      "SELECT u.id, u.RoleId, LOWER(r.RName) AS RoleName FROM dbo.users u LEFT JOIN dbo.Role r ON r.RId = u.RoleId WHERE LOWER(LTRIM(RTRIM(u.email))) = @Email",
-    )).recordset;
-    if (existing.length > 1) return bad(res, "More than one login uses this e-mail address. Resolve it in Users first.", 409);
-    const hash = await bcrypt.hash(String(req.body.password), SALT_ROUNDS);
+    // The Employee Portal finds an employee by e-mail, so two active employees can't share one.
+    const dup = await pool.request().input("Email", sql.NVarChar(150), email).input("Id", sql.Int, id).query(
+      "SELECT COUNT(*) AS N FROM dbo.EmployeeMaster WHERE IsActive = 1 AND EmployeeId <> @Id AND LOWER(LTRIM(RTRIM(Email))) = @Email",
+    );
+    if (dup.recordset[0].N > 0) return bad(res, "Another active employee has the same e-mail address. Give each employee their own e-mail first.", 409);
 
-    if (existing.length === 1) {
-      if (existing[0].RoleName !== "employee portal") {
-        return bad(res, `This e-mail already has a ${existing[0].RoleName || "staff"} login, which can't be turned into an employee login.`, 409);
-      }
-      await pool.request().input("Id", sql.Int, existing[0].id).input("Pw", sql.NVarChar, hash)
+    // The portal login is its OWN credential -- a separate dbo.users row (private placeholder e-mail) linked to the
+    // employee -- so an ERP login on the same e-mail is no obstacle and its password is never touched.
+    const hash = await bcrypt.hash(String(req.body.password), SALT_ROUNDS);
+    const existing = (await pool.request().input("E", sql.Int, id).query("SELECT UserId FROM dbo.EmployeePortalLogin WHERE EmployeeId = @E")).recordset[0];
+    if (existing) {
+      await pool.request().input("Id", sql.Int, existing.UserId).input("Pw", sql.NVarChar, hash)
         .query("UPDATE dbo.users SET discontinue = 0, password = @Pw WHERE id = @Id");
       return res.json({ message: "Employee Portal access re-enabled with the new password" });
     }
 
-    await pool.request()
-      .input("Name", sql.NVarChar(150), emp.EmployeeName).input("Email", sql.NVarChar(150), email)
-      .input("Pw", sql.NVarChar, hash).input("RoleId", sql.Int, roleId)
-      .query(`
-        INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets)
-        VALUES (@Name, @Email, @Pw, @RoleId, GETDATE(), 0, 0)
-      `);
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const u = await tx.request()
+        .input("Name", sql.NVarChar(150), emp.EmployeeName).input("Email", sql.NVarChar(150), placeholderEmail(id))
+        .input("Pw", sql.NVarChar, hash).input("RoleId", sql.Int, roleId)
+        .query(`
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets)
+          OUTPUT INSERTED.id
+          VALUES (@Name, @Email, @Pw, @RoleId, GETDATE(), 0, 0)
+        `);
+      await tx.request().input("E", sql.Int, id).input("U", sql.Int, u.recordset[0].id)
+        .query("INSERT INTO dbo.EmployeePortalLogin (EmployeeId, UserId) VALUES (@E, @U)");
+      await tx.commit();
+    } catch (e) { try { await tx.rollback(); } catch { /* already aborted */ } throw e; }
     res.status(201).json({ message: "Employee Portal access enabled" });
   } catch (err) {
     console.error("[employee-portal-admin] POST enable:", err.message);
@@ -124,11 +175,9 @@ router.post("/employees/:id/enable", async (req, res) => {
 async function employeeLogin(pool, id) {
   const emp = await loadEmployee(pool, id);
   if (!emp) return { error: "Employee not found", status: 404 };
-  const r = (await pool.request().input("Email", sql.NVarChar(150), emailOf(emp.Email)).query(
-    "SELECT u.id, LOWER(r.RName) AS RoleName FROM dbo.users u LEFT JOIN dbo.Role r ON r.RId = u.RoleId WHERE LOWER(LTRIM(RTRIM(u.email))) = @Email",
-  )).recordset;
-  if (r.length !== 1 || r[0].RoleName !== "employee portal") return { error: "This employee has no Employee Portal login.", status: 404 };
-  return { userId: r[0].id };
+  const r = (await pool.request().input("E", sql.Int, id).query("SELECT UserId FROM dbo.EmployeePortalLogin WHERE EmployeeId = @E")).recordset;
+  if (r.length !== 1) return { error: "This employee has no Employee Portal login.", status: 404 };
+  return { userId: r[0].UserId };
 }
 
 router.post("/employees/:id/reset-password", async (req, res) => {
