@@ -331,6 +331,16 @@ const BOOKING_SELECT = `
 // Bookings page's own right, and those pickers came up empty without it).
 const BOOKING_PICKER_RIGHTS = ["crm-bookings", "crm-payments", "crm-money-receipts", "crm-invoices", "crm-refunds",
   "crm-loan-details", "crm-brokerage", "crm-parking-booking", "crm-customer-bank-details", "crm-afs-query-payment", "crm-afs-registry"];
+// The columns the bookings list sorts by (?sortKey=), each a fixed expression — never the raw parameter.
+const BOOKING_SORT = {
+  CreatedAt: "b.CreatedAt",
+  BookingNo: "b.BookingNo",
+  BookingDate: "b.BookingDate",
+  Customer: "a.ApplicantName",
+  Status: "b.Status",
+  Value: "b.GrandTotal",
+};
+
 router.get("/", requireAnyPageRight(BOOKING_PICKER_RIGHTS, "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -377,8 +387,11 @@ router.get("/", requireAnyPageRight(BOOKING_PICKER_RIGHTS, "view"), async (req, 
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
     const FROM = `FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    // Sorted by a column the list offers (?sortKey=&sortDir=), newest first by default.
+    const sortCol = Object.hasOwn(BOOKING_SORT, req.query.sortKey) ? BOOKING_SORT[req.query.sortKey] : BOOKING_SORT.CreatedAt;
+    const ORDER = `ORDER BY ${sortCol} ${req.query.sortDir === "asc" ? "ASC" : "DESC"}, b.Id DESC`;
     const [result, countResult, statusResult] = await Promise.all([
-      req0.query(`${BOOKING_SELECT} ${where} ORDER BY b.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      req0.query(`${BOOKING_SELECT} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
       reqs[2].query(`SELECT b.Status, COUNT(*) AS n, SUM(CASE WHEN b.IsFrozen = 1 THEN 1 ELSE 0 END) AS frozen ${FROM} ${countsWhere} GROUP BY b.Status`),
     ]);
@@ -408,10 +421,21 @@ router.get("/villa-offers", requirePageRight("crm-bookings", "view"), async (req
     }
     const live = (alias) => `${alias}.IsActive = 1 AND ${alias}.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`;
     const rows = (await request.query(`
-      SELECT u.Id AS UnitId, u.UnitName, u.ProjectId, u.BlockId, e.company_id AS CompanyId, e.name AS ProjectName, vt.Code AS VillaTypeCode, vt.Name AS VillaTypeName,
-             p.PlotName, lb.Id AS LandBookingId, lb.BookingNo AS LandBookingNo, a.CustomerId, c.CustomerName, c.Mobile,
-             (SELECT ISNULL(SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)), 0) FROM dbo.CrmPaymentMilestone m
-               WHERE m.BookingId = lb.Id AND m.Status NOT IN (N'Paid', N'Waived')) AS LandDue
+      SELECT DISTINCT u.Id AS UnitId, u.UnitName, u.ProjectId, u.BlockId, e.company_id AS CompanyId, e.name AS ProjectName, vt.Code AS VillaTypeCode, vt.Name AS VillaTypeName,
+             (SELECT STRING_AGG(x.PlotName, N', ') FROM (
+                SELECT DISTINCT p2.PlotName
+                FROM dbo.PlotMaster p2
+                JOIN dbo.CrmBookingPlot bp2 ON bp2.PlotId = p2.Id AND bp2.Status = N'Active' AND bp2.BookingId = lb.Id
+                WHERE p2.ConvertedUnitId = u.Id AND p2.IsActive = 1
+              ) x) AS PlotName,
+             lb.Id AS LandBookingId, lb.BookingNo AS LandBookingNo, a.CustomerId, c.CustomerName, c.Mobile,
+             -- What the owner still owes on the plot booking: its unpaid milestones less the money already held on
+             -- account for it (the same available on-account figure the payment pages and resale cases count).
+             (SELECT CASE WHEN d.Due > oa.Held THEN d.Due - oa.Held ELSE 0 END
+                FROM (SELECT ISNULL(SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)), 0) AS Due FROM dbo.CrmPaymentMilestone m
+                       WHERE m.BookingId = lb.Id AND m.Status NOT IN (N'Paid', N'Waived')) d
+                CROSS JOIN (SELECT ISNULL(SUM(o.AvailableAmount), 0) AS Held FROM ${onAccountWithAvailableSql("o")}
+                       WHERE o.BookingId = lb.Id) oa) AS LandDue
       FROM dbo.UnitMaster u
       JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
       JOIN dbo.CrmBookingPlot bp ON bp.PlotId = p.Id AND bp.Status = N'Active'
@@ -424,7 +448,14 @@ router.get("/villa-offers", requirePageRight("crm-bookings", "view"), async (req
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking vb WHERE vb.UnitId = u.Id AND ${live("vb")})
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmApplication va WHERE va.PreferredUnitId = u.Id AND va.IsActive = 1
                           AND va.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted'))
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmUnitResale r WHERE r.PlotId = p.Id AND r.IsActive = 1 AND r.Status NOT IN (N'Completed', N'Cancelled'))
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmUnitResale r
+                          LEFT JOIN dbo.PlotMaster rp ON rp.Id = r.PlotId AND rp.IsActive = 1
+                         WHERE r.IsActive = 1 AND r.Status NOT IN (N'Completed', N'Cancelled')
+                           -- a case on this villa's plot, or on the plot booking itself: the whole booking, or
+                           -- (a part sale, CrmUnitResale.PlotIds) one of the plots this villa is built on
+                           AND (rp.ConvertedUnitId = u.Id OR (r.FromBookingId = lb.Id AND (r.PlotIds IS NULL
+                             OR EXISTS (SELECT 1 FROM dbo.PlotMaster vp WHERE vp.ConvertedUnitId = u.Id AND vp.IsActive = 1
+                                          AND N',' + r.PlotIds + N',' LIKE N'%,' + CAST(vp.Id AS NVARCHAR(20)) + N',%')))))
       ORDER BY e.name, u.UnitName`)).recordset;
     res.json(sortNatural(rows, "ProjectName", "UnitName"));
   } catch (e) {

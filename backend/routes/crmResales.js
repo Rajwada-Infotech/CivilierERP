@@ -56,7 +56,8 @@ const SELECT = `
          r.ResaleDate, r.AgreedValue, r.OriginalValue,
          r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, r.DeveloperFeeHsnCode, r.DeveloperFeeGstRate,
          r.Status, r.Notes, r.CreatedAt, r.Kind, r.BookingIds, r.PaidAtTransfer, r.TdsAmount, r.BuyBackGstAmount, r.StampDutyAmount,
-         r.ApprovedAt, r.RejectionNote, r.CompletedAt, r.PayoutNewPaymentId,
+         r.ApprovedAt, r.RejectionNote, r.CompletedAt, r.PayoutNewPaymentId, r.PlotIds,
+         ${require("../services/crmResaleTransfer").resalePropertySql("r", "fb")} AS Property,
          p.PlotNo, p.PlotName, p.AreaSqFt AS PlotAreaSqFt,
          u.UnitName,
          fb.BookingNo AS FromBookingNo, fb.ProjectId AS ProjectId,
@@ -431,6 +432,17 @@ router.get("/holdings", requirePageRight("crm-resales", "view"), async (req, res
       o.OpenDeal = await openResaleOn(pool, o.BookingIds);
       // sale deed registered: it can only change hands as an Ownership Change
       o.Conveyed = !!(await conveyedReason(pool, o.BookingIds));
+      // A booking of several plots (no villa on it): each plot can be resold on its own, at its own price.
+      o.Plots = [];
+      if (o.Kind === "Plot") {
+        const plots = (await pool.request().input("bid", sql.Int, o.BookingId).query(`
+          SELECT bp.PlotId, p.PlotName, bp.AreaSqFt, bp.AllocatedValue FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster p ON p.Id = bp.PlotId
+          WHERE bp.BookingId = @bid AND bp.Status = N'Active' ORDER BY bp.IsPrimary DESC, bp.Id`)).recordset;
+        if (plots.length > 1) {
+          for (const p of plots) p.OpenDeal = await openResaleOn(pool, o.BookingIds, null, [p.PlotId]);
+          o.Plots = sortNatural(plots, "PlotName");
+        }
+      }
     }
     res.json(out);
   } catch (e) {
@@ -466,17 +478,34 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
     const { conveyedReason } = require("../services/crmResaleTransfer");
     const conveyed = await conveyedReason(pool, bookings.map((x) => x.Id));
     if (conveyed) return res.status(409).json({ error: conveyed });
-    const open = await openResaleOn(pool, bookings.map((x) => x.Id));
-    if (open) return res.status(409).json({ error: `This property already has an open ${open.Kind === "BuyBack" ? "buy-back" : "resale"} (#${open.Id})` });
-    // The row names one thing (PlotId or UnitId): the villa or unit, else the plot.
     const ids = bookings.map((x) => x.Id);
+    // Some of the booking's plots (a resale only): the case sells those, at their own booked prices. Every plot
+    // chosen is the whole booking, as before.
+    const chosen = Array.isArray(b.PlotIds) ? [...new Set(b.PlotIds.map(Number))].filter((n) => Number.isInteger(n) && n > 0) : [];
+    let partPlots = null;
+    let lines = [];
+    if (chosen.length) {
+      if (kind !== "Resale") return res.status(400).json({ error: "A buy-back takes the whole booking back" });
+      if (bookings.length !== 1) return res.status(409).json({ error: "A villa is booked on these plots — the plots and the villa can only change hands together" });
+      lines = (await pool.request().input("bid", sql.Int, ids[0]).query(
+        "SELECT PlotId, AllocatedValue FROM dbo.CrmBookingPlot WHERE BookingId = @bid AND Status = N'Active'")).recordset;
+      if (chosen.some((p) => !lines.some((l) => l.PlotId === p))) return res.status(400).json({ error: "Choose the plots from this booking" });
+      if (chosen.length < lines.length) partPlots = chosen;
+    }
+    const open = await openResaleOn(pool, ids, null, partPlots || []);
+    if (open) return res.status(409).json({ error: `This property already has an open ${open.Kind === "BuyBack" ? "buy-back" : "resale"} (#${open.Id})` });
+    // The row names one thing (PlotId or UnitId): the villa or unit, else the plot (the first plot sold, on a part sale).
     const target = (await pool.request().query(`
       SELECT TOP 1 b.UnitId, (SELECT TOP 1 bp.PlotId FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = b.Id AND bp.Status = N'Active' ORDER BY bp.IsPrimary DESC, bp.Id) AS PlotId
       FROM dbo.CrmBooking b WHERE b.Id IN (${ids.join(",")}) ORDER BY CASE WHEN b.UnitId IS NOT NULL THEN 0 ELSE 1 END, b.Id`)).recordset[0] || {};
     const unitId = target.UnitId ?? null;
-    const plotId = unitId == null ? target.PlotId ?? null : null;
+    const plotId = unitId == null ? (partPlots ? partPlots[0] : target.PlotId ?? null) : null;
     if (unitId == null && plotId == null) return res.status(400).json({ error: "That booking has no unit or plot on it" });
-    const paid = Math.round(bookings.reduce((s2, x) => s2 + Number(x.Paid || 0), 0) * 100) / 100;
+    const paidAll = Math.round(bookings.reduce((s2, x) => s2 + Number(x.Paid || 0), 0) * 100) / 100;
+    // On a part sale the seller's paid money is shared by the plots' prices (the transfer moves exactly that share).
+    const allValue = lines.reduce((t, l) => t + Number(l.AllocatedValue || 0), 0);
+    const soldValue = partPlots ? lines.filter((l) => partPlots.includes(l.PlotId)).reduce((t, l) => t + Number(l.AllocatedValue || 0), 0) : 0;
+    const paid = partPlots && allValue > 0 ? Math.round(paidAll * (soldValue / allValue) * 100) / 100 : paidAll;
     let feeGst = { gstAmount: null, hsnCode: null, rate: null };
     if (kind === "Resale" && num(b.DeveloperFeeAmount) > 0) {
       try { feeGst = await resolveResaleFeeGst(pool, num(b.DeveloperFeeAmount), { landSale: unitId == null }); }
@@ -497,13 +526,14 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
         !bk.IsActive || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(bk.Status))) {
         throw Object.assign(new Error("That property is no longer live; refresh before opening a resale case."), { status: 409 });
       }
-      const existingOpen = await openResaleOn(createTx, ids);
+      const existingOpen = await openResaleOn(createTx, ids, null, partPlots || []);
       if (existingOpen) {
         throw Object.assign(new Error(`This property already has an open ${existingOpen.Kind === "BuyBack" ? "buy-back" : "resale"} (#${existingOpen.Id})`), { status: 409 });
       }
       r = await createTx.request()
       .input("kind", sql.NVarChar(10), kind).input("plot", sql.Int, plotId).input("unit", sql.Int, unitId)
       .input("fb", sql.Int, bookings[0].Id).input("ids", sql.NVarChar(200), ids.join(","))
+      .input("plots", sql.NVarChar(400), partPlots ? partPlots.join(",") : null)
       .input("fc", sql.Int, seller).input("tc", sql.Int, kind === "Resale" ? toCustomerId : null)
       .input("date", sql.Date, b.ResaleDate || null).input("agreed", sql.Decimal(18, 2), agreed)
       .input("orig", sql.Decimal(18, 2), paid)
@@ -514,11 +544,11 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
       .input("stamp", sql.Decimal(18, 2), kind === "BuyBack" ? num(b.StampDutyAmount) : null)
       .input("notes", sql.NVarChar(1000), b.Notes || null).input("by", sql.Int, actorId(req))
       .query(`INSERT INTO dbo.CrmUnitResale
-                (Kind, PlotId, UnitId, FromBookingId, BookingIds, FromCustomerId, ToCustomerId, ResaleDate, AgreedValue, OriginalValue,
+                (Kind, PlotId, PlotIds, UnitId, FromBookingId, BookingIds, FromCustomerId, ToCustomerId, ResaleDate, AgreedValue, OriginalValue,
                  DeveloperFeeAmount, DeveloperFeeGstAmount, DeveloperFeeHsnCode, DeveloperFeeGstRate,
                  TdsAmount, BuyBackGstAmount, StampDutyAmount, Status, Notes, CreatedBy)
               OUTPUT INSERTED.Id
-              VALUES (@kind, @plot, @unit, @fb, @ids, @fc, @tc, @date, @agreed, @orig,
+              VALUES (@kind, @plot, @plots, @unit, @fb, @ids, @fc, @tc, @date, @agreed, @orig,
                       @fee, @feeGst, @feeHsn, @feeRate, @tds, @bbGst, @stamp, N'Draft', @notes, @by)`);
       await createTx.commit();
     } catch (createError) {
@@ -552,13 +582,13 @@ router.put("/:id/approve", requirePageRight("crm-resales", "edit"), async (req, 
     // long before this request; without re-running them here, an already-
     // conveyed or otherwise no-longer-eligible case would still approve.
     const caseRow = (await pool0.request().input("id", sql.Int, id)
-      .query("SELECT BookingIds FROM dbo.CrmUnitResale WHERE Id = @id AND Status = N'Pending'")).recordset[0];
+      .query("SELECT BookingIds, PlotIds FROM dbo.CrmUnitResale WHERE Id = @id AND Status = N'Pending'")).recordset[0];
     if (caseRow?.BookingIds) {
-      const { conveyedReason, openResaleOn } = require("../services/crmResaleTransfer");
+      const { conveyedReason, openResaleOn, casePlotIds } = require("../services/crmResaleTransfer");
       const bookingIds = caseRow.BookingIds.split(",").map((s) => parseInt(s, 10)).filter(Number.isInteger);
       const conveyed = bookingIds.length ? await conveyedReason(pool0, bookingIds) : null;
       if (conveyed) return res.status(409).json({ error: `No longer eligible — ${conveyed}` });
-      const open = bookingIds.length ? await openResaleOn(pool0, bookingIds, id) : null;
+      const open = bookingIds.length ? await openResaleOn(pool0, bookingIds, id, casePlotIds(caseRow)) : null;
       if (open) return res.status(409).json({ error: `No longer eligible — this property now has another open ${open.Kind === "BuyBack" ? "buy-back" : "resale"} (#${open.Id})` });
     }
 
@@ -612,8 +642,13 @@ router.put("/:id/transfer", requirePageRight("crm-resales", "edit"), async (req,
     if (resale.Kind !== "Resale") { await tx.rollback(); return res.status(400).json({ error: "A buy-back completes when Finance pays it" }); }
     if (resale.Status !== "Approved") { await tx.rollback(); return res.status(resale.Status === "Completed" ? 409 : 400).json({ error: resale.Status === "Completed" ? "Already done — this property has changed hands" : `Approve it first (it is ${resale.Status})` }); }
     const { endorseToBuyer } = require("../services/crmResaleTransfer");
-    const done = await endorseToBuyer(tx, resale, actorId(req));
+    const done = await endorseToBuyer(tx, resale, actorId(req), req.user?.email || req.user?.name || "system");
     await tx.commit();
+    // A part-plot sale gave each booking its own price and money: each settles once its own price is in.
+    if (done.bookingIds?.length > 1 && resale.PlotIds) {
+      const { autoApplyOnAccountIfFullyFunded } = require("./crmPayments");
+      for (const bid of done.bookingIds) await autoApplyOnAccountIfFullyFunded(pool, bid, actorId(req), req.user?.email || req.user?.name || null);
+    }
     // The new buyer: portal access to their property, and the booking's staff
     // are asked to welcome them (their bank details / loan follow from there).
     // Never fatal — the transfer itself is done.

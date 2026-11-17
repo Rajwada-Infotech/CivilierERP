@@ -129,17 +129,6 @@ const CrmPaymentMilestones: React.FC = () => {
   const { data: onAccountData } = useQuery({ queryKey: ["crm-on-account", selectedBookingId], queryFn: () => fetchOnAccount(selectedBookingId), enabled: !!selectedBookingId, staleTime: 15_000 });
   const { data: moneyReceipts = [] } = useQuery({ queryKey: ["crm-money-receipts", selectedBookingId], queryFn: () => fetchMoneyReceipts(selectedBookingId), enabled: !!selectedBookingId, staleTime: 15_000 });
   const { data: customerBank } = useQuery({ queryKey: ["crm-customer-bank", selectedBookingId], queryFn: () => fetchCustomerBank(selectedBookingId), enabled: !!selectedBookingId, staleTime: 30_000 });
-  // Construction-linked milestones whose DPR work is complete (crmConstructionUpdates.js readyDemands): ready to demand.
-  const { data: readyToDemand } = useQuery({
-    queryKey: ["crm-construction-ready-demands", "booking", selectedBookingId],
-    queryFn: async () => {
-      const res = await fetchWithAuth(`/api/crm/construction-updates/ready-demands?bookingId=${selectedBookingId}`);
-      const rows = res.ok ? await res.json() : [];
-      return new Map<number, string>((Array.isArray(rows) ? rows : []).map((r: any) => [r.MilestoneId, r.work]));
-    },
-    enabled: !!selectedBookingId,
-    staleTime: 60_000,
-  });
   const { data: bookingUnitChange } = useQuery({
     queryKey: ["crm-booking-unit-change", selectedBookingId],
     queryFn: async () => {
@@ -205,7 +194,6 @@ const CrmPaymentMilestones: React.FC = () => {
   const reloadMilestones = () => {
     qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     qc.invalidateQueries({ queryKey: ["crm-payments-ledger"] });
-    qc.invalidateQueries({ queryKey: ["crm-construction-ready-demands"] });
   };
 
   const handleOpenPayment = (m: any) => {
@@ -537,7 +525,7 @@ const CrmPaymentMilestones: React.FC = () => {
       <GridRelated icon={ListChecks} title="Payment schedule" count={milestones.length}>
         <MilestoneTable milestones={milestones} canEdit={rights.canEdit && !unitChanged} closed={isBookingClosed(booking?.BookingStatus)} onAccountData={onAccountData} onAccountBalance={onAccountBalance}
           notFullyPaid={notFullyPaid} fullPaymentShortfall={fullPaymentShortfall} activeId={activeMilestone}
-          pendingWaivers={pendingWaiverIds(milestoneData.waivers)} readyToDemand={readyToDemand}
+          pendingWaivers={pendingWaiverIds(milestoneData.waivers)}
           nextMilestone={nextOutstandingMilestone} canManuallyApply={canManuallyApplyOnAccount}
           onPay={handleOpenPayment} onApply={openApplyDialog} onWaive={(m) => setWaiveDialog({ milestone: m, reason: "" })} onRemarks={(m) => setRemarksDialog({ milestone: m })} />
       </GridRelated>

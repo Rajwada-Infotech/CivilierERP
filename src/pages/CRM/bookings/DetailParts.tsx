@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
-import { KEY_INK } from "./config";
+import { GRID_KEY_BRAND as KEY_INK } from "@/components/crm/CrmDataTable";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { FileText, Download, Check, ClipboardCheck, ShieldCheck, AlertTriangle, RefreshCw, X } from "lucide-react";
 import { useExtraWorkRate, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
@@ -17,7 +17,7 @@ export function ExtraWorkGstPreview({ amount, bookingId }: { amount: number; boo
   if (rate == null) return null;
   const gst = computeExtraWorkGst(amount, rate);
   return (
-    <div className="flex items-center justify-between border border-foreground/30 bg-card px-3 py-2 text-xs text-foreground">
+    <div className="flex items-center justify-between border border-border bg-card px-3 py-2 text-xs text-foreground rounded-md">
       <span>GST ({gst.rate}%)</span>
       <span className="font-semibold">{fmtInr(gst.gstAmount)} → Total {fmtInr(gst.total)}</span>
     </div>
@@ -58,7 +58,7 @@ export function PdfPreviewDialog({ pdfUrl, title, subtitle, filename, onClose }:
     <div data-overlay-portal className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
       style={{ pointerEvents: "auto" }}
       onClick={onClose} onPointerDown={(e) => e.stopPropagation()}>
-      <div className="bg-background border border-border shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden max-h-[90vh]"
+      <div className="bg-background border border-border shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden max-h-[90vh] rounded-md"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
           <div className="min-w-0">
@@ -71,7 +71,7 @@ export function PdfPreviewDialog({ pdfUrl, title, subtitle, filename, onClose }:
           <div className="flex items-center gap-2 shrink-0">
             {blobUrl && (
               <a href={blobUrl} download={filename}
-                className="px-3 py-1.5 text-sm border border-border font-medium hover:bg-muted flex items-center gap-1.5">
+                className="px-3 py-1.5 text-sm border border-border font-medium hover:bg-muted flex items-center gap-1.5 rounded-md">
                 <Download size={14} /> Download PDF
               </a>
             )}
@@ -143,7 +143,7 @@ export function ParkingVcItem({
       <div className="flex items-start gap-2">
         {locked ? (
           item.IsChecked
-            ? <span className="shrink-0 mt-0.5 w-4 h-4 bg-foreground text-card flex items-center justify-center"><Check size={10} strokeWidth={3} /></span>
+            ? <span className="shrink-0 mt-0.5 w-4 h-4 rounded bg-primary text-primary-foreground flex items-center justify-center"><Check size={10} strokeWidth={3} /></span>
             : <span className="shrink-0 mt-0.5 w-4 h-4 border-2 border-dashed border-border" />
         ) : (
           <input type="checkbox" checked={!!item.IsChecked} disabled={saving || isOpenRecheck}
@@ -153,7 +153,7 @@ export function ParkingVcItem({
         <div className="flex-1 min-w-0">
           <span className={`text-xs leading-snug ${item.IsChecked ? "text-foreground" : "text-muted-foreground"}`}>{item.Label}</span>
           {isOpenRecheck && (
-            <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 bg-card text-foreground border border-foreground/30">Recheck pending</span>
+            <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 bg-card text-foreground border border-border rounded-md">Recheck pending</span>
           )}
           {item.Remarks && !showRemarks && (
             <p className="text-[0.625rem] text-muted-foreground mt-0.5 italic truncate">"{item.Remarks}"</p>
@@ -170,7 +170,7 @@ export function ParkingVcItem({
         <div className="flex gap-1.5 ml-6">
           <input value={remarks} onChange={(e) => setRemarks(e.target.value)}
             placeholder="Add a remark…"
-            className="flex-1 text-xs border border-border px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+            className="flex-1 text-xs border border-border px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-primary rounded-md" />
           <button onClick={saveRemarks} disabled={saving}
             className={`${KEY_INK} h-8 px-3`}>Save</button>
         </div>
@@ -189,7 +189,7 @@ export function ParkingVcSection({
   return (
     <div className="mt-3 pt-3 border-t border-border space-y-2">
       <div className="flex items-center justify-between">
-        <h4 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+        <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
           <ClipboardCheck size={12} className="text-foreground" /> Verify: {sec.label}
         </h4>
         {sec.complete && (

@@ -14,16 +14,27 @@ import { useAuth } from "@/contexts/AuthContext";
 import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X, Repeat } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
+import { financialFigures, fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { GridStatusPill } from "@/components/crm/CrmDataTable";
+import { BAND_DOT, BAND_KEY, MoneyBand, asName } from "./payments/parts";
+import { fmtShort } from "./payments/config";
+import { cn } from "@/lib/utils";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
 import { BookingStatement } from "@/components/crm/BookingStatement";
 import { PropertyCard } from "@/components/crm/PropertyCard";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
-import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { ApplicantNames, coApplicantsOf, useCoApplicantNames } from "@/components/crm/ApplicantNames";
 import { ExtraWorkGstPreview, PdfPreviewDialog, ParkingVcSection } from "./bookings/DetailParts";
-import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, bookingTone } from "./bookings/config";
+import { bookingTone } from "./bookings/config";
+import { GRID_KEY, GRID_KEY_BRAND } from "@/components/crm/CrmDataTable";
+// The dialog in the CRM grid style: rounded keys, soft rules, sentence-case labels.
+const KEY_INK = GRID_KEY_BRAND;
+const KEY_LINE = GRID_KEY;
+const LBL = "text-xs font-medium text-muted-foreground";
+const RULE = "1px solid hsl(var(--border))";
+const RULE_SOFT = "1px solid hsl(var(--border) / 0.7)";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { Link, useNavigate } from "react-router-dom";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -147,6 +158,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const qc = useQueryClient();
   usePageRights("crm-bookings");
   const { canDoAction, currentUser } = useAuth();
+  // Co-applicants, so the band names every buyer: "Abir Manna & Satyaki Chakrabarti".
+  const { data: coNames } = useCoApplicantNames();
   // Who approves amendments is set in Approval Setup (crm-booking-amendment).
   const isAmendmentApprover = useCanApprove("crm-booking-amendment");
   const canEdit = canDoAction("crm-bookings", "edit");
@@ -1106,11 +1119,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     const interactive = true;
 
     return (
-      <div key={it.ItemKey} className={`border px-3 py-2.5 ${
-        it.CheckStatus === "Checked" ? "border-foreground/30 bg-card"
+      <div key={it.ItemKey} className={`rounded-lg border px-3.5 py-3 ${
+        it.CheckStatus === "Checked" ? "border-emerald-500/30 bg-emerald-500/5"
         : it.CheckStatus === "NeedsRecheck" ? "border-destructive/50 bg-destructive/5" : "border-primary/40 bg-primary/5"
       }`}>
-        <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5 flex items-center gap-1">
+        <p className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1">
           <ClipboardCheck size={11} /> Data Review — {canVerify ? "tick when correct, flag if something is wrong" : "a data verifier ticks this"}
         </p>
         <div className="flex items-start gap-2">
@@ -1118,8 +1131,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             type="button"
             disabled={!interactive || !canVerify || checklistBusyKey === it.ItemKey}
             onClick={() => fireChecklistAction(it.ItemKey, it.CheckStatus === "Checked" ? "uncheck" : "check")}
-            className={`mt-0.5 w-4 h-4 border-2 flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
-              it.CheckStatus === "Checked" ? "bg-foreground border-foreground/30"
+            className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+              it.CheckStatus === "Checked" ? "bg-emerald-600 border-emerald-600"
               : it.CheckStatus === "NeedsRecheck" ? "border-destructive/40 bg-destructive/5" : "border-border"
             }`}
           >
@@ -1130,7 +1143,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <button type="button" disabled={!canVerify || checklistBusyKey === it.ItemKey}
                 onClick={() => fireChecklistAction(it.ItemKey, it.CheckStatus === "Checked" ? "uncheck" : "check")}
                 className="text-xs font-medium text-left enabled:cursor-pointer disabled:cursor-default">{it.ItemLabel}</button>
-              <span className={`text-[0.625rem] px-1.5 py-0.5 border font-medium shrink-0 ${
+              <span className={`text-[0.625rem] px-1.5 py-0.5 border font-medium shrink-0 rounded-full ${
                 it.CheckStatus === "Checked" ? "text-foreground bg-card border-foreground/30"
                 : it.CheckStatus === "NeedsRecheck" ? "text-destructive bg-destructive/5 border-destructive/40"
                 : "text-muted-foreground bg-muted/50 border-border"
@@ -1148,14 +1161,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 <div className="mt-1.5 space-y-1">
                   <textarea value={checklistFlagRemark} onChange={(e) => setChecklistFlagRemark(e.target.value)}
                     placeholder="What needs to be fixed? (required)" rows={2}
-                    className="w-full text-[0.6875rem] border border-border px-2 py-1 bg-background" />
+                    className="w-full text-[0.6875rem] border border-border px-2 py-1 bg-background rounded-md" />
                   <div className="flex gap-1.5">
                     <button disabled={checklistBusyKey === it.ItemKey || !checklistFlagRemark.trim()}
                       onClick={() => fireChecklistAction(it.ItemKey, "flag", checklistFlagRemark)}
                       className="text-[0.6875rem] px-2 py-0.5 bg-destructive text-white disabled:opacity-40">
                       Send for Recheck
                     </button>
-                    <button onClick={() => setChecklistFlaggingKey(null)} className="text-[0.6875rem] px-2 py-0.5 border border-border">
+                    <button onClick={() => setChecklistFlaggingKey(null)} className="text-[0.6875rem] px-2 py-0.5 border border-border rounded-md">
                       Cancel
                     </button>
                   </div>
@@ -1171,12 +1184,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {/* Where the flagged data is edited: the application, at the step that holds it. */}
                 {booking?.ApplicationId && (
                   <Link to={`/crm/applications?edit=${booking.ApplicationId}&step=${checklistStep(it.ItemKey)}`}
-                    className="text-[0.625rem] px-1.5 py-0.5 bg-foreground text-card border border-foreground hover:opacity-90">
+                    className={cn(GRID_KEY_BRAND, "h-6 px-2 text-[0.6875rem]")}>
                     Correct in application ›
                   </Link>
                 )}
                 <button onClick={() => fireChecklistAction(it.ItemKey, "resubmit")} disabled={checklistBusyKey === it.ItemKey}
-                  className="text-[0.625rem] px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/20 disabled:opacity-40">
+                  className="text-[0.625rem] px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/20 disabled:opacity-40 rounded-full">
                   I've revised this — resend for recheck
                 </button>
               </div>
@@ -1190,42 +1203,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   return (<>
     {unitChangeOpen && booking && <ChangeUnitDialog booking={booking} onClose={() => setUnitChangeOpen(false)} />}
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto thin-scroll rounded-none p-5" style={{ border: RULE }}>
-        <DialogHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3 pr-6">
-              <DialogTitle className="min-w-0">
-                <span className={`block ${LBL}`}>Booking</span>
-                <span className="font-heading text-lg font-bold text-foreground flex flex-wrap items-center gap-2">
-                  <Building2 size={16} />
-                  {booking ? <><span className="tabular-nums">{booking.BookingNo}</span> · <ApplicantNames name={booking.ApplicantName} bookingId={booking.Id} applicationId={booking.ApplicationId} /></> : "Booking"}
-                  {booking && <SheetMark text={booking.Status} tone={bookingTone(booking.Status)} />}
-                </span>
-              </DialogTitle>
-              {booking && booking.Status !== 'Cancelled' && booking.DeedStatus === 'Registered' && (
-                <span className="shrink-0 px-3 py-1.5 text-xs text-muted-foreground" style={{ border: RULE_SOFT }} title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
-                  Deed Registered — cancellation not applicable
-                </span>
-              )}
-              {/* Offered only to those who may raise a cancellation (the server checks the same right).
-                  Kept in a menu: a red button beside the title read as the page's main action. */}
-              {booking && !isBookingClosed(booking.Status) && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit) && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className={`${KEY_LINE} h-9 w-9 shrink-0`} title="More actions" aria-label="More actions"><MoreHorizontal size={15} /></button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56 rounded-none">
-                    <DropdownMenuItem onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className="gap-2 text-destructive focus:text-destructive">
-                      <AlertTriangle size={14} /> Request cancellation
-                    </DropdownMenuItem>
-                    {canEdit && !isPlotSale && (
-                      <DropdownMenuItem onClick={() => setUnitChangeOpen(true)} className="gap-2 text-destructive focus:text-destructive">
-                        <Repeat size={14} /> Change unit
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
+      <DialogContent className="max-w-6xl max-h-[92vh] overflow-y-auto thin-scroll rounded-xl p-5 gap-4">
+        {/* The band below carries the visible title; the dialog keeps one for screen readers. */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>{booking ? `Booking ${booking.BookingNo}` : "Booking"}</DialogTitle>
         </DialogHeader>
 
         {isLoading ? (
@@ -1234,16 +1215,78 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           // fetchDetail returns null for a missing / deleted booking or one outside the user's projects.
           <div className="py-16 text-center text-sm text-muted-foreground">This booking could not be found — it may have been deleted, or it belongs to a project you can't open.</div>
         ) : (
-          <div className="min-w-0">
+          <div className="min-w-0 space-y-3">
+            {/* ── The booking and its money, always in view across the tabs (the Payment Milestones band). ── */}
+            {(() => {
+              const mrReceived = (moneyReceipts as any[]).filter((r: any) => r.Status !== "Bounced").reduce((s: number, r: any) => s + Number(r.Amount || 0), 0);
+              const approvedOnAcc = Number(onAccountData?.availableBalance || 0);
+              const pendingReceipts = Math.max(0, mrReceived - totalCleared - approvedOnAcc);
+              const { onAccount, outstanding, clearedPct, onAccPct } = financialFigures({ grandTotal, cleared: totalCleared, pendingReceipts, approvedOnAccount: approvedOnAcc });
+              const overdueCount = closed ? 0 : milestoneList.filter((m: any) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length;
+              const canCancel = !isBookingClosed(booking.Status) && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit);
+              return (
+                <MoneyBand eyebrow={`Booking · ${booking.BookingNo}`}
+                  title={<span className="capitalize"><ApplicantNames name={asName(booking.ApplicantName)}
+                    coApplicants={coApplicantsOf(coNames, { bookingId: booking.Id, applicationId: booking.ApplicationId }, booking.ApplicantName).map(asName)} /></span>}
+                  status={<GridStatusPill status={booking.Status} />}
+                  sub={[booking.ProjectName, [booking.UnitNo, booking.BlockName].filter(Boolean).join(" / ")].filter(Boolean).join(" · ") || undefined}
+                  actions={<>
+                    {booking.Status !== 'Cancelled' && booking.DeedStatus === 'Registered' && (
+                      <span className="inline-flex items-center h-9 px-3 rounded-md border border-white/25 text-xs text-slate-200" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
+                        Deed Registered — cancellation not applicable
+                      </span>
+                    )}
+                    {/* Offered only to those who may raise a cancellation (the server checks the same right).
+                        Kept in a menu: a red button beside the title read as the page's main action. */}
+                    {canCancel && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className={cn(BAND_KEY, "w-9 !px-0")} title="More actions" aria-label="More actions"><MoreHorizontal size={15} /></button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className="gap-2 text-destructive focus:text-destructive">
+                            <AlertTriangle size={14} /> Request cancellation
+                          </DropdownMenuItem>
+                          {canEdit && !isPlotSale && (
+                            <DropdownMenuItem onClick={() => setUnitChangeOpen(true)} className="gap-2 text-destructive focus:text-destructive">
+                              <Repeat size={14} /> Change unit
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </>}
+                  lead={fmtRupees(grandTotal)} leadNote="Grand total"
+                  bar={
+                    <span className="flex h-2.5 w-full overflow-hidden rounded-full bg-white/15" role="img"
+                      aria-label={`${fmtRupees(totalCleared)} cleared, ${fmtRupees(onAccount)} on account, ${fmtRupees(outstanding)} still due`}>
+                      <span className={cn("h-full", BAND_DOT.collected)} style={{ width: `${clearedPct}%` }} title={`${fmtRupees(totalCleared)} cleared`} />
+                      <span className={cn("h-full", BAND_DOT.finance)} style={{ width: `${onAccPct}%` }} title={`${fmtRupees(onAccount)} on account`} />
+                    </span>
+                  }
+                  figures={[
+                    { label: "Cleared", dot: BAND_DOT.collected, value: fmtShort(totalCleared), exact: fmtRupees(totalCleared), note: "Applied to milestones" },
+                    { label: "On account", dot: BAND_DOT.finance, value: onAccount > 0 ? fmtShort(onAccount) : "—", exact: fmtRupees(onAccount),
+                      note: onAccount > 0
+                        ? [pendingReceipts > 0 ? `${fmtRupees(pendingReceipts)} received, not yet settled` : null, approvedOnAcc > 0 ? `${fmtRupees(approvedOnAcc)} deposit, unapplied` : null].filter(Boolean).join(" · ")
+                        : "Nothing held" },
+                    { label: "Outstanding", dot: BAND_DOT.notDue, value: outstanding > 0 ? fmtShort(outstanding) : "Fully collected", exact: fmtRupees(outstanding),
+                      note: outstanding > 0 ? "Not yet received" : "Nothing due", alert: overdueCount > 0 },
+                  ]}
+                  footer={overdueCount > 0
+                    ? <span className="flex items-center gap-1.5 text-rose-300 font-medium"><AlertTriangle size={13} /> {overdueCount} milestone{overdueCount > 1 ? "s" : ""} overdue</span>
+                    : undefined} />
+              );
+            })()}
             {/* The current stage is on the Journey bar's "Now" line below; only
                 what needs reading first is called out here. */}
             {closed && (
-              <div className="px-3 py-2 text-sm font-semibold text-destructive" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
+              <div className="px-4 py-2.5 rounded-lg text-sm font-semibold text-destructive bg-destructive/5 border border-destructive/30">
                 {booking.Status} — no further steps
               </div>
             )}
             {booking.StageRemarks && (
-              <div className="flex items-start gap-2 px-3 py-2.5 text-xs text-foreground bg-destructive/5" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
+              <div className="flex items-start gap-2.5 px-4 py-3 rounded-lg text-xs text-foreground bg-destructive/5 border border-destructive/30">
                 <AlertTriangle size={13} className="text-destructive shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0 space-y-1">
                   {sendBackChain.length > 1 ? (
@@ -1266,18 +1309,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {sendBack.preparerCorrects ? (
                   booking.ApplicationId && (
                     <Link to={`/crm/applications?edit=${booking.ApplicationId}&step=${correctionStep}`}
-                      className="shrink-0 self-center inline-flex items-center gap-1 h-7 px-2.5 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:opacity-90">
+                      className={cn(GRID_KEY_BRAND, "shrink-0 self-center h-7 px-2.5")}>
                       Correct in application ›
                     </Link>
                   )
                 ) : canActOnStage ? (
-                  <span className="shrink-0 self-center text-[0.625rem] font-heading font-semibold uppercase tracking-[0.1em]">Yours — Approve or Reject at the foot of the page</span>
+                  <span className="shrink-0 self-center text-xs font-semibold text-foreground">Yours — Approve or Reject at the foot of the page</span>
                 ) : null}
               </div>
             )}
 
             {booking.IsFrozen && (
-              <div className="flex items-start gap-2 border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-xs">
+              <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs">
                 <Lock size={13} className="text-destructive shrink-0 mt-0.5" />
                 <div>
                   <span className="font-semibold text-destructive">Booking Frozen</span>
@@ -1292,20 +1335,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
-            {/* ── Financial Status Bar ── always visible across all tabs ── */}
-            {(() => {
-              const mrReceived = (moneyReceipts as any[]).filter((r: any) => r.Status !== "Bounced").reduce((s: number, r: any) => s + Number(r.Amount || 0), 0);
-              const approvedOnAcc = Number(onAccountData?.availableBalance || 0);
-              return (
-                <FinancialStatusBar
-                  grandTotal={grandTotal}
-                  cleared={totalCleared}
-                  pendingReceipts={Math.max(0, mrReceived - totalCleared - approvedOnAcc)}
-                  approvedOnAccount={approvedOnAcc}
-                  overdueCount={closed ? 0 : milestoneList.filter((m: any) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length}
-                />
-              );
-            })()}
 
             {/* ── Plot + villa on it: one property, one schedule ── */}
             <PropertyCard bookingId={booking.Id} />
@@ -1337,7 +1366,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   <button onClick={() => setTab("Payment & Invoice")}
                     title="Not required to book — informational only"
-                    className={`flex items-center gap-1 px-2 py-1 font-medium shrink-0 ${mrChipClass}`}>
+                    className={`flex items-center gap-1 h-7 px-2.5 rounded-full border border-border font-medium shrink-0 ${mrChipClass}`}>
                     {latestReceipt?.Status === CrmStatus.APPROVED && <Check size={11} />} Money Receipt: {mrStatus}
                   </button>
                   <span className="shrink-0 whitespace-nowrap text-muted-foreground">(for information — not needed to send for approval)</span>
@@ -1351,7 +1380,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 renderChecklistItem calls below), not dumped here as one
                 block. */}
             {currentStage === "Review" && !closed && checklistItems.length > 0 && (
-              <div className="border border-border px-3 py-2.5 text-xs space-y-2">
+              <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium flex items-center gap-1.5"><ClipboardCheck size={13} className="text-foreground" /> Data Review — {checkedCount} of {checklistItems.length} verified</span>
                   {pendingStepMessage ? (
@@ -1360,8 +1389,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <span className="font-medium flex items-center gap-1"><Check size={12} /> All verified — ready for Verify &amp; Send for Approval</span>
                   )}
                 </div>
-                <div className="h-1 bg-muted overflow-hidden" role="progressbar" aria-valuenow={checkedCount} aria-valuemax={checklistItems.length}>
-                  <div className="h-full bg-foreground transition-all" style={{ width: `${checklistItems.length ? (checkedCount / checklistItems.length) * 100 : 0}%` }} />
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={checkedCount} aria-valuemax={checklistItems.length}>
+                  <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${checklistItems.length ? (checkedCount / checklistItems.length) * 100 : 0}%` }} />
                 </div>
               </div>
             )}
@@ -1370,20 +1399,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 more robust than a custom horizontal scroller (which kept
                 clipping against the dialog's own bounds), and there's
                 always room to wrap inside the dialog's max width. */}
-            <div className="flex flex-wrap items-stretch" style={{ border: RULE }}>
+            <div className="flex flex-wrap items-end gap-x-1 border-b border-border" role="tablist" aria-label="Booking sections">
               {TABS.map((t) => (
-                <button key={t} onClick={() => setTab(t)}
-                  className={`px-3.5 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors whitespace-nowrap ${
-                    tab === t ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/10"
-                  }`} style={{ borderRight: RULE_SOFT }}>
+                <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
+                  className={cn("h-10 px-3 -mb-px border-b-2 text-[0.8125rem] whitespace-nowrap transition-colors",
+                    tab === t ? "border-primary text-foreground font-semibold" : "border-transparent text-muted-foreground hover:text-foreground hover:border-border")}>
                   <span className="flex items-center gap-1.5">
                     {tabName(t)}
                     {currentStage === "Review" && !closed && (() => {
                       const c = tabChecks(t);
                       if (!c.total) return null;
-                      if (c.flagged) return <span title={`${c.flagged} flagged`} className="px-1 text-destructive border border-destructive/50 bg-destructive/10">!</span>;
-                      if (c.checked === c.total) return <span title="All verified"><Check size={11} /></span>;
-                      return <span title={`${c.total - c.checked} to verify`} className="px-1 border border-current/40 tabular-nums">{c.total - c.checked}</span>;
+                      if (c.flagged) return <span title={`${c.flagged} flagged`} className="px-1.5 min-w-[1.25rem] text-center rounded-full text-[0.6875rem] font-semibold bg-destructive/15 text-destructive">!</span>;
+                      if (c.checked === c.total) return <span title="All verified" className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600"><Check size={10} /></span>;
+                      return <span title={`${c.total - c.checked} to verify`} className={cn("px-1.5 min-w-[1.25rem] text-center rounded-full text-[0.6875rem] tabular-nums", tab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>{c.total - c.checked}</span>;
                     })()}
                   </span>
                 </button>
@@ -1394,32 +1422,32 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-2">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Application</label>
-                    <div className="text-sm px-2.5 py-2 border border-border bg-muted/30">{booking.ApplicationNo}</div>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">Application</label>
+                    <div className="text-sm font-medium text-foreground px-3 py-2 rounded-md bg-muted/50">{booking.ApplicationNo}</div>
                   </div>
                   <div>
-                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Company</label>
-                    <div className="text-sm px-2.5 py-2 border border-border bg-muted/30">{booking.CompanyName || "—"}</div>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">Company</label>
+                    <div className="text-sm font-medium text-foreground px-3 py-2 rounded-md bg-muted/50">{booking.CompanyName || "—"}</div>
                   </div>
                   <div>
-                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Project</label>
-                    <div className="text-sm px-2.5 py-2 border border-border bg-muted/30">{booking.ProjectName || "—"}</div>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">Project</label>
+                    <div className="text-sm font-medium text-foreground px-3 py-2 rounded-md bg-muted/50">{booking.ProjectName || "—"}</div>
                   </div>
                   <div>
-                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">{isPlotSale ? "Plots / Block" : "Unit / Block"}</label>
-                    <div className="text-sm px-2.5 py-2 border border-border bg-muted/30">{[booking.UnitNo, booking.BlockName].filter(Boolean).join(" / ") || "—"}</div>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">{isPlotSale ? "Plots / Block" : "Unit / Block"}</label>
+                    <div className="text-sm font-medium text-foreground px-3 py-2 rounded-md bg-muted/50">{[booking.UnitNo, booking.BlockName].filter(Boolean).join(" / ") || "—"}</div>
                   </div>
                   <div>
-                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Rate / sqft</label>
-                    <div className="text-sm px-2.5 py-2 border border-border bg-muted/30">{fmt(booking.RatePerSqFt)}</div>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">Rate / sqft</label>
+                    <div className="text-sm font-medium text-foreground px-3 py-2 rounded-md bg-muted/50">{fmt(booking.RatePerSqFt)}</div>
                   </div>
                   <div>
-                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Grand Total</label>
-                    <div className="text-sm px-2.5 py-2 border border-border bg-muted/30 font-semibold">{fmt(grandTotal)}</div>
+                    <label className="text-xs font-medium text-muted-foreground block mb-1">Grand Total</label>
+                    <div className="text-sm font-medium text-foreground px-3 py-2 rounded-md bg-muted/50 font-semibold">{fmt(grandTotal)}</div>
                   </div>
                 </div>
                 {isPlotSale ? (
-                  <div className=" border border-border/60 overflow-x-auto">
+                  <div className="border border-border/60 overflow-x-auto rounded-lg">
                     <table className="w-full text-xs">
                       <thead className="bg-muted/30 text-muted-foreground">
                         <tr>
@@ -1451,29 +1479,29 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </table>
                   </div>
                 ) : (
-                <div className="grid grid-cols-2 md:grid-cols-6 gap-2 border border-border/60 bg-muted/20 p-2 text-xs">
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-2 border border-border/60 bg-muted/20 p-2 text-xs rounded-lg">
                   <div>
-                    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Carpet</span>
+                    <span className="text-xs font-medium text-muted-foreground block">Carpet</span>
                     <span className="font-medium">{booking.CarpetAreaSqFt != null ? `${Number(booking.CarpetAreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
                   </div>
                   <div>
-                    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Built-up</span>
+                    <span className="text-xs font-medium text-muted-foreground block">Built-up</span>
                     <span className="font-medium">{booking.BuiltUpAreaSqFt != null ? `${Number(booking.BuiltUpAreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
                   </div>
                   <div>
-                    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Saleable</span>
+                    <span className="text-xs font-medium text-muted-foreground block">Saleable</span>
                     <span className="font-medium">{booking.AreaSqFt != null ? `${Number(booking.AreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
                   </div>
                   <div>
-                    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Super Built-up</span>
+                    <span className="text-xs font-medium text-muted-foreground block">Super Built-up</span>
                     <span className="font-medium">{booking.SuperBuiltUpAreaSqFt != null ? `${Number(booking.SuperBuiltUpAreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
                   </div>
                   <div>
-                    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Open Terrace</span>
+                    <span className="text-xs font-medium text-muted-foreground block">Open Terrace</span>
                     <span className="font-medium">{booking.OpenTerraceAreaSqFt != null ? `${Number(booking.OpenTerraceAreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
                   </div>
                   <div>
-                    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Inclusive Rate</span>
+                    <span className="text-xs font-medium text-muted-foreground block">Inclusive Rate</span>
                     <span className="font-medium">{booking.RatePerSqFt != null ? `₹${Number(booking.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span>
                   </div>
                   {/* What an approver needs to judge the price: the unit's list
@@ -1481,7 +1509,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       total has drifted from rate x area. */}
                   {booking.ListRatePerSqFt != null && (
                     <div>
-                      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">List Rate</span>
+                      <span className="text-xs font-medium text-muted-foreground block">List Rate</span>
                       <span className="font-medium">₹{Number(booking.ListRatePerSqFt).toLocaleString("en-IN")}/sqft</span>
                       {booking.DiscountPercent != null && Number(booking.DiscountPercent) !== 0 && (
                         <span className={`ml-1.5 text-[0.6875rem] font-semibold ${Number(booking.DiscountPercent) > 0 ? "text-foreground" : "text-foreground"}`}>
@@ -1505,9 +1533,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     always 18%. The only way to change a rate is editing the
                     HSN Master row itself (9954AFH/9954OTH/9954EXW). */}
                 {isPlotSale ? (
-                <div className=" border border-border p-3 space-y-1.5 text-xs">
+                <div className="border border-border p-3 space-y-1.5 text-xs rounded-lg">
                   <p className="text-sm font-medium">Price</p>
-                  <div className="flex items-center gap-1.5 text-foreground bg-card border border-foreground/30 px-2.5 py-1.5">
+                  <div className="flex items-center gap-1.5 text-foreground bg-card border border-border px-2.5 py-1.5 rounded-md">
                     <Check size={12} className="shrink-0" />
                     Land sale — GST is not applicable to the plot value
                   </div>
@@ -1533,7 +1561,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 </div>
                 ) : (
-                <div className=" border border-border p-3 space-y-1.5 text-xs">
+                <div className="border border-border p-3 space-y-1.5 text-xs rounded-lg">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">GST</p>
                     {booking.HsnCode && <span className="text-[0.6875rem] font-heading tabular-nums text-muted-foreground">{booking.HsnCode} · {booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"}</span>}
@@ -1545,7 +1573,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       after the relevant OC/CC — rather than "not computed
                       yet," which would leave TotalValue/GrandTotal blank too. */}
                   {!booking.HsnCode && Number(booking.TotalValue) > 0 && (
-                    <div className="flex items-center gap-1.5 text-foreground bg-card border border-foreground/30 px-2.5 py-1.5 mb-1">
+                    <div className="flex items-center gap-1.5 text-foreground bg-card border border-border px-2.5 py-1.5 mb-1 rounded-md">
                       <Check size={12} className="shrink-0" />
                       GST exempt under Schedule III: entire consideration received after the {CERTIFICATE_TERMS.ONE}
                     </div>
@@ -1613,10 +1641,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     for why there's no longer a separate Confirm button
                     here. */}
                 {renderTabChecklist("Booking")}
-                {unitChange && <section className="border border-border p-4 space-y-2">
+                {unitChange && <section className="border border-border p-4 space-y-2 rounded-lg">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Unit change {unitChange.RequestNo}</h3>
-                    <StatusBadge status={unitChange.Status} />
+                    <h3 className="text-sm font-semibold text-foreground">Unit change {unitChange.RequestNo}</h3>
+                    <GridStatusPill status={unitChange.Status} />
                   </div>
                   <p className="text-xs">{[unitChange.SourceProjectName, unitChange.SourceUnitName].filter(Boolean).join(" · ") || "Old unit"} → {[unitChange.TargetProjectName, unitChange.TargetUnitName].filter(Boolean).join(" · ") || "New unit"}</p>
                   <p className="text-xs text-muted-foreground">{Number(unitChange.SourceBookingId) === Number(booking.Id)
@@ -1632,9 +1660,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     {unitChange.Status === "Draft" && unitChange.TargetApplicationId && <Link to={`/crm/applications?edit=${unitChange.TargetApplicationId}&step=1`} className="inline-flex text-xs underline underline-offset-2">Continue in application</Link>}
                   </div>
                 </section>}
-                {unitChangeLog.length > 0 && <section className="border border-border p-4 space-y-3">
+                {unitChangeLog.length > 0 && <section className="border border-border p-4 space-y-3 rounded-lg">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Unit change history</h3>
+                    <h3 className="text-sm font-semibold text-foreground">Unit change history</h3>
                     <span className="text-[0.65rem] text-muted-foreground">{unitChangeLog.length} change{unitChangeLog.length === 1 ? "" : "s"}</span>
                   </div>
                   {unitChangeLog.map((entry: any) => (
@@ -1665,9 +1693,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Payment Plan" && (
               <div className="space-y-4 pt-2">
-                <div className=" border border-border p-4 space-y-2">
+                <div className="border border-border p-4 space-y-2 rounded-lg">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-foreground" /> {isPlotSale ? "Payment Schedule" : "Payment Plan"}</h3>
+                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><ClipboardCheck size={15} className="text-foreground" /> {isPlotSale ? "Payment Schedule" : "Payment Plan"}</h3>
                     {!isPlotSale && !planEditOpen && canEdit && booking.Status !== CrmStatus.APPROVED && (
                       <button onClick={() => { setPlanEditOpen(true); setPlanEditValue(booking.PaymentPlanId != null ? String(booking.PaymentPlanId) : ""); }}
                         className="text-xs text-foreground hover:underline shrink-0">
@@ -1678,7 +1706,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   {planEditOpen ? (
                     <div className="space-y-2">
                       <select value={planEditValue} onChange={(e) => setPlanEditValue(e.target.value)}
-                        className="w-full text-sm border border-border px-2.5 py-2 bg-background">
+                        className="w-full text-sm border border-border px-2.5 py-2 bg-background rounded-md">
                         <option value="">— Use default milestone schedule —</option>
                         {(scopedPlans as any[]).filter((p: any) => p.IsActive).map((p: any) => (
                           <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
@@ -1686,7 +1714,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       </select>
                       <div className="flex justify-end gap-2">
                         <button onClick={() => setPlanEditOpen(false)}
-                          className="px-2.5 py-1 text-xs border border-border text-muted-foreground hover:bg-muted">
+                          className="px-2.5 py-1 text-xs border border-border text-muted-foreground hover:bg-muted rounded-md">
                           Cancel
                         </button>
                         <button onClick={handleSavePaymentPlan} disabled={planSaving}
@@ -1712,8 +1740,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     in sync with these server-side on every update — see
                     crmBookings.js), so this can never drift from what the
                     Book action itself is checking. */}
-                <div className=" border border-border p-4 space-y-2">
-                  <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><IndianRupee size={15} className="text-foreground" /> Total Price Breakdown</h3>
+                <div className="border border-border p-4 space-y-2 rounded-lg">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><IndianRupee size={15} className="text-foreground" /> Total Price Breakdown</h3>
                   {isPlotSale ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
                     <div className=" bg-muted/30 px-2.5 py-2">
@@ -1780,7 +1808,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   const renderGroupRows = (label: string, rows: any[]) => rows.length > 0 && (
                     <React.Fragment key={label}>
                       <tr className="bg-muted/20">
-                        <td colSpan={7} className="px-2.5 py-1 text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide">{label}</td>
+                        <td colSpan={7} className="px-2.5 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/40">{label}</td>
                       </tr>
                       {rows.map((m: any) => {
                         const paid = Number(m.AmountPaid || 0);
@@ -1824,7 +1852,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               : "—"}
                           </td>
                           <td className="px-2.5 py-1.5">
-                            <span className={`text-[0.625rem] px-1.5 py-0.5 border font-medium ${
+                            <span className={`text-[0.625rem] px-1.5 py-0.5 border font-medium rounded-full ${
                               m.Status === CrmStatus.PAID ? "text-foreground bg-card border-foreground/30"
                                 : m.Status === "Waived" ? "text-muted-foreground bg-muted/40 border-border"
                                 : isOverdue ? "text-destructive bg-destructive/5 border-destructive/40"
@@ -1840,25 +1868,25 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 every milestone including #1 (Booking Amount). */}
                             {m.Status !== CrmStatus.PAID && m.Status !== "Waived" && m.DemandStatus === CrmStatus.PENDING && bal > 0 && canRaiseDemand && (
                               <button onClick={() => raiseDemand(m.Id)} disabled={demandBusyId === m.Id}
-                                className="ml-1 text-[0.625rem] px-1.5 py-0.5 border font-medium text-primary border-primary/40 hover:bg-primary/10 disabled:opacity-40">
+                                className="ml-1 text-[0.625rem] px-1.5 py-0.5 border font-medium text-primary border-primary/40 hover:bg-primary/10 disabled:opacity-40 rounded-full">
                                 {demandBusyId === m.Id ? "Raising…" : "Raise Demand"}
                               </button>
                             )}
                             {m.DemandStatus === "Demanded" && m.Status !== CrmStatus.PAID && (
                               <>
                                 {m.DemandNo && (
-                                  <span className="ml-1 text-[0.625rem] px-1.5 py-0.5 border font-medium text-foreground bg-card border-foreground/30">
+                                  <span className="ml-1 text-[0.625rem] px-1.5 py-0.5 border font-medium text-foreground bg-card border-foreground/30 rounded-full">
                                     {m.DemandNo}
                                   </span>
                                 )}
                                 {!(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id && inv.Status !== "Void") && (
-                                  <span className="ml-1 text-[0.625rem] px-1.5 py-0.5 border font-medium text-foreground bg-card border-foreground/30">
+                                  <span className="ml-1 text-[0.625rem] px-1.5 py-0.5 border font-medium text-foreground bg-card border-foreground/30 rounded-full">
                                     Invoice Pending
                                   </span>
                                 )}
                                 {canRaiseDemand && (
                                   <button onClick={() => undoDemand(m.Id)} disabled={demandBusyId === m.Id}
-                                    className="ml-1 text-[0.625rem] px-1.5 py-0.5 border font-medium text-muted-foreground border-border hover:bg-muted disabled:opacity-40">
+                                    className="ml-1 text-[0.625rem] px-1.5 py-0.5 border font-medium text-muted-foreground border-border hover:bg-muted disabled:opacity-40 rounded-full">
                                     Undo
                                   </button>
                                 )}
@@ -1872,9 +1900,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   );
 
                   return (
-                    <div className=" border border-border p-4 space-y-2">
+                    <div className="border border-border p-4 space-y-2 rounded-lg">
                       <div className="flex items-center justify-between gap-2">
-                        <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><IndianRupee size={15} className="text-foreground" /> Payment Breakdown</h3>
+                        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><IndianRupee size={15} className="text-foreground" /> Payment Breakdown</h3>
                         <span className="text-xs text-muted-foreground">
                           {fmt(totalPaid)} collected · {fmt(totalDue)} due
                           {waivedMilestones.length > 0 && <span className="text-muted-foreground"> · {fmt(totalWaived)} waived</span>}
@@ -1921,19 +1949,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {/* Read-only: refreshed whenever a payment, receipt or on-account change lands. */}
                 <BookingStatement bookingId={booking.Id}
                   refreshKey={`${milestoneList.map((m: any) => m.AmountPaid).join(",")}|${(moneyReceipts as any[]).map((r: any) => r.Status).join(",")}|${bookingOnAccountBalance}`} />
-                <div className=" border border-border p-4 space-y-2">
-                  <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><CreditCard size={15} className="text-foreground" /> Booking Amount</h3>
+                <div className="border border-border p-4 space-y-2 rounded-lg">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><CreditCard size={15} className="text-foreground" /> Booking Amount</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
-                    <div className=" border border-border px-3 py-2"><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Total Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
-                    <div className=" border border-border px-3 py-2"><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Paid on milestone</span><span className="font-semibold text-foreground">{fmt(bookingAmountPaid)}</span></div>
-                    <div className=" border border-border px-3 py-2"><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">On-account cover</span><span className="font-semibold text-foreground">{fmt(bookingAmountOnAccountCover)}</span></div>
-                    <div className=" border border-border px-3 py-2"><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Due Remaining</span><span className="font-semibold text-foreground">{bookingAmountDue > 0 ? fmt(bookingAmountBalance) : "—"}</span></div>
+                    <div className="border border-border px-3 py-2 rounded-md"><span className="text-xs font-medium text-muted-foreground block">Total Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
+                    <div className="border border-border px-3 py-2 rounded-md"><span className="text-xs font-medium text-muted-foreground block">Paid on milestone</span><span className="font-semibold text-foreground">{fmt(bookingAmountPaid)}</span></div>
+                    <div className="border border-border px-3 py-2 rounded-md"><span className="text-xs font-medium text-muted-foreground block">On-account cover</span><span className="font-semibold text-foreground">{fmt(bookingAmountOnAccountCover)}</span></div>
+                    <div className="border border-border px-3 py-2 rounded-md"><span className="text-xs font-medium text-muted-foreground block">Due Remaining</span><span className="font-semibold text-foreground">{bookingAmountDue > 0 ? fmt(bookingAmountBalance) : "—"}</span></div>
                     {firstMilestone?.DueDate && (() => {
                       const isM1Overdue = !closed && bookingAmountBalance > 0 && firstMilestone.Status !== CrmStatus.PAID
                         && firstMilestone.Status !== "Waived" && new Date(firstMilestone.DueDate) < new Date();
                       return (
-                        <div className={` border px-3 py-2 ${isM1Overdue ? "border-destructive/40 bg-destructive/5" : "border-border"}`}>
-                          <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Due Date</span>
+                        <div className={` border px-3 py-2 rounded-md ${isM1Overdue ? "border-destructive/40 bg-destructive/5" : "border-border"}`}>
+                          <span className="text-xs font-medium text-muted-foreground block">Due Date</span>
                           <span className={`font-semibold ${isM1Overdue ? "text-destructive" : ""}`}>
                             {new Date(firstMilestone.DueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                             {isM1Overdue && " ⚠"}
@@ -1948,7 +1976,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         on-account deposits doesn't display a redundant ₹0
                         card. */}
                     {bookingOnAccountBalance > 0 && (
-                      <div className=" border border-foreground/30 bg-card px-3 py-2"><span className="text-foreground block">Balance (On Account)</span><span className="font-semibold text-foreground">{fmt(bookingOnAccountBalance)}</span></div>
+                      <div className="border border-border bg-card px-3 py-2 rounded-md"><span className="text-foreground block">Balance (On Account)</span><span className="font-semibold text-foreground">{fmt(bookingOnAccountBalance)}</span></div>
                     )}
                   </div>
                   {/* Token payment transparency — shows whenever the customer
@@ -1966,7 +1994,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     // State D — bounced
                     if (receipt?.Status === "Bounced") {
                       return (
-                        <div className="flex items-start gap-2.5 border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-xs mt-1">
+                        <div className="flex items-start gap-2.5 border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-xs mt-1 rounded-md">
                           <AlertTriangle size={13} className="shrink-0 mt-0.5 text-destructive" />
                           <div>
                             <p className="font-semibold text-destructive">Token Payment Bounced — {fmt(tokenAmt)}</p>
@@ -1982,7 +2010,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     // State C — submitted to Finance (RPStatus = Pending)
                     if (receipt?.Status === CrmStatus.PENDING && receipt?.RPStatus === CrmStatus.PENDING) {
                       return (
-                        <div className="flex items-start gap-2.5 border border-foreground/30 bg-card px-3 py-2.5 text-xs mt-1">
+                        <div className="flex items-start gap-2.5 border border-border bg-card px-3 py-2.5 text-xs mt-1 rounded-md">
                           <Hourglass size={13} className="shrink-0 mt-0.5 text-foreground" />
                           <div className="space-y-0.5">
                             <p className="font-semibold text-foreground">
@@ -2000,7 +2028,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     // State B — Money Receipt created, not yet submitted to Finance
                     if (receipt?.Status === CrmStatus.PENDING && !receipt?.RPStatus) {
                       return (
-                        <div className="flex items-start gap-2.5 border border-foreground/30 bg-card px-3 py-2.5 text-xs mt-1">
+                        <div className="flex items-start gap-2.5 border border-border bg-card px-3 py-2.5 text-xs mt-1 rounded-md">
                           <Clock size={13} className="shrink-0 mt-0.5 text-foreground" />
                           <div className="space-y-0.5">
                             <p className="font-semibold text-foreground">
@@ -2017,7 +2045,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     // State A — no receipt yet (booking still at Review / before submission)
                     if (!receipt) {
                       return (
-                        <div className="flex items-start gap-2.5 border border-foreground/30 bg-card px-3 py-2.5 text-xs mt-1">
+                        <div className="flex items-start gap-2.5 border border-border bg-card px-3 py-2.5 text-xs mt-1 rounded-md">
                           <Clock size={13} className="shrink-0 mt-0.5 text-foreground" />
                           <div className="space-y-0.5">
                             <p className="font-semibold text-foreground">
@@ -2069,14 +2097,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     Only rendered when the booking actually has any deposits,
                     so a booking with none doesn't show an empty card. */}
                 {(onAccountData?.payments || []).length > 0 && (
-                  <div className=" border border-border p-4 space-y-2">
-                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><Wallet size={15} className="text-foreground" /> On-Account Payments</h3>
+                  <div className="border border-border p-4 space-y-2 rounded-lg">
+                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Wallet size={15} className="text-foreground" /> On-Account Payments</h3>
                     <div className="space-y-1.5">
                       {(onAccountData.payments as any[]).map((p: any) => {
                         const inv = (invoices as any[]).find((i: any) => i.OnAccountPaymentId === p.Id)
                           || (p.InvoiceId ? { Id: p.InvoiceId, InvoiceNo: p.InvoiceNo, InvoiceType: "OnAccount", Amount: p.Amount, InvoiceDate: p.InvoiceDate, Status: p.InvoiceStatus, OnAccountPaymentId: p.Id } : null);
                         return (
-                          <div key={p.Id} className="flex items-center justify-between gap-2 border border-border px-3 py-2 text-xs">
+                          <div key={p.Id} className="flex items-center justify-between gap-2 border border-border px-3 py-2 text-xs rounded-md">
                             <div className="space-y-0.5">
                               <div className="font-medium">{p.ReceiptNo} — {fmt(p.Amount)}</div>
                               <div className="text-muted-foreground">
@@ -2113,11 +2141,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               </div>
                             ) : (
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 border text-foreground bg-card border-foreground/30">
+                                <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 border text-foreground bg-card border-foreground/30 rounded-md">
                                   Invoice Generation Pending
                                 </span>
                                 {canEdit && (
-                                  <a href={`/crm/invoices?bookingId=${bookingId}`} className="px-2.5 py-1 text-xs border border-border font-medium hover:bg-muted">
+                                  <a href={`/crm/invoices?bookingId=${bookingId}`} className="px-2.5 py-1 text-xs border border-border font-medium hover:bg-muted rounded-md">
                                     Generate from Invoices page
                                   </a>
                                 )}
@@ -2148,29 +2176,29 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   && !bookingAmountCoveredInFull && bookingAmountDue > 0
                   && !(Number(firstMilestone?.PendingVerificationAmount) > 0)
                   && currentStage !== "Review" && moneyReceipts.length === 0 && (
-                  <div className=" border border-border p-4 space-y-2">
-                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><IndianRupee size={15} className="text-foreground" /> Submit Payment for Approval</h3>
+                  <div className="border border-border p-4 space-y-2 rounded-lg">
+                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><IndianRupee size={15} className="text-foreground" /> Submit Payment for Approval</h3>
                     <p className="text-[0.6875rem] text-muted-foreground">Creates the Money Receipt for this booking — it goes Pending until Finance/Account's Head approves it.</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input type="number" placeholder={`Amount — Balance Due ${fmt(bookingAmountBalance)}`} value={payForm.Amount}
                         onChange={(e) => setPayForm((f) => ({ ...f, Amount: e.target.value }))}
-                        className="text-sm border border-border px-2.5 py-2 bg-background" />
+                        className="text-sm border border-border px-2.5 py-2 bg-background rounded-md" />
                       <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                        className="text-sm border border-border px-2.5 py-2 bg-background">
+                        className="text-sm border border-border px-2.5 py-2 bg-background rounded-md">
                         {["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Card"].map((m) => <option key={m}>{m}</option>)}
                       </select>
                       <DateInput value={payForm.ReceivedDate} onChange={(e) => setPayForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
-                        className="text-sm border border-border px-2.5 py-2 bg-background" />
+                        className="text-sm border border-border px-2.5 py-2 bg-background rounded-md" />
                       {payForm.PaymentMode === "Cheque" ? (
                         <input placeholder="Cheque No" value={payForm.TransactionRef} onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-                          className="text-sm border border-border px-2.5 py-2 bg-background" />
+                          className="text-sm border border-border px-2.5 py-2 bg-background rounded-md" />
                       ) : payForm.PaymentMode !== "Cash" ? (
                         <input placeholder="Transaction Ref / UTR" value={payForm.TransactionRef} onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-                          className="text-sm border border-border px-2.5 py-2 bg-background" />
+                          className="text-sm border border-border px-2.5 py-2 bg-background rounded-md" />
                       ) : null}
                       {payForm.PaymentMode === "Cheque" && (
                         <DateInput value={payForm.ChequeDate} onChange={(e) => setPayForm((f) => ({ ...f, ChequeDate: e.target.value }))}
-                          className="text-sm border border-border px-2.5 py-2 bg-background" />
+                          className="text-sm border border-border px-2.5 py-2 bg-background rounded-md" />
                       )}
                     </div>
                     <p className="text-[0.6875rem] text-muted-foreground">Deposit bank: assigned by Accounts on the Received Payment before approval.</p>
@@ -2189,9 +2217,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-2">
                 {/* Pending amendments banner */}
                 {(pendingAmendments as any[]).length > 0 && (
-                  <div className=" border border-foreground/30 bg-card p-3 space-y-2">
+                  <div className="border border-border bg-card p-3 space-y-2 rounded-lg">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><ShieldAlert size={14} /> Pending Amendments ({pendingAmendments.length})</h3>
+                      <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><ShieldAlert size={14} /> Pending Amendments ({pendingAmendments.length})</h3>
                       {isAmendmentApprover && (
                         <a href="/admin/approval/inbox" className="text-[0.625rem] text-foreground underline underline-offset-2 hover:text-foreground">
                           Review in Approval Inbox →
@@ -2199,7 +2227,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       )}
                     </div>
                     {(pendingAmendments as any[]).map((a: any) => (
-                      <div key={a.Id} className="text-xs bg-white p-2 border border-foreground/30">
+                      <div key={a.Id} className="text-xs bg-card p-2 border border-border rounded-md">
                         <span className="font-medium">{a.ChangeType === "ParkingAllotment" ? "Parking" : a.ChangeType === "ExtraCharge" ? "Extra Charge" : a.ChangeType}</span>
                         {" — "}{a.Action}
                         <span className="text-muted-foreground"> by {a.RequestedByName || "—"}</span>
@@ -2221,21 +2249,21 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   return (
                     <div className="flex flex-wrap gap-3">
                       {parkingCount > 0 && (
-                        <div className=" border border-border bg-muted/10 px-3 py-2 text-xs">
+                        <div className="border border-border bg-muted/10 px-3 py-2 text-xs rounded-md">
                           <span className="text-muted-foreground">Parking: </span>
                           <span className="font-medium">{parkingCount} slot{parkingCount > 1 ? "s" : ""}</span>
                           <span className="text-muted-foreground ml-1.5">({fmt(parkingAmt)})</span>
                         </div>
                       )}
                       {extrasCount > 0 && (
-                        <div className=" border border-border bg-muted/10 px-3 py-2 text-xs">
+                        <div className="border border-border bg-muted/10 px-3 py-2 text-xs rounded-md">
                           <span className="text-muted-foreground">Extra charges: </span>
                           <span className="font-medium">{extrasCount} item{extrasCount > 1 ? "s" : ""}</span>
                           <span className="text-muted-foreground ml-1.5">({fmt(extrasAmt)})</span>
                         </div>
                       )}
                       {grandTotal > 0 && (
-                        <div className=" border border-border bg-foreground/5 px-3 py-2 text-xs">
+                        <div className="border border-border bg-foreground/5 px-3 py-2 text-xs rounded-md">
                           <span className="text-muted-foreground">Grand total: </span>
                           <span className="font-semibold text-foreground">{fmt(grandTotal)}</span>
                         </div>
@@ -2247,9 +2275,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                 {/* Parking */}
                 {!isPlotSale && (
-                <div className=" border border-border p-4 space-y-2">
+                <div className="border border-border p-4 space-y-2 rounded-lg">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><Car size={15} className="text-foreground" /> Parking Allotments</h3>
+                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Car size={15} className="text-foreground" /> Parking Allotments</h3>
                     {(parking as any[]).length > 0 && (
                       <span className="text-xs font-semibold text-foreground">
                         Total {fmt((parking as any[]).reduce((s: number, p: any) => s + Number(p.TotalAmount || 0), 0))}
@@ -2258,12 +2286,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                   {canEdit && booking.Status !== CrmStatus.APPROVED && !addingParking && (
                     <button onClick={() => setAddingParking(true)}
-                      className="text-xs px-2 py-1 border border-border text-muted-foreground hover:bg-muted">
+                      className="text-xs px-2 py-1 border border-border text-muted-foreground hover:bg-muted rounded-md">
                       + Add Parking
                     </button>
                   )}
                   {addingParking && (
-                    <div className=" border border-border p-3 space-y-2 bg-muted/20">
+                    <div className="border border-border p-3 space-y-2 bg-muted/20 rounded-lg">
                       <div className="text-xs font-medium text-foreground mb-1">Add Parking Allotment</div>
                       {(availableParking.rates as any[])?.length === 0 ? (
                         <p className="text-xs text-muted-foreground mb-3">No parking configured for this project.</p>
@@ -2278,7 +2306,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 ParkingSlotId: "", RateOverride: "",
                               }));
                             }}
-                            className="w-full text-xs border border-border px-2 py-1.5 bg-background">
+                            className="w-full text-xs border border-border px-2 py-1.5 bg-background rounded-md">
                             <option value="">— Select parking type —</option>
                             {(availableParking.rates as any[]).map((r: any) => (
                               <option key={r.ParkingType} value={r.ParkingType} disabled={r.SoldOutProjectWide}>
@@ -2292,7 +2320,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             return rate?.AvailableSlots?.length > 0 ? (
                               <select value={addParkingForm.ParkingSlotId}
                                 onChange={(e) => setAddParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
-                                className="w-full text-xs border border-border px-2 py-1.5 bg-background">
+                                className="w-full text-xs border border-border px-2 py-1.5 bg-background rounded-md">
                                 <option value="">— Any available slot —</option>
                                 {rate.AvailableSlots.map((s: any) => (
                                   <option key={s.Id} value={String(s.Id)}>{s.SlotNo}</option>
@@ -2316,7 +2344,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                       onChange={(e) => setAddParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
                                       placeholder={isUnrated ? "Enter price…" : (rate ? String(rate.Charge) : undefined)}
                                       autoFocus={isUnrated}
-                                      className="w-full text-xs border border-border px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                                      className="w-full text-xs border border-border px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary rounded-md" />
                                     {!isUnrated && rate && <p className="text-[0.625rem] text-muted-foreground mt-0.5">Master: {fmt(rate.Charge)}</p>}
                                     {isUnrated && <p className="text-[0.625rem] text-muted-foreground mt-0.5">No master rate — enter agreed price.</p>}
                                   </div>
@@ -2324,11 +2352,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     <label className="text-xs font-medium text-foreground block mb-1">Qty</label>
                                     <input type="number" min="1" value={addParkingForm.Quantity}
                                       onChange={(e) => setAddParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-                                      className="w-full text-xs border border-border px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                                      className="w-full text-xs border border-border px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary rounded-md" />
                                   </div>
                                 </div>
                                 {effectiveRate > 0 && Number(addParkingForm.Quantity) > 0 && (
-                                  <div className=" bg-background border border-border px-3 py-2 text-xs space-y-0.5">
+                                  <div className="bg-background border border-border px-3 py-2 text-xs space-y-0.5 rounded-lg">
                                     <div className="flex justify-between text-muted-foreground">
                                       <span>Base ({addParkingForm.Quantity} × {fmt(effectiveRate)})</span>
                                       <span>{fmt(effectiveRate * Number(addParkingForm.Quantity))}</span>
@@ -2351,7 +2379,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           {legalWorkStarted && (
                             <input placeholder="Reason for amendment (required)" value={addParkingForm.Reason}
                               onChange={(e) => setAddParkingForm((f) => ({ ...f, Reason: e.target.value }))}
-                              className="w-full text-xs border border-border px-2 py-1.5 bg-background" />
+                              className="w-full text-xs border border-border px-2 py-1.5 bg-background rounded-md" />
                           )}
                         </>
                       )}
@@ -2363,7 +2391,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           </button>
                         )}
                         <button onClick={() => { setAddingParking(false); setAddParkingForm({ ParkingType: "", ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" }); }}
-                          className="px-2.5 py-1 text-xs border border-border text-muted-foreground hover:bg-muted">
+                          className="px-2.5 py-1 text-xs border border-border text-muted-foreground hover:bg-muted rounded-md">
                           Cancel
                         </button>
                       </div>
@@ -2374,19 +2402,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   ) : (
                     <div className="space-y-2">
                       {(parking as any[]).map((p: any) => (
-                        <div key={p.Id} className=" border border-border px-3 py-2.5 space-y-2">
+                        <div key={p.Id} className="border border-border px-3 py-2.5 space-y-2 rounded-lg">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-medium">{p.SlotNo || p.ParkingSlotNo || `Slot #${p.ParkingSlotId ?? "—"}`}</span>
                                 {p.CurrentParkingType && (
-                                  <span className="text-[0.625rem] px-1.5 py-0.5 border font-medium text-muted-foreground bg-muted/40">{p.CurrentParkingType}</span>
+                                  <span className="text-[0.625rem] px-1.5 py-0.5 border font-medium text-muted-foreground bg-muted/40 rounded-full">{p.CurrentParkingType}</span>
                                 )}
                                 {/* Unit-linked parking has no independent payment status —
                                     its value is merged into the booking's milestone schedule.
                                     "With Booking" is the only honest label here; "Pending"
                                     would stay forever until 100% booking settlement. */}
-                                <span className="text-[0.625rem] px-1.5 py-0.5 border font-medium text-foreground bg-card border-foreground/30"
+                                <span className="text-[0.625rem] px-1.5 py-0.5 border font-medium text-foreground bg-card border-foreground/30 rounded-full"
                                   title="Parking cost is included in this booking's grand total and collected via the booking's payment milestones">
                                   With Booking
                                 </span>
@@ -2396,11 +2424,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               {editingParkingId !== p.Id && canEdit ? (
                                 <>
                                   <button onClick={() => startEditParking(p)}
-                                    className="px-2 py-1 text-xs border border-border text-muted-foreground hover:bg-muted">
+                                    className="px-2 py-1 text-xs border border-border text-muted-foreground hover:bg-muted rounded-md">
                                     Edit
                                   </button>
                                   <button onClick={() => handleRemoveParking(p.Id)}
-                                    className="px-2 py-1 text-xs text-destructive border border-destructive/40 hover:bg-destructive/5">
+                                    className="px-2 py-1 text-xs text-destructive border border-destructive/40 hover:bg-destructive/5 rounded-md">
                                     Release
                                   </button>
                                 </>
@@ -2410,7 +2438,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                           {/* Inline edit form — expands below the header row */}
                           {editingParkingId === p.Id ? (
-                            <div className=" border border-foreground/30 bg-card/40 p-3 space-y-3 mt-1">
+                            <div className="border border-border bg-card/40 p-3 space-y-3 mt-1 rounded-lg">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                   <label className="text-xs font-medium text-foreground block mb-1">Rate (₹)</label>
@@ -2419,7 +2447,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     value={parkingForm.RateOverride}
                                     onChange={(e) => setParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
                                     placeholder={String(p.RateSnapshot ?? "")}
-                                    className="w-full text-sm border border-border px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:border-foreground"
+                                    className="w-full text-sm border border-border px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:border-foreground rounded-md"
                                   />
                                   <p className="text-[0.625rem] text-muted-foreground mt-0.5">Master rate: {fmt(p.RateSnapshot)}</p>
                                 </div>
@@ -2429,7 +2457,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     type="number" min="1"
                                     value={parkingForm.Quantity}
                                     onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-                                    className="w-full text-sm border border-border px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:border-foreground"
+                                    className="w-full text-sm border border-border px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:border-foreground rounded-md"
                                   />
                                 </div>
                               </div>
@@ -2441,7 +2469,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   const base = rate * Number(parkingForm.Quantity);
                                   const gst = Math.round(base * gstRate / 100 * 100) / 100;
                                   return (
-                                    <div className=" bg-background border border-border px-3 py-2 text-xs space-y-0.5">
+                                    <div className="bg-background border border-border px-3 py-2 text-xs space-y-0.5 rounded-lg">
                                       <div className="flex justify-between text-muted-foreground">
                                         <span>Base ({parkingForm.Quantity} × {fmt(rate)})</span>
                                         <span>{fmt(base)}</span>
@@ -2463,7 +2491,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   placeholder="Reason for amendment (required)"
                                   value={parkingReason}
                                   onChange={(e) => setParkingReason(e.target.value)}
-                                  className="w-full text-xs border border-border px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                                  className="w-full text-xs border border-border px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary rounded-md"
                                 />
                               )}
                               <div className="flex gap-2">
@@ -2472,18 +2500,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   Save changes
                                 </button>
                                 <button onClick={cancelEditParking}
-                                  className="px-3 py-1.5 text-xs border border-border text-muted-foreground hover:bg-muted transition-colors">
+                                  className="px-3 py-1.5 text-xs border border-border text-muted-foreground hover:bg-muted transition-colors rounded-md">
                                   Cancel
                                 </button>
                               </div>
                             </div>
                           ) : (
                           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
-                            <div><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Qty</span><span className="font-medium">{p.Quantity}</span></div>
-                            <div><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Rate</span><span className="font-medium">{fmt(p.RateSnapshot)}</span></div>
-                            <div><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">GST</span><span className="font-medium">{p.GstRateSnapshot != null ? `${p.GstRateSnapshot}% (${fmt(p.GstAmount)})` : "—"}</span></div>
-                            <div><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Total</span><span className="font-semibold text-foreground">{fmt(p.TotalAmount)}</span></div>
-                            <div><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Receipt</span><span className="font-medium">{p.ReceiptNo || "—"}</span></div>
+                            <div><span className="text-xs font-medium text-muted-foreground block">Qty</span><span className="font-medium">{p.Quantity}</span></div>
+                            <div><span className="text-xs font-medium text-muted-foreground block">Rate</span><span className="font-medium">{fmt(p.RateSnapshot)}</span></div>
+                            <div><span className="text-xs font-medium text-muted-foreground block">GST</span><span className="font-medium">{p.GstRateSnapshot != null ? `${p.GstRateSnapshot}% (${fmt(p.GstAmount)})` : "—"}</span></div>
+                            <div><span className="text-xs font-medium text-muted-foreground block">Total</span><span className="font-semibold text-foreground">{fmt(p.TotalAmount)}</span></div>
+                            <div><span className="text-xs font-medium text-muted-foreground block">Receipt</span><span className="font-medium">{p.ReceiptNo || "—"}</span></div>
                           </div>
                           )}
                         </div>
@@ -2499,15 +2527,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 )}
 
                 {/* Extra Charges */}
-                <div className=" border border-border p-4 space-y-2">
-                  <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><Wallet size={15} className="text-foreground" /> Extra Charges</h3>
+                <div className="border border-border p-4 space-y-2 rounded-lg">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Wallet size={15} className="text-foreground" /> Extra Charges</h3>
                   <div className="overflow-x-auto thin-scroll">
                     {(extras as any[]).length === 0 ? (
                       <p className="text-xs text-muted-foreground">No extra charges added yet.</p>
                     ) : (
                       <div className="min-w-[500px]">
                         {(extras as any[]).map((c: any) => (
-                          <div key={c.Id} className="flex items-center justify-between gap-2 border border-border px-3 py-2 mb-1.5">
+                          <div key={c.Id} className="flex items-center justify-between gap-2 border border-border px-3 py-2 mb-1.5 rounded-md">
                             <div className="space-y-0.5 min-w-0">
                               <span className="text-sm font-medium">{c.Description}</span>
                               <div className="flex gap-3 text-xs text-muted-foreground">
@@ -2521,27 +2549,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 <>
                                   <input placeholder="Description" value={extraForm.Description}
                                     onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
-                                    className="w-28 text-xs border border-border px-1.5 py-1 bg-background" />
+                                    className="w-28 text-xs border border-border px-1.5 py-1 bg-background rounded-md" />
                                   <input type="number" placeholder="Amount" value={extraForm.Amount}
                                     onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
-                                    className="w-20 text-xs border border-border px-1.5 py-1 bg-background" />
+                                    className="w-20 text-xs border border-border px-1.5 py-1 bg-background rounded-md" />
                                   <button onClick={handleAddExtra} disabled={chargesSaving}
                                     className={`${KEY_INK} h-8 px-3`}>
                                     Save
                                   </button>
                                   <button onClick={cancelEditExtra}
-                                    className="px-2 py-1 text-xs border border-border text-muted-foreground hover:bg-muted">
+                                    className="px-2 py-1 text-xs border border-border text-muted-foreground hover:bg-muted rounded-md">
                                     Cancel
                                   </button>
                                 </>
                               ) : canEdit ? (
                                 <>
                                   <button onClick={() => startEditExtra(c)}
-                                    className="px-2 py-1 text-xs border border-border text-muted-foreground hover:bg-muted">
+                                    className="px-2 py-1 text-xs border border-border text-muted-foreground hover:bg-muted rounded-md">
                                     Edit
                                   </button>
                                   <button onClick={() => handleRemoveExtra(c.Id)}
-                                    className="px-2 py-1 text-xs text-destructive border border-destructive/40 hover:bg-destructive/5">
+                                    className="px-2 py-1 text-xs text-destructive border border-destructive/40 hover:bg-destructive/5 rounded-md">
                                     Remove
                                   </button>
                                 </>
@@ -2557,7 +2585,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       {legalWorkStarted && (
                         <input placeholder="Reason for amendment (required)" value={extraReason}
                           onChange={(e) => setExtraReason(e.target.value)}
-                          className="w-full text-sm border border-border px-2.5 py-2 bg-background" />
+                          className="w-full text-sm border border-border px-2.5 py-2 bg-background rounded-md" />
                       )}
                       <div className="flex items-center gap-2">
                         <select value={extraForm.ExtraChargeMasterId} onChange={(e) => {
@@ -2569,7 +2597,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             Amount: selected?.DefaultAmount ? String(selected.DefaultAmount) : f.Amount,
                           }));
                         }}
-                          className="flex-1 text-sm border border-border px-2.5 py-2 bg-background">
+                          className="flex-1 text-sm border border-border px-2.5 py-2 bg-background rounded-md">
                           <option value="">— Select charge type —</option>
                           {(chargeTypes as any[]).map((ct: any) => (
                             <option key={ct.Id} value={String(ct.Id)}>{ct.Name} {ct.DefaultAmount ? `(${fmt(ct.DefaultAmount)})` : ""}</option>
@@ -2579,10 +2607,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <div className="flex items-center gap-2">
                         <input placeholder="Description" value={extraForm.Description}
                           onChange={(e) => setExtraForm((f) => ({ ...f, Description: e.target.value }))}
-                          className="flex-1 text-sm border border-border px-2.5 py-2 bg-background" />
+                          className="flex-1 text-sm border border-border px-2.5 py-2 bg-background rounded-md" />
                         <input type="number" placeholder="Amount" value={extraForm.Amount}
                           onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
-                          className="w-32 text-sm border border-border px-2.5 py-2 bg-background" />
+                          className="w-32 text-sm border border-border px-2.5 py-2 bg-background rounded-md" />
                         <button onClick={handleAddExtra} disabled={chargesSaving}
                           className={`${KEY_INK} h-8 px-3`}>
                           {chargesSaving ? "Adding…" : "Add"}
@@ -2623,11 +2651,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         { key: "AnnualIncome", label: "Annual Income", type: "number" },
                       ].map((f) => (
                         <div key={f.key}>
-                          <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">{f.label}</label>
+                          <label className="text-xs font-medium text-muted-foreground block mb-1">{f.label}</label>
                           <AutoInput type={f.type} value={(bank as any)[f.key] || ""}
                             disabled={booking.Status === CrmStatus.APPROVED || bankLocked}
                             onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
-                            className="w-full text-sm border border-border px-2.5 py-2 bg-background disabled:opacity-60 disabled:cursor-not-allowed" />
+                            className="w-full text-sm border border-border px-2.5 py-2 bg-background disabled:opacity-60 disabled:cursor-not-allowed rounded-md" />
                         </div>
                       ))}
                     </div>
@@ -2635,7 +2663,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <p className="text-xs text-muted-foreground">Locked — this Booking is Approved. Bank/KYC details can no longer be edited here.</p>
                     )}
                     {booking.Status !== CrmStatus.APPROVED && (
-                      <div className="flex items-center justify-between gap-2 border border-border px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 border border-border px-3 py-2 rounded-md">
                         <div>
                           <p className="text-sm font-medium">Bank/KYC Details</p>
                           {bankLocked && bankVerifiedAt && (
@@ -2651,14 +2679,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             </span>
                             {canEdit && (
                               <button onClick={() => setBankLocked(false)}
-                                className="px-2 py-0.5 text-xs text-foreground border border-foreground/30 bg-card font-medium hover:bg-primary/10">
+                                className="px-2 py-0.5 text-xs text-foreground border border-border bg-card font-medium hover:bg-primary/10 rounded-md">
                                 Edit
                               </button>
                             )}
                           </div>
                         ) : canEdit ? (
                           <button onClick={handleSaveBank} disabled={bankSaving}
-                            className="px-2.5 py-1 text-xs border border-border font-medium hover:bg-muted disabled:opacity-40">
+                            className="px-2.5 py-1 text-xs border border-border font-medium hover:bg-muted disabled:opacity-40 rounded-md">
                             {bankSaving ? "Saving…" : "Verify & Save Bank/KYC Details"}
                           </button>
                         ) : (
@@ -2681,7 +2709,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     Checking portal status…
                   </div>
                 ) : portalStatus?.hasPortal ? (
-                  <div className="border border-border bg-card overflow-hidden">
+                  <div className="border border-border bg-card overflow-hidden rounded-md">
                     {/* Header stripe */}
                     <div className={`px-5 py-4 flex items-center justify-between gap-4 border-b border-border ${portalStatus.isActive ? "bg-foreground/5" : "bg-destructive/5"}`}>
                       <div className="flex items-center gap-3">
@@ -2689,7 +2717,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           <ShieldCheck size={20} className={portalStatus.isActive ? "text-foreground" : "text-destructive"} />
                         </div>
                         <div>
-                          <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground">Customer Portal</p>
+                          <p className="text-sm font-semibold text-foreground">Customer Portal</p>
                           <p className={`text-sm font-bold mt-0.5 ${portalStatus.isActive ? "text-foreground" : "text-destructive"}`}>
                             {portalStatus.isActive ? "Access Active" : "Access Deactivated"}
                           </p>
@@ -2698,7 +2726,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <button
                         onClick={() => handleTogglePortalAccess(portalStatus.isActive)}
                         disabled={togglingPortal}
-                        className={`shrink-0 px-4 py-1.5 text-xs font-semibold border transition-colors disabled:opacity-50 ${
+                        className={`shrink-0 px-4 py-1.5 text-xs font-semibold border transition-colors disabled:opacity-50 rounded-md ${
                           portalStatus.isActive
                             ? "border-destructive/40 text-destructive hover:bg-destructive/10"
                             : "border-foreground/30 text-foreground hover:bg-primary/10"
@@ -2722,7 +2750,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           <KeyRound size={13} className="text-foreground shrink-0" />
                           <span>Password Status</span>
                         </div>
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[0.625rem] font-semibold border ${
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[0.625rem] font-semibold border rounded-md ${
                           portalStatus.mustChangePassword
                             ? "bg-card text-foreground border-foreground/30"
                             : "bg-card text-foreground border-foreground/30"
@@ -2763,12 +2791,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     )}
                   </div>
                 ) : (
-                  <div className="border border-dashed border-border bg-muted/20 p-8 flex flex-col items-center text-center gap-3">
-                    <div className="h-14 w-14 bg-muted/60 border border-border flex items-center justify-center">
+                  <div className="border border-dashed border-border bg-muted/20 p-8 flex flex-col items-center text-center gap-3 rounded-lg">
+                    <div className="h-14 w-14 bg-muted/60 border border-border flex items-center justify-center rounded-md">
                       <Lock size={24} className="text-muted-foreground" />
                     </div>
                     <div>
-                      <h4 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Portal Not Provisioned</h4>
+                      <h4 className="text-sm font-semibold text-foreground">Portal Not Provisioned</h4>
                       <p className="text-xs text-muted-foreground mt-1 max-w-xs leading-relaxed">
                         {portalStatus?.workflowStage !== "Confirmed"
                           ? "The customer portal is provisioned automatically once this booking reaches Confirmed status."
@@ -2794,7 +2822,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-2">
                 {canEdit && booking.Status !== CrmStatus.APPROVED && (
                   <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-2 px-3 py-2 text-sm border border-border cursor-pointer hover:bg-muted">
+                    <label className="flex items-center gap-2 px-3 py-2 text-sm border border-border cursor-pointer hover:bg-muted rounded-md">
                       <Upload size={14} />
                       {uploading ? "Uploading…" : "Upload Files"}
                       <input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} disabled={uploading} />
@@ -2832,7 +2860,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   <Paperclip size={12} className="text-muted-foreground shrink-0" />
                                   <span className="truncate max-w-[200px] sm:max-w-[300px]">{a.FileName}</span>
                                   {a.Source === "application" && (
-                                    <span className="shrink-0 text-[0.625rem] px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/20">From Application</span>
+                                    <span className="shrink-0 text-[0.625rem] px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/20 rounded-full">From Application</span>
                                   )}
                                 </div>
                                 {a.DocumentType && a.DocumentType !== a.Label && (
@@ -2844,13 +2872,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 <div className="flex items-center justify-end gap-1 flex-wrap">
                                   {previewable && (
                                     <button data-row-view onClick={() => setPreviewAttachment({ ...a, fileUrl })}
-                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border hover:bg-muted">
+                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border hover:bg-muted rounded-md">
                                       <Eye size={11} /> Preview
                                     </button>
                                   )}
                                   <button type="button"
                                     onClick={async () => { if (!(await downloadAuthFile(fileUrl, a.FileName))) toast.error("Couldn't download the file — try again."); }}
-                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border hover:bg-muted">
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border hover:bg-muted rounded-md">
                                     <Download size={11} /> Download
                                   </button>
                                   {canEdit && booking.Status !== CrmStatus.APPROVED && a.Source !== "application" && (
@@ -2877,9 +2905,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {tab === "Payment & Invoice" && (
               <div className="space-y-4 pt-4 mt-1 border-t border-border">
                 {/* Money Receipt — inline card with View + Download, no page navigation */}
-                <div className=" border border-border p-4 space-y-3">
+                <div className="border border-border p-4 space-y-3 rounded-lg">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                       <FileText size={15} className="text-foreground" /> Money Receipt
                     </h3>
                     {/* Application Form PDF — gated to post-L1 (Data Review complete).
@@ -2888,11 +2916,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     {booking?.ApplicationId && currentStage !== "Review" && (
                       <div className="flex items-center gap-1.5">
                         <button data-row-view onClick={() => setPreviewApplicationForm({ id: booking.ApplicationId, no: booking.ApplicationNo })}
-                          className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border hover:bg-muted font-medium">
+                          className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border hover:bg-muted font-medium rounded-md">
                           <Eye size={11} /> View Application Form
                         </button>
                         <button onClick={() => downloadPdf(`/api/crm/applications/${booking.ApplicationId}/pdf`, `${booking.ApplicationNo}-ApplicationForm.pdf`)}
-                          className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border hover:bg-muted font-medium">
+                          className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border hover:bg-muted font-medium rounded-md">
                           <Download size={11} /> Download Application Form
                         </button>
                       </div>
@@ -2918,7 +2946,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
                             } catch (e: any) { toast.error(e.message); }
                           }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-muted font-medium"
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-muted font-medium rounded-md"
                         >
                           <RefreshCw size={11} /> Retry Auto-Create
                         </button>
@@ -2933,22 +2961,22 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           : "text-foreground bg-card border-foreground/30";
                         const pdfUrl = `/api/crm/money-receipts/${mr.Id}/pdf`;
                         return (
-                          <div key={mr.Id} className=" border border-border bg-muted/10 px-3 py-2.5 space-y-2">
+                          <div key={mr.Id} className="border border-border bg-muted/10 px-3 py-2.5 space-y-2 rounded-lg">
                             {/* top row: receipt no + status + actions */}
                             <div className="flex items-center justify-between gap-2 flex-wrap">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-semibold">{mr.ReceiptNo}</span>
-                                <span className={`text-[0.625rem] font-medium px-1.5 py-0.5 border ${statusColor}`}>
+                                <span className={`text-[0.625rem] font-medium px-1.5 py-0.5 border rounded-full ${statusColor}`}>
                                   {mr.Status}
                                 </span>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
                                 <button data-row-view onClick={() => setPreviewReceipt(mr)}
-                                  className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border hover:bg-muted font-medium">
+                                  className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border hover:bg-muted font-medium rounded-md">
                                   <Eye size={11} /> View
                                 </button>
                                 <button onClick={() => downloadPdf(`/api/crm/money-receipts/${mr.Id}/pdf`, `${mr.ReceiptNo}.pdf`)}
-                                  className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border hover:bg-muted font-medium">
+                                  className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border hover:bg-muted font-medium rounded-md">
                                   <Download size={11} /> Download PDF
                                 </button>
                               </div>
@@ -2983,9 +3011,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 </div>
 
                 <div className="flex items-center justify-between gap-2 pt-3">
-                  <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><FileText size={15} className="text-foreground" /> Invoices</h3>
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><FileText size={15} className="text-foreground" /> Invoices</h3>
                   <a href={`/crm/invoices?bookingId=${bookingId}`}
-                    className="px-3 py-1.5 text-xs border border-border font-medium hover:bg-muted">
+                    className="px-3 py-1.5 text-xs border border-border font-medium hover:bg-muted rounded-md">
                     Open Invoices page →
                   </a>
                 </div>
@@ -3015,23 +3043,23 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-border mt-4">
               {isLastTab && !closed && !mandatoryReady && booking.Status !== CrmStatus.APPROVED && pendingStepMessage && (
                 <button onClick={() => setTab(pendingStepMessage.tab)}
-                  className="flex-1 text-left text-xs text-foreground bg-card border border-foreground/30 px-3 py-2 hover:bg-primary/10">
+                  className="flex-1 text-left text-xs text-foreground bg-card border border-border px-3 py-2 hover:bg-primary/10 rounded-md">
                   {pendingStepMessage.text}
                 </button>
               )}
               <div className="flex items-center gap-2 shrink-0">
                 <button onClick={() => goStep(-1)} disabled={activeTabIndex === 0}
-                  className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-30 flex items-center gap-1">
+                  className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-30 flex items-center gap-1 rounded-md">
                   <ArrowLeft size={14} /> Previous
                 </button>
                 {!isLastTab ? (
                   <button onClick={() => goStep(1)}
-                    className="px-4 py-1.5 text-sm border border-border font-medium hover:bg-muted flex items-center gap-1">
+                    className="px-4 py-1.5 text-sm border border-border font-medium hover:bg-muted flex items-center gap-1 rounded-md">
                     Next <ArrowRight size={14} />
                   </button>
                 ) : booking.Status === CrmStatus.APPROVED ? (
                   <button disabled
-                    className="px-4 py-1.5 text-sm bg-foreground text-card font-medium cursor-default flex items-center gap-1">
+                    className={cn(GRID_KEY_BRAND, "h-9 px-4 text-sm cursor-default")}>
                     <Check size={14} /> Approved &amp; Booked
                   </button>
                 ) : closed ? (
@@ -3047,7 +3075,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 ) : canVerify && currentStage === "Review" ? (
                   <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady || !checklistAllChecked}
                     title={!mandatoryReady || !checklistAllChecked ? pendingStepMessage?.text : undefined}
-                    className="px-4 py-1.5 text-sm bg-foreground text-card font-medium hover:bg-foreground/80 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
+                    className={cn(GRID_KEY_BRAND, "h-9 px-4 text-sm disabled:opacity-40 disabled:cursor-not-allowed")}>
                     {bookingRequesting ? "Submitting…" : "Verify & Send for Approval"}
                     {!bookingRequesting && <Check size={14} />}
                   </button>
@@ -3058,7 +3086,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       Reject
                     </button>
                     <button onClick={handleStageApprove} disabled={stageActioning !== null}
-                      className="px-4 py-1.5 text-sm bg-foreground text-card font-medium hover:bg-foreground/80 disabled:opacity-40 flex items-center gap-1">
+                      className={cn(GRID_KEY_BRAND, "h-9 px-4 text-sm disabled:opacity-40")}>
                       {stageActioning === "approve"
                         ? "Approving…"
                         : <>{currentStage === "DirectorApproval" ? "Final Approve" : "Approve"} <Check size={14} /></>}
@@ -3107,7 +3135,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       <div data-overlay-portal className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4"
         style={{ pointerEvents: "auto" }}
         onClick={() => setPreviewAttachment(null)} onPointerDown={(e) => e.stopPropagation()}>
-        <div className="bg-background border border-border shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
+        <div className="bg-background border border-border shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col rounded-md"
           onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
             <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
@@ -3117,7 +3145,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             <div className="flex items-center gap-2 shrink-0">
               <button type="button"
                 onClick={async () => { if (!(await downloadAuthFile(previewAttachment.fileUrl, previewAttachment.FileName))) toast.error("Couldn't download the file — try again."); }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-muted font-medium">
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-muted font-medium rounded-md">
                 <Download size={13} /> Download
               </button>
               <button onClick={() => setPreviewAttachment(null)} className="text-muted-foreground hover:text-foreground p-1"><X size={16} /></button>
@@ -3154,17 +3182,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     {/* Send back: a real dialog on top of the booking dialog (a body-level
         overlay sat outside it, where the booking dialog blocks typing and clicks). */}
     <Dialog open={rejectOpen} onOpenChange={(o) => { if (!o && !stageActioning) setRejectOpen(false); }}>
-      <DialogContent hideCloseButton elevated className="max-w-md rounded-none" style={{ border: RULE }}>
+      <DialogContent hideCloseButton elevated className="max-w-md rounded-xl">
         <DialogHeader>
-          <DialogTitle className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</DialogTitle>
+          <DialogTitle className="text-sm font-semibold text-foreground">Send Back for Correction</DialogTitle>
         </DialogHeader>
         <SendBackChoices choices={bookingSendBackChoices(stageState?.SendBackTo)} value={rejectTo} onChange={setRejectTo} />
         <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)} autoFocus
           placeholder="What needs to be corrected? (required)"
-          className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+          className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary rounded-md" />
         <div className="flex justify-end gap-2">
           <button onClick={() => setRejectOpen(false)} disabled={stageActioning !== null}
-            className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-40">
+            className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-40 rounded-md">
             Cancel
           </button>
           <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
@@ -3175,7 +3203,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       </DialogContent>
     </Dialog>
     <Dialog open={!!reasonDialog} onOpenChange={(o) => { if (!o) { setReasonDialog(null); setReasonText(""); } }}>
-      <DialogContent hideCloseButton className="max-w-md rounded-none" style={{ border: RULE }}>
+      <DialogContent hideCloseButton className="max-w-md rounded-xl">
         <DialogHeader>
           <DialogTitle className="text-sm font-semibold">{reasonDialog?.title}</DialogTitle>
         </DialogHeader>
@@ -3192,11 +3220,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             rows={4}
             value={reasonText}
             onChange={(e) => setReasonText(e.target.value)}
-            className="w-full border border-border p-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+            className="w-full border border-border p-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary resize-none rounded-md"
             autoFocus
           />
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => { setReasonDialog(null); setReasonText(""); }} className="px-4 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted">Cancel</button>
+            <button type="button" onClick={() => { setReasonDialog(null); setReasonText(""); }} className="px-4 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted rounded-md">Cancel</button>
             <button type="submit" className={`${KEY_INK} h-8 px-3`}>Confirm</button>
           </div>
         </form>

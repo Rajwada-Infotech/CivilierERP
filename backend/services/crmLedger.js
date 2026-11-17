@@ -890,7 +890,7 @@ async function postCrmRefundPaid(pool, refundId, userEmail) {
  * like a normal on-account deposit's ledger side. The existing
  * applyOnAccountToMilestone sweep then DEBITs it back down onto milestones.
  */
-async function postCrmHeldCreditReallocateLedgerOnly(pool, { customerId, newOnAccountId, amount, companyId, projectId, receiptNo, userEmail, executor }) {
+async function postCrmHeldCreditReallocateLedgerOnly(pool, { customerId, newOnAccountId, amount, companyId, projectId, receiptNo, userEmail, executor, notes = null }) {
   let tx = executor || null;
   const ownsTx = !tx;
   if (!tx) {
@@ -925,7 +925,7 @@ async function postCrmHeldCreditReallocateLedgerOnly(pool, { customerId, newOnAc
       .input("RefId", sql.Int, newOnAccountId)
       .input("CompanyId", sql.Int, companyId ?? null)
       .input("ProjectId", sql.Int, projectId ?? null)
-      .input("Notes", sql.NVarChar(500), `Re-booking credit from cancelled booking (${receiptNo || "held"})`)
+      .input("Notes", sql.NVarChar(500), (notes || `Re-booking credit from cancelled booking (${receiptNo || "held"})`).slice(0, 500))
       .input("CreatedBy", sql.NVarChar(150), userEmail)
       .query(`
         INSERT INTO dbo.OnAccountLedger
@@ -1286,7 +1286,7 @@ async function postCrmResaleTransferToGL(pool, resaleId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
   const r = (await pool.request().input("id", sql.Int, resaleId).query(`
     SELECT r.Id, r.PaidAtTransfer, r.FromCustomerId, r.ToCustomerId, r.CompletedAt,
-           b.ProjectId, b.CompanyId, COALESCE(b.UnitNo, b.BookingNo) AS Item
+           b.ProjectId, b.CompanyId, ${require("./crmResaleTransfer").resalePropertySql("r", "b")} AS Item
     FROM dbo.CrmUnitResale r LEFT JOIN dbo.CrmBooking b ON b.Id = r.FromBookingId WHERE r.Id = @id`)).recordset[0];
   if (!r) return { posted: false, reason: `Resale ${resaleId} not found` };
   const paid = Math.round(Number(r.PaidAtTransfer || 0) * 100) / 100;
