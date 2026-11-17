@@ -55,7 +55,10 @@ export function VillaOffersPanel() {
           <tbody>
             {data.map((o) => (
               <tr key={`${o.UnitId}-${o.LandBookingId}`} className="hover:bg-muted/50">
-                <td className={GRID_TD}><span className="font-medium">{o.UnitName}</span><span className="text-muted-foreground"> · {o.ProjectName}</span></td>
+                <td className={GRID_TD}>
+                  <span className="font-medium">{o.UnitName}</span><span className="text-muted-foreground"> · {o.ProjectName}</span>
+                  {o.PlotName ? <span className="block text-muted-foreground">Plots: {o.PlotName}</span> : null}
+                </td>
                 <td className={GRID_TD}>{o.VillaTypeCode ? `${o.VillaTypeCode} · ${o.VillaTypeName}` : "—"}</td>
                 <td className={GRID_TD}>{o.CustomerName || "—"}{o.Mobile ? <span className="text-muted-foreground"> · {o.Mobile}</span> : null}</td>
                 <td className={cn(GRID_TD, "text-right font-semibold")}>{o.LandDue > 0 ? fmt(o.LandDue) : "Paid"}</td>

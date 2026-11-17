@@ -421,8 +421,14 @@ router.get("/villa-offers", requirePageRight("crm-bookings", "view"), async (req
     }
     const live = (alias) => `${alias}.IsActive = 1 AND ${alias}.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`;
     const rows = (await request.query(`
-      SELECT u.Id AS UnitId, u.UnitName, u.ProjectId, u.BlockId, e.company_id AS CompanyId, e.name AS ProjectName, vt.Code AS VillaTypeCode, vt.Name AS VillaTypeName,
-             p.PlotName, lb.Id AS LandBookingId, lb.BookingNo AS LandBookingNo, a.CustomerId, c.CustomerName, c.Mobile,
+      SELECT DISTINCT u.Id AS UnitId, u.UnitName, u.ProjectId, u.BlockId, e.company_id AS CompanyId, e.name AS ProjectName, vt.Code AS VillaTypeCode, vt.Name AS VillaTypeName,
+             (SELECT STRING_AGG(x.PlotName, N', ') FROM (
+                SELECT DISTINCT p2.PlotName
+                FROM dbo.PlotMaster p2
+                JOIN dbo.CrmBookingPlot bp2 ON bp2.PlotId = p2.Id AND bp2.Status = N'Active' AND bp2.BookingId = lb.Id
+                WHERE p2.ConvertedUnitId = u.Id AND p2.IsActive = 1
+              ) x) AS PlotName,
+             lb.Id AS LandBookingId, lb.BookingNo AS LandBookingNo, a.CustomerId, c.CustomerName, c.Mobile,
              (SELECT ISNULL(SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)), 0) FROM dbo.CrmPaymentMilestone m
                WHERE m.BookingId = lb.Id AND m.Status NOT IN (N'Paid', N'Waived')) AS LandDue
       FROM dbo.UnitMaster u
