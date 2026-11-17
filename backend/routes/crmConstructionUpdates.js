@@ -14,15 +14,13 @@
 //   * DPR works are put in site order (their place in the chains); "now" is the work under way, "next" the first one
 //     not started after it.
 // What moved comes from the DPR progress log (every % change a site engineer records) and completed steps.
-// Payment milestones wait for a DPR work (CrmMilestoneMaster.DprGroupId, else the DPR work of the same name): when it
-// reaches 100% for a booking's unit (else its tower, else the project) the milestone is listed as ready to demand.
 // Staff notes for buyers (CrmConstructionUpdate) stay as before.
 const express = require("express");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { parseId } = require("../middleware/validateRequest");
@@ -40,8 +38,6 @@ const idList = (ids) => [...new Set((ids || []).map(Number).filter((n) => Number
 
 // A DPR work's name as people say it: "5. PLASTERING" -> "Plastering", "9. ELECTRICK WIRING WORK" -> "Electrick Wiring Work".
 const workName = (g) => String(g || "").replace(/^\s*\d+(\.\d+)*\.?\s*/, "").toLowerCase().replace(/(^|[\s&/(-])\S/g, (c) => c.toUpperCase()).trim() || "Other work";
-// For matching a milestone to a DPR work by name: letters only, upper case, numbering dropped.
-const matchKey = (s) => String(s || "").replace(/^\s*\d+(\.\d+)*\.?\s*/, "").toUpperCase().replace(/[^A-Z]+/g, " ").trim();
 
 // The live DPR steps of the given projects, one row each: where it is, its DPR work, weight and %.
 const stepsSql = (list) => `
@@ -240,112 +236,6 @@ router.get("/progress/:projectId", requirePageRight("crm-construction-updates", 
   }
 });
 
-// The DPR works and which one each payment milestone waits for (set, or matched by name).
-async function milestoneLinks(pool) {
-  const [groups, milestones] = await Promise.all([
-    pool.request().query("SELECT id AS GroupId, activity_name AS Name FROM dbo.ActivityMaster WHERE activity_type = 0 AND ISNULL(is_active, 1) = 1 ORDER BY activity_name"),
-    pool.request().query("SELECT Id, Name, SortOrder, DprGroupId FROM dbo.CrmMilestoneMaster WHERE IsActive = 1 ORDER BY SortOrder, Id"),
-  ]);
-  const byKey = new Map();
-  for (const g of groups.recordset) { const k = matchKey(g.Name); byKey.set(k, byKey.has(k) ? null : g.GroupId); } // ambiguous names don't match
-  return {
-    groups: groups.recordset.map((g) => ({ groupId: g.GroupId, name: workName(g.Name) })),
-    milestones: milestones.recordset.map((m) => {
-      // DprGroupId: a DPR work; 0 = set to none on purpose; empty = match by name.
-      const auto = byKey.get(matchKey(m.Name)) || null;
-      return { id: m.Id, name: m.Name, groupId: m.DprGroupId === 0 ? null : (m.DprGroupId ?? auto), matched: m.DprGroupId == null && auto != null };
-    }),
-  };
-}
-
-// GET /milestone-links — the payment milestones and the DPR work each waits for.
-router.get("/milestone-links", requirePageRight("crm-construction-updates", "view"), async (req, res) => {
-  try { res.json(await milestoneLinks(getPool())); }
-  catch (e) { console.error("[crm-construction-updates] GET /milestone-links error:", e.message); res.status(500).json({ error: "Could not load the milestone links" }); }
-});
-
-// PUT /milestone-links { links: [{ id, groupId|null }] } — set which DPR work a milestone waits for (null: none).
-router.put("/milestone-links", requirePageRight("crm-construction-updates", "edit"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const links = Array.isArray(req.body?.links) ? req.body.links : [];
-    for (const l of links) {
-      const id = parseId(l.id); if (!id) continue;
-      const gid = l.groupId == null || l.groupId === "" ? 0 : parseId(l.groupId);
-      if (gid) {
-        const ok = (await pool.request().input("g", sql.Int, gid).query("SELECT 1 AS x FROM dbo.ActivityMaster WHERE id = @g AND activity_type = 0")).recordset.length;
-        if (!ok) return res.status(400).json({ error: "A DPR work picked does not exist" });
-      }
-      await pool.request().input("id", sql.Int, id).input("g", sql.Int, gid).input("u", sql.Int, actorId(req))
-        .query("UPDATE dbo.CrmMilestoneMaster SET DprGroupId = @g, UpdatedBy = @u, UpdatedAt = SYSDATETIME() WHERE Id = @id");
-    }
-    res.json({ success: true });
-  } catch (e) {
-    console.error("[crm-construction-updates] PUT /milestone-links error:", e.message);
-    res.status(500).json({ error: "Could not save the milestone links" });
-  }
-});
-
-/**
- * Payment milestones whose DPR work is complete and are not demanded or paid yet. A booking milestone reaches its
- * milestone master through the booking's plan template item. The work is judged at the level the booking's payment
- * plan was set for (the same tags getApplicablePaymentPlans reads): a plan set for the unit -> the unit; for its tower
- * -> the tower; for the project, or not tagged -> the project. Only where that level has no DPR steps for the work is
- * it judged one level up.
- */
-async function readyDemands(pool, { bookingId = null, projectId = null, scope = null } = {}) {
-  const links = new Map((await milestoneLinks(pool)).milestones.filter((m) => m.groupId).map((m) => [m.id, m.groupId]));
-  if (!links.size) return [];
-  const r = pool.request();
-  const conds = ["b.IsActive = 1", "m.Status NOT IN ('Paid', 'Waived')", "ISNULL(m.DemandStatus, 'Pending') = 'Pending'", "m.ExtraChargeId IS NULL", "m.ParkingAllotmentId IS NULL",
-    `ti.MilestoneMasterId IN (${[...links.keys()].join(",")})`];
-  if (bookingId) { r.input("bid", sql.Int, bookingId); conds.push("b.Id = @bid"); }
-  if (projectId) { r.input("pid", sql.Int, projectId); conds.push("b.ProjectId = @pid"); }
-  const rows = (await r.query(`
-    SELECT m.Id AS MilestoneId, m.MilestoneNo, m.MilestoneName, m.AmountDue, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.UnitId, u.BlockId,
-           b.UnitNo, a.ApplicantName, ti.MilestoneMasterId,
-           CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmUnitPaymentPlan x WHERE x.UnitId = b.UnitId AND x.PlanId = b.PaymentPlanId AND x.IsActive = 1) THEN 'Unit'
-                WHEN EXISTS (SELECT 1 FROM dbo.CrmBlockPaymentPlan x WHERE x.BlockId = u.BlockId AND x.PlanId = b.PaymentPlanId AND x.IsActive = 1) THEN 'Tower'
-                ELSE 'Project' END AS PlanLevel
-    FROM dbo.CrmPaymentMilestone m
-    JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-    LEFT JOIN dbo.UnitMaster u ON u.Id = b.UnitId
-    JOIN dbo.CrmPaymentPlanTemplateItem ti ON ti.PlanTemplateId = b.PaymentPlanId AND ti.MilestoneNo = m.MilestoneNo
-    WHERE ${conds.join(" AND ")} AND b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}${projectPredicate(scope, "b.ProjectId")}
-    ORDER BY b.ProjectId, b.BookingNo, m.MilestoneNo`)).recordset;
-  if (!rows.length) return [];
-  const prog = await constructionProgress(pool, rows.map((x) => x.ProjectId));
-  const out = [];
-  for (const x of rows) {
-    const p = prog.get(x.ProjectId); if (!p?.hasDpr) continue;
-    const gid = links.get(x.MilestoneMasterId);
-    const workIn = (place) => place?.works.find((w) => w.groupId === gid) || null;
-    const levels = [
-      ["Unit", workIn(p.flats.get(Number(x.UnitId)))],
-      ["Tower", workIn(p.towers.find((t) => Number(t.blockId) === Number(x.BlockId)))],
-      ["Project", workIn(p)],
-    ];
-    // From the plan's own level upward, the first place the site tracks this work.
-    const from = levels.findIndex(([lvl]) => lvl === x.PlanLevel);
-    const hit = levels.slice(from < 0 ? 2 : from).find(([, w]) => w);
-    if (hit && hit[1].pct >= 100) out.push({ ...x, work: hit[1].name, judgedOn: hit[0] });
-  }
-  return out;
-}
-
-// GET /ready-demands?bookingId=&projectId= — milestones whose DPR work is complete (payments staff may read it too).
-router.get("/ready-demands", requireAnyPageRight(["crm-construction-updates", "crm-payments"], "view"), async (req, res) => {
-  try {
-    const projectId = req.query.projectId ? parseId(req.query.projectId) : null;
-    if (projectId && !projectAllowed(req.projectScope, projectId)) return res.status(403).json({ error: "You don't have access to this project" });
-    res.json(await readyDemands(getPool(), { bookingId: req.query.bookingId ? parseId(req.query.bookingId) : null, projectId, scope: req.projectScope }));
-  } catch (e) {
-    console.error("[crm-construction-updates] GET /ready-demands error:", e.message);
-    res.status(500).json({ error: "Could not work out the milestones ready to demand" });
-  }
-});
-
 // GET / — staff notes to buyers, newest first; ?projectId=
 router.get("/", requirePageRight("crm-construction-updates", "view"), async (req, res) => {
   try {
@@ -396,4 +286,3 @@ module.exports = router;
 module.exports.constructionProgress = constructionProgress;
 module.exports.unitProgress = unitProgress;
 module.exports.siteFeed = siteFeed;
-module.exports.readyDemands = readyDemands;

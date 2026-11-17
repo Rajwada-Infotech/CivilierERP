@@ -1,13 +1,12 @@
 // End-to-end test of construction progress read live from the DPR module: the roll-up (checked against an independent
 // computation from the raw DPR rows), works in site order, now/next, towers, units, what moved, notes for buyers, the
-// buyer's portal, and payment milestones ready to demand. Real routes and real SQL on the DEVELOPMENT database through
+// buyer's portal. Real routes and real SQL on the DEVELOPMENT database through
 // scripts/e2eHarness.js, inside one transaction that is rolled back. Runs on TEST RESIDENCE (project 16).
 //   node scripts/e2eConstruction.js
 const { openHarness } = require("./e2eHarness");
 
 const PROJECT = 16;   // TEST RESIDENCE
-const BOOKING = 206;  // BKG-2026-00126, ZZTEST, in TEST RESIDENCE
-const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmConstructionUpdate) U, (SELECT CHECKSUM_AGG(CHECKSUM(Id, DprGroupId)) FROM dbo.CrmMilestoneMaster) M,
+const COUNT = `SELECT (SELECT COUNT(*) FROM dbo.CrmConstructionUpdate) U,
   (SELECT CHECKSUM_AGG(CHECKSUM(Status, ProgressPercent)) FROM dbo.DependencyActivityAssignment WHERE IsCurrent = 1) A`;
 const near = (a, b, tol = 0.05) => Math.abs(Number(a) - Number(b)) <= tol;
 const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
@@ -148,62 +147,6 @@ const round1 = (n) => Math.round(Number(n || 0) * 10) / 10;
         && plotTimeline.constructionProgress.unit?.works?.length > 0, JSON.stringify(plotTimeline.constructionProgress)?.slice(0, 200));
     } else check("Converted plot buyer with unit DPR available", true, "Skipped: no active converted plot on a project with DPR in development data");
 
-    section("Milestones ready to demand");
-    const links = (await call("GET", "/cu/milestone-links")).json;
-    check("DPR works and milestones are offered", links.groups.length > 0 && links.milestones.length > 0);
-    const ms = (await q(`SELECT TOP 1 ti.MilestoneMasterId, m.MilestoneNo FROM dbo.CrmBooking b
-      JOIN dbo.CrmPaymentMilestone m ON m.BookingId = b.Id AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL
-      JOIN dbo.CrmPaymentPlanTemplateItem ti ON ti.PlanTemplateId = b.PaymentPlanId AND ti.MilestoneNo = m.MilestoneNo
-      WHERE b.Id = ${BOOKING} AND ti.MilestoneMasterId IS NOT NULL ORDER BY m.MilestoneNo DESC`))[0];
-    if (!ms) check("A booking milestone to test with", false, "none");
-    else {
-      await q(`UPDATE dbo.CrmPaymentMilestone SET Status = 'Pending', AmountPaid = 0, DemandStatus = 'Pending' WHERE BookingId = ${BOOKING} AND MilestoneNo = ${ms.MilestoneNo}`);
-      await q(`UPDATE dbo.CrmBooking SET Status = 'Approved', IsActive = 1 WHERE Id = ${BOOKING}`);
-      expectCall("Link the milestone to the completed work", await call("PUT", "/cu/milestone-links", { links: [{ id: ms.MilestoneMasterId, groupId: first.groupId }] }), 200);
-      const hit = ((await call("GET", `/cu/ready-demands?bookingId=${BOOKING}`)).json || []).find((r) => r.MilestoneNo === ms.MilestoneNo);
-      check("Its work is complete: ready to demand", !!hit && hit.work === first.name && ["Unit", "Tower", "Project"].includes(hit.judgedOn), JSON.stringify(hit));
-
-      // The plan's own level decides where the work is judged: open one step of this work in another tower.
-      const bk = (await q(`SELECT b.UnitId, u.BlockId, b.PaymentPlanId FROM dbo.CrmBooking b JOIN dbo.UnitMaster u ON u.Id = b.UnitId WHERE b.Id = ${BOOKING}`))[0];
-      // The test booking sits in a tower the site tracks this work in (rolled back with the rest).
-      const workTowers = [...new Set(raw.filter((r) => r.GroupId === first.groupId && r.TowerId).map((r) => Number(r.TowerId)))];
-      if (workTowers.length > 1 && !workTowers.includes(Number(bk.BlockId))) {
-        bk.BlockId = workTowers[0];
-        await q(`UPDATE dbo.UnitMaster SET BlockId = ${bk.BlockId} WHERE Id = ${bk.UnitId}`);
-      }
-      const elsewhere = (await q(`SELECT TOP 1 daa.Id FROM dbo.DependencyActivityAssignment daa JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
-        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
-        WHERE daa.IsCurrent = 1 AND dm.IsActive = 1 AND dm.ProjectId = ${PROJECT} AND am.group_id = ${first.groupId} AND ISNULL(dm.TowerId, 0) <> ${bk.BlockId}`))[0];
-      const towerHasWork = raw.some((r) => Number(r.TowerId) === Number(bk.BlockId) && r.GroupId === first.groupId);
-      if (elsewhere && towerHasWork) {
-        await q(`UPDATE dbo.DependencyActivityAssignment SET Status = 'IN_PROGRESS', ProgressPercent = 50 WHERE Id = ${elsewhere.Id}`);
-        await q(`UPDATE dbo.CrmUnitPaymentPlan SET IsActive = 0 WHERE PlanId = ${bk.PaymentPlanId}`);
-        await q(`UPDATE dbo.CrmBlockPaymentPlan SET IsActive = 0 WHERE PlanId = ${bk.PaymentPlanId}`);
-        const readyNow = async () => ((await call("GET", `/cu/ready-demands?bookingId=${BOOKING}`)).json || []).find((r) => r.MilestoneNo === ms.MilestoneNo);
-        check("Plan set for the project: waits for the work across the project", !(await readyNow()));
-        await q(`INSERT INTO dbo.CrmBlockPaymentPlan (BlockId, PlanId, IsActive) VALUES (${bk.BlockId}, ${bk.PaymentPlanId}, 1)`);
-        const tw = await readyNow();
-        check("Plan set for the tower: ready once the tower's work is complete", tw?.judgedOn === "Tower", JSON.stringify(tw));
-        await q(`INSERT INTO dbo.CrmUnitPaymentPlan (UnitId, PlanId, IsActive) VALUES (${bk.UnitId}, ${bk.PaymentPlanId}, 1)`);
-        const un = await readyNow();
-        const unitHasWork = raw.some((r) => Number(r.FlatId) === Number(bk.UnitId) && r.GroupId === first.groupId);
-        check("Plan set for the unit: judged on the unit (its tower when the unit has no DPR steps)", un?.judgedOn === (unitHasWork ? "Unit" : "Tower"), JSON.stringify(un));
-        await q(`UPDATE dbo.DependencyActivityAssignment SET Status = 'COMPLETED', ProgressPercent = 100 WHERE Id = ${elsewhere.Id}`);
-      } else check("Plan level checks", true, "Skipped: the project has this work in one tower only");
-      if (second) {
-        await call("PUT", "/cu/milestone-links", { links: [{ id: ms.MilestoneMasterId, groupId: second.groupId }] });
-        check("Linked to a work not complete: not listed", !((await call("GET", `/cu/ready-demands?bookingId=${BOOKING}`)).json || []).some((r) => r.MilestoneNo === ms.MilestoneNo));
-      }
-      await call("PUT", "/cu/milestone-links", { links: [{ id: ms.MilestoneMasterId, groupId: first.groupId }] });
-      await q(`UPDATE dbo.CrmPaymentMilestone SET DemandStatus = 'Demanded' WHERE BookingId = ${BOOKING} AND MilestoneNo = ${ms.MilestoneNo}`);
-      check("Once demanded it is no longer listed", !((await call("GET", `/cu/ready-demands?bookingId=${BOOKING}`)).json || []).some((r) => r.MilestoneNo === ms.MilestoneNo));
-      expectCall("Set to no DPR work on purpose", await call("PUT", "/cu/milestone-links", { links: [{ id: ms.MilestoneMasterId, groupId: null }] }), 200);
-      const after = (await call("GET", "/cu/milestone-links")).json.milestones.find((m) => m.id === ms.MilestoneMasterId);
-      check("It stays unlinked (no name match brings it back)", after.groupId == null && after.matched === false, JSON.stringify(after));
-      expectCall("A DPR work that doesn't exist is refused", await call("PUT", "/cu/milestone-links", { links: [{ id: ms.MilestoneMasterId, groupId: 999999 }] }), 400, "does not exist");
-    }
-    const byName = (await call("GET", "/cu/milestone-links")).json.milestones.filter((m) => m.matched);
-    check("Milestones with the same name as a DPR work are matched by name", byName.every((m) => m.groupId), JSON.stringify(byName));
   } catch (e) {
     check("Script ran to the end", false, e.stack);
   }
