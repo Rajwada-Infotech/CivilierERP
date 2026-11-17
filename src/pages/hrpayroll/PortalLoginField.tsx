@@ -74,7 +74,7 @@ export const PortalLoginField: React.FC<{ employeeId: number | null }> = ({ empl
           )}
         </div>
       )}
-      <p className="text-xs text-muted-foreground">The employee signs in at the Employee Portal with this e-mail and the password you set. Passwords are never shown after you save them.</p>
+      <p className="text-xs text-muted-foreground">The employee signs in at the Employee Portal with this e-mail and the password you set here. This login is separate from any ERP login on the same e-mail: each has its own password, and changing one never changes the other. Passwords are never shown after you save them.</p>
 
       {dialog && <PasswordDialog employee={emp} mode={dialog} onClose={() => setDialog(null)} />}
     </div>
