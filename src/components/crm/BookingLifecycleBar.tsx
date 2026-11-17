@@ -47,8 +47,8 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
 
   if (isLoading) {
     return (
-      <div className="border border-border bg-card px-3 py-2 flex items-center gap-2 text-muted-foreground/60">
-        <div className="h-3 w-3 border-2 border-current border-t-transparent animate-spin" />
+      <div className="rounded-lg border border-border bg-card px-4 py-2.5 flex items-center gap-2 text-muted-foreground/60">
+        <div className="h-3 w-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
         <span className="text-[0.6875rem]">Loading lifecycle…</span>
       </div>
     );
@@ -63,25 +63,25 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
   const nowIsHere = nowStep?.key === "booking";
 
   return (
-    <div className="border border-border bg-card px-3 py-2.5">
+    <div className="rounded-lg border border-border bg-card px-4 py-3">
       {/* header + inline progress bar share one row */}
       <div className="flex items-center gap-3 mb-2">
-        <span className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+        <span className="text-xs font-semibold text-foreground shrink-0">
           Journey
         </span>
-        <div className="h-1 flex-1 bg-muted overflow-hidden">
+        <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
           <div
-            className="h-full bg-foreground transition-all duration-500"
+            className="h-full rounded-full bg-emerald-500 transition-all duration-500"
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="text-[0.625rem] font-medium text-muted-foreground shrink-0">
+        <span className="text-xs tabular-nums text-muted-foreground shrink-0">
           {doneCount}/{data.steps.length} · {pct}%
         </span>
       </div>
 
       {/* steps — single row that wraps only if truly needed (9 chips fit comfortably) */}
-      <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5">
         {data.steps.map((step, i) => {
           const clickable = !!step.link && step.status !== "locked";
           const isLast = i === data.steps.length - 1;
@@ -94,20 +94,20 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
                 onClick={clickable ? () => navigate(step.link!) : undefined}
                 disabled={!clickable}
                 title={step.blockedBy ?? (step.date ? `${step.label} — ${step.date}` : step.label)}
-                className={`inline-flex items-center gap-1 border px-2 py-0.5 text-[0.6875rem] leading-none transition-colors
-                  ${step.status === "done" ? "border-foreground/30 bg-card text-foreground" : ""}
-                  ${step.status === "active" && isNow ? "border-primary/40 bg-primary/10 text-foreground font-semibold" : ""}
+                className={`inline-flex items-center gap-1 h-6 rounded-full border px-2.5 text-[0.6875rem] leading-none transition-colors
+                  ${step.status === "done" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : ""}
+                  ${step.status === "active" && isNow ? "border-primary bg-primary text-primary-foreground font-semibold" : ""}
                   ${step.status === "active" && !isNow ? "border-border bg-card text-foreground" : ""}
-                  ${step.status === "locked" ? "border-transparent bg-muted/30 text-muted-foreground/40" : ""}
+                  ${step.status === "locked" ? "border-transparent bg-muted/60 text-muted-foreground/60" : ""}
                   ${clickable ? "cursor-pointer" : step.status === "locked" ? "cursor-default" : ""}
                 `}
               >
                 {step.status === "done" && <CheckCircle2 size={10} className="shrink-0" />}
-                {step.status === "active" && isNow && <Circle size={6} className="fill-primary text-foreground shrink-0 animate-pulse" />}
+                {step.status === "active" && isNow && <Circle size={6} className="fill-current shrink-0 animate-pulse" />}
                 {step.status === "active" && !isNow && <Circle size={6} className="text-muted-foreground shrink-0" />}
                 {step.status === "locked" && <Lock size={8} className="shrink-0" />}
                 {step.label}
-                {step.stage && <span className="font-normal text-muted-foreground">· {step.stage}</span>}
+                {step.stage && <span className="font-normal opacity-75">· {step.stage}</span>}
               </button>
               {!isLast && <span className="text-muted-foreground/20 text-[0.625rem] select-none mx-0.5">›</span>}
             </React.Fragment>
@@ -118,14 +118,14 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
       {/* The open step: what to do now, and the way to it. */}
       {nowStep ? (
         <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-2">
-          <span className="text-[0.625rem] font-semibold uppercase tracking-wide text-primary shrink-0">Now</span>
+          <span className="inline-flex items-center h-5 px-2 rounded-full bg-primary/10 text-[0.6875rem] font-semibold text-primary shrink-0">Now</span>
           <span className="text-[0.75rem] text-foreground min-w-0 flex-1">
             <span className="font-semibold">{nowStep.label}</span> — {nowText}
           </span>
           {nowStep.link && !nowIsHere && (
             <button
               onClick={() => navigate(nowStep.link!)}
-              className="inline-flex items-center gap-1 border border-primary/40 bg-primary/10 px-2.5 py-1 text-[0.6875rem] font-semibold text-foreground hover:bg-primary/20 shrink-0"
+              className="inline-flex items-center gap-1 h-7 rounded-md border border-primary bg-primary px-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 shrink-0"
             >
               Open {nowStep.label} <ArrowRight size={11} />
             </button>

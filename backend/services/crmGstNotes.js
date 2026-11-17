@@ -129,12 +129,15 @@ async function issueForRefund(pool, refundId, userEmail, { replacesId = null } =
           FROM dbo.CrmOnAccountPayment oa WHERE oa.Id = @oa`)).recordset[0];
         if (oaRec) {
           if (oaRec.SourceReceivedPaymentId) {
-            const rpRec = (await tx.request().input("srp", sql.Int, oaRec.SourceReceivedPaymentId).query(`
+            // Every input is bound before the query runs: an .input() after .query() threw, leaving that query
+            // running on the transaction, which then failed unhandled and stopped the server.
+            const rpRec = (await tx.request().input("srp", sql.Int, oaRec.SourceReceivedPaymentId)
+              .input("oaNo", sql.NVarChar(50), oaRec.No).input("oaDate", sql.Date, oaRec.RPDocDate).query(`
               SELECT TOP 1 COALESCE(mr.ReceiptNo, rp.RPDocNo, rp.DocNo, @oaNo) AS No,
                            COALESCE(mr.ReceivedDate, rp.RPDocDate, @oaDate) AS RPDocDate
               FROM dbo.ReceivedPayment rp
               LEFT JOIN dbo.CrmMoneyReceipt mr ON mr.ReceivedPaymentId = rp.RPPaymentID
-              WHERE rp.RPPaymentID = @srp`).input("oaNo", sql.NVarChar(50), oaRec.No).input("oaDate", sql.Date, oaRec.RPDocDate)).recordset[0];
+              WHERE rp.RPPaymentID = @srp`)).recordset[0];
             receipts.push(rpRec || oaRec);
           } else {
             receipts.push(oaRec);

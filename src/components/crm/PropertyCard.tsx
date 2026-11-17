@@ -32,9 +32,9 @@ export function PropertyCard({ bookingId }: { bookingId: number }) {
   });
   if (!data?.combined) return null;
   return (
-    <section className="border border-border bg-card px-3 py-2.5 space-y-2.5" aria-label="Property: plot and villa">
+    <section className="border border-border bg-card px-3 py-2.5 space-y-2.5 rounded-lg" aria-label="Property: plot and villa">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+        <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
           <Home size={11} /> One property · plot + villa
         </span>
         <span className="text-[0.6875rem] text-muted-foreground">{data.bookings.map((b) => `${b.UnitNo || b.BookingNo} (${b.BookingNo})`).join(" + ")}</span>
@@ -42,7 +42,7 @@ export function PropertyCard({ bookingId }: { bookingId: number }) {
       <div className="grid grid-cols-3 gap-2 text-center">
         {([["Price", data.totals.price], ["Paid", data.totals.paid], ["Due", data.totals.due]] as const).map(([k, v]) => (
           <div key={k} className="bg-muted/30 py-1.5">
-            <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{k}</p>
+            <p className="text-xs text-muted-foreground">{k}</p>
             <p className="text-sm font-semibold tabular-nums text-foreground">{fmt(v)}</p>
           </div>
         ))}

@@ -29,6 +29,15 @@ const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1
 // On account is money in hand but not yet applied: hatched, between cleared (solid) and due (open).
 const HATCH = "repeating-linear-gradient(135deg, hsl(var(--foreground)) 0, hsl(var(--foreground)) 1px, transparent 1px, transparent 3px)";
 
+/** A booking's money as one reading: what is held on account, what is still due, and each part's share of the total. */
+export function financialFigures({ grandTotal, cleared, pendingReceipts = 0, approvedOnAccount = 0 }: Pick<FinancialStatusBarProps, "grandTotal" | "cleared" | "pendingReceipts" | "approvedOnAccount">) {
+  const onAccount = round2(pendingReceipts + approvedOnAccount);
+  const outstanding = Math.max(0, round2(grandTotal - cleared - onAccount));
+  const clearedPct = grandTotal > 0 ? Math.min(100, Math.round((cleared / grandTotal) * 100)) : 0;
+  const onAccPct = grandTotal > 0 ? Math.min(100 - clearedPct, Math.round((onAccount / grandTotal) * 100)) : 0;
+  return { onAccount, outstanding, clearedPct, onAccPct };
+}
+
 export function FinancialStatusBar({
   grandTotal,
   cleared,
@@ -37,10 +46,7 @@ export function FinancialStatusBar({
   overdueCount = 0,
   compact = false,
 }: FinancialStatusBarProps) {
-  const onAccount = round2(pendingReceipts + approvedOnAccount);
-  const outstanding = Math.max(0, round2(grandTotal - cleared - onAccount));
-  const clearedPct = grandTotal > 0 ? Math.min(100, Math.round((cleared / grandTotal) * 100)) : 0;
-  const onAccPct = grandTotal > 0 ? Math.min(100 - clearedPct, Math.round((onAccount / grandTotal) * 100)) : 0;
+  const { onAccount, outstanding, clearedPct, onAccPct } = financialFigures({ grandTotal, cleared, pendingReceipts, approvedOnAccount });
   const figure = `font-heading font-bold tabular-nums text-foreground ${compact ? "text-sm" : "text-lg"} leading-tight mt-1`;
 
   const tiles: { label: string; value: string; note?: React.ReactNode; muted?: boolean }[] = [

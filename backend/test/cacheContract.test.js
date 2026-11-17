@@ -170,6 +170,29 @@ describe("list response shape", () => {
   });
 });
 
+// ── 5. A second reply after a timeout never stops the server ─────────────────
+// The request-timeout middleware answers 503; when the route's slow query finally fails, its catch replies again
+// through cache's async res.json. That threw "headers already sent" as an unhandled rejection, and the process exited.
+describe("a reply after the response was already sent", () => {
+  test("is skipped quietly: the client keeps the first reply and the second never rejects", async () => {
+    const express = require("express");
+    const { cache } = require("../middleware/cache");
+    let second;
+    const mini = express();
+    mini.use((req, _res, next) => { req.user = { id: 1, userId: 1, role: "Admin" }; next(); });
+    mini.get("/slow", cache("zz-double-reply", 60), async (_req, res) => {
+      res.status(503).json({ message: "Request timeout" });     // the timeout's reply
+      await new Promise((r) => setTimeout(r, 20));              // the query fails later…
+      second = res.status(500).json({ error: "Failed" });       // …and the route's catch replies again
+    });
+    const r = await request(mini).get("/slow");
+    await new Promise((ok) => setTimeout(ok, 60));
+    expect(r.status).toBe(503);
+    // Nothing awaits this promise in a route: a rejection here was the unhandled rejection that stopped the server.
+    await Promise.resolve(second); // throws (and fails the test) if it rejects
+  });
+});
+
 // ── 4. Cache miss then hit — same response body ───────────────────────────────
 describe("cache miss then hit returns same data", () => {
   test("two sequential GETs return identical body", async () => {
