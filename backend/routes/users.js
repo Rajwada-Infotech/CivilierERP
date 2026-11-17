@@ -62,8 +62,10 @@ router.post("/login", async (req, res) => {
   const normalizedEmail = String(email).trim().toLowerCase();
   const incomingPassword = String(password);
 
-  const lockKey = `login:lock:${normalizedEmail}`;
-  const attemptsKey = `login:attempts:${normalizedEmail}`;
+  // The Employee Portal is a separate login system: its attempts and lockouts are counted apart from the ERP login's.
+  const portalLogin = req.body.portal === "employee";
+  const lockKey = `login:lock:${portalLogin ? "emp:" : ""}${normalizedEmail}`;
+  const attemptsKey = `login:attempts:${portalLogin ? "emp:" : ""}${normalizedEmail}`;
 
   // Skip rate limiting for local development
   const isLocal =
@@ -85,11 +87,32 @@ router.post("/login", async (req, res) => {
       // Redis down — skip lockout check, proceed to DB auth
     }
 
+    // Employee Portal sign-in never looks at ERP credentials: the typed e-mail finds the employee, and the employee's own
+    // portal credential (dbo.EmployeePortalLogin -> its dbo.users row) is the only account that can match. An ERP login on
+    // the same e-mail is a different row with a different password.
+    let lookupEmail = normalizedEmail;
+    if (portalLogin) {
+      try {
+        const pl = await queryWithRetry(async (request) =>
+          request.input("e", sql.NVarChar, normalizedEmail).query(`
+            SELECT u.email FROM dbo.EmployeePortalLogin l
+            JOIN dbo.EmployeeMaster em ON em.EmployeeId = l.EmployeeId AND em.IsActive = 1
+            JOIN dbo.users u ON u.id = l.UserId
+            WHERE LOWER(LTRIM(RTRIM(em.Email))) = @e
+          `),
+        );
+        lookupEmail = pl.recordset.length === 1 ? String(pl.recordset[0].email).trim().toLowerCase() : "no-portal-login@portal.invalid";
+      } catch (dbErr) {
+        console.error("Login DB Error (portal lookup):", dbErr);
+        return res.status(503).json({ error: "Login service is temporarily unavailable. Please try again in a moment." });
+      }
+    }
+
     let result;
     try {
       result = await queryWithRetry(async (request) =>
         request
-          .input("email", sql.NVarChar, normalizedEmail).query(`
+          .input("email", sql.NVarChar, lookupEmail).query(`
             SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
                    ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
                    ISNULL(u.ShowLoginReminders, 1) AS ShowLoginReminders,
@@ -190,12 +213,14 @@ router.post("/login", async (req, res) => {
 
     recordLogin(req, { userId: user.id, email: normalizedEmail, portal, success: true });
 
+    // A portal credential carries a private placeholder e-mail; the session shows the employee's real one.
+    const sessionEmail = portalLogin ? normalizedEmail : user.email;
     const token = jwt.sign(
       {
         userId: user.id,
         roleId: user.RoleId,
         role: normalizedRole,
-        email: user.email,
+        email: sessionEmail,
         name: user.name,
       },
       process.env.JWT_SECRET,
@@ -208,7 +233,7 @@ router.post("/login", async (req, res) => {
       user: {
         id: user.id,
         name: user.name,
-        email: user.email,
+        email: sessionEmail,
         role: normalizedRole,
         roleId: user.RoleId,
         can_accept_tickets: !!user.can_accept_tickets,
