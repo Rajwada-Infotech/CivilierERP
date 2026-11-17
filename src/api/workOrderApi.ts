@@ -454,6 +454,36 @@ export const getMaterialRequestPrefillFromBoq = async (id: number): Promise<BoqM
   return body as BoqMRPrefill;
 };
 
+/** Whether a Work Order / BOQ can still raise a Material Request (a BOQ and its Work Orders share one). */
+export interface MRSourceStatus {
+  own: { mrId: number; docNo: string | null } | null;
+  blockedBy: { mrId: number; docNo: string | null; viaLabel: string; viaDocNo: string | null } | null;
+  reason: string | null;
+}
+export const getMRSourceStatus = async (kind: "wo" | "boq", id: number): Promise<MRSourceStatus> => {
+  const res = await fetchWithAuth(`/api/material-requests/source-status/${kind}/${id}`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Failed to check material requests: ${res.status}`);
+  return body as MRSourceStatus;
+};
+
+/** Approved Work Orders / BOQs for the Material Request form's "Raise from" picker. */
+export interface MRSourceOption {
+  id: number;
+  docNo: string | null;
+  projectId: number | null;
+  projectName: string | null;
+  companyId: number | null;
+  available: boolean;
+  reason: string | null;
+}
+export const getMRSourceOptions = async (kind: "wo" | "boq"): Promise<MRSourceOption[]> => {
+  const res = await fetchWithAuth(`/api/material-requests/source-options/${kind}`);
+  const body = await res.json().catch(() => []);
+  if (!res.ok) throw new Error((body as { error?: string }).error || `Failed to load sources: ${res.status}`);
+  return Array.isArray(body) ? body : [];
+};
+
 export const confirmWorkOrder = async (
   id: number,
   finYear?: string | null,

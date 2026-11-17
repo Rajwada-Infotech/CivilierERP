@@ -455,22 +455,24 @@ export function useMaterialRequest() {
     setWoSource(null);
   };
 
-  // Opened from an approved Work Order ({ woPrefill }) or BOQ ({ boqPrefill }) in the router state.
-  // The form is pre-filled but nothing is saved until the user presses Save, so every field can be changed.
-  useEffect(() => {
-    const st = location.state as { woPrefill?: WorkOrderMRPrefill; boqPrefill?: BoqMRPrefill } | null;
-    const woPrefill = st?.woPrefill ?? st?.boqPrefill;
-    if (!woPrefill) return;
-    setHeader({
-      ...defaultHeader,
-      companyId: String(woPrefill.CompanyId ?? ""),
-      projectId: String(woPrefill.ProjectId ?? ""),
-      reason: woPrefill.Reason,
-      remarks: woPrefill.Remarks,
-    });
+  // Fills the form from an approved Work Order or BOQ (their items, company, project, reason). Nothing is saved
+  // until the user presses Save, so every field can still be changed. `keepHeader` keeps what's already chosen
+  // (doc type, dates, priority) when the source is picked inside the form.
+  const applySourcePrefill = (
+    kind: "wo" | "boq",
+    pf: WorkOrderMRPrefill | BoqMRPrefill,
+    keepHeader = false,
+  ) => {
+    setHeader((prev) => ({
+      ...(keepHeader ? prev : defaultHeader),
+      companyId: String(pf.CompanyId ?? ""),
+      projectId: String(pf.ProjectId ?? ""),
+      reason: pf.Reason,
+      remarks: pf.Remarks,
+    }));
     setCart(
-      woPrefill.items.length > 0
-        ? woPrefill.items.map((it) => ({
+      pf.items.length > 0
+        ? pf.items.map((it) => ({
             _key: generateUUID(),
             ItemId: String(it.ItemId),
             ItemName: it.ItemName ?? undefined,
@@ -482,9 +484,17 @@ export function useMaterialRequest() {
           }))
         : [blankCartItem()],
     );
-    setWoSource(st?.woPrefill
-      ? { kind: "wo", id: st.woPrefill.WOId, docNo: st.woPrefill.WODocNo }
-      : { kind: "boq", id: st!.boqPrefill!.BoqId, docNo: st!.boqPrefill!.BoqDocNo });
+    setWoSource(kind === "wo"
+      ? { kind, id: (pf as WorkOrderMRPrefill).WOId, docNo: (pf as WorkOrderMRPrefill).WODocNo }
+      : { kind, id: (pf as BoqMRPrefill).BoqId, docNo: (pf as BoqMRPrefill).BoqDocNo });
+  };
+
+  // Opened from an approved Work Order ({ woPrefill }) or BOQ ({ boqPrefill }) in the router state.
+  useEffect(() => {
+    const st = location.state as { woPrefill?: WorkOrderMRPrefill; boqPrefill?: BoqMRPrefill } | null;
+    if (!st?.woPrefill && !st?.boqPrefill) return;
+    if (st.woPrefill) applySourcePrefill("wo", st.woPrefill);
+    else applySourcePrefill("boq", st.boqPrefill!);
     setEditingId(null);
     setViewMode("form");
     // Clear the router state so a refresh doesn't re-apply it.
@@ -851,6 +861,7 @@ export function useMaterialRequest() {
     setCart,
     woSource,
     setWoSource,
+    applySourcePrefill,
     location,
     setH,
     ctxFinYears,

@@ -7,6 +7,7 @@ import { alternatesForItem, getItemUomFactor, convertItemQuantity } from "@/lib/
 import { DateInput } from "@/components/ui/date-input";
 import { inputCls, selectCls, blankCartItem, PRIORITY_OPTIONS, Field, HEAD, LBL, RULE, KEY_INK, KEY_LINE, ACT } from "./config";
 import type { MRState } from "./useMaterialRequest";
+import { MRSourcePicker } from "./MRSourcePicker";
 
 // Create / edit a material request: header, items, save.
 export function MRForm({ m }: { m: MRState }) {
@@ -100,6 +101,9 @@ export function MRForm({ m }: { m: MRState }) {
               </div>
             )}
           </div>
+
+          {/* Source document: an approved BOQ / Work Order (new requests only) */}
+          {!editingId && <MRSourcePicker m={m} />}
 
           {/* Row 1: Company | Project | Fin Year | Priority */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">

@@ -1089,6 +1089,49 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
 // One live MR per Work Order: while the first is not Rejected/Cancelled a second is refused (409).
 const hasSourceWO = makeColumnProbe("dbo.MaterialRequests", "SourceWOId");
 
+// Whether a Work Order or BOQ can still raise a Material Request. A BOQ and the Work Orders made from it
+// (WorkOrderHeader.BoqID) cover the same materials, so only one of them may have a live request:
+//   own       - a live MR raised from this document itself;
+//   blockedBy - a live MR raised from its BOQ (for a Work Order) or from one of its Work Orders (for a BOQ).
+// "Live" = not Rejected / Cancelled.
+async function mrSourceStatus(pool, kind, id) {
+  const withBoq = await hasSourceBoq(pool);
+  if (kind === "wo") {
+    const r = (await pool.request().input("id", sql.Int, id).query(`
+      SELECT
+        (SELECT TOP 1 CONCAT(MRId, '|', ISNULL(DocNo, '')) FROM dbo.MaterialRequests
+          WHERE SourceWOId = @id AND Status NOT IN ('Rejected', 'Cancelled') ORDER BY MRId DESC) AS OwnMR,
+        ${withBoq ? `(SELECT TOP 1 CONCAT(mr.MRId, '|', ISNULL(mr.DocNo, ''), '|', ISNULL(COALESCE(b.DocNo, b.BoqNo), ''))
+          FROM dbo.WorkOrderHeader h
+          JOIN dbo.MaterialRequests mr ON mr.SourceBoqId = h.BoqID AND mr.Status NOT IN ('Rejected', 'Cancelled')
+          LEFT JOIN dbo.BOQ b ON b.BoqID = h.BoqID
+          WHERE h.Id = @id ORDER BY mr.MRId DESC)` : "CAST(NULL AS NVARCHAR(400))"} AS BlockMR
+    `)).recordset[0] || {};
+    return parseSourceStatus(r, "BOQ");
+  }
+  const r = (await pool.request().input("id", sql.Int, id).query(`
+    SELECT
+      ${withBoq ? `(SELECT TOP 1 CONCAT(MRId, '|', ISNULL(DocNo, '')) FROM dbo.MaterialRequests
+        WHERE SourceBoqId = @id AND Status NOT IN ('Rejected', 'Cancelled') ORDER BY MRId DESC)` : "CAST(NULL AS NVARCHAR(400))"} AS OwnMR,
+      (SELECT TOP 1 CONCAT(mr.MRId, '|', ISNULL(mr.DocNo, ''), '|', ISNULL(COALESCE(h.DocNo, h.DocumentNumber), ''))
+        FROM dbo.WorkOrderHeader h
+        JOIN dbo.MaterialRequests mr ON mr.SourceWOId = h.Id AND mr.Status NOT IN ('Rejected', 'Cancelled')
+        WHERE h.BoqID = @id ORDER BY mr.MRId DESC) AS BlockMR
+  `)).recordset[0] || {};
+  return parseSourceStatus(r, "Work Order");
+}
+function parseSourceStatus(r, viaLabel) {
+  const own = r.OwnMR ? r.OwnMR.split("|") : null;
+  const blk = r.BlockMR ? r.BlockMR.split("|") : null;
+  return {
+    own: own ? { mrId: parseInt(own[0], 10), docNo: own[1] || null } : null,
+    blockedBy: blk ? { mrId: parseInt(blk[0], 10), docNo: blk[1] || null, viaLabel, viaDocNo: blk[2] || null } : null,
+  };
+}
+const blockedMessage = (b, self) =>
+  `Material Request ${b.docNo || "#" + b.mrId} was already raised from ${b.viaLabel} ${b.viaDocNo || ""}`.trim() +
+  ` (${self === "wo" ? "the BOQ this work order is made from" : "a work order made from this BOQ"}), so these materials are already requested.`;
+
 // Loads the approved Work Order a Material Request may be raised from. On any problem it has already
 // answered the request and returns null.
 async function loadWorkOrderForMR(req, res, pool, woId) {
@@ -1109,18 +1152,13 @@ async function loadWorkOrderForMR(req, res, pool, woId) {
     res.status(400).json({ error: "A Material Request can only be raised from an approved work order." });
     return null;
   }
-  const existing = (await pool.request().input("id", sql.Int, woId).query(`
-    SELECT TOP 1 MRId, DocNo, Status FROM dbo.MaterialRequests
-    WHERE SourceWOId = @id AND Status NOT IN ('Rejected', 'Cancelled')
-    ORDER BY MRId DESC
-  `)).recordset[0];
-  if (existing) {
-    res.status(409).json({
-      error: `Material Request ${existing.DocNo || "#" + existing.MRId} already exists for this work order.`,
-      mrId: existing.MRId,
-      docNo: existing.DocNo,
-      status: existing.Status,
-    });
+  const st = await mrSourceStatus(pool, "wo", woId);
+  if (st.own) {
+    res.status(409).json({ error: `Material Request ${st.own.docNo || "#" + st.own.mrId} already exists for this work order.`, mrId: st.own.mrId, docNo: st.own.docNo });
+    return null;
+  }
+  if (st.blockedBy) {
+    res.status(409).json({ error: blockedMessage(st.blockedBy, "wo"), mrId: st.blockedBy.mrId, docNo: st.blockedBy.docNo, blocked: true });
     return null;
   }
   return { ...wo, woNo: wo.DocNo || wo.DocumentNumber || `WO-${woId}` };
@@ -1193,18 +1231,13 @@ async function loadBoqForMR(req, res, pool, boqId) {
     res.status(400).json({ error: "A Material Request can only be raised from an approved BOQ." });
     return null;
   }
-  const existing = (await pool.request().input("id", sql.Int, boqId).query(`
-    SELECT TOP 1 MRId, DocNo, Status FROM dbo.MaterialRequests
-    WHERE SourceBoqId = @id AND Status NOT IN ('Rejected', 'Cancelled')
-    ORDER BY MRId DESC
-  `)).recordset[0];
-  if (existing) {
-    res.status(409).json({
-      error: `Material Request ${existing.DocNo || "#" + existing.MRId} already exists for this BOQ.`,
-      mrId: existing.MRId,
-      docNo: existing.DocNo,
-      status: existing.Status,
-    });
+  const st = await mrSourceStatus(pool, "boq", boqId);
+  if (st.own) {
+    res.status(409).json({ error: `Material Request ${st.own.docNo || "#" + st.own.mrId} already exists for this BOQ.`, mrId: st.own.mrId, docNo: st.own.docNo });
+    return null;
+  }
+  if (st.blockedBy) {
+    res.status(409).json({ error: blockedMessage(st.blockedBy, "boq"), mrId: st.blockedBy.mrId, docNo: st.blockedBy.docNo, blocked: true });
     return null;
   }
   return { ...boq, boqNo: boq.DocNo || boq.BoqNo || `BOQ-${boqId}` };
@@ -1249,6 +1282,75 @@ router.get("/from-boq/:boqId/prefill", authenticateToken, requirePageRight("mate
         Quantity: Math.round((parseFloat(m.Quantity) || 0) * 10000) / 10000,
       })),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -- Sources a Material Request can be raised from ---------------------------------
+// GET /source-status/:kind/:docId (not :id - router.param("id") treats that as an MR id) - kind "wo" | "boq": { own, blockedBy, reason } (see mrSourceStatus); the Work
+// Order / BOQ pages use it to show "View Material Request" or disable the button with the reason.
+router.get("/source-status/:kind/:docId", authenticateToken, async (req, res) => {
+  const { kind } = req.params;
+  const id = parseInt(req.params.docId, 10);
+  if (!["wo", "boq"].includes(kind) || !Number.isFinite(id)) return res.status(400).json({ error: "kind must be wo or boq, with a numeric id" });
+  try {
+    const pool = getPool();
+    if (!(await hasSourceWO(pool))) return res.json({ own: null, blockedBy: null, reason: null });
+    const st = await mrSourceStatus(pool, kind, id);
+    res.json({ ...st, reason: st.blockedBy ? blockedMessage(st.blockedBy, kind) : null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /source-options/:kind - approved Work Orders or BOQs (in the user's projects) for the form's "Raise from"
+// picker, each with whether it can still raise a request: available=false plus a reason when it already has
+// one, or its BOQ / one of its Work Orders does.
+router.get("/source-options/:kind", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
+  const { kind } = req.params;
+  if (!["wo", "boq"].includes(kind)) return res.status(400).json({ error: "kind must be wo or boq" });
+  try {
+    const pool = getPool();
+    const withBoq = await hasSourceBoq(pool);
+    if (!(await hasSourceWO(pool)) || (kind === "boq" && !withBoq)) return res.json([]);
+    const live = "Status NOT IN ('Rejected', 'Cancelled')";
+    const rows = (await pool.request().query(kind === "wo" ? `
+      SELECT h.Id AS id, COALESCE(h.DocNo, h.DocumentNumber) AS docNo, h.ProjectId, pr.name AS ProjectName, h.CompanyId,
+             own.DocNo AS OwnDocNo, own.MRId AS OwnMRId,
+             ${withBoq ? "blk.DocNo AS BlockDocNo, blk.MRId AS BlockMRId, COALESCE(b.DocNo, b.BoqNo) AS ViaDocNo" : "NULL AS BlockDocNo, NULL AS BlockMRId, NULL AS ViaDocNo"}
+      FROM dbo.WorkOrderHeader h
+      LEFT JOIN dbo.enterprise pr ON pr.id = h.ProjectId
+      OUTER APPLY (SELECT TOP 1 MRId, DocNo FROM dbo.MaterialRequests WHERE SourceWOId = h.Id AND ${live} ORDER BY MRId DESC) own
+      ${withBoq ? `OUTER APPLY (SELECT TOP 1 MRId, DocNo FROM dbo.MaterialRequests WHERE h.BoqID IS NOT NULL AND SourceBoqId = h.BoqID AND ${live} ORDER BY MRId DESC) blk
+      LEFT JOIN dbo.BOQ b ON b.BoqID = h.BoqID` : ""}
+      WHERE h.Status = 'Approved'${projectPredicate(req.projectScope, "h.ProjectId")}
+      ORDER BY h.Id DESC` : `
+      SELECT b.BoqID AS id, COALESCE(b.DocNo, b.BoqNo) AS docNo, b.ProjectId, pr.name AS ProjectName, b.CompanyId,
+             own.DocNo AS OwnDocNo, own.MRId AS OwnMRId,
+             blk.DocNo AS BlockDocNo, blk.MRId AS BlockMRId, blk.WoNo AS ViaDocNo
+      FROM dbo.BOQ b
+      LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
+      OUTER APPLY (SELECT TOP 1 MRId, DocNo FROM dbo.MaterialRequests WHERE SourceBoqId = b.BoqID AND ${live} ORDER BY MRId DESC) own
+      OUTER APPLY (SELECT TOP 1 mr.MRId, mr.DocNo, COALESCE(h.DocNo, h.DocumentNumber) AS WoNo
+                   FROM dbo.WorkOrderHeader h JOIN dbo.MaterialRequests mr ON mr.SourceWOId = h.Id AND mr.${live}
+                   WHERE h.BoqID = b.BoqID ORDER BY mr.MRId DESC) blk
+      WHERE b.Status = 'Approved'${projectPredicate(req.projectScope, "b.ProjectId")}
+      ORDER BY b.BoqID DESC`)).recordset;
+    const via = kind === "wo" ? "BOQ" : "Work Order";
+    res.json(rows.map((r) => ({
+      id: r.id,
+      docNo: r.docNo,
+      projectId: r.ProjectId,
+      projectName: r.ProjectName,
+      companyId: r.CompanyId,
+      available: !r.OwnMRId && !r.BlockMRId,
+      reason: r.OwnMRId
+        ? `Already has Material Request ${r.OwnDocNo || "#" + r.OwnMRId}`
+        : r.BlockMRId
+          ? `Materials already requested in ${r.BlockDocNo || "#" + r.BlockMRId}${r.ViaDocNo ? ` (from ${via} ${r.ViaDocNo})` : ""}`
+          : null,
+    })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
