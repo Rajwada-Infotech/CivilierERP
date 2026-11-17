@@ -77,8 +77,18 @@ async function sellerFacts(db, r) {
   // Under the full-booking hold, money paid stays On Account (milestones only
   // settle once the whole price is in) — so a demand is covered when what
   // sits on account pays it, even though the milestone isn't marked Paid yet.
-  const onAccount = Number((await q(`SELECT ISNULL(SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0) THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS v FROM dbo.CrmOnAccountPayment
+  let onAccount = Number((await q(`SELECT ISNULL(SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0) THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS v FROM dbo.CrmOnAccountPayment
     WHERE BookingId IN (${list}) AND ISNULL(Status, N'') NOT IN (N'Bounced', N'Held', N'Void', N'Cancelled', N'Refunded')`))[0].v) || 0;
+  // A case selling some of the booking's plots answers only for those plots: their share (by their own prices) of
+  // each demanded amount and of the money on account (decided 2026-11-17). The seller's other plots keep their dues.
+  const { casePlotIds, partPlotInvoiceCheck } = require("./crmResaleTransfer");
+  const plots = r.Status !== "Completed" ? casePlotIds(r) : [];
+  const ratio = plots.length ? (await partPlotInvoiceCheck(db, r.FromBookingId, plots)).ratio : 1;
+  if (ratio > 0 && ratio < 1) {
+    const share = (n) => Math.round(Number(n || 0) * ratio * 100) / 100;
+    overdue.forEach((m) => { m.Balance = share(m.Balance); });
+    onAccount = share(onAccount);
+  }
   const demandedTotal = overdue.reduce((t, m) => t + Number(m.Balance || 0), 0);
   const uncovered = Math.max(0, Math.round((demandedTotal - onAccount) * 100) / 100);
   const openCancellation = (await q(`SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WHERE BookingId IN (${list}) AND Status NOT IN ${CANCELLATION_DROPPED_SQL}`))[0] || null;
