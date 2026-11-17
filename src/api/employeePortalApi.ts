@@ -92,3 +92,30 @@ export const saveBreakRules = (items: { BreakType: string; AllowedMinutes: numbe
 export const getEntitlements = (id: number, year: number) => get<{ Year: number; Items: EntitlementRow[] }>(`${ADMIN}/employees/${id}/entitlements?year=${year}`);
 export const saveEntitlements = (id: number, year: number, items: { LeaveType: string; Days: number | null }[]) =>
   send<{ message: string }>(`${ADMIN}/employees/${id}/entitlements`, "PUT", { year, items });
+
+// ── View an employee's portal as HR / Super Admin (read-only, no password) ───
+export interface ViewSession { token: string; user: Record<string, unknown>; viewer: string; employeeName: string }
+export const createViewSession = (employeeId: number) => send<ViewSession>(`${ADMIN}/employees/${employeeId}/view-session`, "POST");
+
+/**
+ * Opens the employee's portal in a NEW tab. The new tab is handed a short-lived view-only session by message (never in the
+ * URL), so the viewer's own ERP session in this tab is untouched. The tab must be opened inside the click, before the
+ * request, or the browser blocks it as a pop-up.
+ */
+export async function openEmployeePortalView(employeeId: number): Promise<void> {
+  const w = window.open("/employee-view", "_blank");
+  if (!w) throw new Error("Your browser blocked the new tab. Allow pop-ups for this site and try again.");
+  try {
+    const session = await createViewSession(employeeId);
+    const give = (e: MessageEvent) => {
+      if (e.source !== w || e.origin !== window.location.origin || e.data?.type !== "ep-view-ready") return;
+      w.postMessage({ type: "ep-view-session", ...session }, window.location.origin);
+      window.removeEventListener("message", give);
+    };
+    window.addEventListener("message", give);
+    setTimeout(() => window.removeEventListener("message", give), 60_000);
+  } catch (e) {
+    w.close();
+    throw e;
+  }
+}

@@ -20,10 +20,46 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const authenticateToken = require("../middleware/auth");
-const { pageRightByMethod } = require("../middleware/requirePageRight");
+const jwt = require("jsonwebtoken");
+const { pageRightByMethod, requirePageRight } = require("../middleware/requirePageRight");
 const { getPool, sql } = require("../db");
 
 router.use(authenticateToken);
+
+// ── View an employee's portal (no password) ──────────────────────────────────
+// HR / Super Admin with edit right on this page get a short-lived, VIEW-ONLY session for one employee: it shows exactly
+// what the employee sees, and every write on the portal API is refused while it is used (see employeePortal.js).
+// Registered before the router-wide page-right check below so it carries its own explicit right.
+router.post("/employees/:id/view-session", requirePageRight("employee-portal-access", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return bad(res, "Invalid employee");
+  try {
+    const pool = getPool();
+    const emp = await loadEmployee(pool, id);
+    if (!emp) return bad(res, "Employee not found", 404);
+    const email = emailOf(emp.Email);
+    if (!email) return bad(res, "Set an e-mail address on the Employee Master record first. The portal is matched to the employee by it.");
+    const roleId = await employeeRoleId(pool);
+    const viewer = req.user?.email || req.user?.name || "unknown";
+    // The session belongs to the HR user (so it is valid and revocable like any other) but carries the Employee Portal role
+    // and the employee's identity, and the viewAs claim that makes it read-only.
+    const token = jwt.sign(
+      { userId: req.user.userId ?? req.user.id, roleId, role: "employee portal", email, name: emp.EmployeeName, viewAs: emp.EmployeeId, viewer },
+      process.env.JWT_SECRET,
+      { expiresIn: "2h" },
+    );
+    console.info(`[employee-portal-admin] ${viewer} opened the portal of employee ${emp.EmployeeId} (${emp.EmployeeName}) in view-only mode`);
+    res.json({
+      token,
+      user: { id: req.user.userId ?? req.user.id, name: emp.EmployeeName, email, role: "employee portal", roleId, can_accept_tickets: false, showLoginReminders: false, pagePermissions: [] },
+      viewer, employeeName: emp.EmployeeName,
+    });
+  } catch (err) {
+    console.error("[employee-portal-admin] POST view-session:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.use(pageRightByMethod("employee-portal-access"));
 
 const SALT_ROUNDS = 12;

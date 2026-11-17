@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { applyPortalLeave, getPortalLeaveBalances, getPortalLeaves, withdrawPortalLeave } from "@/api/employeePortalApi";
-import { Card, Loading, Mark, Note, PageHeader, fieldCls, fmtDate, keyInk, keyLine, labelCls } from "./employeeUi";
+import { Card, Loading, Mark, Note, PageHeader, fieldCls, fmtDate, isViewOnly, keyInk, keyLine, labelCls } from "./employeeUi";
 
 const TYPES = ["Casual", "Sick", "Earned", "Unpaid"];
 const daysBetween = (a: string, b: string) => Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000) + 1;
@@ -62,7 +62,7 @@ export default function EmployeeLeave() {
             <div><label className={labelCls} htmlFor="lv-reason">Reason</label>
               <textarea id="lv-reason" rows={3} maxLength={500} className={`${fieldCls} h-auto py-2`} value={form.Reason} onChange={(e) => set("Reason", e.target.value)} /></div>
             {days > 0 && <p className="text-xs text-muted-foreground">{days} day{days > 1 ? "s" : ""} (calendar days)</p>}
-            <button type="submit" className={keyInk} disabled={!ready || apply.isPending}>{apply.isPending ? "Submitting…" : "Submit application"}</button>
+            <button type="submit" className={keyInk} disabled={!ready || apply.isPending || isViewOnly()}>{apply.isPending ? "Submitting…" : "Submit application"}</button>
           </form>
         </Card>
 
@@ -77,7 +77,7 @@ export default function EmployeeLeave() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-medium">{l.LeaveType} · {fmtDate(l.FromDate)}{l.FromDate !== l.ToDate ? ` – ${fmtDate(l.ToDate)}` : ""} <span className="text-muted-foreground">({l.TotalDays}d)</span></span>
                     <span className="flex items-center gap-2"><Mark text={l.Status} />
-                      {l.Status === "Pending" && <button className={keyLine} onClick={() => withdraw.mutate(l.LeaveId)} disabled={withdraw.isPending}>Withdraw</button>}</span>
+                      {l.Status === "Pending" && <button className={keyLine} onClick={() => withdraw.mutate(l.LeaveId)} disabled={withdraw.isPending || isViewOnly()}>Withdraw</button>}</span>
                   </div>
                   {l.Reason && <p className="text-muted-foreground mt-1">{l.Reason}</p>}
                   {l.HrRemarks && <p className="mt-1"><span className={labelCls}>HR remark </span>{l.HrRemarks}</p>}

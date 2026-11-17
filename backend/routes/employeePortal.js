@@ -39,9 +39,14 @@ const bad = (res, msg, status = 400) => res.status(status).json({ error: msg });
 // ── The caller's own Employee Master record ──────────────────────────────────
 async function resolveEmployee(req, res, next) {
   try {
+    // A view-only session (HR / Super Admin looking at an employee's portal, from Employee Master) may read, never write.
+    const viewAs = Number(req.user?.viewAs) || null;
+    if (viewAs && !["GET", "HEAD"].includes(req.method)) {
+      return bad(res, "You are viewing this portal in view-only mode. Actions are disabled.", 403);
+    }
     const email = String(req.user?.email || "").trim();
     if (!email) return bad(res, "Your login has no e-mail address, so it can't be matched to an employee.", 403);
-    const r = await getPool().request().input("Email", sql.NVarChar(150), email).query(`
+    const r = await getPool().request().input("Email", sql.NVarChar(150), email).input("ViewAs", sql.Int, viewAs).query(`
       SELECT e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.Email, e.Mobile, e.Department, e.Designation, e.BranchLocation,
              e.EmploymentType, e.JoiningDate, e.CompanyId, comp.name AS CompanyName,
              e.CTCAmount, e.CTCFrequency, e.SalaryStructureCode, e.PhotoBase64,
@@ -49,6 +54,7 @@ async function resolveEmployee(req, res, next) {
       FROM dbo.EmployeeMaster e
       LEFT JOIN dbo.enterprise comp ON comp.id = e.CompanyId
       WHERE e.IsActive = 1 AND LOWER(LTRIM(RTRIM(e.Email))) = LOWER(@Email)
+        AND (@ViewAs IS NULL OR e.EmployeeId = @ViewAs)
     `);
     if (r.recordset.length === 0) return bad(res, "Your login isn't linked to an active employee record. Please contact HR.", 403);
     if (r.recordset.length > 1) return bad(res, "More than one employee record has your e-mail address. Please contact HR.", 403);
@@ -168,7 +174,12 @@ router.get("/salary", async (req, res) => {
 // ── GET /login-history ───────────────────────────────────────────────────────
 router.get("/login-history", async (req, res) => {
   try {
-    const userId = req.user?.userId ?? req.user?.id;
+    let userId = req.user?.userId ?? req.user?.id;
+    if (req.user?.viewAs) {
+      // Viewing as an employee: show THEIR portal sign-ins, not the viewer's.
+      const l = await getPool().request().input("E", sql.Int, req.employee.EmployeeId).query("SELECT UserId FROM dbo.EmployeePortalLogin WHERE EmployeeId = @E");
+      userId = l.recordset[0]?.UserId ?? -1;
+    }
     const r = await getPool().request().input("UserId", sql.Int, userId).query(`
       SELECT TOP 100 LoginHistoryId, LoginAt, Success, FailureReason, IpAddress, UserAgent, Portal
       FROM dbo.UserLoginHistory WHERE UserId = @UserId ORDER BY LoginAt DESC

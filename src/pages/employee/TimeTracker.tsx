@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { getPortalBreakTypes, getPortalPunchState, portalBreakStop, type PunchState } from "@/api/employeePortalApi";
 import { CaptureDialog, place } from "./PunchCard";
 import { StartDialog, fmtDur, useBreakReminder } from "./BreakPanel";
-import { fmtTime } from "./employeeUi";
+import { fmtTime, isViewOnly } from "./employeeUi";
 
 const TARGET_SEC = 8 * 3600; // a full working day, for the ring
 const R = 68;
@@ -21,6 +21,7 @@ export default function TimeTracker() {
   const cur = data?.current;
   const skewMs = data ? new Date(data.serverNow).getTime() - Date.now() : 0;
   const running = data?.state === "WORKING" || data?.state === "ON_BREAK";
+  const view = isViewOnly(); // HR looking at this portal: read-only
 
   const types = useQuery({ queryKey: ["ep-break-types"], queryFn: getPortalBreakTypes, staleTime: 5 * 60_000, enabled: !!data?.allowed.breakStart });
   const setState = (s: PunchState) => { qc.setQueryData(["ep-punch"], s); qc.invalidateQueries({ queryKey: ["ep-attendance"] }); };
@@ -77,11 +78,11 @@ export default function TimeTracker() {
           {/* play / pause / stop */}
           <div className="grid gap-2 mt-3">
             {data?.state === "ON_BREAK"
-              ? <button className="ep-btn ep-btn-gold w-full" onClick={() => stop.mutate()} disabled={stop.isPending}><Play size={15} /> End break</button>
-              : <button className="ep-btn ep-btn-gold w-full" onClick={() => setDialog("in")} disabled={!data?.allowed.in}><Play size={15} /> Punch in</button>}
+              ? <button className="ep-btn ep-btn-gold w-full" onClick={() => stop.mutate()} disabled={stop.isPending || view}><Play size={15} /> End break</button>
+              : <button className="ep-btn ep-btn-gold w-full" onClick={() => setDialog("in")} disabled={!data?.allowed.in || view}><Play size={15} /> Punch in</button>}
             <div className="grid grid-cols-2 gap-2">
-              <button className="ep-btn ep-btn-ink" onClick={() => setDialog("break")} disabled={!data?.allowed.breakStart || !types.data?.length}><Pause size={15} /> Take a break</button>
-              <button className="ep-btn ep-btn-ink" onClick={() => setDialog("out")} disabled={!data?.allowed.out}><Square size={14} /> Punch out</button>
+              <button className="ep-btn ep-btn-ink" onClick={() => setDialog("break")} disabled={!data?.allowed.breakStart || !types.data?.length || view}><Pause size={15} /> Take a break</button>
+              <button className="ep-btn ep-btn-ink" onClick={() => setDialog("out")} disabled={!data?.allowed.out || view}><Square size={14} /> Punch out</button>
             </div>
           </div>
           {!data?.allowed.in && !data?.allowed.out && data?.state !== "ON_BREAK" && <p className="text-center text-[0.6875rem] text-muted-foreground mt-1.5">Today's attendance is complete</p>}
