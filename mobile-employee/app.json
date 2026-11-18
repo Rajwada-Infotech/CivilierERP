@@ -24,16 +24,66 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.rajwadainfotech.civilieremployee",
-      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.VIBRATE"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
-    "web": { "favicon": "./assets/favicon.png" },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
     "plugins": [
       "expo-secure-store",
       "expo-font",
-      ["expo-location", { "locationWhenInUsePermission": "Employee Portal App records your location when you punch In and Out, as attendance evidence." }],
-      ["expo-image-picker", { "cameraPermission": "Employee Portal App takes a live photo when you punch In and Out, as attendance evidence." }],
-      ["expo-camera", { "cameraPermission": "Employee Portal App uses the front camera for your face registration and the live photo when you punch In and Out.", "recordAudioAndroid": false }],
-      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
-    ]
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Employee Portal App records your location when you punch In and Out, as attendance evidence."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Employee Portal App takes a live photo when you punch In and Out, as attendance evidence."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Employee Portal App uses the front camera for your face registration and the live photo when you punch In and Out.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a2bf5359-10fe-4be8-a43f-8d1064652aee"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a2bf5359-10fe-4be8-a43f-8d1064652aee"
+    }
   }
 }
