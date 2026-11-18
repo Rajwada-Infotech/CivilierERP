@@ -3,6 +3,7 @@ import { View, ActivityIndicator } from "react-native";
 import { useAuth } from "@/auth/AuthContext";
 import AuthStack from "./AuthStack";
 import MainStack from "./MainStack";
+import NoticePopup from "@/components/NoticePopup";
 import { navigationRef } from "./navigationRef";
 import { colors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
@@ -42,7 +43,10 @@ export default function RootNavigator() {
       }}
     >
       {currentUser ? (
-        <MainStack />
+        <>
+          <MainStack />
+          <NoticePopup />
+        </>
       ) : (
         <AuthStack />
       )}

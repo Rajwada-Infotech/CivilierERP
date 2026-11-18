@@ -11,6 +11,7 @@ import { LogoFull } from "@/components/Logo";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import { EmployeeAvatar } from "@/pages/employee/EmployeeAvatar";
 import { viewOnlyInfo } from "@/pages/employee/employeeUi";
+import NoticePopup from "@/pages/employee/NoticePopup";
 
 const NAV = [
   { label: "Dashboard", short: "Home", to: "/employee", icon: Home, exact: true, mobile: true },
@@ -142,6 +143,7 @@ export function EmployeeLayout({ children }: { children: React.ReactNode }) {
       <main className={`${preview ? "pt-[6.25rem]" : "pt-16"} pb-24 lg:pb-8`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4">{children}</div>
       </main>
+      <NoticePopup />
 
       {/* Phone: bottom tab bar */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/90 backdrop-blur-xl" aria-label="Employee Portal">

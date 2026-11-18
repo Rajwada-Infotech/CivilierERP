@@ -125,7 +125,7 @@ export default function HomeScreen() {
     ]);
 
   return (
-    <Screen refreshing={today.isRefetching} onRefresh={() => { today.refetch(); me.refetch(); }}>
+    <Screen refreshing={today.isRefetching} onRefresh={() => { qc.invalidateQueries(); }}>
       <SheetFrame>
         <View style={{ padding: 16, flexDirection: "row", alignItems: "center", gap: 12 }}>
           {me.data?.Photo ? (

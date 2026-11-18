@@ -10,7 +10,8 @@ import { fmtDate } from "@/utils/format";
 
 export function useNotices() {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["notices"], queryFn: api.notices, staleTime: 60_000 });
+  // Re-checked every 2 minutes and whenever Home is pulled down, so a new notice from HR shows up without restarting.
+  const q = useQuery({ queryKey: ["notices"], queryFn: api.notices, staleTime: 30_000, refetchInterval: 120_000 });
   const read = useMutation({ mutationFn: api.readNotice, onSuccess: () => qc.invalidateQueries({ queryKey: ["notices"] }) });
   const [openId, setOpenId] = useState<number | null>(null);
   const toggle = (n: Notice) => { setOpenId((id) => (id === n.NoticeId ? null : n.NoticeId)); if (!n.IsRead) read.mutate(n.NoticeId); };

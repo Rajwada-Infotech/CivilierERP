@@ -61,6 +61,27 @@ router.get("/", requirePageRight(PAGE, "view"), async (_req, res) => {
   }
 });
 
+// GET /:id/readers — every active employee the notice reaches, with when they read it (null = not read yet).
+router.get("/:id/readers", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid notice" });
+  try {
+    const r = await getPool().request().input("Id", sql.Int, id).query(`
+      SELECT e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.Department, e.Designation, r.ReadAt
+      FROM dbo.EmployeeNotice n
+      JOIN dbo.EmployeeMaster e ON e.IsActive = 1 AND (n.Audience = N'All' OR EXISTS (
+        SELECT 1 FROM dbo.EmployeeNoticeDepartment nd JOIN dbo.DepartmentMaster d ON d.Id = nd.DepartmentId
+        WHERE nd.NoticeId = n.NoticeId AND LOWER(LTRIM(RTRIM(d.DepartmentName))) = LOWER(LTRIM(RTRIM(e.Department)))))
+      LEFT JOIN dbo.EmployeeNoticeRead r ON r.NoticeId = n.NoticeId AND r.EmployeeId = e.EmployeeId
+      WHERE n.NoticeId = @Id
+      ORDER BY CASE WHEN r.ReadAt IS NULL THEN 1 ELSE 0 END, r.ReadAt DESC, e.EmployeeName`);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[notices] readers:", err.message);
+    res.status(500).json({ error: "Could not load who has read it" });
+  }
+});
+
 router.get("/departments", requirePageRight(PAGE, "view"), async (_req, res) => {
   try {
     res.json((await getPool().request().query(`

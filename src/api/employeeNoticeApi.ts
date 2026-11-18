@@ -21,6 +21,8 @@ export const getNotices = () => call<Notice[]>(BASE);
 export const getNoticeDepartments = () => call<NoticeDepartment[]>(`${BASE}/departments`);
 export const saveNotice = (id: number | null, body: NoticeInput) =>
   call<{ message: string }>(id ? `${BASE}/${id}` : BASE, { method: id ? "PUT" : "POST", body: JSON.stringify(body) });
+export interface NoticeReader { EmployeeId: number; EmployeeCode: string; EmployeeName: string; Department: string | null; Designation: string | null; ReadAt: string | null }
+export const getNoticeReaders = (id: number) => call<NoticeReader[]>(`${BASE}/${id}/readers`);
 export const deleteNotice = (id: number) => call<{ message: string }>(`${BASE}/${id}`, { method: "DELETE" });
 
 // Employee side

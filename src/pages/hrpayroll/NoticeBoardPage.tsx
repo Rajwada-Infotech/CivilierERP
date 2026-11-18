@@ -3,14 +3,14 @@
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CalendarDays, Megaphone, Pencil, Pin, Plus, Search, Trash2, Users, X } from "lucide-react";
+import { CalendarDays, Check, ChevronRight, Clock, Megaphone, Pencil, Pin, Plus, Search, Trash2, Users, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
 import { HrEmpty, HrError, HrSkeleton, HrStatStrip, HR_FIELD, HR_LBL, HR_RULE } from "@/components/hrpayroll/HrUi";
 import { KEY_INK, KEY_LINE, KEY_RED } from "@/components/sheet/sheetParts";
 import { BodyPortal } from "@/components/ui/body-portal";
-import { deleteNotice, getNoticeDepartments, getNotices, saveNotice, type Notice, type NoticeInput } from "@/api/employeeNoticeApi";
+import { deleteNotice, getNoticeDepartments, getNoticeReaders, getNotices, saveNotice, type Notice, type NoticeInput } from "@/api/employeeNoticeApi";
 
 // Button sizes (the sheet keys carry no size): page actions and row actions.
 const BTN = "h-10 px-5 text-[0.6875rem]";
@@ -137,8 +137,72 @@ function NoticeForm({ notice, onClose, onSaved }: { notice: Notice | null; onClo
   );
 }
 
+// ── Who has read it ──────────────────────────────────────────────────────────
+const fmtTime = (d: string) => new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+function ReadersDialog({ n, onClose }: { n: Notice; onClose: () => void }) {
+  const { data, isLoading, error } = useQuery({ queryKey: ["notice-readers", n.NoticeId], queryFn: () => getNoticeReaders(n.NoticeId) });
+  const [tab, setTab] = useState<"unread" | "read">("unread");
+  const [q, setQ] = useState("");
+  const read = (data ?? []).filter((r) => r.ReadAt);
+  const unread = (data ?? []).filter((r) => !r.ReadAt);
+  const term = q.trim().toLowerCase();
+  const rows = (tab === "read" ? read : unread).filter((r) => !term || [r.EmployeeName, r.EmployeeCode, r.Department].some((v) => String(v ?? "").toLowerCase().includes(term)));
+  return (
+    <BodyPortal>
+      <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Who has read this notice"
+        onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
+        <div className="w-full max-w-2xl max-h-[calc(100vh-2rem)] flex flex-col bg-card border border-foreground shadow-2xl">
+          <header className="flex items-start justify-between gap-3 px-6 py-4 border-b border-foreground">
+            <div className="min-w-0">
+              <p className={HR_LBL}>Who has read it</p>
+              <h2 className="font-heading text-lg font-bold mt-0.5 truncate">{n.Title}</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">{n.Audience === "All" ? "All employees" : n.Departments}</p>
+            </div>
+            <button type="button" onClick={onClose} aria-label="Close" className="h-9 w-9 shrink-0 flex items-center justify-center border border-border hover:border-foreground"><X size={16} /></button>
+          </header>
+          <div className="px-6 pt-4 pb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex gap-2">
+              {([["unread", "Not read yet", unread.length], ["read", "Read", read.length]] as const).map(([k, label, c]) => (
+                <button key={k} onClick={() => setTab(k)}
+                  className={`h-9 px-4 border text-sm font-medium ${tab === k ? "border-foreground bg-foreground text-card" : "border-border hover:border-foreground"}`}>
+                  {label} <span className={`ml-1 tabular-nums ${tab === k ? "text-card/70" : "text-muted-foreground"}`}>{c}</span>
+                </button>
+              ))}
+            </div>
+            <label className="relative w-full sm:w-56">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input className={`${HR_FIELD} h-9 pl-9`} placeholder="Search employee…" value={q} onChange={(e) => setQ(e.target.value)} />
+            </label>
+          </div>
+          <div className="flex-1 overflow-y-auto px-6 pb-5">
+            {error ? <HrError text={(error as Error).message} /> : isLoading ? <HrSkeleton rows={3} /> : !rows.length ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">{tab === "unread" ? (unread.length ? "No match." : "Everyone has read it.") : (read.length ? "No match." : "Nobody has opened it yet.")}</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead><tr className={`${HR_LBL} text-left border-b border-foreground/30`}><th className="py-2 pr-3">Employee</th><th className="py-2 pr-3">Department</th><th className="py-2 text-right">{tab === "read" ? "Read at" : "Status"}</th></tr></thead>
+                <tbody className="divide-y divide-foreground/10">
+                  {rows.map((r) => (
+                    <tr key={r.EmployeeId}>
+                      <td className="py-2.5 pr-3"><span className="font-medium">{r.EmployeeName}</span> <span className="text-xs text-muted-foreground">{r.EmployeeCode}</span>
+                        {r.Designation && <span className="block text-xs text-muted-foreground">{r.Designation}</span>}</td>
+                      <td className="py-2.5 pr-3 text-muted-foreground">{r.Department ?? "—"}</td>
+                      <td className="py-2.5 text-right whitespace-nowrap">{r.ReadAt
+                        ? <span className="inline-flex items-center gap-1 text-emerald-700"><Check size={13} /> {fmtTime(r.ReadAt)}</span>
+                        : <span className="inline-flex items-center gap-1 text-amber-700"><Clock size={13} /> Not read</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+    </BodyPortal>
+  );
+}
+
 // ── One notice in the list ──────────────────────────────────────────────────
-function NoticeCard({ n, canEdit, canDelete, onEdit, onDelete }: { n: Notice; canEdit: boolean; canDelete: boolean; onEdit: () => void; onDelete: () => void }) {
+function NoticeCard({ n, canEdit, canDelete, onEdit, onDelete, onReaders }: { n: Notice; canEdit: boolean; canDelete: boolean; onEdit: () => void; onDelete: () => void; onReaders: () => void }) {
   const st = statusOf(n);
   const pct = n.AudienceCount ? Math.round((n.ReadCount / n.AudienceCount) * 100) : 0;
   const [more, setMore] = useState(false);
@@ -160,10 +224,11 @@ function NoticeCard({ n, canEdit, canDelete, onEdit, onDelete }: { n: Notice; ca
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5"><CalendarDays size={13} /> {fmt(n.PublishFrom)}{n.ExpiresOn ? ` – ${fmt(n.ExpiresOn)}` : " onwards"}</span>
           <span>by {n.CreatedByName ?? "HR"}</span>
-          <span className="inline-flex items-center gap-2" title="Employees who have opened it">
+          <button type="button" onClick={onReaders} className="inline-flex items-center gap-2 h-8 px-2.5 -mx-2.5 border border-transparent hover:border-foreground/30 hover:bg-card" title="See who has read it and who hasn't">
             <span className="h-1.5 w-24 bg-foreground/10 overflow-hidden"><span className="block h-full bg-foreground" style={{ width: `${pct}%` }} /></span>
-            <span className="tabular-nums text-foreground font-medium">Read {n.ReadCount} / {n.AudienceCount}</span>
-          </span>
+            <span className="tabular-nums text-foreground font-medium underline underline-offset-2 decoration-foreground/30">Read {n.ReadCount} / {n.AudienceCount}</span>
+            <ChevronRight size={13} className="text-foreground" />
+          </button>
         </div>
         {(canEdit || canDelete) && (
           <div className="flex items-center gap-2">
@@ -202,6 +267,7 @@ export default function NoticeBoardPage() {
   const { data, isLoading, error } = useQuery({ queryKey: ["employee-notices"], queryFn: getNotices });
   const [editing, setEditing] = useState<Notice | null | "new">(null);
   const [removing, setRemoving] = useState<Notice | null>(null);
+  const [readersOf, setReadersOf] = useState<Notice | null>(null);
   const [tab, setTab] = useState<"All" | Status>("All");
   const [q, setQ] = useState("");
   const refresh = () => qc.invalidateQueries({ queryKey: ["employee-notices"] });
@@ -252,12 +318,13 @@ export default function NoticeBoardPage() {
             <p className="bg-card px-5 py-8 text-center text-sm text-muted-foreground" style={{ border: HR_RULE }}>No notices match.</p>
           ) : (
             <div className="space-y-4">
-              {list.map((n) => <NoticeCard key={n.NoticeId} n={n} canEdit={rights.canEdit} canDelete={rights.canDelete} onEdit={() => setEditing(n)} onDelete={() => setRemoving(n)} />)}
+              {list.map((n) => <NoticeCard key={n.NoticeId} n={n} canEdit={rights.canEdit} canDelete={rights.canDelete} onEdit={() => setEditing(n)} onDelete={() => setRemoving(n)} onReaders={() => setReadersOf(n)} />)}
             </div>
           )}
         </div>
       </HrPayrollShell>
       {editing && <NoticeForm notice={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
+      {readersOf && <ReadersDialog n={readersOf} onClose={() => setReadersOf(null)} />}
       {removing && <ConfirmRemove n={removing} busy={remove.isPending} onCancel={() => setRemoving(null)} onConfirm={() => remove.mutate(removing.NoticeId)} />}
     </>
   );
