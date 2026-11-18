@@ -20,7 +20,7 @@ export interface Me {
 
 export interface BreakRow {
   breakId: number; no: number; start: string; end: string | null; seconds: number | null; open: boolean;
-  type: string; note: string | null; deduct: boolean; overSeconds: number;
+  type: string; note: string | null; deduct: boolean; allowedSeconds?: number | null; overSeconds: number;
 }
 export interface AttendanceRec {
   attendanceId: number; attendanceDate: string; inTime: string; outTime: string | null;

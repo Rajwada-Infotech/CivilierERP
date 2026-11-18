@@ -10,6 +10,7 @@ import { Screen } from "@/components/Screen";
 import { Chip } from "@/components/Chip";
 import { Body, Field, Input, Key, Label, Notice, Panel, SheetFrame, Skel, StatGrid, TitleText } from "@/components/sheet/Sheet";
 import { sheet as S } from "@/theme/colors";
+import HomeDashboard from "./HomeDashboard";
 import { fonts } from "@/theme/fonts";
 import { clock, fmtDate, fmtDur, fmtTime } from "@/utils/format";
 
@@ -139,7 +140,12 @@ export default function HomeScreen() {
                 {d.state === "ON_BREAK" ? clock(breakNow ?? 0) : net != null ? clock(net) : "00:00:00"}
               </Text>
               {d.state === "ON_BREAK" && openBreak?.type && (
-                <Body size={11.5} color={S.graphite}>Working time paused at {fmtDur(cur?.live?.netSeconds)}</Body>
+                <Body size={11.5} color={S.graphite}>
+                  {openBreak.allowedSeconds != null ? `${fmtDur(openBreak.allowedSeconds)} allowed · ` : "No limit · "}Working time paused at {fmtDur(cur?.live?.netSeconds)}
+                </Body>
+              )}
+              {d.state === "ON_BREAK" && openBreak?.allowedSeconds != null && (breakNow ?? 0) > openBreak.allowedSeconds && (
+                <Chip text={`Break over time +${fmtDur((breakNow ?? 0) - openBreak.allowedSeconds)}`} tone="bad" />
               )}
             </View>
             <StatGrid cols={3} size={15} items={[
@@ -147,6 +153,11 @@ export default function HomeScreen() {
               { label: "Out", value: fmtTime(cur?.outTime) },
               { label: "Breaks", value: fmtDur(cur?.live?.breakSeconds ?? cur?.breakSeconds ?? 0) },
             ]} />
+            {cur && (
+              <Body size={11.5} color={S.graphite}>
+                Official out {fmtDur(cur.officialSeconds)} · Extra <Body size={11.5} color={cur.extraSeconds > 0 ? S.red : S.graphite}>{fmtDur(cur.extraSeconds)}</Body>
+              </Body>
+            )}
             {cur?.inLocation && (
               <Body size={11} color={S.graphite}>
                 In location recorded ({cur.inLocation.lat.toFixed(5)}, {cur.inLocation.lng.toFixed(5)}{cur.inLocation.accuracyM != null ? ` · ±${cur.inLocation.accuracyM} m` : ""})
@@ -190,6 +201,8 @@ export default function HomeScreen() {
           ))}
         </Panel>
       )}
+
+      <HomeDashboard />
 
       <BreakPicker open={picker} types={types.data ?? []} onClose={() => setPicker(false)}
         onPick={(t, n) => { setPicker(false); breakStart.mutate({ t, n }); }} />
