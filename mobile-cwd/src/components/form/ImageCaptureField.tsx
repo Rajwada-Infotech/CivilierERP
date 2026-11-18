@@ -6,7 +6,7 @@ import { useState } from "react";
 import { View, Text, Pressable, Image, ActivityIndicator } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Camera, ImagePlus, RefreshCw, Trash2 } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { FieldLabel } from "./Form";
@@ -68,8 +68,8 @@ export function ImageCaptureField({
     <View style={{ marginBottom: 14 }}>
       <FieldLabel label={label} />
       {value ? (
-        <View style={{ flexDirection: "row", gap: 12, alignItems: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 10, backgroundColor: `${colors.card}80` }}>
-          <Image source={{ uri: value }} style={{ width: 68, height: 68, borderRadius: 10, borderWidth: 1, borderColor: colors.border }} />
+        <View style={{ flexDirection: "row", gap: 12, alignItems: "center", borderWidth: 1, borderColor: S.rule, borderRadius: 0, padding: 10, backgroundColor: S.paper }}>
+          <Image source={{ uri: value }} style={{ width: 68, height: 68, borderRadius: 0, borderWidth: 1, borderColor: S.rule }} />
           <View style={{ flex: 1, gap: 8 }}>
             <View style={{ flexDirection: "row", gap: 8 }}>
               <SmallBtn icon={RefreshCw} label="Change" onPress={() => pick("library")} />
@@ -83,9 +83,9 @@ export function ImageCaptureField({
           <BigBtn icon={ImagePlus} label={busy ? "…" : "Gallery"} onPress={() => pick("library")} disabled={busy} />
         </View>
       )}
-      {hint && <Text style={{ color: "#5c6270", fontSize: 9.5, fontFamily: fonts.body.regular, marginTop: 5 }}>{hint}</Text>}
+      {hint && <Text style={{ color: S.graphite, fontSize: 9.5, fontFamily: fonts.body.regular, marginTop: 5 }}>{hint}</Text>}
       {busy && !value && (
-        <View style={{ marginTop: 8, alignItems: "center" }}><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
+        <View style={{ marginTop: 8, alignItems: "center" }}><ActivityIndicator size="small" color={S.graphite} /></View>
       )}
     </View>
   );
@@ -97,22 +97,22 @@ function BigBtn({ icon: Icon, label, onPress, disabled }: { icon: typeof Camera;
       onPress={disabled ? undefined : onPress}
       style={{
         flex: 1, alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 16,
-        borderWidth: 1, borderColor: colors.border, borderStyle: "dashed", borderRadius: 12,
-        backgroundColor: `${colors.card}55`, opacity: disabled ? 0.5 : 1,
+        borderWidth: 1, borderColor: S.rule, borderStyle: "dashed", borderRadius: 0,
+        backgroundColor: S.paper, opacity: disabled ? 0.5 : 1,
       }}
     >
-      <Icon size={17} color={colors.mutedForeground} />
-      <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.medium }}>{label}</Text>
+      <Icon size={17} color={S.graphite} />
+      <Text style={{ color: S.graphite, fontSize: 11, fontFamily: fonts.body.medium }}>{label}</Text>
     </Pressable>
   );
 }
 
 function SmallBtn({ icon: Icon, label, onPress, danger }: { icon: typeof Camera; label: string; onPress: () => void; danger?: boolean }) {
-  const c = danger ? colors.destructive : colors.foreground;
+  const c = danger ? S.red : S.ink;
   return (
     <Pressable
       onPress={onPress}
-      style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 9, borderWidth: 1, borderColor: colors.border }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 0, borderWidth: 1, borderColor: S.rule }}
     >
       <Icon size={12} color={c} />
       <Text style={{ color: c, fontSize: 11, fontFamily: fonts.body.medium }}>{label}</Text>

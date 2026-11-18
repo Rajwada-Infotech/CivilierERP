@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Text, TouchableOpacity } from "react-native";
 import { ChevronDown } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 
 export function useIncremental(total: number, step = 25) {
@@ -17,10 +17,10 @@ export function ShowMore({ remaining, step, onPress }: { remaining: number; step
   return (
     <TouchableOpacity
       onPress={onPress}
-      style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, marginTop: 4, borderRadius: 10, borderWidth: 1, borderColor: colors.border }}
+      style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 40, margin: 10, borderWidth: 1, borderColor: S.ink }}
     >
-      <ChevronDown size={14} color={colors.mutedForeground} />
-      <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.mutedForeground }}>
+      <ChevronDown size={14} color={S.ink} />
+      <Text style={{ fontSize: 10.5, letterSpacing: 1.1, textTransform: "uppercase", fontFamily: fonts.heading.semibold, color: S.ink }}>
         Show {Math.min(step, remaining)} more · {remaining} left
       </Text>
     </TouchableOpacity>

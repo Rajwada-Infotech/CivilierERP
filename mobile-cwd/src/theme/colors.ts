@@ -40,3 +40,28 @@ export const moduleAccents = {
   dba: "#10b981",
   // (civilworkdpr above is this app's own module accent.)
 } as const;
+
+// The drawing sheet's tones (web: .crm-sheet in components/sheet/Sheet.tsx), derived from the palette above as the
+// Admin and Finance apps do: ink is the foreground, the rest are steps of it, the border or the primary.
+const rgba = (hex: string, a: number) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+};
+export const sheet = {
+  paper: colors.card,
+  ink: colors.foreground,
+  ink2: rgba(colors.foreground, 0.78),
+  graphite: colors.mutedForeground,
+  faint: rgba(colors.mutedForeground, 0.6),
+  rule: colors.border,
+  ruleSoft: rgba(colors.border, 0.55),
+  line40: rgba(colors.foreground, 0.4),
+  line15: rgba(colors.foreground, 0.15),
+  blue: colors.primary,
+  blueWash: rgba(colors.primary, 0.1),
+  blueTint: rgba(colors.primary, 0.18),
+  red: colors.destructive,
+  redWash: rgba(colors.destructive, 0.1),
+  grid: rgba(colors.foreground, 0.04),
+  hatch: rgba(colors.foreground, 0.24),
+};

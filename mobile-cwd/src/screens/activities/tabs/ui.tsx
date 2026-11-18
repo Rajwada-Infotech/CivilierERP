@@ -2,14 +2,15 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Text, TouchableOpacity, View, type ImageStyle, type StyleProp } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { apiUrl } from "@/utils/apiBase";
 import { getToken } from "@/services/authStorage";
 import { toast } from "@/components/Toast";
 
-export const ACCENT = "#0891b2";
-export const card = { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14 } as const;
+// The sheet has no module colour: its accent is the primary blue, its boxes square and ruled on paper.
+export const ACCENT = S.blue;
+export const card = { backgroundColor: S.paper, borderRadius: 0, borderWidth: 1, borderColor: S.rule, padding: 14 } as const;
 
 /** Local calendar date as YYYY-MM-DD (never via toISOString — that shifts the day in IST). */
 export const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -22,36 +23,42 @@ export const fmtDay = (s: string) => fromYmd(s).toLocaleDateString("en-IN", { we
 export const fmtClock = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 
 export function Loading() {
-  return <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 36 }} />;
+  return <ActivityIndicator color={S.graphite} style={{ paddingVertical: 36 }} />;
 }
 
 export function Empty({ text }: { text: string }) {
   return (
-    <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 32 }}>{text}</Text>
+    <Text style={{ textAlign: "center", color: S.graphite, fontSize: 13, fontFamily: fonts.body.regular, paddingVertical: 32 }}>{text}</Text>
   );
 }
 
 export function ErrorText({ error }: { error: unknown }) {
-  return <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 12 }}>{(error as Error)?.message || "Something went wrong."}</Text>;
+  return (
+    <View style={{ borderWidth: 1, borderColor: S.red, backgroundColor: S.redWash, paddingHorizontal: 12, paddingVertical: 9, marginVertical: 8 }}>
+      <Text style={{ color: S.red, fontSize: 13, fontFamily: fonts.body.medium }}>{(error as Error)?.message || "Something went wrong."}</Text>
+    </View>
+  );
 }
 
+/** A key on the sheet: "accent" is filled ink, "outline" an ink outline, "danger" red. Square, capital Sora label. */
 export function Btn({
   label, onPress, icon, tone = "accent", disabled, busy,
 }: { label: string; onPress: () => void; icon?: React.ReactNode; tone?: "accent" | "outline" | "danger"; disabled?: boolean; busy?: boolean }) {
-  const filled = tone === "accent";
-  const c = tone === "danger" ? colors.destructive : ACCENT;
+  const bg = tone === "accent" ? S.ink : tone === "danger" ? S.red : "transparent";
+  const border = tone === "danger" ? S.red : S.ink;
+  const fg = tone === "accent" ? S.paper : tone === "danger" ? "#ffffff" : S.ink;
   return (
     <TouchableOpacity
-      activeOpacity={0.7}
+      activeOpacity={0.75}
       disabled={disabled || busy}
       onPress={onPress}
       style={{
-        flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12,
-        backgroundColor: filled ? ACCENT : "transparent", borderWidth: filled ? 0 : 1, borderColor: c, opacity: disabled || busy ? 0.4 : 1,
+        flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 44, paddingHorizontal: 16,
+        backgroundColor: bg, borderWidth: 1, borderColor: border, opacity: disabled || busy ? 0.4 : 1,
       }}
     >
-      {busy ? <ActivityIndicator size="small" color={filled ? "#04181d" : c} /> : icon}
-      <Text style={{ fontFamily: fonts.heading.bold, fontSize: 12, color: filled ? "#04181d" : c }}>{label}</Text>
+      {busy ? <ActivityIndicator size="small" color={fg} /> : icon}
+      <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 11, letterSpacing: 1.1, textTransform: "uppercase", color: fg }}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -72,6 +79,6 @@ export async function takePhoto(): Promise<string | null> {
 export function AuthImage({ path, style }: { path: string; style: StyleProp<ImageStyle> }) {
   const [token, setToken] = useState<string | null>(null);
   useEffect(() => { getToken().then(setToken); }, []);
-  if (!token) return <View style={[{ backgroundColor: colors.muted }, style as object]} />;
+  if (!token) return <View style={[{ backgroundColor: S.line15 }, style as object]} />;
   return <Image source={{ uri: apiUrl(path), headers: { Authorization: `Bearer ${token}` } }} style={style} />;
 }

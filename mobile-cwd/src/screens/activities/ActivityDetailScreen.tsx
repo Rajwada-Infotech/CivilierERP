@@ -3,11 +3,12 @@
 // fine, each is its own entry), hold / resume, move the progress bar forward, and — for a Completed
 // activity — Quality Check each checkpoint and pass it or send it back for rework.
 import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, PauseCircle, PlayCircle, Save, ShieldCheck } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { colors, sheet as S } from "@/theme/colors";
+import { Body, Detail, Figure, Grow, InfoGrid, Input, Key, Label, Notice, Press, SheetFrame, Skel, TitleText } from "@/components/sheet/Sheet";
 import { fonts } from "@/theme/fonts";
 import { StatusPill, displayStatus } from "@/components/StatusPill";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -37,20 +38,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "comments", label: "Comments" },
   { id: "history", label: "History" },
 ];
-
-const ACCENT = "#0891b2";
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={{ marginBottom: 18 }}>
-      <Text style={{ fontSize: 10, fontFamily: fonts.heading.bold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 8 }}>
-        {title}
-      </Text>
-      {children}
-    </View>
-  );
-}
-
-const card = { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14 } as const;
 
 export default function ActivityDetailScreen() {
   const { rungId } = useRoute<RouteProp<MainStackParamList, "ActivityDetail">>().params;
@@ -106,12 +93,18 @@ export default function ActivityDetailScreen() {
   });
 
   if (detailQ.isLoading || rowQ.isLoading) {
-    return <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}><ActivityIndicator color={colors.mutedForeground} /></View>;
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <SheetFrame still>
+          <View style={{ padding: 16 }}><Skel h={18} w="40%" /><Skel h={30} /><Skel h={60} /><Skel h={120} /></View>
+        </SheetFrame>
+      </View>
+    );
   }
   if (detailQ.error || !a) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, padding: 24 }}>
-        <Text style={{ color: colors.destructive, fontFamily: fonts.body.regular, fontSize: 12 }}>{(detailQ.error as Error)?.message || "This activity has no allocation yet."}</Text>
+      <View style={{ flex: 1, backgroundColor: colors.background, padding: 16 }}>
+        <Notice>{(detailQ.error as Error)?.message || "This activity has no allocation yet."}</Notice>
       </View>
     );
   }
@@ -119,153 +112,170 @@ export default function ActivityDetailScreen() {
   const locked = status === "COMPLETED" || status === "APPROVED" || status === "CANCELLED";
   const canWork = editRights.canEdit && !locked;
   const canQc = qcRights.canEdit && status === "COMPLETED";
+  const log = logQ.data ?? [];
+  const remarksTag = String.fromCharCode(67 + (canQc ? 1 : 0) + (canWork ? 1 : 0));
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 96 }}
+      contentContainerStyle={{ paddingBottom: 96 }}
       keyboardShouldPersistTaps="handled"
-      refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={ACCENT} />}
+      refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={S.ink} />}
     >
-      <View style={{ ...card, marginBottom: 18 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
-          <Text style={{ flex: 1, fontSize: 15, fontFamily: fonts.heading.bold, color: colors.foreground }}>{row?.activityName ?? "Activity"}</Text>
-          {!!shown && <StatusPill status={shown} size="md" />}
+      <SheetFrame>
+        {/* Title block: where it is, what it is, its status, the timeline hint. */}
+        <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 16, gap: 8 }}>
+          <Label>{[row?.projectName, "Activity"].filter(Boolean).join(" · ")}</Label>
+          <TitleText size={24}>{row?.activityName ?? "Activity"}</TitleText>
+          {!!row?.scopePath && <Body size={12.5} color={S.ink2}>{row.scopePath}</Body>}
+          <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 2 }}>
+            {!!shown && <StatusPill status={shown} size="md" />}
+            {(row?.attemptNo ?? 1) > 1 && <Label color={S.red}>Attempt {row?.attemptNo} · rework</Label>}
+          </View>
+          {!!hint && <Body size={12} color={S.blue} weight="medium">{hint}</Body>}
         </View>
-        {!!row?.scopePath && <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 4 }}>{[row.projectName, row.scopePath].filter(Boolean).join(" · ")}</Text>}
-        {!!hint && <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: ACCENT, marginTop: 8 }}>{hint}</Text>}
-        {(row?.attemptNo ?? 1) > 1 && <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: "#d946ef", marginTop: 6 }}>Attempt {row?.attemptNo} — rework</Text>}
-      </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16, marginHorizontal: -16 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
-        {TABS.map((x) => {
-          const on = tab === x.id;
-          return (
-            <TouchableOpacity key={x.id} activeOpacity={0.7} onPress={() => setTab(x.id)} style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: on ? ACCENT : colors.border, backgroundColor: on ? `${ACCENT}22` : "transparent" }}>
-              <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: on ? ACCENT : colors.mutedForeground }}>{x.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+        {/* The parts of the activity, as keys along an ink rule: the open one filled ink. */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ borderTopWidth: 1, borderBottomWidth: 1, borderColor: S.ink }}>
+          {TABS.map((x, i) => {
+            const on = tab === x.id;
+            return (
+              <Press
+                key={x.id}
+                onPress={() => setTab(x.id)}
+                style={(pressed) => ({ paddingHorizontal: 14, paddingVertical: 11, borderLeftWidth: i ? 1 : 0, borderLeftColor: S.rule, backgroundColor: on ? S.ink : pressed ? S.blueWash : "transparent" })}
+              >
+                <Text style={{ fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase", fontFamily: fonts.heading.semibold, color: on ? S.paper : S.graphite }}>{x.label}</Text>
+              </Press>
+            );
+          })}
+        </ScrollView>
 
-      {tab === "photos" && <PhotosTab rungId={rungId} canAdd={canWork || canQc} />}
-      {tab === "attendance" && <AttendanceTab rungId={rungId} canEdit={canWork} />}
-      {tab === "checkpoints" && <CheckpointsTab rungId={rungId} canEdit={canWork} onChanged={refresh} />}
-      {tab === "daily-log" && <DailyLogTab rungId={rungId} canEdit={canWork} />}
-      {tab === "comments" && <CommentsTab rungId={rungId} />}
-      {tab === "history" && <HistoryTab rungId={rungId} />}
+        {tab !== "overview" && (
+          <View style={{ padding: 14 }}>
+            {tab === "photos" && <PhotosTab rungId={rungId} canAdd={canWork || canQc} />}
+            {tab === "attendance" && <AttendanceTab rungId={rungId} canEdit={canWork} />}
+            {tab === "checkpoints" && <CheckpointsTab rungId={rungId} canEdit={canWork} onChanged={refresh} />}
+            {tab === "daily-log" && <DailyLogTab rungId={rungId} canEdit={canWork} />}
+            {tab === "comments" && <CommentsTab rungId={rungId} />}
+            {tab === "history" && <HistoryTab rungId={rungId} />}
+          </View>
+        )}
 
-      {tab === "overview" && (
-        <>
+        {tab === "overview" && (
+          <Detail tag="A" title="Allocation" style={{ borderTopWidth: 0 }}>
+            <InfoGrid
+              items={[
+                { label: "Engineers", value: row?.engineerNames || "—", wide: true },
+                { label: "Dates", value: `${a.startDate?.slice(0, 10) ?? "—"} → ${a.endDate?.slice(0, 10) ?? "—"}${a.days ? ` · ${a.days} days` : ""}`, wide: true },
+                { label: "Labour", value: [a.labourSourceName, a.labourSource].filter(Boolean).join(" · ") || "—" },
+                { label: "Material", value: [a.materialSourceName, a.materialSource].filter(Boolean).join(" · ") || "—" },
+              ]}
+            />
+            {a.materials.length > 0 && (
+              <View style={{ marginTop: 14 }}>
+                <View style={{ flexDirection: "row", paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+                  <Label style={{ flex: 1 }}>Material</Label>
+                  <Label>Quantity</Label>
+                </View>
+                {a.materials.map((m) => {
+                  const item = detailQ.data?.candidateItems.find((c) => c.itemId === m.itemId);
+                  return (
+                    <View key={m.itemId} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
+                      <Body size={13}>{item?.itemName ?? m.itemId}</Body>
+                      <Text style={{ fontSize: 13, fontFamily: fonts.heading.medium, color: S.ink, fontVariant: ["tabular-nums"] }}>{m.quantity}{item?.uom ? ` ${item.uom}` : ""}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </Detail>
+        )}
 
-      <Section title="Tag">
-        <TagField rungId={rungId} current={row?.tagName} canEdit={editRights.canEdit} onSaved={refresh} />
-      </Section>
+        {tab === "overview" && (
+          <Detail tag="B" title="Tag">
+            <TagField rungId={rungId} current={row?.tagName} canEdit={editRights.canEdit} onSaved={refresh} />
+          </Detail>
+        )}
 
-      <Section title="Allocation">
-        <View style={{ ...card, gap: 8 }}>
-          {[
-            ["Engineers", row?.engineerNames || "—"],
-            ["Dates", `${a.startDate?.slice(0, 10) ?? "—"} → ${a.endDate?.slice(0, 10) ?? "—"}${a.days ? ` · ${a.days} days` : ""}`],
-            ["Labour", [a.labourSourceName, a.labourSource].filter(Boolean).join(" · ") || "—"],
-            ["Material", [a.materialSourceName, a.materialSource].filter(Boolean).join(" · ") || "—"],
-          ].map(([k, v]) => (
-            <View key={k} style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
-              <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{k}</Text>
-              <Text style={{ flex: 1, textAlign: "right", fontSize: 12, fontFamily: fonts.body.medium, color: colors.foreground }}>{v}</Text>
+        {tab === "overview" && canQc && (
+          <Detail tag="C" title="Quality Check">
+            <Press
+              onPress={() => navigation.navigate("QcInspect", { rungId })}
+              style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderWidth: 1.5, borderColor: S.blue, backgroundColor: pressed ? S.blueTint : S.blueWash })}
+            >
+              <ShieldCheck size={18} color={S.blue} />
+              <Text style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.heading.semibold, color: S.ink }}>Inspect this activity</Text>
+              <ChevronRight size={16} color={S.graphite} />
+            </Press>
+          </Detail>
+        )}
+
+        {tab === "overview" && canWork && (
+          <Detail tag={canQc ? "D" : "C"} title="Work done" note={progress != null && progress !== saved ? "Not saved" : undefined}>
+            <Figure size={40}>{shownProgress}%</Figure>
+            <View style={{ marginTop: 12, height: 14, borderWidth: 1.5, borderColor: S.ink, backgroundColor: S.paper }}>
+              <Grow style={{ height: "100%", width: `${shownProgress}%`, backgroundColor: shownProgress === 100 ? S.blue : S.ink }} />
             </View>
-          ))}
-          {a.materials.length > 0 && (
-            <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8, gap: 4 }}>
-              {a.materials.map((m) => {
-                const item = detailQ.data?.candidateItems.find((c) => c.itemId === m.itemId);
-                return (
-                  <View key={m.itemId} style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                    <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.foreground }}>{item?.itemName ?? m.itemId}</Text>
-                    <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{m.quantity}{item?.uom ? ` ${item.uom}` : ""}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
-      </Section>
-
-      {canQc && (
-        <Section title="Quality Check">
-          <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate("QcInspect", { rungId })} style={{ ...card, flexDirection: "row", alignItems: "center", gap: 10, borderColor: `${ACCENT}66` }}>
-            <ShieldCheck size={18} color={ACCENT} />
-            <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Inspect this activity</Text>
-            <ChevronRight size={16} color={colors.mutedForeground} />
-          </TouchableOpacity>
-        </Section>
-      )}
-
-      {canWork && (
-        <Section title="Work done">
-          <View style={{ ...card, gap: 12 }}>
-            <Text style={{ fontSize: 22, fontFamily: fonts.heading.bold, color: colors.foreground }}>{shownProgress}%</Text>
-            <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.muted, overflow: "hidden" }}>
-              <View style={{ width: `${shownProgress}%`, height: 6, backgroundColor: ACCENT }} />
-            </View>
-            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", marginTop: 14 }}>
               {[5, 10, 25].map((n) => (
-                <Pressable key={n} onPress={() => setProgress(Math.min(100, shownProgress + n))} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: colors.border }}>
-                  <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.foreground }}>+{n}%</Text>
-                </Pressable>
+                <Key key={n} label={`+${n}%`} onPress={() => setProgress(Math.min(100, shownProgress + n))} style={{ minHeight: 38, paddingHorizontal: 12 }} />
               ))}
-              <Pressable onPress={() => setProgress(100)} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: ACCENT }}>
-                <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: ACCENT }}>Done 100%</Text>
-              </Pressable>
-              {progress != null && (
-                <Pressable onPress={() => setProgress(null)} style={{ paddingHorizontal: 12, paddingVertical: 7 }}>
-                  <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: fonts.body.medium }}>Reset</Text>
-                </Pressable>
-              )}
+              <Key label="Done 100%" onPress={() => setProgress(100)} style={{ minHeight: 38, paddingHorizontal: 12, borderColor: S.blue }} />
+              {progress != null && <Key label="Reset" onPress={() => setProgress(null)} style={{ minHeight: 38, paddingHorizontal: 12, borderColor: S.rule }} />}
             </View>
             {progress != null && progress !== saved && (
-              <Pressable disabled={saveProgress.isPending} onPress={() => saveProgress.mutate()} style={{ flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", paddingVertical: 11, borderRadius: 12, backgroundColor: ACCENT }}>
-                <Save size={14} color="#04181d" />
-                <Text style={{ fontFamily: fonts.heading.bold, color: "#04181d", fontSize: 12 }}>{shownProgress === 100 ? "Save — send to Quality Check" : "Save progress"}</Text>
-              </Pressable>
+              <Key
+                tone="ink"
+                label={saveProgress.isPending ? "Saving…" : shownProgress === 100 ? "Save — send to Quality Check" : "Save progress"}
+                icon={<Save size={14} color={S.paper} />}
+                disabled={saveProgress.isPending}
+                onPress={() => saveProgress.mutate()}
+                style={{ marginTop: 12 }}
+              />
             )}
             {(status === "IN_PROGRESS" || status === "HOLD" || status === "ALLOCATED" || status === "PENDING") && (
-              <Pressable disabled={setStatus.isPending} onPress={() => setStatus.mutate(status === "HOLD" ? "IN_PROGRESS" : "HOLD")} style={{ flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: status === "HOLD" ? "#14b8a6" : "#f59e0b" }}>
-                {status === "HOLD" ? <PlayCircle size={14} color="#14b8a6" /> : <PauseCircle size={14} color="#f59e0b" />}
-                <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 12, color: status === "HOLD" ? "#14b8a6" : "#f59e0b" }}>{status === "HOLD" ? "Resume work" : "Put on hold"}</Text>
-              </Pressable>
+              <Key
+                label={status === "HOLD" ? "Resume work" : "Put on hold"}
+                icon={status === "HOLD" ? <PlayCircle size={14} color={S.ink} /> : <PauseCircle size={14} color={S.ink} />}
+                disabled={setStatus.isPending}
+                onPress={() => setStatus.mutate(status === "HOLD" ? "IN_PROGRESS" : "HOLD")}
+                style={{ marginTop: 10 }}
+              />
             )}
-          </View>
-        </Section>
-      )}
+          </Detail>
+        )}
 
-      <Section title="Remarks & updates">
-        <View style={{ ...card, gap: 10 }}>
-          {editRights.canEdit && (
-            <>
-              <TextInput value={remark} onChangeText={setRemark} placeholder="Add a remark…" placeholderTextColor={`${colors.mutedForeground}99`} multiline style={{ color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, minHeight: 44, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10 }} />
-              <Pressable disabled={!remark.trim() || addRemark.isPending} onPress={() => addRemark.mutate()} style={{ alignItems: "center", paddingVertical: 10, borderRadius: 12, backgroundColor: ACCENT, opacity: !remark.trim() || addRemark.isPending ? 0.4 : 1 }}>
-                <Text style={{ fontFamily: fonts.heading.bold, color: "#04181d", fontSize: 12 }}>Add remark</Text>
-              </Pressable>
-            </>
-          )}
-          {(logQ.data ?? []).slice(0, 15).map((e) => (
-            <View key={e.id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: colors.foreground }}>
-                  {e.fromProgressPercent != null && e.toProgressPercent != null ? `${e.fromProgressPercent}% → ${e.toProgressPercent}%` : "Remark"}
-                </Text>
-                <Text style={{ fontSize: 10, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
-                  {new Date(e.loggedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{e.loggedBy ? ` · ${e.loggedBy}` : ""}
-                </Text>
+        {tab === "overview" && (
+          <Detail tag={remarksTag} title="Remarks & updates" note={log.length ? `${log.length} in all` : undefined}>
+            {editRights.canEdit && (
+              <View style={{ gap: 10, marginBottom: 12 }}>
+                <Input value={remark} onChangeText={setRemark} placeholder="Add a remark…" multiline style={{ minHeight: 64, paddingTop: 10, textAlignVertical: "top" }} />
+                <Key tone="ink" label={addRemark.isPending ? "Adding…" : "Add remark"} disabled={!remark.trim() || addRemark.isPending} onPress={() => addRemark.mutate()} />
               </View>
-              {!!e.remarks && <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.foreground, marginTop: 3 }}>{e.remarks}</Text>}
-            </View>
-          ))}
-        </View>
-      </Section>
-        </>
-      )}
+            )}
+            {log.length === 0 ? (
+              <Body size={13} color={S.graphite}>No remarks or progress updates yet.</Body>
+            ) : (
+              <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+                {log.slice(0, 15).map((e) => (
+                  <View key={e.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, gap: 3 }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+                      <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: S.ink, fontVariant: ["tabular-nums"] }}>
+                        {e.fromProgressPercent != null && e.toProgressPercent != null ? `${e.fromProgressPercent}% → ${e.toProgressPercent}%` : "Remark"}
+                      </Text>
+                      <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: S.graphite }}>
+                        {new Date(e.loggedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{e.loggedBy ? ` · ${e.loggedBy}` : ""}
+                      </Text>
+                    </View>
+                    {!!e.remarks && <Body size={13}>{e.remarks}</Body>}
+                  </View>
+                ))}
+              </View>
+            )}
+          </Detail>
+        )}
+      </SheetFrame>
     </ScrollView>
   );
 }

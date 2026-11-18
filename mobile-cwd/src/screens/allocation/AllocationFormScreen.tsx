@@ -7,7 +7,8 @@ import { Alert, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { CalendarDays, Check, Circle, Plus, ShieldCheck, Timer, Trash2, Users } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { colors, sheet as S } from "@/theme/colors";
+import { Body, Label, Notice, SheetFrame, SheetMark, Skel, TitleText } from "@/components/sheet/Sheet";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { StatusPill, displayStatus } from "@/components/StatusPill";
@@ -20,29 +21,25 @@ import { PriorityBadge } from "@/components/PriorityBadge";
 import { dependencyAutoName } from "@/utils/dependencyAutoName";
 import { applyDefaultDays, changeDays, changeEnd, changeStart, type AllocDates } from "@/utils/allocationDates";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { ACCENT, Btn, ErrorText, Loading, card } from "../activities/tabs/ui";
+import { Btn } from "../activities/tabs/ui";
 import { BlueprintPreview } from "@/components/BlueprintPreview";
 
 const SOURCE_META: Record<SourceType, { label: string; color: string }> = {
-  CONTRACTOR: { label: "Contractor", color: "#3b82f6" },
-  DEVELOPER: { label: "Developer", color: "#8b5cf6" },
+  CONTRACTOR: { label: "Contractor", color: S.blue },
+  DEVELOPER: { label: "Developer", color: S.ink },
 };
 
 function SourceBadge({ source }: { source: SourceType | null }) {
   if (!source) return null;
   const m = SOURCE_META[source];
-  return (
-    <View style={{ alignSelf: "flex-start", marginTop: 6, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: `${m.color}22` }}>
-      <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.bold, color: m.color, textTransform: "uppercase", letterSpacing: 0.4 }}>{m.label}</Text>
-    </View>
-  );
+  return <View style={{ alignSelf: "flex-start", marginTop: -4, marginBottom: 4 }}><Label color={m.color}>{m.label}</Label></View>;
 }
 
 function Tag({ text, color, icon }: { text: string; color: string; icon?: React.ReactNode }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: `${color}22` }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: color }}>
       {icon}
-      <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.semibold, color }}>{text}</Text>
+      <Text style={{ fontSize: 9, letterSpacing: 0.9, textTransform: "uppercase", fontFamily: fonts.heading.semibold, color }}>{text}</Text>
     </View>
   );
 }
@@ -158,8 +155,8 @@ export default function AllocationFormScreen() {
     onError: (e: Error) => Alert.alert("Couldn't save", e.message),
   });
 
-  if (rowQ.isLoading || detailQ.isLoading) return <View style={{ flex: 1, backgroundColor: colors.background }}><Loading /></View>;
-  if (detailQ.error || !detail) return <View style={{ flex: 1, backgroundColor: colors.background, padding: 24 }}><ErrorText error={detailQ.error} /></View>;
+  if (rowQ.isLoading || detailQ.isLoading) return <View style={{ flex: 1, backgroundColor: colors.background }}><SheetFrame still><View style={{ padding: 16 }}><Skel h={18} w="40%" /><Skel h={30} /><Skel h={160} /></View></SheetFrame></View>;
+  if (detailQ.error || !detail) return <View style={{ flex: 1, backgroundColor: colors.background, padding: 16 }}><Notice>{(detailQ.error as Error)?.message || "Could not load this activity."}</Notice></View>;
 
   const shown = row ? displayStatus(row.status, row.resumedAt) : "";
   const checkpoints = detail.assignment?.checkpoints ?? [];
@@ -167,26 +164,28 @@ export default function AllocationFormScreen() {
   const updateLevel = (id: string, patch: Partial<ApprovalLevel>) => setLevels((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 96 }} keyboardShouldPersistTaps="handled">
-      <View style={{ ...card, marginBottom: 18 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
-          <Text style={{ flex: 1, fontSize: 15, fontFamily: fonts.heading.bold, color: colors.foreground }}>{row?.sequenceNo != null ? `${row.sequenceNo}. ` : ""}{row?.activityName ?? "Activity"}</Text>
-          {!!shown && <StatusPill status={shown} size="md" />}
-        </View>
-        {!!row?.scopePath && <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 4 }}>{[row.projectName, row.scopePath].filter(Boolean).join(" · ")}</Text>}
-        <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }} keyboardShouldPersistTaps="handled">
+      <SheetFrame still>
+      {/* Title block: the activity being allocated, where it is, its status, and the ways out. */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 16, gap: 8, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+        <Label>{[row?.projectName, "Allocate"].filter(Boolean).join(" · ")}</Label>
+        <TitleText size={24}>{`${row?.sequenceNo != null ? `${row.sequenceNo}. ` : ""}${row?.activityName ?? "Activity"}`}</TitleText>
+        {!!row?.scopePath && <Body size={12.5} color={S.ink2}>{row.scopePath}</Body>}
+        {!!shown && <StatusPill status={shown} size="md" />}
+        {row?.status === "COMPLETED" && row.qcStatus === "APPROVED" && <SheetMark text="QC passed · waiting on approval" tone="done" />}
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 6 }}>
           <View style={{ flex: 1 }}><Btn tone="outline" label="Open activity" onPress={() => navigation.navigate("ActivityDetail", { rungId })} /></View>
-          {canInspect && <View style={{ flex: 1 }}><Btn label="Inspect (QC)" icon={<ShieldCheck size={14} color="#04181d" />} onPress={() => navigation.navigate("QcInspect", { rungId })} /></View>}
+          {canInspect && <View style={{ flex: 1 }}><Btn label="Inspect (QC)" icon={<ShieldCheck size={14} color={S.paper} />} onPress={() => navigation.navigate("QcInspect", { rungId })} /></View>}
         </View>
-        {row?.status === "COMPLETED" && row.qcStatus === "APPROVED" && <Text style={{ fontSize: 11, color: "#10b981", fontFamily: fonts.body.medium, marginTop: 8 }}>Quality Check passed — waiting on approval.</Text>}
       </View>
 
-      {!canEdit && <Text style={{ fontSize: 11.5, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginBottom: 14 }}>You can view this allocation but not change it.</Text>}
+      <View style={{ padding: 14, paddingTop: 18 }}>
+      {!canEdit && <View style={{ marginBottom: 14 }}><Notice tone="ink">You can view this allocation but not change it.</Notice></View>}
 
       {/* Approval setup — who may approve this activity's finished work, step by step */}
       <FormSection title="Approval setup">
         {levels.length === 0 ? (
-          <Text style={{ fontSize: 11.5, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginBottom: 10 }}>No approvers set — only super admin can approve this activity's work. Add a level to name who else can.</Text>
+          <Text style={{ fontSize: 11.5, color: S.graphite, fontFamily: fonts.body.regular, marginBottom: 10 }}>No approvers set — only super admin can approve this activity's work. Add a level to name who else can.</Text>
         ) : levels.map((l, i) => (
           <View key={l.id} style={{ marginBottom: 6 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -194,18 +193,18 @@ export default function AllocationFormScreen() {
                 <MultiPickerField label={i === levels.length - 1 ? "Final approver(s)" : `Step ${i + 1} approver(s)`} options={people} selected={l.userIds.map(String)} onChange={(k) => updateLevel(l.id, { userIds: k.map(Number) })} disabled={!canEdit} />
               </View>
               {canEdit && (
-                <TouchableOpacity onPress={() => setLevels((ls) => ls.filter((x) => x.id !== l.id))} style={{ padding: 6, marginBottom: 14 }}><Trash2 size={15} color={colors.mutedForeground} /></TouchableOpacity>
+                <TouchableOpacity onPress={() => setLevels((ls) => ls.filter((x) => x.id !== l.id))} style={{ padding: 6, marginBottom: 14 }}><Trash2 size={15} color={S.graphite} /></TouchableOpacity>
               )}
             </View>
             {l.userIds.length > 1 && (
-              <TouchableOpacity disabled={!canEdit} onPress={() => updateLevel(l.id, { mode: l.mode === "any" ? "all" : "any" })} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: -6, marginBottom: 12, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: l.mode === "any" ? "#f59e0b22" : colors.muted }}>
-                <Users size={11} color={l.mode === "any" ? "#f59e0b" : colors.mutedForeground} />
-                <Text style={{ fontSize: 10.5, fontFamily: fonts.heading.semibold, color: l.mode === "any" ? "#f59e0b" : colors.mutedForeground }}>{l.mode === "any" ? "Any one can approve" : "All must approve"}</Text>
+              <TouchableOpacity disabled={!canEdit} onPress={() => updateLevel(l.id, { mode: l.mode === "any" ? "all" : "any" })} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: -6, marginBottom: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: S.ink, backgroundColor: l.mode === "any" ? S.blueWash : "transparent" }}>
+                <Users size={11} color={l.mode === "any" ? S.ink : S.graphite} />
+                <Text style={{ fontSize: 10.5, fontFamily: fonts.heading.semibold, color: l.mode === "any" ? S.ink : S.graphite }}>{l.mode === "any" ? "Any one can approve" : "All must approve"}</Text>
               </TouchableOpacity>
             )}
           </View>
         ))}
-        {canEdit && <Btn tone="outline" label="Add approver level" icon={<Plus size={13} color={ACCENT} />} onPress={() => setLevels((ls) => [...ls, newLevel(ls.length)])} />}
+        {canEdit && <Btn tone="outline" label="Add approver level" icon={<Plus size={13} color={S.ink} />} onPress={() => setLevels((ls) => [...ls, newLevel(ls.length)])} />}
       </FormSection>
 
       <FormSection title="People">
@@ -215,7 +214,7 @@ export default function AllocationFormScreen() {
 
       <FormSection title="Schedule">
         <DateField label="Start date" value={dates.startDate} onChange={(v) => setDates((d) => changeStart(d, v))} disabled={!canEdit} />
-        {dates.startAuto && !!dates.startDate && <Text style={{ fontSize: 10.5, color: "#f59e0b", fontFamily: fonts.body.regular, marginTop: -8, marginBottom: 12 }}>Tentative — worked back from the end date</Text>}
+        {dates.startAuto && !!dates.startDate && <Text style={{ fontSize: 10.5, color: S.ink, fontFamily: fonts.body.regular, marginTop: -8, marginBottom: 12 }}>Tentative — worked back from the end date</Text>}
         <NumberField label={detail.daysOfCompletion != null ? `Days · ${detail.daysOfCompletion} in Activity Master` : "Days"} value={dates.days} onChangeText={(v) => setDates((d) => changeDays(d, v.replace(/[^0-9]/g, "")))} placeholder="e.g. 10" disabled={!canEdit} />
         <DateField label="End date" value={dates.endDate} onChange={(v) => setDates((d) => changeEnd(d, v))} disabled={!canEdit} />
       </FormSection>
@@ -242,18 +241,18 @@ export default function AllocationFormScreen() {
         />
         {!!priority && <View style={{ alignSelf: "flex-start", marginTop: 6 }}><PriorityBadge priority={priority} /></View>}
         <View style={{ height: 12 }} />
-        <Text style={{ fontSize: 10.5, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Auto Name</Text>
-        <View style={{ borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.muted, padding: 10 }}>
-          <Text selectable style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.foreground }}>
+        <Label style={{ marginBottom: 6 }}>Auto Name</Label>
+        <View style={{ borderWidth: 1, borderColor: S.rule, backgroundColor: S.blueWash, padding: 10 }}>
+          <Text selectable style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: S.ink }}>
             {dependencyAutoName({ flatName: row?.flatName, alias: row?.alias, roomName: row?.roomName, storey: row?.storey, activityName: row?.activityName }) || "—"}
           </Text>
         </View>
-        <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginTop: 4 }}>Fetched from the dependency's flat, room and activity — not editable.</Text>
+        <Text style={{ fontSize: 10.5, color: S.graphite, fontFamily: fonts.body.regular, marginTop: 4 }}>Fetched from the dependency's flat, room and activity — not editable.</Text>
       </FormSection>
 
       <FormSection title="Description">
         <RemarksField label="Description" value={description} onChangeText={(v) => { setDescription(v); setDescTouched(true); }} disabled={!canEdit} />
-        {!descTouched && <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginTop: -8, marginBottom: 6 }}>Auto-filled from location — edit freely.</Text>}
+        {!descTouched && <Text style={{ fontSize: 10.5, color: S.graphite, fontFamily: fonts.body.regular, marginTop: -8, marginBottom: 6 }}>Auto-filled from location — edit freely.</Text>}
       </FormSection>
 
       {row?.roomId != null && (
@@ -264,7 +263,7 @@ export default function AllocationFormScreen() {
 
       <FormSection title="Material">
         {detail.candidateItems.length === 0 ? (
-          <Text style={{ fontSize: 11.5, fontStyle: "italic", color: colors.mutedForeground, fontFamily: fonts.body.regular }}>No materials are linked to this activity yet.</Text>
+          <Text style={{ fontSize: 11.5, fontStyle: "italic", color: S.graphite, fontFamily: fonts.body.regular }}>No materials are linked to this activity yet.</Text>
         ) : detail.candidateItems.map((it) => (
           <NumberField
             key={it.itemId}
@@ -279,22 +278,22 @@ export default function AllocationFormScreen() {
 
       <FormSection title={`Checkpoints (${checkpoints.length})`}>
         {checkpoints.length === 0 ? (
-          <Text style={{ fontSize: 11.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>None tagged — add them in Activity Master. They are ticked off in Reporting.</Text>
+          <Text style={{ fontSize: 11.5, color: S.graphite, fontFamily: fonts.body.regular }}>None tagged — add them in Activity Master. They are ticked off in Reporting.</Text>
         ) : (
-          <View style={{ ...card, gap: 8 }}>
+          <View style={{ borderTopWidth: 1, borderTopColor: S.rule }}>
             {checkpoints.map((c, i) => (
               <View
                 key={c.id ?? `${c.fieldName}-${i}`}
                 style={{
-                  flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, padding: c.needsRework ? 8 : 0, borderRadius: 10,
-                  backgroundColor: c.needsRework ? "#f59e0b18" : "transparent", borderWidth: c.needsRework ? 1 : 0, borderColor: "#f59e0b80",
+                  flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, paddingVertical: 9, paddingHorizontal: c.needsRework ? 8 : 0,
+                  borderBottomWidth: 1, borderBottomColor: S.ruleSoft, backgroundColor: c.needsRework ? S.redWash : "transparent",
                 }}
               >
-                {c.isChecked ? <Check size={14} color="#10b981" /> : <Circle size={14} color={colors.mutedForeground} />}
-                <Text style={{ flex: 1, minWidth: 120, fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.foreground }}>{c.fieldName}</Text>
-                {c.needsRework && <Tag text="Redo — rated Poor" color="#f59e0b" />}
-                {c.isDaily && <Tag text="Daily" color="#06b6d4" icon={<CalendarDays size={9} color="#06b6d4" />} />}
-                {c.minWaitDays != null && c.minWaitDays > 0 && <Tag text={`${c.minWaitDays}d wait`} color="#f59e0b" icon={<Timer size={9} color="#f59e0b" />} />}
+                {c.isChecked ? <Check size={14} color={S.blue} /> : <Circle size={14} color={S.graphite} />}
+                <Text style={{ flex: 1, minWidth: 120, fontSize: 12.5, fontFamily: fonts.body.regular, color: S.ink }}>{c.fieldName}</Text>
+                {c.needsRework && <Tag text="Redo — rated Poor" color={S.red} />}
+                {c.isDaily && <Tag text="Daily" color={S.blue} icon={<CalendarDays size={9} color={S.blue} />} />}
+                {c.minWaitDays != null && c.minWaitDays > 0 && <Tag text={`${c.minWaitDays}d wait`} color={S.ink} icon={<Timer size={9} color={S.ink} />} />}
               </View>
             ))}
           </View>
@@ -306,6 +305,8 @@ export default function AllocationFormScreen() {
       </FormSection>
 
       {canEdit && <Btn label="Save allocation" busy={save.isPending} onPress={() => save.mutate()} />}
+      </View>
+      </SheetFrame>
     </ScrollView>
   );
 }

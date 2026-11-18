@@ -5,23 +5,24 @@ import {
   View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 
+// The sheet's capital label (Sora semibold 10, tracked out, graphite).
 const labelStyle = {
-  color: colors.mutedForeground,
+  color: S.graphite,
   fontSize: 10,
-  fontFamily: fonts.body.medium,
+  fontFamily: fonts.heading.semibold,
   textTransform: "uppercase" as const,
-  letterSpacing: 0.4,
-  marginBottom: 5,
+  letterSpacing: 1.2,
+  marginBottom: 6,
 };
 
 export function FieldLabel({ label, required }: { label: string; required?: boolean }) {
   return (
     <Text style={labelStyle}>
       {label}
-      {required ? <Text style={{ color: colors.destructive }}> *</Text> : null}
+      {required ? <Text style={{ color: S.red }}> *</Text> : null}
     </Text>
   );
 }
@@ -29,19 +30,20 @@ export function FieldLabel({ label, required }: { label: string; required?: bool
 export function FieldError({ error }: { error?: string | null }) {
   if (!error) return null;
   return (
-    <Text style={{ color: colors.destructive, fontSize: 10.5, fontFamily: fonts.body.regular, marginTop: 4 }}>{error}</Text>
+    <Text style={{ color: S.red, fontSize: 11.5, fontFamily: fonts.body.medium, marginTop: 4 }}>{error}</Text>
   );
 }
 
+// The sheet's input: square, a 40% ink border, paper inside.
 const boxStyle = {
   borderWidth: 1,
-  borderColor: colors.border,
-  backgroundColor: `${colors.card}80`,
-  borderRadius: 12,
+  borderColor: S.line40,
+  backgroundColor: S.paper,
+  borderRadius: 0,
   paddingHorizontal: 12,
   minHeight: 44,
-  color: colors.foreground,
-  fontSize: 13.5,
+  color: S.ink,
+  fontSize: 14,
   fontFamily: fonts.body.regular,
 };
 
@@ -66,7 +68,7 @@ export function TextField({
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor={`${colors.mutedForeground}99`}
+        placeholderTextColor={S.faint}
         autoCapitalize={autoCapitalize}
         keyboardType={keyboardType}
         multiline={multiline}
@@ -74,7 +76,7 @@ export function TextField({
         style={[
           boxStyle,
           multiline ? { minHeight: 84, paddingTop: 10, textAlignVertical: "top" } : { paddingVertical: 10 },
-          error ? { borderColor: colors.destructive } : null,
+          error ? { borderColor: S.red } : null,
           disabled ? { opacity: 0.5 } : null,
         ]}
       />
@@ -96,8 +98,8 @@ export function FormSection({ title, children }: { title: string; children: Reac
     <View style={{ marginBottom: 18 }}>
       <Text
         style={{
-          color: colors.foreground, fontSize: 11, fontFamily: fonts.heading.bold,
-          letterSpacing: 1, textTransform: "uppercase", marginBottom: 12,
+          color: S.ink, fontSize: 10, fontFamily: fonts.heading.semibold, letterSpacing: 1.2, textTransform: "uppercase",
+          paddingBottom: 8, marginBottom: 12, borderBottomWidth: 1, borderBottomColor: S.ink,
         }}
       >
         {title}
@@ -120,7 +122,7 @@ export function FormScaffold({
   const insets = useSafeAreaInsets();
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.background }}
+      style={{ flex: 1, backgroundColor: S.paper }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
@@ -132,26 +134,26 @@ export function FormScaffold({
       <View
         style={{
           flexDirection: "row", gap: 10, padding: 12, paddingBottom: insets.bottom + 12,
-          borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.background,
+          borderTopWidth: 1.5, borderTopColor: S.ink, backgroundColor: S.paper,
         }}
       >
         <Pressable
           onPress={submitting ? undefined : onCancel}
-          style={{ flex: 1, paddingVertical: 13, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: "center" }}
+          style={{ flex: 1, minHeight: 44, justifyContent: "center", borderWidth: 1, borderColor: S.ink, alignItems: "center" }}
         >
-          <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold }}>Cancel</Text>
+          <Text style={{ color: S.ink, fontSize: 11, letterSpacing: 1.1, textTransform: "uppercase", fontFamily: fonts.heading.semibold }}>Cancel</Text>
         </Pressable>
         <Pressable
           onPress={submitting || disabled ? undefined : onSubmit}
           style={{
-            flex: 1.5, paddingVertical: 13, borderRadius: 12, alignItems: "center",
-            backgroundColor: "#0891b2", opacity: submitting || disabled ? 0.6 : 1,
+            flex: 1.5, minHeight: 44, justifyContent: "center", alignItems: "center",
+            backgroundColor: S.ink, borderWidth: 1, borderColor: S.ink, opacity: submitting || disabled ? 0.5 : 1,
           }}
         >
           {submitting ? (
-            <ActivityIndicator color="#1a1a1a" size="small" />
+            <ActivityIndicator color={S.paper} size="small" />
           ) : (
-            <Text style={{ color: "#1a1a1a", fontSize: 13, fontFamily: fonts.heading.bold }}>{submitLabel}</Text>
+            <Text style={{ color: S.paper, fontSize: 11, letterSpacing: 1.1, textTransform: "uppercase", fontFamily: fonts.heading.semibold }}>{submitLabel}</Text>
           )}
         </Pressable>
       </View>
