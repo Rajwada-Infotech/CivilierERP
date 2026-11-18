@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Modal, Pressable, Text, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigation } from "@react-navigation/native";
 import { Coffee, LogIn, LogOut, MapPin, Play } from "lucide-react-native";
 import { api, type BreakType, type TodayState } from "@/api/employeeApi";
 import { captureEvidence, EvidenceError } from "@/services/evidence";
@@ -67,6 +68,8 @@ export default function HomeScreen() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, staleTime: 10 * 60_000 });
   const today = useQuery({ queryKey: ["today"], queryFn: api.today, refetchInterval: 60_000 });
   const types = useQuery({ queryKey: ["break-types"], queryFn: api.breakTypes, staleTime: 10 * 60_000 });
+  const face = useQuery({ queryKey: ["face"], queryFn: api.face, staleTime: 60_000 });
+  const nav = useNavigation<{ navigate: (name: string) => void }>();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picker, setPicker] = useState(false);
@@ -122,6 +125,14 @@ export default function HomeScreen() {
           </View>
         </View>
       </SheetFrame>
+
+      {face.data && face.data.required && !face.data.exempt && face.data.state !== "Active" && (
+        <Pressable onPress={() => nav.navigate("FaceRegistration")}>
+          <Notice tone={face.data.state === "Pending" ? "ink" : "red"}>
+            {face.data.state === "Pending" ? "Your face registration is waiting for HR approval. Punches need it approved." : "Register your face to punch In / Out — tap here."}
+          </Notice>
+        </Pressable>
+      )}
 
       <Panel title="Today's attendance" icon={<MapPin size={14} color={S.ink} />}>
         {today.isLoading ? (

@@ -63,7 +63,12 @@ export const getPortalPunchState = () => get<PunchState>(`${PORTAL}/attendance/t
 export const getPortalBreakTypes = () => get<BreakType[]>(`${PORTAL}/attendance/break-types`);
 export const portalBreakStart = (type: string, note: string) => send<PunchState>(`${PORTAL}/attendance/break-start`, "POST", { type, note });
 export const portalBreakStop = () => send<PunchState>(`${PORTAL}/attendance/break-stop`, "POST");
-export const portalPunch = (kind: "in" | "out", evidence: PunchEvidence) => send<PunchState>(`${PORTAL}/attendance/${kind}`, "POST", evidence);
+// A punch first gets a single-use challenge from the server, then sends it with the photo + location; the server checks
+// the work-location geofence and the face before recording the punch.
+export const portalPunch = async (kind: "in" | "out", evidence: PunchEvidence) => {
+  const { nonce } = await send<{ nonce: string }>(`${PORTAL}/attendance/challenge`, "POST", { kind });
+  return send<PunchState>(`${PORTAL}/attendance/${kind}`, "POST", { ...evidence, nonce });
+};
 export const getPortalLeaveBalances = (year: number) => get<{ Year: number; Balances: LeaveBalance[] }>(`${PORTAL}/leave/balances?year=${year}`);
 export const getPortalLeaves = () => get<LeaveApplication[]>(`${PORTAL}/leave`);
 export const applyPortalLeave = (body: { LeaveType: string; FromDate: string; ToDate: string; Reason: string }) =>

@@ -70,12 +70,21 @@ export interface Salary { CTCAmount: number | null; CTCFrequency: string | null;
 export interface Holiday { HolidayId: number; HolidayName: string; HolidayDate: string }
 export interface LoginRow { LoginHistoryId: number; LoginAt: string; Success: boolean; FailureReason: string | null; IpAddress: string | null; UserAgent: string | null; Portal: string | null }
 
+const challenge = (kind: "in" | "out") => call<{ nonce: string }>("/attendance/challenge", post({ kind }));
+
+export interface FaceSelf { required: boolean; exempt: boolean; configured: boolean; state: "None" | "Pending" | "Active" | "Rejected" | "Revoked";
+  activeSince: string | null; pendingSince: string | null; rejectReason: string | null }
+
 export const api = {
+  face: () => call<FaceSelf>("/face"),
+  faceEnroll: (photos: string[]) => call<{ message: string }>("/face/enroll", post({ photos, consent: true })),
   me: () => call<Me>("/me"),
   today: () => call<TodayState>("/attendance/today"),
   breakTypes: () => call<BreakType[]>("/attendance/break-types"),
-  punchIn: (e: Evidence) => call<TodayState>("/attendance/in", post(e)),
-  punchOut: (e: Evidence) => call<TodayState>("/attendance/out", post(e)),
+  // Each punch: a single-use challenge first, then photo + location + challenge. The server checks the work-location
+  // geofence and verifies the face against the one HR registered in Employee Master.
+  punchIn: async (e: Evidence) => call<TodayState>("/attendance/in", post({ ...e, nonce: (await challenge("in")).nonce })),
+  punchOut: async (e: Evidence) => call<TodayState>("/attendance/out", post({ ...e, nonce: (await challenge("out")).nonce })),
   breakStart: (type: string, note?: string) => call<TodayState>("/attendance/break-start", post({ type, note })),
   breakStop: () => call<TodayState>("/attendance/break-stop", post()),
   month: (month: string) => call<MonthAttendance>(`/attendance?month=${month}`),

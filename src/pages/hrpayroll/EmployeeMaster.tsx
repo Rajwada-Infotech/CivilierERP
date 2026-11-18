@@ -33,6 +33,7 @@ import { Wallet3 } from "iconsax-react";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { PortalLoginField } from "./PortalLoginField";
+import { FaceRegistrationField } from "./FaceRegistrationField";
 
 // Employment types offered on the form (stored as plain text, up to 30 characters).
 const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Part-time", "Contract", "Fixed-term", "Temporary", "Daily Wage", "Consultant", "Retainer", "Trainee", "Apprentice", "Intern"];
@@ -84,6 +85,7 @@ const mapRow = (r: EmployeeRow): RecordWithId => ({
   salaryStructureCode: r.SalaryStructureCode || "",
   isActive: r.IsActive,
   documentCount: r.DocumentCount || 0,
+  faceStatus: r.FaceStatus || "",
 });
 
 const toPayload = (form: Record<string, unknown>): EmployeePayload => ({
@@ -530,6 +532,9 @@ export default function EmployeeMaster() {
     { name: "sec-portal", label: "Portal Login", type: "section" },
     { name: "portalLogin", label: "Employee Portal login", type: "custom", fullWidth: true, render: (p) => <PortalLoginField employeeId={p.formData._id ? Number(p.formData._id) : null} /> },
 
+    { name: "sec-face", label: "Face Registration", type: "section" },
+    { name: "faceRegistration", label: "Face registration for attendance", type: "custom", fullWidth: true, render: (p) => <FaceRegistrationField employeeId={p.formData._id ? Number(p.formData._id) : null} name={String(p.formData.employeeName ?? "")} /> },
+
     { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
   ];
 
@@ -543,6 +548,7 @@ export default function EmployeeMaster() {
     { key: "workLocationNames", label: "Work Locations", hideOnMobile: true, sortable: false },
     { key: "employmentType", label: "Type", hideOnMobile: true },
     { key: "reportingManagerName", label: "Reporting To", hideOnMobile: true, sortable: false },
+    { key: "faceStatus", label: "Face", hideOnMobile: true },
     { key: "documents", label: "Documents", sortable: false },
     { key: "salaryBreakup", label: "Salary", sortable: false },
     { key: "isActive", label: "Status" },
@@ -552,6 +558,9 @@ export default function EmployeeMaster() {
   const chip = "inline-flex items-center px-1.5 py-0.5 border border-foreground/30 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground";
 
   const columnRenderers: Record<string, (value: unknown, row: RecordWithId) => React.ReactNode> = {
+    // Face registration: "Approve" stands out — a self-registration from the app is waiting for HR.
+    faceStatus: (v) => v === "Pending" ? <span className="text-xs font-semibold text-amber-600">Approve</span>
+      : v === "Active" ? <span className="text-xs text-emerald-600">Active</span> : <span className="text-xs text-muted-foreground">—</span>,
     employeeCode: (value) => (
       <span className={`${HR_NUM} text-[0.6875rem] font-semibold`}>{String(value || "—")}</span>
     ),

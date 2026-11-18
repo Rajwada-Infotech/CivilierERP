@@ -28,6 +28,7 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const attendanceSvc = require("../services/employeeAttendance");
+const faceSvc = require("../services/face/faceService");
 
 const LEAVE_TYPES = ["Casual", "Sick", "Earned", "Unpaid"];
 const LIMITED_TYPES = ["Casual", "Sick", "Earned"];
@@ -277,6 +278,7 @@ router.get("/attendance", async (req, res) => {
 // one record a day), but a portal punch must carry { photo, latitude, longitude, accuracy }, which are stored with it.
 function punchFail(res, err, where) {
   if (err instanceof attendanceSvc.AttendanceError) return res.status(err.status).json({ error: err.message });
+  if (err instanceof faceSvc.VerifyError) return res.status(err.status).json({ error: err.message, stage: err.stage });
   console.error(`[employee-portal] ${where}:`, err.message);
   return res.status(500).json({ error: err.message });
 }
@@ -284,8 +286,25 @@ function punchFail(res, err, where) {
 router.get("/attendance/today", async (req, res) => {
   try { res.json(await attendanceSvc.getMyState(getPool(), req.user)); } catch (e) { punchFail(res, e, "GET /attendance/today"); }
 });
+// Each punch first asks for a single-use challenge, then sends it with the photo + location; the server checks the
+// geofence and the face (1:1 against this employee's registered template) before the existing punch runs.
+router.post("/attendance/challenge", async (req, res) => {
+  try { res.json(await faceSvc.createChallenge(getPool(), req.employee.EmployeeId, String(req.body?.kind || ""))); } catch (e) { punchFail(res, e, "POST /attendance/challenge"); }
+});
+// Face self-registration: the employee sends 3 front-camera photos with consent; it waits for HR approval.
+router.get("/face", async (req, res) => {
+  try { res.json(await faceSvc.selfStatus(getPool(), req.employee.EmployeeId)); } catch (e) { punchFail(res, e, "GET /face"); }
+});
+router.post("/face/enroll", async (req, res) => {
+  try {
+    const out = await faceSvc.enroll(getPool(), req.employee.EmployeeId, req.body || {}, req.user?.userId || null, req.ip, "Self");
+    bumpCacheVersion("employee-master").catch(() => {});
+    res.json(out);
+  } catch (e) { punchFail(res, e, "POST /face/enroll"); }
+});
+const verifier = (req, kind) => (employee, ev) => faceSvc.verifyPunch(getPool(), employee, kind, req.body?.nonce, ev, req.ip);
 router.post("/attendance/in", async (req, res) => {
-  try { res.json(await attendanceSvc.clockIn(getPool(), req.user, { evidence: req.body, requireEvidence: true })); } catch (e) { punchFail(res, e, "POST /attendance/in"); }
+  try { res.json(await attendanceSvc.clockIn(getPool(), req.user, { evidence: req.body, requireEvidence: true, verify: verifier(req, "in") })); } catch (e) { punchFail(res, e, "POST /attendance/in"); }
 });
 router.get("/attendance/break-types", async (req, res) => {
   try { res.json(await attendanceSvc.getBreakTypes(getPool())); } catch (e) { punchFail(res, e, "GET /attendance/break-types"); }
@@ -297,7 +316,7 @@ router.post("/attendance/break-stop", async (req, res) => {
   try { res.json(await attendanceSvc.breakStop(getPool(), req.user)); } catch (e) { punchFail(res, e, "POST /attendance/break-stop"); }
 });
 router.post("/attendance/out", async (req, res) => {
-  try { res.json(await attendanceSvc.clockOut(getPool(), req.user, { evidence: req.body, requireEvidence: true })); } catch (e) { punchFail(res, e, "POST /attendance/out"); }
+  try { res.json(await attendanceSvc.clockOut(getPool(), req.user, { evidence: req.body, requireEvidence: true, verify: verifier(req, "out") })); } catch (e) { punchFail(res, e, "POST /attendance/out"); }
 });
 
 // ── Leave ────────────────────────────────────────────────────────────────────

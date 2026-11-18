@@ -3,7 +3,7 @@ import { Alert, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { CalendarDays, ChevronRight, History, LogOut, Palette } from "lucide-react-native";
+import { CalendarDays, ChevronRight, History, LogOut, Palette, ScanFace } from "lucide-react-native";
 import { api } from "@/api/employeeApi";
 import { useAuth } from "@/auth/AuthContext";
 import { Screen } from "@/components/Screen";
@@ -54,6 +54,7 @@ export default function ProfileScreen() {
       </Panel>
 
       <Panel title="More">
+        <Link icon={<ScanFace size={16} color={S.ink} />} label="Face registration" onPress={() => nav.navigate("FaceRegistration")} />
         <Link icon={<CalendarDays size={16} color={S.ink} />} label="Holiday calendar" onPress={() => nav.navigate("Holidays")} />
         <Link icon={<History size={16} color={S.ink} />} label="My login history" onPress={() => nav.navigate("LoginHistory")} />
       </Panel>

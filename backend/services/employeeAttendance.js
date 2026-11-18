@@ -341,7 +341,18 @@ const isUnique = (e) => /UQ_EmployeeAttendance_EmployeeDate|UX_EmployeeAttendanc
 const isCheck = (e) => /CK_EmployeeAttendance_OutAfterIn|CK_EmployeeAttendanceBreak_EndAfterStart/i.test(e.message || "");
 const TOO_FAST = "That was too quick after the previous punch — wait a few seconds and try again.";
 
-async function clockIn(pool, user, { projectId, evidence, requireEvidence } = {}) {
+/** Where / how a punch passed the face + geofence checks (migration 692 columns; skipped if not there yet). */
+async function saveVerification(pool, attendanceId, side, v) {
+  const has = (await pool.request().query("SELECT COL_LENGTH('dbo.EmployeeAttendance', 'InLocationId') AS c")).recordset[0].c;
+  if (!has) return;
+  await pool.request().input("Id", sql.Int, attendanceId).input("L", sql.Int, v.locationId ?? null).input("D", sql.Int, v.distanceM ?? null)
+    .input("F", sql.Decimal(6, 4), v.faceScore ?? null).input("R", sql.NVarChar(300), v.review ?? null).query(`
+    UPDATE dbo.EmployeeAttendance SET ${side}LocationId = @L, ${side}DistanceM = @D, ${side}FaceScore = @F,
+      NeedsReview = CASE WHEN @R IS NULL THEN NeedsReview ELSE 1 END, ReviewReason = ISNULL(@R, ReviewReason)
+    WHERE AttendanceId = @Id`);
+}
+
+async function clockIn(pool, user, { projectId, evidence, requireEvidence, verify } = {}) {
   const ev = evidence || requireEvidence ? cleanEvidence(evidence) : null;
   const employee = await resolveEmployee(pool, user);
   const state = await getMyState(pool, user);
@@ -356,6 +367,8 @@ async function clockIn(pool, user, { projectId, evidence, requireEvidence } = {}
     if (!p.recordset[0]) throw new AttendanceError("That project doesn't exist.", 400);
     projId = Number(projectId);
   }
+  // Face + geofence checks (Employee Portal): refuse the punch, or note where / how well it passed.
+  const v = verify ? await verify(employee, ev) : null;
   try {
     const r = await pool.request().input("E", sql.Int, employee.EmployeeId).input("P", sql.Int, projId)
       .input("Photo", sql.NVarChar(sql.MAX), ev?.photo ?? null).input("Lat", sql.Decimal(9, 6), ev?.lat ?? null)
@@ -365,6 +378,7 @@ async function clockIn(pool, user, { projectId, evidence, requireEvidence } = {}
       OUTPUT INSERTED.AttendanceId
       VALUES (@E, CAST(DATEADD(MINUTE, ${IST_OFFSET_MIN}, @now) AS DATE), @now, @P, @Photo, @Lat, @Lng, @Acc)
     `);
+    if (v) await saveVerification(pool, r.recordset[0].AttendanceId, "In", v);
     await audit(pool, { attendanceId: r.recordset[0].AttendanceId, employeeId: employee.EmployeeId, action: "IN", by: user.email });
     await syncById(pool, r.recordset[0].AttendanceId);
   } catch (e) {
@@ -374,13 +388,14 @@ async function clockIn(pool, user, { projectId, evidence, requireEvidence } = {}
   return getMyState(pool, user);
 }
 
-async function clockOut(pool, user, { evidence, requireEvidence } = {}) {
+async function clockOut(pool, user, { evidence, requireEvidence, verify } = {}) {
   const ev = evidence || requireEvidence ? cleanEvidence(evidence) : null;
   const employee = await resolveEmployee(pool, user);
   const state = await getMyState(pool, user);
   if (state.state === "NOT_STARTED") throw new AttendanceError("Record In Time first — Out Time can only follow it.");
   if (state.state === "COMPLETED") throw new AttendanceError("Out Time is already recorded for today.");
   if (state.state === "ON_BREAK") throw new AttendanceError("Stop your current break before recording Out Time.");
+  const v = verify ? await verify(employee, ev) : null;
   try {
     const r = await pool.request().input("Id", sql.Int, state.current.attendanceId)
       .input("Photo", sql.NVarChar(sql.MAX), ev?.photo ?? null).input("Lat", sql.Decimal(9, 6), ev?.lat ?? null)
@@ -395,6 +410,7 @@ async function clockOut(pool, user, { evidence, requireEvidence } = {}) {
     if (isCheck(e)) throw new AttendanceError(TOO_FAST);
     throw e;
   }
+  if (v) await saveVerification(pool, state.current.attendanceId, "Out", v);
   await audit(pool, { attendanceId: state.current.attendanceId, employeeId: employee.EmployeeId, action: "OUT", by: user.email });
   await syncById(pool, state.current.attendanceId);
   return getMyState(pool, user);
