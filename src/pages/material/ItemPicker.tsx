@@ -6,6 +6,8 @@ export interface PickableItem {
   id: string;
   name: string;
   itemType?: string;
+  // What the search matches when the label carries extra text (stock, group). Defaults to the label.
+  searchText?: string;
 }
 
 const TAB_LABELS: Record<"Goods" | "Service" | "FixedAsset", string> = {
@@ -128,9 +130,12 @@ export function ItemPicker({
 
   const selected = items.find((i) => i.id === value);
 
-  const filtered = byType[tab].filter((i) =>
-    !search || i.name.toLowerCase().includes(search.toLowerCase()),
-  );
+  // Every typed word must appear in the item's own text, in any order.
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = byType[tab].filter((i) => {
+    const hay = (i.searchText ?? i.name).toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
 
   return (
     <div className={`relative ${className}`}>
