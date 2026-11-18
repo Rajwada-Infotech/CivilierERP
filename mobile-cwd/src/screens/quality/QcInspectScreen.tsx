@@ -2,11 +2,12 @@
 // a photo, add remarks, and submit. The decision isn't picked by hand — it follows the ratings: any Poor sends
 // the activity back for rework as a new attempt (remarks required), otherwise it is approved.
 import { useState } from "react";
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
-import { AlertTriangle, Camera, CheckCircle2, MapPin, RotateCcw } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { AlertTriangle, Camera, CheckCircle2, RotateCcw } from "lucide-react-native";
+import { colors, sheet as S } from "@/theme/colors";
+import { Body, Detail, InfoGrid, Input, Label, LinkLabel, Notice, Press, SheetFrame, Skel, TitleText } from "@/components/sheet/Sheet";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { StatusPill, displayStatus } from "@/components/StatusPill";
@@ -15,19 +16,15 @@ import {
   getActivityAssignment, getActivityPhotos, getQcHistory, getRungDetail, submitQcDecision, uploadActivityPhoto, type QcRating,
 } from "@/api/cwdApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { ACCENT, Btn, ErrorText, Loading, card, takePhoto } from "../activities/tabs/ui";
+import { Btn, takePhoto } from "../activities/tabs/ui";
 
 const RATINGS: { key: QcRating; label: string; color: string }[] = [
-  { key: "POOR", label: "Poor", color: "#d946ef" },
-  { key: "GOOD", label: "Good", color: "#10b981" },
-  { key: "EXCELLENT", label: "Excellent", color: "#14b8a6" },
+  { key: "POOR", label: "Poor", color: S.red },
+  { key: "GOOD", label: "Good", color: S.blue },
+  { key: "EXCELLENT", label: "Excellent", color: S.blue },
 ];
 type Verdict = { rating: QcRating | null; note: string };
 const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
-
-function Label({ children }: { children: string }) {
-  return <Text style={{ fontSize: 10, fontFamily: fonts.heading.bold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 8 }}>{children}</Text>;
-}
 
 export default function QcInspectScreen() {
   const { rungId } = useRoute<RouteProp<MainStackParamList, "QcInspect">>().params;
@@ -84,120 +81,121 @@ export default function QcInspectScreen() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (rowQ.isLoading || detailQ.isLoading) return <View style={{ flex: 1, backgroundColor: colors.background }}><Loading /></View>;
-  if (detailQ.error || !a) return <View style={{ flex: 1, backgroundColor: colors.background, padding: 24 }}><ErrorText error={detailQ.error || new Error("This activity has no allocation yet.")} /></View>;
+  if (rowQ.isLoading || detailQ.isLoading) return <View style={{ flex: 1, backgroundColor: colors.background }}><SheetFrame still><View style={{ padding: 16 }}><Skel h={18} w="40%" /><Skel h={30} /><Skel h={160} /></View></SheetFrame></View>;
+  if (detailQ.error || !a) return <View style={{ flex: 1, backgroundColor: colors.background, padding: 16 }}><Notice>{(detailQ.error as Error)?.message || "This activity has no allocation yet."}</Notice></View>;
 
   const shown = row ? displayStatus(row.status, row.resumedAt) : "";
   const previous = (histQ.data ?? []).slice(0, 3);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 96, gap: 18 }} keyboardShouldPersistTaps="handled">
-      <View style={card}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
-          <Text style={{ flex: 1, fontSize: 15, fontFamily: fonts.heading.bold, color: colors.foreground }}>{row?.sequenceNo != null ? `${row.sequenceNo}. ` : ""}{row?.activityName ?? "Activity"}</Text>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }} keyboardShouldPersistTaps="handled">
+      <SheetFrame still>
+        {/* Title block: what is being inspected, where, by whom, when. */}
+        <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 16, gap: 8 }}>
+          <Label>{[row?.projectName, "Quality Check"].filter(Boolean).join(" · ")}</Label>
+          <TitleText size={24}>{`${row?.sequenceNo != null ? `${row.sequenceNo}. ` : ""}${row?.activityName ?? "Activity"}`}</TitleText>
+          {!!row?.scopePath && <Body size={12.5} color={S.ink2}>{row.scopePath}</Body>}
           {!!shown && <StatusPill status={shown} size="md" />}
-        </View>
-        {!!row?.scopePath && (
-          <View style={{ flexDirection: "row", gap: 5, marginTop: 5, alignItems: "flex-start" }}>
-            <MapPin size={11} color={colors.mutedForeground} style={{ marginTop: 2 }} />
-            <Text style={{ flex: 1, fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{[row.projectName, row.scopePath].filter(Boolean).join(" > ")}</Text>
+          <View style={{ marginTop: 6 }}>
+            <InfoGrid items={[{ label: "Engineer", value: row?.engineerNames || "—", wide: true }, { label: "Start", value: fmtDate(a.startDate) }, { label: "End", value: fmtDate(a.endDate) }]} />
           </View>
+          <View style={{ marginTop: 8 }}>
+            <LinkLabel onPress={() => navigation.navigate("ActivityDetail", { rungId })}>Open the full activity</LinkLabel>
+          </View>
+        </View>
+
+        {previous.length > 0 && (
+          <Detail tag="!" title="Previous QC" note={`${previous.length} shown`}>
+            {previous.map((h) => (
+              <View key={h.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
+                <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: S.ink }}>
+                  <Text style={{ fontFamily: fonts.heading.semibold, color: h.decision === "APPROVED" ? S.blue : S.red }}>{h.decision === "APPROVED" ? "Approved" : "Rework"}</Text>
+                  {` · ${fmtDate(h.qcAt)}${h.qcBy ? ` · ${h.qcBy}` : ""}${h.remarks ? ` — ${h.remarks}` : ""}`}
+                </Text>
+              </View>
+            ))}
+          </Detail>
         )}
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-          {[["Engineer", row?.engineerNames || "—"], ["Start", fmtDate(a.startDate)], ["End", fmtDate(a.endDate)]].map(([k, v]) => (
-            <View key={k} style={{ flexGrow: 1, minWidth: "30%", paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: colors.muted }}>
-              <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 1 }}>{k}</Text>
-              <Text numberOfLines={1} style={{ fontSize: 12, fontFamily: fonts.body.medium, color: colors.foreground, marginTop: 1 }}>{v}</Text>
+
+        <Detail tag="A" title="Checklist sign-off" note={`${checkpoints.length} checkpoint${checkpoints.length === 1 ? "" : "s"}`}>
+          {!hasCheckpoints ? (
+            <Body size={13} color={S.graphite}>This activity has no checkpoints, so it can be approved directly.</Body>
+          ) : (
+            <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+              {checkpoints.map((c) => {
+                const id = c.id!;
+                const v = verdicts[id];
+                return (
+                  <View key={id} style={{ paddingVertical: 12, gap: 9, borderBottomWidth: 1, borderBottomColor: S.ruleSoft }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Text style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.body.semibold, color: S.ink }}>{c.fieldName}</Text>
+                      {c.isChecked && <Label color={S.blue}>Engineer ticked</Label>}
+                    </View>
+                    {/* Poor / Good / Excellent as one segmented key: the chosen rating filled (Poor in red). */}
+                    <View style={{ flexDirection: "row", borderWidth: 1, borderColor: S.ink }}>
+                      {RATINGS.map((r, i) => {
+                        const on = v?.rating === r.key;
+                        const fill = r.key === "POOR" ? S.red : S.ink;
+                        return (
+                          <Press
+                            key={r.key}
+                            disabled={!canEdit}
+                            onPress={() => setVerdict(id, { rating: r.key })}
+                            style={(pressed) => ({ flex: 1, alignItems: "center", paddingVertical: 10, borderLeftWidth: i ? 1 : 0, borderLeftColor: S.ink, backgroundColor: on ? fill : pressed ? S.blueWash : "transparent" })}
+                          >
+                            <Text style={{ fontSize: 10.5, letterSpacing: 1.1, textTransform: "uppercase", fontFamily: fonts.heading.semibold, color: on ? (r.key === "POOR" ? "#ffffff" : S.paper) : S.graphite }}>{r.label}</Text>
+                          </Press>
+                        );
+                      })}
+                    </View>
+                    {v?.rating === "POOR" && (
+                      <Input value={v.note} onChangeText={(t) => setVerdict(id, { note: t })} editable={canEdit} placeholder="What's wrong? (optional note)" />
+                    )}
+                  </View>
+                );
+              })}
             </View>
-          ))}
-        </View>
-        <TouchableOpacity onPress={() => navigation.navigate("ActivityDetail", { rungId })} style={{ marginTop: 10 }}>
-          <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: ACCENT }}>Open the full activity (photos, daily log, attendance) →</Text>
-        </TouchableOpacity>
-      </View>
+          )}
+        </Detail>
 
-      {previous.length > 0 && (
-        <View style={{ borderRadius: 14, borderWidth: 1, borderColor: "#f59e0b55", backgroundColor: "#f59e0b0d", padding: 12, gap: 5 }}>
-          <Text style={{ fontSize: 10, fontFamily: fonts.heading.bold, color: "#f59e0b", textTransform: "uppercase", letterSpacing: 1.2 }}>Previous QC</Text>
-          {previous.map((h) => (
-            <Text key={h.id} style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.foreground }}>
-              <Text style={{ fontFamily: fonts.heading.semibold }}>{h.decision === "APPROVED" ? "Approved" : "Rework"}</Text>
-              {` · ${fmtDate(h.qcAt)}${h.qcBy ? ` · ${h.qcBy}` : ""}${h.remarks ? ` — ${h.remarks}` : ""}`}
-            </Text>
-          ))}
-        </View>
-      )}
-
-      <View>
-        <Label>{`Checklist sign-off (${checkpoints.length})`}</Label>
-        {!hasCheckpoints ? (
-          <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>This activity has no checkpoints, so it can be approved directly.</Text>
-        ) : (
-          <View style={{ ...card, padding: 0, overflow: "hidden" }}>
-            {checkpoints.map((c, i) => {
-              const id = c.id!;
-              const v = verdicts[id];
-              return (
-                <View key={id} style={{ padding: 12, gap: 8, borderTopWidth: i ? 1 : 0, borderTopColor: colors.border }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.body.medium, color: colors.foreground }}>{c.fieldName}</Text>
-                    {c.isChecked && <Text style={{ fontSize: 10, color: "#10b981", fontFamily: fonts.body.medium }}>Engineer ticked</Text>}
-                  </View>
-                  <View style={{ flexDirection: "row", gap: 6 }}>
-                    {RATINGS.map((r) => {
-                      const on = v?.rating === r.key;
-                      return (
-                        <TouchableOpacity key={r.key} disabled={!canEdit} onPress={() => setVerdict(id, { rating: r.key })} style={{ flex: 1, alignItems: "center", paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: on ? r.color : colors.border, backgroundColor: on ? `${r.color}25` : "transparent" }}>
-                          <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: on ? r.color : colors.mutedForeground }}>{r.label}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                  {v?.rating === "POOR" && (
-                    <TextInput value={v.note} onChangeText={(t) => setVerdict(id, { note: t })} editable={canEdit} placeholder="What's wrong? (optional note)" placeholderTextColor={`${colors.mutedForeground}99`} style={{ color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 12.5, borderWidth: 1, borderColor: "#d946ef55", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 }} />
-                  )}
-                </View>
-              );
-            })}
+        <Detail tag="B" title="Photo & remarks" note={`${photoCount} photo${photoCount === 1 ? "" : "s"}`}>
+          <View style={{ gap: 12 }}>
+            {canEdit && <Btn tone="outline" label="Attach photo" icon={<Camera size={14} color={S.ink} />} busy={photo.isPending} onPress={() => photo.mutate()} />}
+            <View style={{ gap: 6 }}>
+              <Label>Remarks</Label>
+              <Input value={remarks} onChangeText={setRemarks} editable={canEdit} multiline maxLength={1000} placeholder="Required when sending back for rework" style={{ minHeight: 76, paddingTop: 10, textAlignVertical: "top" }} />
+            </View>
           </View>
-        )}
-      </View>
+        </Detail>
 
-      {canEdit && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <View style={{ flex: 1 }}><Btn tone="outline" label="Attach photo" icon={<Camera size={14} color={ACCENT} />} busy={photo.isPending} onPress={() => photo.mutate()} /></View>
-          <Text style={{ flex: 1, fontSize: 11.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>{photoCount} photo{photoCount === 1 ? "" : "s"} on this activity</Text>
-        </View>
-      )}
-
-      <View>
-        <Label>Remarks</Label>
-        <TextInput value={remarks} onChangeText={setRemarks} editable={canEdit} multiline maxLength={1000} placeholder="Required when sending back for rework" placeholderTextColor={`${colors.mutedForeground}99`} style={{ minHeight: 70, textAlignVertical: "top", color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 12, padding: 12 }} />
-      </View>
-
-      {hasCheckpoints && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 12, padding: 12, backgroundColor: anyPoor ? "#d946ef1a" : "#10b9811a" }}>
-          {anyPoor ? <AlertTriangle size={14} color="#d946ef" /> : <CheckCircle2 size={14} color="#10b981" />}
-          <Text style={{ flex: 1, fontSize: 12, fontFamily: fonts.body.medium, color: anyPoor ? "#d946ef" : "#10b981" }}>
-            {anyPoor ? "One or more checkpoints rated Poor — this will be sent back for Rework." : allRated ? "Every checkpoint rated Good or better — ready to Approve." : "Rate every checkpoint to continue."}
-          </Text>
-        </View>
-      )}
-
-      {canEdit ? (
-        <Btn
-          label={decision === "REWORK" ? "Send for rework" : "Approve"}
-          icon={decision === "REWORK" ? <RotateCcw size={14} color="#04181d" /> : <CheckCircle2 size={14} color="#04181d" />}
-          disabled={blocked}
-          busy={decide.isPending}
-          onPress={() => decide.mutate()}
-        />
-      ) : (
-        <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, textAlign: "center" }}>
-          {row?.status === "COMPLETED" ? "You can view this inspection but not submit it." : "This activity is no longer waiting for Quality Check."}
-        </Text>
-      )}
-      {!!remarksMissing && canEdit && <Text style={{ fontSize: 11, color: colors.mutedForeground, textAlign: "center", fontFamily: fonts.body.regular }}>Add a remark explaining the rework.</Text>}
+        <Detail tag="C" title="Decision">
+          <View style={{ gap: 12 }}>
+            {hasCheckpoints && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderWidth: 1, borderColor: anyPoor ? S.red : S.blue, backgroundColor: anyPoor ? S.redWash : S.blueWash }}>
+                {anyPoor ? <AlertTriangle size={14} color={S.red} /> : <CheckCircle2 size={14} color={S.blue} />}
+                <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.body.medium, color: anyPoor ? S.red : S.ink }}>
+                  {anyPoor ? "One or more checkpoints rated Poor — this will be sent back for Rework." : allRated ? "Every checkpoint rated Good or better — ready to Approve." : "Rate every checkpoint to continue."}
+                </Text>
+              </View>
+            )}
+            {canEdit ? (
+              <Btn
+                tone={decision === "REWORK" ? "danger" : "accent"}
+                label={decision === "REWORK" ? "Send for rework" : "Approve"}
+                icon={decision === "REWORK" ? <RotateCcw size={14} color="#ffffff" /> : <CheckCircle2 size={14} color={S.paper} />}
+                disabled={blocked}
+                busy={decide.isPending}
+                onPress={() => decide.mutate()}
+              />
+            ) : (
+              <Body size={13} color={S.graphite} style={{ textAlign: "center" }}>
+                {row?.status === "COMPLETED" ? "You can view this inspection but not submit it." : "This activity is no longer waiting for Quality Check."}
+              </Body>
+            )}
+            {!!remarksMissing && canEdit && <Body size={12} color={S.red} style={{ textAlign: "center" }}>Add a remark explaining the rework.</Body>}
+          </View>
+        </Detail>
+      </SheetFrame>
     </ScrollView>
   );
 }

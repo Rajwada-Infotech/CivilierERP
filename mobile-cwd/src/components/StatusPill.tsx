@@ -1,19 +1,34 @@
-// Shared status badge + colour map for every Civil Work DPR activity state — the same colours as the
-// web app's ASSIGNMENT_STATUS_META, so a status looks the same on both.
+// Status of a Civil Work DPR activity, drawn as the sheet draws status (web: SheetMark): a small square mark and the word
+// in capitals. Settled work is solid blue, work under way half-filled, waiting hatched, stopped red, not started empty.
+// STATUS_COLOR gives each status its sheet tone, for the bars and dots that colour by status.
 import { View, Text } from "react-native";
 import { fonts } from "@/theme/fonts";
+import { sheet as S } from "@/theme/colors";
+import { MarkSquare, type MarkTone } from "@/components/sheet/Sheet";
 import type { AssignmentStatus } from "@/api/cwdApi";
 
+export const STATUS_TONE: Record<string, MarkTone> = {
+  PENDING: "draft",
+  ALLOCATED: "waiting",
+  IN_PROGRESS: "moving",
+  RESUMED: "moving",
+  HOLD: "waiting",
+  CANCELLED: "stopped",
+  APPROVED: "done",
+  REWORK: "stopped",
+  COMPLETED: "done",
+};
+
 export const STATUS_COLOR: Record<string, string> = {
-  PENDING: "#64748b",
-  ALLOCATED: "#6366f1",
-  IN_PROGRESS: "#3b82f6",
-  RESUMED: "#14b8a6",
-  HOLD: "#f59e0b",
-  CANCELLED: "#ef4444",
-  APPROVED: "#14b8a6",
-  REWORK: "#d946ef",
-  COMPLETED: "#10b981",
+  PENDING: S.line40,
+  ALLOCATED: S.graphite,
+  IN_PROGRESS: S.ink,
+  RESUMED: S.ink,
+  HOLD: S.graphite,
+  CANCELLED: S.red,
+  APPROVED: S.blue,
+  REWORK: S.red,
+  COMPLETED: S.blue,
 };
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -33,27 +48,16 @@ export function displayStatus(status: AssignmentStatus, resumedAt?: string | nul
   return status === "IN_PROGRESS" && resumedAt ? "RESUMED" : status;
 }
 
-// `status` is an activity status key; `label` + `tone` are for the shared detail/list components, which
-// pass a ready-made label and colour instead.
-export function StatusPill({
-  status,
-  label: labelProp,
-  tone,
-  size = "sm",
-}: {
-  status?: string;
-  label?: string;
-  tone?: string;
-  size?: "sm" | "md";
-}) {
-  const c = tone || STATUS_COLOR[status ?? ""] || "#818898";
+// `status` is an activity status key; `label` + `tone` are for the shared detail/list components, which pass a ready-made
+// label and colour instead (drawn as a filled square in that colour).
+export function StatusPill({ status, label: labelProp, tone, size = "sm" }: { status?: string; label?: string; tone?: string; size?: "sm" | "md" }) {
   const label = labelProp ?? STATUS_LABEL[status ?? ""] ?? status ?? "";
-  const pad = size === "md" ? { paddingHorizontal: 9, paddingVertical: 3 } : { paddingHorizontal: 6, paddingVertical: 1.5 };
+  const mark = STATUS_TONE[status ?? ""];
+  const ink = tone ?? (mark === "stopped" ? S.red : mark === "draft" ? S.graphite : S.ink);
   return (
-    <View style={{ backgroundColor: `${c}1f`, borderRadius: 999, ...pad }}>
-      <Text style={{ fontSize: size === "md" ? 10.5 : 9, fontFamily: fonts.heading.bold, color: c, textTransform: "uppercase", letterSpacing: 0.4 }}>
-        {label}
-      </Text>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      {tone || !mark ? <View style={{ width: 9, height: 9, borderWidth: 1, borderColor: ink, backgroundColor: tone ?? "transparent" }} /> : <MarkSquare tone={mark} />}
+      <Text style={{ fontFamily: fonts.heading.semibold, fontSize: size === "md" ? 10 : 9, letterSpacing: 1, textTransform: "uppercase", color: ink }}>{label}</Text>
     </View>
   );
 }

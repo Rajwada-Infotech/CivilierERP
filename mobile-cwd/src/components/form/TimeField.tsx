@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Clock } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { FieldError, FieldLabel } from "./Form";
 
@@ -55,15 +55,15 @@ export function TimeField({
         onPress={disabled ? undefined : () => setOpen(true)}
         style={{
           flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-          borderWidth: 1, borderColor: error ? colors.destructive : colors.border,
-          backgroundColor: `${colors.card}80`, borderRadius: 12, paddingHorizontal: 12,
+          borderWidth: 1, borderColor: error ? S.red : S.rule,
+          backgroundColor: S.paper, borderRadius: 0, paddingHorizontal: 12,
           minHeight: 44, opacity: disabled ? 0.5 : 1,
         }}
       >
-        <Text style={{ color: value ? colors.foreground : `${colors.mutedForeground}99`, fontSize: 13.5, fontFamily: fonts.body.regular }}>
+        <Text style={{ color: value ? S.ink : S.faint, fontSize: 13.5, fontFamily: fonts.body.regular }}>
           {value ? toDisplay(value) : "Select time"}
         </Text>
-        <Clock size={15} color={colors.mutedForeground} />
+        <Clock size={15} color={S.graphite} />
       </Pressable>
       <FieldError error={error} />
       {open && (

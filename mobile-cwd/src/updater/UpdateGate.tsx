@@ -15,6 +15,8 @@ import * as Application from "expo-application";
 import * as FileSystem from "expo-file-system/legacy";
 import * as IntentLauncher from "expo-intent-launcher";
 import { apiUrl } from "@/utils/apiBase";
+import { sheet as S } from "@/theme/colors";
+import { fonts } from "@/theme/fonts";
 
 // In-app updater. On launch and whenever the app returns to the foreground it
 // asks the server for the newest published build of THIS app
@@ -152,7 +154,7 @@ export function UpdateGate({ appKey }: { appKey: string }) {
           )}
           {phase === "installing" && (
             <View style={s.row}>
-              <ActivityIndicator color="#a78bfa" />
+              <ActivityIndicator color={S.ink} />
               <Text style={s.progressText}>Opening the installer…</Text>
             </View>
           )}
@@ -180,25 +182,26 @@ export function UpdateGate({ appKey }: { appKey: string }) {
   );
 }
 
+// The update dialog on the drawing sheet: paper under a 1.5 ink rule, a Sora title, square ink keys.
 const s = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", alignItems: "center", justifyContent: "center", padding: 24 },
-  card: { width: "100%", maxWidth: 420, borderRadius: 20, padding: 22, backgroundColor: "#15112b", borderWidth: 1, borderColor: "#2a2352" },
-  title: { color: "#fff", fontSize: 19, fontWeight: "700" },
-  sub: { color: "#a1a1c2", fontSize: 13, marginTop: 4 },
-  notes: { maxHeight: 160, marginTop: 14, padding: 12, borderRadius: 12, backgroundColor: "#1d1840" },
-  notesText: { color: "#d4d4ee", fontSize: 13, lineHeight: 19 },
-  warn: { color: "#fbbf24", fontSize: 12, marginTop: 12 },
+  card: { width: "100%", maxWidth: 420, padding: 20, backgroundColor: S.paper, borderWidth: 1.5, borderColor: S.ink },
+  title: { color: S.ink, fontSize: 20, fontFamily: fonts.heading.bold, letterSpacing: -0.5 },
+  sub: { color: S.graphite, fontSize: 13, fontFamily: fonts.body.regular, marginTop: 4 },
+  notes: { maxHeight: 160, marginTop: 14, padding: 12, borderWidth: 1, borderColor: S.rule },
+  notesText: { color: S.ink2, fontSize: 13, fontFamily: fonts.body.regular, lineHeight: 19 },
+  warn: { color: S.red, fontSize: 12, fontFamily: fonts.body.medium, marginTop: 12 },
   progressWrap: { marginTop: 16 },
-  progressTrack: { height: 8, borderRadius: 4, backgroundColor: "#2a2352", overflow: "hidden" },
-  progressFill: { height: 8, backgroundColor: "#7c3aed" },
-  progressText: { color: "#a1a1c2", fontSize: 12, marginTop: 6 },
+  progressTrack: { height: 10, borderWidth: 1, borderColor: S.ink, backgroundColor: S.paper, overflow: "hidden" },
+  progressFill: { height: "100%", backgroundColor: S.blue },
+  progressText: { color: S.graphite, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 6 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 16 },
-  error: { color: "#f87171", fontSize: 12, marginTop: 12 },
+  error: { color: S.red, fontSize: 12, fontFamily: fonts.body.medium, marginTop: 12 },
   buttons: { flexDirection: "row", gap: 10, marginTop: 18 },
-  btn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: "center" },
-  btnPrimary: { backgroundColor: "#7c3aed" },
-  btnPrimaryText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  btnGhost: { borderWidth: 1, borderColor: "#3b3470" },
-  btnGhostText: { color: "#c4c4e6", fontWeight: "600", fontSize: 14 },
-  link: { color: "#a78bfa", fontSize: 12, textAlign: "center", textDecorationLine: "underline" },
+  btn: { flex: 1, minHeight: 44, justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: S.ink },
+  btnPrimary: { backgroundColor: S.ink },
+  btnPrimaryText: { color: S.paper, fontFamily: fonts.heading.semibold, fontSize: 11, letterSpacing: 1.1, textTransform: "uppercase" },
+  btnGhost: { borderWidth: 1, borderColor: S.ink },
+  btnGhostText: { color: S.ink, fontFamily: fonts.heading.semibold, fontSize: 11, letterSpacing: 1.1, textTransform: "uppercase" },
+  link: { color: S.ink, fontSize: 12, fontFamily: fonts.body.regular, textAlign: "center", textDecorationLine: "underline" },
 });

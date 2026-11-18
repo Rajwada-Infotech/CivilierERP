@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { Alert, Image, Modal, Text, TouchableOpacity, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Trash2, X } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
+import { useCanDeleteDprWork } from "@/hooks/usePageRights";
 import {
   CARRIED_FORWARD_NOTE, carryForwardPhotos, deleteActivityPhoto, getActivityPhoto, getActivityPhotos, uploadActivityPhoto,
   type ActivityPhotoMeta, type PhotoPhase,
@@ -14,8 +15,8 @@ import {
 import { Btn, Empty, ErrorText, Loading, takePhoto } from "./ui";
 
 const TAGS: { key: PhotoPhase; label: string; color: string }[] = [
-  { key: "before", label: "Before", color: "#f59e0b" },
-  { key: "after", label: "After", color: "#22c55e" },
+  { key: "before", label: "Before", color: S.ink },
+  { key: "after", label: "After", color: S.blue },
 ];
 
 function useDataUri(rungId: number, photoId: number, enabled = true) {
@@ -34,7 +35,7 @@ function useDataUri(rungId: number, photoId: number, enabled = true) {
 export function PhotoThumb({ rungId, photo, onOpen }: { rungId: number; photo: ActivityPhotoMeta; onOpen: () => void }) {
   const q = useDataUri(rungId, photo.id);
   return (
-    <TouchableOpacity activeOpacity={0.8} onPress={onOpen} style={{ width: 92, height: 92, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.muted }}>
+    <TouchableOpacity activeOpacity={0.8} onPress={onOpen} style={{ width: 92, height: 92, borderRadius: 0, overflow: "hidden", borderWidth: 1, borderColor: S.rule, backgroundColor: S.line15 }}>
       {q.data ? <Image source={{ uri: q.data }} style={{ width: 92, height: 92 }} /> : null}
       {photo.note === CARRIED_FORWARD_NOTE && (
         <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.6)", paddingVertical: 2 }}>
@@ -60,11 +61,11 @@ export function PhotoViewer({ rungId, photo, onClose, onDelete }: { rungId: numb
               {photo.phase === "before" ? "Before" : "After"} · {new Date(photo.capturedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
               {photo.capturedBy ? ` · ${photo.capturedBy}` : ""}
             </Text>
-            {!!photo.note && photo.note !== CARRIED_FORWARD_NOTE && <Text style={{ color: "#cbd5e1", fontSize: 11.5, fontFamily: fonts.body.regular }}>{photo.note}</Text>}
+            {!!photo.note && photo.note !== CARRIED_FORWARD_NOTE && <Text style={{ color: S.graphite, fontSize: 11.5, fontFamily: fonts.body.regular }}>{photo.note}</Text>}
             {onDelete && (
               <TouchableOpacity onPress={() => onDelete(photo)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Trash2 size={14} color="#f87171" />
-                <Text style={{ color: "#f87171", fontSize: 12, fontFamily: fonts.heading.semibold }}>Delete photo</Text>
+                <Trash2 size={14} color={S.red} />
+                <Text style={{ color: S.red, fontSize: 12, fontFamily: fonts.heading.semibold }}>Delete photo</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -78,6 +79,7 @@ export function PhotosTab({ rungId, canAdd }: { rungId: number; canAdd: boolean 
   const qc = useQueryClient();
   const [tag, setTag] = useState<PhotoPhase>("after");
   const [open, setOpen] = useState<ActivityPhotoMeta | null>(null);
+  const canDelete = useCanDeleteDprWork();
   const q = useQuery({ queryKey: ["cwd-photos", rungId], queryFn: () => getActivityPhotos(rungId) });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["cwd-photos", rungId] });
@@ -120,13 +122,13 @@ export function PhotosTab({ rungId, canAdd }: { rungId: number; canAdd: boolean 
             {TAGS.map((t) => {
               const on = tag === t.key;
               return (
-                <TouchableOpacity key={t.key} onPress={() => setTag(t.key)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: on ? t.color : colors.border, backgroundColor: on ? `${t.color}22` : "transparent" }}>
-                  <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: on ? t.color : colors.mutedForeground }}>{t.label}</Text>
+                <TouchableOpacity key={t.key} onPress={() => setTag(t.key)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 0, borderWidth: 1, borderColor: on ? t.color : S.rule, backgroundColor: on ? `${t.color}22` : "transparent" }}>
+                  <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: on ? t.color : S.graphite }}>{t.label}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-          <Btn label={`Take ${tag} photo`} icon={<Camera size={14} color="#04181d" />} busy={add.isPending} onPress={() => add.mutate()} />
+          <Btn label={`Take ${tag} photo`} icon={<Camera size={14} color={S.paper} />} busy={add.isPending} onPress={() => add.mutate()} />
         </View>
       )}
       {TAGS.map((t) => {
@@ -135,7 +137,7 @@ export function PhotosTab({ rungId, canAdd }: { rungId: number; canAdd: boolean 
           <View key={t.key} style={{ borderLeftWidth: 2, borderLeftColor: `${t.color}55`, paddingLeft: 12 }}>
             <Text style={{ fontSize: 10, fontFamily: fonts.heading.bold, color: t.color, textTransform: "uppercase", letterSpacing: 1.1, marginBottom: 8 }}>{t.label} · {photos.length}</Text>
             {photos.length === 0 ? (
-              <Text style={{ fontSize: 11.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>None yet</Text>
+              <Text style={{ fontSize: 11.5, color: S.graphite, fontFamily: fonts.body.regular }}>None yet</Text>
             ) : (
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 {photos.map((p) => <PhotoThumb key={p.id} rungId={rungId} photo={p} onOpen={() => setOpen(p)} />)}
@@ -145,7 +147,7 @@ export function PhotosTab({ rungId, canAdd }: { rungId: number; canAdd: boolean 
         );
       })}
       {(q.data?.before.length ?? 0) + (q.data?.after.length ?? 0) === 0 && !canAdd && <Empty text="No photos yet." />}
-      <PhotoViewer rungId={rungId} photo={open} onClose={() => setOpen(null)} onDelete={canAdd ? confirmDelete : undefined} />
+      <PhotoViewer rungId={rungId} photo={open} onClose={() => setOpen(null)} onDelete={canDelete ? confirmDelete : undefined} />
     </View>
   );
 }

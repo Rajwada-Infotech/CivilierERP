@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Tag as TagIcon, X } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { getDprTags, setActivityTag } from "@/api/cwdApi";
@@ -40,8 +40,8 @@ export function TagField({ rungId, current, canEdit, onSaved }: { rungId: number
 
   return (
     <View style={{ gap: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 12, paddingHorizontal: 12 }}>
-        <TagIcon size={14} color={colors.mutedForeground} />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: S.rule, backgroundColor: S.paper, borderRadius: 0, paddingHorizontal: 12 }}>
+        <TagIcon size={14} color={S.graphite} />
         <TextInput
           value={text}
           onChangeText={setText}
@@ -49,23 +49,23 @@ export function TagField({ rungId, current, canEdit, onSaved }: { rungId: number
           editable={canEdit}
           maxLength={100}
           placeholder="Search or type a new tag…"
-          placeholderTextColor={`${colors.mutedForeground}99`}
-          style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }}
+          placeholderTextColor={S.faint}
+          style={{ flex: 1, color: S.ink, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }}
         />
-        {!!text && canEdit && <TouchableOpacity onPress={() => setText("")} hitSlop={8}><X size={14} color={colors.mutedForeground} /></TouchableOpacity>}
+        {!!text && canEdit && <TouchableOpacity onPress={() => setText("")} hitSlop={8}><X size={14} color={S.graphite} /></TouchableOpacity>}
       </View>
 
       {focused && canEdit && (matches.length > 0 || (!!q && !exact)) && (
-        <View style={{ borderRadius: 10, borderWidth: 1, borderColor: colors.border, overflow: "hidden", backgroundColor: colors.card }}>
+        <View style={{ borderRadius: 0, borderWidth: 1, borderColor: S.rule, overflow: "hidden", backgroundColor: S.paper }}>
           {matches.map((t, i) => (
-            <TouchableOpacity key={t.id} onPress={() => { setText(t.tagName); setFocused(false); }} style={{ paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: colors.border }}>
-              <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.foreground }}>{t.tagName}</Text>
+            <TouchableOpacity key={t.id} onPress={() => { setText(t.tagName); setFocused(false); }} style={{ paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: S.rule }}>
+              <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: S.ink }}>{t.tagName}</Text>
             </TouchableOpacity>
           ))}
           {!!q && !exact && (
-            <TouchableOpacity onPress={() => setFocused(false)} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: matches.length ? 1 : 0, borderTopColor: colors.border }}>
-              <Plus size={13} color="#0891b2" />
-              <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: "#0891b2" }}>Add new tag "{text.trim()}"</Text>
+            <TouchableOpacity onPress={() => setFocused(false)} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: matches.length ? 1 : 0, borderTopColor: S.rule }}>
+              <Plus size={13} color={S.blue} />
+              <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: S.blue }}>Add new tag "{text.trim()}"</Text>
             </TouchableOpacity>
           )}
         </View>

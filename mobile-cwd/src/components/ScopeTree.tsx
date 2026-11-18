@@ -4,16 +4,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { Building, ChevronRight, DoorOpen, FolderTree, Home, Layers, type LucideIcon } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import type { ScopeRoom } from "@/api/cwdApi";
 
+// Every level drawn in ink, as the sheet draws everything: told apart by its icon and indent.
 const LEVELS: { icon: LucideIcon; color: string }[] = [
-  { icon: FolderTree, color: "#8b5cf6" },
-  { icon: Building, color: "#0ea5e9" },
-  { icon: Layers, color: "#f59e0b" },
-  { icon: Home, color: "#10b981" },
-  { icon: DoorOpen, color: "#f97316" },
+  { icon: FolderTree, color: S.ink },
+  { icon: Building, color: S.ink },
+  { icon: Layers, color: S.ink2 },
+  { icon: Home, color: S.ink2 },
+  { icon: DoorOpen, color: S.graphite },
 ];
 
 interface Node {
@@ -72,14 +73,18 @@ export function ScopeTree({
     // Compact indent: 8px per level (max 4 levels) so deep trees keep room for content.
     const pad = 10 + Math.min(depth, 4) * 8;
     return (
-      <View key={node.key} style={depth === 0 ? { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 10, overflow: "hidden" } : undefined}>
-        <TouchableOpacity activeOpacity={0.6} onPress={() => toggle(node.key)} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10, paddingRight: 12, paddingLeft: pad }}>
-          <ChevronRight size={14} color={colors.mutedForeground} style={{ transform: [{ rotate: expanded ? "90deg" : "0deg" }] }} />
+      <View key={node.key} style={depth === 0 ? { backgroundColor: S.paper, borderWidth: 1, borderColor: S.ink, marginBottom: 10, overflow: "hidden" } : undefined}>
+        <TouchableOpacity
+          activeOpacity={0.6}
+          onPress={() => toggle(node.key)}
+          style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 11, paddingRight: 12, paddingLeft: pad, borderTopWidth: depth ? 1 : 0, borderTopColor: S.ruleSoft, backgroundColor: depth === 0 && expanded ? S.blueWash : "transparent" }}
+        >
+          <ChevronRight size={14} color={S.graphite} style={{ transform: [{ rotate: expanded ? "90deg" : "0deg" }] }} />
           <L.icon size={14} color={L.color} />
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: depth === 0 ? 13 : 12.5, fontFamily: depth === 0 ? fonts.heading.semibold : fonts.body.medium, color: colors.foreground }}>
+          <Text numberOfLines={1} style={{ flex: 1, fontSize: depth === 0 ? 13.5 : 13, fontFamily: depth === 0 ? fonts.heading.semibold : fonts.body.medium, color: S.ink }}>
             {node.label}
           </Text>
-          <Text style={{ fontSize: 10.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>
+          <Text style={{ fontSize: 9.5, letterSpacing: 1, textTransform: "uppercase", fontFamily: fonts.heading.semibold, color: S.graphite }}>
             {node.count} {node.count === 1 ? unit : `${unit.replace(/y$/, "ie")}s`}
           </Text>
         </TouchableOpacity>
@@ -87,7 +92,7 @@ export function ScopeTree({
           <View>
             {node.children.map((c) => renderNode(c, depth + 1))}
             {/* Room content uses the full card width (no tree indent) — the header path above already shows where it sits. */}
-            {node.room && <View style={{ paddingHorizontal: 8, paddingBottom: 8 }}>{renderRoom(node.room)}</View>}
+            {node.room && <View>{renderRoom(node.room)}</View>}
           </View>
         )}
       </View>

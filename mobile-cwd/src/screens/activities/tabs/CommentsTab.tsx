@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Lock, RotateCcw, Send } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiError } from "@/services/fetchWithAuth";
@@ -68,8 +68,8 @@ export function CommentsTab({ rungId }: { rungId: number }) {
   if (q.error instanceof ApiError && q.error.status === 403) {
     return (
       <View style={{ alignItems: "center", gap: 8, paddingVertical: 36 }}>
-        <Lock size={20} color={colors.mutedForeground} />
-        <Text style={{ textAlign: "center", fontSize: 12, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>Comments are limited to the engineers allocated to this activity and its approvers.</Text>
+        <Lock size={20} color={S.graphite} />
+        <Text style={{ textAlign: "center", fontSize: 12, color: S.graphite, fontFamily: fonts.body.regular }}>Comments are limited to the engineers allocated to this activity and its approvers.</Text>
       </View>
     );
   }
@@ -88,19 +88,19 @@ export function CommentsTab({ rungId }: { rungId: number }) {
         lastDay = day;
         return (
           <View key={m.id ?? m.clientId ?? i}>
-            {header && <Text style={{ textAlign: "center", fontSize: 10, color: colors.mutedForeground, fontFamily: fonts.heading.semibold, marginVertical: 6 }}>{header}</Text>}
+            {header && <Text style={{ textAlign: "center", fontSize: 10, color: S.graphite, fontFamily: fonts.heading.semibold, marginVertical: 6 }}>{header}</Text>}
             <View style={{ alignItems: mine ? "flex-end" : "flex-start" }}>
-              <View style={{ ...card, maxWidth: "85%", padding: 10, backgroundColor: mine ? `${ACCENT}22` : colors.card, borderColor: m.state === "failed" ? colors.destructive : mine ? `${ACCENT}55` : colors.border, opacity: m.state === "sending" ? 0.6 : 1 }}>
+              <View style={{ ...card, maxWidth: "85%", padding: 10, backgroundColor: mine ? S.blueWash : S.paper, borderColor: m.state === "failed" ? S.red : mine ? S.blueTint : S.rule, opacity: m.state === "sending" ? 0.6 : 1 }}>
                 {!mine && <Text style={{ fontSize: 10.5, fontFamily: fonts.heading.semibold, color: ACCENT, marginBottom: 2 }}>{m.authorName}</Text>}
-                <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: colors.foreground }}>{m.body}</Text>
-                <Text style={{ fontSize: 9.5, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginTop: 3, alignSelf: "flex-end" }}>{m.state === "sending" ? "Sending…" : fmtClock(m.createdAt)}</Text>
+                <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: S.ink }}>{m.body}</Text>
+                <Text style={{ fontSize: 9.5, color: S.graphite, fontFamily: fonts.body.regular, marginTop: 3, alignSelf: "flex-end" }}>{m.state === "sending" ? "Sending…" : fmtClock(m.createdAt)}</Text>
               </View>
               {m.state === "failed" && (
                 <TouchableOpacity onPress={() => retry(m)} style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
-                  <AlertCircle size={11} color={colors.destructive} />
-                  <Text style={{ fontSize: 10.5, color: colors.destructive, fontFamily: fonts.body.medium }}>{m.error || "Couldn't send"} · </Text>
-                  <RotateCcw size={10} color={colors.destructive} />
-                  <Text style={{ fontSize: 10.5, color: colors.destructive, fontFamily: fonts.heading.semibold }}>Retry</Text>
+                  <AlertCircle size={11} color={S.red} />
+                  <Text style={{ fontSize: 10.5, color: S.red, fontFamily: fonts.body.medium }}>{m.error || "Couldn't send"} · </Text>
+                  <RotateCcw size={10} color={S.red} />
+                  <Text style={{ fontSize: 10.5, color: S.red, fontFamily: fonts.heading.semibold }}>Retry</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -109,9 +109,9 @@ export function CommentsTab({ rungId }: { rungId: number }) {
       })}
 
       <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, marginTop: 6 }}>
-        <TextInput value={draft} onChangeText={setDraft} multiline maxLength={MAX_LEN} placeholder="Write a message…" placeholderTextColor={`${colors.mutedForeground}99`} style={{ flex: 1, maxHeight: 110, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9 }} />
-        <TouchableOpacity disabled={!draft.trim()} onPress={submit} style={{ width: 42, height: 42, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: ACCENT, opacity: draft.trim() ? 1 : 0.4 }}>
-          <Send size={16} color="#04181d" />
+        <TextInput value={draft} onChangeText={setDraft} multiline maxLength={MAX_LEN} placeholder="Write a message…" placeholderTextColor={S.faint} style={{ flex: 1, maxHeight: 110, color: S.ink, fontFamily: fonts.body.regular, fontSize: 13, borderWidth: 1, borderColor: S.line40, backgroundColor: S.paper, borderRadius: 0, paddingHorizontal: 12, paddingVertical: 11 }} />
+        <TouchableOpacity disabled={!draft.trim()} onPress={submit} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: S.ink, backgroundColor: S.ink, opacity: draft.trim() ? 1 : 0.4 }}>
+          <Send size={16} color={S.paper} />
         </TouchableOpacity>
       </View>
     </View>

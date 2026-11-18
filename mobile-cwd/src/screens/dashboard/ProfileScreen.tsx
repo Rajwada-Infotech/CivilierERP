@@ -1,16 +1,15 @@
 // Your account: who you are, what you can do in Civil Work DPR, change your password, sign out.
 import { useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { Alert, ScrollView, Text, View } from "react-native";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Calendar, ChevronRight, Hash, KeyRound, LogOut, Mail, Shield } from "lucide-react-native";
+import { ChevronRight, LogOut } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import { colors } from "@/theme/colors";
+import { colors, sheet as S } from "@/theme/colors";
+import { Body, Detail, Field, InfoGrid, Input, Key, Label, Notice, Press, SheetFrame, TitleText } from "@/components/sheet/Sheet";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { changeMyPassword, getMyProfile } from "@/api/cwdApi";
 
-const ACCENT = "#0891b2";
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin", admin: "Admin", user: "User", dba: "DBA", engineer: "Engineer", customer: "Customer",
   supplier: "Supplier", marketing_head: "Marketing Head", sales_team_lead: "Sales Team Lead", sales_person: "Sales Person",
@@ -24,39 +23,6 @@ const PAGES: { key: string; label: string }[] = [
   { key: "civilworkdpr-work-transfer", label: "Work Transfer" },
 ];
 const ACTION_LABEL: Record<string, string> = { view: "View", create: "Create", edit: "Edit", delete: "Delete", approve: "Approve", reject: "Reject", export: "Export", print: "Print" };
-const card = { borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 16, marginBottom: 16 } as const;
-
-function InfoRow({ icon: Icon, label, value }: { icon: React.ComponentType<{ size?: number; color?: string }>; label: string; value?: string | null }) {
-  if (!value) return null;
-  return (
-    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.muted }}>
-      <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: `${ACCENT}1a`, alignItems: "center", justifyContent: "center", marginTop: 1 }}>
-        <Icon size={12} color={ACCENT} />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 1, marginBottom: 1 }}>{label}</Text>
-        <Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: colors.foreground }}>{value}</Text>
-      </View>
-    </View>
-  );
-}
-
-function PasswordField({ label, value, onChangeText }: { label: string; value: string; onChangeText: (v: string) => void }) {
-  return (
-    <View style={{ marginBottom: 12 }}>
-      <Text style={{ fontSize: 10, fontFamily: fonts.body.medium, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 5 }}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        secureTextEntry
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80`, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, minHeight: 44, color: colors.foreground, fontSize: 13.5, fontFamily: fonts.body.regular }}
-      />
-    </View>
-  );
-}
-
 export default function ProfileScreen() {
   const { currentUser, logout } = useAuth();
   const name = currentUser?.name ?? "User";
@@ -86,84 +52,82 @@ export default function ProfileScreen() {
   const rights = (key: string) => (isSuper ? null : currentUser?.pagePermissions?.find((p) => p.page === key)?.actions ?? []);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
-      <LinearGradient colors={["#083344", "#0e7490", ACCENT]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ borderRadius: 18, padding: 20, marginBottom: 16, overflow: "hidden" }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-          <View style={{ width: 58, height: 58, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" }}>
-            <Text style={{ fontSize: 19, fontFamily: fonts.heading.bold, color: "#fff" }}>{initials}</Text>
+    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingBottom: 96 }} keyboardShouldPersistTaps="handled">
+      <SheetFrame>
+        {/* Title block: initials in an ink square, the role over the name. */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 18 }}>
+          <View style={{ width: 58, height: 58, borderWidth: 1.5, borderColor: S.ink, alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ fontSize: 19, fontFamily: fonts.heading.bold, color: S.ink, letterSpacing: 0.5 }}>{initials}</Text>
           </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 3 }}>{role}</Text>
-            <Text numberOfLines={2} style={{ fontSize: 17, fontFamily: fonts.heading.bold, color: "#fff" }}>{name}</Text>
+          <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+            <Label>{role || "Account"}</Label>
+            <TitleText size={24}>{name}</TitleText>
           </View>
         </View>
-      </LinearGradient>
 
-      <View style={card}>
-        <Text style={{ fontSize: 13, fontFamily: fonts.heading.bold, color: colors.foreground, marginBottom: 4 }}>Account</Text>
-        <InfoRow icon={Mail} label="Email" value={currentUser?.email} />
-        <InfoRow icon={Shield} label="Role" value={role} />
-        <InfoRow icon={Hash} label="User ID" value={currentUser?.id} />
-        <InfoRow icon={Calendar} label="Member since" value={since} />
-      </View>
+        <Detail tag="A" title="Account">
+          <InfoGrid
+            items={[
+              { label: "Email", value: currentUser?.email || "—", wide: true },
+              { label: "Role", value: role || "—" },
+              { label: "User ID", value: currentUser?.id || "—" },
+              ...(since ? [{ label: "Member since", value: since }] : []),
+            ]}
+          />
+        </Detail>
 
-      <View style={card}>
-        <Text style={{ fontSize: 13, fontFamily: fonts.heading.bold, color: colors.foreground, marginBottom: 10 }}>Your access in Civil Work DPR</Text>
-        {isSuper && <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 6 }}>Super admin — full access to every page.</Text>}
-        {PAGES.map((pg) => {
-          const actions = rights(pg.key);
-          const has = actions === null || actions.length > 0;
-          return (
-            <View key={pg.key} style={{ paddingVertical: 9, borderTopWidth: 1, borderTopColor: colors.muted, gap: 6 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: has ? colors.foreground : colors.mutedForeground }}>{pg.label}</Text>
-                {!has && <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>No access</Text>}
-              </View>
-              {has && actions !== null && (
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
-                  {actions.map((a) => (
-                    <View key={a} style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: `${ACCENT}1f` }}>
-                      <Text style={{ fontSize: 10, fontFamily: fonts.heading.semibold, color: ACCENT }}>{ACTION_LABEL[a] ?? a}</Text>
+        <Detail tag="B" title="Your access" note="Civil Work DPR">
+          {isSuper && <Body size={13} color={S.graphite} style={{ marginBottom: 8 }}>Super admin — full access to every page.</Body>}
+          <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
+            {PAGES.map((pg) => {
+              const actions = rights(pg.key);
+              const has = actions === null || actions.length > 0;
+              return (
+                <View key={pg.key} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, gap: 6 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={{ fontSize: 13, fontFamily: fonts.body.semibold, color: has ? S.ink : S.graphite }}>{pg.label}</Text>
+                    {!has && <Label>No access</Label>}
+                  </View>
+                  {has && actions !== null && (
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
+                      {actions.map((a) => (
+                        <View key={a} style={{ paddingHorizontal: 7, paddingVertical: 2, borderWidth: 1, borderColor: S.rule }}>
+                          <Text style={{ fontSize: 9.5, letterSpacing: 0.9, textTransform: "uppercase", fontFamily: fonts.heading.semibold, color: S.ink2 }}>{ACTION_LABEL[a] ?? a}</Text>
+                        </View>
+                      ))}
                     </View>
-                  ))}
+                  )}
                 </View>
-              )}
-            </View>
-          );
-        })}
-      </View>
-
-      <View style={card}>
-        <TouchableOpacity activeOpacity={0.7} onPress={() => setPwOpen((o) => !o)} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <KeyRound size={15} color={ACCENT} />
-          <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.heading.bold, color: colors.foreground }}>Change password</Text>
-          <ChevronRight size={15} color={colors.mutedForeground} style={{ transform: [{ rotate: pwOpen ? "90deg" : "0deg" }] }} />
-        </TouchableOpacity>
-        {pwOpen && (
-          <View style={{ marginTop: 14 }}>
-            <PasswordField label="Current password" value={cur} onChangeText={setCur} />
-            <PasswordField label="New password" value={next} onChangeText={setNext} />
-            <PasswordField label="Confirm new password" value={again} onChangeText={setAgain} />
-            {!!pwError && <Text style={{ fontSize: 11, color: colors.destructive, fontFamily: fonts.body.regular, marginBottom: 10 }}>{pwError}</Text>}
-            <TouchableOpacity
-              disabled={!cur || next.length < 6 || next !== again || change.isPending}
-              onPress={() => change.mutate()}
-              style={{ alignItems: "center", paddingVertical: 11, borderRadius: 12, backgroundColor: ACCENT, opacity: !cur || next.length < 6 || next !== again || change.isPending ? 0.4 : 1 }}
-            >
-              {change.isPending ? <ActivityIndicator size="small" color="#04181d" /> : <Text style={{ fontFamily: fonts.heading.bold, fontSize: 12, color: "#04181d" }}>Update password</Text>}
-            </TouchableOpacity>
+              );
+            })}
           </View>
-        )}
-      </View>
+        </Detail>
 
-      <TouchableOpacity
-        activeOpacity={0.7}
-        onPress={confirmSignOut}
-        style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 12, borderWidth: 1, borderColor: `${colors.destructive}40`, backgroundColor: `${colors.destructive}14`, paddingVertical: 13 }}
-      >
-        <LogOut size={15} color="#f87171" />
-        <Text style={{ fontSize: 13, fontFamily: fonts.body.semibold, color: "#f87171" }}>Sign Out</Text>
-      </TouchableOpacity>
+        <Detail tag="C" title="Password">
+          <Press onPress={() => setPwOpen((o) => !o)} style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44, paddingHorizontal: 12, borderWidth: 1, borderColor: S.ink, backgroundColor: pressed ? S.blueWash : "transparent" })}>
+            <Text style={{ flex: 1, fontSize: 11, letterSpacing: 1.1, textTransform: "uppercase", fontFamily: fonts.heading.semibold, color: S.ink }}>Change password</Text>
+            <ChevronRight size={15} color={S.graphite} style={{ transform: [{ rotate: pwOpen ? "90deg" : "0deg" }] }} />
+          </Press>
+          {pwOpen && (
+            <View style={{ marginTop: 14, gap: 12 }}>
+              <Field label="Current password"><Input value={cur} onChangeText={setCur} secureTextEntry autoCapitalize="none" autoCorrect={false} /></Field>
+              <Field label="New password"><Input value={next} onChangeText={setNext} secureTextEntry autoCapitalize="none" autoCorrect={false} /></Field>
+              <Field label="Confirm new password"><Input value={again} onChangeText={setAgain} secureTextEntry autoCapitalize="none" autoCorrect={false} /></Field>
+              {!!pwError && <Notice>{pwError}</Notice>}
+              <Key
+                tone="ink"
+                label={change.isPending ? "Updating…" : "Update password"}
+                disabled={!cur || next.length < 6 || next !== again || change.isPending}
+                onPress={() => change.mutate()}
+              />
+            </View>
+          )}
+        </Detail>
+
+        <Detail tag="D" title="Sign out">
+          <Key tone="red" label="Sign out" icon={<LogOut size={15} color="#ffffff" />} onPress={confirmSignOut} />
+        </Detail>
+      </SheetFrame>
     </ScrollView>
   );
 }

@@ -1,17 +1,16 @@
 import { memo } from "react";
-// One activity as a card — name, status, location, progress bar, engineers, dates and the timeline hint.
-import { Pressable, Text, View } from "react-native";
-import { colors } from "@/theme/colors";
+// One activity as a ruled row of the register: name and status, where it is, a progress bar, engineers, dates and the
+// timeline hint. A soft rule under each row; pressed, it washes blue.
+import { Text, View } from "react-native";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { StatusPill, displayStatus, STATUS_COLOR } from "@/components/StatusPill";
 import { timelineMessage, type ActivityAssignment } from "@/api/cwdApi";
 import { PriorityBadge } from "@/components/PriorityBadge";
+import { Press } from "@/components/sheet/Sheet";
 import { dependencyAutoName } from "@/utils/dependencyAutoName";
 
-const ACCENT = "#0891b2";
-
-const fmtDate = (d?: string | null) =>
-  d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—";
+const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—");
 
 function ActivityRowView({ a, onPress }: { a: ActivityAssignment; onPress: () => void }) {
   const shown = displayStatus(a.status, a.resumedAt);
@@ -19,42 +18,41 @@ function ActivityRowView({ a, onPress }: { a: ActivityAssignment; onPress: () =>
   const hint = timelineMessage(a);
   const autoName = dependencyAutoName({ flatName: a.flatName, alias: a.alias, roomName: a.roomName, storey: a.storey, activityName: a.activityName });
   return (
-    <Pressable onPress={onPress} style={{ backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10 }}>
-      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-        <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }} numberOfLines={2}>
+    <Press
+      onPress={onPress}
+      style={(pressed) => ({ paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : S.paper })}
+    >
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+        <Text style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.body.semibold, color: S.ink }} numberOfLines={2}>
           {a.sequenceNo != null ? `${a.sequenceNo}. ` : ""}{a.activityName ?? "Activity"}
         </Text>
-        <View style={{ alignItems: "flex-end", gap: 4 }}>
+        <View style={{ alignItems: "flex-end", gap: 5 }}>
           <StatusPill status={shown} />
           <PriorityBadge priority={a.priority} />
           {!!a.tagName && (
-            <View style={{ paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 999, backgroundColor: `${ACCENT}22` }}>
-              <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: ACCENT }}>{a.tagName}</Text>
+            <View style={{ paddingHorizontal: 6, paddingVertical: 1.5, borderWidth: 1, borderColor: S.rule }}>
+              <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, letterSpacing: 0.8, textTransform: "uppercase", color: S.ink2 }}>{a.tagName}</Text>
             </View>
           )}
         </View>
       </View>
-      {!!autoName && (
-        <Text style={{ fontSize: 10.5, fontFamily: fonts.body.medium, color: ACCENT, marginTop: 3 }} numberOfLines={2}>{autoName}</Text>
-      )}
+      {!!autoName && <Text style={{ fontSize: 11.5, fontFamily: fonts.body.medium, color: S.blue, marginTop: 3 }} numberOfLines={2}>{autoName}</Text>}
       {!!a.scopePath && (
-        <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 3 }} numberOfLines={2}>
+        <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: S.graphite, marginTop: 3 }} numberOfLines={2}>
           {[a.projectName, a.scopePath].filter(Boolean).join(" · ")}
         </Text>
       )}
-      <View style={{ height: 5, borderRadius: 3, backgroundColor: colors.muted, marginTop: 10, overflow: "hidden" }}>
-        <View style={{ width: `${pct}%`, height: 5, borderRadius: 3, backgroundColor: STATUS_COLOR[shown] ?? ACCENT }} />
+      <View style={{ height: 6, backgroundColor: S.line15, marginTop: 10 }}>
+        <View style={{ width: `${pct}%`, height: 6, backgroundColor: STATUS_COLOR[shown] ?? S.ink }} />
       </View>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8, gap: 8 }}>
-        <Text style={{ flex: 1, fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }} numberOfLines={1}>
-          {a.engineerNames || "No engineer"}
-        </Text>
-        <Text style={{ fontSize: 10.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 7, gap: 8 }}>
+        <Text style={{ flex: 1, fontSize: 11.5, fontFamily: fonts.body.regular, color: S.ink2 }} numberOfLines={1}>{a.engineerNames || "No engineer"}</Text>
+        <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.medium, color: S.graphite, fontVariant: ["tabular-nums"] }}>
           {pct}% · {fmtDate(a.startDate)} → {fmtDate(a.endDate)}
         </Text>
       </View>
-      {!!hint && <Text style={{ fontSize: 10.5, fontFamily: fonts.body.medium, color: ACCENT, marginTop: 6 }}>{hint}</Text>}
-    </Pressable>
+      {!!hint && <Text style={{ fontSize: 11.5, fontFamily: fonts.body.medium, color: S.blue, marginTop: 6 }}>{hint}</Text>}
+    </Press>
   );
 }
 

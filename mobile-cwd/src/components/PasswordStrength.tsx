@@ -2,12 +2,13 @@
 // — identical scoring, RN View bars instead of framer-motion divs.
 import { View, Text } from "react-native";
 import { fonts } from "@/theme/fonts";
+import { sheet as S } from "@/theme/colors";
 
 export function PasswordStrength({ password }: { password: string }) {
   if (!password) return null;
 
   const strength = password.length < 4 ? 1 : password.length < 7 ? 2 : /[A-Z]/.test(password) && /[0-9]/.test(password) ? 4 : 3;
-  const colors = ["", "#ef4444", "#f97316", "#eab308", "#22c55e"];
+  const colors = ["", S.red, S.ink, S.ink, S.blue];
   const labels = ["", "Weak", "Fair", "Good", "Strong"];
 
   return (
@@ -16,12 +17,12 @@ export function PasswordStrength({ password }: { password: string }) {
         {[1, 2, 3, 4].map((i) => (
           <View
             key={i}
-            className="h-1 flex-1 rounded-full"
-            style={{ backgroundColor: i <= strength ? colors[strength] : "rgba(255,255,255,0.12)" }}
+            className="h-1 flex-1"
+            style={{ backgroundColor: i <= strength ? colors[strength] : S.ruleSoft }}
           />
         ))}
       </View>
-      <Text className="text-[10px] text-right" style={{ color: colors[strength], fontFamily: fonts.body.medium }}>
+      <Text className="text-right" style={{ color: colors[strength], fontFamily: fonts.heading.semibold, fontSize: 9, letterSpacing: 1, textTransform: "uppercase" }}>
         {labels[strength]}
       </Text>
     </View>
