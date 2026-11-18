@@ -3,7 +3,7 @@
 // shared by every portal page.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { CalendarCheck, CalendarDays, CalendarRange, Eye, FileText, History, Home, UserRound, Wallet } from "lucide-react";
+import { CalendarCheck, CalendarDays, CalendarRange, Eye, FileText, History, Home, Megaphone, UserRound, Wallet } from "lucide-react";
 import { Logout } from "iconsax-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
@@ -18,6 +18,7 @@ const NAV = [
   { label: "Payslips", short: "Payslips", to: "/employee/payslips", icon: FileText, mobile: true },
   { label: "Attendance", short: "Attendance", to: "/employee/attendance", icon: CalendarCheck, mobile: true },
   { label: "Leave", short: "Leave", to: "/employee/leave", icon: CalendarRange, mobile: true },
+  { label: "Notices", short: "Notices", to: "/employee/notices", icon: Megaphone, mobile: false },
   { label: "Holidays", short: "Holidays", to: "/employee/holidays", icon: CalendarDays, mobile: false },
   { label: "History", short: "History", to: "/employee/login-history", icon: History, mobile: false },
 ];

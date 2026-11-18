@@ -81,7 +81,7 @@ function CaptureDialog({ employeeId, name, onClose, onDone }: { employeeId: numb
                 </ul>
                 <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
                   <span>The employee is present and has given consent for face registration.</span></label>
-                <button className={KEY_INK} disabled={!consent} onClick={start}><Camera size={14} /> Start camera</button>
+                <button className={`${KEY_INK} h-9 px-4`} disabled={!consent} onClick={start}><Camera size={14} /> Start camera</button>
               </>
             ) : (
               <>
@@ -101,8 +101,8 @@ function CaptureDialog({ employeeId, name, onClose, onDone }: { employeeId: numb
                 </div>
                 {problems.map((p) => <p key={p} className="text-xs text-destructive">{p}</p>)}
                 <div className="flex flex-wrap gap-2">
-                  <button className={KEY_LINE} disabled={cam !== "ready" || shots.length >= MAX || busy} onClick={snap}><Camera size={14} /> Take photo ({shots.length}/{MAX})</button>
-                  <button className={KEY_INK} disabled={shots.length < NEED || busy} onClick={save}><ScanFace size={14} /> {busy ? "Checking…" : "Register face"}</button>
+                  <button className={`${KEY_LINE} h-9 px-4`} disabled={cam !== "ready" || shots.length >= MAX || busy} onClick={snap}><Camera size={14} /> Take photo ({shots.length}/{MAX})</button>
+                  <button className={`${KEY_INK} h-9 px-4`} disabled={shots.length < NEED || busy} onClick={save}><ScanFace size={14} /> {busy ? "Checking…" : "Register face"}</button>
                 </div>
               </>
             )}
@@ -143,8 +143,8 @@ function ReasonDialog({ ask, busy, onClose }: { ask: Ask; busy: boolean; onClose
                 className="mt-1 w-full border border-border bg-background px-2 py-1.5 text-sm focus:border-foreground outline-none" />
             </label>
             <div className="flex justify-end gap-2">
-              <button type="button" className={KEY_LINE} onClick={onClose}>Cancel</button>
-              <button type="submit" className={ask.tone === "red" ? KEY_RED : KEY_INK} disabled={!ok || busy}>{busy ? "Saving…" : ask.confirm}</button>
+              <button type="button" className={`${KEY_LINE} h-9 px-4`} onClick={onClose}>Cancel</button>
+              <button type="submit" className={`${ask.tone === "red" ? KEY_RED : KEY_INK} h-9 px-4`} disabled={!ok || busy}>{busy ? "Saving…" : ask.confirm}</button>
             </div>
           </div>
         </form>
@@ -170,8 +170,8 @@ function PendingReview({ employeeId, p, canEdit, onDone }: { employeeId: number;
           : <>Match with the profile photo: <b className={score >= 0.4 ? "text-emerald-600" : "text-destructive"}>{score.toFixed(2)}</b> {score >= 0.4 ? "(looks like the same person)" : "(does NOT look like the profile photo — check carefully)"}</>}</p>
         {canEdit && (
           <div className="flex flex-wrap gap-2 pt-1">
-            <button type="button" className={KEY_INK} disabled={approve.isPending} onClick={() => approve.mutate()}><ScanFace size={14} /> Approve</button>
-            <button type="button" className={KEY_RED} disabled={reject.isPending} onClick={() => setAsking(true)}><X size={14} /> Reject</button>
+            <button type="button" className={`${KEY_INK} h-9 px-4`} disabled={approve.isPending} onClick={() => approve.mutate()}><ScanFace size={14} /> Approve</button>
+            <button type="button" className={`${KEY_RED} h-9 px-4`} disabled={reject.isPending} onClick={() => setAsking(true)}><X size={14} /> Reject</button>
           </div>
         )}
       </div>
@@ -239,10 +239,10 @@ export const FaceRegistrationField: React.FC<{ employeeId: number | null; name?:
         </div>
       </div>
       {rights.canEdit && (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={KEY_INK} disabled={!data.configured} onClick={() => setCapture(true)}><ScanFace size={14} /> {a ? "Re-register with webcam" : "Register with webcam"}</button>
-          {a && <button type="button" className={KEY_RED} onClick={askRevoke} disabled={revoke.isPending}><Trash2 size={14} /> Revoke</button>}
-          <button type="button" className={KEY_LINE} onClick={askExempt} disabled={exempt.isPending}>{data.exempt ? "Require face check again" : "Face check exempt"}</button>
+        <div className="flex flex-wrap gap-3 pt-1">
+          <button type="button" className={`${KEY_INK} h-9 px-4`} disabled={!data.configured} onClick={() => setCapture(true)}><ScanFace size={14} /> {a ? "Re-register with webcam" : "Register with webcam"}</button>
+          {a && <button type="button" className={`${KEY_RED} h-9 px-4`} onClick={askRevoke} disabled={revoke.isPending}><Trash2 size={14} /> Revoke</button>}
+          <button type="button" className={`${KEY_LINE} h-9 px-4`} onClick={askExempt} disabled={exempt.isPending}>{data.exempt ? "Require face check again" : "Face check exempt"}</button>
         </div>
       )}
       {data.recent.length > 0 && (

@@ -198,6 +198,7 @@ const ALL_ROUTES = [
   { path: "/api/employee-attendance", file: "./routes/employeeAttendance" },
   { path: "/api/leave-record", file: "./routes/leaveRecord" },
   { path: "/api/employee-portal-admin", file: "./routes/employeePortalAdmin" },
+  { path: "/api/employee-notices", file: "./routes/employeeNotice" },
   { path: "/api/overtime-record", file: "./routes/overtimeRecord" },
   { path: "/api/incentive-record", file: "./routes/incentiveRecord" },
   { path: "/api/interviews", file: "./routes/interview" },

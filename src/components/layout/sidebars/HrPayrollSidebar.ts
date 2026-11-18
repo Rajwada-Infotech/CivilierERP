@@ -30,6 +30,7 @@ export const hrPayrollNavItems: NavItem[] = [
       { label: "Offers & Joining", path: "/hr-payroll/offer-letter-joining", pageKey: "offer-letter-joining" },
       { label: "Team Attendance", path: "/hr-payroll/hr-attendance", pageKey: "hr-attendance-management" },
       { label: "Employee Portal", path: "/hr-payroll/employee-portal-access", pageKey: "employee-portal-access" },
+      { label: "Notice Board", path: "/hr-payroll/notice-board", pageKey: "employee-notice" },
     ],
   },
 ];

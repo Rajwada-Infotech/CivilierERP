@@ -13,6 +13,7 @@ import { Chip } from "@/components/Chip";
 import { Body, Field, Input, Key, Label, Notice, Panel, SheetFrame, Skel, StatGrid, TitleText } from "@/components/sheet/Sheet";
 import { sheet as S } from "@/theme/colors";
 import HomeDashboard from "./HomeDashboard";
+import NoticesPanel from "./NoticesPanel";
 import { fonts } from "@/theme/fonts";
 import { clock, fmtDate, fmtDur, fmtTime } from "@/utils/format";
 
@@ -149,6 +150,8 @@ export default function HomeScreen() {
           </Notice>
         </Pressable>
       )}
+
+      <NoticesPanel />
 
       <Panel title="Today's attendance" icon={<MapPin size={14} color={S.ink} />}>
         {today.isLoading ? (

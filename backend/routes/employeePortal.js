@@ -427,4 +427,43 @@ router.delete("/leave/:id", async (req, res) => {
   }
 });
 
+
+// ── Notices (Notice Board): for All, or for this employee's department; live between PublishFrom and ExpiresOn ──
+const noticesReady = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.EmployeeNotice', 'U') AS t")).recordset[0].t;
+router.get("/notices", async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await noticesReady(pool))) return res.json([]);
+    const r = await pool.request().input("E", sql.Int, req.employee.EmployeeId).input("Dept", sql.NVarChar(150), String(req.employee.Department || "").trim()).query(`
+      DECLARE @today DATE = CAST(DATEADD(MINUTE, 330, SYSUTCDATETIME()) AS DATE);
+      SELECT n.NoticeId, n.Title, n.Body, n.Priority, n.IsPinned, CONVERT(char(10), n.PublishFrom, 23) AS PublishFrom, CONVERT(char(10), n.ExpiresOn, 23) AS ExpiresOn,
+             (SELECT name FROM dbo.users WHERE id = n.CreatedBy) AS PostedBy,
+             CASE WHEN n.Audience = N'All' THEN N'All employees' ELSE (SELECT STRING_AGG(d.DepartmentName, ', ') FROM dbo.EmployeeNoticeDepartment nd JOIN dbo.DepartmentMaster d ON d.Id = nd.DepartmentId WHERE nd.NoticeId = n.NoticeId) END AS ForWhom,
+             CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.EmployeeNoticeRead x WHERE x.NoticeId = n.NoticeId AND x.EmployeeId = @E) THEN 1 ELSE 0 END AS bit) AS IsRead
+      FROM dbo.EmployeeNotice n
+      WHERE n.IsActive = 1 AND n.PublishFrom <= @today AND (n.ExpiresOn IS NULL OR n.ExpiresOn >= @today)
+        AND (n.Audience = N'All' OR EXISTS (SELECT 1 FROM dbo.EmployeeNoticeDepartment nd JOIN dbo.DepartmentMaster d ON d.Id = nd.DepartmentId
+                                            WHERE nd.NoticeId = n.NoticeId AND LOWER(LTRIM(RTRIM(d.DepartmentName))) = LOWER(@Dept)))
+      ORDER BY n.IsPinned DESC, CASE n.Priority WHEN N'Important' THEN 0 ELSE 1 END, n.PublishFrom DESC, n.NoticeId DESC`);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[employee-portal] GET /notices:", err.message);
+    res.status(500).json({ error: "Could not load notices" });
+  }
+});
+router.post("/notices/:id/read", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return bad(res, "Invalid notice");
+  try {
+    await getPool().request().input("N", sql.Int, id).input("E", sql.Int, req.employee.EmployeeId).query(`
+      IF EXISTS (SELECT 1 FROM dbo.EmployeeNotice WHERE NoticeId = @N AND IsActive = 1)
+        AND NOT EXISTS (SELECT 1 FROM dbo.EmployeeNoticeRead WHERE NoticeId = @N AND EmployeeId = @E)
+        INSERT INTO dbo.EmployeeNoticeRead (NoticeId, EmployeeId) VALUES (@N, @E)`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[employee-portal] POST /notices/:id/read:", err.message);
+    res.status(500).json({ error: "Could not mark as read" });
+  }
+});
+
 module.exports = router;

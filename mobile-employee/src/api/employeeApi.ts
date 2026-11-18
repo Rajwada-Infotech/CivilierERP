@@ -75,7 +75,11 @@ const challenge = (kind: "in" | "out") => call<{ nonce: string }>("/attendance/c
 export interface FaceSelf { required: boolean; exempt: boolean; configured: boolean; state: "None" | "Pending" | "Active" | "Rejected" | "Revoked";
   activeSince: string | null; pendingSince: string | null; rejectReason: string | null }
 
+export interface Notice { NoticeId: number; Title: string; Body: string; Priority: string; IsPinned: boolean; PublishFrom: string; ExpiresOn: string | null; PostedBy: string | null; ForWhom: string | null; IsRead: boolean }
+
 export const api = {
+  notices: () => call<Notice[]>("/notices"),
+  readNotice: (id: number) => call<{ ok: boolean }>(`/notices/${id}/read`, post()),
   face: () => call<FaceSelf>("/face"),
   faceEnroll: (photos: string[]) => call<{ message: string }>("/face/enroll", post({ photos, consent: true })),
   me: () => call<Me>("/me"),
