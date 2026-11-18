@@ -5,7 +5,11 @@
 // Shared brand asset — not module-tinted, same as on mobile-supplier.
 import { useEffect, useRef, useState } from "react";
 import { Animated, Text, View } from "react-native";
-import MaskedView from "@react-native-masked-view/masked-view";
+import MaskedViewClass, { type MaskedViewProps } from "@react-native-masked-view/masked-view";
+import type { ComponentType } from "react";
+
+// masked-view 0.3.2 types it as a class without a typed `props`, which React 19.3's JSX types reject. Same component.
+const MaskedView = MaskedViewClass as unknown as ComponentType<MaskedViewProps>;
 import { LinearGradient } from "expo-linear-gradient";
 import { fonts } from "@/theme/fonts";
 import { useAppVersion } from "@/hooks/useAppVersion";

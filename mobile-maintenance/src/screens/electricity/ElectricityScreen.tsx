@@ -110,7 +110,7 @@ function OverviewTab() {
   return (
     <ScrollView
       contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={ELEC_AMBER} />}
+      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => void refetch()} tintColor={ELEC_AMBER} />}
     >
       <LinearGradient
         colors={[ELEC_INK, "#3a2308", "#1c1305"]}

@@ -2,7 +2,7 @@
 // passed — same rule the server enforces), and for "daily" checkpoints log one photo update per day.
 // A checkpoint Quality Check rated Poor last time blinks until it's ticked again.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Animated, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Animated, ScrollView, Text, TextInput, TouchableOpacity, View, type ScrollViewInstance } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, CalendarDays, Check, RotateCcw, Timer, Trash2 } from "lucide-react-native";
 import { colors } from "@/theme/colors";
@@ -50,7 +50,7 @@ function DailyUpdates({ checkpointId, canEdit }: { checkpointId: number; canEdit
   // Every day from the start date (or the last 14) up to today, newest last, so the strip lands on today.
   // Locked to today: a daily update is a same-day record (the server enforces it too).
   const days = useMemo(() => [today], [today]);
-  const strip = useRef<ScrollView>(null);
+  const strip = useRef<ScrollViewInstance>(null);
 
   const save = useMutation({
     mutationFn: async () => {

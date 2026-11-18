@@ -178,7 +178,7 @@ export default function WorkTransferScreen() {
         keyboardShouldPersistTaps="handled"
         onEndReachedThreshold={0.6}
         onEndReached={() => { if (candQ.hasNextPage && !candQ.isFetchingNextPage) candQ.fetchNextPage(); }}
-        ListFooterComponent={candQ.isFetchingNextPage ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 14 }} /> : null}
+        ListFooterComponent={candQ.isFetchingNextPage ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 14 }} /> : undefined}
         initialNumToRender={10}
         windowSize={7}
         contentContainerStyle={{ padding: 16, paddingBottom: 120 }}

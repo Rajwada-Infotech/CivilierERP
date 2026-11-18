@@ -126,7 +126,7 @@ export default function ActivitiesScreen() {
               tintColor={ACCENT}
             />
           }
-          ListFooterComponent={q.isFetchingNextPage ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 16 }} /> : null}
+          ListFooterComponent={q.isFetchingNextPage ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 16 }} /> : undefined}
           ListEmptyComponent={
             <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 40 }}>
               No activities match.

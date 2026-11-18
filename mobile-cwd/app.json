@@ -3,7 +3,7 @@
     "name": "Civilier Work DPR",
     "slug": "mobile-cwd",
     "scheme": "civiliercwd",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "runtimeVersion": {
       "policy": "appVersion"
     },
