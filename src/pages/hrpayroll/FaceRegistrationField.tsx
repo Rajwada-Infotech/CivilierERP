@@ -191,6 +191,7 @@ export const FaceRegistrationField: React.FC<{ employeeId: number | null; name?:
   const rights = usePageRights("employee-master");
   const qc = useQueryClient();
   const [capture, setCapture] = useState(false);
+  const [ask, setAsk] = useState<Ask | null>(null);
   const { data, isLoading, error } = useQuery({ queryKey: ["employee-face", employeeId], queryFn: () => getFaceStatus(employeeId!), enabled: employeeId != null });
   const refresh = () => { qc.invalidateQueries({ queryKey: ["employee-face", employeeId] }); qc.invalidateQueries({ queryKey: ["employee-master"] }); };
   const revoke = useMutation({ mutationFn: (reason: string) => revokeFace(employeeId!, reason), onSuccess: (r) => { toast.success(r.message); refresh(); }, onError: (e: Error) => toast.error(e.message) });
@@ -202,7 +203,6 @@ export const FaceRegistrationField: React.FC<{ employeeId: number | null; name?:
   if (error || !data) return <p className={`${box} text-sm text-destructive`} style={{ border: HR_RULE }}>{(error as Error)?.message || "Could not load face registration."}</p>;
 
   const a = data.active;
-  const [ask, setAsk] = useState<Ask | null>(null);
   const askRevoke = () => setAsk({
     title: "Revoke face registration", tone: "red", confirm: "Revoke", label: "Reason",
     note: "The face is removed. The employee can't punch until they register again (from the app) and HR approves it.",
