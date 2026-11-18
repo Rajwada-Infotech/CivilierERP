@@ -15,7 +15,6 @@ async function get(path: string) {
   if (res.status === 401) throw new Error("unauthorized");
   if (res.status === 403) {
     const body = await res.json().catch(() => ({}));
-    if (body.mustChangePassword) throw new Error("password_change_required");
     throw new Error(body.error || "Forbidden");
   }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Request failed");
@@ -45,6 +44,8 @@ export function writeSeen(key: string, v: number) { try { localStorage.setItem(k
 export const fetchTimeline          = (applicationId: number) => get(withAppId("/timeline", applicationId));
 export const fetchTickets           = (applicationId: number) => get(withAppId("/tickets", applicationId));
 export const fetchActivity          = (applicationId: number) => get(withAppId("/activity", applicationId));
+/** What is waiting on the customer for this property — the server's one rule set (crmPortal.js needsYou), shared with the mobile app. */
+export const fetchNeedsYou          = (applicationId: number) => get(withAppId("/needs-you", applicationId)).then((r: any) => r.items as any[]);
 export const fetchAgreement         = (applicationId: number) => get(withAppId("/agreement", applicationId));
 export const fetchAgreementDocuments = (applicationId: number) => get(withAppId("/agreement/documents", applicationId));
 export const fetchInvoices          = (applicationId: number) => get(withAppId("/invoices", applicationId));

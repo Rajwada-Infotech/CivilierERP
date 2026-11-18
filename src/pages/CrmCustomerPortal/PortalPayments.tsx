@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download, Receipt } from "lucide-react";
+import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download, Receipt, TrendingUp } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
 import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices, fetchCreditNotes, creditNotesSeenKey, writeSeen, fetchReceipts, downloadReceiptPdf } from "./portalApi";
 import {
-  PageHeader, Card, CardHeader, StatusPill, GOLD, HAIRLINE, TEXT, TEXT_FAINT, TEXT_MUTED, SURFACE_ALT, serif,
+  GOLD, HAIRLINE, TEXT, TEXT_FAINT, TEXT_MUTED, SURFACE_ALT, INK, VIOLET, serif, mono,
+  HeroStrip, HeroStatCard, PulseBar, UrgencyBanner,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
 } from "./portalTheme";
 
@@ -54,6 +55,80 @@ function InvoicePdfDialog({ invoice, applicationId, onClose }: { invoice: any; a
   );
 }
 
+// ── Milestone card with premium styling ──────────────────────────────────────
+function MilestoneCard({ m, today }: { m: any; today: Date }) {
+  const isPaid = m.Status === "Paid";
+  const isOverdue = !isPaid && m.DueDate && new Date(m.DueDate) < today;
+  const partialPaid = !isPaid && Number(m.AmountPaid || 0) > 0;
+
+  const railColor = isPaid ? "#059669" : isOverdue ? "#DC2626" : GOLD;
+  const bgColor = isPaid ? "rgba(5,150,105,0.04)" : isOverdue ? "rgba(220,38,38,0.04)" : "transparent";
+
+  return (
+    <div
+      className="relative flex items-start gap-4 px-5 py-4 border-b last:border-0"
+      style={{ borderColor: HAIRLINE, background: bgColor }}
+    >
+      {/* Left status rail */}
+      <div
+        className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full"
+        style={{ background: railColor, opacity: isPaid ? 1 : isOverdue ? 1 : 0.5 }}
+      />
+
+      {/* Status icon */}
+      <div
+        className="mt-0.5 w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+        style={{
+          background: isPaid ? "rgba(5,150,105,0.10)" : isOverdue ? "rgba(220,38,38,0.10)" : "rgba(201,162,39,0.10)",
+          color: isPaid ? "#059669" : isOverdue ? "#DC2626" : GOLD,
+        }}
+      >
+        {isPaid ? <CheckCircle2 size={18} /> : isOverdue ? <Clock size={18} /> : <Circle size={18} />}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold" style={{ color: TEXT }}>{m.MilestoneName}</p>
+            <p className="text-[0.6875rem] mt-0.5" style={{ color: TEXT_FAINT }}>
+              {m.DueDate ? (isOverdue ? `Was due ${fmtDate(m.DueDate)}` : `Due ${fmtDate(m.DueDate)}`) : "Due date to be set"}
+            </p>
+            {partialPaid && (
+              <div className="mt-2">
+                <div className="flex justify-between items-center mb-1">
+                  <p className="text-[0.6875rem]" style={{ color: TEXT_MUTED }}>{fmtMoney(m.AmountPaid)} received</p>
+                  <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
+                    {Math.round((m.AmountPaid / m.AmountDue) * 100)}%
+                  </p>
+                </div>
+                <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${Math.min(100, (m.AmountPaid / m.AmountDue) * 100)}%`, background: GOLD }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-base font-bold tabular-nums" style={{ ...serif, color: TEXT }}>{fmtMoney(m.AmountDue)}</p>
+            <span
+              className="text-[0.625rem] font-semibold px-2 py-0.5 rounded-full inline-block mt-1"
+              style={{
+                background: isPaid ? "rgba(5,150,105,0.12)" : isOverdue ? "rgba(220,38,38,0.12)" : "rgba(201,162,39,0.12)",
+                color: isPaid ? "#059669" : isOverdue ? "#DC2626" : "#8A6D14",
+              }}
+            >
+              {isPaid ? "Paid" : isOverdue ? "Overdue" : "Pending"}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const PortalPayments: React.FC = () => {
   const { timeline, applicationId, me } = useOutletContext<Ctx>();
   const milestones = timeline.paymentMilestones || [];
@@ -77,11 +152,19 @@ const PortalPayments: React.FC = () => {
 
   if (!milestones.length) {
     return (
-      <div className="space-y-6">
-        <PageHeader eyebrow="Finance" title="Payments" />
-        <Card className="p-8 text-center text-sm" style={{ color: TEXT_MUTED }}>
-          Your payment schedule will appear here once your booking is confirmed.
-        </Card>
+      <div>
+        <HeroStrip eyebrow="Finance" title="Payments" subtitle="Your full payment schedule will appear here once your booking is confirmed." />
+        <div className="flex flex-col items-center justify-center py-20 gap-4">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: "rgba(201,162,39,0.10)" }}>
+            <CreditCard size={28} style={{ color: GOLD }} />
+          </div>
+          <div className="text-center">
+            <p className="text-base font-semibold" style={{ color: TEXT }}>No payment schedule yet</p>
+            <p className="text-sm mt-1 max-w-xs" style={{ color: TEXT_MUTED }}>
+              Once your booking is confirmed, your milestone-wise payment plan will appear here automatically.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -94,107 +177,166 @@ const PortalPayments: React.FC = () => {
   const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
     + Number(timeline.onAccountTotalReceived || 0);
   const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
+  const remaining = totalDue - totalPaid;
   const today = new Date(new Date().toDateString());
+  const overdueCount = milestones.filter((m: any) => m.Status !== "Paid" && m.DueDate && new Date(m.DueDate) < today).length;
+  const nextDue = milestones.find((m: any) => m.Status === "Pending");
 
   return (
-    <div className="space-y-6">
-      <PageHeader eyebrow="Finance" title="Payments" subtitle="Your full payment schedule, milestone by milestone." />
+    <div className="space-y-5">
+      {/* Premium hero strip with inline stats */}
+      <HeroStrip
+        eyebrow="Finance"
+        title="Payments"
+        subtitle="Your milestone-by-milestone payment plan"
+        gradient={overdueCount > 0 ? "red" : "violet"}
+      >
+        <div className="grid grid-cols-3 gap-3">
+          <HeroStatCard label="Paid so far" value={fmtMoney(totalPaid)} highlight />
+          <HeroStatCard label="Remaining" value={fmtMoney(remaining)} />
+          <HeroStatCard label="Total value" value={fmtMoney(totalDue)} />
+        </div>
+      </HeroStrip>
 
-      <Card className="p-5">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs" style={{ color: TEXT_FAINT }}>Total Paid</span>
-          <span className="text-xs font-semibold" style={{ color: TEXT }}>{pctPaid}%</span>
-        </div>
-        <div className="h-2.5 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
-          <div className="h-full rounded-full transition-all" style={{ width: `${pctPaid}%`, background: GOLD }} />
-        </div>
-        <div className="grid grid-cols-3 gap-4 mt-4 text-center">
-          <div>
-            <p className="text-lg font-semibold" style={{ ...serif, color: TEXT }}>{fmtMoney(totalPaid)}</p>
-            <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>Paid</p>
-          </div>
-          <div>
-            <p className="text-lg font-semibold" style={{ ...serif, color: GOLD }}>{fmtMoney(totalDue - totalPaid)}</p>
-            <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>Remaining</p>
-          </div>
-          <div>
-            <p className="text-lg font-semibold" style={{ ...serif, color: TEXT }}>{fmtMoney(totalDue)}</p>
-            <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>Total</p>
-          </div>
-        </div>
-      </Card>
+      {/* Overdue alert */}
+      {overdueCount > 0 && (
+        <UrgencyBanner
+          icon={Clock}
+          title={`${overdueCount} payment${overdueCount > 1 ? "s are" : " is"} overdue`}
+          sub="Please contact our team to discuss your payment plan."
+          level="error"
+        />
+      )}
 
-      <Card className="overflow-hidden">
-        <CardHeader icon={CreditCard} title="Milestone Schedule" />
-        {milestones.map((m: any) => {
-          const isPaid = m.Status === "Paid";
-          const isOverdue = !isPaid && m.DueDate && new Date(m.DueDate) < today;
-          return (
-            <div key={m.MilestoneNo} className="flex items-center gap-3 px-5 py-3.5 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
-              {isPaid ? <CheckCircle2 size={18} className="shrink-0" style={{ color: "#0F7A44" }} />
-                : isOverdue ? <Clock size={18} className="text-rose-500 shrink-0" />
-                : <Circle size={18} className="shrink-0" style={{ color: TEXT_FAINT }} />}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold" style={{ color: TEXT }}>{m.MilestoneName}</p>
-                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{m.DueDate ? `Due ${fmtDate(m.DueDate)}` : "Due date to be set"}</p>
-              </div>
-              <div className="text-right shrink-0 flex flex-col items-end gap-1">
-                <p className="text-sm font-bold" style={{ color: TEXT }}>{fmtMoney(m.AmountDue)}</p>
-                {m.AmountPaid > 0 && !isPaid && <p className="text-[0.625rem]" style={{ color: TEXT_FAINT }}>{fmtMoney(m.AmountPaid)} received</p>}
-                <StatusPill status={isPaid ? "Paid" : isOverdue ? "Overdue" : "Pending"} />
-              </div>
+      {/* Progress card */}
+      <div
+        className="rounded-2xl p-5"
+        style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <TrendingUp size={16} style={{ color: GOLD }} />
+            <span className="text-sm font-semibold" style={{ color: TEXT }}>Overall progress</span>
+          </div>
+          <span className="text-2xl font-bold tabular-nums" style={{ ...serif, color: pctPaid >= 100 ? "#059669" : GOLD }}>
+            {pctPaid}%
+          </span>
+        </div>
+        <PulseBar pct={pctPaid} height={12} />
+        <div className="flex justify-between mt-2 text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
+          <span>{fmtMoney(totalPaid)} paid</span>
+          <span>{fmtMoney(remaining)} remaining</span>
+        </div>
+        {nextDue && (
+          <div
+            className="mt-4 pt-4 flex items-center justify-between gap-3"
+            style={{ borderTop: `1px solid ${HAIRLINE}` }}
+          >
+            <div>
+              <p className="text-[0.6875rem] font-semibold uppercase tracking-wide" style={{ color: GOLD }}>Next payment due</p>
+              <p className="text-sm font-semibold mt-0.5" style={{ color: TEXT }}>{nextDue.MilestoneName}</p>
+              {nextDue.DueDate && <p className="text-xs" style={{ color: TEXT_MUTED }}>Due {fmtDate(nextDue.DueDate)}</p>}
             </div>
-          );
-        })}
-      </Card>
+            <p className="text-xl font-bold tabular-nums shrink-0" style={{ ...serif, color: TEXT }}>{fmtMoney(nextDue.AmountDue)}</p>
+          </div>
+        )}
+      </div>
 
-      {invoices.length > 0 && (
-        <Card className="overflow-hidden">
-          <CardHeader icon={FileText} title="Invoices" />
-          {invoices.map((inv: any) => (
-            <div key={inv.Id} className="flex items-center justify-between gap-3 px-5 py-3.5 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
+      {/* Milestone schedule */}
+      <div
+        className="rounded-2xl overflow-hidden"
+        style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}
+      >
+        <div
+          className="flex items-center gap-3 px-5 py-4"
+          style={{ borderBottom: `1px solid ${HAIRLINE}` }}
+        >
+          <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: "rgba(201,162,39,0.10)", color: GOLD }}>
+            <CreditCard size={14} />
+          </span>
+          <h2 className="text-sm font-semibold" style={{ ...serif, color: TEXT }}>Milestone Schedule</h2>
+          <span className="ml-auto text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(201,162,39,0.10)", color: "#8A6D14" }}>
+            {milestones.filter((m: any) => m.Status === "Paid").length} / {milestones.length} paid
+          </span>
+        </div>
+        {milestones.map((m: any) => (
+          <MilestoneCard key={m.MilestoneNo} m={m} today={today} />
+        ))}
+      </div>
+
+      {/* Invoices */}
+      {(invoices as any[]).length > 0 && (
+        <div
+          className="rounded-2xl overflow-hidden"
+          style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}
+        >
+          <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
+            <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: "rgba(201,162,39,0.10)", color: GOLD }}>
+              <FileText size={14} />
+            </span>
+            <h2 className="text-sm font-semibold" style={{ ...serif, color: TEXT }}>Invoices</h2>
+          </div>
+          {(invoices as any[]).map((inv: any) => (
+            <div key={inv.Id} className="flex items-center justify-between gap-3 px-5 py-4 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
               <div className="min-w-0">
                 <p className="text-sm font-semibold" style={{ color: TEXT }}>{inv.InvoiceNo}</p>
-                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{inv.InvoiceType} · {fmtDate(inv.InvoiceDate)}{inv.Description ? ` · ${inv.Description}` : ""}</p>
+                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
+                  {inv.InvoiceType} · {fmtDate(inv.InvoiceDate)}{inv.Description ? ` · ${inv.Description}` : ""}
+                </p>
               </div>
-              <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-4 shrink-0">
                 <p className="text-sm font-bold" style={{ color: TEXT }}>{fmtMoney(inv.Amount)}</p>
-                <button data-row-view onClick={() => setPreviewInvoice(inv)}
-                  className="flex items-center gap-1 text-xs font-medium hover:underline" style={{ color: GOLD }}>
+                <button
+                  data-row-view
+                  onClick={() => setPreviewInvoice(inv)}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-opacity hover:opacity-80"
+                  style={{ background: "rgba(201,162,39,0.10)", color: "#8A6D14" }}
+                >
                   <Eye size={13} /> View
                 </button>
               </div>
             </div>
           ))}
-        </Card>
+        </div>
       )}
 
-      {receipts.length > 0 && (
-        <Card className="overflow-hidden">
-          <CardHeader icon={Receipt} title="Payment Receipts" />
-          {receipts.map((rcpt: any) => (
-            <div key={rcpt.Id} className="flex items-center justify-between gap-3 px-5 py-3.5 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
+      {/* Receipts */}
+      {(receipts as any[]).length > 0 && (
+        <div
+          className="rounded-2xl overflow-hidden"
+          style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}
+        >
+          <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
+            <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: "rgba(5,150,105,0.10)", color: "#059669" }}>
+              <Receipt size={14} />
+            </span>
+            <h2 className="text-sm font-semibold" style={{ ...serif, color: TEXT }}>Payment Receipts</h2>
+          </div>
+          {(receipts as any[]).map((rcpt: any) => (
+            <div key={rcpt.Id} className="flex items-center justify-between gap-3 px-5 py-4 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
               <div className="min-w-0">
                 <p className="text-sm font-semibold" style={{ color: TEXT }}>{rcpt.ReceiptNo}</p>
                 <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
-                  {fmtDate(rcpt.ReceivedDate || rcpt.CreatedAt)}{rcpt.PaymentMode ? ` · ${rcpt.PaymentMode}` : ""}{rcpt.TransactionRef ? ` · Ref: ${rcpt.TransactionRef}` : rcpt.ChequeNo ? ` · Chq: ${rcpt.ChequeNo}` : ""}
+                  {fmtDate(rcpt.ReceivedDate || rcpt.CreatedAt)}
+                  {rcpt.PaymentMode ? ` · ${rcpt.PaymentMode}` : ""}
+                  {rcpt.TransactionRef ? ` · Ref: ${rcpt.TransactionRef}` : rcpt.ChequeNo ? ` · Chq: ${rcpt.ChequeNo}` : ""}
                 </p>
               </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <p className="text-sm font-bold" style={{ color: TEXT }}>{fmtMoney(rcpt.Amount)}</p>
+              <div className="flex items-center gap-4 shrink-0">
+                <p className="text-sm font-bold" style={{ ...serif, color: "#059669" }}>{fmtMoney(rcpt.Amount)}</p>
                 <button
                   type="button"
                   disabled={downloadingReceiptId === rcpt.Id}
                   onClick={() => handleDownloadReceipt(rcpt.Id)}
-                  className="flex items-center gap-1 text-xs font-medium hover:underline disabled:opacity-50"
-                  style={{ color: GOLD }}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
+                  style={{ background: "rgba(5,150,105,0.10)", color: "#065F46" }}
                 >
                   <Download size={13} /> {downloadingReceiptId === rcpt.Id ? "Opening…" : "Download"}
                 </button>
               </div>
             </div>
           ))}
-        </Card>
+        </div>
       )}
 
       <RefundDocuments customerId={me?.Id} />
@@ -220,20 +362,40 @@ function RefundDocuments({ customerId }: { customerId: any }) {
   };
   const label = (n: any) => (n.Status === "TimeBarred" ? "GST paid certificate" : n.DocType === "CreditNote" ? "Credit note" : "Credit note (refund voucher)");
   return (
-    <Card>
-      <CardHeader icon={FileText} title="Credit notes" />
-      <p className="px-5 pt-3 text-xs" style={{ color: TEXT_MUTED }}>Your credit notes for money we gave back — keep them for your records and tax filings.</p>
+    <div
+      className="rounded-2xl overflow-hidden"
+      style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}
+    >
+      <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
+        <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: "rgba(201,162,39,0.10)", color: GOLD }}>
+          <FileText size={14} />
+        </span>
+        <h2 className="text-sm font-semibold" style={{ ...serif, color: TEXT }}>Credit Notes</h2>
+      </div>
+      <p className="px-5 pt-3 pb-1 text-xs" style={{ color: TEXT_MUTED }}>
+        Your credit notes for money we've returned — keep them for your records and tax filings.
+      </p>
       {notes.map((n) => (
-        <div key={n.Id} className="flex items-center gap-3 px-5 py-3 border-t" style={{ borderColor: HAIRLINE }}>
+        <div key={n.Id} className="flex items-center gap-3 px-5 py-3.5 border-t" style={{ borderColor: HAIRLINE }}>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium" style={{ color: TEXT }}>{label(n)} {n.DocNo ? <span style={{ color: TEXT_MUTED }}>· {n.DocNo}</span> : null}</div>
-            <div className="text-xs" style={{ color: TEXT_FAINT }}>{n.Property} · {fmtDate(n.DocDate)} · refund {n.RefundNo}</div>
+            <div className="text-sm font-medium" style={{ color: TEXT }}>
+              {label(n)} {n.DocNo ? <span style={{ color: TEXT_MUTED }}>· {n.DocNo}</span> : null}
+            </div>
+            <div className="text-xs mt-0.5" style={{ color: TEXT_FAINT }}>
+              {n.Property} · {fmtDate(n.DocDate)} · refund {n.RefundNo}
+            </div>
           </div>
-          <div className="text-sm tabular-nums" style={{ color: TEXT }}>{fmtMoney(n.TotalAmount)}</div>
-          <button onClick={() => open(n.Id)} className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border" style={{ borderColor: HAIRLINE, color: TEXT }}><Download size={13} />PDF</button>
+          <div className="text-sm font-bold tabular-nums shrink-0" style={{ color: TEXT }}>{fmtMoney(n.TotalAmount)}</div>
+          <button
+            onClick={() => open(n.Id)}
+            className="text-xs inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-opacity hover:opacity-80"
+            style={{ background: "rgba(201,162,39,0.10)", color: "#8A6D14" }}
+          >
+            <Download size={13} /> PDF
+          </button>
         </div>
       ))}
-    </Card>
+    </div>
   );
 }
 

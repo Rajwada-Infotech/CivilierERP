@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -13,7 +13,7 @@ import {
   respondAgreement, respondSalesDeed, fetchQueryPaymentAttachments, uploadQueryPaymentProof, fmtMoney, fmtDate, fmtBytes, maskAadhaar,
 } from "./portalApi";
 import {
-  PageHeader, Card, CardHeader, InfoField, StatusPill, Stepper, StepState,
+  Card, CardHeader, InfoField, StatusPill, Stepper, StepState, HeroStrip, UrgencyBanner,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
   GOLD, GOLD_SOFT, INK, VIOLET, HAIRLINE, SURFACE, SURFACE_ALT, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
 } from "./portalTheme";
@@ -415,7 +415,7 @@ const PortalAgreement: React.FC = () => {
   if (!agreement && !timeline.salesDeed && documents.length === 0) {
     return (
       <div className="space-y-6">
-        <PageHeader eyebrow="Finance" title="Agreement" />
+        <HeroStrip eyebrow="Finance" title="Agreement" subtitle="Your agreement will appear here as soon as it's ready for review." />
         <Card className="p-10 text-center">
           <div className="w-11 h-11 mx-auto rounded-full flex items-center justify-center mb-3" style={{ background: GOLD_SOFT, color: GOLD }}>
             <ScrollText size={20} />
@@ -429,7 +429,7 @@ const PortalAgreement: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Finance · Legal" title="Agreement" subtitle="Track your full legal journey — agreement, sale deed, government payment, and registration — in one place." />
+      <HeroStrip eyebrow="Finance · Legal" title="Agreement" subtitle="Track your full legal journey — agreement, sale deed, government payment, and registration." />
 
       {agreement && (
         <Card className="overflow-hidden">

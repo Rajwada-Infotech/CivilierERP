@@ -1,24 +1,38 @@
 import React, { useMemo, useState } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, CreditCard, FolderCheck, LifeBuoy, Radio, ArrowRight, AlertTriangle, ChevronRight, Scale } from "lucide-react";
-import { fetchActivity, fetchAgreement, fetchAgreementDocuments, fmtMoney, fmtDate, fmtDateTime } from "./portalApi";
-import { PageHeader, Card, GOLD, GOLD_SOFT, INK, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, SURFACE_ALT, serif } from "./portalTheme";
+import { FileText, CreditCard, FolderCheck, LifeBuoy, Radio, AlertTriangle, Scale, Home, FileSignature } from "lucide-react";
+import { fetchActivity, fetchNeedsYou, fmtDateTime } from "./portalApi";
+import {
+  HeroStrip, UrgencyBanner, TimelineRow,
+  GOLD, GOLD_SOFT, INK, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif,
+} from "./portalTheme";
 
 type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
-const TYPE_META: Record<string, { icon: any; label: string; to: string }> = {
-  agreement: { icon: FileText, label: "Agreement", to: "/crm-client-portal/agreement" },
-  legal: { icon: Scale, label: "Legal & Registration", to: "/crm-client-portal/agreement" },
-  payment: { icon: CreditCard, label: "Payment", to: "/crm-client-portal/payments" },
-  document: { icon: FolderCheck, label: "Document", to: "/crm-client-portal/agreement" },
-  ticket: { icon: LifeBuoy, label: "Support", to: "/crm-client-portal/tickets" },
+const TYPE_META: Record<string, { icon: any; label: string; to: string; type: "agreement" | "payment" | "document" | "ticket" | "default" }> = {
+  agreement: { icon: FileText, label: "Agreement", to: "/crm-client-portal/agreement", type: "agreement" },
+  legal: { icon: Scale, label: "Legal & Registration", to: "/crm-client-portal/agreement", type: "agreement" },
+  payment: { icon: CreditCard, label: "Payment", to: "/crm-client-portal/payments", type: "payment" },
+  document: { icon: FolderCheck, label: "Document", to: "/crm-client-portal/agreement", type: "document" },
+  ticket: { icon: LifeBuoy, label: "Support", to: "/crm-client-portal/tickets", type: "ticket" },
+};
+
+// Where each kind of waiting item is acted on, and its icon. The items themselves (and their wording) come from the
+// server's one rule set — GET /needs-you — the same list the mobile app shows.
+const NEEDS_TARGET: Record<string, string> = {
+  documents: "/crm-client-portal/agreement", payments: "/crm-client-portal/payments",
+  construction: "/crm-client-portal/construction", transferDeed: "/crm-client-portal/transfer-deed",
+};
+const NEEDS_ICON: Record<string, any> = {
+  agreementReview: FileText, documentsNeeded: FolderCheck, agreementDate: FileText, salesDeedReview: FileText,
+  govtPaymentProof: Scale, possessionNotice: Home, transferDeed: FileSignature, paymentDue: CreditCard,
 };
 
 const FILTERS: { key: string; label: string }[] = [
   { key: "", label: "All" },
   { key: "agreement", label: "Agreement" },
-  { key: "legal", label: "Legal & Registration" },
+  { key: "legal", label: "Legal" },
   { key: "payment", label: "Payments" },
   { key: "document", label: "Documents" },
   { key: "ticket", label: "Support" },
@@ -38,11 +52,10 @@ const FILTERS: { key: string; label: string }[] = [
 // they take it (the real approve/respond/upload UI already lives on the
 // Agreement/Payments pages — this doesn't duplicate that, it routes to it).
 const PortalActivity: React.FC = () => {
-  const { timeline, applicationId } = useOutletContext<Ctx>();
+  const { applicationId } = useOutletContext<Ctx>();
   const navigate = useNavigate();
   const { data: feed = [], isLoading } = useQuery({ queryKey: ["portal-activity", applicationId], queryFn: () => fetchActivity(applicationId), staleTime: 30_000 });
-  const { data: agreement } = useQuery({ queryKey: ["portal-agreement", applicationId], queryFn: () => fetchAgreement(applicationId) });
-  const { data: documents = [] } = useQuery({ queryKey: ["portal-agreement-documents", applicationId], queryFn: () => fetchAgreementDocuments(applicationId) });
+  const { data: needs = [] } = useQuery({ queryKey: ["portal-needs-you", applicationId], queryFn: () => fetchNeedsYou(applicationId) });
   const [filter, setFilter] = useState("");
 
   const filtered = useMemo(
@@ -50,79 +63,91 @@ const PortalActivity: React.FC = () => {
     [feed, filter]
   );
 
-  const needsAction: { icon: any; label: string; sub: string; to: string }[] = [];
-  if (agreement?.SentToCustomerAt && agreement?.CustomerApprovalStatus === "Pending") {
-    needsAction.push({ icon: FileText, label: "Your agreement is waiting for your review", sub: `${agreement.AgreementNo} — approve or request a recheck`, to: "/crm-client-portal/agreement" });
-  }
-  const mandatoryDocs = (documents as any[]).filter((d) => (d.Status === "Requested" || d.Status === "Rejected") && d.IsMandatory);
-  if (mandatoryDocs.length > 0) {
-    needsAction.push({ icon: FolderCheck, label: `${mandatoryDocs.length} required document${mandatoryDocs.length > 1 ? "s" : ""} needed`, sub: mandatoryDocs.map((d) => d.Label || d.DocumentType).join(", "), to: "/crm-client-portal/agreement" });
-  }
-  if (agreement?.CustomerApprovalStatus === "Approved" && !agreement?.AgreementDate && agreement?.DateApprovalStatus !== "Pending"
-      && agreement?.ProposedDateStatus !== "PendingCompanyReview") {
-    needsAction.push({
-      icon: FileText,
-      label: agreement?.ProposedDateStatus === "PendingCustomerReview" ? "Respond to our proposed agreement date" : "Propose an agreement date",
-      sub: agreement?.ProposedDateStatus === "PendingCustomerReview" ? `We proposed ${fmtDate(agreement.ProposedDate)} — accept or suggest another` : "Suggest a date that works for you",
-      to: "/crm-client-portal/agreement",
-    });
-  }
-  if (timeline?.salesDeed?.SentToCustomerAt && timeline?.salesDeed?.CustomerApprovalStatus === "Pending") {
-    needsAction.push({ icon: FileText, label: "Your sales deed is waiting for your review", sub: "Approve or request a recheck", to: "/crm-client-portal/agreement" });
-  }
-  if (timeline?.queryPayment && timeline?.queryPayment?.Status === "InfoSent") {
-    needsAction.push({ icon: Scale, label: "Government payment proof needed", sub: `${fmtMoney(timeline.queryPayment.RequiredAmount)} — upload your proof once paid`, to: "/crm-client-portal/agreement" });
-  }
-  const nextDue = (timeline?.paymentMilestones || []).find((m: any) => m.Status === "Pending");
-  if (nextDue) {
-    needsAction.push({ icon: CreditCard, label: `${nextDue.MilestoneName} payment is due`, sub: `${fmtMoney(nextDue.AmountDue)}${nextDue.DueDate ? ` · Due ${fmtDate(nextDue.DueDate)}` : ""}`, to: "/crm-client-portal/payments" });
-  }
+  const needsAction = (needs as any[]).map((x) => ({
+    icon: NEEDS_ICON[x.kind] || AlertTriangle, label: x.label as string, sub: x.sub as string,
+    to: NEEDS_TARGET[x.target] || "/crm-client-portal/activity", level: (x.urgent ? "error" : "warning") as "warning" | "error",
+  }));
 
   return (
-    <div className="space-y-6">
-      <PageHeader eyebrow="Account" title="Updates & Approvals" subtitle="A running log of everything that's happened on your application — agreement approvals, dates, payments, documents, and support." />
+    <div className="space-y-5">
+      {/* Premium hero */}
+      <HeroStrip
+        eyebrow="Updates"
+        title="Updates & Approvals"
+        subtitle="A live log of everything on your application — approvals, payments, documents, and support."
+        gradient={needsAction.length > 0 ? "gold" : "violet"}
+      >
+        {needsAction.length > 0 && (
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl" style={{ background: "rgba(220,38,38,0.20)", border: "1px solid rgba(220,38,38,0.4)" }}>
+            <AlertTriangle size={14} style={{ color: "#FCA5A5" }} />
+            <span className="text-sm font-semibold text-white">{needsAction.length} action{needsAction.length > 1 ? "s" : ""} need your attention</span>
+          </div>
+        )}
+      </HeroStrip>
 
+      {/* Needs-action cards */}
       {needsAction.length > 0 && (
-        <Card className="p-4 space-y-2" style={{ background: GOLD_SOFT, borderColor: "#E8C766" }}>
-          <h2 className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5" style={{ color: "#8A6D14" }}>
-            <AlertTriangle size={13} /> Needs Your Action
-          </h2>
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: TEXT_FAINT }}>Needs Your Action</p>
           {needsAction.map((a, i) => (
-            <button key={i} onClick={() => navigate(a.to)}
-              className="w-full flex items-center gap-3 rounded-xl px-4 py-3 text-left hover:shadow-sm transition-shadow" style={{ background: "#fff", border: "1px solid #E8E1D3" }}>
-              <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: GOLD_SOFT, color: GOLD }}>
-                <a.icon size={15} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold" style={{ color: INK }}>{a.label}</p>
-                <p className="text-xs mt-0.5 truncate" style={{ color: "#8A6D14" }}>{a.sub}</p>
-              </div>
-              <ArrowRight size={16} className="shrink-0" style={{ color: GOLD }} />
-            </button>
+            <UrgencyBanner
+              key={i}
+              icon={a.icon}
+              title={a.label}
+              sub={a.sub}
+              cta="Go →"
+              onCta={() => navigate(a.to)}
+              level={a.level}
+            />
           ))}
-        </Card>
+        </div>
       )}
 
+      {/* Filter pills */}
       <div className="flex items-center gap-1.5 flex-wrap">
         {FILTERS.map((f) => (
-          <button key={f.key} onClick={() => setFilter(f.key)}
-            className="px-3 py-1.5 text-xs font-semibold rounded-full transition-colors"
-            style={filter === f.key ? { background: INK, color: "#fff" } : { background: GOLD_SOFT, color: "#8A6D14" }}>
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className="px-3.5 py-1.5 text-xs font-semibold rounded-full transition-all"
+            style={filter === f.key
+              ? { background: INK, color: "#fff", boxShadow: "0 2px 8px rgba(30,11,66,0.25)" }
+              : { background: GOLD_SOFT, color: "#8A6D14" }
+            }
+          >
             {f.label}
           </button>
         ))}
       </div>
 
-      <Card className="overflow-hidden">
+      {/* Timeline */}
+      <div
+        className="rounded-2xl p-5"
+        style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}
+      >
         {isLoading ? (
-          <div className="p-8 text-center text-sm" style={{ color: TEXT_FAINT }}>Loading…</div>
+          <div className="space-y-6 animate-pulse">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex gap-4">
+                <div className="w-9 h-9 rounded-xl shrink-0" style={{ background: "var(--portal-surface-alt)" }} />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-48 rounded-lg" style={{ background: "var(--portal-surface-alt)" }} />
+                  <div className="h-3 w-32 rounded-lg" style={{ background: "var(--portal-surface-alt)" }} />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
-          <div className="p-10 text-center">
-            <div className="w-11 h-11 mx-auto rounded-full flex items-center justify-center mb-3" style={{ background: GOLD_SOFT, color: GOLD }}>
-              <Radio size={20} />
+          <div className="py-12 flex flex-col items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: GOLD_SOFT }}>
+              <Radio size={24} style={{ color: GOLD }} />
             </div>
-            <p className="text-sm font-medium" style={{ color: TEXT }}>Nothing here yet</p>
-            <p className="text-xs mt-1" style={{ color: TEXT_MUTED }}>Updates will show up here the moment something happens on your application.</p>
+            <div className="text-center">
+              <p className="text-base font-semibold" style={{ color: TEXT }}>Nothing here yet</p>
+              <p className="text-sm mt-1 max-w-xs" style={{ color: TEXT_MUTED }}>
+                Updates will appear here the moment something happens on your application.
+              </p>
+            </div>
           </div>
         ) : (
           <div>
@@ -130,24 +155,29 @@ const PortalActivity: React.FC = () => {
               const meta = TYPE_META[e.type] || TYPE_META.agreement;
               const Icon = meta.icon;
               return (
-                <button key={i} onClick={() => navigate(meta.to)}
-                  className="w-full flex items-start gap-3 px-5 py-3.5 border-b last:border-0 text-left hover:bg-black/[0.02] transition-colors"
-                  style={{ borderColor: HAIRLINE }}>
-                  <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: SURFACE_ALT, color: GOLD }}>
-                    <Icon size={15} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium" style={{ ...serif, color: TEXT }}>{e.title}</p>
-                    {e.detail && <p className="text-[0.75rem] mt-0.5" style={{ color: TEXT_MUTED }}>{e.detail}</p>}
-                    <p className="text-[0.6875rem] mt-1" style={{ color: TEXT_FAINT }}>{fmtDateTime(e.at)}</p>
-                  </div>
-                  <ChevronRight size={15} className="shrink-0 mt-1" style={{ color: TEXT_FAINT }} />
-                </button>
+                <TimelineRow
+                  key={i}
+                  icon={Icon}
+                  title={e.title}
+                  detail={e.detail}
+                  time={fmtDateTime(e.at)}
+                  type={meta.type}
+                  isLast={i === filtered.length - 1}
+                  onClick={() => navigate(meta.to)}
+                />
               );
             })}
           </div>
         )}
-      </Card>
+      </div>
+
+      {/* Footer note */}
+      {!isLoading && filtered.length > 0 && (
+        <p className="text-center text-xs" style={{ color: TEXT_FAINT }}>
+          Showing {filtered.length} update{filtered.length > 1 ? "s" : ""}
+          {filter ? ` in ${FILTERS.find((f) => f.key === filter)?.label}` : ""}.
+        </p>
+      )}
     </div>
   );
 };
