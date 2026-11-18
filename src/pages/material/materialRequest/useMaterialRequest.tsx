@@ -255,6 +255,9 @@ export function useMaterialRequest() {
           id: String(item.M_Id),
           name: `${item.M_Name} — Stock: ${Number(item.AvailableStock).toFixed(2)}${item.M_Group ? ` · ${item.M_Group}` : ""}`,
           itemType: item.M_Type ?? "",
+          // Search the item's name only: the group in the label ("AAC BLOCK AND BLOCK ADHESIVE") made every item
+          // of the group match "block adhesive".
+          searchText: String(item.M_Name ?? ""),
         })),
     [itemOptions, availableSupplyDays, selectedItemIds],
   );

@@ -6,7 +6,7 @@
 // interval gets "close enough to live" for a chat that isn't
 // high-frequency without that extra plumbing.
 import { useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, type ScrollViewInstance } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send, MessageCircle } from "lucide-react-native";
 import * as spApi from "@/api/supplierPortalApi";
@@ -29,7 +29,7 @@ function fmtDay(d: string) {
 export function OrderChat({ poId, currentUserId }: { poId: number; currentUserId: number }) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
 
   const commentsQ = useQuery({
     queryKey: ["supplier-order-comments", poId],

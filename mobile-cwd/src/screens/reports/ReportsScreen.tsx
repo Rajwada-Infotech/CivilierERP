@@ -110,7 +110,7 @@ export default function ReportsScreen() {
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ paddingHorizontal: 10, paddingTop: 14, paddingBottom: 96 }}
       keyboardShouldPersistTaps="handled"
-      refreshControl={<RefreshControl refreshing={reportQ.isRefetching} onRefresh={() => reportQ.refetch()} tintColor={colors.mutedForeground} />}
+      refreshControl={<RefreshControl refreshing={reportQ.isRefetching} onRefresh={() => void reportQ.refetch()} tintColor={colors.mutedForeground} />}
     >
       <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
         {([{ k: "tag", label: "Tag-Wise Report" }, { k: "user", label: "User-Wise Daily Work" }] as const).map((t) => {

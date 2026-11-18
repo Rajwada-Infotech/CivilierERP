@@ -59,7 +59,7 @@ export default function TagMasterScreen() {
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ paddingHorizontal: 10, paddingTop: 14, paddingBottom: 96, gap: 10 }}
       keyboardShouldPersistTaps="handled"
-      refreshControl={<RefreshControl refreshing={tagsQ.isRefetching} onRefresh={() => tagsQ.refetch()} tintColor={colors.mutedForeground} />}
+      refreshControl={<RefreshControl refreshing={tagsQ.isRefetching} onRefresh={() => void tagsQ.refetch()} tintColor={colors.mutedForeground} />}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 12, paddingHorizontal: 12 }}>
         <Search size={14} color={colors.mutedForeground} />

@@ -75,7 +75,7 @@ export default function QualityCheckScreen() {
           )}
           contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: 96 }}
           refreshControl={<RefreshControl refreshing={refreshing} tintColor={ACCENT} onRefresh={async () => { setRefreshing(true); await q.refetch(); setRefreshing(false); }} />}
-          ListFooterComponent={q.isFetchingNextPage ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 16 }} /> : null}
+          ListFooterComponent={q.isFetchingNextPage ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 16 }} /> : undefined}
           ListEmptyComponent={
             <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 40 }}>
               {term ? "No activities match your search." : "Nothing is waiting for Quality Check."}
