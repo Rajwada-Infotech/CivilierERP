@@ -942,3 +942,25 @@ export const transferWork = async (payload: {
   });
   return handleResponse<{ success: boolean; transferred: number }>(res);
 };
+
+// ── Labour / Material Given By: who supplied it, from when (migration 695) ─────────────────────────────────────
+export interface SourceLogEntry {
+  id: number;
+  kind: "LABOUR" | "MATERIAL";
+  source: "DEVELOPER" | "CONTRACTOR";
+  contractorId: number | null;
+  contractorName: string | null;
+  startedOn: string; // YYYY-MM-DD
+  endedOn: string | null; // null = the current source
+  days: number; // days supplied, to today for the current one
+  current: boolean;
+  createdBy: string | null;
+  endedBy: string | null;
+}
+
+/** Every labour / material source period of an activity, newest first. */
+export const getSourceLog = async (rungId: number): Promise<SourceLogEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/source-log`);
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load the source history");
+  return res.json();
+};
