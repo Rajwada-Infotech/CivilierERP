@@ -32,8 +32,9 @@ const KIND_LABEL: Record<Kind, string> = {
   demand: "Demand", payment: "Payment", applied: "Applied", deposit: "On account", awaiting: "Awaiting approval", refund: "Refund", void: "Not counted",
 };
 
-const H3 = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5";
-const CAP = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block";
+const H3 = "text-sm font-semibold text-foreground flex items-center gap-1.5";
+// A caption; the table headings use it too, so it is not a block of its own (that stacked the headings).
+const CAP = "text-xs font-medium text-muted-foreground";
 
 export const BookingStatement: React.FC<{ bookingId: number; refreshKey?: string }> = ({ bookingId, refreshKey }) => {
   const { data, isLoading, isError, error } = useQuery({
@@ -43,7 +44,7 @@ export const BookingStatement: React.FC<{ bookingId: number; refreshKey?: string
   });
 
   return (
-    <div className="border border-border p-4 space-y-3">
+    <div className="border border-border p-4 space-y-3 rounded-lg">
       <h3 className={H3}><FileText size={15} /> Statement</h3>
       {isLoading ? (
         <p className="text-xs text-muted-foreground">Loading…</p>
@@ -60,8 +61,8 @@ export const BookingStatement: React.FC<{ bookingId: number; refreshKey?: string
               { label: "Demanded, unpaid", value: data.totals.demandedOpen, warn: data.totals.demandedOpen > 0 },
               { label: "Awaiting approval", value: data.totals.awaitingApproval },
             ].map((t) => (
-              <div key={t.label} className="border border-border px-3 py-2">
-                <span className={CAP}>{t.label}</span>
+              <div key={t.label} className="border border-border px-3 py-2 rounded-md">
+                <span className={`${CAP} block`}>{t.label}</span>
                 <span className={`tabular-nums ${t.strong ? "font-bold" : "font-semibold"} ${t.warn ? "text-destructive" : "text-foreground"}`}>{fmtInr(t.value)}</span>
               </div>
             ))}
@@ -70,7 +71,7 @@ export const BookingStatement: React.FC<{ bookingId: number; refreshKey?: string
           {data.entries.length === 0 ? (
             <p className="text-xs text-muted-foreground">No demand or payment recorded yet.</p>
           ) : (
-            <div className="overflow-x-auto max-h-80 overflow-y-auto border border-border">
+            <div className="overflow-x-auto max-h-80 overflow-y-auto border border-border rounded-lg">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-card">
                   <tr className="border-b border-border text-left">
@@ -108,7 +109,7 @@ export const BookingStatement: React.FC<{ bookingId: number; refreshKey?: string
 
           {data.upcoming.length > 0 && (
             <div className="text-xs">
-              <span className={CAP}>Not yet demanded</span>
+              <span className={`${CAP} block`}>Not yet demanded</span>
               <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
                 {data.upcoming.map((u, i) => (
                   <li key={i} className="tabular-nums">

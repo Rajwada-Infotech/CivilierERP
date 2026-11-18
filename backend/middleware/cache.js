@@ -275,7 +275,11 @@ function cache(namespace, ttl = 300, { shared = false, fixedTtl = false, dropOnA
       // the cache HIT path replays data without the original status code, which
       // would serve an error body as 200 and break every client that checks
       // res.ok before parsing the body.
+      // This wrapper is async, so anything it throws is a rejected promise no route awaits — an unhandled
+      // rejection that stops the server. A reply already sent (the request-timeout 503, then the route's own error
+      // reply when its query finally fails) is therefore skipped, and the send itself can never throw out of here.
       res.json = async (data) => {
+        if (res.headersSent) { releaseLock(); return res; }
         try {
           if (dbStart) req.timing.mark("db.query", dbStart);
 
@@ -298,9 +302,12 @@ function cache(namespace, ttl = 300, { shared = false, fixedTtl = false, dropOnA
             ]);
 
             if (writeStart) req.timing.mark("cache.write", writeStart);
-            res.setHeader("X-Cache", "MISS");
-            res.setHeader("X-Cache-TTL", `${finalTtl}s`);
-          } else {
+            // The cache write awaited Redis: a timeout reply may have gone out meanwhile.
+            if (!res.headersSent) {
+              res.setHeader("X-Cache", "MISS");
+              res.setHeader("X-Cache-TTL", `${finalTtl}s`);
+            }
+          } else if (!res.headersSent) {
             res.setHeader("X-Cache", "SKIP");
           }
 
@@ -310,7 +317,13 @@ function cache(namespace, ttl = 300, { shared = false, fixedTtl = false, dropOnA
           releaseLock(); // always release even on write failure
         }
 
-        return originalJson(data);
+        if (res.headersSent) return res;
+        try {
+          return originalJson(data);
+        } catch (err) {
+          console.error("[cache] send error:", err.message);
+          return res;
+        }
       };
 
       next();

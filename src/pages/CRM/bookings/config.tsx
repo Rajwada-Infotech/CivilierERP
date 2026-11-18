@@ -72,7 +72,7 @@ export async function fetchBookings(applicationId: string): Promise<any[]> {
 }
 
 export const PAGE_SIZE = 20;
-export interface BookingListFilters { search: string; status: string; companyId: string; projectId: string; blockId: string }
+export interface BookingListFilters { search: string; status: string; companyId: string; projectId: string; blockId: string; sortKey?: string; sortDir?: "asc" | "desc" }
 export interface BookingList { rows: any[]; total: number; statusCounts: Record<string, number>; frozen: number }
 
 // Throws, so a failed load shows as one instead of an empty list. statusCounts covers every status under the other
@@ -84,6 +84,7 @@ export async function fetchBookingsList(filters: BookingListFilters, page: numbe
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
   if (filters.blockId) params.set("blockId", filters.blockId);
+  if (filters.sortKey) { params.set("sortKey", filters.sortKey); params.set("sortDir", filters.sortDir || "desc"); }
   const res = await fetchWithAuth(`${API}?${params}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Could not load the bookings (${res.status}).`);

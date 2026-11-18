@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -35,7 +35,7 @@ const fmt = (n: any) => (n == null || n === "" ? "—" : fmtRupees(Number(n)));
 
 interface Deal {
   Id: number; Kind: "Resale" | "BuyBack" | null; BookingIds: string | null;
-  PlotName: string | null; PlotNo: string | null; UnitName: string | null;
+  PlotName: string | null; PlotNo: string | null; UnitName: string | null; Property?: string | null; PlotIds?: string | null;
   FromBookingNo: string | null; FromCustomerName: string | null; ToCustomerName: string | null;
   ResaleDate: string | null; AgreedValue: number | null; OriginalValue: number | null; PaidAtTransfer: number | null;
   DeveloperFeeAmount: number | null; DeveloperFeeGstAmount: number | null;
@@ -47,6 +47,8 @@ interface Holding {
   BookingId: number; BookingIds: number[]; BookingNos: string; UnitNo: string; Kind: string;
   ProjectName: string | null; BlockName: string | null; CustomerId: number; CustomerName: string | null; Mobile: string | null;
   TotalValue: number; Paid: number; OpenDeal: { Id: number; Kind: string; Status: string } | null; Conveyed?: boolean;
+  // A booking of several plots: each can be resold on its own, at its own booked price.
+  Plots?: { PlotId: number; PlotName: string; AreaSqFt: number | null; AllocatedValue: number; OpenDeal: { Id: number; Kind: string; Status: string } | null }[];
 }
 
 const getJson = async (url: string) => {
@@ -56,7 +58,7 @@ const getJson = async (url: string) => {
 };
 
 const emptyForm = () => ({ Kind: "Resale" as "Resale" | "BuyBack", FromBookingId: "", ToCustomerId: "", AgreedValue: "", DeveloperFeeAmount: "",
-  TdsAmount: "", BuyBackGstAmount: "", StampDutyAmount: "", ResaleDate: localDay(), Notes: "" });
+  TdsAmount: "", BuyBackGstAmount: "", StampDutyAmount: "", ResaleDate: localDay(), Notes: "", PlotIds: [] as number[] });
 
 /** What a case's status reads as on the list. */
 const statusText = (d: Deal) =>
@@ -84,6 +86,20 @@ const CrmResales: React.FC = () => {
   const [form, setForm] = useState(emptyForm);
   // In the address, so a refresh or a shared link keeps it.
   const [tab, setTab] = useUrlParam<ResaleTab>("tab", "all", RESALE_TABS);
+  // ?newCase=Resale|BuyBack&fromBooking=<id> (the Bookings page's villa offers): this page's own new-case form,
+  // opened once with the kind and the property chosen; the parameters are then dropped so a refresh doesn't reopen it.
+  const [sp, setSp] = useSearchParams();
+  useEffect(() => {
+    const kind = sp.get("newCase");
+    const from = sp.get("fromBooking");
+    // Waits for the page rights: they read "no" until they have loaded.
+    if (!kind || !from || !rights.canCreate) return;
+    if (kind === "Resale" || kind === "BuyBack") {
+      setForm({ ...emptyForm(), Kind: kind, FromBookingId: from });
+      setOpen(true);
+    }
+    setSp((p) => { p.delete("newCase"); p.delete("fromBooking"); return p; }, { replace: true });
+  }, [sp, setSp, rights.canCreate]);
 
   const { data: deals = [], isLoading, isError, error, isFetching, refetch } = useQuery<Deal[]>({ queryKey: ["crm-resales"], queryFn: () => getJson(API) });
   const { data: holdings = [] } = useQuery<Holding[]>({ queryKey: ["crm-resale-holdings"], queryFn: () => getJson(`${API}/holdings`), enabled: open });
@@ -104,6 +120,19 @@ const CrmResales: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["crm-resale-holdings"] });
   };
   const holding = useMemo(() => holdings.find((h) => String(h.BookingId) === form.FromBookingId), [holdings, form.FromBookingId]);
+  // A booking of several plots: the plots not on another case, all ticked to start with (every plot = the whole booking).
+  const freePlots = useMemo(() => (holding?.Plots || []).filter((p) => !p.OpenDeal), [holding]);
+  const choosesPlots = form.Kind === "Resale" && (holding?.Plots?.length || 0) > 1;
+  // Keyed by the plots themselves, so a list refresh doesn't undo what was ticked.
+  const freePlotKey = `${holding?.BookingId ?? ""}:${freePlots.map((p) => p.PlotId).join(",")}`;
+  useEffect(() => { setForm((f) => ({ ...f, PlotIds: freePlots.map((p) => p.PlotId) })); }, [freePlotKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const plotSale = useMemo(() => {
+    if (!choosesPlots || !holding?.Plots) return null;
+    const all = holding.Plots.reduce((t, p) => t + Number(p.AllocatedValue || 0), 0);
+    const sold = holding.Plots.filter((p) => form.PlotIds.includes(p.PlotId)).reduce((t, p) => t + Number(p.AllocatedValue || 0), 0);
+    if (!(all > 0) || form.PlotIds.length === holding.Plots.length) return null;
+    return { price: sold, paid: Math.round(Number(holding.Paid || 0) * (sold / all) * 100) / 100 };
+  }, [choosesPlots, holding, form.PlotIds]);
   const feeGstQ = useQuery<{ gstAmount: number; rate: number }>({
     queryKey: ["crm-resale-fee-gst", form.DeveloperFeeAmount, holding?.Kind],
     queryFn: () => getJson(`${API}/fee-gst?amount=${encodeURIComponent(form.DeveloperFeeAmount)}&plot=${holding?.Kind === "Plot" ? 1 : 0}`),
@@ -129,13 +158,15 @@ const CrmResales: React.FC = () => {
 
   const save = async () => {
     if (!form.FromBookingId) return toast.error("Choose the property that is changing hands");
+    if (choosesPlots && !form.PlotIds.length) return toast.error("Choose the plots being sold");
     if (form.Kind === "Resale" && !form.ToCustomerId) return toast.error("Choose the new buyer");
     if (form.Kind === "Resale" && holding && String(form.ToCustomerId) === String(holding.CustomerId)) return toast.error("The seller and the buyer can't be the same customer");
     // The server needs the price for both kinds (it goes on the transfer); the form used to let a resale go without it.
     if (!(Number(form.AgreedValue) > 0)) return toast.error(form.Kind === "BuyBack" ? "Enter the agreed buy-back price" : "Enter the price the buyers agreed");
     setSaving(true);
     try {
-      const r = await fetchWithAuth(`${API}/deal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const body = { ...form, PlotIds: choosesPlots ? form.PlotIds : undefined };
+      const r = await fetchWithAuth(`${API}/deal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const out = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(out.error || "Could not record it");
       toast.success(out.message || "Recorded");
@@ -224,7 +255,7 @@ const CrmResales: React.FC = () => {
                           </span>
                         </td>
                         <td className="!px-4 !py-3.5">
-                          <div className="font-medium leading-snug">{d.UnitName || d.PlotName || d.PlotNo || "—"}</div>
+                          <div className="font-medium leading-snug">{d.UnitName || d.Property || d.PlotName || d.PlotNo || "—"}</div>
                           <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{d.FromBookingNo}</div>
                         </td>
                         <td className="!px-4 !py-3.5 text-xs leading-relaxed">
@@ -286,7 +317,7 @@ const CrmResales: React.FC = () => {
                   onChange={(v) => setForm((f) => ({ ...f, FromBookingId: v }))}
                   placeholder="Choose a sold property"
                   searchPlaceholder="Search unit, booking or owner…"
-                  options={holdings.filter((h) => !h.OpenDeal && !h.Conveyed).map((h) => ({
+                  options={holdings.filter((h) => (!h.OpenDeal || h.Plots?.some((p) => !p.OpenDeal)) && !h.Conveyed).map((h) => ({
                     value: String(h.BookingId),
                     label: [h.UnitNo, h.Kind, h.CustomerName, h.BookingNos, h.ProjectName].filter(Boolean).join(" · "),
                   }))}
@@ -298,9 +329,35 @@ const CrmResales: React.FC = () => {
                     <span className="text-muted-foreground">Price</span><span className="font-heading tabular-nums">{fmt(holding.TotalValue)}</span>
                     <span className="text-muted-foreground">Paid so far</span><span className="font-heading tabular-nums">{fmt(holding.Paid)}</span>
                     <span className="text-muted-foreground">Still due</span><span className="font-heading tabular-nums">{fmt(Math.max(0, holding.TotalValue - holding.Paid))}</span>
+                    {plotSale && <>
+                      <span className="text-muted-foreground">Plots sold — price</span><span className="font-heading tabular-nums">{fmt(plotSale.price)}</span>
+                      <span className="text-muted-foreground">Their share of what was paid</span><span className="font-heading tabular-nums">{fmt(plotSale.paid)}</span>
+                    </>}
                   </div>
                 ) : <p className="text-[0.6875rem] text-muted-foreground">Not listed? It has an open case, or its sale deed is registered — use Ownership Changes.</p>}
               </div>
+
+              {choosesPlots && holding?.Plots && (
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Plots being sold</label>
+                  <div style={{ border: RULE_SOFT }}>
+                    {holding.Plots.map((p) => {
+                      const on = form.PlotIds.includes(p.PlotId);
+                      return (
+                        <label key={p.PlotId} className={`flex items-center gap-2.5 px-3 py-2 text-xs ${p.OpenDeal ? "opacity-60" : "cursor-pointer hover:bg-primary/5"}`} style={{ borderTop: RULE_SOFT }}>
+                          <input type="checkbox" className="h-3.5 w-3.5 accent-foreground" disabled={!!p.OpenDeal} checked={on}
+                            onChange={() => setForm((f) => ({ ...f, PlotIds: on ? f.PlotIds.filter((x) => x !== p.PlotId) : [...f.PlotIds, p.PlotId] }))} />
+                          <span className="font-medium">{p.PlotName}</span>
+                          {p.AreaSqFt ? <span className="text-muted-foreground tabular-nums">{Number(p.AreaSqFt).toLocaleString("en-IN")} sq ft</span> : null}
+                          <span className="ml-auto font-heading tabular-nums">{fmt(p.AllocatedValue)}</span>
+                          {p.OpenDeal && <span className="text-[0.6875rem] text-muted-foreground">On case #{p.OpenDeal.Id}</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[0.6875rem] text-muted-foreground">Each plot goes at its own booked price; what was paid is shared by those prices. Plots sold leave this booking for a new booking in the buyer's name.</p>
+                </div>
+              )}
 
               {form.Kind === "Resale" ? (
                 <>
