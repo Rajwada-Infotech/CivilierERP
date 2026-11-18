@@ -1,4 +1,4 @@
-# CivilierERP Maintenance (mobile)
+# Civilier Home (mobile) — Customer Portal + Maintenance
 
 React Native (Expo, TypeScript) client for the **Maintenance** module — a
 separate app from `mobile-admin/`, `mobile-finance-material/`,
@@ -10,6 +10,24 @@ same as the web app's `src/pages/maintenance/**`.
 
 Scaffolded from `mobile-Fixed-Asset/`: auth, theme, navigation shell, and
 shared components are ported as-is; FA-only screens/APIs were stripped.
+
+## Two sign-ins: customers and staff
+
+The sign-in screen has **Customer** and **Staff**:
+
+- **Customer** — the Customer Portal (`backend/routes/crmPortal.js`, its own accounts and token, the same routes as
+  the web portal `src/pages/CrmCustomerPortal/**`). Screens in `src/screens/customer/`, navigation in
+  `src/navigation/CustomerStack.tsx`, data in `src/api/customerPortalApi.ts`, the chosen property in
+  `src/customer/CustomerContext.tsx`. Everything the web portal does, by its own menu: Dashboard (journey, Needs
+  Your Action — `src/customer/todo.ts`), My Booking, Construction (possession: letter, acknowledge / dispute),
+  Agreement (documents to upload and on file, approve / recheck, agreement date, sale deed, government payment
+  proof, registry, NOCs), Transfer Deed (papers, draft, signing date, stamp-duty challan), Payments (schedule,
+  receipts, invoices, credit notes — as PDF), Support Tickets, Updates & Approvals and Customer 360 — plus their own
+  Maintenance Bills (maintenance and electricity). Files open and upload through `src/utils/documents.ts`. A first
+  sign-in with the mobile-number password must set a new password first. A customer's phone registers for
+  notifications through the portal (`/api/crm-portal/push-devices`, migration 692); what they are told, and the
+  screen a tap opens, is one list in `backend/services/pushNotifications.js` CUSTOMER_EVENTS.
+- **Staff** — the Maintenance module below, unchanged.
 
 ## Stack
 

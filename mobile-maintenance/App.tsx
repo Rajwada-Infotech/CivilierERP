@@ -10,6 +10,7 @@ import RootNavigator from "@/navigation/RootNavigator";
 import { UpdateGate } from "@/updater/UpdateGate";
 import { PushNotificationsGate } from "@/notifications/PushNotificationsGate";
 import { navigationRef } from "@/navigation/navigationRef";
+import { showApplication } from "@/customer/CustomerContext";
 import { useAppFonts } from "@/theme/fonts";
 import { colors } from "@/theme/colors";
 
@@ -18,9 +19,13 @@ import { colors } from "@/theme/colors";
 function openFromNotification(data?: Record<string, unknown>) {
   // "Update available": opening the app is enough — UpdateGate checks for the new build as the app comes forward.
   if (data?.type === "app-update") return;
+  // A customer's: that property, on the screen the message is about (backend pushNotifications.js CUSTOMER_EVENTS).
+  const portal = data?.type === "portal";
+  if (portal && Number.isInteger(Number(data?.applicationId))) showApplication(Number(data?.applicationId));
+  const screen = portal && typeof data?.screen === "string" ? data.screen : "Notifications";
   let tries = 0;
   const go = () => {
-    if (navigationRef.isReady()) navigationRef.navigate("Notifications" as never);
+    if (navigationRef.isReady()) navigationRef.navigate(screen as never);
     else if (tries++ < 20) setTimeout(go, 250);
   };
   go();

@@ -1,4 +1,4 @@
-// RN login card for the Maintenance app. Ported from mobile-Fixed-Asset's
+﻿// RN login card for the Maintenance app. Ported from mobile-Fixed-Asset's
 // LoginScreen — same Animated API + expo-linear-gradient, rebranded from
 // the FA amber accent to the Maintenance lime-green accent.
 import { useEffect, useRef, useState } from "react";
@@ -20,12 +20,21 @@ import { GradientText } from "@/components/GradientText";
 import { LogoRing } from "@/components/LogoRing";
 import { WelcomeOverlay } from "@/components/WelcomeOverlay";
 import { fonts } from "@/theme/fonts";
+import { getLastLoginKind, setLastLoginKind } from "@/services/authStorage";
+import type { UserKind } from "@/types/auth";
+
+// One app, two sign-ins: customers (the Customer Portal) and staff (the Maintenance module). The customer
+// wording is the web portal's own (src/pages/CrmCustomerPortal/PortalLogin.tsx).
+const KINDS: { kind: UserKind; label: string; hint: string; placeholder: string }[] = [
+  { kind: "customer", label: "Customer", hint: "Sign in to track your application, agreement and payments", placeholder: "you@example.com" },
+  { kind: "staff", label: "Staff", hint: "Sign in to the CivilierERP Maintenance module", placeholder: "name@company.com" },
+];
 
 const NAV_HOLD_MS = 1800;
 
 function CornerAccents() {
   const corner = "absolute w-5 h-5";
-  const color = "rgba(101,163,13,0.4)";
+  const color = "rgba(201,162,39,0.5)";
   return (
     <>
       <View className={`${corner} top-0 left-0 border-t-2 border-l-2 rounded-tl-2xl`} style={{ borderColor: color }} />
@@ -37,7 +46,10 @@ function CornerAccents() {
 }
 
 export default function LoginScreen() {
-  const { login } = useAuth();
+  const { login, loginCustomer } = useAuth();
+  const [kind, setKind] = useState<UserKind>("customer");
+  useEffect(() => { void getLastLoginKind().then((k) => { if (k === "staff" || k === "customer") setKind(k); }); }, []);
+  const meta = KINDS.find((k) => k.kind === kind)!;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -58,7 +70,8 @@ export default function LoginScreen() {
     setError(null);
     setLoading(true);
     try {
-      await login(email.trim(), password, (user) => {
+      await setLastLoginKind(kind);
+      await (kind === "customer" ? loginCustomer : login)(email.trim(), password, (user) => {
         setLoginName(user.name || "");
         setLoginSuccess(true);
       }, NAV_HOLD_MS);
@@ -71,7 +84,7 @@ export default function LoginScreen() {
   return (
     <View className="flex-1">
       <LinearGradient
-        colors={["#fefce8", "#fef9c3", "#ffffff", "#fffdf5"]}
+        colors={["#0F0C29", "#1a1448", "#302b63", "#1a1448"]}
         locations={[0, 0.3, 0.65, 1]}
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.9, y: 1 }}
@@ -87,10 +100,10 @@ export default function LoginScreen() {
             <View
               className="rounded-3xl p-6 overflow-hidden"
               style={{
-                backgroundColor: "rgba(255,255,255,0.92)",
+                backgroundColor: "rgba(30,27,58,0.98)",
                 borderWidth: 1,
-                borderColor: "rgba(202,138,4,0.12)",
-                shadowColor: "#ca8a04",
+                borderColor: "rgba(201,162,39,0.25)",
+                shadowColor: "#C9A227",
                 shadowOpacity: 0.1,
                 shadowRadius: 24,
                 shadowOffset: { width: 0, height: 10 },
@@ -104,21 +117,35 @@ export default function LoginScreen() {
                 <View className="mt-3">
                   <GradientText
                     style={{ fontSize: 24, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}
-                    colors={["#365314", "#65a30d", "#bef264"]}
+                    colors={["#F0C94D", "#C9A227", "#F0C94D"]}
                   >
-                    Maintenance
+                    {kind === "customer" ? "Customer Portal" : "Maintenance"}
                   </GradientText>
                 </View>
-                <Text style={{ color: "#94a3b8", fontSize: 12, fontFamily: fonts.body.regular, marginTop: 6 }}>
-                  Sign in to the CivilierERP Maintenance module
+                <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: fonts.body.regular, marginTop: 6, textAlign: "center" }}>
+                  {meta.hint}
                 </Text>
+              </View>
+
+              <View className="flex-row mb-5 p-1 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.06)" }} accessibilityRole="tablist">
+                {KINDS.map((k) => {
+                  const on = k.kind === kind;
+                  return (
+                    <Pressable key={k.kind} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                      onPress={() => { setKind(k.kind); setError(null); }}
+                      className="flex-1 items-center py-2 rounded-lg"
+                      style={on ? { backgroundColor: "rgba(201,162,39,0.18)", shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4, elevation: 1 } : undefined}>
+                      <Text style={{ fontSize: 13, fontFamily: on ? fonts.body.semibold : fonts.body.medium, color: on ? "#C9A227" : "rgba(255,255,255,0.5)" }}>{k.label}</Text>
+                    </Pressable>
+                  );
+                })}
               </View>
 
               <View className="gap-4">
                 <AnimatedInput
                   label="Email Address"
                   value={email}
-                  placeholder="name@company.com"
+                  placeholder={meta.placeholder}
                   onChangeText={(t) => {
                     setEmail(t);
                     setError(null);

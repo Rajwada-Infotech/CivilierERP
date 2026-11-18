@@ -172,7 +172,7 @@ function OverviewTab() {
   return (
     <ScrollView
       contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={OPS_CYAN} />}
+      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => { void refetch(); }} tintColor={OPS_CYAN} />}
     >
       <LiveClockBand />
 

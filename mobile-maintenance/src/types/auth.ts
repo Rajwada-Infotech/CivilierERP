@@ -34,7 +34,13 @@ export interface PagePermission {
   actions: PageAction[];
 }
 
+// Who is signed in: ERP staff (the Maintenance module) or a customer (the Customer Portal — its own login and
+// token, backend/routes/crmPortal.js). One app, two sign-ins; the navigator shows each their own screens.
+export type UserKind = "staff" | "customer";
+
 export interface AppUser {
+  /** Missing on sessions saved before customers could sign in: those are staff. */
+  kind?: UserKind;
   id: string;
   name: string;
   email: string;

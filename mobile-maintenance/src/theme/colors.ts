@@ -1,4 +1,4 @@
-// Hex conversion of the web app's default dark theme HSL tokens
+﻿// Hex conversion of the web app's default dark theme HSL tokens
 // (src/index.css :root, @layer base — "DARK THEME (default)"). RN styles
 // take hex/rgba, not CSS custom properties, so these are computed once
 // here rather than re-deriving HSL math in every component.
@@ -41,4 +41,55 @@ export const moduleAccents = {
   // This app's own module — matches web's MAINTENANCE_ACCENT
   // (src/components/maintenance/MaintenanceShell.tsx).
   maintenance: "#65a30d",
+} as const;
+
+// The drawing sheet's own tones, the same derivation the other CivilierERP apps use (mobile-employee / mobile-admin
+// src/theme/colors.ts sheetOf, from the web's .crm-sheet): ink is the foreground colour, everything else a step of
+// it, the border or the primary. Read by components/sheet/Sheet.tsx (the customer screens' kit).
+const rgba = (hex: string, a: number) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+};
+export const sheet = {
+  paper: colors.card,
+  ink: colors.foreground,
+  ink2: rgba(colors.foreground, 0.78),
+  graphite: colors.mutedForeground,
+  faint: rgba(colors.mutedForeground, 0.6),
+  rule: colors.border,
+  ruleSoft: rgba(colors.border, 0.55),
+  line40: rgba(colors.foreground, 0.4),
+  line15: rgba(colors.foreground, 0.15),
+  blue: colors.primary,
+  blueWash: rgba(colors.primary, 0.1),
+  blueTint: rgba(colors.primary, 0.18),
+  red: colors.destructive,
+  redWash: rgba(colors.destructive, 0.1),
+  grid: rgba(colors.foreground, 0.04),
+  hatch: rgba(colors.foreground, 0.24),
+};
+
+// -- Customer-facing premium brand palette ------------------------------------
+// Used by src/customer/ui.tsx and customer screens ONLY.
+export const brand = {
+  heroFrom:      "#0F0C29",
+  heroMid:       "#1a1448",
+  heroTo:        "#302b63",
+  gold:          "#C9A227",
+  goldLight:     "#F0C94D",
+  goldSoft:      "rgba(201,162,39,0.15)",
+  surface:       "#15132B",
+  surfaceCard:   "#1E1B3A",
+  surfaceGlass:  "rgba(255,255,255,0.06)",
+  textPrimary:   "#FFFFFF",
+  textSecondary: "rgba(255,255,255,0.65)",
+  textFaint:     "rgba(255,255,255,0.35)",
+  success:       "#22C55E",
+  successSoft:   "rgba(34,197,94,0.15)",
+  warning:       "#F59E0B",
+  warningSoft:   "rgba(245,158,11,0.15)",
+  danger:        "#EF4444",
+  dangerSoft:    "rgba(239,68,68,0.15)",
+  border:        "rgba(255,255,255,0.08)",
+  borderGold:    "rgba(201,162,39,0.3)",
 } as const;

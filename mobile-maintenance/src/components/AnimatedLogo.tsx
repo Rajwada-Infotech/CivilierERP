@@ -5,7 +5,7 @@
 // Shared brand asset — not module-tinted, same as on mobile-supplier.
 import { useEffect, useRef, useState } from "react";
 import { Animated, Text, View } from "react-native";
-import MaskedView from "@react-native-masked-view/masked-view";
+import { MaskedView } from "./GradientText";
 import { LinearGradient } from "expo-linear-gradient";
 import { fonts } from "@/theme/fonts";
 import { useAppVersion } from "@/hooks/useAppVersion";
