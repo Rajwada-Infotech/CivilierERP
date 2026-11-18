@@ -289,7 +289,7 @@ router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edi
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, AssignedTo, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
+      .query("SELECT Status, AssignedTo, BookingId, TicketNo, Subject FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -302,6 +302,9 @@ router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edi
     await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
       UPDATE dbo.CrmServiceTicket SET Status = '${CrmStatus.IN_PROGRESS}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id
     `);
+    // The customer follows it on their phone (Customer Portal → Support Tickets).
+    const tk = cur.recordset[0];
+    require("../services/pushNotifications").notifyBookingCustomers(tk.BookingId, "ticketUpdated", { no: tk.TicketNo, status: "In progress", subject: tk.Subject });
     res.json({ success: true, status: CrmStatus.IN_PROGRESS });
   } catch (e) {
     console.error("[crm-service-tickets] mark-in-progress error:", e.message);
@@ -320,7 +323,7 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
     if (!b.ResolutionNotes?.trim()) return res.status(400).json({ error: "ResolutionNotes is required to resolve a ticket" });
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
+      .query("SELECT Status, BookingId, TicketNo, Subject FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -338,6 +341,8 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+    const tk = cur.recordset[0];
+    require("../services/pushNotifications").notifyBookingCustomers(tk.BookingId, "ticketUpdated", { no: tk.TicketNo, status: "Resolved", subject: b.ResolutionNotes.trim() });
     res.json({ success: true, status: CrmStatus.RESOLVED });
   } catch (e) {
     console.error("[crm-service-tickets] resolve error:", e.message);

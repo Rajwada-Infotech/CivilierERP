@@ -17,6 +17,8 @@ const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
+// The customer's own phone (Customer Portal): services/pushNotifications.js CUSTOMER_EVENTS.
+const { notifyBookingCustomers } = require("../services/pushNotifications");
 const { agreementStepFlagsSql, validateAgreementPreparationPrerequisites, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
@@ -875,6 +877,7 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
             summary: "Agreement shared with the customer via portal, awaiting their approval.",
             createdBy: actorId(req),
           });
+          notifyBookingCustomers(notifyRow?.BookingId, "agreementShared", { no: notifyRow?.AgreementNo });
         } catch (sideErr) { console.error("[crm-agreements] approve send-to-customer side effects failed:", sideErr.message); }
       }
     }
@@ -905,6 +908,7 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
           summary: "Agreement shared with the customer via portal, awaiting their approval.",
           createdBy: actorId(req),
         });
+        notifyBookingCustomers(notifyRow?.BookingId, "agreementShared", { no: notifyRow?.AgreementNo });
       } catch (sideErr) { console.error("[crm-agreements] approve send-to-customer side effects failed:", sideErr.message); }
     }
     res.json({ success: true, status: result.newStatus, ...result });
@@ -1184,7 +1188,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
     const ag = await pool.request().input("id", sql.Int, id).query(`
       SELECT
         ag.SeniorApprovalStatus,
-        ag.BookingId,
+        ag.BookingId, ag.AgreementNo,
         (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = ag.Id) AS DocumentCount
       FROM dbo.CrmAgreement ag
       WHERE ag.Id = @id
@@ -1267,6 +1271,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
       try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
       throw txErr;
     }
+    notifyBookingCustomers(ag.recordset[0].BookingId, "agreementShared", { no: ag.recordset[0].AgreementNo });
 
     res.json({ success: true });
   } catch (e) {
@@ -1328,6 +1333,7 @@ router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), asyn
         createdBy: actorId(req),
       });
       await tx.commit();
+      notifyBookingCustomers(locked.BookingId, "agreementDateProposed", { date: proposedDate });
     } catch (txErr) {
       await tx.rollback().catch(() => {});
       throw txErr;

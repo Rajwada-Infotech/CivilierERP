@@ -358,7 +358,7 @@ async function autoApplyOnAccount(pool, bookingId, actorUserId, actorEmail) {
     // Payment -> Demand -> Adjustment -> Invoice.
     if (milestone.recordset[0].DemandStatus === CrmStatus.PENDING) {
       if (!milestone.recordset[0].IsDue) break;
-      try { await raiseDemandForMilestone(pool, milestone.recordset[0].Id, "Auto-raised — full booking amount received"); }
+      try { await raiseDemandForMilestone(pool, milestone.recordset[0].Id, "Auto-raised — full booking amount received", { notifyCustomer: false }); }
       catch (e) { console.error("[crm-payments] autoApplyOnAccount: demand auto-raise failed —", e.message, `| milestoneId=${milestone.recordset[0].Id}`); break; }
     }
 
@@ -716,9 +716,11 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
 // Demands feature" rather than building a parallel demand concept. Throws
 // (with .status set) on the same conditions the route below used to
 // res.status(...).json(...) on, so callers can handle failures uniformly.
-async function raiseDemandForMilestone(pool, milestoneId, notes) {
+// notifyCustomer: false where the money is already in and the demand is settled at once (the full-payment sweep) —
+// telling the customer a payment is due would be wrong there.
+async function raiseDemandForMilestone(pool, milestoneId, notes, { notifyCustomer = true } = {}) {
   const m = await pool.request().input("id", sql.Int, milestoneId).query(`
-    SELECT m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.Status, m.DemandStatus,
+    SELECT m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.Status, m.DemandStatus, m.DueDate, m.BookingId,
            b.BookingNo, b.AssignedTo, a.ApplicantName
     FROM dbo.CrmPaymentMilestone m
     JOIN dbo.CrmBooking b ON b.Id = m.BookingId
@@ -766,6 +768,11 @@ async function raiseDemandForMilestone(pool, milestoneId, notes) {
       "Payment Demand Raised",
       `${row.ApplicantName} · ${row.BookingNo} — ${row.MilestoneName} demand raised (₹${balance.toLocaleString("en-IN")})`,
       milestoneId, "payment_milestone");
+  }
+  // ...and the customer, on their phone (Customer Portal).
+  if (notifyCustomer) {
+    require("../services/pushNotifications").notifyBookingCustomers(row.BookingId, "demandRaised",
+      { milestone: row.MilestoneName, amount: balance, due: row.DueDate });
   }
   return { DemandNo: demandNo, DemandRaisedOn: demandRaisedOn };
 }
@@ -1258,6 +1265,10 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
     console.error("[crm-payments] Money Receipt generation on approval failed:", mrErr.message);
   }
 
+  // The customer hears that their money arrived — once, not again on a re-run of the same approval.
+  if (!existing.recordset.length) {
+    require("../services/pushNotifications").notifyBookingCustomers(targetRow.BookingId, "paymentReceived", { amount: rp.RPAmount });
+  }
   return { bookingId: targetRow.BookingId, onAccountId, OnAccountReceiptNo: onAccountReceiptNo, brokerWarning: null };
 }
 
@@ -1333,6 +1344,10 @@ async function applyCrmOnAccountPaymentApproval(pool, rp, actorUserId, actorEmai
   const oaRow = await pool.request().input("id", sql.Int, onAccountId)
     .query("SELECT ReceiptNo FROM dbo.CrmOnAccountPayment WHERE Id = @id");
   const ReceiptNo = oaRow.recordset[0]?.ReceiptNo || null;
+  // The customer hears that their money arrived — once, not again on a re-run of the same approval.
+  if (!existing.recordset.length) {
+    require("../services/pushNotifications").notifyBookingCustomers(rp.CrmBookingId, "paymentReceived", { amount: rp.RPAmount });
+  }
   return { ...glOutcome, onAccountId, ReceiptNo };
 }
 

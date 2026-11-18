@@ -343,7 +343,7 @@ router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), 
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, DeliveryMode FROM dbo.CrmPossessionNotice WHERE Id = @id");
+      .query("SELECT Status, DeliveryMode, BookingId, NoticeNo, ResponseDeadline FROM dbo.CrmPossessionNotice WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
     if (cur.recordset[0].Status !== CrmStatus.DRAFT) {
       return res.status(400).json({ error: `Cannot mark-sent from status '${cur.recordset[0].Status}'` });
@@ -363,6 +363,9 @@ router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), 
         WHERE Id = @id AND Status = '${CrmStatus.DRAFT}'
       `);
     if (!sent.rowsAffected?.some((count) => count > 0)) return res.status(409).json({ error: "The notice status changed; reload before marking it sent" });
+    // The customer acknowledges or disputes it on their phone (Customer Portal → Construction).
+    const pn = cur.recordset[0];
+    require("../services/pushNotifications").notifyBookingCustomers(pn.BookingId, "possessionOffered", { no: pn.NoticeNo, respondBy: pn.ResponseDeadline });
     res.json({ success: true, status: "Sent" });
   } catch (e) {
     console.error("[crm-possession-notice] mark-sent error:", e.message);
