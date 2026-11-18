@@ -1,11 +1,11 @@
 // Face registration: the employee takes 3 front-camera photos with consent. The server checks each photo, builds an
 // encrypted face template and sends it to HR; once HR approves it in Employee Master, punches verify the face.
 import { useState } from "react";
-import { ActivityIndicator, Image, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, ScanFace, X } from "lucide-react-native";
 import { api } from "@/api/employeeApi";
-import { livePhoto, EvidenceError } from "@/services/evidence";
+import { CameraCapture } from "@/components/CameraCapture";
 import { Screen } from "@/components/Screen";
 import { Chip } from "@/components/Chip";
 import { Body, Key, Label, Notice, Panel, Skel } from "@/components/sheet/Sheet";
@@ -26,10 +26,8 @@ export default function FaceRegistrationScreen() {
     onSuccess: (r) => { setOk(r.message); setShots([]); setConsent(false); qc.invalidateQueries({ queryKey: ["face"] }); },
     onError: (e: Error) => setErr(e.message),
   });
-  const take = async () => {
-    setErr(null);
-    try { const p = await livePhoto(); if (p) setShots((s) => [...s, p]); } catch (e) { setErr(e instanceof EvidenceError || e instanceof Error ? e.message : "Camera failed"); }
-  };
+  const [camOpen, setCamOpen] = useState(false);
+  const take = () => { setErr(null); setCamOpen(true); };
   const d = st.data;
   const tone = d?.state === "Active" ? "ok" : d?.state === "Pending" ? "warn" : d?.state === "Rejected" ? "bad" : "info";
   const label = { None: "Not registered", Pending: "Waiting for HR approval", Active: "Active", Rejected: "Rejected by HR", Revoked: "Removed by HR" } as const;
@@ -61,9 +59,10 @@ export default function FaceRegistrationScreen() {
                 {shots.map((p, i) => (
                   <View key={i}>
                     <Image source={{ uri: p }} style={{ width: 72, height: 72, borderWidth: 1, borderColor: S.rule }} />
-                    <View style={{ position: "absolute", top: 2, right: 2 }}>
-                      <Key label="" icon={<X size={12} color={S.ink} />} onPress={() => setShots((s) => s.filter((_, j) => j !== i))} />
-                    </View>
+                    <Pressable onPress={() => setShots((s) => s.filter((_, j) => j !== i))} hitSlop={8} accessibilityLabel={`Remove photo ${i + 1}`}
+                      style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 11, backgroundColor: S.paper, borderWidth: 1, borderColor: S.ink, alignItems: "center", justifyContent: "center" }}>
+                      <X size={12} color={S.ink} />
+                    </Pressable>
                   </View>
                 ))}
               </View>
@@ -80,6 +79,10 @@ export default function FaceRegistrationScreen() {
           )}
         </Panel>
       )}
+      <CameraCapture open={camOpen} title={`Photo ${Math.min(shots.length + 1, NEED)} of ${NEED}`}
+        hint="Face inside the oval, look straight, good light, nobody else in the picture."
+        onClose={() => setCamOpen(false)}
+        onPhoto={(p) => { setShots((s) => { const next = [...s, p]; if (next.length >= NEED) setCamOpen(false); return next; }); }} />
     </Screen>
   );
 }

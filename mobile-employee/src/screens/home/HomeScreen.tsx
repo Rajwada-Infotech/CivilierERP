@@ -6,7 +6,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
 import { Coffee, LogIn, LogOut, MapPin, Play } from "lucide-react-native";
 import { api, type BreakType, type TodayState } from "@/api/employeeApi";
-import { captureEvidence, EvidenceError } from "@/services/evidence";
+import { currentPosition, EvidenceError } from "@/services/evidence";
+import { CameraCapture } from "@/components/CameraCapture";
 import { Screen } from "@/components/Screen";
 import { Chip } from "@/components/Chip";
 import { Body, Field, Input, Key, Label, Notice, Panel, SheetFrame, Skel, StatGrid, TitleText } from "@/components/sheet/Sheet";
@@ -77,16 +78,31 @@ export default function HomeScreen() {
   const done = (s: TodayState) => { qc.setQueryData(["today"], s); qc.invalidateQueries({ queryKey: ["month"] }); setError(null); };
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : "Something went wrong");
 
+  // Punch: location first (a GPS problem shows before the camera), then the in-app camera, then send.
+  const [camFor, setCamFor] = useState<"in" | "out" | null>(null);
+  const [pos, setPos] = useState<Awaited<ReturnType<typeof currentPosition>> | null>(null);
   const punch = async (kind: "in" | "out") => {
     setError(null);
-    setBusy(kind === "in" ? "Getting your location…" : "Getting your location…");
+    setBusy("Getting your location…");
     try {
-      const ev = await captureEvidence();
-      if (!ev) return;
-      setBusy(kind === "in" ? "Punching in…" : "Punching out…");
-      done(kind === "in" ? await api.punchIn(ev) : await api.punchOut(ev));
+      setPos(await currentPosition());
+      setCamFor(kind);
     } catch (e) {
       fail(e instanceof EvidenceError ? e : e);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const sendPunch = async (photo: string) => {
+    const kind = camFor;
+    setCamFor(null);
+    if (!kind || !pos) return;
+    setBusy(kind === "in" ? "Verifying face and location…" : "Verifying face and location…");
+    try {
+      const ev = { photo, ...pos };
+      done(kind === "in" ? await api.punchIn(ev) : await api.punchOut(ev));
+    } catch (e) {
+      fail(e);
     } finally {
       setBusy(null);
     }
@@ -214,6 +230,9 @@ export default function HomeScreen() {
       )}
 
       <HomeDashboard />
+
+      <CameraCapture open={!!camFor} title={camFor === "in" ? "Punch In" : "Punch Out"} hint="Look straight at the camera — your face is checked against your registered face."
+        onClose={() => setCamFor(null)} onPhoto={sendPunch} />
 
       <BreakPicker open={picker} types={types.data ?? []} onClose={() => setPicker(false)}
         onPick={(t, n) => { setPicker(false); breakStart.mutate({ t, n }); }} />

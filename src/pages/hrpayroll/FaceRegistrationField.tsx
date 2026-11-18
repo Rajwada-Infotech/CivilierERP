@@ -113,12 +113,53 @@ function CaptureDialog({ employeeId, name, onClose, onDone }: { employeeId: numb
   );
 }
 
+/** A small form for the reason HR must give (reject / revoke / exempt), in the page's own style. */
+type Ask = { title: string; note: string; label: string; confirm: string; tone: "ink" | "red"; presets?: string[]; onSubmit: (reason: string) => void };
+function ReasonDialog({ ask, busy, onClose }: { ask: Ask; busy: boolean; onClose: () => void }) {
+  const [text, setText] = useState("");
+  const ok = text.trim().length >= 3;
+  return (
+    <BodyPortal>
+      <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-3" role="dialog" aria-modal="true" aria-label={ask.title}
+        onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
+        <form className="w-full max-w-md bg-card border border-foreground shadow-2xl" onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); if (ok && !busy) ask.onSubmit(text.trim()); }}>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <h2 className="font-heading text-sm font-bold uppercase tracking-[0.08em]">{ask.title}</h2>
+            <button type="button" onClick={onClose} aria-label="Close" className="p-1"><X size={16} /></button>
+          </div>
+          <div className="p-4 space-y-3">
+            <p className="text-sm text-muted-foreground">{ask.note}</p>
+            {ask.presets && (
+              <div className="flex flex-wrap gap-1.5">
+                {ask.presets.map((p) => (
+                  <button key={p} type="button" onClick={() => setText(p)}
+                    className={`border px-2 py-1 text-xs ${text === p ? "border-foreground bg-foreground text-card" : "border-border hover:border-foreground"}`}>{p}</button>
+                ))}
+              </div>
+            )}
+            <label className="block">
+              <span className={HR_LBL}>{ask.label} <span className="text-destructive">*</span></span>
+              <textarea autoFocus rows={3} maxLength={300} value={text} onChange={(e) => setText(e.target.value)}
+                className="mt-1 w-full border border-border bg-background px-2 py-1.5 text-sm focus:border-foreground outline-none" />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button type="button" className={KEY_LINE} onClick={onClose}>Cancel</button>
+              <button type="submit" className={ask.tone === "red" ? KEY_RED : KEY_INK} disabled={!ok || busy}>{busy ? "Saving…" : ask.confirm}</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </BodyPortal>
+  );
+}
+
 /** A self-registration waiting for HR: the photo the employee took, the match with the profile photo, approve / reject. */
 function PendingReview({ employeeId, p, canEdit, onDone }: { employeeId: number; p: FaceTemplateRow; canEdit: boolean; onDone: () => void }) {
   const photo = useQuery({ queryKey: ["employee-face-review", employeeId, p.FaceTemplateId], queryFn: () => getFaceReviewPhoto(employeeId, p.FaceTemplateId), enabled: !!p.HasReviewPhoto });
   const approve = useMutation({ mutationFn: () => approveFace(employeeId, p.FaceTemplateId), onSuccess: (r) => { toast.success(r.message); onDone(); }, onError: (e: Error) => toast.error(e.message) });
   const reject = useMutation({ mutationFn: (reason: string) => rejectFace(employeeId, p.FaceTemplateId, reason), onSuccess: (r) => { toast.success(r.message); onDone(); }, onError: (e: Error) => toast.error(e.message) });
   const score = p.ProfileScore != null ? Number(p.ProfileScore) : null;
+  const [asking, setAsking] = useState(false);
   return (
     <div className="border border-amber-500/60 bg-amber-500/10 p-3 flex flex-wrap gap-4 items-start">
       {photo.data?.photo ? <img src={photo.data.photo} alt="Submitted face" className="h-28 w-28 object-cover border border-border" /> : <div className="h-28 w-28 border border-border flex items-center justify-center text-xs text-muted-foreground">{photo.isLoading ? "Loading…" : "No photo"}</div>}
@@ -130,10 +171,18 @@ function PendingReview({ employeeId, p, canEdit, onDone }: { employeeId: number;
         {canEdit && (
           <div className="flex flex-wrap gap-2 pt-1">
             <button type="button" className={KEY_INK} disabled={approve.isPending} onClick={() => approve.mutate()}><ScanFace size={14} /> Approve</button>
-            <button type="button" className={KEY_RED} disabled={reject.isPending} onClick={() => { const r = window.prompt("Why is it rejected? (shown to the employee)"); if (r && r.trim()) reject.mutate(r.trim()); }}><X size={14} /> Reject</button>
+            <button type="button" className={KEY_RED} disabled={reject.isPending} onClick={() => setAsking(true)}><X size={14} /> Reject</button>
           </div>
         )}
       </div>
+      {asking && (
+        <ReasonDialog busy={reject.isPending} onClose={() => setAsking(false)} ask={{
+          title: "Reject face registration", tone: "red", confirm: "Reject", label: "Reason (shown to the employee)",
+          note: "The employee sees this reason in the app and can register again.",
+          presets: ["Photo is not of this employee", "Face not clear — retake in good light", "Someone else is in the photo", "Mask or dark glasses"],
+          onSubmit: (r) => reject.mutate(r, { onSuccess: () => setAsking(false) }),
+        }} />
+      )}
     </div>
   );
 }
@@ -153,11 +202,21 @@ export const FaceRegistrationField: React.FC<{ employeeId: number | null; name?:
   if (error || !data) return <p className={`${box} text-sm text-destructive`} style={{ border: HR_RULE }}>{(error as Error)?.message || "Could not load face registration."}</p>;
 
   const a = data.active;
-  const askRevoke = () => { const r = window.prompt("Why is this face registration being revoked?"); if (r && r.trim()) revoke.mutate(r.trim()); };
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const askRevoke = () => setAsk({
+    title: "Revoke face registration", tone: "red", confirm: "Revoke", label: "Reason",
+    note: "The face is removed. The employee can't punch until they register again (from the app) and HR approves it.",
+    presets: ["Employee asked to remove it", "Wrong person registered", "Face changed — register again", "Left the company"],
+    onSubmit: (r) => revoke.mutate(r, { onSuccess: () => setAsk(null) }),
+  });
   const askExempt = () => {
     if (data.exempt) { exempt.mutate({ on: false, reason: "" }); return; }
-    const r = window.prompt("Why can't this employee use face verification? (Their punches will still need the work location and will be flagged for HR review.)");
-    if (r && r.trim()) exempt.mutate({ on: true, reason: r.trim() });
+    setAsk({
+      title: "Face check exempt", tone: "ink", confirm: "Exempt from face check", label: "Why can't this employee use face verification?",
+      note: "Their punches skip the face check but still need their work location, and every punch is flagged for HR review.",
+      presets: ["Injury / medical reason", "Face does not match repeatedly", "No smartphone with a front camera", "Temporary — until re-registration"],
+      onSubmit: (r) => exempt.mutate({ on: true, reason: r }, { onSuccess: () => setAsk(null) }),
+    });
   };
   return (
     <div className={`${box} space-y-4`} style={{ border: HR_RULE }}>
@@ -207,6 +266,7 @@ export const FaceRegistrationField: React.FC<{ employeeId: number | null; name?:
       {data.history.length > 1 && (
         <p className="text-xs text-muted-foreground">History: {data.history.map((h) => `${h.Status} ${fmt(h.EnrolledAt)}${h.RevokeReason ? ` (${h.RevokeReason})` : ""}`).join(" · ")}</p>
       )}
+      {ask && <ReasonDialog ask={ask} busy={revoke.isPending || exempt.isPending} onClose={() => setAsk(null)} />}
       {capture && <CaptureDialog employeeId={employeeId} name={name ?? "Employee"} onClose={() => setCapture(false)} onDone={() => { setCapture(false); refresh(); }} />}
     </div>
   );

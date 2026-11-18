@@ -32,6 +32,7 @@
       "expo-font",
       ["expo-location", { "locationWhenInUsePermission": "Employee Portal App records your location when you punch In and Out, as attendance evidence." }],
       ["expo-image-picker", { "cameraPermission": "Employee Portal App takes a live photo when you punch In and Out, as attendance evidence." }],
+      ["expo-camera", { "cameraPermission": "Employee Portal App uses the front camera for your face registration and the live photo when you punch In and Out.", "recordAudioAndroid": false }],
       ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
     ]
   }
