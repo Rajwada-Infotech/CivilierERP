@@ -120,7 +120,6 @@ const PortalOverview: React.FC = () => {
   const selectedApp = (applications || []).find((a: any) => a.ApplicationId === applicationId);
 
   const agreement = timeline.agreement;
-  const customerDetailsComplete = !!timeline.customerDetails?.IsComplete;
 
   const milestones = timeline.paymentMilestones || [];
   // Paid / total from the money statement — the same figures as Payments, Profile and the mobile app.
@@ -146,8 +145,8 @@ const PortalOverview: React.FC = () => {
     { label: "Application", state: "done" },
     { label: "Booking", state: timeline.booking ? "done" : "current" },
     { label: "Welcome Call", state: timeline.welcomeCall ? "done" : timeline.booking ? "current" : "upcoming" },
-    { label: "Customer Details", state: customerDetailsComplete ? "done" : timeline.welcomeCall ? "current" : "upcoming" },
-    { label: "Agreement", state: agreementApproved ? "done" : customerDetailsComplete ? "current" : "upcoming" },
+    // No separate "customer details" step: the salesperson takes PAN, Aadhaar and bank details within the welcome call.
+    { label: "Agreement", state: agreementApproved ? "done" : timeline.welcomeCall ? "current" : "upcoming" },
     { label: "Payments", state: paymentsDone ? "done" : agreementApproved ? "current" : "upcoming" },
     { label: "Sales Deed", state: salesDeedDone ? "done" : agreementApproved ? "current" : "upcoming" },
     { label: "Govt. Payment", state: qpDone ? "done" : salesDeedDone ? "current" : "upcoming" },

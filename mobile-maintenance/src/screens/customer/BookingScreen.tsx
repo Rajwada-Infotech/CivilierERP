@@ -4,7 +4,7 @@
 //   Project    — the project: type, developer, address, a map (server-built, same as the web portal);
 //   Your home  — what was bought (server-built facts, same as the web portal), every plot on a plot sale;
 //   Price      — what the price is made of, the token and the booking amount;
-//   Getting started — booking confirmed, welcome call, details on file, each done or what happens next;
+//   Getting started — booking confirmed and the welcome call, each done or what happens next;
 //   then shortcuts to that property's Payments, Documents and Construction.
 // The one open first is the property chosen elsewhere in the app. Customer-wide, so the header has no property picker.
 import { useState, type ReactNode } from "react";
@@ -223,22 +223,20 @@ function HomeBlock({ t }: { t: Timeline | undefined }) {
   );
 }
 
-/** The first steps after booking: each done (and when), or what happens next. */
+/** The first steps after booking: each done (and when), or what happens next. (PAN / Aadhaar / bank details are taken by
+ * the salesperson within the welcome call — not a step of their own.) */
 function StartBlock({ a, t }: { a: PortalApplication; t: Timeline | undefined }) {
   const call = t?.welcomeCall;
   const callDone = call?.Outcome === "Welcomed";
-  const detailsDone = !!t?.customerDetails?.IsComplete;
-  const done = 1 + (callDone ? 1 : 0) + (detailsDone ? 1 : 0);
+  const done = 1 + (callDone ? 1 : 0);
   const brand = useBrand();
   return (
-    <Block icon={ListChecks} title="Getting started" right={<Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: brand.textSecondary }}>{done} of 3 done</Text>}>
+    <Block icon={ListChecks} title="Getting started" right={<Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: brand.textSecondary }}>{done} of 2 done</Text>}>
       <Step done title="Booking confirmed" sub={a.BookingDate ? `On ${fmtDate(a.BookingDate)}` : null} />
       <Step done={callDone} title="Welcome call"
         sub={callDone ? (call?.CallDate ? `Done on ${fmtDate(call.CallDate)}` : "Done")
           : call ? `${call.Outcome || "Arranged"}${call.CallDate ? ` · ${fmtDate(call.CallDate)}` : ""}. Our team will complete it with you.`
           : "Our team will call you shortly to welcome you and walk you through what happens next."} />
-      <Step done={detailsDone} title="Your details on file"
-        sub={detailsDone ? "Complete. Thank you." : "Our sales team collects your bank account, PAN and Aadhaar before the agreement is prepared. Please keep them ready."} />
     </Block>
   );
 }

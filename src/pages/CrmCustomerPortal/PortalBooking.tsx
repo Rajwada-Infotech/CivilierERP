@@ -1,6 +1,6 @@
 import React from "react";
 import { useOutletContext } from "react-router-dom";
-import { Building2, Phone, CheckCircle2, User, Landmark, Ruler, Map as MapIcon, Clock, MapPin } from "lucide-react";
+import { Building2, Phone, CheckCircle2, Landmark, Ruler, Map as MapIcon, Clock, MapPin } from "lucide-react";
 import { fmtMoney, fmtDate } from "./portalApi";
 import {
   Card, CardHeader, InfoField, StatusPill, Stepper, StepState,
@@ -39,16 +39,14 @@ const PortalBooking: React.FC = () => {
     );
   }
 
-  const cd = timeline.customerDetails;
   const callDone = timeline.welcomeCall?.Outcome === "Welcomed";
-  const detailsDone = !!cd?.IsComplete;
   const agreementStarted = !!timeline.agreement;
 
   const bookingSteps: { label: string; state: StepState; note?: string }[] = [
     { label: "Booking Confirmed", state: "done", note: fmtDate(booking.BookingDate) },
     { label: "Welcome Call", state: callDone ? "done" : "current", note: timeline.welcomeCall?.Outcome || "Pending" },
-    { label: "Details on File", state: detailsDone ? "done" : callDone ? "current" : "upcoming", note: detailsDone ? "Complete" : "Pending" },
-    { label: "Agreement Prep", state: agreementStarted ? "done" : detailsDone ? "current" : "upcoming" },
+    // PAN / Aadhaar / bank details are taken by the salesperson within the welcome call — not a step of their own.
+    { label: "Agreement Prep", state: agreementStarted ? "done" : callDone ? "current" : "upcoming" },
   ];
 
   const doneSteps = bookingSteps.filter((s) => s.state === "done").length;
@@ -214,31 +212,6 @@ const PortalBooking: React.FC = () => {
             <p className="text-sm" style={{ color: TEXT_MUTED }}>Our team will reach out to you shortly.</p>
           </div>
         )}
-      </div>
-
-      {/* Customer details status */}
-      <div
-        className="rounded-2xl p-5"
-        style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}
-      >
-        <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: TEXT_FAINT }}>Your Details on File</p>
-        <div className="flex items-center gap-3">
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: detailsDone ? "rgba(5,150,105,0.10)" : GOLD_SOFT, color: detailsDone ? "#059669" : GOLD }}
-          >
-            {detailsDone ? <CheckCircle2 size={16} /> : <User size={16} />}
-          </div>
-          <div>
-            <p className="text-sm font-semibold" style={{ color: TEXT }}>
-              {detailsDone ? "All details collected — thank you" : "Being collected by our team"}
-            </p>
-            <p className="text-xs mt-0.5" style={{ color: TEXT_MUTED }}>
-              Bank account, PAN and Aadhaar details are needed before agreement preparation.
-              {!detailsDone && " Please have these ready when our team calls."}
-            </p>
-          </div>
-        </div>
       </div>
 
       {/* How the price is made up — the money statement's lines (same as Payments and the app): they add up to the total */}
