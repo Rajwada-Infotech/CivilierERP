@@ -312,26 +312,29 @@ router.get("/item-ledger", async (req, res) => {
       return res.status(400).json({ error: "itemId is required" });
     }
 
-    const rawDate = req.query.date;
-    const targetDate =
-      rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
-        ? rawDate
-        : new Date().toISOString().slice(0, 10);
+    const isYmd = (v) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
     const rawDateFrom = req.query.dateFrom;
     const rawDateTo = req.query.dateTo;
-    const dateFrom = rawDateFrom && /^\d{4}-\d{2}-\d{2}$/.test(rawDateFrom) ? rawDateFrom : null;
-    const dateTo = rawDateTo && /^\d{4}-\d{2}-\d{2}$/.test(rawDateTo) ? rawDateTo : targetDate;
+    const dateFrom = isYmd(rawDateFrom) ? rawDateFrom : null;
+    // The page sends its To date as dateTo (and no `date`): with no From date that day is the period, as in the main
+    // list — it used to fall back to today here, so a past To date showed today's movements.
+    const targetDate = isYmd(req.query.date) ? req.query.date : isYmd(rawDateTo) ? rawDateTo : new Date().toISOString().slice(0, 10);
+    const dateTo = isYmd(rawDateTo) ? rawDateTo : targetDate;
+    // Where the period starts: everything before it is the item's opening stock in the main list.
+    const periodStart = dateFrom || targetDate;
 
     const periodFilter = ledgerDateExpr
       ? dateFrom
         ? `CAST(${ledgerDateExpr} AS DATE) >= @dateFrom AND CAST(${ledgerDateExpr} AS DATE) <= @dateTo`
         : `CAST(${ledgerDateExpr} AS DATE) = @targetDate`
       : "1=0";
+    const beforeFilter = ledgerDateExpr ? `CAST(${ledgerDateExpr} AS DATE) < @periodStart` : "1=0";
 
     const request = pool
       .request()
       .input("itemId", sql.NVarChar(50), String(itemId))
-      .input("targetDate", sql.Date, targetDate);
+      .input("targetDate", sql.Date, targetDate)
+      .input("periodStart", sql.Date, periodStart);
     if (dateFrom) {
       request.input("dateFrom", sql.Date, dateFrom);
       request.input("dateTo", sql.Date, dateTo);
@@ -343,23 +346,46 @@ router.get("/item-ledger", async (req, res) => {
       godownFilter = "AND sl.GodownID = @godownId";
     }
 
+    // The period's movements, then what makes up the opening stock: its balance and the movements before the
+    // period (receipts included), so the drill-down accounts for the whole closing figure, not only the period.
+    const cols = `sl.StockID, sl.Type, sl.RefType, sl.RefID, sl.DocNo, sl.Qty, sl.UOM, ${ledgerDateExpr ? ledgerDateExpr : "NULL"} AS MovementDate`;
     const result = await request.query(`
-      SELECT
-        sl.StockID, sl.Type, sl.RefType, sl.RefID, sl.DocNo, sl.Qty, sl.UOM,
-        ${ledgerDateExpr ? ledgerDateExpr : "NULL"} AS MovementDate
+      SELECT ${cols}
       FROM dbo.StockLedger sl
       WHERE CONVERT(NVARCHAR(50), sl.ItemID) = @itemId
         ${godownFilter}
         AND ${periodFilter}
-      ORDER BY MovementDate DESC, sl.StockID DESC
+      ORDER BY MovementDate DESC, sl.StockID DESC;
+
+      SELECT ISNULL(SUM(CASE WHEN sl.Type = 'IN' THEN sl.Qty ELSE -sl.Qty END), 0) AS Opening, COUNT(*) AS N
+      FROM dbo.StockLedger sl
+      WHERE CONVERT(NVARCHAR(50), sl.ItemID) = @itemId
+        ${godownFilter}
+        AND ${beforeFilter};
+
+      SELECT TOP 300 ${cols}
+      FROM dbo.StockLedger sl
+      WHERE CONVERT(NVARCHAR(50), sl.ItemID) = @itemId
+        ${godownFilter}
+        AND ${beforeFilter}
+      ORDER BY MovementDate DESC, sl.StockID DESC;
     `);
 
-    const rows = result.recordset.map((r) => ({
-      ...r,
-      Qty: Number(r.Qty || 0),
-    }));
+    const toRow = (r) => ({ ...r, Qty: Number(r.Qty || 0) });
+    const rows = result.recordsets[0].map(toRow);
+    const before = result.recordsets[1][0] || { Opening: 0, N: 0 };
+    const earlier = result.recordsets[2].map(toRow);
 
-    res.json({ itemId: String(itemId), godownId, data: rows, total: rows.length });
+    res.json({
+      itemId: String(itemId),
+      godownId,
+      periodStart,
+      data: rows,
+      total: rows.length,
+      opening: Number(before.Opening || 0),
+      earlierCount: Number(before.N || 0),
+      earlier,
+    });
   } catch (err) {
     console.error("[inventory-master] item-ledger GET error:", err.message);
     res.status(500).json({
