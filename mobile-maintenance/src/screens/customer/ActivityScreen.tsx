@@ -1,17 +1,14 @@
-﻿// Updates & Approvals — premium redesign. Same logic as before.
+﻿// Updates & Approvals — everything that happened on this property, newest first, filterable. What needs the
+// customer is in the header's bell (TopHeader.tsx NotificationsMenu), not repeated here.
 import { useMemo, useState } from "react";
 import { Text, View } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, History } from "lucide-react-native";
+import { History } from "lucide-react-native";
 import { useBrand } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
 import { portal } from "@/api/customerPortalApi";
 import { useCustomer } from "@/customer/CustomerContext";
-import { useNeedsYou } from "@/customer/todo";
-import { ActionBanner, Divider, ErrorText, ListRow, Loading, Muted, Page, Panel, Tap } from "@/customer/ui";
-import type { CustomerStackParamList } from "@/navigation/CustomerStack";
+import { Divider, ErrorText, ListRow, Loading, Muted, Page, Panel, Tap } from "@/customer/ui";
 
 const FILTERS: { key: string; label: string }[] = [
   { key: "",           label: "All" },
@@ -27,38 +24,19 @@ const when = (d: string) =>
 
 export default function CustomerActivityScreen() {
   const brand = useBrand();
-  const nav     = useNavigation<NativeStackNavigationProp<CustomerStackParamList>>();
   const { appId, timeline } = useCustomer();
   const enabled = appId != null;
   const feed      = useQuery({ queryKey: ["portal-activity", appId],              queryFn: () => portal.activity(appId as number), enabled });
-  const needs     = useNeedsYou(appId);
   const [filter, setFilter] = useState("");
 
   const list = useMemo(
     () => (filter ? (feed.data || []).filter((e) => e.type === filter) : feed.data || []),
     [feed.data, filter],
   );
-  const todo = needs.data || [];
 
   return (
-    <Page onRefresh={() => Promise.all([feed.refetch(), needs.refetch(), timeline.refetch()])}>
+    <Page onRefresh={() => Promise.all([feed.refetch(), timeline.refetch()])}>
       <Muted>A running log of everything that's happened — agreement approvals, payments, documents, and support.</Muted>
-
-      {/* Action items */}
-      {todo.length > 0 ? (
-        <Panel title="Needs Your Action" icon={AlertTriangle}>
-          {todo.map((a) => (
-            <ActionBanner
-              key={`${a.kind}-${a.label}`}
-              title={a.label}
-              sub={a.sub}
-              tone={a.urgent ? "red" : "gold"}
-              cta="Open ›"
-              onPress={() => nav.navigate(a.route as never)}
-            />
-          ))}
-        </Panel>
-      ) : null}
 
       {/* Filter chips */}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>

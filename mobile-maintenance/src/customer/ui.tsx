@@ -24,6 +24,12 @@ export const ON_ACCENT   = "#14110A";
 export const fmtDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
+/** "Today", "Yesterday", "3 days ago", else the date. */
+export function ago(at: string) {
+  const days = Math.floor((Date.now() - new Date(at).getTime()) / 86400000);
+  return days <= 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? `${days} days ago` : fmtDate(at);
+}
+
 export const money = (n: unknown) => formatINR(n as never, { decimals: 0 });
 
 /** A person's or project's name as people write it: words stored in ALL CAPS ("SILVER WOODS") become "Silver Woods".
@@ -143,15 +149,22 @@ export function Section({ title, right, children }: { title: string; right?: Rea
 }
 
 // ── Row ───────────────────────────────────────────────────────────────────────
-export function Row({ label, value, strong, tone }: {
+export function Row({ label, value, strong, tone, sub, indent }: {
   label: string; value: ReactNode; strong?: boolean; tone?: string;
+  /** A short explanation under the label. */
+  sub?: string | null;
+  /** A part of the row above (e.g. one plot's share of the price). */
+  indent?: boolean;
 }) {
   const b = useBrand();
   return (
-    <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-      <Text style={{ fontSize: 14, fontFamily: fonts.body.regular, color: b.textSecondary, flex: 1 }}>
-        {label}
-      </Text>
+    <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingLeft: indent ? 14 : 0 }}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={{ fontSize: indent ? 13 : 14, fontFamily: fonts.body.regular, color: b.textSecondary }}>
+          {label}
+        </Text>
+        {sub ? <Text style={{ fontSize: 12, lineHeight: 17, fontFamily: fonts.body.regular, color: b.textFaint }}>{sub}</Text> : null}
+      </View>
       <Text
         style={{
           fontSize: strong ? 16.5 : 14.5,

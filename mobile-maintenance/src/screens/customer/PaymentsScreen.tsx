@@ -8,31 +8,16 @@
 import { useState } from "react";
 import { Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarClock, Check, ChevronRight, FileDown, Receipt, Scale, Wallet } from "lucide-react-native";
+import { CalendarClock, Check, ChevronDown, ChevronUp, FileDown, Receipt, Scale, Wallet } from "lucide-react-native";
 import { toast } from "@/components/Toast";
-import { portal, pdfPath, type MoneyStatement } from "@/api/customerPortalApi";
+import { portal, pdfPath, type MoneyStatement, moneyView } from "@/api/customerPortalApi";
 import { useCustomer } from "@/customer/CustomerContext";
-import { Divider, ErrorText, HeroSurface, Loading, Muted, ON_HERO, Page, Panel, Pill, Ring, fmtDate, money, Tap } from "@/customer/ui";
+import { Button, Divider, ErrorText, HeroSurface, Loading, Muted, ON_HERO, Page, Panel, Pill, Ring, Row, fmtDate, money, Tap } from "@/customer/ui";
 import { openDocument } from "@/utils/documents";
 import { useBrand } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
 
-type Line = MoneyStatement["price"]["lines"][number];
 type Inst = MoneyStatement["plan"]["instalments"][number];
-type Pay = MoneyStatement["payments"][number];
-
-/** A price line in the customer's words. */
-function lineText(l: Line, plot: boolean): { label: string; sub?: string } {
-  const gst = l.gst ? `Includes GST of ${money(l.gst)}` : undefined;
-  switch (l.key) {
-    case "home": return { label: plot ? "Plot price" : "Home price" };
-    case "homeGst": return { label: plot ? "GST on the plot" : "GST on the home" };
-    case "parking": return { label: `Parking${l.label ? ` · ${l.label}` : ""}${l.quantity && l.quantity > 1 ? ` × ${l.quantity}` : ""}`, sub: gst };
-    case "extra": return { label: l.label || "Extra charges", sub: gst };
-    case "creditNotes": return { label: "Credit notes", sub: "Taken off your price" };
-    default: return { label: "Other adjustments", sub: "Changes made to your price by our accounts team" };
-  }
-}
 
 /** An instalment's state in the customer's words. */
 function instState(m: Inst, isNext: boolean): { label: string; sub?: string; done: boolean } {
@@ -45,32 +30,16 @@ function instState(m: Inst, isNext: boolean): { label: string; sub?: string; don
   return { label: isNext ? "Due next" : "Later", done: false };
 }
 
-/** A payment's state, and where its money went, in the customer's words. */
-function payState(p: Pay): { label: string; sub?: string } {
-  switch (p.stage) {
-    case "settled": return { label: "Counted" };
-    case "held": return { label: "Received", sub: "Waiting to be matched to your instalments" };
-    case "split": return { label: "Received" };
-    case "finance":
-    case "recorded": return { label: "Being verified", sub: "Our accounts team is checking it. It counts once confirmed." };
-    case "returned": return { label: "Not accepted", sub: "This entry could not be accepted. Please contact us about it." };
-    case "bounced": return { label: "Bounced", sub: p.note || "This payment did not go through." };
-    case "unitChange": return { label: "Moved to your new unit" };
-    case "out": return { label: p.refunded > 0 ? "Refunded" : "Moved" };
-    default: return { label: "Adjustment", sub: "A credit or transfer made by us — not a payment from you" };
-  }
-}
-
 export default function CustomerPaymentsScreen() {
   const brand = useBrand();
-  const { app, appId } = useCustomer();
-  const statement = useQuery({ queryKey: ["portal-money", appId], queryFn: () => portal.money(appId as number), enabled: appId != null });
+  const { app, appId, money: statement } = useCustomer();
   // Credit notes come for the whole customer; show only this property's (by its booking).
   const notes    = useQuery({ queryKey: ["portal-credit-notes"], queryFn: portal.creditNotes,
     select: (rows) => rows.filter((n) => !!app?.BookingNo && n.BookingNo === app.BookingNo) });
   const invoices = useQuery({ queryKey: ["portal-invoices", appId], queryFn: () => portal.invoices(appId as number), enabled: appId != null });
   const [opening, setOpening] = useState<string | null>(null);
   const [showAllPlan, setShowAllPlan] = useState(false);
+  const [openPay, setOpenPay] = useState<number | null>(null);
 
   const open = async (key: string, path: string, name: string) => {
     if (opening) return;
@@ -93,9 +62,7 @@ export default function CustomerPaymentsScreen() {
   // A booking that ended owes nothing; the statement then answers "where did my money go?".
   const closed = s.booking.Closed;
   const { totals, plan, price } = s;
-  const pct = plan.total > 0 ? Math.min(100, Math.round((totals.paid / plan.total) * 100)) : 0;
-  const nextIdx = plan.instalments.findIndex((m) => !m.waived && !["Adjusted", "Verified"].includes(m.stage || ""));
-  const next = nextIdx >= 0 ? plan.instalments[nextIdx] : undefined;
+  const { pct, next, nextAmount } = moneyView(s);
   // A long plan shows the open part first; paid instalments fold away behind "Show all".
   const openPlan = plan.instalments.filter((m) => !instState(m, false).done);
   const planRows = showAllPlan || openPlan.length === 0 ? plan.instalments : openPlan;
@@ -145,7 +112,7 @@ export default function CustomerPaymentsScreen() {
                 <View style={{ flex: 1, gap: 2, borderRadius: 16, padding: 14, backgroundColor: ON_HERO.glass }}>
                   <Text numberOfLines={1} style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>Next{next.dueDate ? ` · ${fmtDate(next.dueDate)}` : ""}</Text>
                   <Text style={{ fontSize: 17, fontFamily: fonts.heading.semibold, color: brand.gold, fontVariant: ["tabular-nums"] }}>
-                    {money(Math.max(0, next.due - next.settled - next.held))}
+                    {money(nextAmount)}
                   </Text>
                 </View>
               ) : null}
@@ -182,6 +149,14 @@ export default function CustomerPaymentsScreen() {
             {money(totals.verifying)} more is being verified. It will count towards this once confirmed.
           </Text>
         ) : null}
+        {totals.overPrice > 0 ? (
+          <View style={{ padding: 12, borderRadius: 12, backgroundColor: brand.goldSoft, borderWidth: 1, borderColor: brand.borderGold, gap: 2 }}>
+            <Text style={{ fontSize: 14, fontFamily: fonts.heading.semibold, color: brand.textPrimary }}>You have paid {money(totals.overPrice)} more than your price</Text>
+            <Text style={{ fontSize: 13, lineHeight: 19, fontFamily: fonts.body.regular, color: brand.textSecondary }}>
+              Your total price is {money(price.total)}{price.lines.some((l) => l.key === "creditNotes") ? " after credit notes" : ""} and you have paid {money(totals.paid)}. Please contact us about refunding or adjusting the difference.
+            </Text>
+          </View>
+        ) : null}
         {totals.refunded > 0 || totals.movedOut > 0 ? (
           <Text style={{ fontSize: 13, lineHeight: 19, fontFamily: fonts.body.regular, color: brand.textSecondary }}>
             {[totals.refunded > 0 ? `${money(totals.refunded)} was refunded to you` : null, totals.movedOut > 0 ? `${money(totals.movedOut)} was moved on (for example to a new unit)` : null].filter(Boolean).join(" and ")}. Neither is counted above.
@@ -191,16 +166,22 @@ export default function CustomerPaymentsScreen() {
       )}
 
       {/* 2 — how the price is made up */}
-      <Panel title="How your price is made up" icon={Receipt}>
+      <Panel title="Price and GST breakdown" icon={Receipt}>
         {price.lines.map((l, i) => {
-          const tx = lineText(l, plot);
-          return <Sum key={`${l.key}-${i}`} label={tx.label} sub={tx.sub} value={l.amount} color={l.amount < 0 ? brand.success : undefined} />;
+          return (
+            <View key={`${l.key}-${i}`} style={{ gap: 8 }}>
+              <Sum label={l.title} sub={l.note || undefined} value={l.amount} color={l.amount < 0 ? brand.success : undefined} />
+              {(l.parts || []).map((p) => <Row key={p.title} indent label={p.title} sub={p.note} value={money(p.amount)} />)}
+            </View>
+          );
         })}
         <Divider />
         <Sum label="Total price" value={price.total} />
-        {price.gstIncluded > 0 ? <Muted>This price includes {money(price.gstIncluded)} of GST in all.</Muted> : null}
+        <Muted>{price.gstIncluded > 0 ? `This price includes ${money(price.gstIncluded)} of GST in all.` : "No GST is included in this price."}</Muted>
         {Math.abs(price.total - plan.total - plan.waived) > 0.5 ? (
-          <Muted>Your payment plan adds up to {money(plan.total + plan.waived)}{plan.waived > 0 ? " before waivers" : ""}. If this differs from your price, please ask us.</Muted>
+          <Muted>
+            Your payment plan adds up to {money(plan.total + plan.waived)}{plan.waived > 0 ? " before waivers" : ""}, which is {money(Math.abs(price.total - plan.total - plan.waived))} {price.total < plan.total + plan.waived ? "more" : "less"} than this price. Please ask us if you have a question about it.
+          </Muted>
         ) : null}
       </Panel>
 
@@ -244,7 +225,7 @@ export default function CustomerPaymentsScreen() {
       <Panel title="Every payment you've made" icon={Wallet}>
         {!s.payments.length ? <Muted>No payments yet. Each one will appear here with its receipt.</Muted> : (
           [...s.payments].reverse().map((p, i) => {
-            const st = payState(p);
+            const st = p.status;
             const parts = [
               p.settled > 0 && p.stage !== "settled" ? `${money(p.settled)} counted` : null,
               p.held > 0 && p.stage !== "held" ? `${money(p.held)} waiting to be matched` : null,
@@ -253,30 +234,36 @@ export default function CustomerPaymentsScreen() {
             ].filter(Boolean).join(" · ");
             const key = `pay-${i}`;
             const canOpen = p.receiptId != null;
+            const shown = openPay === i;
             return (
-              <View key={key}>
+              <View key={key} style={{ gap: 10 }}>
                 {i ? <Divider /> : null}
-                <Tap disabled={!canOpen}
-                  onPress={() => canOpen && open(key, pdfPath.receipt(appId as number, p.receiptId as number), p.receiptNo || "Receipt")}
-                  style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingTop: i ? 12 : 0, opacity: pressed ? 0.6 : 1 })}>
+                <Tap onPress={() => setOpenPay(shown ? null : i)} accessibilityRole="button" accessibilityState={{ expanded: shown }}
+                  style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingTop: i ? 2 : 0, opacity: pressed ? 0.6 : 1 })}>
                   <View style={{ flex: 1, gap: 3 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       {num(p.amount, p.stage === "bounced" || p.stage === "returned" ? brand.textFaint : brand.textPrimary, 16)}
                       <Pill label={st.label} />
                     </View>
                     <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: brand.textSecondary }}>
-                      {[p.date ? fmtDate(p.date) : null, p.mode, p.ref].filter(Boolean).join(" · ")}
+                      {[p.date ? fmtDate(p.date) : null, p.mode, p.milestone ? `for ${p.milestone}` : null].filter(Boolean).join(" · ")}
                     </Text>
                     {st.sub ? <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: brand.textSecondary }}>{st.sub}</Text> : null}
                     {parts ? <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: brand.textPrimary }}>{parts}</Text> : null}
-                    {canOpen ? (
-                      <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: brand.gold }}>
-                        {opening === key ? "Opening…" : `Receipt ${p.receiptNo} · tap to open`}
-                      </Text>
-                    ) : null}
                   </View>
-                  {canOpen ? <ChevronRight size={18} color={brand.textFaint} /> : null}
+                  {shown ? <ChevronUp size={18} color={brand.textFaint} /> : <ChevronDown size={18} color={brand.textFaint} />}
                 </Tap>
+                {shown ? (
+                  <View style={{ gap: 8, padding: 12, borderRadius: 12, backgroundColor: brand.surface, borderWidth: 1, borderColor: brand.border }}>
+                    {/* How they paid — the server's ready-made list (same as the web portal) — then where it stands */}
+                    {p.details.map((d) => <Row key={d.label} label={d.label} value={d.value} />)}
+                    <Row label="Status" value={st.label} />
+                    {canOpen ? (
+                      <Button label={opening === key ? "Opening…" : `Open receipt ${p.receiptNo}`} kind="line" icon={FileDown}
+                        busy={opening === key} onPress={() => open(key, pdfPath.receipt(appId as number, p.receiptId as number), p.receiptNo || "Receipt")} />
+                    ) : p.receiptNo ? <Muted>The receipt opens here once our accounts team approves it.</Muted> : null}
+                  </View>
+                ) : null}
               </View>
             );
           })

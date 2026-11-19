@@ -6,7 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { portal, type PortalApplication, type PortalMe, type Timeline } from "@/api/customerPortalApi";
+import { portal, type MoneyStatement, type PortalApplication, type PortalMe, type Timeline } from "@/api/customerPortalApi";
 
 interface CustomerCtx {
   me: UseQueryResult<PortalMe>;
@@ -19,6 +19,9 @@ interface CustomerCtx {
   appId: number | null;
   setAppId: (id: number) => void;
   timeline: UseQueryResult<Timeline>;
+  /** The chosen property's money statement (GET /money) — the ONE source of every paid / total / balance figure in the
+   *  app (Home, Payments, Profile), so no two screens can disagree. */
+  money: UseQueryResult<MoneyStatement>;
   /** A co-applicant, or a past property: look, don't act (the server enforces the co-applicant rule). */
   readOnly: boolean;
 }
@@ -72,8 +75,13 @@ export function CustomerProvider({ children }: PropsWithChildren) {
     queryFn: () => portal.timeline(chosen as number),
     enabled: chosen != null,
   });
+  const money = useQuery({
+    queryKey: ["portal-money", chosen],
+    queryFn: () => portal.money(chosen as number),
+    enabled: chosen != null,
+  });
   const value: CustomerCtx = {
-    me, apps, homes, past, app, appId: chosen, setAppId, timeline,
+    me, apps, homes, past, app, appId: chosen, setAppId, timeline, money,
     readOnly: !!app?.IsCoApplicant || app?.Lifecycle === "Past",
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

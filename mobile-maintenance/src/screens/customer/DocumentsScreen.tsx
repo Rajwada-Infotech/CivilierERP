@@ -89,6 +89,7 @@ export default function CustomerDocumentsScreen() {
   const docsQ = useQuery({ queryKey: ["portal-agreement-documents", appId], queryFn: () => portal.agreementDocuments(appId as number), enabled });
   const t = timeline.data;
   const qpQ = useQuery({ queryKey: ["portal-qp-attachments", appId], queryFn: () => portal.queryPaymentAttachments(appId as number), enabled: enabled && !!t?.queryPayment });
+  const deedQ = useQuery({ queryKey: ["portal-sales-deed", appId], queryFn: () => portal.salesDeed(appId as number), enabled: enabled && !!t?.salesDeed?.SentToCustomerAt });
   const [proposing, setProposing] = useState(false);
   const [busyDoc, setBusyDoc] = useState<number | null>(null);
   const [qpBusy, setQpBusy] = useState(false);
@@ -98,6 +99,8 @@ export default function CustomerDocumentsScreen() {
     qc.invalidateQueries({ queryKey: ["portal-agreement", appId] });
     qc.invalidateQueries({ queryKey: ["portal-agreement-documents", appId] });
     qc.invalidateQueries({ queryKey: ["portal-qp-attachments", appId] });
+    qc.invalidateQueries({ queryKey: ["portal-sales-deed", appId] });
+    qc.invalidateQueries({ queryKey: ["portal-needs-you"] });
   };
   const acceptDate = useMutation({
     mutationFn: () => portal.acceptAgreementDate(appId as number),
@@ -134,6 +137,8 @@ export default function CustomerDocumentsScreen() {
   const onFile = documents.filter((d) => d.FileName && d.Status !== "Rejected");
   const mandatoryOutstanding = needsAction.filter((d) => d.IsMandatory);
   const sd = t?.salesDeed;
+  const deed = deedQ.data?.deed;
+  const deedPapers = deedQ.data?.documents || [];
   const qp = t?.queryPayment;
   const qpInfo = (qpQ.data || []).filter((a) => a.DocType === "Info");
   const qpProof = (qpQ.data || []).filter((a) => a.DocType === "Proof");
@@ -149,7 +154,7 @@ export default function CustomerDocumentsScreen() {
   }
 
   return (
-    <Page onRefresh={() => Promise.all([timeline.refetch(), agreementQ.refetch(), docsQ.refetch(), qpQ.refetch()])}>
+    <Page onRefresh={() => Promise.all([timeline.refetch(), agreementQ.refetch(), docsQ.refetch(), qpQ.refetch(), deedQ.refetch()])}>
       <Muted>Track your full legal journey — agreement, sale deed, government payment, and registration — in one place.</Muted>
 
       {ag ? (
@@ -226,8 +231,24 @@ export default function CustomerDocumentsScreen() {
           <Row label="Deed Date" value={fmtDate(sd.DeedDate)} />
           <Row label="Sub-Registrar Office" value={sd.SubRegistrarOffice || "—"} />
           <Row label="Registration No." value={sd.RegistrationNo || "—"} />
+          {deed?.StampDuty != null ? <Row label="Stamp duty" value={money(deed.StampDuty)} /> : null}
+          {deed?.RegistrationFee != null ? <Row label="Registration fee" value={money(deed.RegistrationFee)} /> : null}
+          {Number(deed?.StampDutyCredit) > 0 ? <Row label="Stamp duty already paid (credit)" value={money(deed?.StampDutyCredit)} /> : null}
+          {deedPapers.length ? (
+            <>
+              <Text style={{ fontSize: 11, fontFamily: fonts.body.semibold, color: brand.textSecondary }}>THE DEED AND ITS PAPERS — TAP TO READ</Text>
+              {deedPapers.map((d) => (
+                <ListRow key={d.Id} title={`${docLabel(d)}${d.VersionNo && d.VersionNo > 1 ? ` (v${d.VersionNo})` : ""}`}
+                  sub={[d.FileName, fmtBytes(d.FileSize), d.UploadedAt ? fmtDate(d.UploadedAt) : null].filter(Boolean).join(" · ")}
+                  onPress={() => open(pdfPath.salesDeedDoc(appId as number, d.Id), d.FileName || docLabel(d))} />
+              ))}
+            </>
+          ) : deedQ.isLoading ? <Loading /> : <Muted>The deed papers will appear here as soon as our legal team attaches them.</Muted>}
+          {sd.CustomerApprovalStatus === "Recheck" ? (
+            <Muted>You asked for a recheck{deed?.CustomerRecheckRemarks ? `: "${deed.CustomerRecheckRemarks}"` : ""}. Our legal team is revising the deed and will share it again.</Muted>
+          ) : null}
           {sd.CustomerApprovalStatus === "Pending" && !readOnly ? <Respond which="salesDeed" onDone={refresh} />
-            : sd.CustomerApprovalStatus === "Approved" ? <Muted>You've approved this sales deed</Muted> : null}
+            : sd.CustomerApprovalStatus === "Approved" ? <Muted>You approved this sale deed{deed?.CustomerApprovedAt ? ` on ${fmtDate(deed.CustomerApprovedAt)}` : ""}.</Muted> : null}
         </Panel>
       ) : null}
 

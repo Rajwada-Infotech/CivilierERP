@@ -1,27 +1,26 @@
 ﻿// Profile — premium redesign. Same logic as before.
 import { Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, CalendarClock, History, LayoutGrid, Settings, UserRound } from "lucide-react-native";
+import { Building2, CalendarClock, History, Settings, UserRound } from "lucide-react-native";
 import { useBrand } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
-import { portal } from "@/api/customerPortalApi";
+import { portal, moneyView } from "@/api/customerPortalApi";
 import { useCustomer } from "@/customer/CustomerContext";
 import { useNavigation } from "@react-navigation/native";
 import { Bar, Button, ErrorText, Loading, MenuGroup, Muted, Page, Panel, Row, Section, StatRow, fmtDate, money, AccentAvatar } from "@/customer/ui";
 
 export default function CustomerProfileScreen() {
   const brand = useBrand();
-  const { me, app, appId, setAppId, homes, past, timeline } = useCustomer();
+  const { me, app, appId, setAppId, homes, past, timeline, money: statement } = useCustomer();
   const navigation = useNavigation();
   const tickets  = useQuery({ queryKey: ["portal-tickets", appId], queryFn: () => portal.tickets(appId as number), enabled: appId != null });
   const m = me.data;
   const t = timeline.data;
 
-  const ms        = t?.paymentMilestones || [];
-  const totalDue  = ms.reduce((s, x) => s + Number(x.AmountDue || 0), 0);
-  const totalPaid = ms.reduce((s, x) => s + Number(x.AmountPaid || 0), 0) + Number(t?.onAccountTotalReceived || 0);
-  const pct       = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
+  // The same figures as Home and Payments (moneyView over the money statement).
+  const st = statement.data;
+  const { total: totalDue, paid: totalPaid, pct } = moneyView(st);
   const openTickets = (tickets.data || []).filter((x) => x.Status !== "Resolved" && x.Status !== "Closed").length;
 
   const keyDates = [
@@ -37,7 +36,7 @@ export default function CustomerProfileScreen() {
     (name ?? "?").split(" ").filter(Boolean).map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 
   return (
-    <Page onRefresh={() => Promise.all([me.refetch(), timeline.refetch(), tickets.refetch()])}>
+    <Page onRefresh={() => Promise.all([me.refetch(), timeline.refetch(), statement.refetch(), tickets.refetch()])}>
 
       {/* Avatar hero */}
       <View style={{ alignItems: "center", paddingVertical: 24, gap: 10 }}>
@@ -57,7 +56,7 @@ export default function CustomerProfileScreen() {
       </View>
 
       {/* Payment progress */}
-      {t?.booking ? (
+      {t?.booking && !st?.booking?.Closed ? (
         <Panel title="Payment Progress">
           <Bar pct={pct} />
           <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: brand.textSecondary }}>
@@ -79,16 +78,6 @@ export default function CustomerProfileScreen() {
           </>
         )}
       </Panel>
-
-      {/* Snapshot */}
-      {t?.booking ? (
-        <Panel title="Snapshot" icon={LayoutGrid}>
-          <Row label="Unit"        value={t.booking.UnitNo || "—"} />
-          <Row label="Paid of Total" value={`${money(totalPaid)} / ${money(totalDue)}`} />
-          <Row label="Agreement"   value={t.agreement?.CustomerApprovalStatus || "Not sent"} />
-          <Row label="Open help requests" value={String(openTickets)} />
-        </Panel>
-      ) : null}
 
       {/* Key dates */}
       {t?.booking ? (

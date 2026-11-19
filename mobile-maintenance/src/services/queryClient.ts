@@ -6,7 +6,8 @@ import { QueryClient } from "@tanstack/react-query";
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      // One retry for a blip — but never for "too many requests" (HTTP 429): a retry is one more request.
+      retry: (failures, error) => failures < 1 && (error as { status?: number } | null)?.status !== 429,
       staleTime: 30_000,
     },
   },
