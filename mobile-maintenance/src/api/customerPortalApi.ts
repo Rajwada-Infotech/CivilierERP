@@ -120,7 +120,8 @@ export interface Timeline {
   welcomeCall?: { Outcome: string | null; CallDate: string | null } | null;
   customerDetails?: { IsComplete: boolean } | null;
   agreement?: { Id: number; AgreementNo: string | null; Status: string; CustomerApprovalStatus: string | null; SentToCustomerAt: string | null;
-    AgreementDate: string | null; ProposedDate: string | null; DocumentsNeedingAction: number; LastRecheckRemarks: string | null } | null;
+    AgreementDate: string | null; ProposedDate: string | null; DocumentsNeedingAction: number; LastRecheckRemarks: string | null;
+    AfsRegistrationNo: string | null; AfsRegistrationDate: string | null } | null;
   paymentMilestones?: Milestone[];
   onAccountTotalReceived?: number;
   salesDeed?: { DeedNo: string | null; Status: string; DeedValue: number | null; DeedDate: string | null; SubRegistrarOffice: string | null;
@@ -189,6 +190,8 @@ export interface Agreement {
   CustomerApprovalStatus: string | null; CustomerApprovedAt: string | null; RecheckCount: number | null;
   ProposedDate: string | null; ProposedDateStatus: string | null; DateApprovalStatus: string | null; SentToCustomerAt: string | null;
   LastRecheckRemarks: string | null; BookingNo: string; UnitNo: string | null; ProjectName: string | null; TotalValue: number;
+  /** Set once the agreement is registered (Status 'Registered'); signed = Status 'Executed' or 'Registered'. */
+  AfsRegistrationNo: string | null; AfsRegistrationDate: string | null; AfsStampDuty: number | null; AfsRegistrationFee: number | null;
 }
 export interface AgreementDoc {
   Id: number; DocumentType: string; Label: string | null; IsMandatory: boolean; UploadedByType: string | null; FileName: string | null;

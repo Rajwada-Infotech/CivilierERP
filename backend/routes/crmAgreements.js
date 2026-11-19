@@ -1606,6 +1606,11 @@ router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), asyn
 // — one side accepting the other's proposed date, then a super_admin
 // sign-off — never typed in here, so execution itself is proof the "both
 // ends agreed on a date" mandate was actually satisfied.
+/** An agreement's number, for the customer's push message. */
+async function agreementNo(pool, id) {
+  return (await pool.request().input("id", sql.Int, id).query("SELECT AgreementNo FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0]?.AgreementNo || null;
+}
+
 router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -1728,6 +1733,8 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
       throw err;
     }
 
+    // The customer hears their agreement is signed (Civilier Home push; sent only to a customer with the app).
+    require("../services/pushNotifications").notifyBookingCustomers(row.BookingId, "agreementSigned", { no: await agreementNo(pool, id), date: row.AgreementDate });
     res.json({ success: true, status: CrmStatus.EXECUTED });
   } catch (e) {
     console.error("[crm-agreements] mark-executed error:", e.message);
@@ -1846,6 +1853,8 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
       throw err;
     }
 
+    // The customer hears their agreement is registered (Civilier Home push).
+    require("../services/pushNotifications").notifyBookingCustomers(cur.recordset[0].BookingId, "agreementRegistered", { no: await agreementNo(pool, id), regNo, date: regDate });
     res.json({ success: true, status: CrmStatus.REGISTERED });
   } catch (e) {
     console.error("[crm-agreements] mark-registered error:", e.message);

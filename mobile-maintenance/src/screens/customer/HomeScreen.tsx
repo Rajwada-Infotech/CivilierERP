@@ -40,6 +40,8 @@ interface Step { label: string; hint: string; state: StepState }
 function journey(t: Timeline): Step[] {
   const ms = t.paymentMilestones || [];
   const agreementApproved = t.agreement?.CustomerApprovalStatus === "Approved";
+  // Registered is the agreement's last state (crmAgreements.js: Draft -> Executed -> Registered).
+  const agreementRegistered = t.agreement?.Status === "Registered";
   // Judged by money stage (Covered), not Status — paid money held On Account leaves Status "Pending" (crmPortal.js loadTimeline).
   const paymentsDone      = ms.length > 0 && ms.every((m) => m.Covered);
   const salesDeedDone     = !!t.salesDeed;
@@ -51,6 +53,7 @@ function journey(t: Timeline): Step[] {
     // No separate "your details" step: the salesperson collects PAN, Aadhaar and bank details as part of the welcome
     // call (CRM welcome-call checklist) — it is never something the customer does here.
     { label: "Agreement",         hint: "You read and approve the agreement for sale.",        done: agreementApproved },
+    { label: "Agreement registered", hint: "The agreement is signed and registered with the government.", done: agreementRegistered },
     { label: "Payments",          hint: "You pay the instalments as they fall due.",           done: paymentsDone },
     { label: "Sale deed",         hint: "The final legal document for your home.",             done: salesDeedDone },
     { label: "Government fees",   hint: "Stamp duty and registration fees are paid.",          done: qpDone },

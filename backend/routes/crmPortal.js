@@ -614,6 +614,7 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT Id, AgreementNo, Status, SeniorApprovalStatus, CustomerApprovalStatus,
                ProposedDate, ProposedDateStatus, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
+               AfsRegistrationNo, AfsRegistrationDate,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','${CrmStatus.REJECTED}')) AS DocumentsNeedingAction
         FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL AND Status <> 'Cancelled'
@@ -1023,6 +1024,8 @@ async function loadAgreement(pool, appId) {
              ag.CustomerApprovalStatus, ag.CustomerApprovedAt, ag.RecheckCount,
              ag.ProposedDate, ag.ProposedDateStatus, ag.DateApprovalStatus,
              ag.SentToCustomerAt, ag.LastRecheckRemarks,
+             -- Signed (Executed) and registered: the registration staff record (crmAgreements.js mark-registered)
+             ag.AfsRegistrationNo, ag.AfsRegistrationDate, ag.AfsStampDuty, ag.AfsRegistrationFee,
              b.BookingNo,
              COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
              COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
@@ -2149,7 +2152,7 @@ router.get("/activity", async (req, res) => {
     const appId = await resolveAndAssertApplication(pool, req, res);
     if (appId === null) return;
 
-    const [agreementLog, payments, documents, tickets, salesDeed, queryPayment, qpProofs, registry, nocs] = await Promise.all([
+    const [agreementLog, payments, documents, tickets, salesDeed, queryPayment, qpProofs, registry, nocs, agreementState] = await Promise.all([
       pool.request().input("aid", sql.Int, appId)
         .query(`
           SELECT l.Action, l.Remarks, l.CreatedAt, ag.AgreementNo
@@ -2221,6 +2224,12 @@ router.get("/activity", async (req, res) => {
         JOIN dbo.CrmBooking b ON b.Id = n.BookingId
         WHERE b.ApplicationId = @aid AND n.IssuedDate IS NOT NULL
       `),
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT TOP 1 ag.AgreementNo, ag.Status, ag.AgreementDate, ag.AfsRegistrationNo, ag.AfsRegistrationDate, ag.UpdatedAt
+        FROM dbo.CrmAgreement ag JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+        WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
+        ORDER BY ag.Id DESC
+      `),
     ]);
 
     const feed = [];
@@ -2237,6 +2246,22 @@ router.get("/activity", async (req, res) => {
       if (!fn) continue;
       const { title, detail } = fn(r);
       feed.push({ type: "agreement", title, detail, at: r.CreatedAt });
+    }
+    // Signed and registered have no customer-facing log row — read from the agreement itself, so an agreement that
+    // reached them before this existed shows them too. Signing is on the agreed date; registration on its own date.
+    const agS = agreementState.recordset[0];
+    // Those dates carry no time (midnight). When the agreement was last updated that same day, that is when it was
+    // recorded — use it, so the event sorts after what happened earlier that day, not under it.
+    const sameDay = (d, t) => d && t && day(d) === day(t);
+    const when = (d, t) => (sameDay(d, t) ? new Date(t) : d || t);
+    if (agS && [CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agS.Status)) {
+      const at = when(agS.AgreementDate, agS.UpdatedAt);
+      // Signed comes just before registered when both were recorded at the same moment.
+      feed.push({ type: "agreement", title: "Agreement signed", detail: agS.AgreementNo, at: at instanceof Date ? new Date(at.getTime() - 1000) : at });
+    }
+    if (agS && agS.Status === CrmStatus.REGISTERED) {
+      feed.push({ type: "agreement", title: "Agreement registered", detail: [agS.AgreementNo, agS.AfsRegistrationNo ? `Reg. no. ${agS.AfsRegistrationNo}` : null].filter(Boolean).join(" · "),
+        at: when(agS.AfsRegistrationDate, agS.UpdatedAt) });
     }
     for (const r of payments.recordset) {
       feed.push({ type: "payment", title: `Payment received — ${r.MilestoneName}`, detail: `₹${Number(r.Amount).toLocaleString("en-IN")}${r.PaymentMode ? ` via ${r.PaymentMode}` : ""}`, at: r.CreatedAt });

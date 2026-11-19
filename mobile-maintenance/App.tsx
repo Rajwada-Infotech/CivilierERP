@@ -9,7 +9,7 @@ import { ToastProvider } from "@/components/Toast";
 import RootNavigator from "@/navigation/RootNavigator";
 import { UpdateGate } from "@/updater/UpdateGate";
 import { PushNotificationsGate } from "@/notifications/PushNotificationsGate";
-import { navigationRef } from "@/navigation/navigationRef";
+import { navigationRef, openCustomerScreen } from "@/navigation/navigationRef";
 import { showApplication } from "@/customer/CustomerContext";
 import { useAppFonts } from "@/theme/fonts";
 import { colors } from "@/theme/colors";
@@ -25,7 +25,8 @@ function openFromNotification(data?: Record<string, unknown>) {
   const screen = portal && typeof data?.screen === "string" ? data.screen : "Notifications";
   let tries = 0;
   const go = () => {
-    if (navigationRef.isReady()) navigationRef.navigate(screen as never);
+    // A customer's screen may be a bottom tab (Payments, Bills, Help) — openCustomerScreen routes it through the tabs.
+    if (navigationRef.isReady()) { if (portal) openCustomerScreen(screen); else navigationRef.navigate(screen as never); }
     else if (tries++ < 20) setTimeout(go, 250);
   };
   go();

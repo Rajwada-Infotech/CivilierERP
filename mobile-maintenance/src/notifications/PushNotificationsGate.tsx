@@ -3,6 +3,7 @@ import type * as NotificationsModule from "expo-notifications";
 import { useAuth } from "@/auth/AuthContext";
 import { notifications, registerForPushAsync } from "./pushNotifications";
 import { CUSTOMER_PUSH } from "@/api/customerPortalApi";
+import { queryClient } from "@/services/queryClient";
 
 export type PushPayload = Record<string, unknown>;
 
@@ -37,13 +38,15 @@ export function PushNotificationsGate({
       onOpenRef.current?.(data);
     };
     const sub = Notifications.addNotificationResponseReceivedListener(handle);
+    // A message arriving while the app is open means something changed for this person: refresh what is on screen.
+    const arrived = Notifications.addNotificationReceivedListener(() => { void queryClient.invalidateQueries(); });
     // The tap that started the app from closed.
     const launched = Notifications.getLastNotificationResponse();
     if (launched) {
       handle(launched);
       Notifications.clearLastNotificationResponse();
     }
-    return () => sub.remove();
+    return () => { sub.remove(); arrived.remove(); };
   }, [userId]);
 
   return null;

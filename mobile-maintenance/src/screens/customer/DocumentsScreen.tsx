@@ -173,14 +173,26 @@ export default function CustomerDocumentsScreen() {
       <Muted>Track your full legal journey — agreement, sale deed, government payment, and registration — in one place.</Muted>
 
       {ag ? (
-        <Panel title={`Agreement For Sale · ${ag.AgreementNo || ""}`} icon={FileText} right={<Pill label={ag.CustomerApprovalStatus || ag.Status} />}>
+        <Panel title={`Agreement For Sale · ${ag.AgreementNo || ""}`} icon={FileText}
+          // Where the agreement really is: registered and signed come after the customer's approval.
+          right={<Pill label={ag.Status === "Registered" ? "Registered" : ag.Status === "Executed" ? "Signed" : ag.CustomerApprovalStatus || ag.Status} />}>
           <Row label="Legal Name" value={ag.LegalName || "—"} />
           <Row label="Project" value={ag.ProjectName || "—"} />
           <Row label="Unit" value={ag.UnitNo || "—"} />
           <Row label="Total Value" value={money(ag.TotalValue)} />
           <Row label="PAN (Permanent Account Number)" value={ag.PanNo || "—"} />
           <Row label="Aadhaar" value={ag.AadhaarNo || "—"} />
-          <Row label="Agreement Date" value={ag.AgreementDate ? fmtDate(ag.AgreementDate) : "Not yet finalized"} />
+          <Row label={ag.Status === "Executed" || ag.Status === "Registered" ? "Signed on" : "Agreement Date"} value={ag.AgreementDate ? fmtDate(ag.AgreementDate) : "Not yet finalized"} />
+          {ag.Status === "Registered" ? (
+            <>
+              <Divider />
+              <Text style={{ fontSize: 11, fontFamily: fonts.body.semibold, color: brand.textSecondary }}>REGISTRATION</Text>
+              <Row label="Registered on" value={fmtDate(ag.AfsRegistrationDate)} tone={brand.success} />
+              {ag.AfsRegistrationNo ? <Row label="Registration no." value={ag.AfsRegistrationNo} /> : null}
+              {ag.AfsStampDuty != null ? <Row label="Stamp duty" value={money(ag.AfsStampDuty)} /> : null}
+              {ag.AfsRegistrationFee != null ? <Row label="Registration fee" value={money(ag.AfsRegistrationFee)} /> : null}
+            </>
+          ) : null}
           {ag.LegalAddress ? <Row label="Registered Address" value={ag.LegalAddress} /> : null}
           <Row label="Documents" value={needsAction.length > 0 ? `${onFile.length} on file, ${needsAction.length} needed` : String(onFile.length)} />
           {ag.LastRecheckRemarks ? <Muted>Your last recheck note: {ag.LastRecheckRemarks}{ag.RecheckCount ? ` (requested ${ag.RecheckCount}×)` : ""}</Muted> : null}
@@ -190,7 +202,11 @@ export default function CustomerDocumentsScreen() {
               : readOnly ? null : <Respond which="agreement" onDone={refresh} />
           ) : ag.CustomerApprovalStatus === "Approved" ? (
             <View style={{ gap: 8 }}>
-              <Muted>You approved this agreement on {fmtDate(ag.CustomerApprovedAt)}</Muted>
+              <Muted>
+                You approved this agreement on {fmtDate(ag.CustomerApprovedAt)}.
+                {ag.Status === "Registered" ? " It is signed and registered — nothing more is needed from you on it."
+                  : ag.Status === "Executed" ? " It is signed; registration with the government comes next — we'll tell you once it's done." : ""}
+              </Muted>
               {!ag.AgreementDate && (
                 ag.DateApprovalStatus === "Pending" ? <Muted>Date agreed — awaiting our team's final sign-off</Muted>
                 : ag.ProposedDateStatus === "PendingCustomerReview" ? (

@@ -207,6 +207,8 @@ const day = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit"
 const CUSTOMER_EVENTS = {
   agreementShared: (v) => ({ title: "Your agreement is waiting for your review", body: `${v.no || "Your agreement"} — approve or request a recheck.`, screen: "CustomerDocuments" }),
   agreementDateProposed: (v) => ({ title: "Agreement date proposed", body: `We proposed ${day(v.date)} — accept it, or suggest a different date.`, screen: "CustomerDocuments" }),
+  agreementSigned: (v) => ({ title: "Your agreement is signed", body: `${v.no || "Your agreement"}${v.date ? ` · signed ${day(v.date)}` : ""}.`, screen: "CustomerDocuments" }),
+  agreementRegistered: (v) => ({ title: "Your agreement is registered", body: `${v.no || "Your agreement"}${v.regNo ? ` · Reg. no. ${v.regNo}` : ""}${v.date ? ` · ${day(v.date)}` : ""}.`, screen: "CustomerDocuments" }),
   salesDeedShared: (v) => ({ title: "Your sales deed is waiting for your review", body: `${v.no || "Your sales deed"} — approve or request a recheck.`, screen: "CustomerDocuments" }),
   govtPaymentInfo: () => ({ title: "Government payment details shared", body: "Stamp duty and registration fee — upload your proof once paid.", screen: "CustomerDocuments" }),
   demandRaised: (v) => ({ title: `${v.milestone} payment is due`, body: `${inr(v.amount)}${v.due ? ` · Due ${day(v.due)}` : ""}`, screen: "CustomerPayments" }),
