@@ -16,7 +16,8 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://civiliererp.in"
-      }
+      },
+      "autoIncrement": true
     },
     "production": {
       "channel": "production",
