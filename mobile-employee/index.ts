@@ -1,4 +1,5 @@
 import 'react-native-gesture-handler';
+import './src/services/movementTracker'; // registers the background location task
 import { registerRootComponent } from 'expo';
 
 import App from './App';

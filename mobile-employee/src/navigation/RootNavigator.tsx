@@ -4,6 +4,7 @@ import { useAuth } from "@/auth/AuthContext";
 import AuthStack from "./AuthStack";
 import MainStack from "./MainStack";
 import NoticePopup from "@/components/NoticePopup";
+import MovementWatcher from "@/components/MovementWatcher";
 import { navigationRef } from "./navigationRef";
 import { colors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
@@ -46,6 +47,7 @@ export default function RootNavigator() {
         <>
           <MainStack />
           <NoticePopup />
+          <MovementWatcher />
         </>
       ) : (
         <AuthStack />

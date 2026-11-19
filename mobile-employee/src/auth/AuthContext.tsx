@@ -6,6 +6,7 @@ import { fetchWithAuth, ApiError } from "@/services/fetchWithAuth";
 import { endAppSession, startAppSession } from "@/services/appSession";
 import { queryClient } from "@/services/queryClient";
 import { onSessionExpired } from "@/services/sessionEvents";
+import { stopMovementTracking } from "@/services/movementTracker";
 import { getToken, setToken, getStoredUser, setStoredUser, clearAuthStorage } from "@/services/authStorage";
 import type { AppUser, LoginResponse } from "@/types/auth";
 
@@ -62,6 +63,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const logout = useCallback(async () => {
+    await stopMovementTracking();
     await clearAuthStorage();
     endAppSession();
     queryClient.clear();
