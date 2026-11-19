@@ -57,6 +57,8 @@ function agreementSteps(ag: any): { label: string; state: StepState; note?: stri
   const sent = !!ag?.SentToCustomerAt;
   const status = ag?.CustomerApprovalStatus;
   const dated = !!ag?.AgreementDate;
+  const registered = ag?.Status === "Registered";
+  const signed = registered || ag?.Status === "Executed";
   return [
     { label: "Prepared", state: "done", note: fmtDate(ag?.CreatedAt) },
     { label: "Approved In-House", state: senior ? "done" : "current", note: senior ? fmtDate(ag?.SeniorApprovedAt) : "Pending" },
@@ -70,6 +72,13 @@ function agreementSteps(ag: any): { label: string; state: StepState; note?: stri
       label: "Date Confirmed",
       state: dated ? "done" : ag?.DateApprovalStatus === "Pending" ? "current" : "upcoming",
       note: dated ? fmtDate(ag?.AgreementDate) : ag?.DateApprovalStatus === "Pending" ? "Awaiting sign-off" : undefined,
+    },
+    // Signed (Executed) and registered — the agreement's last states (crmAgreements.js: Draft -> Executed -> Registered).
+    { label: "Signed", state: signed ? "done" : dated ? "current" : "upcoming", note: signed ? fmtDate(ag?.AgreementDate) : undefined },
+    {
+      label: "Registered",
+      state: registered ? "done" : signed ? "current" : "upcoming",
+      note: registered ? [fmtDate(ag?.AfsRegistrationDate), ag?.AfsRegistrationNo].filter(Boolean).join(" · ") : undefined,
     },
   ];
 }
@@ -450,7 +459,8 @@ const PortalAgreement: React.FC = () => {
                   <Hash size={10} /> v{agreement.VersionNo || 1} · {agreement.BookingNo}
                 </p>
               </div>
-              <StatusPill status={agreement.CustomerApprovalStatus} />
+              <StatusPill status={agreement.Status === "Registered" || agreement.Status === "Executed" ? "Approved" : agreement.CustomerApprovalStatus}
+                label={agreement.Status === "Registered" ? "Registered" : agreement.Status === "Executed" ? "Signed" : undefined} />
             </div>
           </div>
 
@@ -465,7 +475,15 @@ const PortalAgreement: React.FC = () => {
             <InfoField label="Total Value" value={fmtMoney(agreement.TotalValue)} />
             <InfoField label="PAN (Permanent Account Number)" value={agreement.PanNo} mono />
             <InfoField label="Aadhaar" value={maskAadhaar(agreement.AadhaarNo)} mono />
-            <InfoField label="Agreement Date" value={fmtDate(agreement.AgreementDate) || "Not yet finalized"} />
+            <InfoField label={agreement.Status === "Registered" || agreement.Status === "Executed" ? "Signed On" : "Agreement Date"} value={fmtDate(agreement.AgreementDate) || "Not yet finalized"} />
+            {agreement.Status === "Registered" && (
+              <>
+                <InfoField label="Registered On" value={fmtDate(agreement.AfsRegistrationDate)} />
+                {agreement.AfsRegistrationNo && <InfoField label="Registration No." value={agreement.AfsRegistrationNo} mono />}
+                {agreement.AfsStampDuty != null && <InfoField label="Stamp Duty" value={fmtMoney(agreement.AfsStampDuty)} />}
+                {agreement.AfsRegistrationFee != null && <InfoField label="Registration Fee" value={fmtMoney(agreement.AfsRegistrationFee)} />}
+              </>
+            )}
             {agreement.LegalAddress && <InfoField label="Registered Address" value={agreement.LegalAddress} />}
             <InfoField label="Documents" value={needsAction.length > 0 ? `${onFile.length} on file, ${needsAction.length} needed` : onFile.length} />
           </div>
@@ -511,6 +529,11 @@ const PortalAgreement: React.FC = () => {
                 <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#0F7A44" }}>
                   <CheckCircle2 size={16} /> You approved this agreement on {fmtDate(agreement.CustomerApprovedAt)}
                 </div>
+                {agreement.Status === "Registered" ? (
+                  <p className="text-sm" style={{ color: TEXT_MUTED }}>It is signed and registered — nothing more is needed from you on it.</p>
+                ) : agreement.Status === "Executed" ? (
+                  <p className="text-sm" style={{ color: TEXT_MUTED }}>It is signed; registration with the government comes next — we'll tell you once it's done.</p>
+                ) : null}
                 {!agreement.AgreementDate && (
                   agreement.DateApprovalStatus === "Pending" ? (
                     <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#8A6D14" }}>

@@ -147,6 +147,8 @@ const PortalOverview: React.FC = () => {
     { label: "Welcome Call", state: timeline.welcomeCall ? "done" : timeline.booking ? "current" : "upcoming" },
     // No separate "customer details" step: the salesperson takes PAN, Aadhaar and bank details within the welcome call.
     { label: "Agreement", state: agreementApproved ? "done" : timeline.welcomeCall ? "current" : "upcoming" },
+    // Registered is the agreement's last state (Draft -> Executed -> Registered), as in the app's journey.
+    { label: "Agreement Registered", state: agreement?.Status === "Registered" ? "done" : agreementApproved ? "current" : "upcoming" },
     { label: "Payments", state: paymentsDone ? "done" : agreementApproved ? "current" : "upcoming" },
     { label: "Sales Deed", state: salesDeedDone ? "done" : agreementApproved ? "current" : "upcoming" },
     { label: "Govt. Payment", state: qpDone ? "done" : salesDeedDone ? "current" : "upcoming" },
@@ -166,7 +168,9 @@ const PortalOverview: React.FC = () => {
     ? { icon: ReceiptIndianRupee, label: "Govt. Payment", value: timeline.queryPayment.Status, sub: timeline.queryPayment.QPNo }
     : timeline.salesDeed
     ? { icon: Landmark, label: "Sales Deed", value: timeline.salesDeed.CustomerApprovalStatus || timeline.salesDeed.Status, sub: timeline.salesDeed.DeedNo }
-    : { icon: FileText, label: "Agreement", value: agreement?.CustomerApprovalStatus || "Not sent", sub: agreement?.AgreementNo };
+    : { icon: FileText, label: "Agreement",
+        value: agreement?.Status === "Registered" ? "Registered" : agreement?.Status === "Executed" ? "Signed" : agreement?.CustomerApprovalStatus || "Not sent",
+        sub: agreement?.AgreementNo };
 
   // Action items — with type info for icon/color
   const actionItems: { label: string; sub: string; to: string; type: "sign" | "payment" | "notice" }[] = [];
