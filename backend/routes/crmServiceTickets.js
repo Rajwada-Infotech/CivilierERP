@@ -385,34 +385,41 @@ router.put("/:id/close", requirePageRight("crm-service-tickets", "edit"), async 
   }
 });
 
+/**
+ * Reopen a Resolved/Closed ticket with a reason — the one rule for staff (below) and the customer (crm-portal
+ * PUT /tickets/:ticketId/reopen). Returns an error message, or null when reopened.
+ */
+async function reopenTicket(pool, id, reason, updatedBy) {
+  if (!String(reason || "").trim()) return "Reason is required to reopen a ticket";
+  const cur = await pool.request().input("id", sql.Int, id)
+    .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
+  if (!cur.recordset.length) return "Ticket not found";
+  const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+  if (activeErr) return activeErr;
+  if (![CrmStatus.RESOLVED, CrmStatus.CLOSED].includes(cur.recordset[0].Status)) {
+    return `Cannot reopen from status '${cur.recordset[0].Status}'`;
+  }
+  await pool.request()
+    .input("id", sql.Int, id)
+    .input("res", sql.NVarChar(sql.MAX), String(reason).trim())
+    .input("ub", sql.Int, updatedBy ?? null)
+    .query(`
+      UPDATE dbo.CrmServiceTicket SET
+        Status = 'Reopened', ResolutionNotes = @res, ResolvedAt = NULL,
+        UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+  return null;
+}
+
 // PUT /:id/reopen — Resolved/Closed -> Reopened. Requires a reason.
 router.put("/:id/reopen", requirePageRight("crm-service-tickets", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
-    const b = req.body || {};
-    if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to reopen a ticket" });
-
-    const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
-    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-    if (![CrmStatus.RESOLVED, CrmStatus.CLOSED].includes(cur.recordset[0].Status)) {
-      return res.status(400).json({ error: `Cannot reopen from status '${cur.recordset[0].Status}'` });
-    }
-
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("res", sql.NVarChar(sql.MAX), b.Reason.trim())
-      .input("ub", sql.Int, actorId(req))
-      .query(`
-        UPDATE dbo.CrmServiceTicket SET
-          Status = 'Reopened', ResolutionNotes = @res, ResolvedAt = NULL,
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    const err = await reopenTicket(pool, id, req.body?.Reason, actorId(req));
+    if (err) return res.status(err === "Ticket not found" ? 404 : 400).json({ error: err });
     res.json({ success: true, status: "Reopened" });
   } catch (e) {
     console.error("[crm-service-tickets] reopen error:", e.message);
@@ -421,3 +428,4 @@ router.put("/:id/reopen", requirePageRight("crm-service-tickets", "edit"), async
 });
 
 module.exports = router;
+module.exports.reopenTicket = reopenTicket;

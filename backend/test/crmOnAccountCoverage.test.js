@@ -118,4 +118,21 @@ describe("the money trail", () => {
     expect(t.rows.map((r) => r.stage).sort()).toEqual(["bounced", "returned"]);
     expect(t.totals.received).toBe(0);
   });
+  test("a payment that bounced after Finance approved it is shown bounced and not counted (BKG-2026-00130)", async () => {
+    const t = await getBookingMoneyTrail(trailPool({
+      booking: { Status: "Cancelled" },
+      receipts: [
+        { Id: 1, ReceiptNo: "MR-1", Amount: 80000, Status: "Bounced", ReceivedPaymentId: 5, BouncedReason: "Insufficient funds" },
+        { Id: 2, ReceiptNo: "MR-2", Amount: 80000, Status: "Approved", ReceivedPaymentId: 6 },
+      ],
+      entries: [{ RPPaymentID: 5, RPAmount: 80000, RPStatus: "Approved" }, { RPPaymentID: 6, RPAmount: 80000, RPStatus: "Approved" }],
+      deposits: [
+        { Id: 7, ReceiptNo: "OACC-1", Amount: 80000, AppliedAmount: 80000, AvailableAmount: 0, Status: "Bounced", SourceReceivedPaymentId: 5 },
+        { Id: 8, ReceiptNo: "OACC-2", Amount: 80000, AppliedAmount: 80000, AvailableAmount: 0, Status: "Applied", SourceReceivedPaymentId: 6 },
+      ],
+    }), 9);
+    expect(t.rows.find((r) => r.id === "rp-5")).toMatchObject({ stage: "bounced", note: "Insufficient funds", docs: ["MR-1", "OACC-1"] });
+    expect(t.rows.some((r) => r.id === "oa-7")).toBe(false); // its deposit is not listed again as an adjustment
+    expect(t.totals.received).toBe(80000);
+  });
 });

@@ -33,7 +33,9 @@ const CUSTOMER_TICKET_CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "
 const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal priority
 
 const rateLimit = require("../middleware/rateLimiter");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));
+// Per customer (rateLimiter.js counts the signed-in person): one visit to Civilier Home makes 10-15 requests, so 600 per
+// 15 minutes (~40 a minute) leaves room for real use and still stops scripted scraping.
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // 15-second in-memory cache for portal user active status.
 // Declared at module scope so both the staff admin endpoint and the portal
@@ -460,6 +462,88 @@ router.get("/me", async (req, res) => {
 // Requires ?applicationId= — validated against req.portalUser.customerId.
 /** Everything the customer sees about one application. `lite` skips the construction progress (the heaviest part),
  * for callers that only need the booking's state — e.g. what needs the customer across all their homes. */
+// ─── Home facts — what the customer bought, in their words (shown only when recorded) ─────────────────────────────
+const sqftText = (n) => (Number(n) > 0 ? `${Number(n).toLocaleString("en-IN")} sq ft` : null);
+const feetText = (n) => (Number(n) > 0 ? `${Number(n)} ft` : null);
+const keepShown = (rows) => rows.filter(([, v]) => v != null && v !== "").map(([label, value]) => ({ label, value: String(value) }));
+function homeFacts(b) {
+  // A plot not yet built on has no home to describe — its plots carry the facts.
+  if (b.IsPlotSale && !b.UnitType && !b.UnitKind) return [];
+  const anyArea = b.CarpetAreaSqFt || b.BuiltUpAreaSqFt || b.SuperBuiltUpAreaSqFt;
+  return keepShown([
+    ["Type", b.UnitType || b.UnitKind],
+    ["Tower / block", b.BlockName],
+    ["Floor", b.FloorNo],
+    ["Carpet area", sqftText(b.CarpetAreaSqFt)],
+    ["Built-up area", sqftText(b.BuiltUpAreaSqFt)],
+    ["Super built-up area", sqftText(b.SuperBuiltUpAreaSqFt)],
+    ["Open terrace", sqftText(b.OpenTerraceAreaSqFt)],
+    ["Area", anyArea ? null : sqftText(b.AreaSqFt)],
+    ["Facing", b.Facing],
+  ]);
+}
+/** The project, ready to show: its facts (only what is recorded), a description, and where it is on a map. */
+function projectView(p) {
+  if (!p) return null;
+  const address = [p.address, p.address_line2, p.address_line3, p.city, p.state, p.pincode].map((x) => String(x || "").trim()).filter(Boolean)
+    .filter((x, i, all) => all.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i).join(", ");
+  const lat = Number(p.latitude), lng = Number(p.longitude);
+  return {
+    name: p.name,
+    facts: keepShown([["Type", p.TypeName], ["Developer", p.Developer], ["Address", address || null], ["Website", p.website]]),
+    description: String(p.description || "").trim() || null,
+    // A map pin only when a real location is recorded; otherwise the address can still be searched.
+    location: Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0) ? { lat, lng } : null,
+    mapQuery: address ? `${p.name}, ${address}` : null,
+  };
+}
+function plotFacts(p) {
+  return keepShown([
+    ["Area", sqftText(p.AreaSqFt)],
+    ["Size", feetText(p.PlotWidthFt) && feetText(p.PlotDepthFt) ? `${feetText(p.PlotWidthFt)} × ${feetText(p.PlotDepthFt)}` : null],
+    ["Facing", p.Facing],
+    ["Position", p.IsCornerPlot ? "Corner plot" : null],
+    ["Road in front", feetText(p.RoadWidthFt) ? `${feetText(p.RoadWidthFt)} wide` : null],
+  ]);
+}
+
+/** A price line in the customer's words — for the app and the web portal. */
+function priceLineText(l, { plot = false, area = null, rate = null, base = null, gstRate = null } = {}) {
+  const gst = l.gst ? `Includes GST of ${inr(l.gst)}` : null;
+  // Area × rate, shown only when it is exactly how the price was reached (to the rupee).
+  const byArea = Number(area) > 0 && Number(rate) > 0 && Math.abs(Number(area) * Number(rate) - Number(base)) < 1
+    ? `${Number(area).toLocaleString("en-IN")} sq ft × ${inr(rate)} per sq ft` : null;
+  switch (l.key) {
+    case "home": return { title: plot ? "Plot price" : "Home price", note: byArea };
+    case "homeGst": return {
+      title: plot ? "GST on the plot" : "GST on the home",
+      note: Number(l.amount) > 0
+        ? (Number(gstRate) > 0 ? `${Number(gstRate)}% of the ${plot ? "plot" : "home"} price` : null)
+        : "No GST is charged on this booking",
+    };
+    case "parking": return { title: `Parking${l.label ? ` · ${l.label}` : ""}${l.quantity > 1 ? ` × ${l.quantity}` : ""}`, note: gst };
+    case "extra": return { title: l.label || "Extra charges", note: gst };
+    case "creditNotes": return { title: "Credit notes", note: "Taken off your price" };
+    default: return { title: "Other adjustments", note: "Changes made to your price by our accounts team" };
+  }
+}
+
+/** A payment's state, and where its money went, in the customer's words — for the app and the web portal. */
+function paymentStatus(x) {
+  switch (x.stage) {
+    case "settled": return { label: "Counted", sub: null };
+    case "held": return { label: "Received", sub: "Waiting to be matched to your instalments" };
+    case "split": return { label: "Received", sub: null };
+    case "finance":
+    case "recorded": return { label: "Being verified", sub: "Our accounts team is checking it. It counts once confirmed." };
+    case "returned": return { label: "Not accepted", sub: "This entry could not be accepted. Please contact us about it." };
+    case "bounced": return { label: "Bounced", sub: x.note || "This payment did not go through." };
+    case "unitChange": return { label: "Moved to your new unit", sub: null };
+    case "out": return { label: Number(x.refunded) > 0 ? "Refunded" : "Moved", sub: null };
+    default: return { label: "Adjustment", sub: "A credit or transfer made by us — not a payment from you" };
+  }
+}
+
 async function loadTimeline(pool, appId, { lite = false } = {}) {
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT b.Id, b.BookingNo,
@@ -470,7 +554,12 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
              b.TotalValue, b.BookingAmount,
              b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate,
              b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
-             CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale
+             CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
+             -- What the home is, as Unit Master records it (a converted villa's unit for a plot sale; plots are listed apart)
+             um.UnitType, um.UnitKind, um.FloorNo, um.AreaSqFt, um.CarpetAreaSqFt, um.BuiltUpAreaSqFt, um.SuperBuiltUpAreaSqFt,
+             um.OpenTerraceAreaSqFt, um.Facing, blk.BlockName,
+             -- Who looks after the booking: name only (by decision: no staff phone numbers to customers)
+             asg.name AS LookedAfterBy
       FROM dbo.CrmBooking b
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       OUTER APPLY (
@@ -480,6 +569,8 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
         ORDER BY bp.IsPrimary DESC, bp.Id
       ) plot
       LEFT JOIN dbo.UnitMaster um ON um.Id = COALESCE(b.UnitId, plot.ConvertedUnitId)
+      LEFT JOIN dbo.BlockMaster blk ON blk.Id = COALESCE(um.BlockId, plot.BlockId)
+      LEFT JOIN dbo.users asg ON asg.id = b.AssignedTo
       WHERE b.ApplicationId = @aid AND b.IsActive = 1
     `);
     const bk = booking.recordset[0];
@@ -499,7 +590,7 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
 
     if (!bk) return { stage: "Application", steps: [], holds: holds.recordset };
 
-    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, possessionNotice, legalMilestone, nocs, prePossession, queryPayment, registry, onAccountTotal] = await Promise.all([
+    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, possessionNotice, legalMilestone, nocs, prePossession, queryPayment, registry, onAccountTotal, plots, snags, project] = await Promise.all([
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 * FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT TOP 1
@@ -539,7 +630,9 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
       `),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT OverallStatus FROM dbo.CrmLegalMilestone WHERE BookingId = @bid"),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT NocType, Status, NocNo, IssuedDate FROM dbo.CrmNoc WHERE BookingId = @bid"),
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, ScheduledInspectionDate FROM dbo.CrmPrePossession WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT Status, ScheduledInspectionDate, InspectionCompletedDate, DuesClearedCheck, DocumentationCheck, QualityInspectionCheck, UtilityReadinessCheck
+        FROM dbo.CrmPrePossession WHERE BookingId = @bid`),
       // Query Payment: the customer's own government payment (stamp duty +
       // registration fee) — required amount is read live from the Sales
       // Deed, same as the staff-side route, never duplicated here.
@@ -561,6 +654,26 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
       pool.request().input("bid", sql.Int, bk.Id).// only the part not yet applied to a milestone — applied money is already in
       // the milestones' AmountPaid, so the full Amount counted it twice
       query("SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0) THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
+      // Every plot on a plot sale (one or many), with its size and frontage
+      pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT pm.PlotNo, pm.PlotName, bp.AreaSqFt, pm.PlotWidthFt, pm.PlotDepthFt, pm.Facing, pm.IsCornerPlot, pm.RoadWidthFt, bp.IsPrimary
+        FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
+        WHERE bp.BookingId = @bid AND bp.Status = N'${CrmStatus.ACTIVE}' ORDER BY bp.IsPrimary DESC, bp.Id`),
+      // Snags found at the handover inspection and whether each is fixed — the buyer's own home
+      pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT s.Id, s.Category, s.Description, s.Status, s.ResolvedAt, s.CreatedAt,
+               CAST(CASE WHEN s.Status IN (N'${CrmStatus.OPEN}', N'${CrmStatus.IN_PROGRESS}') THEN 1 ELSE 0 END AS BIT) AS IsOpen
+        FROM dbo.CrmSnagItem s JOIN dbo.CrmHandover h ON h.Id = s.HandoverId
+        WHERE h.BookingId = @bid AND ISNULL(h.Status, '') <> 'Cancelled' ORDER BY s.CreatedAt`),
+      // The project as Project Master records it, with its type and the developer (the project's company).
+      // rera_no is NOT read: Project Master currently saves Priority into it (known bug) — showing it would mislead.
+      pool.request().input("pid", sql.Int, bk.ProjectId || 0).query(`
+        SELECT p.name, p.address, p.address_line2, p.address_line3, p.city, p.state, p.pincode, p.latitude, p.longitude,
+               p.website, p.description, pt.Name AS TypeName, c.name AS Developer
+        FROM dbo.enterprise p
+        LEFT JOIN dbo.ProjectTypeMaster pt ON pt.Id = p.project_type_id
+        LEFT JOIN dbo.enterprise c ON c.id = p.company_id AND c.business_type = 'C'
+        WHERE p.id = @pid AND p.business_type = 'P'`),
     ]);
 
     // Whether each instalment is actually paid. Money is held On Account until the full price is in (crmOnAccountCoverage),
@@ -595,6 +708,19 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
           return null;
         })
         : null,
+      siteNotes: bk.ProjectId && !lite ? await require("./crmConstructionUpdates").buyerNotes(pool, bk.ProjectId) : [],
+      // Photos from site of their own unit and shared work on their tower / project (the file opens via /site-photos/:id)
+      sitePhotos: bk.ProjectId && !lite
+        ? await require("./crmConstructionUpdates").buyerPhotos(pool, { projectId: bk.ProjectId, blockId: bk.BlockId, unitId: bk.UnitId }).catch((e) => {
+          console.error("[crm-portal] site photos error:", e.message);
+          return [];
+        })
+        : [],
+      // What the home is, and each plot, as ready-to-show facts — built once here for the app and the web portal.
+      homeFacts: homeFacts(bk),
+      project: projectView(project.recordset[0]),
+      plots: plots.recordset.map((p) => ({ ...p, facts: plotFacts(p) })),
+      snags: snags.recordset,
       holds: holds.recordset,
       // Customer-facing framing of internal process trackers — raw step
       // names (DocCollection/LegalReview/etc) and NOC bank details are never
@@ -610,7 +736,10 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
       queryPayment: queryPayment.recordset[0] || null,
       registry: registry.recordset[0] || null,
       prePossession: prePossession.recordset[0]
-        ? { status: prePossession.recordset[0].Status, scheduledDate: prePossession.recordset[0].ScheduledInspectionDate }
+        ? (({ Status, ScheduledInspectionDate, InspectionCompletedDate, DuesClearedCheck, DocumentationCheck, QualityInspectionCheck, UtilityReadinessCheck }) => ({
+          status: Status, scheduledDate: ScheduledInspectionDate, completedDate: InspectionCompletedDate,
+          checks: { duesCleared: !!DuesClearedCheck, documentation: !!DocumentationCheck, quality: !!QualityInspectionCheck, utilities: !!UtilityReadinessCheck },
+        }))(prePossession.recordset[0])
         : null,
     };
 }
@@ -657,6 +786,15 @@ const pdfRateLimiter = rateLimit({
   max: 20,
   keyGenerator: (req) => `pdf:portal:${req.portalUser?.portalUserId || req.ip}`,
   message: { error: "Too many PDF requests — please wait a moment before downloading more" },
+  validate: false,
+});
+
+// Site photos load as a grid, so they get their own, larger allowance (not the PDF one).
+const photoRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 150,
+  keyGenerator: (req) => `photo:portal:${req.portalUser?.portalUserId || req.ip}`,
+  message: { error: "Too many photo requests — please wait a moment" },
   validate: false,
 });
 
@@ -735,17 +873,21 @@ router.get("/money", async (req, res) => {
              ISNULL(b.ParkingTotal, 0) AS ParkingTotal, ISNULL(b.ParkingGstAmount, 0) AS ParkingGstAmount,
              ISNULL(b.ExtraChargesTotal, 0) AS ExtraChargesTotal, ISNULL(b.ExtraWorkGstAmount, 0) AS ExtraWorkGstAmount,
              ISNULL(b.CreditNoteTotal, 0) AS CreditNoteTotal, ISNULL(b.TotalGstAmount, 0) AS TotalGstAmount, b.GrandTotal,
+             b.AreaSqFt, b.RatePerSqFt, b.UnitParkingGstRate,
              CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale
       FROM dbo.CrmBooking b WHERE b.ApplicationId = @aid AND b.IsActive = 1`)).recordset[0];
     if (!bk) return res.json({ booking: null });
     const bid = () => pool.request().input("bid", sql.Int, bk.Id);
-    const [extras, parking, dates, approved, stages, trail] = await Promise.all([
+    const [extras, parking, dates, approved, stages, trail, plotShares] = await Promise.all([
       bid().query("SELECT Description, Amount, GstAmount, TotalAmount FROM dbo.CrmExtraCharge WHERE BookingId = @bid AND IsActive = 1 ORDER BY Id"),
       bid().query("SELECT ParkingSlotNo, Quantity, RateSnapshot, GstAmount, TotalAmount FROM dbo.CrmParkingAllotment WHERE BookingId = @bid AND IsActive = 1 ORDER BY Id"),
       bid().query("SELECT Id, DueDate, DemandStatus FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid"),
       bid().query("SELECT Id FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status = 'Approved'"),
       getMilestoneMoneyStages(pool, bk.Id),
       getBookingMoneyTrail(pool, bk.Id),
+      bid().query(`SELECT pm.PlotNo, pm.PlotName, bp.AreaSqFt, bp.RatePerSqFt, bp.PremiumAmount, bp.AllocatedValue
+                   FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
+                   WHERE bp.BookingId = @bid AND bp.Status = N'${CrmStatus.ACTIVE}' ORDER BY bp.IsPrimary DESC, bp.Id`),
     ]);
 
     const lines = [
@@ -775,6 +917,21 @@ router.get("/money", async (req, res) => {
     const ok = new Set(approved.recordset.map((x) => x.Id));
     const payments = trail.rows.map((x) => ({
       date: x.date, mode: x.mode, ref: x.ref, amount: r2(x.amount), stage: x.stage,
+      // How they paid (from their Money Receipt) and which instalment it was paid against
+      chequeNo: x.chequeNo, chequeDate: x.chequeDate, bankName: x.bankName, txnRef: x.txnRef, milestone: x.milestone || null,
+      status: paymentStatus(x),
+      // Every detail of how they paid, ready to show (built once here for the app and the web portal; only what is recorded)
+      details: keepShown([
+        ["Amount", inr(x.amount)],
+        ["Date", x.date ? day(x.date) : null],
+        ["Paid by", x.mode],
+        ["Cheque / DD no.", x.chequeNo],
+        ["Cheque date", x.chequeDate ? day(x.chequeDate) : null],
+        ["Drawn on (your bank)", x.bankName],
+        ["Transaction ref / UTR", x.txnRef || (!x.chequeNo ? x.ref : null)],
+        ["Paid towards", x.milestone],
+        ["Receipt no.", x.receiptNo],
+      ]),
       receiptNo: x.receiptNo, receiptId: x.receiptId && ok.has(x.receiptId) ? x.receiptId : null,
       settled: r2(x.settled), held: r2(x.held), refunded: r2(x.refunded), movedOut: r2(x.otherOut),
       // Only a bounce reason is the customer's to read; other notes are staff remarks.
@@ -785,13 +942,29 @@ router.get("/money", async (req, res) => {
     res.json({
       // Closed: the booking ended (DEAD_BOOKING_STATUSES) — nothing is owed; the question is where the money went.
       booking: { BookingNo: bk.BookingNo, Status: bk.Status, IsPlotSale: !!bk.IsPlotSale, Closed: DEAD_BOOKING_STATUSES.includes(bk.Status) },
-      price: { lines: lines.filter((l) => l.amount !== 0 || l.key === "home"), total: r2(bk.GrandTotal), gstIncluded: r2(bk.TotalGstAmount) },
+      price: {
+        lines: lines.filter((l) => l.amount !== 0 || l.key === "home" || l.key === "homeGst")
+          .map((l) => ({ ...l, ...priceLineText(l, { plot: !!bk.IsPlotSale, area: bk.AreaSqFt, rate: bk.RatePerSqFt, base: bk.TotalValue, gstRate: bk.UnitParkingGstRate }) }))
+          // A plot sale of several plots: each plot's share of the price, under the price line (they add up to it)
+          .map((l) => (l.key === "home" && plotShares.recordset.length > 1
+            ? { ...l, parts: plotShares.recordset.map((p) => ({
+              title: `Plot ${p.PlotName || p.PlotNo}`,
+              note: [Number(p.AreaSqFt) > 0 ? `${Number(p.AreaSqFt).toLocaleString("en-IN")} sq ft` : null,
+                Number(p.RatePerSqFt) > 0 ? `at ${inr(p.RatePerSqFt)} per sq ft` : null,
+                Number(p.PremiumAmount) > 0 ? `incl. ${inr(p.PremiumAmount)} premium` : null].filter(Boolean).join(" ") || null,
+              amount: r2(p.AllocatedValue),
+            })) }
+            : l)),
+        total: r2(bk.GrandTotal), gstIncluded: r2(bk.TotalGstAmount),
+      },
       plan: { instalments, total: planTotal, waived },
       payments,
       totals: {
         paid, received: r2(t.received), settled: r2(t.settled), held: r2(t.held), verifying: r2(t.finance + t.recorded),
         refunded: r2(t.refunded), movedOut: r2(t.otherOut),
         balance: r2(Math.max(0, planTotal - paid)), extra: r2(Math.max(0, paid - planTotal)),
+        // Paid beyond the price itself — e.g. a credit note lowered the price after the plan was paid in full.
+        overPrice: r2(Math.max(0, paid - r2(bk.GrandTotal))),
       },
     });
   } catch (e) {
@@ -1747,7 +1920,7 @@ router.get("/tickets", async (req, res) => {
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT t.Id, t.TicketNo, t.Category, t.Priority, t.Subject, t.Description,
              t.Status, t.ResolvedAt, t.ResolutionNotes, t.CustomerRating, t.CustomerFeedback,
-             t.RaisedByCustomer, t.CreatedAt
+             t.RaisedByCustomer, t.CreatedAt, t.SlaDueDate
       FROM dbo.CrmServiceTicket t
       JOIN dbo.CrmBooking b ON b.Id = t.BookingId
       WHERE b.ApplicationId = @aid AND b.IsActive = 1 AND b.Status <> 'Cancelled'
@@ -1808,6 +1981,93 @@ router.post("/tickets", async (req, res) => {
     res.status(201).json({ success: true, id: result.recordset[0].Id, TicketNo: ticketNo });
   } catch (e) {
     console.error("[crm-portal] POST /tickets error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /tickets/:ticketId/feedback — the customer rates how a resolved request was handled (1–5, optional comment).
+// Only on their own request, once it is Resolved or Closed; it can be changed. Staff still close it (crmServiceTickets
+// /:id/close keeps a rating already given — ISNULL(@rate, CustomerRating)).
+router.put("/tickets/:ticketId/feedback", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const ticketId = parseId(req.params.ticketId);
+    if (ticketId === null) return res.status(400).json({ error: "Invalid request" });
+    const rating = Number(req.body?.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: "Choose a rating from 1 to 5" });
+    const feedback = String(req.body?.feedback || "").trim() || null;
+    const t = (await pool.request().input("id", sql.Int, ticketId).input("aid", sql.Int, appId).query(`
+      SELECT t.Id, t.Status, t.TicketNo, t.Subject, t.BookingId FROM dbo.CrmServiceTicket t JOIN dbo.CrmBooking b ON b.Id = t.BookingId
+      WHERE t.Id = @id AND b.ApplicationId = @aid`)).recordset[0];
+    if (!t) return res.status(404).json({ error: "Request not found" });
+    if (![CrmStatus.RESOLVED, CrmStatus.CLOSED].includes(t.Status)) return res.status(400).json({ error: "You can rate a request once it is resolved" });
+    await pool.request().input("id", sql.Int, ticketId).input("rate", sql.Int, rating).input("fb", sql.NVarChar(sql.MAX), feedback)
+      .query("UPDATE dbo.CrmServiceTicket SET CustomerRating = @rate, CustomerFeedback = @fb, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    await logCommunication(pool, {
+      bookingId: t.BookingId, direction: "Inbound",
+      subject: `Support request rated — ${t.TicketNo}`,
+      summary: `${rating}/5${feedback ? `: ${feedback}` : ""} (${t.Subject})`,
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-portal] PUT /tickets/:ticketId/feedback error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /tickets/:ticketId/reopen — the customer says a resolved request isn't fixed: it reopens with their reason
+// (the same rule staff use, crmServiceTickets reopenTicket) and the person handling it is told.
+router.put("/tickets/:ticketId/reopen", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const ticketId = parseId(req.params.ticketId);
+    if (ticketId === null) return res.status(400).json({ error: "Invalid request" });
+    const reason = String(req.body?.reason || "").trim();
+    if (!reason) return res.status(400).json({ error: "Tell us what is still wrong" });
+    const t = (await pool.request().input("id", sql.Int, ticketId).input("aid", sql.Int, appId).query(`
+      SELECT t.Id, t.TicketNo, t.Subject, t.BookingId, t.AssignedTo, b.AssignedTo AS BookingOwner, b.BookingNo
+      FROM dbo.CrmServiceTicket t JOIN dbo.CrmBooking b ON b.Id = t.BookingId
+      WHERE t.Id = @id AND b.ApplicationId = @aid`)).recordset[0];
+    if (!t) return res.status(404).json({ error: "Request not found" });
+    const err = await require("./crmServiceTickets").reopenTicket(pool, ticketId, `Reopened by the customer: ${reason}`, null);
+    if (err) return res.status(400).json({ error: err });
+    const notifyTo = t.AssignedTo || t.BookingOwner;
+    if (notifyTo) {
+      await emitNotification(pool, notifyTo, "service_ticket_reopened_by_customer", "Customer Reopened a Ticket",
+        `${t.TicketNo}: ${t.Subject} (${t.BookingNo}) — ${reason}`, ticketId, "service_ticket");
+    }
+    await logCommunication(pool, { bookingId: t.BookingId, direction: "Inbound", subject: `Support request reopened — ${t.TicketNo}`, summary: reason });
+    res.json({ success: true, status: "Reopened" });
+  } catch (e) {
+    console.error("[crm-portal] PUT /tickets/:ticketId/reopen error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /site-photos/:photoId — one site photo, only if it is of the customer's own unit or shared work on their
+// tower / project (crmConstructionUpdates buyerPhotoFile holds the rule).
+router.get("/site-photos/:photoId", photoRateLimiter, async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const photoId = parseId(req.params.photoId);
+    if (photoId === null) return res.status(400).json({ error: "Invalid photo" });
+    const t = await loadTimeline(pool, appId, { lite: true });
+    if (!t.booking?.ProjectId) return res.status(404).json({ error: "Photo not found" });
+    const f = await require("./crmConstructionUpdates").buyerPhotoFile(pool, photoId,
+      { projectId: t.booking.ProjectId, blockId: t.booking.BlockId, unitId: t.booking.UnitId });
+    if (!f) return res.status(404).json({ error: "Photo not found" });
+    res.setHeader("Content-Type", f.MimeType || "image/jpeg");
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.setHeader("Content-Disposition", `inline; filename="${String(f.FileName || "site-photo.jpg").replace(/"/g, "")}"`);
+    res.send(Buffer.isBuffer(f.FileData) ? f.FileData : Buffer.from(String(f.FileData || ""), "base64"));
+  } catch (e) {
+    console.error("[crm-portal] GET /site-photos/:photoId error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });

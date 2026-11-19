@@ -105,7 +105,7 @@ async function getBookingMoneyTrail(pool, bookingId) {
   const bid = () => pool.request().input("bid", sql.Int, bookingId);
   const [bkRes, mrRes, rpRes, oaRes, refundRes] = await Promise.all([
     bid().query("SELECT TokenType, TokenValue, PaymentMode, Status FROM dbo.CrmBooking WHERE Id = @bid"),
-    bid().query(`SELECT Id, ReceiptNo, Amount, Status, ReceivedPaymentId, PaymentMode, ChequeNo, TransactionRef, ReceivedDate, BouncedReason
+    bid().query(`SELECT Id, ReceiptNo, Amount, Status, ReceivedPaymentId, PaymentMode, ChequeNo, ChequeDate, BankName, TransactionRef, ReceivedDate, BouncedReason
                  FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid ORDER BY ReceivedDate, Id`),
     bid().query(`SELECT rp.RPPaymentID, rp.RPDocNo, rp.RPAmount, rp.RPStatus, rp.RPMode, rp.RPTransactionID, rp.RPDocDate, rp.RPRejectionNote, m.MilestoneName
                  FROM dbo.ReceivedPayment rp LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
@@ -128,7 +128,10 @@ async function getBookingMoneyTrail(pool, bookingId) {
   const closed = DEAD_BOOKING_STATUSES.includes(booking.Status);
   const refundedOf = new Map(refundRes.recordset.map((r) => [r.SourceOnAccountId, Number(r.Paid) || 0]));
   const reservedRefundOf = new Map(refundRes.recordset.map((r) => [r.SourceOnAccountId, Number(r.Reserved) || 0]));
-  const row = (x) => ({ receiptId: null, receiptNo: null, settled: 0, held: 0, refunded: 0, out: 0, otherOut: 0, reservedRefund: 0, note: null, milestone: null, ...x });
+  const row = (x) => ({ receiptId: null, receiptNo: null, settled: 0, held: 0, refunded: 0, out: 0, otherOut: 0, reservedRefund: 0, note: null, milestone: null,
+    chequeNo: null, chequeDate: null, bankName: null, txnRef: null, ...x });
+  // How the customer paid, as their Money Receipt records it (cheque no. and date, the bank it was drawn on, UTR / ref).
+  const paidWith = (mr) => (mr ? { chequeNo: mr.ChequeNo || null, chequeDate: mr.ChequeDate || null, bankName: mr.BankName || null, txnRef: mr.TransactionRef || null } : {});
   // A deposit's money: settled on milestones, still held, or gone out (refunded, reserved for a refund or transfer). A
   // paid refund also counts in the deposit's applied figure, and on a closed booking nothing stays settled: the
   // cancellation moved it on.
@@ -151,10 +154,17 @@ async function getBookingMoneyTrail(pool, bookingId) {
     const mr = receipts.find((r) => r.ReceivedPaymentId === rp.RPPaymentID);
     const docs = [mr?.ReceiptNo, rp.RPDocNo].filter(Boolean);
     // receiptId / receiptNo: the customer's own Money Receipt for this payment (what the portal can open), nothing internal.
-    const base = { id: `rp-${rp.RPPaymentID}`, receiptId: mr?.Id ?? null, receiptNo: mr?.ReceiptNo ?? null, date: mr?.ReceivedDate || rp.RPDocDate, mode: rp.RPMode || mr?.PaymentMode || null, ref: rp.RPTransactionID || mr?.ChequeNo || mr?.TransactionRef || null, amount: Number(rp.RPAmount) || 0, milestone: rp.MilestoneName };
+    const base = { id: `rp-${rp.RPPaymentID}`, receiptId: mr?.Id ?? null, receiptNo: mr?.ReceiptNo ?? null, date: mr?.ReceivedDate || rp.RPDocDate, mode: rp.RPMode || mr?.PaymentMode || null, ref: rp.RPTransactionID || mr?.ChequeNo || mr?.TransactionRef || null, amount: Number(rp.RPAmount) || 0, milestone: rp.MilestoneName, ...paidWith(mr) };
     if (rp.RPStatus === "Pending") { rows.push(row({ ...base, docs, stage: "finance" })); continue; }
     if (rp.RPStatus === "Rejected") { rows.push(row({ ...base, docs, stage: "returned", note: rp.RPRejectionNote })); continue; }
     const o = deposits.find((d) => d.SourceReceivedPaymentId === rp.RPPaymentID);
+    // A bounce after Finance approved it: the Money Receipt (and its On Account deposit) say Bounced while the Received
+    // Payment stays Approved. No money arrived — it is never counted as received, the same as every other money read.
+    if (mr?.Status === "Bounced" || o?.Status === "Bounced") {
+      if (o) usedDeposits.add(o.Id);
+      rows.push(row({ ...base, docs: [...docs, o?.ReceiptNo].filter(Boolean), stage: "bounced", note: mr?.BouncedReason || null }));
+      continue;
+    }
     if (o) {
       usedDeposits.add(o.Id);
       const money = fromDeposit(o);
@@ -169,7 +179,7 @@ async function getBookingMoneyTrail(pool, bookingId) {
   }
   for (const mr of receipts) {
     if (mr.ReceivedPaymentId && entries.some((e) => e.RPPaymentID === mr.ReceivedPaymentId)) continue;
-    const base = { id: `mr-${mr.Id}`, receiptId: mr.Id, receiptNo: mr.ReceiptNo, date: mr.ReceivedDate, docs: [mr.ReceiptNo], mode: mr.PaymentMode, ref: mr.ChequeNo || mr.TransactionRef, amount: Number(mr.Amount) || 0 };
+    const base = { id: `mr-${mr.Id}`, receiptId: mr.Id, receiptNo: mr.ReceiptNo, date: mr.ReceivedDate, docs: [mr.ReceiptNo], mode: mr.PaymentMode, ref: mr.ChequeNo || mr.TransactionRef, amount: Number(mr.Amount) || 0, ...paidWith(mr) };
     if (mr.Status === "Bounced") rows.push(row({ ...base, stage: "bounced", note: mr.BouncedReason }));
     else if (mr.Status === "Pending") rows.push(row({ ...base, stage: "recorded" }));
     else rows.push(row({ ...base, ...(closed ? { out: base.amount, otherOut: base.amount } : { settled: base.amount }), stage: closed ? "out" : "settled" }));
