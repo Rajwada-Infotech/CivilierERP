@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import {
   getHrFilterOptions, getHrPunchPhoto, getHrRecord, getHrRecords, getHrSummary, getNotMarked,
   hrAddBreak, hrDeleteBreak, hrDeleteRecord, hrUpdateBreak, hrUpdateRecord,
-  type AttendanceRecord, type HrFilters,
+  type AttendanceMovement, type AttendanceRecord, type HrFilters,
 } from "@/api/employeeAttendanceApi";
 import { getWorkLocations } from "@/api/workLocationMasterApi";
 import { fmtDateIst, fmtDateTimeIst, fmtDuration, fmtTimeIst, fromIstInput, toIstInput, todayIstDate } from "@/lib/attendanceFormat";
@@ -126,6 +126,35 @@ function PunchEvidence({ rec }: { rec: AttendanceRecord }) {
   );
 }
 
+// Trips outside the employee's own work locations and visits to other offices, from the app's location (every 100 m move).
+function MovementLog({ items }: { items: AttendanceMovement[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="bg-card p-4" style={{ border: HR_RULE }}>
+      <p className={`${HR_HEAD} mb-3`}>Movement while on duty <span className="text-xs text-muted-foreground font-normal normal-case tracking-normal">— from the app's location</span></p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className={`${HR_LBL} text-left`}><th className="py-1.5 pr-3">What</th><th className="py-1.5 pr-3">From</th><th className="py-1.5 pr-3">To</th><th className="py-1.5 pr-3">Time</th><th className="py-1.5">Reason</th></tr></thead>
+          <tbody>
+            {items.map((m) => (
+              <tr key={m.movementId} className={`border-t border-foreground/10 align-top ${m.alert ? "bg-amber-500/10" : ""}`}>
+                <td className="py-2 pr-3">{m.kind === "LocationOff" ? <span className="text-destructive font-semibold">Location turned off</span> : m.kind === "Visit" ? <span><b>{m.locationName ?? "Other office"}</b> <span className="text-xs text-muted-foreground">visit</span></span> : <span className="text-amber-700 dark:text-amber-400 font-semibold">Outside office</span>}</td>
+                <td className="py-2 pr-3 tabular-nums">{fmtTimeIst(m.start)}</td>
+                <td className="py-2 pr-3 tabular-nums">{m.end ? fmtTimeIst(m.end) : <span className="text-muted-foreground">{m.kind === "LocationOff" ? "still off" : "still there"}</span>}</td>
+                <td className="py-2 pr-3 tabular-nums">{m.seconds != null ? fmtDuration(m.seconds) : "—"}</td>
+                <td className="py-2">{m.kind === "Visit" ? <span className="text-muted-foreground">Office visit</span>
+                  : m.reason ?? (m.hasVisit ? <span className="text-muted-foreground">Went to another office</span>
+                  : m.skipped ? <span className="text-destructive font-semibold">Skipped — no reason given</span>
+                  : m.end || m.kind === "LocationOff" ? <span className="text-destructive">Reason not given yet</span> : "—")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["hr-attendance-record", id], queryFn: () => getHrRecord(id) });
@@ -152,7 +181,7 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
   }, [rec]);
 
   const refresh = (res: { record: AttendanceRecord }) => {
-    qc.setQueryData(["hr-attendance-record", id], res);
+    qc.setQueryData(["hr-attendance-record", id], (old: object | undefined) => ({ ...(old ?? {}), ...res }));
     qc.invalidateQueries({ queryKey: ["hr-attendance"] });
     setReason("");
   };
@@ -218,6 +247,8 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
             </div>
 
             <PunchEvidence rec={rec} />
+
+            <MovementLog items={data?.movements ?? []} />
 
             {canEdit && (
               <div className="bg-card p-4 space-y-3" style={{ border: HR_RULE }}>
@@ -342,6 +373,7 @@ export default function HrAttendanceManagement() {
   const { data: missing = [] } = useQuery({ queryKey: ["hr-attendance", "missing", missingFilters], queryFn: () => getNotMarked(missingFilters), enabled: tab === "missing" || (tab === "summary" && period === "daily") });
 
   const flagged = records.filter((r) => r.flags.length > 0).length;
+  const moveAlerts = records.filter((r) => (r.movementAlerts ?? 0) > 0).length;
 
   const recordColumns = [
     { header: "Employee", accessor: (r: Record<string, unknown>) => String(r.employeeName ?? "") },
@@ -425,6 +457,7 @@ export default function HrAttendanceManagement() {
               {isFetching ? <Loader2 size={12} className="animate-spin" /> : null}
               <span><span className={NUM}>{records.length}</span> record{records.length === 1 ? "" : "s"}</span>
               {flagged > 0 && <span className="text-destructive font-medium flex items-center gap-1"><AlertTriangle size={12} /> {flagged} incomplete — needs HR review</span>}
+              {moveAlerts > 0 && <span className="text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1"><AlertTriangle size={12} /> {moveAlerts} with location off / outside without reason</span>}
             </p>
             <div className={`${hrCard} overflow-x-auto`}>
               <table className="w-full text-sm">
@@ -440,8 +473,10 @@ export default function HrAttendanceManagement() {
                 <tbody className="divide-y divide-foreground/15">
                   {records.length === 0 && <tr><td colSpan={13} className="p-8 text-center text-muted-foreground">No attendance records for these filters.</td></tr>}
                   {records.map((r) => (
-                    <tr key={r.attendanceId} onClick={() => setOpenId(r.attendanceId)} className={`cursor-pointer transition-colors hover:bg-primary/5 ${r.flags.length ? "bg-destructive/5" : ""}`}>
-                      <td className="px-4 py-3"><p className="font-medium">{r.employeeName}</p><p className={`text-xs text-muted-foreground ${NUM}`}>{r.employeeCode}</p></td>
+                    <tr key={r.attendanceId} onClick={() => setOpenId(r.attendanceId)} className={`cursor-pointer transition-colors hover:bg-primary/5 ${r.flags.length ? "bg-destructive/5" : (r.movementAlerts ?? 0) > 0 ? "bg-amber-500/10" : ""}`}
+                      style={(r.movementAlerts ?? 0) > 0 ? { boxShadow: "inset 4px 0 0 rgb(217 119 6)" } : undefined}>
+                      <td className="px-4 py-3"><p className="font-medium">{r.employeeName}</p>
+                        {(r.movementAlerts ?? 0) > 0 && <p className="text-[0.6875rem] font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1"><AlertTriangle size={11} /> Location off / outside — {r.movementAlerts}</p>}<p className={`text-xs text-muted-foreground ${NUM}`}>{r.employeeCode}</p></td>
                       <td className="px-4 py-3 text-xs">{r.companyName || "—"}<br /><span className="text-muted-foreground">{r.department || "—"}</span></td>
                       <td className="px-4 py-3 text-xs">{r.projectName || "—"}</td>
                       <td className={`px-4 py-3 whitespace-nowrap ${NUM}`}>{fmtDateIst(r.attendanceDate)}</td>

@@ -9,6 +9,7 @@ const { getPool } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const svc = require("../services/employeeAttendance");
+const movementSvc = require("../services/attendanceMovement");
 
 router.use(authenticateToken);
 
@@ -82,7 +83,8 @@ router.get("/hr/records/:id", requirePageRight(HR, "view"), async (req, res) => 
     const pool = getPool();
     const record = await svc.getRecord(pool, id);
     if (!record) return res.status(404).json({ error: "Not found" });
-    res.json({ record, audit: await svc.getAudit(pool, id) });
+    const movements = await movementSvc.list(pool, id).catch(() => []); // [] until migration 696 has run
+    res.json({ record, audit: await svc.getAudit(pool, id), movements });
   } catch (e) { fail(res, e, "GET /hr/records/:id"); }
 });
 

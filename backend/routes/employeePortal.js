@@ -28,6 +28,7 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const attendanceSvc = require("../services/employeeAttendance");
+const movementSvc = require("../services/attendanceMovement");
 const faceSvc = require("../services/face/faceService");
 
 const LEAVE_TYPES = ["Casual", "Sick", "Earned", "Unpaid"];
@@ -316,7 +317,36 @@ router.post("/attendance/break-stop", async (req, res) => {
   try { res.json(await attendanceSvc.breakStop(getPool(), req.user)); } catch (e) { punchFail(res, e, "POST /attendance/break-stop"); }
 });
 router.post("/attendance/out", async (req, res) => {
-  try { res.json(await attendanceSvc.clockOut(getPool(), req.user, { evidence: req.body, requireEvidence: true, verify: verifier(req, "out") })); } catch (e) { punchFail(res, e, "POST /attendance/out"); }
+  try {
+    const out = await attendanceSvc.clockOut(getPool(), req.user, { evidence: req.body, requireEvidence: true, verify: verifier(req, "out") });
+    await movementSvc.closeAll(getPool(), req.employee.EmployeeId).catch((e) => console.error("[employee-portal] movement close:", e.message));
+    res.json(out);
+  } catch (e) { punchFail(res, e, "POST /attendance/out"); }
+});
+
+// ── On-duty movement: the app sends its location after each 100 m move while punched in ──
+function moveFail(res, err, where) {
+  if (err instanceof movementSvc.MovementError) return res.status(err.status).json({ error: err.message });
+  return punchFail(res, err, where);
+}
+router.post("/attendance/location", async (req, res) => {
+  try { res.json(await movementSvc.recordPoints(getPool(), req.employee.EmployeeId, req.body?.points ?? req.body)); } catch (e) { moveFail(res, e, "POST /attendance/location"); }
+});
+router.post("/attendance/location-status", async (req, res) => {
+  try { res.json(await movementSvc.locationStatus(getPool(), req.employee.EmployeeId, { enabled: req.body?.enabled !== false, at: req.body?.at })); } catch (e) { moveFail(res, e, "POST /attendance/location-status"); }
+});
+router.post("/attendance/movement/:id/skip", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  try { res.json({ pending: await movementSvc.skip(getPool(), req.employee.EmployeeId, id) }); } catch (e) { moveFail(res, e, "POST /attendance/movement/:id/skip"); }
+});
+router.get("/attendance/movement/pending", async (req, res) => {
+  try { res.json({ pending: await movementSvc.pending(getPool(), req.employee.EmployeeId) }); } catch (e) { moveFail(res, e, "GET /attendance/movement/pending"); }
+});
+router.post("/attendance/movement/:id/reason", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  try { res.json({ pending: await movementSvc.giveReason(getPool(), req.employee.EmployeeId, id, req.body?.reason) }); } catch (e) { moveFail(res, e, "POST /attendance/movement/:id/reason"); }
 });
 
 // ── Leave ────────────────────────────────────────────────────────────────────

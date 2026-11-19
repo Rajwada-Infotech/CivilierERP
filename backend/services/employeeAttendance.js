@@ -119,6 +119,7 @@ function compute(rec, breaks, now = new Date()) {
     // Evidence captured at the punch on the Employee Portal (photos are fetched separately, see getPhoto).
     inLocation: rec.InLatitude != null ? { lat: Number(rec.InLatitude), lng: Number(rec.InLongitude), accuracyM: rec.InAccuracyM ?? null } : null,
     outLocation: rec.OutLatitude != null ? { lat: Number(rec.OutLatitude), lng: Number(rec.OutLongitude), accuracyM: rec.OutAccuracyM ?? null } : null,
+    movementAlerts: Number(rec.MovementAlerts || 0),
     inWorkLocation: rec.InLocationId != null ? { id: rec.InLocationId, name: rec.InLocationName || null, distanceM: rec.InDistanceM ?? null } : null,
     outWorkLocation: rec.OutLocationId != null ? { id: rec.OutLocationId, name: rec.OutLocationName || null, distanceM: rec.OutDistanceM ?? null } : null,
     hasInPhoto: !!rec.HasInPhoto,
@@ -134,6 +135,8 @@ const RECORD_SELECT = `
          e.Department, a.ProjectId, pr.name AS ProjectName, CONVERT(NVARCHAR(10), a.AttendanceDate, 23) AS AttendanceDate,
          a.InTime, a.OutTime, a.IsHrEdited,
          a.InLatitude, a.InLongitude, a.InAccuracyM, a.OutLatitude, a.OutLongitude, a.OutAccuracyM,
+         (SELECT COUNT(*) FROM dbo.EmployeeAttendanceMovement m WHERE m.AttendanceId = a.AttendanceId
+            AND (m.Kind = N'LocationOff' OR (m.Kind = N'Outside' AND m.HasVisit = 0 AND m.Reason IS NULL AND m.EndAt IS NOT NULL))) AS MovementAlerts,
          a.InLocationId, inl.LocationName AS InLocationName, a.InDistanceM, a.OutLocationId, outl.LocationName AS OutLocationName, a.OutDistanceM,
          CASE WHEN a.InPhoto IS NULL THEN 0 ELSE 1 END AS HasInPhoto, CASE WHEN a.OutPhoto IS NULL THEN 0 ELSE 1 END AS HasOutPhoto
   FROM dbo.EmployeeAttendance a

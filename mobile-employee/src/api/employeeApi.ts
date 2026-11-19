@@ -77,7 +77,15 @@ export interface FaceSelf { required: boolean; exempt: boolean; configured: bool
 
 export interface Notice { NoticeId: number; Title: string; Body: string; Priority: string; IsPinned: boolean; PublishFrom: string; ExpiresOn: string | null; PostedBy: string | null; ForWhom: string | null; IsRead: boolean }
 
+export interface MovementPending { movementId: number; kind: "Outside" | "LocationOff"; leftAt: string; returnedAt: string | null }
+export interface LocationPoint { lat: number; lng: number; acc: number | null; at: string }
+
 export const api = {
+  sendLocation: (points: LocationPoint[]) => call<{ tracking: boolean; pending: MovementPending[] }>("/attendance/location", post({ points })),
+  locationStatus: (enabled: boolean) => call<{ tracking: boolean; pending: MovementPending[] }>("/attendance/location-status", post({ enabled, at: new Date().toISOString() })),
+  movementSkip: (id: number) => call<{ pending: MovementPending[] }>(`/attendance/movement/${id}/skip`, post()),
+  movementPending: () => call<{ pending: MovementPending[] }>("/attendance/movement/pending"),
+  movementReason: (id: number, reason: string) => call<{ pending: MovementPending[] }>(`/attendance/movement/${id}/reason`, post({ reason })),
   notices: () => call<Notice[]>("/notices"),
   readNotice: (id: number) => call<{ ok: boolean }>(`/notices/${id}/read`, post()),
   face: () => call<FaceSelf>("/face"),
