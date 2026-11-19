@@ -128,32 +128,17 @@ const PortalOverview: React.FC = () => {
   const nextDue = milestones.find((m: any) => !m.Covered && !m.Verifying && Number(m.Outstanding) > 0);
   const paidCount = milestones.filter((m: any) => m.Covered).length;
 
-  // Payments (construction milestones) and the Legal chain (Sales Deed ->
-  // Govt. Payment -> Registry -> Handover) are genuinely parallel tracks,
-  // not one sequential chain — a still-pending construction milestone must
-  // never freeze the stepper's legal stages at "upcoming" when Registry is
-  // already Completed. Each stage's done/current state is evaluated off its
-  // own data, branching independently off Agreement being approved.
-  const agreementApproved = !!agreement && agreement.CustomerApprovalStatus === "Approved";
-  const paymentsDone = milestones.length > 0 && milestones.every((m: any) => m.Covered);
-  const salesDeedDone = !!timeline.salesDeed;
-  const qpDone = timeline.queryPayment?.Status === "Confirmed";
-  const registryDone = timeline.registry?.Status === "Completed";
-  const handoverDone = !!timeline.handover;
+  // The journey comes from the server (crmPortal.js customerJourney). Payments and the legal steps run in parallel there
+  // too: each step is "done" from its own record, so an unpaid instalment never makes a finished legal step look
+  // unfinished; only the "current" marker goes to the first step not yet done.
+  // Handed over = the journey's handover step done (Completed — a scheduled handover is not done).
+  const handoverDone = !!(timeline.journey || []).find((x: any) => x.key === "handover" && x.done);
 
-  const journeySteps: { label: string; state: StepState }[] = [
+  // The journey is the server's (crmPortal.js customerJourney): the CRM's own rules, the same list as the app.
+  const journeySteps: { label: string; state: StepState; note?: string }[] = [
     { label: "Application", state: "done" },
-    { label: "Booking", state: timeline.booking ? "done" : "current" },
-    { label: "Welcome Call", state: timeline.welcomeCall ? "done" : timeline.booking ? "current" : "upcoming" },
-    // No separate "customer details" step: the salesperson takes PAN, Aadhaar and bank details within the welcome call.
-    { label: "Agreement", state: agreementApproved ? "done" : timeline.welcomeCall ? "current" : "upcoming" },
-    // Registered is the agreement's last state (Draft -> Executed -> Registered), as in the app's journey.
-    { label: "Agreement Registered", state: agreement?.Status === "Registered" ? "done" : agreementApproved ? "current" : "upcoming" },
-    { label: "Payments", state: paymentsDone ? "done" : agreementApproved ? "current" : "upcoming" },
-    { label: "Sales Deed", state: salesDeedDone ? "done" : agreementApproved ? "current" : "upcoming" },
-    { label: "Govt. Payment", state: qpDone ? "done" : salesDeedDone ? "current" : "upcoming" },
-    { label: "Registry", state: registryDone ? "done" : qpDone ? "current" : "upcoming" },
-    { label: "Handover", state: handoverDone ? "done" : registryDone ? "current" : "upcoming" },
+    ...((timeline.journey || []) as { label: string; state: StepState; at: string | null }[])
+      .map((x) => ({ label: x.label, state: x.state, note: x.at ? fmtDate(x.at) : undefined })),
   ];
 
   // Find the current step label for the subtitle

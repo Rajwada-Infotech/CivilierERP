@@ -12,7 +12,7 @@ const portalAuth = require("../middleware/crmPortalAuth");
 const { getNextDocNumber } = require("../services/docNumber");
 const { emitNotification } = require("../services/notify");
 const { getPossessionLetterBuffer } = require("../services/possessionLetterPdf");
-const { proposeAgreementDate, acceptAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
+const { proposeAgreementDate, acceptAgreementDate, syncLegalMilestoneStep, getProjectSaleGate } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { getMoneyReceiptPdfBuffer } = require("../services/moneyReceiptPdf");
@@ -548,6 +548,43 @@ function paymentStatus(x) {
   }
 }
 
+/**
+ * The purchase as the customer lives it, in order — each step done (with when), the current one, or still to come.
+ * The same rules the CRM enforces, so the journey never claims more than has happened:
+ *   welcome call — done once the customer is Welcomed (an unanswered call is not done);
+ *   agreement — approved by the customer, then signed and registered (Status Registered);
+ *   payments — every instalment covered (paid, or covered by verified money held — MoneyStage);
+ *   sale deed — approved by the customer (a draft is not done); then the government fees and the registration;
+ *   key handover — Completed (a scheduled one is not done). On an under-construction project the handover comes
+ *   before the sale deed (crmWorkflowGuards getProjectSaleGate: the deed is prepared after possession).
+ */
+function customerJourney({ booking, welcomeCall, agreement, milestones = [], salesDeed, queryPayment, registry, handover, handoverFirst }) {
+  const step = (key, label, hint, done, at) => ({ key, label, hint, done: !!done, at: done ? at || null : null });
+  const handoverStep = step("handover", "Key handover", "You receive the keys and move in.",
+    handover?.Status === "Completed" || !!handover?.ActualHandoverDate, handover?.ActualHandoverDate);
+  const steps = [
+    step("booking", "Booking confirmed", "Your home is reserved in your name.", !!booking, booking?.BookingDate),
+    step("welcome", "Welcome call", "Our team calls to welcome you, answer questions and take your details.",
+      welcomeCall?.Outcome === "Welcomed", welcomeCall?.CallDate),
+    step("agreement", "Agreement", "You read and approve the agreement for sale.",
+      agreement?.CustomerApprovalStatus === CrmStatus.APPROVED, agreement?.CustomerApprovedAt),
+    step("agreementRegistered", "Agreement registered", "The agreement is signed and registered with the government.",
+      agreement?.Status === CrmStatus.REGISTERED, agreement?.AfsRegistrationDate),
+    step("payments", "Payments", "You pay the instalments as they fall due.",
+      milestones.length > 0 && milestones.every((m) => m.Covered), null),
+    ...(handoverFirst ? [handoverStep] : []),
+    step("saleDeed", "Sale deed", "You read and approve the final sale deed for your home.",
+      salesDeed?.CustomerApprovalStatus === CrmStatus.APPROVED, salesDeed?.CustomerApprovedAt),
+    step("govtFees", "Government fees", "Stamp duty and registration fees are paid.",
+      queryPayment?.Status === "Confirmed", queryPayment?.ConfirmedAt),
+    step("registration", "Registration", "The sale deed is registered in your name.",
+      registry?.Status === "Completed" || !!salesDeed?.RegistrationNo, registry?.CompletedDate || salesDeed?.RegistrationDate),
+    ...(handoverFirst ? [] : [handoverStep]),
+  ];
+  const current = steps.findIndex((x) => !x.done);
+  return steps.map((x, i) => ({ ...x, state: x.done ? "done" : i === current ? "current" : "upcoming" }));
+}
+
 async function loadTimeline(pool, appId, { lite = false } = {}) {
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT b.Id, b.BookingNo,
@@ -612,7 +649,7 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
         WHERE BookingId = @bid
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
-        SELECT Id, AgreementNo, Status, SeniorApprovalStatus, CustomerApprovalStatus,
+        SELECT Id, AgreementNo, Status, SeniorApprovalStatus, CustomerApprovalStatus, CustomerApprovedAt,
                ProposedDate, ProposedDateStatus, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
                AfsRegistrationNo, AfsRegistrationDate,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
@@ -706,6 +743,12 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
       salesDeed: deed.recordset[0] || null,
       handover: handover.recordset[0] || null,
       possessionNotice: possessionNotice.recordset[0] || null,
+      // The purchase, step by step — one list for the app and the web portal (customerJourney below).
+      journey: customerJourney({
+        booking: bk, welcomeCall: welcomeCall.recordset[0], agreement: agreement.recordset[0], milestones: paymentMilestones,
+        salesDeed: deed.recordset[0], queryPayment: queryPayment.recordset[0], registry: registry.recordset[0], handover: handover.recordset[0],
+        handoverFirst: (await getProjectSaleGate(pool, bk.Id).catch(() => ({}))).requiresHandoverBeforeDeed === true,
+      }),
       // The buyer's own unit as the site records it (DPR), with its tower and project for context.
       constructionProgress: bk.ProjectId && !lite
         ? await require("./crmConstructionUpdates").unitProgress(pool, { projectId: bk.ProjectId, unitId: bk.UnitId, blockId: bk.BlockId }).catch((e) => {

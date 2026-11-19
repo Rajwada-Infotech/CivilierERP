@@ -104,6 +104,8 @@ export interface Timeline {
     BuiltUpAreaSqFt: number | null; SuperBuiltUpAreaSqFt: number | null; OpenTerraceAreaSqFt: number | null; Facing: string | null; BlockName: string | null;
     /** The staff member looking after the booking (name only). */
     LookedAfterBy: string | null };
+  /** The purchase, step by step (server-built: crmPortal.js customerJourney — the CRM's own rules), same as the web. */
+  journey?: { key: string; label: string; hint: string; done: boolean; at: string | null; state: "done" | "current" | "upcoming" }[];
   /** The project, ready to show (server-built: crmPortal.js projectView) — same as the web portal. */
   project?: { name: string; facts: { label: string; value: string }[]; description: string | null;
     location: { lat: number; lng: number } | null; mapQuery: string | null } | null;

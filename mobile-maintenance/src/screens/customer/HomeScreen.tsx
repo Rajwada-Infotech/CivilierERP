@@ -33,37 +33,6 @@ const QUICK: { route: RouteName; label: string; icon: LucideIcon }[] = [
   { route: "CustomerRequests",     label: "Help",      icon: LifeBuoy },
 ];
 
-type StepState = "done" | "current" | "upcoming";
-interface Step { label: string; hint: string; state: StepState }
-
-/** The purchase journey in plain words. `hint` is the one-line answer to "what is this step?". */
-function journey(t: Timeline): Step[] {
-  const ms = t.paymentMilestones || [];
-  const agreementApproved = t.agreement?.CustomerApprovalStatus === "Approved";
-  // Registered is the agreement's last state (crmAgreements.js: Draft -> Executed -> Registered).
-  const agreementRegistered = t.agreement?.Status === "Registered";
-  // Judged by money stage (Covered), not Status — paid money held On Account leaves Status "Pending" (crmPortal.js loadTimeline).
-  const paymentsDone      = ms.length > 0 && ms.every((m) => m.Covered);
-  const salesDeedDone     = !!t.salesDeed;
-  const qpDone            = t.queryPayment?.Status === "Confirmed";
-  const registryDone      = t.registry?.Status === "Completed";
-  const raw: { label: string; hint: string; done: boolean }[] = [
-    { label: "Booking confirmed", hint: "Your home is reserved in your name.",                 done: !!t.booking },
-    { label: "Welcome call",      hint: "Our team calls to welcome you and answer questions.", done: !!t.welcomeCall },
-    // No separate "your details" step: the salesperson collects PAN, Aadhaar and bank details as part of the welcome
-    // call (CRM welcome-call checklist) — it is never something the customer does here.
-    { label: "Agreement",         hint: "You read and approve the agreement for sale.",        done: agreementApproved },
-    { label: "Agreement registered", hint: "The agreement is signed and registered with the government.", done: agreementRegistered },
-    { label: "Payments",          hint: "You pay the instalments as they fall due.",           done: paymentsDone },
-    { label: "Sale deed",         hint: "The final legal document for your home.",             done: salesDeedDone },
-    { label: "Government fees",   hint: "Stamp duty and registration fees are paid.",          done: qpDone },
-    { label: "Registration",      hint: "The home is registered in your name.",                done: registryDone },
-    { label: "Key handover",      hint: "You receive the keys and move in.",                   done: !!t.handover },
-  ];
-  const cur = raw.findIndex((r) => !r.done);
-  return raw.map((r, i) => ({ label: r.label, hint: r.hint, state: r.done ? "done" : i === cur ? "current" : "upcoming" }));
-}
-
 /** One live card in "At a glance": what it is, the current value, one line of context, and a tap target. */
 function GlanceTile({ icon: Icon, label, value, sub, subTone, dot, wide, onPress }: {
   icon: LucideIcon; label: string; value: string; sub: string; subTone?: string; dot?: boolean; wide?: boolean; onPress: () => void;
@@ -409,7 +378,8 @@ export default function CustomerHomeScreen() {
   // Several bookings (current or past) → the portfolio view; one → that home's own card and journey.
   const multi = cards.length > 1;
   const booked = (apps.data || []).filter((a) => a.BookingId);
-  const steps = t?.booking ? journey(t) : [];
+  // The journey is the server's (crmPortal.js customerJourney): the CRM's own rules, the same list as the web portal.
+  const steps = t?.booking ? t.journey || [] : [];
   const doneCount = steps.filter((s) => s.state === "done").length;
   const current = steps.find((s) => s.state === "current");
   const after = current ? steps[steps.indexOf(current) + 1] : undefined;
@@ -492,8 +462,10 @@ export default function CustomerHomeScreen() {
                           </View>
                           {i < steps.length - 1 ? <View style={{ width: 2, flex: 1, minHeight: 14, backgroundColor: done ? brand.gold : brand.surfaceGlass }} /> : null}
                         </View>
-                        <Text style={{ flex: 1, paddingBottom: 14, paddingTop: 2, fontSize: 14.5,
-                          fontFamily: curr ? fonts.heading.semibold : fonts.body.regular, color: done || curr ? brand.textPrimary : brand.textFaint }}>{s.label}</Text>
+                        <View style={{ flex: 1, paddingBottom: 14, paddingTop: 2, flexDirection: "row", gap: 8 }}>
+                          <Text style={{ flex: 1, fontSize: 14.5, fontFamily: curr ? fonts.heading.semibold : fonts.body.regular, color: done || curr ? brand.textPrimary : brand.textFaint }}>{s.label}</Text>
+                          {done && s.at ? <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: brand.textSecondary }}>{fmtDate(s.at)}</Text> : null}
+                        </View>
                       </View>
                     );
                   })}
