@@ -508,7 +508,7 @@ function plotFacts(p) {
 }
 
 /** A price line in the customer's words — for the app and the web portal. */
-function priceLineText(l, { plot = false, area = null, rate = null, base = null, gstRate = null } = {}) {
+function priceLineText(l, { plot = false, area = null, rate = null, base = null, gstRate = null, noGst = null } = {}) {
   const gst = l.gst ? `Includes GST of ${inr(l.gst)}` : null;
   // Area × rate, shown only when it is exactly how the price was reached (to the rupee).
   const byArea = Number(area) > 0 && Number(rate) > 0 && Math.abs(Number(area) * Number(rate) - Number(base)) < 1
@@ -519,7 +519,11 @@ function priceLineText(l, { plot = false, area = null, rate = null, base = null,
       title: plot ? "GST on the plot" : "GST on the home",
       note: Number(l.amount) > 0
         ? (Number(gstRate) > 0 ? `${Number(gstRate)}% of the ${plot ? "plot" : "home"} price` : null)
-        : "No GST is charged on this booking",
+        // Why there is none: a building completed before any payment (Schedule III — outside GST), or land.
+        : noGst?.why === "completed"
+          ? `No GST: the building's completion certificate${noGst.certDate ? ` came on ${day(noGst.certDate)},` : " came"} before your first payment, so this sale is outside GST`
+          : noGst?.why === "land" ? "No GST: land is not taxed under GST"
+          : "No GST is charged on this booking",
     };
     case "parking": return { title: `Parking${l.label ? ` · ${l.label}` : ""}${l.quantity > 1 ? ` × ${l.quantity}` : ""}`, note: gst };
     case "extra": return { title: l.label || "Extra charges", note: gst };
@@ -878,13 +882,16 @@ router.get("/money", async (req, res) => {
       FROM dbo.CrmBooking b WHERE b.ApplicationId = @aid AND b.IsActive = 1`)).recordset[0];
     if (!bk) return res.json({ booking: null });
     const bid = () => pool.request().input("bid", sql.Int, bk.Id);
-    const [extras, parking, dates, approved, stages, trail, plotShares] = await Promise.all([
+    const [extras, parking, dates, approved, stages, trail, exemption, landSplit, plotShares] = await Promise.all([
       bid().query("SELECT Description, Amount, GstAmount, TotalAmount FROM dbo.CrmExtraCharge WHERE BookingId = @bid AND IsActive = 1 ORDER BY Id"),
       bid().query("SELECT ParkingSlotNo, Quantity, RateSnapshot, GstAmount, TotalAmount FROM dbo.CrmParkingAllotment WHERE BookingId = @bid AND IsActive = 1 ORDER BY Id"),
       bid().query("SELECT Id, DueDate, DemandStatus FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid"),
       bid().query("SELECT Id FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status = 'Approved'"),
       getMilestoneMoneyStages(pool, bk.Id),
       getBookingMoneyTrail(pool, bk.Id),
+      // Why a booking carries no GST, when it carries none — the same rules crmGst.js recalculateBookingGst applies.
+      require("../services/crmGst").checkGstExemption(pool, bk.Id),
+      require("../services/projectType").getBookingLandSplit(pool, bk.Id, bk.TotalValue),
       bid().query(`SELECT pm.PlotNo, pm.PlotName, bp.AreaSqFt, bp.RatePerSqFt, bp.PremiumAmount, bp.AllocatedValue
                    FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
                    WHERE bp.BookingId = @bid AND bp.Status = N'${CrmStatus.ACTIVE}' ORDER BY bp.IsPrimary DESC, bp.Id`),
@@ -944,7 +951,8 @@ router.get("/money", async (req, res) => {
       booking: { BookingNo: bk.BookingNo, Status: bk.Status, IsPlotSale: !!bk.IsPlotSale, Closed: DEAD_BOOKING_STATUSES.includes(bk.Status) },
       price: {
         lines: lines.filter((l) => l.amount !== 0 || l.key === "home" || l.key === "homeGst")
-          .map((l) => ({ ...l, ...priceLineText(l, { plot: !!bk.IsPlotSale, area: bk.AreaSqFt, rate: bk.RatePerSqFt, base: bk.TotalValue, gstRate: bk.UnitParkingGstRate }) }))
+          .map((l) => ({ ...l, ...priceLineText(l, { plot: !!bk.IsPlotSale, area: bk.AreaSqFt, rate: bk.RatePerSqFt, base: bk.TotalValue, gstRate: bk.UnitParkingGstRate,
+            noGst: exemption.exempt ? { why: "completed", certDate: exemption.certDate } : landSplit.isPureLand ? { why: "land" } : null }) }))
           // A plot sale of several plots: each plot's share of the price, under the price line (they add up to it)
           .map((l) => (l.key === "home" && plotShares.recordset.length > 1
             ? { ...l, parts: plotShares.recordset.map((p) => ({
