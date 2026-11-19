@@ -52,6 +52,9 @@ export interface AttendanceRecord {
   /** Device location and live photo captured at an Employee Portal punch (null for other punches). */
   inLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
   outLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
+  /** Work Location matched at the punch (or set by HR), with the distance from its point in metres. */
+  inWorkLocation?: { id: number; name: string | null; distanceM: number | null } | null;
+  outWorkLocation?: { id: number; name: string | null; distanceM: number | null } | null;
   hasInPhoto?: boolean;
   hasOutPhoto?: boolean;
   live: { sessionSeconds: number; breakSeconds: number; netSeconds: number } | null;
@@ -161,7 +164,7 @@ export const getHrPunchPhoto = async (id: number, which: "in" | "out") =>
   parse<{ photo: string | null }>(await fetchWithAuth(`${BASE}/hr/records/${id}/photo/${which}`), "Failed to load the photo");
 
 type Corrected = { record: AttendanceRecord; audit: AuditEntry[] };
-export const hrUpdateRecord = async (id: number, body: { inTime?: string; outTime?: string | null; reason: string }) =>
+export const hrUpdateRecord = async (id: number, body: { inTime?: string; outTime?: string | null; inLocationId?: number | null; outLocationId?: number | null; reason: string }) =>
   parse<Corrected>(await post(`/hr/records/${id}`, body, "PUT"), "Could not save the correction");
 export const hrAddBreak = async (id: number, body: { start: string; end?: string | null; reason: string }) =>
   parse<Corrected>(await post(`/hr/records/${id}/breaks`, body), "Could not add the break");

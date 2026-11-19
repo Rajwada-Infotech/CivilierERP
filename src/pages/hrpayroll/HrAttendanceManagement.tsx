@@ -16,6 +16,7 @@ import {
   hrAddBreak, hrDeleteBreak, hrDeleteRecord, hrUpdateBreak, hrUpdateRecord,
   type AttendanceRecord, type HrFilters,
 } from "@/api/employeeAttendanceApi";
+import { getWorkLocations } from "@/api/workLocationMasterApi";
 import { fmtDateIst, fmtDateTimeIst, fmtDuration, fmtTimeIst, fromIstInput, toIstInput, todayIstDate } from "@/lib/attendanceFormat";
 
 // Sheet fields and labels (docs/DESIGN.md). HR_FIELD is w-full; inline fields keep their own width.
@@ -132,6 +133,10 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
 
   const [inV, setInV] = useState("");
   const [outV, setOutV] = useState("");
+  const [inLoc, setInLoc] = useState("");
+  const [outLoc, setOutLoc] = useState("");
+  const { data: locations } = useQuery({ queryKey: ["work-location-master"], queryFn: getWorkLocations, staleTime: 5 * 60 * 1000, enabled: canEdit });
+  const locOptions = (Array.isArray(locations) ? locations : []).filter((l) => l.IsActive !== false);
   const [reason, setReason] = useState("");
   const [newStart, setNewStart] = useState("");
   const [newEnd, setNewEnd] = useState("");
@@ -141,6 +146,8 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
     if (!rec) return;
     setInV(toIstInput(rec.inTime));
     setOutV(toIstInput(rec.outTime));
+    setInLoc(rec.inWorkLocation ? String(rec.inWorkLocation.id) : "");
+    setOutLoc(rec.outWorkLocation ? String(rec.outWorkLocation.id) : "");
     setEdits(Object.fromEntries(rec.breaks.map((b) => [b.breakId, { start: toIstInput(b.start), end: toIstInput(b.end) }])));
   }, [rec]);
 
@@ -156,8 +163,11 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
   };
 
   const saveTimes = useMutation({
-    mutationFn: () => hrUpdateRecord(id, { inTime: fromIstInput(inV) ?? undefined, outTime: outV ? fromIstInput(outV) : null, reason }),
-    onSuccess: (r) => { refresh(r); toast.success("In / Out Time corrected"); }, onError: fail,
+    mutationFn: () => hrUpdateRecord(id, {
+      inTime: fromIstInput(inV) ?? undefined, outTime: outV ? fromIstInput(outV) : null,
+      inLocationId: inLoc ? Number(inLoc) : null, outLocationId: outLoc ? Number(outLoc) : null, reason,
+    }),
+    onSuccess: (r) => { refresh(r); toast.success("Attendance corrected"); }, onError: fail,
   });
   const addBreak = useMutation({
     mutationFn: () => hrAddBreak(id, { start: fromIstInput(newStart)!, end: newEnd ? fromIstInput(newEnd) : null, reason }),
@@ -187,6 +197,9 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
               {[
                 ["In Time", fmtTimeIst(rec.inTime)], ["Out Time", rec.outTime ? fmtTimeIst(rec.outTime) : "—"], ["Breaks", String(rec.breakCount)],
                 ["Break Duration", fmtDuration(rec.breakSeconds)], ["Working Duration", fmtDuration(rec.totalSeconds)], ["Net Working Hours", fmtDuration(rec.netSeconds)],
+                ["In Location", rec.inWorkLocation ? `${rec.inWorkLocation.name ?? "—"}${rec.inWorkLocation.distanceM != null ? ` · ${Math.round(rec.inWorkLocation.distanceM)} m` : ""}` : "—"],
+                ["Out Location", rec.outWorkLocation ? `${rec.outWorkLocation.name ?? "—"}${rec.outWorkLocation.distanceM != null ? ` · ${Math.round(rec.outWorkLocation.distanceM)} m` : ""}` : "—"],
+                ["HR edited", rec.hrEdited ? "Yes" : "No"],
               ].map(([k, v], i) => (
                 <div key={k} className="px-3 py-2.5" style={{ borderLeft: i % 3 ? "1px solid hsl(var(--foreground) / 0.15)" : undefined, borderTop: i >= 3 ? "1px solid hsl(var(--foreground) / 0.15)" : undefined }}>
                   <p className={HR_LBL}>{k}</p><p className={`${NUM} mt-1 font-bold`}>{v}</p>
@@ -213,9 +226,25 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                   <label className={labelCls}>Reason (required) *</label>
                   <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Employee forgot to punch out — confirmed by manager" className={`${inputCls} w-full`} />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div><label className={labelCls}>In Time (IST)</label><DateTimeInput value={inV} onChange={(e) => setInV(e.target.value)} className={`${inputCls} w-full`} /></div>
                   <div><label className={labelCls}>Out Time (IST) — clear to reopen</label><DateTimeInput value={outV} onChange={(e) => setOutV(e.target.value)} className={`${inputCls} w-full`} /></div>
+                  <div>
+                    <label className={labelCls}>In location</label>
+                    <select value={inLoc} onChange={(e) => setInLoc(e.target.value)} className={`${inputCls} w-full`}>
+                      <option value="">— Not set —</option>
+                      {locOptions.map((l) => <option key={l.LocationId} value={l.LocationId}>{l.LocationName}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Out location</label>
+                    <select value={outLoc} onChange={(e) => setOutLoc(e.target.value)} disabled={!outV} className={`${inputCls} w-full`}>
+                      <option value="">— Not set —</option>
+                      {locOptions.map((l) => <option key={l.LocationId} value={l.LocationId}>{l.LocationName}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex justify-end">
                   <button onClick={() => needReason() && saveTimes.mutate()} disabled={saveTimes.isPending} className={`${KEY_INK} h-9 px-4`}>
                     {saveTimes.isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Save
                   </button>

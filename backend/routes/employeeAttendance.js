@@ -98,8 +98,8 @@ router.put("/hr/records/:id", requirePageRight(HR, "edit"), async (req, res) => 
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
-    const { inTime, outTime, reason } = req.body || {};
-    const record = await svc.hrUpdateRecord(getPool(), id, { inTime, outTime, reason }, actorOf(req));
+    const { inTime, outTime, inLocationId, outLocationId, reason } = req.body || {};
+    const record = await svc.hrUpdateRecord(getPool(), id, { inTime, outTime, inLocationId, outLocationId, reason }, actorOf(req));
     res.json({ record, audit: await svc.getAudit(getPool(), id) });
   } catch (e) { fail(res, e, "PUT /hr/records/:id"); }
 });

@@ -119,6 +119,8 @@ function compute(rec, breaks, now = new Date()) {
     // Evidence captured at the punch on the Employee Portal (photos are fetched separately, see getPhoto).
     inLocation: rec.InLatitude != null ? { lat: Number(rec.InLatitude), lng: Number(rec.InLongitude), accuracyM: rec.InAccuracyM ?? null } : null,
     outLocation: rec.OutLatitude != null ? { lat: Number(rec.OutLatitude), lng: Number(rec.OutLongitude), accuracyM: rec.OutAccuracyM ?? null } : null,
+    inWorkLocation: rec.InLocationId != null ? { id: rec.InLocationId, name: rec.InLocationName || null, distanceM: rec.InDistanceM ?? null } : null,
+    outWorkLocation: rec.OutLocationId != null ? { id: rec.OutLocationId, name: rec.OutLocationName || null, distanceM: rec.OutDistanceM ?? null } : null,
     hasInPhoto: !!rec.HasInPhoto,
     hasOutPhoto: !!rec.HasOutPhoto,
     live: !outT && !stale ? { sessionSeconds: sessionSoFar, breakSeconds: liveBreakSec, netSeconds: Math.max(0, sessionSoFar - liveBreakSec) } : null,
@@ -132,11 +134,14 @@ const RECORD_SELECT = `
          e.Department, a.ProjectId, pr.name AS ProjectName, CONVERT(NVARCHAR(10), a.AttendanceDate, 23) AS AttendanceDate,
          a.InTime, a.OutTime, a.IsHrEdited,
          a.InLatitude, a.InLongitude, a.InAccuracyM, a.OutLatitude, a.OutLongitude, a.OutAccuracyM,
+         a.InLocationId, inl.LocationName AS InLocationName, a.InDistanceM, a.OutLocationId, outl.LocationName AS OutLocationName, a.OutDistanceM,
          CASE WHEN a.InPhoto IS NULL THEN 0 ELSE 1 END AS HasInPhoto, CASE WHEN a.OutPhoto IS NULL THEN 0 ELSE 1 END AS HasOutPhoto
   FROM dbo.EmployeeAttendance a
   JOIN dbo.EmployeeMaster e ON e.EmployeeId = a.EmployeeId
   LEFT JOIN dbo.enterprise comp ON comp.id = e.CompanyId
   LEFT JOIN dbo.enterprise pr ON pr.id = a.ProjectId
+  LEFT JOIN dbo.WorkLocationMaster inl ON inl.LocationId = a.InLocationId
+  LEFT JOIN dbo.WorkLocationMaster outl ON outl.LocationId = a.OutLocationId
 `;
 
 function bindFilters(request, f = {}) {
@@ -575,7 +580,7 @@ function assertBreaksValid(inT, outT, breaks) {
 }
 
 async function loadRaw(pool, attendanceId) {
-  const a = await pool.request().input("Id", sql.Int, attendanceId).query("SELECT AttendanceId, EmployeeId, InTime, OutTime, InLatitude, InLongitude, OutLatitude, OutLongitude FROM dbo.EmployeeAttendance WHERE AttendanceId = @Id");
+  const a = await pool.request().input("Id", sql.Int, attendanceId).query("SELECT a.AttendanceId, a.EmployeeId, a.InTime, a.OutTime, a.InLatitude, a.InLongitude, a.OutLatitude, a.OutLongitude, a.InLocationId, il.LocationName AS InLocationName, a.OutLocationId, ol.LocationName AS OutLocationName FROM dbo.EmployeeAttendance a LEFT JOIN dbo.WorkLocationMaster il ON il.LocationId = a.InLocationId LEFT JOIN dbo.WorkLocationMaster ol ON ol.LocationId = a.OutLocationId WHERE a.AttendanceId = @Id");
   const rec = a.recordset[0];
   if (!rec) throw new AttendanceError("Attendance record not found.", 404);
   const b = await pool.request().input("Id", sql.Int, attendanceId).query("SELECT BreakId, BreakStart, BreakEnd FROM dbo.EmployeeAttendanceBreak WHERE AttendanceId = @Id");
@@ -586,7 +591,7 @@ async function loadRaw(pool, attendanceId) {
 }
 
 /** Correct In Time / Out Time (null Out reopens the session). */
-async function hrUpdateRecord(pool, attendanceId, { inTime, outTime, reason }, actor) {
+async function hrUpdateRecord(pool, attendanceId, { inTime, outTime, inLocationId, outLocationId, reason }, actor) {
   const why = needReason(reason);
   const { rec, breaks } = await loadRaw(pool, attendanceId);
   const newIn = inTime !== undefined ? parseWhen(inTime, "In Time") : rec.InTime;
@@ -597,13 +602,35 @@ async function hrUpdateRecord(pool, attendanceId, { inTime, outTime, reason }, a
   const changes = [];
   if (+newIn !== +rec.InTime) changes.push(`In Time: ${fmtIst(rec.InTime)} → ${fmtIst(newIn)}`);
   if ((newOut ? +newOut : null) !== (rec.OutTime ? +rec.OutTime : null)) changes.push(`Out Time: ${fmtIst(rec.OutTime)} → ${fmtIst(newOut)}`);
+  // Work location of the In / Out punch: HR sets it to a Work Location (its point becomes the punch location) or clears it.
+  const locSets = [];
+  const locReq = pool.request();
+  for (const [side, val] of [["In", inLocationId], ["Out", outLocationId]]) {
+    if (val === undefined) continue;
+    const cur = rec[`${side}LocationId`] ?? null;
+    const next = val === null || val === "" ? null : Number(val);
+    if (next !== null && !(Number.isInteger(next) && next > 0)) throw new AttendanceError(`Invalid ${side} work location.`, 400);
+    if (next === cur) continue;
+    if (side === "Out" && next !== null && !newOut) throw new AttendanceError("Set the Out Time before the Out location.", 400);
+    let name = "none";
+    if (next !== null) {
+      const l = (await pool.request().input("L", sql.Int, next).query("SELECT LocationName, Latitude, Longitude FROM dbo.WorkLocationMaster WHERE LocationId = @L")).recordset[0];
+      if (!l) throw new AttendanceError("Work location not found.", 404);
+      name = l.LocationName;
+      locReq.input(`${side}Lat`, sql.Float, l.Latitude).input(`${side}Lng`, sql.Float, l.Longitude);
+      locSets.push(`${side}Latitude = @${side}Lat, ${side}Longitude = @${side}Lng, ${side}AccuracyM = NULL`);
+    }
+    locReq.input(`${side}Loc`, sql.Int, next);
+    locSets.push(`${side}LocationId = @${side}Loc, ${side}DistanceM = ${next === null ? "NULL" : "0"}`);
+    changes.push(`${side} location: ${rec[`${side}LocationName`] || (cur ? `#${cur}` : "none")} → ${name}`);
+  }
   if (!changes.length) throw new AttendanceError("Nothing was changed.", 400);
 
   try {
-    await pool.request()
+    await locReq
       .input("Id", sql.Int, attendanceId).input("In", sql.DateTime2(0), newIn).input("Out", sql.DateTime2(0), newOut)
       .input("D", sql.Date, istDate(newIn))
-      .query(`UPDATE dbo.EmployeeAttendance SET InTime = @In, OutTime = @Out, AttendanceDate = @D, IsHrEdited = 1, UpdatedAt = SYSUTCDATETIME() WHERE AttendanceId = @Id`);
+      .query(`UPDATE dbo.EmployeeAttendance SET InTime = @In, OutTime = @Out, AttendanceDate = @D, ${locSets.map((x) => x + ", ").join("")}IsHrEdited = 1, UpdatedAt = SYSUTCDATETIME() WHERE AttendanceId = @Id`);
   } catch (e) {
     if (isUnique(e)) throw new AttendanceError("The employee already has an attendance record on that date.");
     if (isCheck(e)) throw new AttendanceError("Out Time must be after In Time.", 400);
