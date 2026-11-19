@@ -9,6 +9,7 @@ import { portal, moneyView } from "@/api/customerPortalApi";
 import { useCustomer } from "@/customer/CustomerContext";
 import { useNavigation } from "@react-navigation/native";
 import { Bar, Button, ErrorText, Loading, MenuGroup, Muted, Page, Panel, Row, Section, StatRow, fmtDate, money, AccentAvatar } from "@/customer/ui";
+import { openCustomerScreen } from "@/navigation/navigationRef";
 
 export default function CustomerProfileScreen() {
   const brand = useBrand();
@@ -93,7 +94,7 @@ export default function CustomerProfileScreen() {
             key: `h${a.ApplicationId}`, icon: Building2,
             label: a.UnitNo || a.ApplicationNo,
             sub: [a.ProjectName || a.InterestedProject, a.Lifecycle === "InProgress" ? a.StateLabel : a.ApplicationId === appId ? "Showing now" : null].filter(Boolean).join(" · "),
-            onPress: () => { setAppId(a.ApplicationId); navigation.navigate("CustomerHome" as never); },
+            onPress: () => { setAppId(a.ApplicationId); openCustomerScreen("CustomerHome", undefined, navigation.navigate as never); },
           }))} />
         </Section>
       ) : null}
@@ -104,7 +105,7 @@ export default function CustomerProfileScreen() {
             key: `p${a.ApplicationId}`, icon: History, tint: brand.textSecondary,
             label: a.UnitNo || a.ApplicationNo,
             sub: [a.StateLabel, a.ProjectName || a.InterestedProject].filter(Boolean).join(" · "),
-            onPress: () => { setAppId(a.ApplicationId); navigation.navigate("CustomerPayments" as never); },
+            onPress: () => { setAppId(a.ApplicationId); openCustomerScreen("CustomerPayments", undefined, navigation.navigate as never); },
           }))} />
         </Section>
       ) : null}

@@ -18,6 +18,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { portal } from "@/api/customerPortalApi";
 import { useTheme, useBrand, ACCENTS, type AccentKey } from "@/theme/ThemeContext";
 import { Page, Panel, Tap, useTopInset } from "@/customer/ui";
+import { openCustomerScreen } from "@/navigation/navigationRef";
 
 // ── Inline password form ──────────────────────────────────────────────────
 function ChangePasswordForm({ onDone }: { onDone: () => void }) {
@@ -236,7 +237,7 @@ export default function CustomerSettingsScreen() {
       <View style={{ backgroundColor: b.surfaceCard, borderRadius: 16, borderWidth: 1, borderColor: b.border, overflow: "hidden", marginBottom: 16 }}>
         <SettingRow
           icon={LifeBuoy} label="Ask for help" sublabel="Report a problem or ask a question"
-          onPress={() => navigation.navigate("CustomerRequests" as never)}
+          onPress={() => openCustomerScreen("CustomerRequests", undefined, navigation.navigate as never)}
         />
         {/* Call / Email / Privacy Policy return once the company's real contact details and policy page are given:
             none is on file anywhere in the project, and a made-up number or address must never reach a customer. */}

@@ -24,6 +24,7 @@ import CustomerTransferDeedScreen from "@/screens/customer/TransferDeedScreen";
 import CustomerActivityScreen from "@/screens/customer/ActivityScreen";
 import CustomerSettingsScreen from "@/screens/customer/SettingsScreen";
 import { AccountMenuProvider, TopHeader, useCustomerMenus } from "./TopHeader";
+import { registerCustomerTabs } from "./navigationRef";
 
 /** Every customer screen by name — the tabs and the pages — so any screen can open any other (and a notification can). */
 export type CustomerStackParamList = {
@@ -51,6 +52,8 @@ const TABS = [
   { name: "CustomerBills", title: "My Bills", label: "Bills", icon: Receipt, component: CustomerBillsScreen },
   { name: "CustomerRequests", title: "Help & Support", label: "Help", icon: LifeBuoy, component: CustomerRequestsScreen },
 ] as const;
+// The tab names, for openCustomerScreen (navigationRef.ts): a tab is opened through CustomerTabs.
+registerCustomerTabs(TABS.map((t) => t.name));
 
 /** A floating, rounded tab bar: the active tab sits in an accent pill with its label; the others are icons + labels.
  * Floats over content, so Page leaves TAB_BAR_CLEARANCE at the bottom. */

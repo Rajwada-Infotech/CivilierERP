@@ -38,6 +38,12 @@
       "expo-notifications",
       "@react-native-community/datetimepicker",
       [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Civilier Home uses the camera so you can photograph or scan papers to upload."
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {

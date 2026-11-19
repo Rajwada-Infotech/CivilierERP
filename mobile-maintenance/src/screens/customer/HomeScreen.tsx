@@ -21,6 +21,7 @@ import { useCustomer } from "@/customer/CustomerContext";
 import {
   Bar, ErrorText, HeroSurface, Loading, Muted, displayName, ON_HERO, Page, Panel, Ring, Section, fmtDate, money, useCardStyle, Tap, ago } from "@/customer/ui";
 import type { CustomerStackParamList } from "@/navigation/CustomerStack";
+import { openCustomerScreen } from "@/navigation/navigationRef";
 
 type Nav = NativeStackNavigationProp<CustomerStackParamList>;
 type RouteName = keyof CustomerStackParamList;
@@ -412,7 +413,7 @@ export default function CustomerHomeScreen() {
   const deedTodo = (deeds.data || []).reduce((n, v) => n + v.todo, 0);
   const firstName = displayName(me.data?.Name || app?.ApplicantName).split(" ")[0];
   const loading = timeline.isLoading || statement.isLoading;
-  const go = (r: RouteName) => nav.navigate(r as never);
+  const go = (r: RouteName) => openCustomerScreen(r, undefined, nav.navigate as never);
 
   return (
     <Page onRefresh={() => Promise.all([apps.refetch(), timeline.refetch(), statement.refetch(), me.refetch(), deeds.refetch(), feed.refetch()])}>

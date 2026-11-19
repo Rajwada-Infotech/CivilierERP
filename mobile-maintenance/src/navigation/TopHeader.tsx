@@ -18,7 +18,7 @@ import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
 import { useMaintenanceAlerts } from "@/hooks/useMaintenanceAlerts";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
-import { navigate, navigationRef } from "./navigationRef";
+import { navigate, navigationRef, openCustomerScreen } from "./navigationRef";
 import { useBrand } from "@/theme/ThemeContext";
 import { useCustomer } from "@/customer/CustomerContext";
 import { useNeedsYou } from "@/customer/todo";
@@ -202,9 +202,9 @@ function NotificationsMenu({ open, onClose, target, alerts }: {
   const act = (x: (typeof alerts.todo)[number]) => {
     if (x.applicationId && x.applicationId !== appId) setAppId(x.applicationId);
     onClose();
-    navigationRef.navigate(x.route as never);
+    openCustomerScreen(x.route);
   };
-  const go = (route: string) => { onClose(); navigationRef.navigate(route as never); };
+  const go = (route: string) => { onClose(); openCustomerScreen(route); };
   const glassEdge = b.isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.7)";
   // Denser than the account menu: its rows are sentences, which must read cleanly over whatever page is behind.
   const glassFill = b.isDark ? "rgba(24,22,36,0.94)" : "rgba(255,255,255,0.95)";
@@ -398,7 +398,7 @@ function NavMenuSheet({ open, onClose, target }: { open: boolean; onClose: () =>
   }, [open, onClose]);
   if (!shown) return null;
 
-  const go = (route: string) => { onClose(); navigationRef.navigate(route as never); };
+  const go = (route: string) => { onClose(); openCustomerScreen(route); };
   const glassEdge = b.isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.7)";
   const glassFill = b.isDark ? "rgba(24,22,36,0.93)" : "rgba(255,255,255,0.93)";
   // Sits just above the floating tab bar (CustomerStack.tsx: 68 tall, lifted by the safe area + 6).
@@ -474,7 +474,7 @@ function AccountMenu({ open, onClose, target }: { open: boolean; onClose: () => 
 
   const name = displayName(me.data?.Name || currentUser?.name) || "Customer";
   const contact = me.data?.Email || me.data?.Mobile || "";
-  const go = (route: string) => { onClose(); navigationRef.navigate(route as never); };
+  const go = (route: string) => { onClose(); openCustomerScreen(route); };
   const items: { key: string; label: string; icon: LucideIcon; onPress: () => void; danger?: boolean }[] = [
     { key: "profile", label: "My profile", icon: UserRound, onPress: () => go("CustomerProfile") },
     { key: "settings", label: "Settings", icon: Settings, onPress: () => go("CustomerSettings") },

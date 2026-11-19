@@ -13,8 +13,8 @@ import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { DateField } from "@/components/form/DateField";
 import { portal, pdfPath, type DeedView } from "@/api/customerPortalApi";
-import { ACCENT_SOFT, Button, Divider, ErrorText, Loading, Muted, Page, Panel, Row, fmtDate, money } from "@/customer/ui";
-import { openDocument, pickDocument } from "@/utils/documents";
+import { ACCENT_SOFT, Button, Divider, ErrorText, Loading, Muted, Page, Panel, Row, fmtDate, money, useAddPapers } from "@/customer/ui";
+import { openDocument } from "@/utils/documents";
 
 const DOC_STATE: Record<string, string> = { Requested: "Please upload", Uploaded: "Received — being checked", Verified: "Accepted", Rejected: "Please upload again" };
 const today = () => new Date().toISOString().slice(0, 10);
@@ -24,6 +24,15 @@ function DeedCard({ v, onChange }: { v: DeedView; onChange: (next: DeedView) => 
   const input = { borderWidth: 1, borderColor: brand.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, color: brand.textPrimary, fontFamily: fonts.body.regular, fontSize: 13 } as const;
   const d = v.deed;
   const [busy, setBusy] = useState<string | null>(null);
+  // A photo taken just before Android closed the app goes to the deed paper it was meant for.
+  const papers = useAddPapers({
+    owns: (k) => k.startsWith(`deed:${d.Id}:`),
+    onRecovered: (k, f) => {
+      const parts = k.split("|");
+      const [key, path, fields] = [parts[2], parts[3], parts.slice(4).join("|")]; // the fields may hold a "|" themselves
+      void run(key, () => portal.deedUpload(d.Id, path, f, JSON.parse(fields || "{}")), "Sent to our team");
+    },
+  });
   const [recheck, setRecheck] = useState("");
   const [date, setDate] = useState("");
   const [pay, setPay] = useState({ PaidRef: "", AmountPaid: "", PaidOn: today() });
@@ -35,7 +44,7 @@ function DeedCard({ v, onChange }: { v: DeedView; onChange: (next: DeedView) => 
   const act = (key: string, path: string, body: unknown, ok: string) => run(key, () => portal.deedAction(d.Id, path, body), ok);
   const upload = async (key: string, path: string, fields: Record<string, string> = {}) => {
     try {
-      const f = await pickDocument();
+      const f = await papers.pick(`deed:${d.Id}:|${d.Id}|${key}|${path}|${JSON.stringify(fields)}`);
       if (f) await run(key, () => portal.deedUpload(d.Id, path, f, fields), "Sent to our team");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not upload it"); }
   };
@@ -47,6 +56,8 @@ function DeedCard({ v, onChange }: { v: DeedView; onChange: (next: DeedView) => 
   const payer = v.payment ? (v.payment.PayableBy === v.role ? "you" : v.payment.PayableBy === "Shared" ? "both parties" : v.payment.PayableBy === "Developer" ? "us" : `the ${v.payment.PayableBy.toLowerCase()}`) : "";
 
   return (
+    <>
+    {papers.sheet}
     <Panel title={`${d.DeedType === "Assignment" ? "Deed of assignment" : "Cancellation deed"} · ${d.Property}`} icon={FileSignature}
       right={<Text style={{ fontSize: 11, fontFamily: fonts.body.semibold, color: ACCENT_SOFT }}>You are the {v.role.toLowerCase()}</Text>}>
       <Muted>
@@ -151,6 +162,7 @@ function DeedCard({ v, onChange }: { v: DeedView; onChange: (next: DeedView) => 
       {v.registry ? <Muted>Sub-Registrar visit: {v.registry.Office}, {fmtDate(v.registry.ScheduledAt)}{v.registry.Attendees ? ` · ${v.registry.Attendees}` : ""}</Muted> : null}
       {regCopy ? <Button label="Registered deed" kind="line" icon={Eye} onPress={() => view(regCopy.Id, `${d.DeedNo} registered`)} /> : null}
     </Panel>
+    </>
   );
 }
 

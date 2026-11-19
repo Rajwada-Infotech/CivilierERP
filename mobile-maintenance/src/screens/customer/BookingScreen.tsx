@@ -20,6 +20,7 @@ import { useCustomer } from "@/customer/CustomerContext";
 import { ActionBanner, Bar, Button, Divider, ErrorText, Loading, Muted, Page, Panel, Pill, Row, Section, Tap, displayName, fmtDate, money, useCardStyle } from "@/customer/ui";
 import { useBrand } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
+import { openCustomerScreen } from "@/navigation/navigationRef";
 
 type GroupKey = "current" | "preparing" | "past" | "notAhead";
 const GROUPS: { key: GroupKey; title: string; note: string; folded?: boolean }[] = [
@@ -73,7 +74,7 @@ function BookingDetails({ a }: { a: PortalApplication }) {
   const statement = useQuery({ queryKey: ["portal-money", appIdHere], queryFn: () => portal.money(appIdHere), enabled: !!a.BookingId });
   const t = timeline.data;
   /** Open one of this property's pages (switching the app to it first if another is chosen). */
-  const go = (route: string) => { if (appId !== appIdHere) setAppId(appIdHere); nav.navigate(route as never); };
+  const go = (route: string) => { if (appId !== appIdHere) setAppId(appIdHere); openCustomerScreen(route, undefined, nav.navigate as never); };
 
   if (timeline.isLoading) return <Loading />;
   if (timeline.error) return <ErrorText error={timeline.error} />;

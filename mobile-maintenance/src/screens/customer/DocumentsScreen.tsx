@@ -13,8 +13,8 @@ import { toast } from "@/components/Toast";
 import { DateField } from "@/components/form/DateField";
 import { portal, pdfPath, type AgreementDoc } from "@/api/customerPortalApi";
 import { useCustomer } from "@/customer/CustomerContext";
-import { Button, Divider, ErrorText, ListRow, Loading, Muted, Page, Panel, Row, fmtDate, money, Pill } from "@/customer/ui";
-import { openDocument, pickDocument } from "@/utils/documents";
+import { Button, Divider, ErrorText, ListRow, Loading, Muted, Page, Panel, Row, fmtDate, money, Pill, useAddPapers } from "@/customer/ui";
+import { openDocument, type PickedFile } from "@/utils/documents";
 
 const docLabel = (d: { Label?: string | null; DocumentType: string }) => d.Label || d.DocumentType.replace(/([A-Z])/g, " $1").trim();
 const fmtBytes = (n: number | null) => (n == null ? "" : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
@@ -93,6 +93,12 @@ export default function CustomerDocumentsScreen() {
   const [proposing, setProposing] = useState(false);
   const [busyDoc, setBusyDoc] = useState<number | null>(null);
   const [qpBusy, setQpBusy] = useState(false);
+  // Every upload asks the same way: from the phone, a photo, or several pages scanned into one PDF.
+  const papers = useAddPapers({
+    // A photo taken just before Android closed the app goes where it was meant to.
+    owns: (k) => k === "qpProof" || k.startsWith("agreementDoc:"),
+    onRecovered: (k, f) => { void (k === "qpProof" ? sendProof(f) : sendDoc(Number(k.split(":")[1]), f)); },
+  });
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["portal-timeline"] });
@@ -107,25 +113,33 @@ export default function CustomerDocumentsScreen() {
     onSuccess: () => { toast.success("Date accepted — sent to our team for final sign-off"); refresh(); },
     onError: fail,
   });
-  const upload = async (d: AgreementDoc) => {
+  const sendDoc = async (docId: number, f: PickedFile) => {
     try {
-      const f = await pickDocument();
-      if (!f) return;
-      setBusyDoc(d.Id);
-      await portal.uploadAgreementDoc(appId as number, d.Id, f);
+      setBusyDoc(docId);
+      await portal.uploadAgreementDoc(appId as number, docId, f);
       toast.success("Document submitted for review");
       refresh();
     } catch (e) { fail(e); } finally { setBusyDoc(null); }
   };
-  const uploadProof = async () => {
+  const sendProof = async (f: PickedFile) => {
     try {
-      const f = await pickDocument();
-      if (!f) return;
       setQpBusy(true);
       await portal.uploadQueryPaymentProof(appId as number, f);
       toast.success("Proof uploaded — our team will confirm shortly");
       refresh();
     } catch (e) { fail(e); } finally { setQpBusy(false); }
+  };
+  const upload = async (d: AgreementDoc) => {
+    try {
+      const f = await papers.pick(`agreementDoc:${d.Id}`);
+      if (f) await sendDoc(d.Id, f);
+    } catch (e) { fail(e); }
+  };
+  const uploadProof = async () => {
+    try {
+      const f = await papers.pick("qpProof");
+      if (f) await sendProof(f);
+    } catch (e) { fail(e); }
   };
   const open = (path: string, name: string) => openDocument(path, name).catch(fail);
 
@@ -155,6 +169,7 @@ export default function CustomerDocumentsScreen() {
 
   return (
     <Page onRefresh={() => Promise.all([timeline.refetch(), agreementQ.refetch(), docsQ.refetch(), qpQ.refetch(), deedQ.refetch()])}>
+      {papers.sheet}
       <Muted>Track your full legal journey — agreement, sale deed, government payment, and registration — in one place.</Muted>
 
       {ag ? (

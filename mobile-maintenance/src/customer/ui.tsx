@@ -4,13 +4,15 @@
 //  • the accent is spent on what matters (the main figure, the one primary button, the current step);
 //  • sentence-case section titles, large figures, 44 px+ touch targets, no colour without a word beside it.
 // Every export keeps its old name and props, so all screens pick the look up without changes.
-import { useContext, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { HeaderHeightContext } from "@react-navigation/elements";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View, type GestureResponderEvent, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
+import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, Text, View, type GestureResponderEvent, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle } from "react-native-svg";
 import type { LucideIcon } from "lucide-react-native";
-import { ChevronRight } from "lucide-react-native";
+import { Camera, ChevronRight, FolderOpen, Image as ImageIcon, Plus, ScanLine, X } from "lucide-react-native";
+import { pagesToPdf, photoFile, pickDocument, pickFromGallery, recoverPendingUpload, takePhoto, type PickedFile, type Photo } from "@/utils/documents";
 import { useBrand } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
@@ -488,5 +490,161 @@ export function ActionBanner({
       </View>
       {cta || onPress ? <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 14, color: c.text }}>{cta ?? "Open ›"}</Text> : null}
     </Tap>
+  );
+}
+
+// ── Upload document ────────────────────────────────────────────────────────────
+/**
+ * Every upload asks the same way: a photo from the gallery, a file from the phone's storage, a new photo, or several
+ * pages scanned into one PDF (as the web's upload menu, src/pages/CRM/salesDeed/parts.tsx). `pick(intent)` opens the
+ * sheet and resolves with the file (null if the customer backs out); errors (camera off, wrong type, too large) are
+ * thrown for the caller's toast and logged to the Metro console.
+ * `intent` says what the file is for. Android may close the app while the camera is open; when the screen comes back,
+ * `onRecovered(intent, file)` is called with that photo so the upload still happens (pass `owns` to claim intents).
+ * Render `sheet` once in the screen.
+ */
+export function useAddPapers(opts: { owns?: (intent: string) => boolean; onRecovered?: (intent: string, file: PickedFile) => void } = {}):
+  { pick: (intent?: string) => Promise<PickedFile | null>; sheet: ReactNode } {
+  const [open, setOpen] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [pages, setPages] = useState<Photo[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const settle = useRef<{ ok: (f: PickedFile | null) => void; fail: (e: unknown) => void; intent?: string } | null>(null);
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
+
+  // A photo taken just before Android closed the app: finish its upload now.
+  useEffect(() => {
+    const owns = optsRef.current.owns;
+    if (!owns) return;
+    let alive = true;
+    recoverPendingUpload(owns)
+      .then(async (got) => { if (got && alive) optsRef.current.onRecovered?.(got.intent, await photoFile(got.photo)); })
+      .catch((e) => console.warn("[upload] could not recover the photo taken:", e));
+    return () => { alive = false; };
+  }, []);
+
+  const finish = (f: PickedFile | null, err?: unknown) => {
+    const s = settle.current;
+    settle.current = null;
+    setOpen(false); setScanning(false); setPages([]); setBusy(null);
+    if (err) { console.warn("[upload]", err); s?.fail(err); } else s?.ok(f);
+  };
+  const pick = useCallback((intent?: string) => new Promise<PickedFile | null>((ok, fail) => {
+    settle.current = { ok, fail, intent };
+    setOpen(true);
+  }), []);
+  /** Open a system picker or the camera straight from the sheet (it stays up, showing that it is waiting). */
+  const run = async (what: string, get: () => Promise<PickedFile | null>) => {
+    setBusy(what);
+    try {
+      const f = await get();
+      if (f) finish(f); else setBusy(null); // backed out: the choices stay, to pick another way
+    } catch (e) { finish(null, e); }
+  };
+  const addPage = async () => {
+    setBusy("Opening the camera…");
+    try {
+      const p = await takePhoto();
+      if (p) setPages((x) => [...x, p]);
+      setBusy(null);
+    } catch (e) { finish(null, e); }
+  };
+  const makePdf = async () => {
+    setBusy("Making the PDF…");
+    try { finish(await pagesToPdf(pages)); } catch (e) { finish(null, e); }
+  };
+
+  const sheet = (
+    <AddPapersSheet open={open} scanning={scanning} pages={pages} busy={busy}
+      onCancel={() => finish(null)}
+      onGallery={() => void run("Opening your gallery…", pickFromGallery)}
+      onFiles={() => void run("Opening your files…", pickDocument)}
+      onPhoto={() => void run("Opening the camera…", async () => { const p = await takePhoto(settle.current?.intent); return p ? photoFile(p) : null; })}
+      onScan={() => { setScanning(true); void addPage(); }}
+      onAddPage={() => void addPage()}
+      onRemove={(i) => setPages((x) => x.filter((_, k) => k !== i))}
+      onMakePdf={() => void makePdf()} />
+  );
+  return { pick, sheet };
+}
+
+function AddPapersSheet({ open, scanning, pages, busy, onCancel, onGallery, onFiles, onPhoto, onScan, onAddPage, onRemove, onMakePdf }: {
+  open: boolean; scanning: boolean; pages: Photo[]; busy: string | null;
+  onCancel: () => void; onGallery: () => void; onFiles: () => void; onPhoto: () => void; onScan: () => void;
+  onAddPage: () => void; onRemove: (i: number) => void; onMakePdf: () => void;
+}) {
+  const b = useBrand();
+  const insets = useSafeAreaInsets();
+  const choices: { key: string; icon: LucideIcon; title: string; sub: string; onPress: () => void }[] = [
+    { key: "gallery", icon: ImageIcon, title: "Photo from gallery", sub: "A photo already on your phone", onPress: onGallery },
+    { key: "files", icon: FolderOpen, title: "File from phone storage", sub: "A PDF, Word file or image from your files", onPress: onFiles },
+    { key: "photo", icon: Camera, title: "Take a photo", sub: "With this phone's camera", onPress: onPhoto },
+    { key: "scan", icon: ScanLine, title: "Scan pages into one PDF", sub: "Photograph each page; they join into one file", onPress: onScan },
+  ];
+  return (
+    <Modal visible={open} transparent animationType="fade" onRequestClose={busy ? undefined : onCancel} statusBarTranslucent>
+      <Pressable onPress={busy ? undefined : onCancel} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)" }} accessibilityLabel="Close" />
+      <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: Math.max(insets.bottom, 12) + 8, paddingTop: 10, paddingHorizontal: 14,
+        borderTopLeftRadius: 26, borderTopRightRadius: 26, backgroundColor: b.surfaceCard, borderTopWidth: 1, borderColor: b.border, gap: 6 }}>
+        <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: b.border, marginBottom: 6 }} />
+        <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 6, paddingBottom: 4 }}>
+          <Text style={{ flex: 1, fontSize: 16, fontFamily: fonts.heading.semibold, color: b.textPrimary }}>
+            {scanning ? (pages.length ? `Scan · ${pages.length} page${pages.length > 1 ? "s" : ""}` : "Scan pages") : "Upload document"}
+          </Text>
+          {busy ? null : (
+            <Tap onPress={onCancel} hitSlop={10} accessibilityLabel="Cancel"><X size={20} color={b.textSecondary} /></Tap>
+          )}
+        </View>
+
+        {busy ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 6 }}>
+            <ActivityIndicator color={b.gold} />
+            <Text style={{ fontSize: 14, fontFamily: fonts.body.medium, color: b.textSecondary }}>{busy}</Text>
+          </View>
+        ) : null}
+
+        {!scanning ? choices.map((c) => (
+          <Tap key={c.key} onPress={c.onPress} disabled={!!busy} accessibilityRole="menuitem"
+            style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 14, padding: 12, borderRadius: 16, opacity: busy ? 0.5 : 1,
+              backgroundColor: pressed ? b.surfaceGlass : "transparent" })}>
+            <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: b.goldSoft, alignItems: "center", justifyContent: "center" }}>
+              <c.icon size={20} color={b.gold} />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontSize: 15, fontFamily: fonts.heading.semibold, color: b.textPrimary }}>{c.title}</Text>
+              <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: b.textSecondary }}>{c.sub}</Text>
+            </View>
+            <ChevronRight size={17} color={b.textFaint} />
+          </Tap>
+        )) : (
+          <View style={{ gap: 12, paddingHorizontal: 4 }}>
+            <Text style={{ fontSize: 13, lineHeight: 18, fontFamily: fonts.body.regular, color: b.textSecondary }}>
+              Photograph each page in good light, flat and filling the frame. Tap a page to remove it.
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+              {pages.map((p, i) => (
+                <Tap key={`${p.uri}-${i}`} onPress={() => onRemove(i)} disabled={!!busy} accessibilityLabel={`Remove page ${i + 1}`}
+                  style={{ width: 84, height: 112, borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: b.border, backgroundColor: b.surfaceGlass }}>
+                  <Image source={{ uri: p.uri }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                  <View style={{ position: "absolute", left: 6, bottom: 6, minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6,
+                    backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ color: "#fff", fontSize: 11.5, fontFamily: fonts.heading.semibold }}>{i + 1}</Text>
+                  </View>
+                </Tap>
+              ))}
+              <Tap onPress={onAddPage} disabled={!!busy} accessibilityLabel="Add a page"
+                style={({ pressed }) => ({ width: 84, height: 112, borderRadius: 12, borderWidth: 1.5, borderStyle: "dashed", borderColor: b.borderGold,
+                  alignItems: "center", justifyContent: "center", gap: 6, opacity: pressed || busy ? 0.6 : 1 })}>
+                <Plus size={20} color={b.gold} />
+                <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: b.gold }}>{pages.length ? "Add page" : "First page"}</Text>
+              </Tap>
+            </ScrollView>
+            <Button label={pages.length ? `Make PDF · ${pages.length} page${pages.length > 1 ? "s" : ""}` : "Make PDF"}
+              busy={busy === "Making the PDF…"} disabled={!pages.length || !!busy} onPress={onMakePdf} />
+          </View>
+        )}
+      </View>
+    </Modal>
   );
 }
