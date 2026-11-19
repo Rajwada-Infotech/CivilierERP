@@ -57,9 +57,11 @@ function InvoicePdfDialog({ invoice, applicationId, onClose }: { invoice: any; a
 
 // ── Milestone card with premium styling ──────────────────────────────────────
 function MilestoneCard({ m, today }: { m: any; today: Date }) {
-  const isPaid = m.Status === "Paid";
-  const isOverdue = !isPaid && m.DueDate && new Date(m.DueDate) < today;
-  const partialPaid = !isPaid && Number(m.AmountPaid || 0) > 0;
+  // Paid = settled, or covered by verified money held On Account (server money stage) — Status alone stays "Pending".
+  const isPaid = !!m.Covered;
+  const isOverdue = !isPaid && !m.Verifying && m.DueDate && new Date(m.DueDate) < today;
+  // Part paid counts money held for it too (Outstanding below the amount due), not only money settled on it.
+  const partialPaid = !isPaid && Number(m.Outstanding) < Number(m.AmountDue);
 
   const railColor = isPaid ? "#059669" : isOverdue ? "#DC2626" : GOLD;
   const bgColor = isPaid ? "rgba(5,150,105,0.04)" : isOverdue ? "rgba(220,38,38,0.04)" : "transparent";
@@ -179,8 +181,8 @@ const PortalPayments: React.FC = () => {
   const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
   const remaining = totalDue - totalPaid;
   const today = new Date(new Date().toDateString());
-  const overdueCount = milestones.filter((m: any) => m.Status !== "Paid" && m.DueDate && new Date(m.DueDate) < today).length;
-  const nextDue = milestones.find((m: any) => m.Status === "Pending");
+  const overdueCount = milestones.filter((m: any) => !m.Covered && !m.Verifying && m.DueDate && new Date(m.DueDate) < today).length;
+  const nextDue = milestones.find((m: any) => !m.Covered && !m.Verifying && Number(m.Outstanding) > 0);
 
   return (
     <div className="space-y-5">
@@ -237,7 +239,7 @@ const PortalPayments: React.FC = () => {
               <p className="text-sm font-semibold mt-0.5" style={{ color: TEXT }}>{nextDue.MilestoneName}</p>
               {nextDue.DueDate && <p className="text-xs" style={{ color: TEXT_MUTED }}>Due {fmtDate(nextDue.DueDate)}</p>}
             </div>
-            <p className="text-xl font-bold tabular-nums shrink-0" style={{ ...serif, color: TEXT }}>{fmtMoney(nextDue.AmountDue)}</p>
+            <p className="text-xl font-bold tabular-nums shrink-0" style={{ ...serif, color: TEXT }}>{fmtMoney(nextDue.Outstanding)}</p>
           </div>
         )}
       </div>
@@ -256,7 +258,7 @@ const PortalPayments: React.FC = () => {
           </span>
           <h2 className="text-sm font-semibold" style={{ ...serif, color: TEXT }}>Milestone Schedule</h2>
           <span className="ml-auto text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(201,162,39,0.10)", color: "#8A6D14" }}>
-            {milestones.filter((m: any) => m.Status === "Paid").length} / {milestones.length} paid
+            {milestones.filter((m: any) => m.Covered).length} / {milestones.length} paid
           </span>
         </div>
         {milestones.map((m: any) => (

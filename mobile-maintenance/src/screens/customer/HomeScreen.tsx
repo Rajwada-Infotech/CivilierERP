@@ -38,7 +38,8 @@ function journey(t: Timeline): Step[] {
   const ms = t.paymentMilestones || [];
   const agreementApproved = t.agreement?.CustomerApprovalStatus === "Approved";
   const detailsDone       = !!t.customerDetails?.IsComplete;
-  const paymentsDone      = ms.length > 0 && !ms.some((m) => m.Status === "Pending");
+  // Judged by money stage (Covered), not Status — paid money held On Account leaves Status "Pending" (crmPortal.js loadTimeline).
+  const paymentsDone      = ms.length > 0 && ms.every((m) => m.Covered);
   const salesDeedDone     = !!t.salesDeed;
   const qpDone            = t.queryPayment?.Status === "Confirmed";
   const registryDone      = t.registry?.Status === "Completed";
@@ -133,7 +134,8 @@ export default function CustomerHomeScreen() {
   const total = milestones.reduce((s, m) => s + Number(m.AmountDue || 0), 0) || Number(t?.booking?.GrandTotal || 0);
   const paid = milestones.reduce((s, m) => s + Number(m.AmountPaid || 0), 0) + Number(t?.onAccountTotalReceived || 0);
   const pct = total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : 0;
-  const next = milestones.find((m) => m.Status === "Pending");
+  // The next instalment genuinely still to pay — not one already covered by money held, nor one being verified.
+  const next = milestones.find((m) => !m.Covered && !m.Verifying && m.Outstanding > 0);
   // This property's items first, then the other homes' (each labelled), then deeds with no home of theirs.
   const allTodo = needs.data || [];
   const todo = [...allTodo.filter((x) => x.applicationId === appId), ...allTodo.filter((x) => x.applicationId !== appId)];
@@ -266,7 +268,7 @@ export default function CustomerHomeScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>Next payment{next.DueDate ? ` · due ${fmtDate(next.DueDate)}` : ""}</Text>
                   <Text style={{ fontSize: 16, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, fontVariant: ["tabular-nums"] }}>
-                    {money(Number(next.AmountDue) - Number(next.AmountPaid || 0))} <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: ON_HERO.secondary }}>· {next.MilestoneName}</Text>
+                    {money(next.Outstanding)} <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: ON_HERO.secondary }}>· {next.MilestoneName}</Text>
                   </Text>
                 </View>
               ) : (

@@ -524,7 +524,7 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
         FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL AND Status <> 'Cancelled'
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
-        SELECT MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status
+        SELECT Id, MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status
         FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
@@ -563,12 +563,27 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
       query("SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0) THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
     ]);
 
+    // Whether each instalment is actually paid. Money is held On Account until the full price is in (crmOnAccountCoverage),
+    // so a paid instalment can still say Status = 'Pending'. Its money stage is the truth — the same one the staff
+    // screens and the money statement use: Covered = paid (settled, or covered by verified money held for it);
+    // Verifying = paid, being checked; Outstanding = what is genuinely still to pay on it.
+    const stageOf = new Map((await getMilestoneMoneyStages(pool, bk.Id)).milestones.map((m) => [m.Id, m]));
+    const paymentMilestones = milestones.recordset.map((m) => {
+      const st = stageOf.get(m.Id) || {};
+      const stage = st.MoneyStage ?? null;
+      return {
+        ...m, MoneyStage: stage,
+        Covered: ["Adjusted", "Verified", "Waived"].includes(stage),
+        Verifying: ["InVerification", "Recorded"].includes(stage),
+        Outstanding: stage === "Waived" ? 0 : Math.max(0, Math.round((Number(m.AmountDue || 0) - Number(m.AmountPaid || 0) - Number(st.HeldOnAccount || 0)) * 100) / 100),
+      };
+    });
     return {
       booking: bk,
       welcomeCall: welcomeCall.recordset[0] || null,
       customerDetails: customerDetails.recordset[0] || null,
       agreement: agreement.recordset[0] || null,
-      paymentMilestones: milestones.recordset,
+      paymentMilestones,
       onAccountTotalReceived: Number(onAccountTotal.recordset[0]?.Total) || 0,
       salesDeed: deed.recordset[0] || null,
       handover: handover.recordset[0] || null,
@@ -2157,8 +2172,10 @@ function needsYou({ applicationId, timeline: t, agreement, documents, deeds }) {
         v.asks?.length ? v.asks.join(". ") : `${v.deed.DeedNo} — ${v.steps.find((x) => x.state === "current")?.label || v.deed.StatusLabel}`, "transferDeed");
     }
   }
-  const next = (t?.paymentMilestones || []).find((m) => m.Status === "Pending");
-  if (next) add("paymentDue", `${next.MilestoneName} payment is due`, `${inr(next.AmountDue)}${next.DueDate ? ` · Due ${day(next.DueDate)}` : ""}`, "payments");
+  // Due = not covered by money already paid and not being verified (loadTimeline's money stages — never Status alone,
+  // which stays 'Pending' while paid money is held On Account).
+  const next = (t?.paymentMilestones || []).find((m) => m.Status !== "Waived" && !m.Covered && !m.Verifying && m.Outstanding > 0);
+  if (next) add("paymentDue", `${next.MilestoneName} payment is due`, `${inr(next.Outstanding)}${next.DueDate ? ` · Due ${day(next.DueDate)}` : ""}`, "payments");
   return out;
 }
 

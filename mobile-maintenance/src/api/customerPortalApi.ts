@@ -70,7 +70,13 @@ export interface NeedsYouItem {
   urgent: boolean;
 }
 
-export interface Milestone { MilestoneNo: number; MilestoneName: string; DueDate: string | null; AmountDue: number; AmountPaid: number | null; Status: string }
+export interface Milestone { MilestoneNo: number; MilestoneName: string; DueDate: string | null; AmountDue: number; AmountPaid: number | null; Status: string;
+  /** Paid (settled, or covered by verified money held On Account) — Status stays 'Pending' while money is held, so judge by this. */
+  Covered: boolean;
+  /** Paid, being verified by accounts. */
+  Verifying: boolean;
+  /** Genuinely still to pay on it. */
+  Outstanding: number }
 
 export interface Timeline {
   stage?: string;

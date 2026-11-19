@@ -98,7 +98,7 @@ function NextPaymentBanner({ nextDue, onNavigate }: { nextDue: any; onNavigate: 
           {isOverdue ? "⚠ Payment Overdue" : "Next Payment Due"}
         </p>
         <p className="text-base font-semibold mt-0.5 leading-tight" style={{ color: TEXT }}>
-          {fmtMoney(nextDue.AmountDue)}
+          {fmtMoney(nextDue.Outstanding)}
         </p>
         <p className="text-xs mt-0.5" style={{ color: TEXT_MUTED }}>
           {nextDue.MilestoneName}
@@ -130,8 +130,9 @@ const PortalOverview: React.FC = () => {
   const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
     + Number(timeline.onAccountTotalReceived || 0);
   const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
-  const nextDue = milestones.find((m: any) => m.Status === "Pending");
-  const paidCount = milestones.filter((m: any) => m.Status === "Paid" || m.AmountPaid > 0).length;
+  // Judged by money stage (Covered / Outstanding from the server), not Status — paid money held On Account leaves it "Pending".
+  const nextDue = milestones.find((m: any) => !m.Covered && !m.Verifying && Number(m.Outstanding) > 0);
+  const paidCount = milestones.filter((m: any) => m.Covered).length;
 
   // Payments (construction milestones) and the Legal chain (Sales Deed ->
   // Govt. Payment -> Registry -> Handover) are genuinely parallel tracks,
@@ -140,7 +141,7 @@ const PortalOverview: React.FC = () => {
   // already Completed. Each stage's done/current state is evaluated off its
   // own data, branching independently off Agreement being approved.
   const agreementApproved = !!agreement && agreement.CustomerApprovalStatus === "Approved";
-  const paymentsDone = milestones.length > 0 && !milestones.some((m: any) => m.Status === "Pending");
+  const paymentsDone = milestones.length > 0 && milestones.every((m: any) => m.Covered);
   const salesDeedDone = !!timeline.salesDeed;
   const qpDone = timeline.queryPayment?.Status === "Confirmed";
   const registryDone = timeline.registry?.Status === "Completed";
@@ -286,7 +287,7 @@ const PortalOverview: React.FC = () => {
         <StatCard
           icon={CreditCard}
           label="Next Payment"
-          value={nextDue ? fmtMoney(nextDue.AmountDue) : "All paid ✓"}
+          value={nextDue ? fmtMoney(nextDue.Outstanding) : "All paid ✓"}
           sub={nextDue?.MilestoneName || (milestones.length > 0 ? "No pending milestones" : undefined)}
           highlight={!!nextDue}
         />

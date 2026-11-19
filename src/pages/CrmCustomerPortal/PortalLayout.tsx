@@ -236,7 +236,8 @@ const PortalLayout: React.FC = () => {
     if (timeline?.salesDeed?.CustomerApprovalStatus === "Pending" && timeline?.salesDeed?.SentToCustomerAt) b.agreement = (b.agreement || 0) + 1;
     if (timeline?.queryPayment?.Status === "InfoSent") b.agreement = (b.agreement || 0) + 1;
     if (timeline?.possessionNotice?.Status === "Sent") b.construction = 1;
-    const pendingMilestones = (timeline?.paymentMilestones || []).filter((m: any) => m.Status === "Pending").length;
+    // Instalments genuinely still to pay — Status stays "Pending" while paid money is held On Account (timeline Covered).
+    const pendingMilestones = (timeline?.paymentMilestones || []).filter((m: any) => !m.Covered && !m.Verifying && Number(m.Outstanding) > 0).length;
     if (pendingMilestones) b.payments = pendingMilestones;
     // Transfer deeds belong to the customer, not one application.
     const deedTodo = (deeds || []).reduce((n: number, v: any) => n + Number(v.todo || 0), 0);
