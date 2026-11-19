@@ -5,7 +5,7 @@ import {
   Building2, KeyRound, LogOut, FileText, CreditCard,
   LifeBuoy, HardHat, CheckCircle2, Circle, Palette, Check, Sun, Moon, Laptop, TrendingUp,
 } from "lucide-react";
-import { fetchTickets, fmtMoney, fmtDate } from "./portalApi";
+import { fetchTickets, fmtMoney, fmtDate, moneyFigures } from "./portalApi";
 import {
   Card, CardHeader, InfoField, StatusPill,
   HeroStrip, PulseBar,
@@ -14,7 +14,7 @@ import {
   PortalMode, getStoredPortalMode, applyPortalMode,
 } from "./portalTheme";
 
-type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
+type Ctx = { me: any; timeline: any; money: any; applicationId: number; applications: any[] };
 
 const MODE_OPTIONS: { key: PortalMode; label: string; icon: any }[] = [
   { key: "light", label: "Light", icon: Sun },
@@ -31,7 +31,7 @@ function initials(name: string | null | undefined) {
 // all pulled from the same live tables the staff CRM reads, in one glance,
 // instead of a bare contact-details form.
 const PortalProfile: React.FC = () => {
-  const { me, timeline, applicationId, applications } = useOutletContext<Ctx>();
+  const { me, timeline, money, applicationId, applications } = useOutletContext<Ctx>();
   const navigate = useNavigate();
 
   // /me is the customer's shared identity (Name, Mobile, Email — keyed by
@@ -58,13 +58,8 @@ const PortalProfile: React.FC = () => {
     navigate("/crm-client-portal/login");
   };
 
-  const milestones = timeline.paymentMilestones || [];
-  const totalDue = milestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
-  // Includes money held in On Account but not yet swept onto a milestone —
-  // same fix as PortalPayments.tsx / PortalOverview.tsx.
-  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
-    + Number(timeline.onAccountTotalReceived || 0);
-  const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
+  // Paid / total / balance from the money statement — the same figures as Overview, Payments and the mobile app.
+  const { total: totalDue, paid: totalPaid, pct: pctPaid, balance, closed } = moneyFigures(money);
   const openTickets = (tickets as any[]).filter((t) => t.Status !== "Resolved" && t.Status !== "Closed").length;
 
   const keyDates = [
@@ -133,7 +128,7 @@ const PortalProfile: React.FC = () => {
       </div>
 
       {/* Payment progress */}
-      {totalDue > 0 && (
+      {totalDue > 0 && !closed && (
         <div
           className="rounded-2xl p-5"
           style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}
@@ -148,7 +143,7 @@ const PortalProfile: React.FC = () => {
           <PulseBar pct={pctPaid} height={10} />
           <div className="flex justify-between mt-2 text-xs" style={{ color: TEXT_FAINT }}>
             <span>{fmtMoney(totalPaid)} paid</span>
-            <span>{fmtMoney(totalDue - totalPaid)} remaining</span>
+            <span>{fmtMoney(balance)} remaining</span>
           </div>
         </div>
       )}

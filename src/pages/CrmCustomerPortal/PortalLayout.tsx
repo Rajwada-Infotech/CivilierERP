@@ -6,7 +6,7 @@ import {
   LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers,
   FileSignature,
 } from "lucide-react";
-import { fetchMe, fetchApplications, fetchTimeline, fetchTransferDeeds, fetchCreditNotes, creditNotesSeenKey, readSeen } from "./portalApi";
+import { fetchMe, fetchApplications, fetchTimeline, fetchTransferDeeds, fetchCreditNotes, creditNotesSeenKey, readSeen, fetchMoney } from "./portalApi";
 import {
   INK, VIOLET_DEEP, VIOLET, VIOLET_LIGHT, GOLD, GOLD_SOFT, PORCELAIN, SURFACE, SURFACE_ALT, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
   applyPortalAccent, getStoredPortalAccent, applyPortalMode, getStoredPortalMode, StatusPill,
@@ -203,6 +203,14 @@ const PortalLayout: React.FC = () => {
     queryFn: () => fetchTimeline(selectedApplicationId!),
     enabled: !!selectedApplicationId,
     retry: false,
+    staleTime: 30_000,
+  });
+
+  // The money statement, loaded once here for every page (Overview, Payments, Profile read the same figures).
+  const { data: money } = useQuery({
+    queryKey: ["portal-money", selectedApplicationId],
+    queryFn: () => fetchMoney(selectedApplicationId!),
+    enabled: !!selectedApplicationId,
     staleTime: 30_000,
   });
 
@@ -462,7 +470,7 @@ const PortalLayout: React.FC = () => {
             />
           ) : accountWide ? (
             <Suspense fallback={<PortalSkeleton />}>
-              <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />
+              <Outlet context={{ me, timeline, money, applicationId: selectedApplicationId, applications }} />
             </Suspense>
           ) : !selectedApplicationId ? (
             <div className="min-h-[60vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>
@@ -477,7 +485,7 @@ const PortalLayout: React.FC = () => {
                   You are a co-applicant on this booking — you can follow everything here; approvals, uploads and requests are made by the main applicant, {selectedApp.ApplicantName}.
                 </div>
               ) : null}
-              <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />
+              <Outlet context={{ me, timeline, money, applicationId: selectedApplicationId, applications }} />
             </Suspense>
           )}
         </div>

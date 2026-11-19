@@ -2,9 +2,9 @@ import React, { useState, useMemo } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { LifeBuoy, Plus, MessageSquare, CheckCircle2, Clock, Circle, ChevronDown, ChevronUp } from "lucide-react";
+import { LifeBuoy, Plus, MessageSquare, CheckCircle2, Clock, Circle, ChevronDown, ChevronUp, Star } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { API, authHeaders, fetchTickets, TICKET_CATEGORIES, fmtDate } from "./portalApi";
+import { API, authHeaders, fetchTickets, TICKET_CATEGORIES, fmtDate, rateTicket, reopenTicket } from "./portalApi";
 import {
   HeroStrip, UrgencyBanner,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
@@ -28,8 +28,87 @@ function statusLabel(status: string): string {
   return status;
 }
 
+/** Rate how a resolved request was handled (1–5 stars, optional comment); can be changed later — same as the app. */
+function RateRequest({ t, applicationId }: { t: any; applicationId: number }) {
+  const qc = useQueryClient();
+  const [stars, setStars] = useState<number>(t.CustomerRating || 0);
+  const [note, setNote] = useState<string>(t.CustomerFeedback || "");
+  const [editing, setEditing] = useState(!t.CustomerRating);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!stars) { toast.error("Click a star to rate"); return; }
+    setSaving(true);
+    try {
+      await rateTicket(applicationId, t.Id, stars, note.trim());
+      toast.success("Thank you for your feedback");
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["portal-tickets", applicationId] });
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+  const row = (value: number, pick?: (n: number) => void) => (
+    <div className="flex gap-1">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button key={n} type="button" disabled={!pick} onClick={() => pick?.(n)} aria-label={`${n} star${n > 1 ? "s" : ""}`} className="disabled:cursor-default">
+          <Star size={22} style={{ color: GOLD }} fill={n <= value ? GOLD : "transparent"} />
+        </button>
+      ))}
+    </div>
+  );
+  if (!editing) {
+    return (
+      <div className="space-y-1">
+        <p className="text-[0.625rem] font-semibold uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Your rating</p>
+        {row(t.CustomerRating || 0)}
+        {t.CustomerFeedback && <p className="text-xs" style={{ color: TEXT_MUTED }}>"{t.CustomerFeedback}"</p>}
+        <button onClick={() => setEditing(true)} className="text-xs font-semibold" style={{ color: GOLD }}>Change rating</button>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-semibold" style={{ color: TEXT }}>How did we do?</p>
+      {row(stars, setStars)}
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Anything to add? (optional)"
+        className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none" style={{ border: `1px solid ${HAIRLINE}`, background: "transparent", color: TEXT }} />
+      <button onClick={save} disabled={saving} className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>
+        {saving ? "Sending…" : "Send rating"}
+      </button>
+    </div>
+  );
+}
+
+/** A resolved request that isn't actually fixed: reopen it with what is still wrong (same as the app). */
+function ReopenRequest({ t, applicationId }: { t: any; applicationId: number }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState("");
+  const [saving, setSaving] = useState(false);
+  const send = async () => {
+    if (!why.trim()) { toast.error("Tell us what is still wrong"); return; }
+    setSaving(true);
+    try {
+      await reopenTicket(applicationId, t.Id, why.trim());
+      toast.success("Reopened. Our team will look at it again.");
+      setOpen(false); setWhy("");
+      qc.invalidateQueries({ queryKey: ["portal-tickets", applicationId] });
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+  if (!open) return <button onClick={() => setOpen(true)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT }}>Still not fixed? Reopen it</button>;
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-semibold" style={{ color: TEXT }}>What is still wrong?</p>
+      <textarea value={why} onChange={(e) => setWhy(e.target.value)} rows={3} placeholder="e.g. The leak started again yesterday"
+        className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none" style={{ border: `1px solid ${HAIRLINE}`, background: "transparent", color: TEXT }} />
+      <div className="flex gap-2">
+        <button onClick={() => setOpen(false)} className="px-3 py-1.5 text-sm rounded-lg" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
+        <button onClick={send} disabled={saving} className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>{saving ? "Reopening…" : "Reopen"}</button>
+      </div>
+    </div>
+  );
+}
+
 // Individual ticket card
-function TicketCard({ t }: { t: any }) {
+function TicketCard({ t, applicationId, canRate }: { t: any; applicationId: number; canRate: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const st = statusStyle(t.Status);
   const isResolved = t.Status === "Resolved" || t.Status === "Closed";
@@ -82,13 +161,22 @@ function TicketCard({ t }: { t: any }) {
         </div>
       </button>
 
+      {/* What was asked, and when we aim to sort it / when it was resolved */}
+      {expanded && (
+        <div className="px-6 pb-3 space-y-1 text-xs" style={{ color: TEXT_MUTED }}>
+          {t.Description && <p className="text-sm whitespace-pre-line" style={{ color: TEXT }}>{t.Description}</p>}
+          <p>Asked on {fmtDate(t.CreatedAt)}</p>
+          {!isResolved && t.SlaDueDate && <p>We aim to sort it by {fmtDate(t.SlaDueDate)}</p>}
+          {t.ResolvedAt && <p style={{ color: "#059669" }}>Resolved on {fmtDate(t.ResolvedAt)}</p>}
+        </div>
+      )}
       {expanded && t.ResolutionNotes && (
         <div className="px-6 pb-4 pt-0">
           <div
             className="rounded-xl p-3.5 text-sm"
             style={{ background: SURFACE_ALT, borderLeft: `3px solid ${st.dot}` }}
           >
-            <p className="text-[0.625rem] font-semibold uppercase tracking-wide mb-1" style={{ color: st.fg }}>Resolution</p>
+            <p className="text-[0.625rem] font-semibold uppercase tracking-wide mb-1" style={{ color: st.fg }}>{t.Status === "Reopened" ? "Why it was reopened" : "Resolution"}</p>
             <p style={{ color: TEXT_MUTED }}>{t.ResolutionNotes}</p>
           </div>
         </div>
@@ -100,13 +188,20 @@ function TicketCard({ t }: { t: any }) {
           </p>
         </div>
       )}
+      {expanded && isResolved && canRate && (
+        <div className="px-6 pb-4 space-y-3"><RateRequest t={t} applicationId={applicationId} /><ReopenRequest t={t} applicationId={applicationId} /></div>
+      )}
     </div>
   );
 }
 
 const PortalTickets: React.FC = () => {
   const qc = useQueryClient();
-  const { applicationId } = useOutletContext<{ me: any; timeline: any; applicationId: number; applications: any[] }>();
+  const { applicationId, applications, timeline } = useOutletContext<{ me: any; timeline: any; applicationId: number; applications: any[] }>();
+  const lookedAfterBy = timeline?.booking?.LookedAfterBy;
+  // Joint applicants and past properties look but don't act (same rule as the app).
+  const thisApp = (applications || []).find((a: any) => a.ApplicationId === applicationId);
+  const canRate = !thisApp?.IsCoApplicant && thisApp?.Lifecycle !== "Past";
   const { data: tickets = [], isLoading } = useQuery({ queryKey: ["portal-tickets", applicationId], queryFn: () => fetchTickets(applicationId) });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
@@ -147,7 +242,7 @@ const PortalTickets: React.FC = () => {
       <HeroStrip
         eyebrow="Support"
         title="Support Centre"
-        subtitle="Raise a request and track it right through to resolution."
+        subtitle={lookedAfterBy ? `Raise a request and track it right through to resolution. ${lookedAfterBy} looks after your booking and sees every request.` : "Raise a request and track it right through to resolution."}
       >
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-xl px-4 py-3" style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
@@ -227,7 +322,7 @@ const PortalTickets: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((t) => <TicketCard key={t.Id} t={t} />)}
+          {filtered.map((t) => <TicketCard key={t.Id} t={t} applicationId={applicationId} canRate={canRate} />)}
         </div>
       )}
 

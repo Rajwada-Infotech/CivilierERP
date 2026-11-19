@@ -10,7 +10,7 @@ import {
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
 import {
   API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDoc, proposeAgreementDate, acceptAgreementDate,
-  respondAgreement, respondSalesDeed, fetchQueryPaymentAttachments, uploadQueryPaymentProof, fmtMoney, fmtDate, fmtBytes, maskAadhaar,
+  respondAgreement, respondSalesDeed, fetchSalesDeed, openSalesDeedDoc, fetchQueryPaymentAttachments, uploadQueryPaymentProof, fmtMoney, fmtDate, fmtBytes, maskAadhaar,
 } from "./portalApi";
 import {
   Card, CardHeader, InfoField, StatusPill, Stepper, StepState, HeroStrip, UrgencyBanner,
@@ -349,6 +349,13 @@ const PortalAgreement: React.FC = () => {
     queryFn: () => fetchQueryPaymentAttachments(applicationId),
     enabled: !!timeline.queryPayment,
   });
+  const { data: deedView } = useQuery({
+    queryKey: ["portal-sales-deed", applicationId],
+    queryFn: () => fetchSalesDeed(applicationId),
+    enabled: !!timeline.salesDeed?.SentToCustomerAt,
+  });
+  const deed: any = deedView?.deed;
+  const deedPapers: any[] = deedView?.documents || [];
   const qpInfoDocs = (qpAttachments as any[]).filter((a) => a.DocType === "Info");
   const qpProofDocs = (qpAttachments as any[]).filter((a) => a.DocType === "Proof");
 
@@ -385,6 +392,7 @@ const PortalAgreement: React.FC = () => {
       setRespondFor(null);
       qc.invalidateQueries({ queryKey: ["portal-timeline"] });
       qc.invalidateQueries({ queryKey: ["portal-agreement", applicationId] });
+      qc.invalidateQueries({ queryKey: ["portal-sales-deed", applicationId] });
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -612,14 +620,41 @@ const PortalAgreement: React.FC = () => {
               <InfoField label="Deed Date" value={fmtDate(timeline.salesDeed.DeedDate)} />
               <InfoField label="Sub-Registrar Office" value={timeline.salesDeed.SubRegistrarOffice} />
               <InfoField label="Registration No." value={timeline.salesDeed.RegistrationNo} />
+              {deed?.StampDuty != null && <InfoField label="Stamp Duty" value={fmtMoney(deed.StampDuty)} />}
+              {deed?.RegistrationFee != null && <InfoField label="Registration Fee" value={fmtMoney(deed.RegistrationFee)} />}
+              {Number(deed?.StampDutyCredit) > 0 && <InfoField label="Stamp Duty Already Paid (Credit)" value={fmtMoney(deed.StampDutyCredit)} />}
             </div>
+            {/* The deed and its papers — read before approving */}
+            <div>
+              <p className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-2" style={{ color: TEXT_FAINT }}>The deed and its papers</p>
+              {deedPapers.length ? (
+                <div className="space-y-2">
+                  {deedPapers.map((d) => (
+                    <button key={d.Id} onClick={() => openSalesDeedDoc(d.Id, applicationId).catch((e) => toast.error(e.message))}
+                      className="w-full flex items-center gap-3 text-left text-sm py-2 px-3 rounded-xl hover:opacity-80" style={{ background: SURFACE_ALT }}>
+                      <FileText size={15} style={{ color: GOLD }} />
+                      <span className="flex-1 min-w-0 truncate" style={{ color: TEXT }}>
+                        {d.Label || String(d.DocumentType || "").replace(/([A-Z])/g, " $1").trim()}{d.VersionNo > 1 ? ` (v${d.VersionNo})` : ""}
+                      </span>
+                      <span className="text-xs shrink-0" style={{ color: TEXT_FAINT }}>{[fmtBytes(d.FileSize), d.UploadedAt ? fmtDate(d.UploadedAt) : null].filter(Boolean).join(" · ")}</span>
+                      <Eye size={14} style={{ color: TEXT_MUTED }} />
+                    </button>
+                  ))}
+                </div>
+              ) : <p className="text-xs" style={{ color: TEXT_MUTED }}>The deed papers will appear here as soon as our legal team attaches them.</p>}
+            </div>
+            {timeline.salesDeed.CustomerApprovalStatus === "Recheck" && (
+              <p className="text-xs" style={{ color: TEXT_MUTED }}>
+                You asked for a recheck{deed?.CustomerRecheckRemarks ? `: "${deed.CustomerRecheckRemarks}"` : ""}. Our legal team is revising the deed and will share it again.
+              </p>
+            )}
             {timeline.salesDeed.CustomerApprovalStatus === "Pending" ? (
               <button onClick={() => setRespondFor("salesDeed")}
                 className="px-5 py-2.5 text-white text-sm font-semibold rounded-lg shadow-sm hover:opacity-90" style={{ background: INK }}>
                 Review & Respond
               </button>
             ) : timeline.salesDeed.CustomerApprovalStatus === "Approved" ? (
-              <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#0F7A44" }}><CheckCircle2 size={16} /> You've approved this sales deed</div>
+              <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#0F7A44" }}><CheckCircle2 size={16} /> You approved this sale deed{deed?.CustomerApprovedAt ? ` on ${fmtDate(deed.CustomerApprovedAt)}` : ""}</div>
             ) : null}
           </div>
         </Card>

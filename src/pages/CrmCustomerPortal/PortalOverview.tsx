@@ -1,10 +1,10 @@
 import React from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { Clock, Building2, CreditCard, FileText, LifeBuoy, ArrowRight, AlertTriangle, TrendingUp, Landmark, ReceiptIndianRupee, BookMarked, CheckCircle2, ChevronRight } from "lucide-react";
-import { fmtMoney, fmtDate } from "./portalApi";
+import { fmtMoney, fmtDate, moneyFigures } from "./portalApi";
 import { HeroStrip, HeroStatCard, Card, Stepper, StepState, GOLD, GOLD_SOFT, SURFACE, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, INK, serif } from "./portalTheme";
 
-type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
+type Ctx = { me: any; timeline: any; money: any; applicationId: number; applications: any[] };
 
 // Stat card — slightly larger, more legible at a glance
 function StatCard({
@@ -111,7 +111,7 @@ function NextPaymentBanner({ nextDue, onNavigate }: { nextDue: any; onNavigate: 
 }
 
 const PortalOverview: React.FC = () => {
-  const { me, timeline, applicationId, applications } = useOutletContext<Ctx>();
+  const { me, timeline, money, applicationId, applications } = useOutletContext<Ctx>();
   const navigate = useNavigate();
 
   // /me is the customer's shared identity (Id, Name, Mobile, ... — keyed by
@@ -123,13 +123,8 @@ const PortalOverview: React.FC = () => {
   const customerDetailsComplete = !!timeline.customerDetails?.IsComplete;
 
   const milestones = timeline.paymentMilestones || [];
-  const totalDue = milestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
-  // Includes money held in On Account but not yet swept onto a milestone —
-  // same fix as PortalPayments.tsx, so a customer who's paid in full doesn't
-  // see a stalled progress bar while staff work through the sweep.
-  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
-    + Number(timeline.onAccountTotalReceived || 0);
-  const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
+  // Paid / total from the money statement — the same figures as Payments, Profile and the mobile app.
+  const { total: totalDue, paid: totalPaid, pct: pctPaid } = moneyFigures(money);
   // Judged by money stage (Covered / Outstanding from the server), not Status — paid money held On Account leaves it "Pending".
   const nextDue = milestones.find((m: any) => !m.Covered && !m.Verifying && Number(m.Outstanding) > 0);
   const paidCount = milestones.filter((m: any) => m.Covered).length;

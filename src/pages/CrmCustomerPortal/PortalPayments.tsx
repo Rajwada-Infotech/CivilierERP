@@ -1,16 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download, Receipt, TrendingUp } from "lucide-react";
+import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download, Receipt, TrendingUp, ChevronDown, ChevronUp } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices, fetchCreditNotes, creditNotesSeenKey, writeSeen, fetchReceipts, downloadReceiptPdf } from "./portalApi";
+import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices, fetchCreditNotes, creditNotesSeenKey, writeSeen, downloadReceiptPdf, moneyFigures } from "./portalApi";
 import {
-  GOLD, HAIRLINE, TEXT, TEXT_FAINT, TEXT_MUTED, SURFACE_ALT, INK, VIOLET, serif, mono,
+  GOLD, GOLD_SOFT, HAIRLINE, TEXT, TEXT_FAINT, TEXT_MUTED, SURFACE_ALT, INK, VIOLET, serif, mono,
   HeroStrip, HeroStatCard, PulseBar, UrgencyBanner,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
 } from "./portalTheme";
 
-type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
+type Ctx = { me: any; timeline: any; money: any; applicationId: number; applications: any[] };
 
 // Same blob-preview pattern PortalAgreement.tsx already uses for agreement
 // documents — the portal's Bearer-token auth means a plain <a href> can't
@@ -132,12 +132,12 @@ function MilestoneCard({ m, today }: { m: any; today: Date }) {
 }
 
 const PortalPayments: React.FC = () => {
-  const { timeline, applicationId, me } = useOutletContext<Ctx>();
+  const { timeline, money, applicationId, me } = useOutletContext<Ctx>();
   const milestones = timeline.paymentMilestones || [];
   const { data: invoices = [] } = useQuery({ queryKey: ["portal-invoices", applicationId], queryFn: () => fetchInvoices(applicationId), staleTime: 30_000 });
-  const { data: receipts = [] } = useQuery({ queryKey: ["portal-receipts", applicationId], queryFn: () => fetchReceipts(applicationId), staleTime: 30_000 });
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
   const [downloadingReceiptId, setDownloadingReceiptId] = useState<number | null>(null);
+  const [openPay, setOpenPay] = useState<number | null>(null);
 
   const handleDownloadReceipt = async (receiptId: number) => {
     try {
@@ -171,15 +171,8 @@ const PortalPayments: React.FC = () => {
     );
   }
 
-  const totalDue = milestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
-  // Includes money the customer has paid that's still sitting in On Account,
-  // not yet swept onto a specific milestone by staff (crmPayments.js
-  // applyOnAccountToMilestone) — without this, a customer who paid in full
-  // would see "0% Paid" here until staff got around to the sweep.
-  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
-    + Number(timeline.onAccountTotalReceived || 0);
-  const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
-  const remaining = totalDue - totalPaid;
+  // Every headline figure from the money statement — the same as Overview, Profile and the mobile app.
+  const { total: totalDue, paid: totalPaid, pct: pctPaid, balance: remaining, verifying, overPrice, price, closed } = moneyFigures(money);
   const today = new Date(new Date().toDateString());
   const overdueCount = milestones.filter((m: any) => !m.Covered && !m.Verifying && m.DueDate && new Date(m.DueDate) < today).length;
   const nextDue = milestones.find((m: any) => !m.Covered && !m.Verifying && Number(m.Outstanding) > 0);
@@ -194,9 +187,9 @@ const PortalPayments: React.FC = () => {
         gradient={overdueCount > 0 ? "red" : "violet"}
       >
         <div className="grid grid-cols-3 gap-3">
-          <HeroStatCard label="Paid so far" value={fmtMoney(totalPaid)} highlight />
+          <HeroStatCard label={closed ? "You paid in total" : "Paid so far"} value={fmtMoney(totalPaid)} highlight />
           <HeroStatCard label="Remaining" value={fmtMoney(remaining)} />
-          <HeroStatCard label="Total value" value={fmtMoney(totalDue)} />
+          <HeroStatCard label="Payment plan" value={fmtMoney(totalDue)} />
         </div>
       </HeroStrip>
 
@@ -229,6 +222,14 @@ const PortalPayments: React.FC = () => {
           <span>{fmtMoney(totalPaid)} paid</span>
           <span>{fmtMoney(remaining)} remaining</span>
         </div>
+        {verifying > 0 && !closed && (
+          <p className="mt-2 text-xs" style={{ color: GOLD }}>{fmtMoney(verifying)} more is being verified. It will count once confirmed.</p>
+        )}
+        {overPrice > 0 && (
+          <p className="mt-2 text-xs" style={{ color: TEXT_MUTED }}>
+            You have paid {fmtMoney(overPrice)} more than your total price of {fmtMoney(price)}. Please contact us about refunding or adjusting the difference.
+          </p>
+        )}
         {nextDue && (
           <div
             className="mt-4 pt-4 flex items-center justify-between gap-3"
@@ -302,42 +303,55 @@ const PortalPayments: React.FC = () => {
         </div>
       )}
 
-      {/* Receipts */}
-      {(receipts as any[]).length > 0 && (
-        <div
-          className="rounded-2xl overflow-hidden"
-          style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}
-        >
+      {/* Every payment the customer made — from the money statement, with how they paid and where it stands */}
+      {(money?.payments || []).length > 0 && (
+        <div className="rounded-2xl overflow-hidden" style={{ background: "var(--portal-surface)", border: `1px solid var(--portal-hairline)`, boxShadow: "0 1px 3px rgba(30,11,66,0.07)" }}>
           <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
             <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: "rgba(5,150,105,0.10)", color: "#059669" }}>
               <Receipt size={14} />
             </span>
-            <h2 className="text-sm font-semibold" style={{ ...serif, color: TEXT }}>Payment Receipts</h2>
+            <h2 className="text-sm font-semibold" style={{ ...serif, color: TEXT }}>Every payment you've made</h2>
           </div>
-          {(receipts as any[]).map((rcpt: any) => (
-            <div key={rcpt.Id} className="flex items-center justify-between gap-3 px-5 py-4 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold" style={{ color: TEXT }}>{rcpt.ReceiptNo}</p>
-                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
-                  {fmtDate(rcpt.ReceivedDate || rcpt.CreatedAt)}
-                  {rcpt.PaymentMode ? ` · ${rcpt.PaymentMode}` : ""}
-                  {rcpt.TransactionRef ? ` · Ref: ${rcpt.TransactionRef}` : rcpt.ChequeNo ? ` · Chq: ${rcpt.ChequeNo}` : ""}
-                </p>
-              </div>
-              <div className="flex items-center gap-4 shrink-0">
-                <p className="text-sm font-bold" style={{ ...serif, color: "#059669" }}>{fmtMoney(rcpt.Amount)}</p>
-                <button
-                  type="button"
-                  disabled={downloadingReceiptId === rcpt.Id}
-                  onClick={() => handleDownloadReceipt(rcpt.Id)}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
-                  style={{ background: "rgba(5,150,105,0.10)", color: "#065F46" }}
-                >
-                  <Download size={13} /> {downloadingReceiptId === rcpt.Id ? "Opening…" : "Download"}
+          {[...(money.payments as any[])].reverse().map((p: any, i: number) => {
+            const shown = openPay === i;
+            const faint = p.stage === "bounced" || p.stage === "returned";
+            return (
+              <div key={i} className="border-b last:border-0" style={{ borderColor: HAIRLINE }}>
+                <button type="button" onClick={() => setOpenPay(shown ? null : i)} className="w-full text-left flex items-center justify-between gap-3 px-5 py-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold tabular-nums" style={{ ...serif, color: faint ? TEXT_FAINT : TEXT }}>{fmtMoney(p.amount)}</p>
+                      <span className="text-[0.625rem] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full" style={{ background: GOLD_SOFT, color: TEXT_MUTED }}>{p.status.label}</span>
+                    </div>
+                    <p className="text-[0.6875rem] mt-0.5" style={{ color: TEXT_FAINT }}>
+                      {[p.date ? fmtDate(p.date) : null, p.mode, p.milestone ? `for ${p.milestone}` : null].filter(Boolean).join(" · ")}
+                    </p>
+                    {p.status.sub && <p className="text-[0.6875rem]" style={{ color: TEXT_MUTED }}>{p.status.sub}</p>}
+                  </div>
+                  {shown ? <ChevronUp size={15} style={{ color: TEXT_FAINT }} /> : <ChevronDown size={15} style={{ color: TEXT_FAINT }} />}
                 </button>
+                {shown && (
+                  <div className="px-5 pb-4 space-y-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 rounded-xl p-3" style={{ background: "var(--portal-surface-alt)" }}>
+                      {p.details.map((d: any) => (
+                        <div key={d.label}>
+                          <p className="text-[0.625rem] uppercase tracking-wide" style={{ color: TEXT_FAINT }}>{d.label}</p>
+                          <p className="text-sm" style={{ color: TEXT }}>{d.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {p.receiptId ? (
+                      <button type="button" disabled={downloadingReceiptId === p.receiptId} onClick={() => handleDownloadReceipt(p.receiptId)}
+                        className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-opacity hover:opacity-80 disabled:opacity-40"
+                        style={{ background: "rgba(5,150,105,0.10)", color: "#065F46" }}>
+                        <Download size={13} /> {downloadingReceiptId === p.receiptId ? "Opening…" : `Download receipt ${p.receiptNo}`}
+                      </button>
+                    ) : p.receiptNo ? <p className="text-xs" style={{ color: TEXT_MUTED }}>The receipt can be downloaded here once our accounts team approves it.</p> : null}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
