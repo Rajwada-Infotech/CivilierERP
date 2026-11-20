@@ -29,7 +29,8 @@ async function hasColumn(pool, tableName, columnName) {
 let _schemaCache = null;
 
 async function getSchema(pool) {
-  if (_schemaCache) return _schemaCache;
+  // Re-probed until EntryDate exists, so migration 699 takes effect without a restart.
+  if (_schemaCache && _schemaCache.hasEntryDate) return _schemaCache;
   const [hasCreatedDate, hasEntryDate, hasUom, hasDocNo, hasGodownID] =
     await Promise.all([
       hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
@@ -152,7 +153,7 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
 
     const ledgerDateExpr =
       hasCreatedDate && hasEntryDate
-        ? "COALESCE(sl.CreatedDate, sl.EntryDate)"
+        ? "COALESCE(sl.EntryDate, sl.CreatedDate)"
         : hasCreatedDate
           ? "sl.CreatedDate"
           : hasEntryDate

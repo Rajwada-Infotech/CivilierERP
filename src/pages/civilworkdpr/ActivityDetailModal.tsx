@@ -1110,7 +1110,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
       {/* Milestone shortcuts: set the bar to a fixed figure, then Save as usual. Below the saved value they're off
           (the bar never goes backward). */}
       {!locked && (
-        <div className="flex flex-wrap gap-1.5 mt-2.5">
+        <div className="flex flex-wrap justify-end gap-1.5 mt-2.5">
           {[5, 10, 25, 50, 100].map((m) => (
             <button
               key={m}

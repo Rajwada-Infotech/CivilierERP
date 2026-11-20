@@ -274,7 +274,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     // Date expression for the ledger rows (same logic as inventoryMaster.js)
     const ledgerDateExpr =
       hasCreatedDate && hasEntryDate
-        ? "COALESCE(sl.CreatedDate, sl.EntryDate)"
+        ? "COALESCE(sl.EntryDate, sl.CreatedDate)"
         : hasCreatedDate
           ? "sl.CreatedDate"
           : hasEntryDate

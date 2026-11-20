@@ -148,17 +148,34 @@ function SummaryRow({ opening, stockIn, stockOut, closing }: { opening: number; 
 }
 
 // ─── Item Ledger Drill-down ───────────────────────────────────────────────────
+// Stock movements export: oldest first, each movement's In / Out with the running In, Out and balance.
+const LEDGER_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Date", accessor: "Date" },
+  { header: "Document", accessor: "DocNo" },
+  { header: "Type", accessor: "TypeLabel" },
+  { header: "In", accessor: "In" },
+  { header: "Out", accessor: "Out" },
+  { header: "Cumulative In", accessor: "CumIn" },
+  { header: "Cumulative Out", accessor: "CumOut" },
+  { header: "Balance", accessor: "Balance" },
+  { header: "UOM", accessor: "UOM" },
+];
+
 function ItemLedgerModal({
   item,
   godownId,
+  godownName,
   dateFrom,
   dateTo,
+  canExport,
   onClose,
 }: {
   item: { ItemID: string; ItemName: string | null } | null;
   godownId: number;
+  godownName: string;
   dateFrom?: string;
   dateTo?: string;
+  canExport: boolean;
   onClose: () => void;
 }) {
   const navigate = useNavigate();
@@ -177,6 +194,42 @@ function ItemLedgerModal({
   useEffect(() => setShowEarlier(false), [item?.ItemID]);
   const fmtDay = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 
+  // Every fetched movement oldest first. When only the latest earlier movements came back, the balance before them
+  // starts the sheet as "Brought forward" so the running balance still ends on the closing stock.
+  const exportRows = useMemo(() => {
+    const chrono = [...earlier].reverse().concat([...rows].reverse());
+    const shownEarlierNet = earlier.reduce((s, r) => s + (r.Type === "IN" ? r.Qty : -r.Qty), 0);
+    const broughtForward = opening - shownEarlierNet;
+    const out: Record<string, unknown>[] = [];
+    let cumIn = 0;
+    let cumOut = 0;
+    let balance = 0;
+    if (Math.abs(broughtForward) > 1e-9) {
+      balance = broughtForward;
+      out.push({ Date: "", DocNo: "Brought forward", TypeLabel: "", In: "", Out: "", CumIn: "", CumOut: "", Balance: balance, UOM: "" });
+    }
+    const round = (n: number) => Math.round(n * 1000) / 1000;
+    for (const r of chrono) {
+      const isIn = r.Type === "IN";
+      if (isIn) cumIn += r.Qty;
+      else cumOut += r.Qty;
+      balance += isIn ? r.Qty : -r.Qty;
+      out.push({
+        Date: fmtDay(r.MovementDate),
+        DocNo: r.DocNo || `#${r.RefID}`,
+        TypeLabel: REF_TYPE_META[r.RefType]?.label ?? r.RefType,
+        In: isIn ? r.Qty : "",
+        Out: isIn ? "" : r.Qty,
+        CumIn: round(cumIn),
+        CumOut: round(cumOut),
+        Balance: round(balance),
+        UOM: r.UOM || "",
+      });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
   const openDoc = (row: ItemLedgerRow) => {
     const meta = REF_TYPE_META[row.RefType];
     if (!meta?.route) return;
@@ -189,7 +242,17 @@ function ItemLedgerModal({
       <DialogContent className="sheet-frame max-w-2xl max-h-[85vh] overflow-y-auto p-0 gap-0" style={{ margin: 0 }}>
         <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: RULE }}>
           <p className={LBL}>Stock movements</p>
-          <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">{item?.ItemName || "Item"}</DialogTitle>
+          <div className="flex items-start justify-between gap-3 mt-1 pr-6">
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight">{item?.ItemName || "Item"}</DialogTitle>
+            <ExportMenu
+              data={exportRows}
+              columns={LEDGER_EXPORT_COLUMNS}
+              title={`Stock movements — ${item?.ItemName || "Item"} — ${godownName}`}
+              subtitle={`${dateFrom ? `${dateFrom} to ` : "As of "}${dateTo || today}`}
+              filename={`stock-movements-${(item?.ItemName || "item").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${dateTo || today}`}
+              disabled={isLoading || !exportRows.length || !canExport}
+            />
+          </div>
           <DialogDescription className="text-xs text-muted-foreground mt-1">
             Every GRN, issue, return and other movement behind this item's in / out figures for the godown and period, and the opening stock before it.
           </DialogDescription>
@@ -440,7 +503,7 @@ function StockDetailsTable({ godownId, godownName, dateFrom, dateTo, projectName
         </div>
       </div>
 
-      <ItemLedgerModal item={selectedItem} godownId={godownId} dateFrom={dateFrom} dateTo={dateTo || queryDate} onClose={() => setSelectedItem(null)} />
+      <ItemLedgerModal item={selectedItem} godownId={godownId} godownName={godownName} canExport={rights.canExport} dateFrom={dateFrom} dateTo={dateTo || queryDate} onClose={() => setSelectedItem(null)} />
     </div>
   );
 }
