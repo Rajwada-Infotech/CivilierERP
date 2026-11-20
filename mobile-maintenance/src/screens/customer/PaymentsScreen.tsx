@@ -10,7 +10,7 @@ import { Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarClock, Check, ChevronDown, ChevronUp, FileDown, Receipt, Scale, Wallet } from "lucide-react-native";
 import { toast } from "@/components/Toast";
-import { portal, pdfPath, type MoneyStatement, moneyView } from "@/api/customerPortalApi";
+import { portal, pdfPath, type MoneyStatement, moneyView, isPastDue } from "@/api/customerPortalApi";
 import { useCustomer } from "@/customer/CustomerContext";
 import { Button, Divider, ErrorText, HeroSurface, Loading, Muted, ON_HERO, Page, Panel, Pill, Ring, Row, fmtDate, money, Tap } from "@/customer/ui";
 import { openDocument } from "@/utils/documents";
@@ -25,7 +25,7 @@ function instState(m: Inst, isNext: boolean): { label: string; sub?: string; don
   if (m.stage === "Adjusted") return { label: "Paid", done: true };
   if (m.stage === "Verified") return { label: "Covered", sub: "Covered by money you've already paid", done: true };
   if (m.stage === "InVerification" || m.stage === "Recorded") return { label: "Being verified", sub: "Your payment for this is being checked", done: false };
-  if (m.dueDate && new Date(m.dueDate) < new Date()) return { label: "Overdue", sub: m.demanded ? "Demand sent" : undefined, done: false };
+  if (isPastDue(m.dueDate)) return { label: "Overdue", sub: m.demanded ? "Demand sent" : undefined, done: false };
   if (m.demanded) return { label: "Due now", sub: "Demand sent to you", done: false };
   return { label: isNext ? "Due next" : "Later", done: false };
 }

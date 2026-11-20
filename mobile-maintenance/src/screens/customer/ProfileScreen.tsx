@@ -24,14 +24,9 @@ export default function CustomerProfileScreen() {
   const { total: totalDue, paid: totalPaid, pct } = moneyView(st);
   const openTickets = (tickets.data || []).filter((x) => x.Status !== "Resolved" && x.Status !== "Closed").length;
 
-  const keyDates = [
-    { label: "Booking Date",    value: t?.booking?.BookingDate },
-    { label: "Welcome Call",    value: t?.welcomeCall?.CallDate },
-    { label: "Agreement Sent",  value: t?.agreement?.SentToCustomerAt },
-    { label: "Agreement Date",  value: t?.agreement?.AgreementDate },
-    { label: "Sales Deed",      value: t?.salesDeed?.DeedDate },
-    { label: "Handover",        value: t?.handover?.ActualHandoverDate },
-  ];
+  // Key dates are the purchase's own steps with the day each was done — the server's journey (crmPortal.js
+  // customerJourney), the same list Home shows, so a date is never missing here that the journey has.
+  const keyDates = (t?.journey || []).map((s) => ({ label: s.label, value: s.at, done: s.done }));
 
   const initials = (name?: string) =>
     (name ?? "?").split(" ").filter(Boolean).map((n) => n[0]).join("").toUpperCase().slice(0, 2);
@@ -83,7 +78,7 @@ export default function CustomerProfileScreen() {
       {/* Key dates */}
       {t?.booking ? (
         <Panel title="Key Dates" icon={CalendarClock}>
-          {keyDates.map((d) => <Row key={d.label} label={d.label} value={d.value ? fmtDate(d.value) : "—"} />)}
+          {keyDates.map((d) => <Row key={d.label} label={d.label} value={d.value ? fmtDate(d.value) : d.done ? "Done" : "—"} />)}
         </Panel>
       ) : null}
 

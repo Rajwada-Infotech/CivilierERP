@@ -7,7 +7,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { ChevronRight, Receipt, Zap } from "lucide-react-native";
 import { useBrand } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
-import { portal } from "@/api/customerPortalApi";
+import { portal, isPastDue } from "@/api/customerPortalApi";
 import { useCustomer } from "@/customer/CustomerContext";
 import { Divider, ErrorText, Loading, Muted, Page, Panel, Pill, Row, fmtDate, money, Tap } from "@/customer/ui";
 import type { CustomerStackParamList } from "@/navigation/CustomerStack";
@@ -49,7 +49,7 @@ export default function CustomerBillsScreen() {
           {maint.isLoading ? <Loading /> : maint.error ? <ErrorText error={maint.error} /> : !maint.data?.length ? (
             <Muted>No maintenance bills yet.</Muted>
           ) : maint.data.map((bill, i) => {
-            const overdue = bill.Status === "Active" && !!bill.DueDate && new Date(bill.DueDate) < new Date();
+            const overdue = bill.Status === "Active" && isPastDue(bill.DueDate);
             return (
               <View key={bill.Id}>
                 {i ? <Divider /> : null}

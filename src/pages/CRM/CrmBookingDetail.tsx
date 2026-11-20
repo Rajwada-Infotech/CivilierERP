@@ -11,7 +11,7 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { downloadAuthFile } from "@/components/crm/AuthFilePreview";
 import { useAuth } from "@/contexts/AuthContext";
-import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X, Repeat } from "lucide-react";
+import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, Phone, User, CalendarCheck, Lock, Clock, Hourglass, X, Repeat } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { financialFigures, fmtRupees } from "@/components/crm/FinancialStatusBar";
@@ -395,6 +395,22 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       refetchPortal();
     } finally {
       setTogglingPortal(false);
+    }
+  }
+  // Back to the first password (name + mobile rule) — the way a customer who forgot theirs gets in again.
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resettingPortal, setResettingPortal] = useState(false);
+  async function handleResetPortalPassword() {
+    setResettingPortal(true);
+    try {
+      const r = await fetchWithAuth("/api/crm-portal/admin/reset-password", { method: "POST", body: JSON.stringify({ customerId: portalStatus?.customerId }) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(body.error || "Could not reset the password"); return; }
+      toast.success(body.message || "Password reset");
+      setConfirmReset(false);
+      refetchPortal();
+    } finally {
+      setResettingPortal(false);
     }
   }
   async function handleProvisionPortal() {
@@ -2740,11 +2756,20 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="divide-y divide-border/60">
                       <div className="px-5 py-3 flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
-                          <Mail size={13} className="text-foreground shrink-0" />
-                          <span>Login Email</span>
+                          <Phone size={13} className="text-foreground shrink-0" />
+                          <span>Login Mobile</span>
                         </div>
-                        <span className="text-xs font-medium text-foreground font-heading tabular-nums">{portalStatus.email || "—"}</span>
+                        <span className="text-xs font-medium text-foreground font-heading tabular-nums">{portalStatus.loginMobile || "No 10-digit mobile on file"}</span>
                       </div>
+                      {portalStatus.email && (
+                        <div className="px-5 py-3 flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                            <Mail size={13} className="text-foreground shrink-0" />
+                            <span>Email</span>
+                          </div>
+                          <span className="text-xs font-medium text-foreground">{portalStatus.email}</span>
+                        </div>
+                      )}
                       <div className="px-5 py-3 flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
                           <KeyRound size={13} className="text-foreground shrink-0" />
@@ -2755,7 +2780,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             ? "bg-card text-foreground border-foreground/30"
                             : "bg-card text-foreground border-foreground/30"
                         }`}>
-                          {portalStatus.mustChangePassword ? "First login pending" : "Password set by customer"}
+                          {portalStatus.mustChangePassword ? "First password" : "Own password"}
+                        </span>
+                      </div>
+                      <div className="px-5 py-3 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                          <Clock size={13} className="text-foreground shrink-0" />
+                          <span>Last Signed In</span>
+                        </div>
+                        <span className="text-xs text-foreground">
+                          {portalStatus.lastLoginAt
+                            ? new Date(portalStatus.lastLoginAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+                            : "Never"}
                         </span>
                       </div>
                       {portalStatus.customerName && (
@@ -2780,15 +2816,33 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       )}
                     </div>
 
-                    {/* Initial password hint */}
-                    {portalStatus.mustChangePassword && portalStatus.maskedMobile && (
-                      <div className="px-5 py-3 bg-muted/30 border-t border-border flex items-start gap-2.5 text-xs text-muted-foreground">
-                        <Hourglass size={13} className="shrink-0 mt-0.5 text-foreground" />
-                        <p>
-                          Initial password is the applicant's mobile number <span className="font-heading tabular-nums font-medium text-foreground">{portalStatus.maskedMobile}</span>. They'll be prompted to set a new password on first login.
-                        </p>
-                      </div>
-                    )}
+                    {/* The first password, and a reset back to it */}
+                    <div className="px-5 py-3 bg-muted/30 border-t border-border flex items-start gap-2.5 text-xs text-muted-foreground">
+                      <Hourglass size={13} className="shrink-0 mt-0.5 text-foreground" />
+                      <p className="flex-1">
+                        {portalStatus.firstPassword ? (
+                          <>Signs in with <span className="font-heading tabular-nums font-medium text-foreground">{portalStatus.loginMobile}</span> and
+                            password <span className="font-heading tabular-nums font-medium text-foreground">{portalStatus.firstPassword}</span> ({portalStatus.passwordRule}).</>
+                        ) : (
+                          <>Signs in with <span className="font-heading tabular-nums font-medium text-foreground">{portalStatus.loginMobile || "their mobile number"}</span> and
+                            the password they set. Reset password sends it back to the first one ({portalStatus.passwordRule}).</>
+                        )}
+                      </p>
+                      {confirmReset ? (
+                        <span className="flex items-center gap-2 shrink-0">
+                          <button onClick={handleResetPortalPassword} disabled={resettingPortal}
+                            className="px-3 py-1 text-xs font-semibold border border-destructive/40 text-destructive hover:bg-destructive/10 rounded-md disabled:opacity-50">
+                            {resettingPortal ? "Resetting…" : "Confirm reset"}
+                          </button>
+                          <button onClick={() => setConfirmReset(false)} className="px-3 py-1 text-xs border border-border rounded-md hover:bg-muted">Cancel</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setConfirmReset(true)} disabled={!portalStatus.isActive}
+                          className="shrink-0 px-3 py-1 text-xs font-semibold border border-foreground/30 text-foreground hover:bg-primary/10 rounded-md disabled:opacity-50">
+                          Reset password
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="border border-dashed border-border bg-muted/20 p-8 flex flex-col items-center text-center gap-3 rounded-lg">

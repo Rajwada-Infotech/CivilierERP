@@ -46,7 +46,7 @@ export interface PortalApplication {
 
 /** One property's whole money picture (server: crmPortal.js GET /money) — every figure from the staff side's own sources. */
 export interface MoneyStatement {
-  booking: { BookingNo: string; Status: string; IsPlotSale: boolean; Closed: boolean } | null;
+  booking: { BookingNo: string; Status: string; IsPlotSale: boolean; Closed: boolean };
   price: {
     /** Add up to `total` exactly. key: home | homeGst | parking | extra | creditNotes | other. */
     lines: { key: "home" | "homeGst" | "parking" | "extra" | "creditNotes" | "other"; label?: string | null; quantity?: number; amount: number; gst?: number | null;
@@ -148,6 +148,9 @@ export interface Timeline {
   nocStatus?: { total: number; issued: number; items: { type: string; status: string; nocNo: string | null }[] };
 }
 
+/** A due date that has passed — the one "overdue" rule for instalments and bills (Home, Payments, Bills). */
+export const isPastDue = (d?: string | null) => !!d && new Date(d) < new Date();
+
 /** Money stages that mean an instalment needs nothing more from the customer: paid, covered, or being verified. */
 const NOTHING_TO_PAY = ["Adjusted", "Verified", "InVerification", "Recorded"];
 
@@ -157,11 +160,11 @@ const NOTHING_TO_PAY = ["Adjusted", "Verified", "InVerification", "Recorded"];
 export function moneyView(m: MoneyStatement | null | undefined) {
   const t = m?.totals;
   const closed = !!m?.booking?.Closed;
-  const total = m?.plan.total ?? 0;
+  const total = m?.plan?.total ?? 0;
   const paid = t ? (closed ? t.received : t.paid) : 0;
   const owedOn = (i: MoneyStatement["plan"]["instalments"][number]) => Math.max(0, Math.round((i.due - i.settled - i.held) * 100) / 100);
   // The next instalment genuinely still to pay — not waived, covered, or being verified.
-  const next = closed ? undefined : m?.plan.instalments.find((i) => !i.waived && !NOTHING_TO_PAY.includes(i.stage || "") && owedOn(i) > 0);
+  const next = closed ? undefined : m?.plan?.instalments.find((i) => !i.waived && !NOTHING_TO_PAY.includes(i.stage || "") && owedOn(i) > 0);
   return {
     closed, total, paid,
     balance: closed ? 0 : t?.balance ?? 0,
@@ -169,6 +172,7 @@ export function moneyView(m: MoneyStatement | null | undefined) {
     overPrice: closed ? 0 : t?.overPrice ?? 0,
     pct: total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : 0,
     next, nextAmount: next ? owedOn(next) : 0,
+    overdue: isPastDue(next?.dueDate),
   };
 }
 
@@ -198,6 +202,8 @@ export interface Agreement {
 export interface AgreementDoc {
   Id: number; DocumentType: string; Label: string | null; IsMandatory: boolean; UploadedByType: string | null; FileName: string | null;
   FileSize: number | null; MimeType: string | null; Status: string; Remarks: string | null; VersionNo: number | null;
+  /** Asked for (or sent back) and the agreement still takes uploads — closes once it is signed (server rule). */
+  CanUpload: boolean;
 }
 export interface QpAttachment { AttachmentId: number; DocType: "Info" | "Proof" | string; FileName: string; MimeType: string | null; FileSize: number | null; UploadedAt: string | null }
 export interface ActivityItem { type: string; title: string; detail: string | null; at: string }
@@ -264,7 +270,9 @@ export const portal = {
     send(withApp("/query-payment/proof", appId), { fileName: f.name, mimeType: f.mimeType, base64: await fileBase64(f) }),
   activity: (appId: number) => get<ActivityItem[]>(withApp("/activity", appId)),
   /** Everything waiting on the customer across all their homes, or — with an id — on that one property. */
-  money: (appId: number) => get<MoneyStatement>(withApp("/money", appId)),
+  // An application with no booking yet has no money statement (the server answers { booking: null }): null here, so
+  // every screen shows its "nothing yet" state instead of reading a price or plan that isn't there.
+  money: (appId: number) => get<MoneyStatement | { booking: null }>(withApp("/money", appId)).then((m) => (m?.booking ? (m as MoneyStatement) : null)),
   needsYou: (appId?: number) => get<{ items: NeedsYouItem[] }>(appId == null ? "/needs-you" : withApp("/needs-you", appId)).then((r) => r.items),
   transferDeeds: () => get<DeedView[]>("/transfer-deeds"),
   /** A step of a transfer deed the customer is party to (respond, date/propose, date/accept); returns the deed again. */

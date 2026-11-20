@@ -29,10 +29,10 @@ const GL_POSTERS = {
 };
 
 /**
- * Super Admin check: Super Admin has approval rights for every approval in parallel.
- * Matches super_admin, superadmin, sa.
+ * Who acts at every step of every approval, in parallel with the people Approval Setup names: the full-access
+ * roles (super_admin, admin, dba — the one list in middleware/role.js). The one rule every approval check uses.
  */
-const { isSuperAdmin } = require("../middleware/role");
+const { approvesEveryStep } = require("../middleware/role");
 
 // Map module slug → { table, pkCol, statusCol }
 const MODULE_MAP = {
@@ -481,8 +481,8 @@ async function cycleApprovals(tableName, recordId, executor = null) {
 function levelSatisfiedBy(rows, level, levelDef) {
   const atLevel = rows.filter((r) => Number(r.Level) === Number(level));
   if (levelDef?.mode === "all" && Array.isArray(levelDef.userIds) && levelDef.userIds.length > 0) {
-    // Super Admin parallel sign-off immediately satisfies any multi-user level
-    if (atLevel.some((r) => isSuperAdmin(r.Role))) return true;
+    // A full-access role's parallel sign-off immediately satisfies any multi-user level
+    if (atLevel.some((r) => approvesEveryStep(r.Role))) return true;
     const approvedUserIds = new Set(atLevel.filter((r) => r.UserId != null).map((r) => r.UserId));
     return levelDef.userIds.every((uid) => approvedUserIds.has(uid));
   }
@@ -936,11 +936,11 @@ async function transition(
 
 /**
  * Approver matching:
- * - Super Admin can approve ANY level/approval across all modules in parallel.
+ * - The full-access roles (approvesEveryStep) can approve ANY level/approval across all modules in parallel.
  * - Otherwise, a workflow level admits a user when it names their role or names them.
  */
 function userMatchesLevel(levelDef, userRole, userId) {
-  if (isSuperAdmin(userRole)) return true;
+  if (approvesEveryStep(userRole)) return true;
   const role = String(userRole || "").trim().toLowerCase();
   const roles = Array.isArray(levelDef?.roles) ? levelDef.roles.map((r) => String(r).toLowerCase()) : [];
   const ids = Array.isArray(levelDef?.userIds) ? levelDef.userIds.map(Number) : [];
@@ -951,10 +951,10 @@ function userMatchesLevel(levelDef, userRole, userId) {
  * Single-step gates that don't run the full Pending -> Approved cycle
  * (Registry Complete, Mutation Approve, Booking Amendment, Received Payment,
  * Money Receipt, refund finance, the lock overrides...): may this user act?
- * Super Admin can approve in parallel; otherwise decided by level 1 in Approval Setup.
+ * The full-access roles can approve in parallel; otherwise decided by level 1 in Approval Setup.
  */
 async function isApproverFor(module, userId, userRole) {
-  if (isSuperAdmin(userRole)) return true;
+  if (approvesEveryStep(userRole)) return true;
   const workflow = await getWorkflow(module);
   const levelDef = workflow?.LevelDefs?.[0];
   return !!levelDef && userMatchesLevel(levelDef, userRole, userId);
@@ -962,10 +962,10 @@ async function isApproverFor(module, userId, userRole) {
 
 /**
  * May this user approve/reject THIS record right now?
- * Super Admin can approve in parallel whenever the record is actionable (Pending).
+ * The full-access roles can approve in parallel whenever the record is actionable (Pending).
  */
 async function canUserAct(module, recordId, userRole, userId) {
-  if (isSuperAdmin(userRole)) {
+  if (approvesEveryStep(userRole)) {
     const map = MODULE_MAP[module];
     if (map && recordId != null && recordId !== "") {
       const status = await getRecordStatus(module, Number(recordId)).catch(() => null);
@@ -1020,6 +1020,14 @@ async function receivedPaymentStep(recordId, executor = null, { restart = false 
   return { status: rp.RPStatus, workflowKey: "received-payment", defs: defs.slice(0, 1), total: defs.length ? 1 : 0, level: 1, levelDef: defs[0] || null };
 }
 
+/** Is this user an approver of received payments at all — named on any step of either approval (or full access)? */
+async function isReceivedPaymentApprover(userRole, userId) {
+  for (const key of ["received-payment", CRM_PAYMENT_WORKFLOW]) {
+    if ((await getWorkflow(key))?.LevelDefs?.some((l) => userMatchesLevel(l, userRole, userId))) return true;
+  }
+  return approvesEveryStep(userRole);
+}
+
 /** A Received Payment was changed while waiting: steps already given no longer count (Finance checks it again). */
 const restartReceivedPaymentSteps = (recordId, role, email, userId, executor = null) =>
   writeAuditLog(RP_TABLE, recordId, 0, role || null, email || null, "Pending", "Changed — approval starts again", executor, userId ?? null);
@@ -1055,11 +1063,12 @@ module.exports = {
   recordGLPosting,
   writeAuditLog,
   canApproveBookingAmendment,
-  isSuperAdmin,
+  approvesEveryStep,
   userMatchesLevel,
   isApproverFor,
   canUserAct,
   receivedPaymentStep,
+  isReceivedPaymentApprover,
   restartReceivedPaymentSteps,
   RP_TABLE,
   canPerformCrmGatedAction,

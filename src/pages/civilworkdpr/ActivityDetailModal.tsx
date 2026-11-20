@@ -1107,6 +1107,26 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
         />
       </div>
 
+      {/* Milestone shortcuts: set the bar to a fixed figure, then Save as usual. Below the saved value they're off
+          (the bar never goes backward). */}
+      {!locked && (
+        <div className="flex flex-wrap justify-end gap-1.5 mt-2.5">
+          {[5, 10, 25, 50, 100].map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setPercent(m)}
+              disabled={m < saved || mutation.isPending}
+              className={`h-7 px-2.5 rounded border text-[0.6875rem] font-heading font-semibold tabular-nums transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                percent === m ? "bg-foreground text-card border-foreground" : "bg-card text-foreground border-border hover:bg-muted"
+              }`}
+            >
+              {m}%
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center justify-between mt-2.5">
         <button
           type="button"

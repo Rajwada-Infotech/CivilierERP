@@ -16,7 +16,7 @@ const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
-const { recordGLPosting, receivedPaymentStep, restartReceivedPaymentSteps, writeAuditLog, userMatchesLevel, RP_TABLE } = require("../services/approvalService");
+const { recordGLPosting, receivedPaymentStep, isReceivedPaymentApprover, restartReceivedPaymentSteps, writeAuditLog, userMatchesLevel, RP_TABLE } = require("../services/approvalService");
 const { areEarlierMilestonesCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 
@@ -28,6 +28,7 @@ const stepRefusal = (step) =>
   `You are not authorized to act on this received payment${step?.total > 1 ? ` at step ${step.level} of ${step.total}${step.levelDef?.label ? ` (${step.levelDef.label})` : ""}` : ""} — Approval Setup doesn't name your role or you.`;
 async function allowApprover(req, res, next) {
   try {
+    if (!(await isReceivedPaymentApprover(req.user?.role, actorId(req)))) return res.status(403).json({ error: stepRefusal(null) });
     const step = await receivedPaymentStep(parseInt(req.params.id, 10));
     if (!step) return res.status(404).json({ error: "Received payment not found" });
     if (userMatchesLevel(step.levelDef, req.user?.role, actorId(req))) return next();

@@ -211,7 +211,8 @@ function HomeCard({ a, width, onOpenPayments }: { a: PortalApplication; width: n
                 <Text style={{ flex: 1, fontSize: 14.5, fontFamily: fonts.heading.semibold, color: ON_HERO.primary }}>See where your money went</Text>
               ) : v.next ? (
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>Next payment{v.next.dueDate ? ` · due ${fmtDate(v.next.dueDate)}` : ""}</Text>
+                  <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>Next payment{v.next.dueDate ? ` · due ${fmtDate(v.next.dueDate)}` : ""}
+                    {v.overdue ? <Text style={{ fontFamily: fonts.heading.semibold, color: brand.danger }}> · Overdue</Text> : null}</Text>
                   <Text style={{ fontSize: 16, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, fontVariant: ["tabular-nums"] }}>
                     {money(v.nextAmount)} <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: ON_HERO.secondary }}>· {v.next.name}</Text>
                   </Text>
@@ -236,7 +237,7 @@ function HomeCard({ a, width, onOpenPayments }: { a: PortalApplication; width: n
 function PortfolioHero({ live, onOpenPayments }: { live: PortalApplication[]; onOpenPayments: (id: number) => void }) {
   const brand = useBrand();
   const results = useQueries({ queries: live.map((a) => ({ queryKey: ["portal-money", a.ApplicationId], queryFn: () => portal.money(a.ApplicationId) })) });
-  const ready = results.every((r) => !!r.data);
+  const ready = results.every((r) => r.isSuccess);
   const views = results.map((r, i) => ({ a: live[i], v: moneyView(r.data) }));
   const paid = views.reduce((n, x) => n + x.v.paid, 0);
   const total = views.reduce((n, x) => n + x.v.total, 0);
@@ -274,6 +275,7 @@ function PortfolioHero({ live, onOpenPayments }: { live: PortalApplication[]; on
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>
                   Next payment · {soonest.a.UnitNo || soonest.a.ApplicationNo}{soonest.v.next.dueDate ? ` · due ${fmtDate(soonest.v.next.dueDate)}` : ""}
+                  {soonest.v.overdue ? <Text style={{ fontFamily: fonts.heading.semibold, color: brand.danger }}> · Overdue</Text> : null}
                 </Text>
                 <Text style={{ fontSize: 16, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, fontVariant: ["tabular-nums"] }}>
                   {money(soonest.v.nextAmount)} <Text style={{ fontSize: 13, fontFamily: fonts.body.regular, color: ON_HERO.secondary }}>· {soonest.v.next.name}</Text>
@@ -313,7 +315,7 @@ function BookingRow({ a, first, onOpen }: { a: PortalApplication; first: boolean
     ? (s ? [`${money(v.paid)} paid`, s.totals.refunded > 0 ? `${money(s.totals.refunded)} refunded` : null, s.totals.movedOut > 0 ? `${money(s.totals.movedOut)} moved on` : null].filter(Boolean).join(" · ") : null)
     : !a.BookingId ? (t?.holds?.length ? `Held for you until ${fmtDate(t.holds[0].HoldUntil)}` : "Becomes a booking once confirmed")
     : s ? [v.balance > 0 ? `${money(v.balance)} to go` : "Fully paid",
-      v.next ? `next ${money(v.nextAmount)}${v.next.dueDate ? ` by ${fmtDate(v.next.dueDate)}` : ""}` : null].filter(Boolean).join(" · ") : null;
+      v.next ? `next ${money(v.nextAmount)}${v.next.dueDate ? ` by ${fmtDate(v.next.dueDate)}` : ""}${v.overdue ? " · Overdue" : ""}` : null].filter(Boolean).join(" · ") : null;
   return (
     <Tap onPress={onOpen} accessibilityRole="button" accessibilityLabel={`${project}, ${code}, ${right}`}
       style={({ pressed }) => ({ paddingVertical: 14, gap: 8, borderTopWidth: first ? 0 : 1, borderTopColor: brand.border, opacity: pressed ? 0.6 : 1 })}>
@@ -392,7 +394,7 @@ export default function CustomerHomeScreen() {
     <Page onRefresh={() => Promise.all([apps.refetch(), timeline.refetch(), statement.refetch(), me.refetch(), deeds.refetch(), feed.refetch()])}>
       {/* Greeting: the time of day and today's date, the customer's name, and where this home stands */}
       <Greeting name={firstName || "Welcome"}
-        where={multi ? "Everything across your homes, at a glance"
+        where={multi ? (!liveBooked.length && homes.some((h) => !h.BookingId) ? "Your booking is being prepared" : "Everything across your homes, at a glance")
           : loading ? null : isPast ? `${app?.StateLabel || "Past booking"} · kept for your records`
           : !t?.booking ? "Your booking is being prepared"
           : current ? `Next step · ${current.label}`
@@ -401,7 +403,8 @@ export default function CustomerHomeScreen() {
       {multi ? (
         <>
           {/* Several bookings: the portfolio, then every booking as a row (a row opens it in My bookings) */}
-          <PortfolioHero live={liveBooked} onOpenPayments={(id) => { if (id !== appId) setAppId(id); go("CustomerPayments"); }} />
+          {/* No booking yet (applications only): no money to show, so no portfolio figures */}
+          {liveBooked.length ? <PortfolioHero live={liveBooked} onOpenPayments={(id) => { if (id !== appId) setAppId(id); go("CustomerPayments"); }} /> : null}
           <BookingList list={cards} onOpen={(id) => { if (id !== appId) setAppId(id); go("CustomerBooking"); }} />
         </>
       ) : app ? (
