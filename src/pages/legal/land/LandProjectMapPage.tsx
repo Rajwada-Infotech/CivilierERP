@@ -1,9 +1,11 @@
+import { usePaged } from "@/components/legal/usePaged";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Building } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
+import { AmendmentCell, PendingAmendments } from "@/components/legal/LandAmendmentPanel";
 import { getLandProjectMap, setLandProject, type ProjectLand } from "@/api/legalLandApi";
 import { getLegalLookup } from "@/api/legalMastersApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -30,19 +32,22 @@ const stage = (l: ProjectLand) =>
 
 export default function LandProjectMapPage() {
   const qc = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ["legal-land-project-map"], queryFn: getLandProjectMap });
+  // One page (20) from the server, searched and limited to the picked project there; groups are per page.
+  const paged = usePaged(["legal-land-project-map"], (qs) => getLandProjectMap(qs));
+  const { data, isLoading, error } = paged;
+  const unmapped = usePaged(["legal-land-project-map", "unmapped"], (qs) => getLandProjectMap(qs), { kind: "unmapped", pageSize: 1 });
   // "Create new project" for one land: name + company, then the land is mapped to it.
   const [creating, setCreating] = useState<{ land: ProjectLand; name: string; companyId: string; pick: string } | null>(null);
   const { data: companies = [] } = useQuery({ queryKey: ["legal-lookup", "company"], queryFn: () => getLegalLookup("company"), enabled: !!creating, staleTime: 5 * 60_000 });
-  const [search, setSearch] = useState("");
+
   const [saving, setSaving] = useState<number | null>(null);
 
   const lands = data?.lands ?? [];
   const shown = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = "";
     return lands.filter((l) =>
       (!q || [l.LandCode, l.LandName, l.ProjectName, l.MouzaName, l.CurrentOwners].some((v) => v?.toLowerCase().includes(q))));
-  }, [lands, search]);
+  }, [lands]);
 
   // Group by project; unmapped land last.
   const groups = useMemo(() => {
@@ -89,19 +94,20 @@ export default function LandProjectMapPage() {
   };
 
   const tiles: [string, string][] = [
-    ["Registered land", String(lands.length)],
-    ["Projects with land", String(new Set(lands.filter((l) => l.ProjectId).map((l) => l.ProjectId)).size)],
-    ["Existing land, project not set", String(lands.filter((l) => !l.ProjectId).length)],
+    ["Registered land", String(paged.total)],
+    ["Project set", String(Math.max(0, paged.total - unmapped.total))],
+    ["Existing land, project not set", String(unmapped.total)],
   ];
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land & Projects"]} />
-      <LegalShell
+      <LegalShell register
         title="Land & Projects"
         subtitle="Registered company land by project. Land from an enquiry takes the enquiry's project; only existing land without an enquiry needs its project set here."
         icon={Building}
       >
+        <PendingAmendments />
         <div className="mb-4 grid grid-cols-3 gap-3">
           {tiles.map(([l, v]) => (
             <div key={l} className="border border-border bg-card p-3">
@@ -112,7 +118,7 @@ export default function LandProjectMapPage() {
         </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search land, project, mouza, owner…"
+          <input value={paged.q} onChange={(e) => paged.setQ(e.target.value)} placeholder="Search land, project, mouza, owner…"
             className="ml-auto h-8 w-full rounded-lg border border-border bg-background px-3 text-xs sm:w-72" />
         </div>
 
@@ -130,7 +136,7 @@ export default function LandProjectMapPage() {
                 </span>
               </header>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[820px] text-xs">
+                <table className="w-full min-w-[960px] text-xs">
                   <thead className="text-left text-muted-foreground">
                     <tr className="border-b border-border">
                       <th className="px-3 py-2 font-medium">Land ID</th>
@@ -141,6 +147,7 @@ export default function LandProjectMapPage() {
                       <th className="px-3 py-2 font-medium">Documents</th>
                       <th className="px-3 py-2 font-medium">Stage</th>
                       <th className="px-3 py-2 font-medium">Project</th>
+                      <th className="px-3 py-2 font-medium">Amendment</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -178,6 +185,7 @@ export default function LandProjectMapPage() {
                               className="rounded-md border border-foreground px-3 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-40">Set project</button>
                           )}
                         </td>
+                        <td className="px-3 py-2"><AmendmentCell landId={l.LandId} registered={l.WorkflowStatus === "Registered"} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -234,6 +242,7 @@ export default function LandProjectMapPage() {
             )}
           </DialogContent>
         </Dialog>
+        {paged.pager}
       </LegalShell>
     </>
   );

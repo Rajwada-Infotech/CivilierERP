@@ -30,6 +30,7 @@ const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
 const { documentGate } = require("./landDocuments");
 const { DUE_DILIGENCE_CHECKS, FINAL_CHECKS } = require("./masterConfig");
 
+const { pageable } = require("./paging");
 const router = express.Router();
 router.use(apiRateLimit);
 
@@ -464,7 +465,7 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
 
 // GET /api/legal/land/project-map: every company land with the project it serves. Complete = fully approved (L2);
 // everything else is under process. Cancelled lands are left out; sold / transferred ones are marked.
-router.get("/project-map", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
+router.get("/project-map", requirePageRight(LAND_PAGE, "view"), pageable("lands", { kinds: { unmapped: (l) => !l.ProjectId } }), async (_req, res) => {
   try {
     const pool = getPool();
     const lands = (await pool.request().query(`
@@ -520,7 +521,7 @@ router.put("/:id/project", requirePageRight(LAND_PAGE, "edit"), async (req, res)
 });
 
 // GET /api/legal/land/pending-queue: All land records waiting for Verification or L1/L2 Approval
-router.get("/pending-queue", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
+router.get("/pending-queue", requirePageRight(LAND_PAGE, "view"), pageable(null, { kinds: { verify: (r) => r.Stage === "Verification Pending" } }), async (_req, res) => {
   try {
     const r = await getPool().request().query(`
       SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, l.EntryType, l.LandStatus,
@@ -1030,6 +1031,7 @@ async function ownerPersonId(conn, name, guardian, userId) {
 }
 
 router.post("/:id/ownership/change", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  { const amend = require("./landAmendment"); if (await amend.isLocked(getPool(), idParam(req.params.id))) return res.status(409).json({ error: amend.LOCK_MSG }); }
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   const c = readChange(req.body || {});
@@ -1054,6 +1056,7 @@ router.post("/:id/ownership/change", requirePageRight(LAND_PAGE, "edit"), async 
 // Step 5: undo the latest change (only while none of its records is verified). Its rows are deactivated, not
 // deleted, and the owners it ended become current again.
 router.post("/:id/ownership/undo", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  { const amend = require("./landAmendment"); if (await amend.isLocked(getPool(), idParam(req.params.id))) return res.status(409).json({ error: amend.LOCK_MSG }); }
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   const tx = new sql.Transaction(getPool());
@@ -1097,6 +1100,7 @@ router.post("/:id/ownership/undo", requirePageRight(LAND_PAGE, "edit"), async (r
 // the givers' start and not after any later change. The edited change goes back to Pending for verification;
 // a verified change can only be edited by a reviewer.
 router.put("/:id/ownership/change/:date", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  { const amend = require("./landAmendment"); if (await amend.isLocked(getPool(), idParam(req.params.id))) return res.status(409).json({ error: amend.LOCK_MSG }); }
   const id = idParam(req.params.id);
   const date = String(req.params.date || "").slice(0, 10);
   const b = req.body || {};
@@ -1171,6 +1175,7 @@ router.put("/:id/ownership/change/:date", requirePageRight(LAND_PAGE, "edit"), a
 
 // Step 23: the same change, from an approved registered deed — Sale, with the deed as its document.
 router.post("/:id/ownership-transfer", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  { const amend = require("./landAmendment"); if (await amend.isLocked(getPool(), idParam(req.params.id))) return res.status(409).json({ error: amend.LOCK_MSG }); }
   const id = idParam(req.params.id);
   const b = req.body || {};
   const deedId = idParam(b.registeredDeedId);
@@ -1306,6 +1311,7 @@ router.post("/:id/register/snapshot", requirePageRight(LAND_PAGE, "edit"), async
 // from goes too; the uploaded files of its documents are removed when nothing else uses them. One audit entry
 // (without a land link, since the land is gone) records who deleted which land.
 router.delete("/:id", requirePageRight(LAND_PAGE, "delete"), async (req, res) => {
+  { const amend = require("./landAmendment"); if (await amend.isLocked(getPool(), idParam(req.params.id))) return res.status(409).json({ error: "A registered land cannot be deleted. Change it through Request amendment (Land & Projects)." }); }
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid land" });
   const pool = getPool();
@@ -1776,7 +1782,13 @@ router.post("/:id/final-verify", requirePageRight(LAND_PAGE, "view"), async (req
 });
 
 // GET /deed-process/list — lands sent to the deed department.
-router.get("/deed-process/list", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+router.get("/deed-process/list", requirePageRight(LAND_PAGE, "view"), pageable("lands", { kinds: {
+  process: (l) => l.WorkflowStatus === "Deed Process",
+  reverify: (l) => l.WorkflowStatus === "Deed Process" && !!l.DeedChangedAt,
+  l1: (l) => l.WorkflowStatus === "Deed Process" && !l.DeedChangedAt && l.L1Status !== "Approved",
+  l2: (l) => l.WorkflowStatus === "Deed Process" && !l.DeedChangedAt && l.L1Status === "Approved" && l.L2Status !== "Approved",
+  overdue: (l) => l.WorkflowStatus === "Deed Process" && !!l.DeedTargetDate && !l.DeedCompletedAt && String(l.DeedTargetDate).slice(0, 10) < new Date().toISOString().slice(0, 10),
+} }), async (req, res) => {
   try {
     const pool = getPool();
     if (!(await deedReady(pool))) return res.json({ lands: [], canEditTimeline: false });
@@ -2181,7 +2193,7 @@ async function createPostRegTasks(pool, req, landId) {
 }
 
 // GET /post-registration/list — registered lands with their compliance tasks.
-router.get("/post-registration/list", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
+router.get("/post-registration/list", requirePageRight(LAND_PAGE, "view"), pageable("lands"), async (_req, res) => {
   try {
     const pool = getPool();
     if (!(await postRegReady(pool))) return res.json({ lands: [], statuses: POST_REG_STATUS });
@@ -2251,7 +2263,7 @@ const clearanceRows = async (pool, landId) => {
 };
 
 // GET /clearance/list — pipeline step between Deed Process and Deed Registration: every land from Deed Process on.
-router.get("/clearance/list", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
+router.get("/clearance/list", requirePageRight(LAND_PAGE, "view"), pageable("lands"), async (_req, res) => {
   try {
     const pool = getPool();
     if (!(await clearanceReady(pool))) return res.json({ lands: [], statuses: CLEARANCE_STATUS });

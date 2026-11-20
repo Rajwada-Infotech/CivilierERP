@@ -1,12 +1,12 @@
+import { usePaged } from "@/components/legal/usePaged";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { DocumentText } from "iconsax-react";
 import { toast } from "sonner";
 import { Upload } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
-import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getPostRegistration, updatePostRegTask, type PostRegTask } from "@/api/legalLandApi";
@@ -69,14 +69,15 @@ export default function LandPostRegistrationPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const canEdit = usePageRights("legal-land-master").canEdit;
-  const { data, isLoading, error } = useQuery({ queryKey: ["legal-post-registration"], queryFn: getPostRegistration });
+  const list = usePaged(["legal-post-registration"], (qs) => getPostRegistration(qs));
+  const { data, isLoading, error } = list;
   const refresh = () => qc.invalidateQueries({ queryKey: ["legal-post-registration"] });
-  const { inScope } = useProjectScope();
-  const lands = (data?.lands ?? []).filter((l) => inScope(l.ProjectId));
+  const lands = data?.lands ?? []; // one page, already limited to the picked project on the server
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Post-Registration" }]} />
-      <LegalShell title="Post-Registration" subtitle="After the deed is registered: mutation, new Khatian / RoR, land records, tax and ownership updates." icon={DocumentText}>
+      <LegalShell stage="post" title="Post-Registration" subtitle="After the deed is registered: mutation, new Khatian / RoR, land records, tax and ownership updates." icon={DocumentText}>
+        {list.search("Search land ID, name, mouza…")}
         {error ? <p className="p-6 text-destructive">{(error as Error).message}</p> : isLoading ? <p className="p-6 text-muted-foreground">Loading…</p> : !lands.length ? (
           <p className="border border-border p-6 text-sm text-muted-foreground">No registered land yet. Tasks appear here when a land's registered deed is submitted on the Deed Registration page.</p>
         ) : (
@@ -115,6 +116,7 @@ export default function LandPostRegistrationPage() {
             })}
           </div>
         )}
+        {list.pager}
       </LegalShell>
     </>
   );

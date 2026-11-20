@@ -1,3 +1,5 @@
+import { PipelineTabs, type PipelineStage } from "./PipelineTabs";
+import { RegisterTabs } from "./RegisterTabs";
 import React, { useRef } from "react";
 import { SheetShell } from "@/components/sheet/Sheet";
 import { LegalDocumentPreview, PANEL_DOCK_MIN_WIDTH } from "./LegalDocumentPreview";
@@ -19,6 +21,10 @@ interface LegalShellProps {
   action?: React.ReactNode;
   /** Hide the header's project picker (setup / master pages that are not per project). */
   noProject?: boolean;
+  /** A pipeline stage page: shows the stage tabs on top (PipelineTabs). */
+  stage?: PipelineStage;
+  /** A register page: shows the register tabs on top. */
+  register?: boolean;
   children: React.ReactNode;
 }
 
@@ -35,7 +41,7 @@ const LEGAL_MOBILE_CSS = `
 /** Shared sheet wrapper for every Legal module page. */
 // The side panel docks on the right of the page; on phone-width pages it is a bottom sheet instead.
 // Decided from the real width of the page area, not the screen (the ERP sidebars take part of it).
-export const LegalShell: React.FC<LegalShellProps> = ({ title, subtitle, action, noProject, children }) => {
+export const LegalShell: React.FC<LegalShellProps> = ({ title, subtitle, action, noProject, stage, register, children }) => {
   const ref = useRef<HTMLDivElement>(null);
   const width = useElementWidth(ref);
   const dock = width >= PANEL_DOCK_MIN_WIDTH;
@@ -44,7 +50,7 @@ export const LegalShell: React.FC<LegalShellProps> = ({ title, subtitle, action,
     <style>{LEGAL_MOBILE_CSS}</style>
     <SheetShell eyebrow="CivilierERP · Legal" title={title} subtitle={subtitle} action={noProject ? action : <div className="flex flex-wrap items-center justify-end gap-3"><LegalProjectSwitch />{action}</div>}>
       <div ref={ref} className={`flex gap-4 ${dock ? "flex-row items-start" : "flex-col"}`}>
-        <div className="min-w-0 flex-1">{children}</div>
+        <div className="min-w-0 flex-1">{stage && <PipelineTabs stage={stage} />}{register && <RegisterTabs />}{children}</div>
         <LegalDocumentPreview dock={dock} />
       </div>
       <LegalAskHost />

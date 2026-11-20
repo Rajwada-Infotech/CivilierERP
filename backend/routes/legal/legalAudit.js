@@ -41,6 +41,11 @@ async function writeAudit(conn, req, { action, entityType, entityId, landId = nu
           EXEC sp_executesql N'UPDATE dbo.LegalLand SET DeedChangedAt = SYSUTCDATETIME(), DeedChangedBy = @U WHERE LandId = @L AND WorkflowStatus = N''Deed Process''',
             N'@L INT, @U INT', @L = @LandId, @U = @UserId;`);
     }
+    // An approval closes a version of the land: save the whole land as it now is (see landFlow.js).
+    if (landId) {
+      const flow = require("./landFlow");
+      if (flow.APPROVAL_ACTIONS.has(action)) await flow.snapshotVersion(conn, landId, req.user?.userId || null, action).catch((err) => console.error("[legal-audit] version snapshot:", err.message));
+    }
   } catch (e) {
     console.error("[legal-audit]", action, entityType, entityId, e.message);
   }
@@ -49,7 +54,7 @@ async function writeAudit(conn, req, { action, entityType, entityId, landId = nu
 // Deed Process's own actions do not count as a change to the land's data.
 const DEED_ACTIONS = new Set(["Land verified — sent to Deed Process", "Deed timeline changed", "Deed completed", "Deed reopened",
   "Deed copy uploaded", "Deed copy removed", "Deed changes re-verified",
-  "Deed L1 approved", "Deed L1 rejected", "Deed L1 on hold", "Deed L2 approved", "Deed L2 rejected", "Deed L2 on hold", "Registry search recorded", "Due diligence checked", "Risk assessed", "Legal review updated", "Court case cleared", "Government site data saved", "Post-registration task updated", "Post-registration tasks created", "Registry search edited", "Registry search deleted", "Applied for deed registration", "Deed registered"]);
+  "Deed L1 approved", "Deed L1 rejected", "Deed L1 on hold", "Deed L2 approved", "Deed L2 rejected", "Deed L2 on hold", "Registry search recorded", "Due diligence checked", "Risk assessed", "Legal review updated", "Court case cleared", "Government site data saved", "Post-registration task updated", "Post-registration tasks created", "Registry search edited", "Registry search deleted", "Applied for deed registration", "Deed registered", "Amendment requested", "Amendment approved", "Amendment rejected", "Amendment withdrawn"]);
 
 /**
  * SQL for the next running number of a table's code column: PREFIX-YYYY-00001.

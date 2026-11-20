@@ -1,3 +1,4 @@
+import { usePaged } from "@/components/legal/usePaged";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -55,21 +56,21 @@ const stepsOf = (l: DeedRegRow | DeedRegLand, queries: number) => [
  */
 export default function LandDeedRegistrationPage() {
   const [tab, setTab] = useState<"active" | "registered">("active");
-  const [q, setQ] = useState("");
   const [pickedId, setPickedId] = useState<number | null>(null);
-  const { data, isFetching, error } = useQuery({ queryKey: ["legal-deed-reg", tab], queryFn: () => getDeedRegList(tab) });
-  const { inScope } = useProjectScope();
-  const lands = (data?.lands ?? []).filter((l) => inScope(l.ProjectId));
-  const { data: other } = useQuery({ queryKey: ["legal-deed-reg", tab === "active" ? "registered" : "active"], queryFn: () => getDeedRegList(tab === "active" ? "registered" : "active") });
-  const counts = { active: tab === "active" ? lands.length : other?.lands.filter((l) => inScope(l.ProjectId)).length ?? 0, registered: tab === "registered" ? lands.length : other?.lands.filter((l) => inScope(l.ProjectId)).length ?? 0 };
-  const term = q.trim().toLowerCase();
-  const list = lands.filter((l) => !term || [l.LandCode, l.LandName, l.MouzaName, l.RsDagNo, l.LrDagNo, l.RegDeedNo].some((v) => String(v ?? "").toLowerCase().includes(term)));
+  // One page (20) of the open tab from the server; the other tab's count is its page total.
+  const paged = usePaged(["legal-deed-reg", tab], (qs) => getDeedRegList(tab, qs));
+  const { data, isFetching, error, q, setQ } = paged;
+  const lands = data?.lands ?? [];
+  const otherTab = tab === "active" ? "registered" : "active";
+  const other = usePaged(["legal-deed-reg", otherTab, "count"], (qs) => getDeedRegList(otherTab, qs), { pageSize: 1 });
+  const counts = { [tab]: paged.total, [otherTab]: other.total } as Record<"active" | "registered", number>;
+  const list = lands;
   useEffect(() => { if (pickedId && !lands.some((l) => l.LandId === pickedId)) setPickedId(null); }, [lands, pickedId]);
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Deed Registration"]} />
-      <LegalShell title="Deed Registration" subtitle="Lands approved in Deed Process. Work each land through consideration, stamp duty, application, final registration and the physical deed." icon={DocumentText}>
+      <LegalShell stage="registration" title="Deed Registration" subtitle="Lands approved in Deed Process. Work each land through consideration, stamp duty, application, final registration and the physical deed." icon={DocumentText}>
         <div className="legal-cq"><div className="legal-split">
           <aside className="legal-queue border border-border bg-card">
             <div className="space-y-2 border-b border-border p-3">
@@ -107,6 +108,7 @@ export default function LandDeedRegistrationPage() {
               })}
               {!list.length && <li className="p-4 text-center text-xs text-muted-foreground">{isFetching ? "Loading…" : tab === "active" ? "No land waiting for registration" : "No registered land yet"}</li>}
             </ul>
+            <div className="px-3 pb-3">{paged.pager}</div>
           </aside>
           <section className="legal-cq min-w-0">
             {pickedId ? <LandWork key={pickedId} id={pickedId} /> : <div className="flex h-48 items-center justify-center border border-dashed border-border text-sm text-muted-foreground">Pick a land from the list</div>}

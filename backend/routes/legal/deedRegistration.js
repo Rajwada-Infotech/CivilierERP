@@ -15,6 +15,7 @@ const { canAct } = require("./approvalAuthority");
 const { writeAudit } = require("./legalAudit");
 const apiRateLimit = require("../../middleware/apiRateLimit");
 
+const { pageable } = require("./paging");
 const router = express.Router();
 router.use(apiRateLimit);
 const PAGE = "legal-land-master";
@@ -48,7 +49,7 @@ async function payState(pool, id) {
 }
 
 // GET /list?tab=active|registered — lands at Deed Registration (active) or registered (deed tracking still going).
-router.get("/list", requirePageRight(PAGE, "view"), async (req, res) => {
+router.get("/list", requirePageRight(PAGE, "view"), pageable("lands"), async (req, res) => {
   try {
     const pool = getPool();
     if (!(await ready(pool))) return notReady(res);

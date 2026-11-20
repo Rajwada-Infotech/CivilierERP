@@ -30,7 +30,7 @@ export default function LandSalesPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", landId ? "Land Register" : "Land Sales", ...(landId ? ["Sales"] : [])]} />
-      <LegalShell
+      <LegalShell register
         title={landId ? "Sales of this land" : "Land Sales"}
         subtitle="Selling land the company owns, in full or in part. Record the sale here, then its payments on the land's Payment History; a land sold in full is marked Disposed / Transferred."
         icon={MoneySend}

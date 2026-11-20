@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pager } from "@/components/legal/usePaged";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { SearchStatus } from "iconsax-react";
@@ -10,7 +11,7 @@ import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
-  getSearchOptions, findEnquiries, getEnquirySearches, setOfficeOf, addYearResult, editYearResult, deleteYearResult, addYearRange,
+  getSearchOptions, findEnquiries, findEnquiriesPage, getEnquirySearches, setOfficeOf, addYearResult, editYearResult, deleteYearResult, addYearRange,
   completeOffice, reopenOffice, addOffice, daysCounter,
   type EnquiryHit, type OfficeSearch, type YearResult, type YearBody, type SearchOptions,
 } from "@/api/legalEnquirySearchApi";
@@ -49,23 +50,27 @@ export default function LandDeedSearchPage() {
   const asked = new URLSearchParams(window.location.search).get("view") as View | null;
   const [tab, setTab] = useState<View>(asked && VIEWS.includes(asked) ? asked : start ? "all" : "pending");
 
-  const { data: all = [], isFetching, error } = useQuery({
-    queryKey: ["legal-enq-find", projectId, "", "all"],
-    queryFn: () => findEnquiries(projectId!, "", "all"),
-    enabled: !!projectId,
+  // One page (20) from the server, for the open view and what is typed; the view counts come as page totals.
+  const [term, setTerm] = useState(q.trim());
+  useEffect(() => { const t = setTimeout(() => setTerm(q.trim()), 300); return () => clearTimeout(t); }, [q]);
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [term, tab, projectId]);
+  const { data: pageData, isFetching, error } = useQuery({
+    queryKey: ["legal-enq-find", projectId, term, tab, page],
+    queryFn: () => findEnquiriesPage(projectId!, term, page, tab === "all" ? undefined : tab),
+    enabled: !!projectId, placeholderData: keepPreviousData,
   });
+  const countOf = (kind?: string) => ({
+    queryKey: ["legal-enq-find", projectId, "", kind ?? "all", "count"], queryFn: () => findEnquiriesPage(projectId!, "", 1, kind, 1), enabled: !!projectId,
+  });
+  const pendingN = useQuery(countOf("pending")).data?.total ?? 0;
+  const overdueN = useQuery(countOf("overdue")).data?.total ?? 0;
+  const doneN = useQuery(countOf("done")).data?.total ?? 0;
+  const allN = useQuery(countOf()).data?.total ?? 0;
   const isDone = (h: EnquiryHit) => !!h.LandId || h.EnquiryStatus === "Rejected" || h.OfficesDone >= h.OfficesTotal;
-  const pendingN = all.filter((h) => !isDone(h)).length;
-  const overdueN = all.filter((h) => !isDone(h) && h.DaysOver > 0).length;
-  // Filter on the client: instant while typing (enquiry no, Land ID, location, RS / LR Dag or Khatian).
-  const term = q.trim().toLowerCase();
-  const list = all
-    .filter((h) => (tab === "pending" ? !isDone(h) : tab === "overdue" ? !isDone(h) && h.DaysOver > 0
-      : tab === "ontime" ? !isDone(h) && !h.DaysOver : tab === "done" ? isDone(h) : true))
-    .filter((h) => !term || [h.EnquiryNo, h.LandCode, h.LandLocation, h.RsDagNo, h.LrDagNo, h.RsKhatianNo, h.LrKhatianNo, h.MouzaName]
-      .some((v) => String(v ?? "").toLowerCase().includes(term)));
-  const current = all.find((h) => h.EnquiryId === pickedId) ?? null;
-  const doneN = all.filter(isDone).length;
+  const list = pageData?.items ?? [];
+  const all = list; // the enquiries on this page
+  const current = list.find((h) => h.EnquiryId === pickedId) ?? null;
 
   // Link values (?project, ?q, ?view, ?office from the dashboard / Land Enquiries) are used once; any choice made here
   // drops them from the address so a refresh or the next pick does not bring them back.
@@ -112,7 +117,7 @@ export default function LandDeedSearchPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", "Deed Registry Search"]} />
-      <LegalShell title="Deed Registry Search" subtitle="Each enquiry gets a timeline per registration office when it is saved. Pick an enquiry, then search each office year by year; what you find is stored on the enquiry." icon={SearchStatus}>
+      <LegalShell stage="search" title="Deed Registry Search" subtitle="Each enquiry gets a timeline per registration office when it is saved. Pick an enquiry, then search each office year by year; what you find is stored on the enquiry." icon={SearchStatus}>
         <div className="mb-4 flex flex-wrap items-center gap-3 border border-border bg-card px-4 py-3">
           <form className="flex min-w-[18rem] flex-1 items-center gap-2" onSubmit={(e) => { e.preventDefault(); findEverywhere(); }}>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Enquiry no, Land ID, RS / LR Dag or Khatian, mouza — filters this list; Search looks in all projects"
@@ -126,9 +131,9 @@ export default function LandDeedSearchPage() {
             {/* ── Queue ── */}
             <aside className="legal-queue border border-border bg-card">
               <div className="space-y-2 border-b border-border p-3">
-                {term && <p className="text-xs text-muted-foreground">Filtered by “{q.trim()}” · {list.length} shown</p>}
+                {term && <p className="text-xs text-muted-foreground">Filtered by “{q.trim()}” · {pageData?.total ?? 0} found</p>}
                 <div className="grid grid-cols-3 border border-border text-[0.6875rem] font-semibold uppercase tracking-wider">
-                  {([["pending", `Pending ${pendingN}`], ["done", `Completed ${doneN}`], ["all", `All ${all.length}`]] as const).map(([k, l]) => (
+                  {([["pending", `Pending ${pendingN}`], ["done", `Completed ${doneN}`], ["all", `All ${allN}`]] as const).map(([k, l]) => (
                     <button key={k} onClick={() => setTab(k)}
                       className={`px-2 py-1.5 ${tab === k ? "bg-foreground text-card" : k === "pending" && pendingN ? "bg-amber-500/15 text-amber-700" : "hover:bg-muted"}`}>{l}</button>
                   ))}
@@ -167,6 +172,7 @@ export default function LandDeedSearchPage() {
                 })}
                 {!list.length && <li className="p-4 text-center text-xs text-muted-foreground">{isFetching ? "Loading…" : tab === "pending" ? "Nothing pending in this project" : tab === "overdue" ? "Nothing overdue in this project" : "No enquiry matches"}</li>}
               </ul>
+              <div className="px-3 pb-3"><Pager page={page} pageSize={pageData?.pageSize ?? 20} total={pageData?.total ?? 0} loading={isFetching} onPage={setPage} /></div>
             </aside>
 
             {/* ── Work area ── */}

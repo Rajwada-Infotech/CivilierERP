@@ -6,6 +6,9 @@ import { Global } from "iconsax-react";
 import { FileText, Pencil } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
+import { LegalLockContext, LockedBanner, REGISTERED_LOCK } from "@/components/legal/LegalLock";
+import { LandStageStepper, LandVersionsPanel } from "@/components/legal/LandVersions";
+import { LandAmendmentActions } from "@/components/legal/LandAmendmentPanel";
 import {
   getLandOverview,
   getLandAudit,
@@ -45,7 +48,8 @@ type TabKey =
   | "tax"
   | "survey"
   | "photos"
-  | "activity";
+  | "activity"
+  | "versions";
 
 const TABS: { key: TabKey; label: string; count?: keyof LandOverview["counts"] }[] = [
   { key: "overview", label: "Overview" },
@@ -63,6 +67,7 @@ const TABS: { key: TabKey; label: string; count?: keyof LandOverview["counts"] }
   { key: "documents", label: "Other Documents", count: "documents" },
   { key: "diligence", label: "Due Diligence" },
   { key: "photos", label: "Notes & Attachments" },
+  { key: "versions", label: "Versions & Amendments" },
   { key: "activity", label: "Activity History" },
 ];
 
@@ -215,9 +220,11 @@ export default function LandProfilePage() {
         action={
           land && (
             <div className="flex flex-wrap gap-2">
-              <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
-                <Pencil size={13} /> Edit basic info
-              </button>
+              {!registered && (
+                <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
+                  <Pencil size={13} /> Edit basic info
+                </button>
+              )}
               <button className={btn} onClick={() => navigate(`/legal/land/properties/${landId}/details`)}>
                 <FileText size={13} /> Full report & PDF
               </button>
@@ -228,7 +235,26 @@ export default function LandProfilePage() {
         {error && <p className="text-sm text-destructive">Could not load this land property: {(error as Error).message}</p>}
         {isLoading && <p className="text-sm text-muted-foreground">Loading land property profile…</p>}
         {land && c && (
+          <LegalLockContext.Provider value={registered ? REGISTERED_LOCK : null}>
           <div className="space-y-5">
+            {/* Where the land is in the pipeline, and the one thing to do next. */}
+            <div className="space-y-3 border border-border bg-card p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Stage · <span className="text-foreground">{land.WorkflowStatus ?? "—"}</span></p>
+                {(() => {
+                  const wf = String(land.WorkflowStatus ?? "");
+                  const next: [string, () => void] | null =
+                    wf === "Registered" ? ["Request amendment", () => setTab("versions")]
+                    : wf === "Deed Registration" || wf === "Deed Completed" ? ["Open in Deed Registration", () => navigate(`/legal/deed-registration/${landId}`)]
+                    : wf === "Deed Process" ? ["Open in Deed Process", () => navigate(`/legal/land/deed-process/${landId}`)]
+                    : wf.startsWith("Draft") ? ["Final verification", () => navigate(`/legal/land/properties/${landId}/final-verify`)]
+                    : null;
+                  return next ? <button onClick={next[1]} className="h-9 border border-foreground bg-foreground px-4 text-xs font-semibold uppercase tracking-[0.1em] text-background hover:opacity-90">{next[0]} →</button> : null;
+                })()}
+              </div>
+              <LandStageStepper landId={landId} />
+            </div>
+            {registered && <LockedBanner landCode={land.LandCode} onRequest={() => setTab("versions")} />}
 
             {/* Modal: Action confirmation dialog */}
             <Dialog open={!!child} onOpenChange={(o) => { if (!o) setChild(null); }}>
@@ -436,9 +462,10 @@ export default function LandProfilePage() {
                       <button className="ml-1 text-xs underline" onClick={() => openLegalMap(land.GpsLatitude, land.GpsLongitude, `${land.LandCode} · map`)}>Map</button>
                     </>
                   ) : (
+                    registered ? <span className="text-muted-foreground">Not set</span> : (
                     <button className="text-xs underline text-muted-foreground hover:text-foreground" onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
                       Not set — add latitude / longitude
-                    </button>
+                    </button>)
                   )}
                 />
                 <Field k="Full location address" v={land.LocationAddress} />
@@ -447,11 +474,13 @@ export default function LandProfilePage() {
                   district: land.DistrictName, mouza: land.MouzaName, jlNo: land.JLNo, location: land.LocationAddress, lat: land.GpsLatitude, lng: land.GpsLongitude,
                   rsDag: land.RsDagNo, lrDag: land.LrDagNo, rsKhatian: land.RsKhatianNo, lrKhatian: land.LrKhatianNo, landCode: land.LandCode,
                 }} />} />
-                <div className="sm:col-span-2 lg:col-span-3 pt-2">
-                  <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
-                    <Pencil size={13} /> Edit basic information
-                  </button>
-                </div>
+                {!registered && (
+                  <div className="sm:col-span-2 lg:col-span-3 pt-2">
+                    <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
+                      <Pencil size={13} /> Edit basic information
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -526,6 +555,13 @@ export default function LandProfilePage() {
             )}
 
             {/* TAB 14: ACTIVITY HISTORY */}
+            {tab === "versions" && (
+              <div className="space-y-4">
+                <LandAmendmentActions landId={landId} />
+                <LandVersionsPanel landId={landId} />
+              </div>
+            )}
+
             {tab === "activity" && (
               <Section
                 title="Activity & Audit Trail"
@@ -538,6 +574,7 @@ export default function LandProfilePage() {
             {/* All data entered → the verifier checks everything on one page and sends the land to Deed Process. */}
             <FinalVerifyBar landId={landId} />
           </div>
+          </LegalLockContext.Provider>
         )}
       </LegalShell>
     </>

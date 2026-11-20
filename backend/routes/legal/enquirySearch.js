@@ -12,6 +12,7 @@ const { requirePageRight } = require("../../middleware/requirePageRight");
 const { writeAudit } = require("./legalAudit");
 const apiRateLimit = require("../../middleware/apiRateLimit");
 
+const { pageable } = require("./paging");
 const router = express.Router();
 router.use(apiRateLimit);
 const PAGE = "legal-land-enquiry";
@@ -124,7 +125,11 @@ router.post("/offices", requirePageRight(PAGE, "edit"), async (req, res) => {
 });
 
 // GET /find?projectId=&tab=pending|done|all&q= — enquiries of a project, by enquiry no, Land ID, RS / LR Dag or Khatian.
-router.get("/find", requirePageRight(PAGE, "view"), async (req, res) => {
+const searchDone = (h) => !!h.LandId || h.EnquiryStatus === "Rejected" || Number(h.OfficesDone) >= Number(h.OfficesTotal);
+router.get("/find", requirePageRight(PAGE, "view"), pageable(null, { kinds: {
+  pending: (h) => !searchDone(h), overdue: (h) => !searchDone(h) && Number(h.DaysOver) > 0,
+  ontime: (h) => !searchDone(h) && !Number(h.DaysOver), done: searchDone,
+} }), async (req, res) => {
   try {
     const pool = getPool();
     if (!(await ready(pool))) return notReady(res);

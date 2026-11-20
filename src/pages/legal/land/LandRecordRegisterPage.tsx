@@ -18,7 +18,7 @@ export default function LandRecordRegisterPage({ kind }: { kind: keyof typeof KI
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", k.title]} />
-      <LegalShell title={k.title} subtitle={`${k.subtitle}. Add or change records on the land's Land Profile → Land Records tab.`} icon={k.icon}>
+      <LegalShell register title={k.title} subtitle={`${k.subtitle}. Add or change records on the land's Land Profile → Land Records tab.`} icon={k.icon}>
         <LegalMasterTable
           key={k.key}
           entry={{ key: k.key, label: k.title, pageKey: "legal-land-master" }}
