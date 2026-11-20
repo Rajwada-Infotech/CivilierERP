@@ -2,12 +2,13 @@
 // passed — same rule the server enforces), and for "daily" checkpoints log one photo update per day.
 // A checkpoint Quality Check rated Poor last time blinks until it's ticked again.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Animated, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Animated, ScrollView, Text, TextInput, TouchableOpacity, View, type ScrollViewInstance } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, CalendarDays, Check, RotateCcw, Timer, Trash2 } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
+import { useCanDeleteDprWork } from "@/hooks/usePageRights";
 import {
   deleteCheckpointUpdate, getCheckpointUpdates, getRungDetail, saveCheckpointUpdate, saveCheckpoints,
   type RungCheckpoint,
@@ -38,6 +39,7 @@ const addDays = (s: string, n: number) => { const d = fromYmd(s); d.setDate(d.ge
 const diffDays = (a: string, b: string) => Math.round((fromYmd(b).getTime() - fromYmd(a).getTime()) / 86_400_000);
 
 function DailyUpdates({ checkpointId, canEdit }: { checkpointId: number; canEdit: boolean }) {
+  const canDelete = useCanDeleteDprWork();
   const qc = useQueryClient();
   const today = useMemo(() => todayYmd(), []);
   const [date, setDate] = useState(today);
@@ -50,7 +52,7 @@ function DailyUpdates({ checkpointId, canEdit }: { checkpointId: number; canEdit
   // Every day from the start date (or the last 14) up to today, newest last, so the strip lands on today.
   // Locked to today: a daily update is a same-day record (the server enforces it too).
   const days = useMemo(() => [today], [today]);
-  const strip = useRef<ScrollView>(null);
+  const strip = useRef<ScrollViewInstance>(null);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -69,41 +71,41 @@ function DailyUpdates({ checkpointId, canEdit }: { checkpointId: number; canEdit
   });
 
   return (
-    <View style={{ marginTop: 8, borderRadius: 12, borderWidth: 1, borderStyle: "dashed", borderColor: `${ACCENT}55`, backgroundColor: `${ACCENT}0d`, padding: 10, gap: 10 }}>
+    <View style={{ marginTop: 8, borderRadius: 0, borderWidth: 1, borderStyle: "dashed", borderColor: S.blueTint, backgroundColor: S.blueWash, padding: 10, gap: 10 }}>
       <ScrollView ref={strip} horizontal showsHorizontalScrollIndicator={false} onContentSizeChange={() => strip.current?.scrollToEnd({ animated: false })} contentContainerStyle={{ gap: 6 }}>
         {days.map((d) => {
           const on = d === date;
           const logged = byDate.has(d);
           const dt = fromYmd(d);
           return (
-            <TouchableOpacity key={d} onPress={() => setDate(d)} style={{ width: 42, paddingVertical: 6, borderRadius: 10, alignItems: "center", borderWidth: 1, borderColor: on ? ACCENT : logged ? "#10b98188" : colors.border, backgroundColor: on ? `${ACCENT}25` : logged ? "#10b98120" : "transparent" }}>
-              <Text style={{ fontSize: 9, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{dt.toLocaleDateString("en-IN", { month: "short" })}</Text>
-              <Text style={{ fontSize: 13, fontFamily: fonts.heading.bold, color: on ? ACCENT : colors.foreground }}>{dt.getDate()}</Text>
+            <TouchableOpacity key={d} onPress={() => setDate(d)} style={{ width: 42, paddingVertical: 6, borderRadius: 0, alignItems: "center", borderWidth: 1, borderColor: on ? ACCENT : logged ? S.blue : S.rule, backgroundColor: on ? S.blueWash : logged ? S.blueWash : "transparent" }}>
+              <Text style={{ fontSize: 9, fontFamily: fonts.body.regular, color: S.graphite }}>{dt.toLocaleDateString("en-IN", { month: "short" })}</Text>
+              <Text style={{ fontSize: 13, fontFamily: fonts.heading.bold, color: on ? ACCENT : S.ink }}>{dt.getDate()}</Text>
             </TouchableOpacity>
           );
         })}
       </ScrollView>
-      <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>
+      <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: S.graphite }}>
         Today · {fmtDay(date)}{current?.loggedTime ? ` · logged at ${fmtTime(current.loggedTime)}` : ""} · {(q.data ?? []).length} day{(q.data ?? []).length === 1 ? "" : "s"} logged
       </Text>
 
       {canEdit && (
         <>
-          <TextInput value={note} onChangeText={setNote} maxLength={500} placeholder="Note for this photo (optional)" placeholderTextColor={`${colors.mutedForeground}99`} style={{ color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 12.5, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 }} />
-          <Btn label={current?.hasPhoto ? "Retake photo" : "Take photo"} icon={<Camera size={13} color="#04181d" />} busy={save.isPending} onPress={() => save.mutate()} />
+          <TextInput value={note} onChangeText={setNote} maxLength={500} placeholder="Note for this photo (optional)" placeholderTextColor={S.faint} style={{ color: S.ink, fontFamily: fonts.body.regular, fontSize: 12.5, borderWidth: 1, borderColor: S.rule, borderRadius: 0, paddingHorizontal: 10, paddingVertical: 8 }} />
+          <Btn label={current?.hasPhoto ? "Retake photo" : "Take photo"} icon={<Camera size={13} color={S.paper} />} busy={save.isPending} onPress={() => save.mutate()} />
         </>
       )}
 
       {current && (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          {current.hasPhoto && <AuthImage path={`/api/dependency-activity-assignment/checkpoint-update/${current.id}/photo`} style={{ width: 72, height: 54, borderRadius: 8, borderWidth: 1, borderColor: colors.border }} />}
+          {current.hasPhoto && <AuthImage path={`/api/dependency-activity-assignment/checkpoint-update/${current.id}/photo`} style={{ width: 72, height: 54, borderRadius: 0, borderWidth: 1, borderColor: S.rule }} />}
           <View style={{ flex: 1 }}>
-            {!!current.note && <Text numberOfLines={2} style={{ fontSize: 11.5, color: colors.foreground, fontFamily: fonts.body.regular }}>{current.note}</Text>}
-            {!!current.createdBy && <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>by {current.createdBy}</Text>}
+            {!!current.note && <Text numberOfLines={2} style={{ fontSize: 11.5, color: S.ink, fontFamily: fonts.body.regular }}>{current.note}</Text>}
+            {!!current.createdBy && <Text style={{ fontSize: 10.5, color: S.graphite, fontFamily: fonts.body.regular }}>by {current.createdBy}</Text>}
           </View>
-          {canEdit && (
+          {canDelete && (
             <TouchableOpacity onPress={() => Alert.alert("Remove this day's update?", undefined, [{ text: "Cancel", style: "cancel" }, { text: "Remove", style: "destructive", onPress: () => remove.mutate(current.id) }])} style={{ padding: 6 }}>
-              <Trash2 size={14} color={colors.mutedForeground} />
+              <Trash2 size={14} color={S.graphite} />
             </TouchableOpacity>
           )}
         </View>
@@ -159,22 +161,22 @@ export function CheckpointsTab({ rungId, canEdit, onChanged }: { rungId: number;
         const g = gate(cp);
         return (
           <Blink key={cp.id ?? `${cp.fieldName}-${i}`} on={!!cp.needsRework}>
-            <View style={{ ...card, padding: 12, ...(cp.needsRework ? { borderColor: "#f59e0b", backgroundColor: "#f59e0b12" } : {}) }}>
+            <View style={{ ...card, padding: 12, ...(cp.needsRework ? { borderColor: S.ink, backgroundColor: S.redWash } : {}) }}>
               <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
                 <TouchableOpacity
                   disabled={!canEdit || saving === i}
                   onPress={() => toggle(i)}
                   activeOpacity={0.7}
-                  style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, alignItems: "center", justifyContent: "center", borderColor: cp.isChecked ? "#10b981" : g.locked ? "#f59e0b66" : colors.border, backgroundColor: cp.isChecked ? "#10b981" : "transparent", opacity: saving === i ? 0.5 : 1 }}
+                  style={{ width: 24, height: 24, borderWidth: 1.5, alignItems: "center", justifyContent: "center", borderColor: g.locked && !cp.isChecked ? S.red : S.ink, backgroundColor: cp.isChecked ? S.ink : "transparent", opacity: saving === i ? 0.5 : 1 }}
                 >
-                  {cp.isChecked && <Check size={13} color="#fff" strokeWidth={3} />}
+                  {cp.isChecked && <Check size={13} color={S.paper} strokeWidth={3} />}
                 </TouchableOpacity>
                 <View style={{ flex: 1, gap: 6 }}>
-                  <Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: colors.foreground }}>{cp.fieldName}</Text>
+                  <Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: S.ink }}>{cp.fieldName}</Text>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                    {cp.needsRework && <Tag icon={<RotateCcw size={9} color="#f59e0b" />} text="Redo — rated Poor" color="#f59e0b" />}
+                    {cp.needsRework && <Tag icon={<RotateCcw size={9} color={S.ink} />} text="Redo — rated Poor" color={S.ink} />}
                     {cp.isDaily && <Tag icon={<CalendarDays size={9} color={ACCENT} />} text="Daily" color={ACCENT} />}
-                    {g.locked && <Tag icon={<Timer size={9} color="#f59e0b" />} text={g.daysLeft != null ? `${g.daysLeft}d left` : `${cp.minWaitDays}d wait`} color="#f59e0b" />}
+                    {g.locked && <Tag icon={<Timer size={9} color={S.ink} />} text={g.daysLeft != null ? `${g.daysLeft}d left` : `${cp.minWaitDays}d wait`} color={S.ink} />}
                   </View>
                 </View>
               </View>
@@ -189,7 +191,7 @@ export function CheckpointsTab({ rungId, canEdit, onChanged }: { rungId: number;
 
 function Tag({ icon, text, color }: { icon: React.ReactNode; text: string; color: string }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: `${color}1f` }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 0, backgroundColor: `${color}1f` }}>
       {icon}
       <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.semibold, color }}>{text}</Text>
     </View>

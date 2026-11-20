@@ -3,17 +3,19 @@
 // engineer (Allocated / In Progress / Hold / Rework) is listed; the server refuses the whole batch if any
 // item has moved on, so a bulk transfer never half-applies.
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Text, View } from "react-native";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRightLeft, Check, Search, X } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { ArrowRightLeft, Check } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
+import { Body, Label, LinkLabel, Notice, Press, SearchBox, Skel } from "@/components/sheet/Sheet";
+import { ChipRow, NoAccessPage, PageHead } from "@/components/sheet/Page";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { StatusPill } from "@/components/StatusPill";
 import { PickerField, TextField } from "@/components/form";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getEngineers, getTransferCandidateIds, getTransferCandidates, transferWork, type TransferCandidate } from "@/api/cwdApi";
-import { ACCENT, Btn } from "../activities/tabs/ui";
+import { Btn } from "../activities/tabs/ui";
 
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—");
 
@@ -84,55 +86,37 @@ export default function WorkTransferScreen() {
     ]);
   };
 
-  if (!rights.canView) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center", padding: 32 }}>
-        <Text style={{ color: colors.foreground, fontFamily: fonts.heading.semibold, fontSize: 14 }}>No access</Text>
-        <Text style={{ color: colors.mutedForeground, fontFamily: fonts.body.regular, fontSize: 12, marginTop: 4, textAlign: "center" }}>You don't have permission to view Work Transfer.</Text>
-      </View>
-    );
-  }
+  if (!rights.canView) return <NoAccessPage title="Work Transfer" what="Work Transfer" />;
 
   const header = (
-    <View style={{ gap: 4, marginBottom: 8 }}>
-      <PickerField label="Transfer from" value={fromId} options={people} onSelect={setFromId} placeholder="Select engineer…" loading={peopleQ.isLoading} />
-      <View style={{ height: 10 }} />
-      <PickerField label="Transfer to" value={toId} options={people.filter((p) => p.key !== fromId)} onSelect={setToId} placeholder="Select engineer…" loading={peopleQ.isLoading} />
-      <View style={{ height: 10 }} />
-      <TextField label="Remarks (optional)" value={remarks} onChangeText={setRemarks} placeholder="e.g. on leave, moved to another site" />
-
-      {!!fromId && (
-        <>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 12, paddingHorizontal: 12 }}>
-            <Search size={14} color={colors.mutedForeground} />
-            <TextInput value={search} onChangeText={setSearch} placeholder="Search activity or location…" placeholderTextColor={`${colors.mutedForeground}99`} style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }} />
-            {!!search && <TouchableOpacity onPress={() => setSearch("")}><X size={14} color={colors.mutedForeground} /></TouchableOpacity>}
-          </View>
-          {projects.length > 1 && (
-            <FlatList
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              data={[{ id: null as number | null, name: "All projects" }, ...projects.map((p) => ({ id: p.id as number | null, name: `${p.name} (${p.count})` }))]}
-              keyExtractor={(p) => String(p.id)}
-              style={{ marginTop: 8 }}
-              contentContainerStyle={{ gap: 8 }}
-              renderItem={({ item }) => {
-                const on = projectId === item.id;
-                return (
-                  <TouchableOpacity onPress={() => setProjectId(item.id)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: on ? ACCENT : colors.border, backgroundColor: on ? `${ACCENT}22` : "transparent" }}>
-                    <Text style={{ fontSize: 11, fontFamily: fonts.heading.semibold, color: on ? ACCENT : colors.mutedForeground }}>{item.name}</Text>
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          )}
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-            <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{fromName}'s activities · {selected.size} of {totalAll} selected</Text>
-            {visible.length > 0 && rights.canEdit && (
-              <TouchableOpacity disabled={selectingAll} onPress={toggleAll}><Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: ACCENT, opacity: selectingAll ? 0.5 : 1 }}>{allSelected ? "Clear selection" : `Select all ${totalMatching}`}</Text></TouchableOpacity>
+    <View>
+      <PageHead title="Work Transfer" subtitle="Move activities from one engineer to another: pick who from, tick the work, pick who takes over.">
+        <PickerField label="Transfer from" value={fromId} options={people} onSelect={setFromId} placeholder="Select engineer…" loading={peopleQ.isLoading} />
+        <PickerField label="Transfer to" value={toId} options={people.filter((p) => p.key !== fromId)} onSelect={setToId} placeholder="Select engineer…" loading={peopleQ.isLoading} />
+        <TextField label="Remarks (optional)" value={remarks} onChangeText={setRemarks} placeholder="e.g. on leave, moved to another site" />
+        {!!fromId && (
+          <>
+            <SearchBox value={search} onChange={setSearch} placeholder="Search activity or location" />
+            {projects.length > 1 && (
+              <ChipRow
+                options={[{ value: "all", label: "All projects" }, ...projects.map((p) => ({ value: String(p.id), label: p.name, count: p.count }))]}
+                value={projectId == null ? "all" : String(projectId)}
+                onChange={(v) => setProjectId(v === "all" ? null : Number(v))}
+              />
             )}
+          </>
+        )}
+      </PageHead>
+      {!!fromId && (
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Label color={S.ink}>{`${fromName}'s activities`}</Label>
+            <Body size={12} color={S.graphite} style={{ marginTop: 3 }}>{selected.size} of {totalAll} selected</Body>
           </View>
-        </>
+          {visible.length > 0 && rights.canEdit && (
+            <LinkLabel onPress={selectingAll ? undefined : () => void toggleAll()}>{allSelected ? "Clear selection" : `Select all ${totalMatching}`}</LinkLabel>
+          )}
+        </View>
       )}
     </View>
   );
@@ -143,33 +127,34 @@ export default function WorkTransferScreen() {
     const newProject = index === 0 || visible[index - 1]?.projectId !== c.projectId;
     return (
       <View>
-      {newProject && (
-        <Text style={{ fontSize: 11, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.6, marginTop: index === 0 ? 0 : 10, marginBottom: 6 }}>{c.projectName || "No project"}</Text>
-      )}
-      <TouchableOpacity
-        activeOpacity={0.7}
-        disabled={!rights.canEdit}
-        onPress={() => toggle(c.assignmentId)}
-        style={{ flexDirection: "row", gap: 10, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: on ? ACCENT : colors.border, padding: 12, marginBottom: 8 }}
-      >
-        <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, alignItems: "center", justifyContent: "center", borderColor: on ? ACCENT : colors.border, backgroundColor: on ? ACCENT : "transparent", marginTop: 1 }}>
-          {on && <Check size={13} color="#fff" strokeWidth={3} />}
-        </View>
-        <View style={{ flex: 1, gap: 3 }}>
-          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-            <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{c.activityName}</Text>
-            <StatusPill status={c.status} />
+        {newProject && (
+          <View style={{ paddingHorizontal: 16, paddingTop: index === 0 ? 12 : 16, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: S.rule }}>
+            <Label color={S.ink}>{c.projectName || "No project"}</Label>
           </View>
-          <Text numberOfLines={2} style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>{c.scopePath}</Text>
-          <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.medium }}>{Math.round(c.progressPercent ?? 0)}% · ends {fmtDate(c.endDate)}{c.engineerNames ? ` · ${c.engineerNames}` : ""}</Text>
-        </View>
-      </TouchableOpacity>
+        )}
+        <Press
+          disabled={!rights.canEdit}
+          onPress={() => toggle(c.assignmentId)}
+          style={(pressed) => ({ flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, backgroundColor: on ? S.blueWash : pressed ? S.blueWash : S.paper })}
+        >
+          <View style={{ width: 22, height: 22, borderWidth: 1.5, alignItems: "center", justifyContent: "center", borderColor: S.ink, backgroundColor: on ? S.ink : "transparent", marginTop: 1 }}>
+            {on && <Check size={13} color={S.paper} strokeWidth={3} />}
+          </View>
+          <View style={{ flex: 1, gap: 3 }}>
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+              <Text style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.body.semibold, color: S.ink }}>{c.activityName}</Text>
+              <StatusPill status={c.status} />
+            </View>
+            <Text numberOfLines={2} style={{ fontSize: 11.5, color: S.graphite, fontFamily: fonts.body.regular }}>{c.scopePath}</Text>
+            <Text style={{ fontSize: 11.5, color: S.ink2, fontFamily: fonts.body.medium }}>{Math.round(c.progressPercent ?? 0)}% · ends {fmtDate(c.endDate)}{c.engineerNames ? ` · ${c.engineerNames}` : ""}</Text>
+          </View>
+        </Press>
       </View>
     );
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: S.paper }}>
       <FlatList
         data={fromId ? visible : []}
         keyExtractor={(c) => String(c.assignmentId)}
@@ -178,22 +163,22 @@ export default function WorkTransferScreen() {
         keyboardShouldPersistTaps="handled"
         onEndReachedThreshold={0.6}
         onEndReached={() => { if (candQ.hasNextPage && !candQ.isFetchingNextPage) candQ.fetchNextPage(); }}
-        ListFooterComponent={candQ.isFetchingNextPage ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 14 }} /> : null}
+        ListFooterComponent={candQ.isFetchingNextPage ? <ActivityIndicator color={S.graphite} style={{ paddingVertical: 14 }} /> : undefined}
         initialNumToRender={10}
         windowSize={7}
-        contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: 140 }}
         ListEmptyComponent={
-          !fromId ? <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 30 }}>Pick the engineer to transfer work from.</Text>
-          : candQ.isLoading ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 30 }} />
-          : candQ.error ? <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 20 }}>{(candQ.error as Error).message}</Text>
-          : <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 30 }}>{totalAll === 0 ? "This engineer has no transferable activities." : "No activities match your filters."}</Text>
+          !fromId ? <Body size={13} color={S.graphite} style={{ textAlign: "center", paddingVertical: 30 }}>Pick the engineer to transfer work from.</Body>
+          : candQ.isLoading ? <View style={{ padding: 16 }}><Skel h={64} /><Skel h={64} /></View>
+          : candQ.error ? <View style={{ padding: 16 }}><Notice>{(candQ.error as Error).message}</Notice></View>
+          : <Body size={13} color={S.graphite} style={{ textAlign: "center", paddingVertical: 30 }}>{totalAll === 0 ? "This engineer has no transferable activities." : "No activities match your filters."}</Body>
         }
       />
       {rights.canEdit && (
-        <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: 14, backgroundColor: colors.background, borderTopWidth: 1, borderTopColor: colors.border }}>
+        <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: 12, paddingRight: 120, backgroundColor: S.paper, borderTopWidth: 1.5, borderTopColor: S.ink }}>
           <Btn
             label={selected.size > 0 && toName ? `Transfer ${selected.size} to ${toName}` : "Select activities and a receiving engineer"}
-            icon={<ArrowRightLeft size={14} color="#04181d" />}
+            icon={<ArrowRightLeft size={14} color={S.paper} />}
             disabled={!canSubmit}
             busy={mutation.isPending}
             onPress={submit}

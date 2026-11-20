@@ -2321,6 +2321,81 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
   }
 });
 
+// ── Labour / Material Given By: who supplied it, from when (migration 695) ─────────────────────────────────────
+// One row per period a source supplied the activity's labour or material. The first source starts on the allocation's
+// start date; a different source saved later ends the open period today and starts the new one today. Per rung, so it
+// runs on across rework attempts (which carry the same source forward).
+const todayYmd = () => {
+  const d = new Date(Date.now() + 5.5 * 3600 * 1000); // the site's day (IST), not the server's UTC date
+  return d.toISOString().slice(0, 10);
+};
+async function syncSourceLog(pool, rungId, kind, source, contractorId, startDate, actor) {
+  const rows = (await pool.request().input("r", sql.Int, rungId).input("k", sql.NVarChar(10), kind).query(`
+    SELECT Id, Source, ContractorId, StartedOn, EndedOn FROM dbo.DependencyAssignmentSourceLog
+    WHERE RungId = @r AND Kind = @k ORDER BY StartedOn, Id
+  `)).recordset;
+  const open = rows.find((x) => x.EndedOn == null) || null;
+  const cid = source === "CONTRACTOR" && Number.isFinite(contractorId) ? contractorId : null;
+  const today = todayYmd();
+  if (!source) {
+    // Source cleared: the open period ends today.
+    if (open) {
+      await pool.request().input("id", sql.Int, open.Id).input("d", sql.Date, today).input("by", sql.NVarChar(200), actor)
+        .query("UPDATE dbo.DependencyAssignmentSourceLog SET EndedOn = @d, EndedBy = @by WHERE Id = @id");
+    }
+    return;
+  }
+  const same = open && open.Source === source && (open.ContractorId ?? null) === cid;
+  if (same) {
+    // Still the first source: it follows the allocation's start date when that is changed.
+    if (rows.length === 1 && startDate) {
+      await pool.request().input("id", sql.Int, open.Id).input("d", sql.Date, startDate)
+        .query("UPDATE dbo.DependencyAssignmentSourceLog SET StartedOn = @d WHERE Id = @id");
+    }
+    return;
+  }
+  // A new source: the open period ends today and the new one starts today — or, for the very first source, on the
+  // allocation's start date.
+  if (open) {
+    await pool.request().input("id", sql.Int, open.Id).input("d", sql.Date, today).input("by", sql.NVarChar(200), actor)
+      .query("UPDATE dbo.DependencyAssignmentSourceLog SET EndedOn = @d, EndedBy = @by WHERE Id = @id");
+  }
+  const startsOn = rows.length === 0 ? (startDate || today) : today;
+  await pool.request()
+    .input("r", sql.Int, rungId).input("k", sql.NVarChar(10), kind).input("s", sql.NVarChar(20), source)
+    .input("c", sql.Int, cid).input("d", sql.Date, startsOn).input("by", sql.NVarChar(200), actor)
+    .query(`INSERT INTO dbo.DependencyAssignmentSourceLog (RungId, Kind, Source, ContractorId, StartedOn, CreatedBy)
+            VALUES (@r, @k, @s, @c, @d, @by)`);
+}
+
+// GET /:rungId/source-log — every labour / material source period of this activity, newest first, with the
+// contractor's name and how many days it supplied (to today for the current one).
+router.get("/:rungId/source-log", authMiddleware, async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+  try {
+    const pool = await getPool();
+    const rows = (await pool.request().input("r", sql.Int, rungId).input("t", sql.Date, todayYmd()).query(`
+      SELECT l.Id, l.Kind, l.Source, l.ContractorId, ah.LHeadName AS ContractorName,
+             CONVERT(VARCHAR(10), l.StartedOn, 23) AS StartedOn, CONVERT(VARCHAR(10), l.EndedOn, 23) AS EndedOn,
+             l.CreatedBy, l.EndedBy,
+             CASE WHEN l.StartedOn > ISNULL(l.EndedOn, @t) THEN 0 ELSE DATEDIFF(DAY, l.StartedOn, ISNULL(l.EndedOn, @t)) + 1 END AS Days
+      FROM dbo.DependencyAssignmentSourceLog l
+      LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = l.ContractorId
+      WHERE l.RungId = @r
+      ORDER BY l.Kind, l.StartedOn DESC, l.Id DESC
+    `)).recordset;
+    res.json(rows.map((x) => ({
+      id: x.Id, kind: x.Kind, source: x.Source, contractorId: x.ContractorId, contractorName: x.ContractorName || null,
+      startedOn: x.StartedOn, endedOn: x.EndedOn, days: x.Days, current: x.EndedOn == null,
+      createdBy: x.CreatedBy, endedBy: x.EndedBy,
+    })));
+  } catch (err) {
+    console.error("[dependency-activity-assignment] GET /:rungId/source-log error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /:rungId — upsert the assignment for one rung: engineers, start
 // date/duration/end date, labour & material source, description, remarks,
 // and a material+quantity list. Engineers and materials are always replaced
@@ -2526,6 +2601,10 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
           VALUES (@assignmentId, @engineerId)
         `);
     }
+
+    // Who supplies the labour and the material, from when: a changed source starts its own period today.
+    await syncSourceLog(pool, rungId, "LABOUR", labourSource || null, labourContractorId, startDate || null, actor);
+    await syncSourceLog(pool, rungId, "MATERIAL", materialSource || null, materialContractorId, startDate || null, actor);
 
     // QC assignees — who will perform the quality check on this activity.
     // Simple delete-then-reinsert (unlike engineers above): there's no

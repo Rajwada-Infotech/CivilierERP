@@ -327,6 +327,8 @@ const EmployeeLeave = lazy(() => import("./pages/employee/EmployeeLeave"));
 const EmployeeHolidays = lazy(() => import("./pages/employee/EmployeeHolidays"));
 const EmployeeLoginHistory = lazy(() => import("./pages/employee/EmployeeLoginHistory"));
 const EmployeePortalAccess = lazy(() => import("./pages/hrpayroll/EmployeePortalAccess"));
+const NoticeBoardPage = lazy(() => import("./pages/hrpayroll/NoticeBoardPage"));
+const EmployeeNotices = lazy(() => import("./pages/employee/EmployeeNotices"));
 const DailyAttendanceCheck = lazy(() => import("./pages/hrpayroll/DailyAttendanceCheck"));
 const SupplierQuotationDetail = lazy(
   () => import("./pages/supplier/SupplierQuotationDetail"),
@@ -1262,6 +1264,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route path="/hr-payroll/notice-board" element={<ProtectedRoute pageKey="employee-notice"><NoticeBoardPage /></ProtectedRoute>} />
       <Route
         path="/hr-payroll/employee-portal-access"
         element={
@@ -2728,6 +2731,7 @@ function AppRoutes() {
       <Route path="/employee/attendance" element={<EmployeePortalRoute><EmployeePortalAttendance /></EmployeePortalRoute>} />
       <Route path="/employee/leave" element={<EmployeePortalRoute><EmployeeLeave /></EmployeePortalRoute>} />
       <Route path="/employee/holidays" element={<EmployeePortalRoute><EmployeeHolidays /></EmployeePortalRoute>} />
+      <Route path="/employee/notices" element={<EmployeePortalRoute><EmployeeNotices /></EmployeePortalRoute>} />
       <Route path="/employee/login-history" element={<EmployeePortalRoute><EmployeeLoginHistory /></EmployeePortalRoute>} />
 
       <Route

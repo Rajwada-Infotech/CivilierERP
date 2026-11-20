@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { View, Text, Pressable, Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CheckCircle2, AlertCircle, X } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 
 type ToastKind = "success" | "error" | "info";
@@ -28,9 +28,9 @@ export const toast: ToastApi = {
 };
 
 const TONE: Record<ToastKind, { color: string; Icon: typeof CheckCircle2 }> = {
-  success: { color: "#10b981", Icon: CheckCircle2 },
-  error: { color: colors.destructive, Icon: AlertCircle },
-  info: { color: colors.primary, Icon: AlertCircle },
+  success: { color: S.blue, Icon: CheckCircle2 },
+  error: { color: S.red, Icon: AlertCircle },
+  info: { color: S.blue, Icon: AlertCircle },
 };
 
 export function ToastProvider({ children }: PropsWithChildren) {
@@ -70,18 +70,18 @@ export function ToastProvider({ children }: PropsWithChildren) {
                 <View
                   style={{
                     flexDirection: "row", alignItems: "flex-start", gap: 9,
-                    backgroundColor: colors.card, borderRadius: 12,
-                    borderWidth: 1, borderColor: `${color}55`,
+                    backgroundColor: S.paper, borderRadius: 0,
+                    borderWidth: 1.5, borderColor: color === S.red ? S.red : S.ink,
                     paddingVertical: 10, paddingHorizontal: 12,
                     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8,
                   }}
                 >
                   <Icon size={16} color={color} style={{ marginTop: 1 }} />
-                  <Text style={{ flex: 1, color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium, lineHeight: 17 }}>
+                  <Text style={{ flex: 1, color: S.ink, fontSize: 12.5, fontFamily: fonts.body.medium, lineHeight: 17 }}>
                     {t.message}
                   </Text>
                   <Pressable onPress={() => remove(t.id)} hitSlop={8}>
-                    <X size={13} color={colors.mutedForeground} />
+                    <X size={13} color={S.graphite} />
                   </Pressable>
                 </View>
               </Row>

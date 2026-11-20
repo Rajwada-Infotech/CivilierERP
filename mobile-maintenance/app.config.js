@@ -1,15 +1,17 @@
 // google-services.json is not committed (it holds the Firebase API key). EAS builds receive its path through the
-// GOOGLE_SERVICES_JSON file secret; local runs fall back to the git-ignored ./google-services.json next to app.json.
-// Without either (a local Expo Go run), no Firebase file is set: Expo Go doesn't need it, and naming a missing file
-// stops Expo from reading this config at all.
+// GOOGLE_SERVICES_JSON file secret; a local run uses the git-ignored ./google-services.json next to app.json when it
+// is there. When neither exists (Expo Go on a machine without the file) the key is left out altogether: pointing at a
+// missing file makes every start print "Could not parse Expo config: android.googleServicesFile", and Expo Go has no
+// remote push to configure anyway.
 const fs = require("fs");
 const path = require("path");
 
 module.exports = ({ config }) => {
-  const file = process.env.GOOGLE_SERVICES_JSON || config.android?.googleServicesFile || "./google-services.json";
-  const exists = path.isAbsolute(file) ? fs.existsSync(file) : fs.existsSync(path.join(__dirname, file));
-  const android = { ...config.android };
-  if (exists || process.env.GOOGLE_SERVICES_JSON) android.googleServicesFile = file;
-  else delete android.googleServicesFile;
-  return { ...config, android };
+  const local = path.join(__dirname, "google-services.json");
+  const googleServicesFile = process.env.GOOGLE_SERVICES_JSON || (fs.existsSync(local) ? "./google-services.json" : undefined);
+  const { googleServicesFile: _ignored, ...android } = config.android ?? {};
+  return {
+    ...config,
+    android: googleServicesFile ? { ...android, googleServicesFile } : android,
+  };
 };

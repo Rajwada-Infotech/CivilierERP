@@ -53,8 +53,15 @@ export interface ItemLedgerRow {
 export interface ItemLedgerResponse {
   itemId: string;
   godownId: number | null;
+  /** The first day of the period; everything before it is the opening stock. */
+  periodStart?: string;
   data: ItemLedgerRow[];
   total: number;
+  /** Opening stock: the balance of every movement before the period. */
+  opening?: number;
+  /** How many movements make up the opening stock, and the latest of them (up to 300). */
+  earlierCount?: number;
+  earlier?: ItemLedgerRow[];
 }
 
 export const getItemStockLedger = async (

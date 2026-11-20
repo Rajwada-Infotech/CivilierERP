@@ -13,6 +13,7 @@ import {
   type TextInputProps,
   type TextStyle,
   type ViewStyle,
+  type TextInputInstance,
 } from "react-native";
 import Svg, { Defs, Line, Path, Pattern, Rect } from "react-native-svg";
 import { sheet as S } from "@/theme/colors";
@@ -221,7 +222,7 @@ export const Field: React.FC<{ label: string; required?: boolean; children: Reac
 );
 
 /** A text input: square, a 40% ink border that goes full ink on focus, paper inside. */
-export const Input = React.forwardRef<TextInput, TextInputProps & { right?: React.ReactNode }>(function Input({ right, style, onFocus, onBlur, ...props }, ref) {
+export const Input = React.forwardRef<TextInputInstance, TextInputProps & { right?: React.ReactNode }>(function Input({ right, style, onFocus, onBlur, ...props }, ref) {
   const [focused, setFocused] = useState(false);
   return (
     <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: focused ? S.ink : S.line40, backgroundColor: S.paper }}>

@@ -27,3 +27,10 @@ export function usePageRights(pageKey: string) {
       ),
   };
 }
+
+/** Deleting an activity photo or a checkpoint's daily update: Delete on Reporting or Work Done (the server's rule). */
+export function useCanDeleteDprWork(): boolean {
+  const reporting = usePageRights("civilworkdpr-activity-reporting").canDelete;
+  const workDone = usePageRights("civilworkdpr-work-done").canDelete;
+  return reporting || workDone;
+}

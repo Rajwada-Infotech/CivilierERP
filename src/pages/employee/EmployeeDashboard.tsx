@@ -1,6 +1,8 @@
 // Employee Portal dashboard, laid out as a soft bento grid: a welcome line with this month's numbers and leave-usage bars,
 // then the profile photo, weekly hours, the live time tracker and leave usage, then summaries, the month calendar and the
 // dark leave-applications list. On a phone the cards stack, time tracker first.
+import { NoticeItem, useNotices } from "./EmployeeNotices";
+import { Link } from "react-router-dom";
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getPortalAttendance, getPortalLeaveBalances, getPortalPayslips, getPortalProfile } from "@/api/employeePortalApi";
@@ -24,6 +26,21 @@ function Pill({ label, pct, tone }: { label: string; pct: number; tone: "ink" | 
 
 function BigNumber({ value, label }: { value: React.ReactNode; label: string }) {
   return <div className="text-right"><p className="font-heading text-3xl sm:text-4xl font-bold tabular-nums leading-none">{value}</p><p className="text-xs text-muted-foreground mt-1">{label}</p></div>;
+}
+
+/** Live notices from HR (pinned / important first); unread ones are bold with a dot. */
+function LatestNotices() {
+  const { data, openId, toggle } = useNotices();
+  const list = (data ?? []).slice(0, 4);
+  if (!list.length) return null;
+  const unread = (data ?? []).filter((n) => !n.IsRead).length;
+  return (
+    <section className="ep-card mb-4" aria-label="Notices">
+      <div className="flex items-center justify-between px-5 pt-4"><h2 className="font-heading text-base font-bold">Notices{unread ? ` · ${unread} new` : ""}</h2>
+        <Link to="/employee/notices" className="text-xs font-bold underline underline-offset-2">View all</Link></div>
+      <ul className="divide-y divide-foreground/10 pb-1">{list.map((n) => <NoticeItem key={n.NoticeId} n={n} open={openId === n.NoticeId} onOpen={() => toggle(n)} />)}</ul>
+    </section>
+  );
 }
 
 export default function EmployeeDashboard() {
@@ -61,6 +78,8 @@ export default function EmployeeDashboard() {
           <BigNumber value={summary ? `${summary.BreakMinutes}m` : "–"} label="Break time" />
         </div>
       </div>
+
+      <LatestNotices />
 
       {/* Row 1 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">

@@ -1,117 +1,150 @@
-// Civil Work DPR dashboard — built to answer "what needs me right now?" before "how are we doing?":
-//   1. Hero: overall progress of live work, completion rate, and this week's finished work vs last week.
-//   2. Needs attention: overdue · due in 2 days · rework · on hold — tap one to open exactly that list.
-//   3. Quality & approval queues.
-//   4. The pipeline: where every live activity sits, in one bar.
-//   5. Most overdue activities, progress by project, engineer workload, today's site labour, 14-day trend.
-// Every number comes from GET /api/civilworkdpr-dashboard and counts each activity's CURRENT attempt only
-// (a reworked activity isn't counted twice), scoped to the signed-in user's projects by the server.
-import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, TouchableOpacity, View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+// The Civil Work DPR dashboard on the drawing sheet, as the Admin and Finance apps draw theirs: the title block with the
+// drawing's corner box (date, when read, Re-read), then lettered details that answer "what needs me now?" first:
+//   A Needs attention   overdue · due in 2 days · rework · on hold — each opens exactly that list
+//   B Progress          live work's average progress, the completion rate, finished this week against last week
+//   C Quality & approval awaiting QC, waiting for approval (shown to those who can open Quality Check)
+//   D Work pipeline     where every activity sits, in one measured bar; a status opens its list
+//   E Most overdue      the activities furthest past their end date
+//   F Projects          progress per project, with its overdue count
+//   G Engineers         live work per engineer, overdue in red
+//   H On site today     skilled, unskilled, crews reporting
+//   I Last 14 days      activities completed per day, newly allocated drawn over it
+// Every number comes from GET /api/civilworkdpr-dashboard and counts each activity's CURRENT attempt only, scoped to the
+// signed-in user's projects by the server. Re-read every minute and on pull-down.
+import { useState } from "react";
+import { RefreshControl, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import Svg, { Line, Rect, Text as SvgText } from "react-native-svg";
 import { useNavigation } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
-import {
-  AlertTriangle, ArrowDownRight, ArrowUpRight, BadgeCheck, CalendarClock, CheckCircle2, ChevronRight,
-  HardHat, Hourglass, PauseCircle, RotateCcw, ShieldCheck, TrendingUp, Users,
-} from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { ChevronRight } from "lucide-react-native";
+import { colors, sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
-import { RadialGauge } from "@/components/charts/RadialGauge";
-import { TrendLineChart } from "@/components/charts/TrendLineChart";
-import { STATUS_COLOR, STATUS_LABEL } from "@/components/StatusPill";
+import { STATUS_LABEL } from "@/components/StatusPill";
 import { getCwdDashboard, type CwdDashboard } from "@/api/cwdApi";
 import { usePageRights } from "@/hooks/usePageRights";
+import { AnimatedPath, Body, Detail, Grow, Label, Notice, Press, SheetFrame, Skel, Tick, TitleText, useDraw } from "@/components/sheet/Sheet";
 
-const ACCENT = "#0891b2";
-const RED = "#ef4444";
-const AMBER = "#f59e0b";
-const FUCHSIA = "#d946ef";
-const VIOLET = "#8b5cf6";
-const TEAL = "#14b8a6";
-
-type IconType = React.ComponentType<{ size?: number; color?: string }>;
 type Nav = { navigate: (name: string, params?: object) => void };
+const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n);
+const share = (part: number, whole: number) => (whole > 0 ? Math.min(100, Math.max(0, (part / whole) * 100)) : 0);
 
-const card = { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border } as const;
-
-function Title({ children, action, onAction }: { children: string; action?: string; onAction?: () => void }) {
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 22, marginBottom: 10 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <View style={{ width: 3, height: 13, borderRadius: 2, backgroundColor: ACCENT }} />
-        <Text style={{ fontSize: 10.5, fontFamily: fonts.heading.bold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 1.8 }}>{children}</Text>
-      </View>
-      {action && onAction && (
-        <Pressable onPress={onAction} hitSlop={8} style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
-          <Text style={{ fontSize: 11, fontFamily: fonts.heading.semibold, color: ACCENT }}>{action}</Text>
-          <ChevronRight size={12} color={ACCENT} />
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-// A tappable count tile: coloured edge, big number, plain-language caption.
-function Tile({ label, value, caption, icon: Icon, color, onPress, quiet }: {
-  label: string; value: number; caption: string; icon: IconType; color: string; onPress?: () => void; quiet?: boolean;
-}) {
-  const live = value > 0 && !quiet;
-  return (
-    <TouchableOpacity
-      activeOpacity={0.8}
-      onPress={onPress}
-      style={{ ...card, flex: 1, padding: 14, overflow: "hidden", borderColor: live ? `${color}55` : colors.border }}
-    >
-      <View style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, backgroundColor: live ? color : colors.border }} />
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.bold, color: live ? color : colors.mutedForeground, textTransform: "uppercase", letterSpacing: 1 }}>{label}</Text>
-        <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: `${color}${live ? "22" : "12"}`, alignItems: "center", justifyContent: "center" }}>
-          <Icon size={13} color={live ? color : colors.mutedForeground} />
-        </View>
-      </View>
-      <Text style={{ fontSize: 28, fontFamily: fonts.heading.bold, color: live ? colors.foreground : colors.mutedForeground, fontVariant: ["tabular-nums"], lineHeight: 32 }}>{value}</Text>
-      <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>{caption}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function Bar({ value, color, height = 6 }: { value: number; color: string; height?: number }) {
-  return (
-    <View style={{ height, borderRadius: height / 2, backgroundColor: colors.muted, overflow: "hidden" }}>
-      <View style={{ width: `${Math.max(0, Math.min(100, value))}%`, height, backgroundColor: color, borderRadius: height / 2 }} />
-    </View>
-  );
-}
-
-const greeting = () => {
-  const h = new Date().getHours();
-  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+// Pipeline statuses in order, each drawn in a tone of the sheet: settled work blue, under way ink, stopped red.
+const PIPELINE = ["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "REWORK", "COMPLETED", "APPROVED"] as const;
+type Stage = (typeof PIPELINE)[number];
+const STAGE_TONE: Record<Stage, string> = {
+  PENDING: S.line15,
+  ALLOCATED: S.line40,
+  IN_PROGRESS: S.ink,
+  HOLD: S.graphite,
+  REWORK: S.red,
+  COMPLETED: S.blueTint,
+  APPROVED: S.blue,
 };
+
+/** A big figure that counts up, with its capital label above and a note under it. */
+function BigFigure({ label, value, note, suffix = "", red, size = 40 }: { label: string; value: number; note?: string; suffix?: string; red?: boolean; size?: number }) {
+  return (
+    <View>
+      <Label color={red ? S.red : S.graphite}>{label}</Label>
+      <Text style={{ fontFamily: fonts.heading.semibold, fontSize: size, lineHeight: size * 1.05, letterSpacing: -size * 0.03, color: red ? S.red : S.ink, marginTop: 8, fontVariant: ["tabular-nums"] }}>
+        <Tick value={value} />
+        {suffix}
+      </Text>
+      {!!note && <Body size={11.5} color={S.graphite} style={{ marginTop: 4 }}>{note}</Body>}
+    </View>
+  );
+}
+
+/** One cell of a ruled 2×2 grid of counts; the whole cell opens its list. Red when a count that matters is above zero. */
+function CountCell({ label, value, note, alarm, onPress, right, bottom }: { label: string; value: number; note: string; alarm?: boolean; onPress?: () => void; right?: boolean; bottom?: boolean }) {
+  const red = alarm && value > 0;
+  return (
+    <Press
+      onPress={onPress}
+      disabled={!onPress}
+      style={(pressed) => ({
+        width: "50%", padding: 12, gap: 6,
+        borderLeftWidth: right ? 1 : 0, borderLeftColor: S.rule,
+        borderTopWidth: bottom ? 1 : 0, borderTopColor: S.rule,
+        backgroundColor: pressed ? S.blueWash : "transparent",
+      })}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <Label color={red ? S.red : S.graphite} style={{ flex: 1 }}>{label}</Label>
+        {onPress && <ChevronRight size={12} color={S.graphite} />}
+      </View>
+      <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 28, letterSpacing: -0.8, color: red ? S.red : value ? S.ink : S.graphite, fontVariant: ["tabular-nums"] }}>
+        <Tick value={value} />
+      </Text>
+      <Body size={11} color={S.graphite}>{note}</Body>
+    </Press>
+  );
+}
+
+/** A horizontal bar: name, a track scaled to `max`, the filled part, its label at the end. */
+function BarRow({ name, value, max, label, color = S.ink, note }: { name: string; value: number; max: number; label: string; color?: string; note?: string }) {
+  return (
+    <View style={{ gap: 4 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.body.semibold, fontSize: 13, color: S.ink }}>{name}</Text>
+        <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 12.5, color: S.ink, fontVariant: ["tabular-nums"] }}>{label}</Text>
+      </View>
+      <View style={{ height: 10, backgroundColor: S.line15 }}>
+        <Grow style={{ height: "100%", width: `${share(value, max)}%`, backgroundColor: color }} />
+      </View>
+      {!!note && <Body size={11} color={S.graphite}>{note}</Body>}
+    </View>
+  );
+}
+
+/** The last 14 days: a bar per day for activities completed, with the newly allocated drawn as a line over them. */
+function TwoWeeks({ rows, width }: { rows: CwdDashboard["assignmentTimeline"]; width: number }) {
+  const W = Math.max(200, width);
+  const H = 132;
+  const pad = 4;
+  const base = H - 22;
+  const top = 18;
+  const max = Math.max(1, ...rows.map((r) => Math.max(r.completed, r.assigned)));
+  const slot = rows.length ? (W - pad * 2) / rows.length : 0;
+  const cx = (i: number) => pad + slot * i + slot / 2;
+  const y = (v: number) => base - (v / max) * (base - top);
+  const line = rows.map((r, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${y(r.assigned).toFixed(1)}`).join(" ");
+  const len = rows.reduce((acc, r, i) => (i ? acc + Math.hypot(slot, y(r.assigned) - y(rows[i - 1].assigned)) : 0), 0) + 2;
+  const dash = useDraw(len);
+  const day = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric" });
+  return (
+    <Svg width={W} height={H}>
+      <Line x1={pad} x2={W - pad} y1={base} y2={base} stroke={S.ink} />
+      <Line x1={pad} x2={W - pad} y1={top} y2={top} stroke={S.rule} strokeDasharray="2 5" />
+      {rows.map((r, i) => {
+        const h = base - y(r.completed);
+        const w = Math.min(14, slot * 0.55);
+        return <Rect key={r.date} x={cx(i) - w / 2} y={base - h} width={w} height={h} fill={S.blue} />;
+      })}
+      <AnimatedPath d={line} fill="none" stroke={S.ink} strokeWidth={1.5} strokeLinejoin="round" strokeDasharray={`${len} ${len}`} strokeDashoffset={dash} />
+      {rows.map((r, i) => (i === 0 || i === rows.length - 1 || i === Math.floor(rows.length / 2) ? (
+        <Line key={`t${r.date}`} x1={cx(i)} x2={cx(i)} y1={base} y2={base + 4} stroke={S.ink} />
+      ) : null))}
+      {/* Day numbers at the start, middle and end. */}
+      {[0, Math.floor(rows.length / 2), rows.length - 1].filter((i, k, a) => rows[i] && a.indexOf(i) === k).map((i) => (
+        <SvgLabel key={`l${i}`} x={cx(i)} y={base + 16} text={day(rows[i].date)} />
+      ))}
+    </Svg>
+  );
+}
+
+function SvgLabel({ x, y, text }: { x: number; y: number; text: string }) {
+  return <SvgText x={x} y={y} textAnchor="middle" fontFamily={fonts.heading.semibold} fontSize={9.5} fill={S.graphite}>{text}</SvgText>;
+}
 
 export default function DashboardScreen() {
   const rights = usePageRights("civilworkdpr-dashboard");
   const qcRights = usePageRights("civilworkdpr-quality-check");
   const { currentUser } = useAuth();
-  const navigation = useNavigation<Nav>();
   const [refreshing, setRefreshing] = useState(false);
   const q = useQuery({ queryKey: ["cwd-dashboard"], queryFn: getCwdDashboard, staleTime: 30_000, refetchInterval: 60_000, enabled: rights.canView });
-  const d = q.data;
-
-  const trend = useMemo(() => (d?.assignmentTimeline ?? []).map((p) => ({ date: p.date, amount: p.completed })), [d]);
-  const openList = (filter: string) => navigation.navigate("Activities", { filter });
-
-  if (!rights.canView) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center", padding: 32 }}>
-        <Text style={{ color: colors.foreground, fontFamily: fonts.heading.semibold, fontSize: 14 }}>No access</Text>
-        <Text style={{ color: colors.mutedForeground, fontFamily: fonts.body.regular, fontSize: 12, marginTop: 4, textAlign: "center" }}>
-          You don't have permission to view the Civil Work DPR dashboard.
-        </Text>
-      </View>
-    );
-  }
+  const readAt = q.dataUpdatedAt ? new Date(q.dataUpdatedAt) : new Date();
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -122,234 +155,246 @@ export default function DashboardScreen() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 110 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
+      contentContainerStyle={{ paddingBottom: 110 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={S.ink} />}
     >
-      {q.isLoading ? (
-        <View style={{ paddingVertical: 80, alignItems: "center" }}><ActivityIndicator color={colors.mutedForeground} /></View>
-      ) : q.error || !d ? (
-        <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular }}>{(q.error as Error)?.message || "Couldn't load the dashboard."}</Text>
-      ) : (
-        <Content d={d} firstName={(currentUser?.name ?? "").split(" ")[0]} trend={trend} openList={openList} showQc={qcRights.canView} />
-      )}
+      <SheetFrame>
+        {/* Title block, with the drawing's corner box: date, when read, Re-read. */}
+        <View>
+          <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 18, gap: 8 }}>
+            <Label>CivilierERP · Civil Work DPR{currentUser?.name ? ` · ${currentUser.name.split(" ")[0]}` : ""}</Label>
+            <TitleText size={30}>Site progress</TitleText>
+            <Body size={13} color={S.ink2}>What is overdue or stuck, how far the live work has come, and who is on site today.</Body>
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", borderTopWidth: 1, borderTopColor: S.ink }}>
+            <View style={{ width: "100%", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ink, gap: 3 }}>
+              <Label>Date</Label>
+              <Body size={13}>{readAt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</Body>
+            </View>
+            <View style={{ width: "50%", paddingHorizontal: 14, paddingVertical: 10, borderRightWidth: 1, borderRightColor: S.ink, gap: 3 }}>
+              <Label>Read at</Label>
+              <Body size={13}>{readAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</Body>
+            </View>
+            <Press onPress={() => void q.refetch()} disabled={q.isFetching || !rights.canView} style={(pressed) => ({ width: "50%", paddingHorizontal: 14, paddingVertical: 10, justifyContent: "flex-end", backgroundColor: pressed ? S.blueWash : "transparent" })}>
+              <Label color={S.blue}>{q.isFetching ? "Reading…" : "Re-read"}</Label>
+            </Press>
+          </View>
+        </View>
+
+        {!rights.canView ? (
+          <View style={{ borderTopWidth: 1, borderTopColor: S.rule, padding: 14 }}>
+            <Notice tone="ink">You don't have permission to view the Civil Work DPR dashboard. Ask your administrator if you need access.</Notice>
+          </View>
+        ) : q.isLoading ? (
+          <View style={{ borderTopWidth: 1, borderTopColor: S.rule, padding: 14 }}>
+            <Skel h={110} />
+            <Skel h={80} />
+            <Skel h={60} />
+          </View>
+        ) : q.isError || !q.data ? (
+          <View style={{ borderTopWidth: 1, borderTopColor: S.rule, padding: 14 }}>
+            <Notice>{(q.error as Error)?.message || "Could not load the dashboard."} Use Re-read or pull down to try again.</Notice>
+          </View>
+        ) : null}
+
+        {rights.canView && q.data ? <Content d={q.data} showQc={qcRights.canView} /> : null}
+      </SheetFrame>
     </ScrollView>
   );
 }
 
-function Content({ d, firstName, trend, openList, showQc }: {
-  d: CwdDashboard; firstName: string; trend: { date: string; amount: number }[]; openList: (f: string) => void; showQc: boolean;
-}) {
+function Content({ d, showQc }: { d: CwdDashboard; showQc: boolean }) {
   const navigation = useNavigation<Nav>();
+  const { width } = useWindowDimensions();
+  const openList = (filter: string) => navigation.navigate("Activities", { filter });
   const by = d.current.byStatus;
   const n = (s: keyof typeof by) => by[s] ?? 0;
   const ins = d.insights;
   const progress = ins.avgProgress ?? 0;
   const delta = ins.doneThisWeek - ins.doneLastWeek;
   const allClear = ins.overdue + ins.dueSoon + n("REWORK") + n("HOLD") === 0;
-
-  const pipeline = (["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "REWORK", "COMPLETED", "APPROVED"] as const)
-    .map((s) => ({ key: s, count: n(s) }))
-    .filter((p) => p.count > 0);
+  const pipeline = PIPELINE.map((s) => ({ key: s, count: n(s) })).filter((p) => p.count > 0);
   const pipelineTotal = pipeline.reduce((a, p) => a + p.count, 0);
+  const engMax = Math.max(1, ...d.engineerLoad.map((x) => x.active));
+  const done14 = d.assignmentTimeline.reduce((a, p) => a + p.completed, 0);
+  const new14 = d.assignmentTimeline.reduce((a, p) => a + p.assigned, 0);
+  // The sheet sits 5 + 3 + 1.5 in from each side and the detail 14 more: what is left for the chart.
+  const chartW = width - 2 * (5 + 1 + 3 + 1.5 + 14);
+
+  let tag = 0;
+  const next = () => String.fromCharCode(65 + tag++);
 
   return (
     <>
-      {/* ── Hero ───────────────────────────────────────────────────────────── */}
-      <LinearGradient colors={["#0b2a33", "#0e3b49", "#0b2a33"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ borderRadius: 20, padding: 18, borderWidth: 1, borderColor: `${ACCENT}44` }}>
-        <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: "rgba(165,243,252,0.75)" }}>
-          {greeting()}{firstName ? `, ${firstName}` : ""}
+      <Detail tag={next()} title="Needs attention" note={allClear ? "All clear" : "Tap to open"}>
+        {allClear ? (
+          <Body size={13} color={S.graphite}>Nothing is overdue, due soon, on hold or sent back for rework.</Body>
+        ) : (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", borderWidth: 1, borderColor: S.ink }}>
+            <CountCell label="Overdue" value={ins.overdue} note="past their end date" alarm onPress={() => openList("OVERDUE")} />
+            <CountCell label="Due soon" value={ins.dueSoon} note="finish within 2 days" right onPress={() => openList("DUE_SOON")} />
+            <CountCell label="Rework" value={n("REWORK")} note="sent back by QC" alarm bottom onPress={() => openList("REWORK")} />
+            <CountCell label="On hold" value={n("HOLD")} note="paused, clock running" right bottom onPress={() => openList("HOLD")} />
+          </View>
+        )}
+      </Detail>
+
+      <Detail tag={next()} title="Progress" note={`${fmtNum(d.current.active)} live`}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", columnGap: 30, rowGap: 14 }}>
+          <BigFigure label="Live work" value={progress} suffix="%" note="average progress" />
+          <BigFigure label="Completion" value={d.current.completionRate} suffix="%" note="of all work" size={30} />
+        </View>
+        <View style={{ marginTop: 18, height: 14, borderWidth: 1.5, borderColor: S.ink, backgroundColor: S.paper }}>
+          <Grow style={{ height: "100%", width: `${share(d.current.completionRate, 100)}%`, backgroundColor: S.blue }} />
+        </View>
+        <Text style={{ fontFamily: fonts.body.regular, fontSize: 12, color: S.graphite, marginTop: 10 }}>
+          <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{fmtNum(ins.doneThisWeek)}</Text>
+          {" finished this week · "}
+          <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{fmtNum(ins.doneLastWeek)}</Text>
+          {" last week · "}
+          <Text style={{ fontFamily: fonts.heading.semibold, color: delta < 0 ? S.red : S.ink }}>{delta > 0 ? `+${delta}` : delta}</Text>
         </Text>
-        <Text style={{ fontSize: 17, fontFamily: fonts.heading.bold, color: "#ecfeff", marginTop: 2 }}>
-          {d.current.active} live {d.current.active === 1 ? "activity" : "activities"} on site
-        </Text>
+      </Detail>
 
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginTop: 14 }}>
-          <RadialGauge progress={progress / 100} size={104} strokeWidth={11} color="#22d3ee" trackColor="rgba(255,255,255,0.10)" centerValue={`${progress}%`} centerLabel="progress" />
-          <View style={{ flex: 1, gap: 12 }}>
-            <View>
-              <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.bold, color: "rgba(165,243,252,0.6)", textTransform: "uppercase", letterSpacing: 1.2 }}>Completion rate</Text>
-              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6, marginTop: 2 }}>
-                <Text style={{ fontSize: 22, fontFamily: fonts.heading.bold, color: "#ecfeff" }}>{d.current.completionRate}%</Text>
-                <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: "rgba(165,243,252,0.6)" }}>of all work</Text>
-              </View>
-              <View style={{ marginTop: 5 }}><Bar value={d.current.completionRate} color="#22d3ee" height={5} /></View>
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: delta >= 0 ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)", flexDirection: "row", alignItems: "center", gap: 3 }}>
-                {delta >= 0 ? <ArrowUpRight size={11} color="#34d399" /> : <ArrowDownRight size={11} color="#f87171" />}
-                <Text style={{ fontSize: 10.5, fontFamily: fonts.heading.bold, color: delta >= 0 ? "#34d399" : "#f87171" }}>{delta > 0 ? `+${delta}` : delta}</Text>
-              </View>
-              <Text style={{ flex: 1, fontSize: 10.5, fontFamily: fonts.body.regular, color: "rgba(236,254,255,0.8)" }}>
-                {ins.doneThisWeek} finished this week · {ins.doneLastWeek} last week
-              </Text>
-            </View>
-          </View>
-        </View>
-      </LinearGradient>
-
-      {/* ── Needs attention ────────────────────────────────────────────────── */}
-      <Title>Needs attention</Title>
-      {allClear ? (
-        <View style={{ ...card, padding: 16, flexDirection: "row", alignItems: "center", gap: 12, borderColor: "#10b98155" }}>
-          <CheckCircle2 size={22} color="#10b981" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Everything is on track</Text>
-            <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 1 }}>Nothing overdue, due soon, on hold or sent back for rework.</Text>
-          </View>
-        </View>
-      ) : (
-        <View style={{ gap: 10 }}>
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            <Tile label="Overdue" value={ins.overdue} caption="past their end date" icon={AlertTriangle} color={RED} onPress={() => openList("OVERDUE")} />
-            <Tile label="Due soon" value={ins.dueSoon} caption="finish within 2 days" icon={CalendarClock} color={AMBER} onPress={() => openList("DUE_SOON")} />
-          </View>
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            <Tile label="Rework" value={n("REWORK")} caption="sent back by QC" icon={RotateCcw} color={FUCHSIA} onPress={() => openList("REWORK")} />
-            <Tile label="On hold" value={n("HOLD")} caption="paused, clock running" icon={PauseCircle} color={AMBER} onPress={() => openList("HOLD")} />
-          </View>
-        </View>
-      )}
-
-      {/* ── Queues ─────────────────────────────────────────────────────────── */}
       {showQc && (
-        <>
-          <Title>Quality &amp; approval</Title>
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            <Tile label="Awaiting QC" value={ins.awaitingQc} caption="completed, not yet checked" icon={ShieldCheck} color={VIOLET} onPress={() => navigation.navigate("QualityCheck")} />
-            <Tile label="To approve" value={ins.awaitingApproval} caption="QC passed" icon={BadgeCheck} color={TEAL} onPress={() => openList("COMPLETED")} />
+        <Detail tag={next()} title="Quality & approval">
+          <View style={{ flexDirection: "row", flexWrap: "wrap", borderWidth: 1, borderColor: S.ink }}>
+            <CountCell label="Awaiting QC" value={ins.awaitingQc} note="completed, not yet checked" onPress={() => navigation.navigate("QualityCheck")} />
+            <CountCell label="To approve" value={ins.awaitingApproval} note="QC passed" right onPress={() => openList("COMPLETED")} />
           </View>
-        </>
+        </Detail>
       )}
 
-      {/* ── Pipeline ───────────────────────────────────────────────────────── */}
-      <Title action="All activities" onAction={() => openList("ALL")}>Work pipeline</Title>
-      <View style={{ ...card, padding: 14 }}>
+      <Detail tag={next()} title="Work pipeline" note={pipelineTotal ? `${fmtNum(pipelineTotal)} activities` : undefined}>
         {pipelineTotal === 0 ? (
-          <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 12 }}>No allocated work yet.</Text>
+          <Body size={13} color={S.graphite}>No allocated work yet.</Body>
         ) : (
           <>
-            <View style={{ flexDirection: "row", height: 12, borderRadius: 6, overflow: "hidden", gap: 2 }}>
-              {pipeline.map((p) => (<View key={p.key} style={{ flex: p.count, backgroundColor: STATUS_COLOR[p.key] }} />))}
+            <View style={{ height: 30, flexDirection: "row", borderWidth: 1.5, borderColor: S.ink, backgroundColor: S.paper, overflow: "hidden" }}>
+              {pipeline.map((p, i) => (
+                <Grow key={p.key} delay={i * 60} style={{ height: "100%", width: `${share(p.count, pipelineTotal)}%`, backgroundColor: STAGE_TONE[p.key] }} />
+              ))}
             </View>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 12, rowGap: 8 }}>
-              {pipeline.map((p) => (
-                <Pressable key={p.key} onPress={() => openList(p.key)} style={{ width: "50%", flexDirection: "row", alignItems: "center", gap: 7 }}>
-                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: STATUS_COLOR[p.key] }} />
-                  <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, flex: 1 }}>{STATUS_LABEL[p.key]}</Text>
-                  <Text style={{ fontSize: 12, fontFamily: fonts.heading.bold, color: colors.foreground, marginRight: 12, fontVariant: ["tabular-nums"] }}>{p.count}</Text>
-                </Pressable>
+            <View style={{ marginTop: 12 }}>
+              {pipeline.map((p, i) => (
+                <Press
+                  key={p.key}
+                  onPress={() => openList(p.key)}
+                  style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderTopWidth: i ? 1 : 0, borderTopColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
+                >
+                  <View style={{ width: 10, height: 10, backgroundColor: STAGE_TONE[p.key], borderWidth: 1, borderColor: S.ink }} />
+                  <Body size={13} style={{ flex: 1 }}>{STATUS_LABEL[p.key]}</Body>
+                  <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 13, color: S.ink, fontVariant: ["tabular-nums"] }}>{fmtNum(p.count)}</Text>
+                  <ChevronRight size={12} color={S.graphite} />
+                </Press>
               ))}
             </View>
           </>
         )}
-      </View>
+        <Press onPress={() => openList("ALL")} style={(pressed) => ({ marginTop: 14, minHeight: 40, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: S.ink, backgroundColor: pressed ? S.blueWash : "transparent" })}>
+          <Label color={S.ink}>Open all activities</Label>
+        </Press>
+      </Detail>
 
-      {/* ── Most overdue ───────────────────────────────────────────────────── */}
       {d.overdueList.length > 0 && (
-        <>
-          <Title action="See all" onAction={() => openList("OVERDUE")}>Most overdue</Title>
-          <View style={{ ...card, overflow: "hidden" }}>
-            {d.overdueList.map((o, i) => (
-              <TouchableOpacity
-                key={o.rungId}
-                activeOpacity={0.7}
-                onPress={() => navigation.navigate("ActivityDetail", { rungId: o.rungId })}
-                style={{ padding: 13, flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: i ? 1 : 0, borderTopColor: colors.border }}
-              >
-                <View style={{ minWidth: 46, alignItems: "center", paddingVertical: 5, borderRadius: 10, backgroundColor: `${RED}18` }}>
-                  <Text style={{ fontSize: 15, fontFamily: fonts.heading.bold, color: RED, fontVariant: ["tabular-nums"] }}>{o.daysOverdue}</Text>
-                  <Text style={{ fontSize: 8.5, fontFamily: fonts.heading.bold, color: RED, textTransform: "uppercase" }}>{o.daysOverdue === 1 ? "day" : "days"}</Text>
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{o.activityName ?? "Activity"}</Text>
-                  <Text numberOfLines={1} style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 1 }}>
-                    {[o.projectName, o.scopePath].filter(Boolean).join(" · ")}
-                  </Text>
-                  <Text numberOfLines={1} style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 1 }}>
-                    {o.engineerNames || "No engineer"} · {o.progressPercent}% done
-                  </Text>
-                </View>
-                <ChevronRight size={14} color={colors.mutedForeground} />
-              </TouchableOpacity>
-            ))}
+        <Detail tag={next()} title="Most overdue" note={`${fmtNum(ins.overdue)} in all`}>
+          <View style={{ flexDirection: "row", paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: S.ink }}>
+            <Label style={{ flex: 1 }}>Activity · where · who</Label>
+            <Label>Late</Label>
           </View>
-        </>
-      )}
-
-      {/* ── Projects ───────────────────────────────────────────────────────── */}
-      {d.projects.length > 0 && (
-        <>
-          <Title>Progress by project</Title>
-          <View style={{ ...card, padding: 14, gap: 16 }}>
-            {d.projects.map((p) => (
-              <View key={p.name}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-                  <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{p.name}</Text>
-                  {p.overdue > 0 && (
-                    <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: `${RED}18` }}>
-                      <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.bold, color: RED }}>{p.overdue} overdue</Text>
-                    </View>
-                  )}
-                  <Text style={{ fontSize: 13, fontFamily: fonts.heading.bold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{p.avgProgress}%</Text>
-                </View>
-                <Bar value={p.avgProgress} color={p.overdue > 0 ? AMBER : ACCENT} />
-                <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 5 }}>
-                  {p.done} of {p.total} activities done · {p.inProgress} in progress
-                </Text>
+          {d.overdueList.map((o) => (
+            <Press
+              key={o.rungId}
+              onPress={() => navigation.navigate("ActivityDetail", { rungId: o.rungId })}
+              style={(pressed) => ({ flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
+            >
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text numberOfLines={1} style={{ fontFamily: fonts.body.semibold, fontSize: 13, color: S.ink }}>{o.activityName ?? "Activity"}</Text>
+                <Text numberOfLines={1} style={{ fontFamily: fonts.body.regular, fontSize: 11.5, color: S.graphite, marginTop: 1 }}>{[o.projectName, o.scopePath].filter(Boolean).join(" · ")}</Text>
+                <Text numberOfLines={1} style={{ fontFamily: fonts.body.regular, fontSize: 11.5, color: S.ink2, marginTop: 2 }}>{o.engineerNames || "No engineer"} · {o.progressPercent}% done</Text>
               </View>
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 16, color: S.red, fontVariant: ["tabular-nums"] }}>{o.daysOverdue}</Text>
+                <Label color={S.red}>{o.daysOverdue === 1 ? "day" : "days"}</Label>
+              </View>
+            </Press>
+          ))}
+          <Press onPress={() => openList("OVERDUE")} style={(pressed) => ({ marginTop: 14, minHeight: 40, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: S.ink, backgroundColor: pressed ? S.blueWash : "transparent" })}>
+            <Label color={S.ink}>See every overdue activity</Label>
+          </Press>
+        </Detail>
+      )}
+
+      {d.projects.length > 0 && (
+        <Detail tag={next()} title="Projects" note="Average progress">
+          <View style={{ gap: 16 }}>
+            {d.projects.map((p) => (
+              <BarRow
+                key={p.name}
+                name={p.name}
+                value={p.avgProgress}
+                max={100}
+                label={`${p.avgProgress}%`}
+                color={p.overdue > 0 ? S.red : S.ink}
+                note={`${fmtNum(p.done)} of ${fmtNum(p.total)} done · ${fmtNum(p.inProgress)} in progress${p.overdue > 0 ? ` · ${fmtNum(p.overdue)} overdue` : ""}`}
+              />
             ))}
           </View>
-        </>
+        </Detail>
       )}
 
-      {/* ── Engineers ──────────────────────────────────────────────────────── */}
       {d.engineerLoad.length > 0 && (
-        <>
-          <Title>Engineer workload</Title>
-          <View style={{ ...card, padding: 14, gap: 12 }}>
-            {d.engineerLoad.map((e) => {
-              const max = Math.max(...d.engineerLoad.map((x) => x.active), 1);
-              return (
-                <View key={e.name} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                  <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: `${ACCENT}22`, alignItems: "center", justifyContent: "center" }}>
-                    <HardHat size={14} color={ACCENT} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                      <Text numberOfLines={1} style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{e.name}</Text>
-                      <Text style={{ fontSize: 11.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>
-                        {e.active} live{e.overdue > 0 ? ` · ` : ""}
-                        {e.overdue > 0 && <Text style={{ color: RED }}>{e.overdue} overdue</Text>}
-                      </Text>
-                    </View>
-                    <Bar value={(e.active / max) * 100} color={e.overdue > 0 ? AMBER : ACCENT} height={5} />
-                  </View>
-                </View>
-              );
-            })}
+        <Detail tag={next()} title="Engineers" note="Live work">
+          <View style={{ gap: 14 }}>
+            {d.engineerLoad.map((e) => (
+              <BarRow
+                key={e.name}
+                name={e.name}
+                value={e.active}
+                max={engMax}
+                label={`${fmtNum(e.active)} live`}
+                color={e.overdue > 0 ? S.red : S.ink}
+                note={e.overdue > 0 ? `${fmtNum(e.overdue)} overdue` : undefined}
+              />
+            ))}
           </View>
-        </>
+        </Detail>
       )}
 
-      {/* ── Site today ─────────────────────────────────────────────────────── */}
-      <Title>On site today</Title>
-      <View style={{ flexDirection: "row", gap: 10 }}>
-        <Tile label="Skilled" value={d.labour.skilledToday} caption="labour logged" icon={HardHat} color={ACCENT} quiet />
-        <Tile label="Unskilled" value={d.labour.unskilledToday} caption="labour logged" icon={Users} color="#6366f1" quiet />
-        <Tile label="Crews" value={d.labour.crewsToday} caption="reporting today" icon={Hourglass} color={TEAL} quiet />
-      </View>
-
-      {/* ── Trend ──────────────────────────────────────────────────────────── */}
-      <Title>Completed — last 14 days</Title>
-      <View style={{ ...card, padding: 14 }}>
-        <TrendLineChart data={trend} color={ACCENT} formatValue={(v) => String(Math.round(v))} />
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10 }}>
-          <TrendingUp size={12} color={colors.mutedForeground} />
-          <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
-            {d.assignmentTimeline.reduce((a, p) => a + p.completed, 0)} completed · {d.assignmentTimeline.reduce((a, p) => a + p.assigned, 0)} newly allocated
-          </Text>
+      <Detail tag={next()} title="On site today" note="Labour logged">
+        <View style={{ flexDirection: "row" }}>
+          {[
+            { label: "Skilled", value: d.labour.skilledToday },
+            { label: "Unskilled", value: d.labour.unskilledToday },
+            { label: "Crews", value: d.labour.crewsToday },
+          ].map((x, i) => (
+            <View key={x.label} style={{ flex: 1, paddingLeft: i ? 12 : 0, borderLeftWidth: i ? 1 : 0, borderLeftColor: S.rule }}>
+              <Label>{x.label}</Label>
+              <Text style={{ fontFamily: fonts.heading.semibold, fontSize: 26, letterSpacing: -0.6, color: x.value ? S.ink : S.graphite, marginTop: 8, fontVariant: ["tabular-nums"] }}>
+                <Tick value={x.value} />
+              </Text>
+            </View>
+          ))}
         </View>
-      </View>
+      </Detail>
+
+      <Detail tag={next()} title="Last 14 days" note={`${fmtNum(done14)} completed`}>
+        <TwoWeeks rows={d.assignmentTimeline} width={chartW} />
+        <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 16, rowGap: 4, marginTop: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View style={{ width: 9, height: 9, backgroundColor: S.blue }} />
+            <Body size={12} color={S.graphite}>
+              <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{fmtNum(done14)}</Text> completed
+            </Body>
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View style={{ width: 14, height: 2, backgroundColor: S.ink }} />
+            <Body size={12} color={S.graphite}>
+              <Text style={{ fontFamily: fonts.heading.semibold, color: S.ink }}>{fmtNum(new14)}</Text> newly allocated
+            </Body>
+          </View>
+        </View>
+      </Detail>
     </>
   );
 }

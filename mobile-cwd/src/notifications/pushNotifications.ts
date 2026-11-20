@@ -11,6 +11,7 @@
 import { Platform } from "react-native";
 import * as Application from "expo-application";
 import Constants, { ExecutionEnvironment } from "expo-constants";
+import { isRunningInExpoGo } from "expo";
 import * as SecureStore from "expo-secure-store";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
@@ -19,7 +20,8 @@ const TOKEN_KEY = "push_token";
 // Expo Go can't do push notifications (removed in SDK 53) — loading expo-notifications there throws at
 // import time and takes the whole app down with it. So the module is only ever loaded outside Expo Go
 // (a development build or a real APK), and every caller treats `null` as "push isn't available here".
-export const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+// On SDK 58 Expo Go no longer always reports StoreClient, so ask expo directly as well.
+export const isExpoGo = isRunningInExpoGo() || Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
 type NotificationsModule = typeof import("expo-notifications");
 let loaded: NotificationsModule | null | undefined;

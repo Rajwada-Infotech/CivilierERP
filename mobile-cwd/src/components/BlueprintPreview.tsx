@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Image, Modal, Pressable, Text, TouchableOpacity, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, X } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { getBlueprintAnnotation, getRoomBlueprint } from "@/api/cwdApi";
 
@@ -21,11 +21,11 @@ export function BlueprintPreview({ rungId, roomId, title }: { rungId: number; ro
     : bp.data && !isPdf ? `data:${bp.data.mimeType};base64,${bp.data.dataBase64}` : null;
 
   if (bp.isLoading) {
-    return <View style={{ height: 140, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.muted }} />;
+    return <View style={{ height: 140, borderRadius: 0, borderWidth: 1, borderColor: S.rule, backgroundColor: S.line15 }} />;
   }
   if (!bp.data && !marked) {
     return (
-      <Text style={{ fontSize: 11.5, fontStyle: "italic", color: colors.mutedForeground, fontFamily: fonts.body.regular }}>
+      <Text style={{ fontSize: 11.5, fontStyle: "italic", color: S.graphite, fontFamily: fonts.body.regular }}>
         No blueprint uploaded for this room yet — upload one from Setup › Flat Master.
       </Text>
     );
@@ -33,17 +33,17 @@ export function BlueprintPreview({ rungId, roomId, title }: { rungId: number; ro
 
   return (
     <>
-      <TouchableOpacity activeOpacity={0.8} disabled={!uri} onPress={() => setFull(true)} style={{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: "hidden", backgroundColor: "#fff" }}>
+      <TouchableOpacity activeOpacity={0.8} disabled={!uri} onPress={() => setFull(true)} style={{ borderRadius: 0, borderWidth: 1, borderColor: S.rule, overflow: "hidden", backgroundColor: "#fff" }}>
         {uri ? (
           <Image source={{ uri }} resizeMode="contain" style={{ width: "100%", height: 170 }} />
         ) : (
-          <View style={{ height: 120, alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.muted }}>
-            <FileText size={22} color={colors.mutedForeground} />
-            <Text style={{ fontSize: 11, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>PDF blueprint — open it on the web to view</Text>
+          <View style={{ height: 120, alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: S.line15 }}>
+            <FileText size={22} color={S.graphite} />
+            <Text style={{ fontSize: 11, color: S.graphite, fontFamily: fonts.body.regular }}>PDF blueprint — open it on the web to view</Text>
           </View>
         )}
         {marked && (
-          <View style={{ position: "absolute", top: 8, right: 8, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: "#10b981" }}>
+          <View style={{ position: "absolute", top: 8, right: 8, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 0, backgroundColor: S.blue }}>
             <Text style={{ fontSize: 10, color: "#fff", fontFamily: fonts.heading.bold }}>Marked</Text>
           </View>
         )}

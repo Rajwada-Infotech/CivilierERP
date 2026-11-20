@@ -84,7 +84,9 @@ export default function AttendanceScreen() {
         { label: "Present", value: s?.Present ?? 0 },
         { label: "On leave", value: s?.OnLeave ?? 0 },
         { label: "Absent", value: s?.Absent ?? 0, red: !!s?.Absent },
+        { label: "Half day", value: s?.HalfDay ?? 0 },
         { label: "Holidays", value: s?.Holiday ?? 0 },
+        { label: "Week off", value: s?.WeekOff ?? 0 },
         { label: "Break min", value: s?.BreakMinutes ?? 0 },
         { label: "Extra min", value: s?.ExtraMinutes ?? 0, red: !!s?.ExtraMinutes },
       ]} />

@@ -28,6 +28,8 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const attendanceSvc = require("../services/employeeAttendance");
+const movementSvc = require("../services/attendanceMovement");
+const faceSvc = require("../services/face/faceService");
 
 const LEAVE_TYPES = ["Casual", "Sick", "Earned", "Unpaid"];
 const LIMITED_TYPES = ["Casual", "Sick", "Earned"];
@@ -277,6 +279,7 @@ router.get("/attendance", async (req, res) => {
 // one record a day), but a portal punch must carry { photo, latitude, longitude, accuracy }, which are stored with it.
 function punchFail(res, err, where) {
   if (err instanceof attendanceSvc.AttendanceError) return res.status(err.status).json({ error: err.message });
+  if (err instanceof faceSvc.VerifyError) return res.status(err.status).json({ error: err.message, stage: err.stage });
   console.error(`[employee-portal] ${where}:`, err.message);
   return res.status(500).json({ error: err.message });
 }
@@ -284,8 +287,25 @@ function punchFail(res, err, where) {
 router.get("/attendance/today", async (req, res) => {
   try { res.json(await attendanceSvc.getMyState(getPool(), req.user)); } catch (e) { punchFail(res, e, "GET /attendance/today"); }
 });
+// Each punch first asks for a single-use challenge, then sends it with the photo + location; the server checks the
+// geofence and the face (1:1 against this employee's registered template) before the existing punch runs.
+router.post("/attendance/challenge", async (req, res) => {
+  try { res.json(await faceSvc.createChallenge(getPool(), req.employee.EmployeeId, String(req.body?.kind || ""))); } catch (e) { punchFail(res, e, "POST /attendance/challenge"); }
+});
+// Face self-registration: the employee sends 3 front-camera photos with consent; it waits for HR approval.
+router.get("/face", async (req, res) => {
+  try { res.json(await faceSvc.selfStatus(getPool(), req.employee.EmployeeId)); } catch (e) { punchFail(res, e, "GET /face"); }
+});
+router.post("/face/enroll", async (req, res) => {
+  try {
+    const out = await faceSvc.enroll(getPool(), req.employee.EmployeeId, req.body || {}, req.user?.userId || null, req.ip, "Self");
+    bumpCacheVersion("employee-master").catch(() => {});
+    res.json(out);
+  } catch (e) { punchFail(res, e, "POST /face/enroll"); }
+});
+const verifier = (req, kind) => (employee, ev) => faceSvc.verifyPunch(getPool(), employee, kind, req.body?.nonce, ev, req.ip);
 router.post("/attendance/in", async (req, res) => {
-  try { res.json(await attendanceSvc.clockIn(getPool(), req.user, { evidence: req.body, requireEvidence: true })); } catch (e) { punchFail(res, e, "POST /attendance/in"); }
+  try { res.json(await attendanceSvc.clockIn(getPool(), req.user, { evidence: req.body, requireEvidence: true, verify: verifier(req, "in") })); } catch (e) { punchFail(res, e, "POST /attendance/in"); }
 });
 router.get("/attendance/break-types", async (req, res) => {
   try { res.json(await attendanceSvc.getBreakTypes(getPool())); } catch (e) { punchFail(res, e, "GET /attendance/break-types"); }
@@ -297,7 +317,36 @@ router.post("/attendance/break-stop", async (req, res) => {
   try { res.json(await attendanceSvc.breakStop(getPool(), req.user)); } catch (e) { punchFail(res, e, "POST /attendance/break-stop"); }
 });
 router.post("/attendance/out", async (req, res) => {
-  try { res.json(await attendanceSvc.clockOut(getPool(), req.user, { evidence: req.body, requireEvidence: true })); } catch (e) { punchFail(res, e, "POST /attendance/out"); }
+  try {
+    const out = await attendanceSvc.clockOut(getPool(), req.user, { evidence: req.body, requireEvidence: true, verify: verifier(req, "out") });
+    await movementSvc.closeAll(getPool(), req.employee.EmployeeId).catch((e) => console.error("[employee-portal] movement close:", e.message));
+    res.json(out);
+  } catch (e) { punchFail(res, e, "POST /attendance/out"); }
+});
+
+// ── On-duty movement: the app sends its location after each 100 m move while punched in ──
+function moveFail(res, err, where) {
+  if (err instanceof movementSvc.MovementError) return res.status(err.status).json({ error: err.message });
+  return punchFail(res, err, where);
+}
+router.post("/attendance/location", async (req, res) => {
+  try { res.json(await movementSvc.recordPoints(getPool(), req.employee.EmployeeId, req.body?.points ?? req.body)); } catch (e) { moveFail(res, e, "POST /attendance/location"); }
+});
+router.post("/attendance/location-status", async (req, res) => {
+  try { res.json(await movementSvc.locationStatus(getPool(), req.employee.EmployeeId, { enabled: req.body?.enabled !== false, at: req.body?.at })); } catch (e) { moveFail(res, e, "POST /attendance/location-status"); }
+});
+router.post("/attendance/movement/:id/skip", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  try { res.json({ pending: await movementSvc.skip(getPool(), req.employee.EmployeeId, id) }); } catch (e) { moveFail(res, e, "POST /attendance/movement/:id/skip"); }
+});
+router.get("/attendance/movement/pending", async (req, res) => {
+  try { res.json({ pending: await movementSvc.pending(getPool(), req.employee.EmployeeId) }); } catch (e) { moveFail(res, e, "GET /attendance/movement/pending"); }
+});
+router.post("/attendance/movement/:id/reason", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  try { res.json({ pending: await movementSvc.giveReason(getPool(), req.employee.EmployeeId, id, req.body?.reason) }); } catch (e) { moveFail(res, e, "POST /attendance/movement/:id/reason"); }
 });
 
 // ── Leave ────────────────────────────────────────────────────────────────────
@@ -405,6 +454,45 @@ router.delete("/leave/:id", async (req, res) => {
   } catch (err) {
     console.error("[employee-portal] DELETE /leave/:id:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── Notices (Notice Board): for All, or for this employee's department; live between PublishFrom and ExpiresOn ──
+const noticesReady = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.EmployeeNotice', 'U') AS t")).recordset[0].t;
+router.get("/notices", async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await noticesReady(pool))) return res.json([]);
+    const r = await pool.request().input("E", sql.Int, req.employee.EmployeeId).input("Dept", sql.NVarChar(150), String(req.employee.Department || "").trim()).query(`
+      DECLARE @today DATE = CAST(DATEADD(MINUTE, 330, SYSUTCDATETIME()) AS DATE);
+      SELECT n.NoticeId, n.Title, n.Body, n.Priority, n.IsPinned, CONVERT(char(10), n.PublishFrom, 23) AS PublishFrom, CONVERT(char(10), n.ExpiresOn, 23) AS ExpiresOn,
+             (SELECT name FROM dbo.users WHERE id = n.CreatedBy) AS PostedBy,
+             CASE WHEN n.Audience = N'All' THEN N'All employees' ELSE (SELECT STRING_AGG(d.DepartmentName, ', ') FROM dbo.EmployeeNoticeDepartment nd JOIN dbo.DepartmentMaster d ON d.Id = nd.DepartmentId WHERE nd.NoticeId = n.NoticeId) END AS ForWhom,
+             CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.EmployeeNoticeRead x WHERE x.NoticeId = n.NoticeId AND x.EmployeeId = @E) THEN 1 ELSE 0 END AS bit) AS IsRead
+      FROM dbo.EmployeeNotice n
+      WHERE n.IsActive = 1 AND n.PublishFrom <= @today AND (n.ExpiresOn IS NULL OR n.ExpiresOn >= @today)
+        AND (n.Audience = N'All' OR EXISTS (SELECT 1 FROM dbo.EmployeeNoticeDepartment nd JOIN dbo.DepartmentMaster d ON d.Id = nd.DepartmentId
+                                            WHERE nd.NoticeId = n.NoticeId AND LOWER(LTRIM(RTRIM(d.DepartmentName))) = LOWER(@Dept)))
+      ORDER BY n.IsPinned DESC, CASE n.Priority WHEN N'Important' THEN 0 ELSE 1 END, n.PublishFrom DESC, n.NoticeId DESC`);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[employee-portal] GET /notices:", err.message);
+    res.status(500).json({ error: "Could not load notices" });
+  }
+});
+router.post("/notices/:id/read", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return bad(res, "Invalid notice");
+  try {
+    await getPool().request().input("N", sql.Int, id).input("E", sql.Int, req.employee.EmployeeId).query(`
+      IF EXISTS (SELECT 1 FROM dbo.EmployeeNotice WHERE NoticeId = @N AND IsActive = 1)
+        AND NOT EXISTS (SELECT 1 FROM dbo.EmployeeNoticeRead WHERE NoticeId = @N AND EmployeeId = @E)
+        INSERT INTO dbo.EmployeeNoticeRead (NoticeId, EmployeeId) VALUES (@N, @E)`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[employee-portal] POST /notices/:id/read:", err.message);
+    res.status(500).json({ error: "Could not mark as read" });
   }
 });
 

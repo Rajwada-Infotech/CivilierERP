@@ -24,6 +24,7 @@ const ABOUT: Record<string, string> = {
   "follow-up": "For task follow-ups: tasks, close / cancel, transfer and performance.",
   maintenance: "For customers: your booking, payments, documents and maintenance bills. For maintenance and security teams: bills, attendance, electricity and the directory.",
   cwd: "For site engineers, QC and approvers: allocation, reporting, quality check and transfer.",
+  employee: "For employees: punch in and out, breaks, attendance, leave and payslips.",
 };
 
 const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";

@@ -128,7 +128,7 @@ export default function ReportViewScreen() {
               <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular, marginBottom: 8 }}>
                 {rows.length} {rows.length === 1 ? "row" : "rows"}
               </Text>
-            ) : null
+            ) : undefined
           }
           ListEmptyComponent={
             <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, textAlign: "center", paddingVertical: 40 }}>

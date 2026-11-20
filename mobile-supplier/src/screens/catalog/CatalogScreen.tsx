@@ -190,7 +190,7 @@ export default function CatalogScreen() {
       <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: "#818898", marginTop: 12, textAlign: "center" }}>
         <Text style={{ color: "#6ee7b7", fontFamily: fonts.heading.semibold }}>{pricedCount}</Text> of {totalCount} items priced
       </Text>
-    ) : null;
+    ) : undefined;
 
   const ListEmpty =
     !catalogQ.isLoading ? (
@@ -203,7 +203,7 @@ export default function CatalogScreen() {
           {search ? "No items match your search" : "No items in your catalog yet"}
         </Text>
       </View>
-    ) : null;
+    ) : undefined;
 
   return (
     <View className="flex-1" style={{ backgroundColor: "#0c0c12" }}>

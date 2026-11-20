@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, History, Plus, Save, Search, UserPlus, UserX, X } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { sheet as S } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { addToRoster, createWorker, getAttendance, getContractorOptions, removeFromRoster, saveAttendance, searchWorkers, type AttendanceStatus } from "@/api/cwdApi";
@@ -13,9 +13,9 @@ import { ACCENT, Btn, Empty, ErrorText, Loading, card, fmtDay, fromYmd, todayYmd
 import { WorkerHistorySheet } from "./WorkerHistorySheet";
 
 const OPTIONS: { key: AttendanceStatus; label: string; color: string }[] = [
-  { key: "P", label: "Present", color: "#10b981" },
-  { key: "H", label: "Half", color: "#f59e0b" },
-  { key: "A", label: "Absent", color: "#ef4444" },
+  { key: "P", label: "Present", color: S.blue },
+  { key: "H", label: "Half", color: S.ink },
+  { key: "A", label: "Absent", color: S.red },
 ];
 
 function AddWorkers({ rungId, existing, visible, onClose, onAdded }: { rungId: number; existing: Set<number>; visible: boolean; onClose: () => void; onAdded: () => void }) {
@@ -54,28 +54,28 @@ function AddWorkers({ rungId, existing, visible, onClose, onAdded }: { rungId: n
     },
     onError: (e: Error) => toast.error(e.message),
   });
-  const input = { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13 } as const;
+  const input = { borderWidth: 1, borderColor: S.rule, borderRadius: 0, paddingHorizontal: 12, paddingVertical: 10, color: S.ink, fontFamily: fonts.body.regular, fontSize: 13 } as const;
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }}>
-        <View style={{ maxHeight: "85%", backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 12 }}>
+        <View style={{ maxHeight: "85%", backgroundColor: S.paper, borderTopLeftRadius: 0, borderTopRightRadius: 0, borderWidth: 1, borderColor: S.rule, padding: 16, gap: 12 }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <Text style={{ fontSize: 14, fontFamily: fonts.heading.bold, color: colors.foreground }}>Add workers</Text>
-            <TouchableOpacity onPress={onClose} style={{ padding: 4 }}><X size={18} color={colors.mutedForeground} /></TouchableOpacity>
+            <Text style={{ fontSize: 14, fontFamily: fonts.heading.bold, color: S.ink }}>Add workers</Text>
+            <TouchableOpacity onPress={onClose} style={{ padding: 4 }}><X size={18} color={S.graphite} /></TouchableOpacity>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12 }}>
-            <Search size={14} color={colors.mutedForeground} />
-            <TextInput value={search} onChangeText={setSearch} placeholder="Search by name or Aadhaar…" placeholderTextColor={`${colors.mutedForeground}99`} style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }} />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: S.rule, borderRadius: 0, paddingHorizontal: 12 }}>
+            <Search size={14} color={S.graphite} />
+            <TextInput value={search} onChangeText={setSearch} placeholder="Search by name or Aadhaar…" placeholderTextColor={S.faint} style={{ flex: 1, color: S.ink, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }} />
           </View>
           <ScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
             {q.isLoading ? <Loading /> : list.length === 0 ? <Empty text="No workers found." /> : list.map((w) => {
               const on = picked.has(w.id);
               return (
-                <TouchableOpacity key={w.id} onPress={() => setPicked((p) => { const n = new Set(p); if (!n.delete(w.id)) n.add(w.id); return n; })} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                  <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: 2, borderColor: on ? ACCENT : colors.border, backgroundColor: on ? ACCENT : "transparent" }} />
+                <TouchableOpacity key={w.id} onPress={() => setPicked((p) => { const n = new Set(p); if (!n.delete(w.id)) n.add(w.id); return n; })} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: S.rule }}>
+                  <View style={{ width: 20, height: 20, borderRadius: 0, borderWidth: 2, borderColor: on ? ACCENT : S.rule, backgroundColor: on ? ACCENT : "transparent" }} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, color: colors.foreground, fontFamily: fonts.body.medium }}>{w.name}</Text>
-                    <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>{w.contractorName || w.skillType}</Text>
+                    <Text style={{ fontSize: 13, color: S.ink, fontFamily: fonts.body.medium }}>{w.name}</Text>
+                    <Text style={{ fontSize: 10.5, color: S.graphite, fontFamily: fonts.body.regular }}>{w.contractorName || w.skillType}</Text>
                   </View>
                 </TouchableOpacity>
               );
@@ -83,7 +83,7 @@ function AddWorkers({ rungId, existing, visible, onClose, onAdded }: { rungId: n
           </ScrollView>
           <Btn label={picked.size ? `Add ${picked.size} worker${picked.size === 1 ? "" : "s"}` : "Pick workers to add"} disabled={!picked.size} busy={add.isPending} onPress={() => add.mutate()} />
 
-          <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, gap: 10 }}>
+          <View style={{ borderTopWidth: 1, borderTopColor: S.rule, paddingTop: 10, gap: 10 }}>
             <TouchableOpacity onPress={() => setCreating((v) => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <UserPlus size={14} color={ACCENT} />
               <Text style={{ flex: 1, fontSize: 12, fontFamily: fonts.heading.semibold, color: ACCENT }}>Worker not listed? Create new</Text>
@@ -91,7 +91,7 @@ function AddWorkers({ rungId, existing, visible, onClose, onAdded }: { rungId: n
             </TouchableOpacity>
             {creating && (
               <View style={{ gap: 10 }}>
-                <TextInput value={name} onChangeText={setName} placeholder="Worker name" placeholderTextColor={`${colors.mutedForeground}99`} style={input} />
+                <TextInput value={name} onChangeText={setName} placeholder="Worker name" placeholderTextColor={S.faint} style={input} />
                 <View style={{ marginBottom: -14 }}>
                   <PickerRow label="Contractor" required value={contractor?.label ?? ""} placeholder="Select contractor…" onPress={() => setPickContractor(true)} />
                 </View>
@@ -100,11 +100,11 @@ function AddWorkers({ rungId, existing, visible, onClose, onAdded }: { rungId: n
                     value={aadhaar}
                     onChangeText={(t) => setAadhaar(t.replace(/\D/g, "").slice(0, 12))}
                     placeholder="Aadhaar number (12 digits)"
-                    placeholderTextColor={`${colors.mutedForeground}99`}
+                    placeholderTextColor={S.faint}
                     keyboardType="number-pad"
-                    style={{ ...input, borderColor: aadhaar && !aadhaarOk ? colors.destructive : colors.border }}
+                    style={{ ...input, borderColor: aadhaar && !aadhaarOk ? S.red : S.rule }}
                   />
-                  <Text style={{ fontSize: 10, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginTop: 4 }}>
+                  <Text style={{ fontSize: 10, color: S.graphite, fontFamily: fonts.body.regular, marginTop: 4 }}>
                     Used to recognise this worker if re-added later — the record is auto-removed after 4 months with no attendance.
                   </Text>
                 </View>
@@ -180,14 +180,14 @@ export function AttendanceTab({
   return (
     <View style={{ gap: 12 }}>
       <View style={{ ...card, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8 }}>
-        <TouchableOpacity onPress={() => step(-1)} style={{ padding: 8 }}><ChevronLeft size={18} color={colors.foreground} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => step(-1)} style={{ padding: 8 }}><ChevronLeft size={18} color={S.ink} /></TouchableOpacity>
         <View style={{ alignItems: "center" }}>
-          <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{fmtDay(date)}</Text>
+          <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: S.ink }}>{fmtDay(date)}</Text>
           {date === today ? <Text style={{ fontSize: 10, color: ACCENT, fontFamily: fonts.heading.semibold }}>Today</Text> : (
             <TouchableOpacity onPress={() => setDate(today)}><Text style={{ fontSize: 10, color: ACCENT, fontFamily: fonts.heading.semibold }}>Jump to today</Text></TouchableOpacity>
           )}
         </View>
-        <TouchableOpacity disabled={date >= today} onPress={() => step(1)} style={{ padding: 8, opacity: date >= today ? 0.25 : 1 }}><ChevronRight size={18} color={colors.foreground} /></TouchableOpacity>
+        <TouchableOpacity disabled={date >= today} onPress={() => step(1)} style={{ padding: 8, opacity: date >= today ? 0.25 : 1 }}><ChevronRight size={18} color={S.ink} /></TouchableOpacity>
       </View>
 
       {q.isLoading ? <Loading /> : q.error ? <ErrorText error={q.error} /> : rows.length === 0 ? (
@@ -195,10 +195,10 @@ export function AttendanceTab({
       ) : (
         <View style={{ ...card, padding: 0, overflow: "hidden" }}>
           {/* Live tally of what Save would record. */}
-          <View style={{ flexDirection: "row", gap: 6, padding: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-            <Text style={{ flex: 1, fontSize: 11.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{rows.length} worker{rows.length === 1 ? "" : "s"} allocated</Text>
+          <View style={{ flexDirection: "row", gap: 6, padding: 10, borderBottomWidth: 1, borderBottomColor: S.rule }}>
+            <Text style={{ flex: 1, fontSize: 11.5, fontFamily: fonts.heading.semibold, color: S.ink }}>{rows.length} worker{rows.length === 1 ? "" : "s"} allocated</Text>
             {OPTIONS.map((o) => (
-              <View key={o.key} style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: `${o.color}22` }}>
+              <View key={o.key} style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 0, backgroundColor: `${o.color}22` }}>
                 <Text style={{ fontSize: 10, fontFamily: fonts.heading.bold, color: o.color }}>{counts[o.key]} {o.label}</Text>
               </View>
             ))}
@@ -207,18 +207,18 @@ export function AttendanceTab({
           {shown.map((r, i) => {
             const cur = status[r.workerId] ?? "P";
             return (
-              <View key={r.workerId} style={{ padding: 12, gap: 8, borderTopWidth: i ? 1 : 0, borderTopColor: colors.border }}>
+              <View key={r.workerId} style={{ padding: 12, gap: 8, borderTopWidth: i ? 1 : 0, borderTopColor: S.rule }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <View style={{ flex: 1 }}>
-                    <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.body.medium, color: colors.foreground }}>{r.workerName}</Text>
-                    <Text numberOfLines={1} style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{r.contractorName || r.skillType}</Text>
+                    <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.body.medium, color: S.ink }}>{r.workerName}</Text>
+                    <Text numberOfLines={1} style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: S.graphite }}>{r.contractorName || r.skillType}</Text>
                   </View>
                   <TouchableOpacity onPress={() => setHistory({ id: r.workerId, name: r.workerName })} hitSlop={6} style={{ padding: 6 }}>
-                    <History size={15} color={colors.mutedForeground} />
+                    <History size={15} color={S.graphite} />
                   </TouchableOpacity>
                   {canEdit && (
                     <TouchableOpacity onPress={() => Alert.alert("Remove from this activity?", r.workerName, [{ text: "Cancel", style: "cancel" }, { text: "Remove", style: "destructive", onPress: () => remove.mutate(r.workerId) }])} style={{ padding: 6 }}>
-                      <UserX size={15} color={colors.mutedForeground} />
+                      <UserX size={15} color={S.graphite} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -226,8 +226,8 @@ export function AttendanceTab({
                   {OPTIONS.map((o) => {
                     const on = cur === o.key;
                     return (
-                      <TouchableOpacity key={o.key} disabled={!canEdit} onPress={() => setStatus((p) => ({ ...p, [r.workerId]: o.key }))} style={{ flex: 1, alignItems: "center", paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: on ? o.color : colors.border, backgroundColor: on ? `${o.color}25` : "transparent" }}>
-                        <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: on ? o.color : colors.mutedForeground }}>{o.label}</Text>
+                      <TouchableOpacity key={o.key} disabled={!canEdit} onPress={() => setStatus((p) => ({ ...p, [r.workerId]: o.key }))} style={{ flex: 1, alignItems: "center", paddingVertical: 7, borderRadius: 0, borderWidth: 1, borderColor: on ? o.color : S.rule, backgroundColor: on ? `${o.color}25` : "transparent" }}>
+                        <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: on ? o.color : S.graphite }}>{o.label}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -241,7 +241,7 @@ export function AttendanceTab({
       {canEdit && (
         <View style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}><Btn tone="outline" label="Add worker" icon={<Plus size={14} color={ACCENT} />} onPress={() => setAdding(true)} /></View>
-          <View style={{ flex: 1 }}><Btn label={dirty ? "Save attendance" : "Saved"} icon={dirty ? <Save size={14} color="#04181d" /> : <Check size={14} color="#04181d" />} disabled={rows.length === 0 || !dirty} busy={save.isPending} onPress={() => save.mutate()} /></View>
+          <View style={{ flex: 1 }}><Btn label={dirty ? "Save attendance" : "Saved"} icon={dirty ? <Save size={14} color={S.paper} /> : <Check size={14} color={S.paper} />} disabled={rows.length === 0 || !dirty} busy={save.isPending} onPress={() => save.mutate()} /></View>
         </View>
       )}
       <AddWorkers rungId={rungId} existing={existing} visible={adding} onClose={() => setAdding(false)} onAdded={refresh} />

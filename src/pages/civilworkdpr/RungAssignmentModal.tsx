@@ -21,7 +21,7 @@ import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { chainFloorDisplay, roomDisplay } from "@/lib/floorLabel";
 import { dependencyAutoName } from "@/lib/dependencyAutoName";
 import { PRIORITY_META } from "@/components/civilworkdpr/PriorityBadge";
-import { ASSIGNMENT_PRIORITIES, type AssignmentPriority } from "@/api/dependencyActivityAssignmentApi";
+import { ASSIGNMENT_PRIORITIES, getSourceLog, type AssignmentPriority, type SourceLogEntry } from "@/api/dependencyActivityAssignmentApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
@@ -202,6 +202,65 @@ export function ApprovalLevelsEditor({
 // markup on it, the raw blueprint otherwise) and opens the Konva editor on
 // click. Two activities in the same chain can mark up the same room's
 // blueprint independently — see migration 345.
+const fmtLogDay = (ymd: string) => new Date(`${ymd}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
+/**
+ * Under a Labour / Material Given By dropdown: how long the saved source has supplied this activity ("Day 12 · since
+ * 07 Nov 2026"), what a changed choice will do once saved, and the sources that came before, each with its dates and
+ * days. The log itself is written by the server when the allocation is saved.
+ */
+function SourceTenure({ log, kind, source, contractorId, startDate, developerLabel, nameOf }: {
+  log: SourceLogEntry[]; kind: "LABOUR" | "MATERIAL"; source: SourceType | ""; contractorId: number | null; startDate: string;
+  developerLabel: string; nameOf: (id: number | null) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rows = log.filter((r) => r.kind === kind);
+  const current = rows.find((r) => r.current) || null;
+  const past = rows.filter((r) => !r.current);
+  const label = (r: SourceLogEntry) => (r.source === "DEVELOPER" ? developerLabel : r.contractorName || nameOf(r.contractorId));
+  const sameAsSaved = !!current && current.source === source && (current.contractorId ?? null) === (source === "CONTRACTOR" ? contractorId : null);
+  const notStarted = !!current && current.days === 0;
+
+  let line: React.ReactNode = null;
+  if (source && sameAsSaved) {
+    line = notStarted
+      ? <>Starts on <b className="text-foreground">{fmtLogDay(current!.startedOn)}</b></>
+      : <><b className="text-foreground">Day {current!.days}</b> · since {fmtLogDay(current!.startedOn)}</>;
+  } else if (source && current) {
+    line = <>Changed — the new source counts from <b className="text-foreground">today</b> once saved; the previous one goes to the history.</>;
+  } else if (source) {
+    line = <>Day 1 will be <b className="text-foreground">{startDate ? fmtLogDay(startDate) : "today"}</b> once saved.</>;
+  } else if (current) {
+    line = <>Cleared — the current source ends today once saved.</>;
+  }
+
+  if (!line && past.length === 0) return null;
+  return (
+    <div className="mt-1.5 text-[0.6875rem] text-muted-foreground">
+      <div className="flex items-center gap-2 flex-wrap">
+        {line && <span className="tabular-nums">{line}</span>}
+        {past.length > 0 && (
+          <button type="button" onClick={() => setOpen((o) => !o)} className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] underline decoration-dashed underline-offset-2 hover:text-foreground">
+            {open ? "Hide" : "Show"} previous ({past.length})
+          </button>
+        )}
+      </div>
+      {open && past.length > 0 && (
+        <ul className="mt-1.5 border-t border-border">
+          {past.map((r) => (
+            <li key={r.id} className="flex items-baseline justify-between gap-3 py-1.5 border-b border-border/60">
+              <span className="text-foreground truncate">{label(r)}</span>
+              <span className="shrink-0 tabular-nums">
+                {fmtLogDay(r.startedOn)} → {r.endedOn ? fmtLogDay(r.endedOn) : "—"} · {r.days} day{r.days === 1 ? "" : "s"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number; rungId: number; roomLabel: string }) {
   const [editorOpen, setEditorOpen] = useState(false);
   const { data: blueprint, isLoading: blueprintLoading } = useQuery({
@@ -334,6 +393,12 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     enabled: !!chain.projectId,
   });
 
+  const { data: sourceLog = [] } = useQuery({
+    queryKey: ["dependency-activity-source-log", rungId],
+    queryFn: () => getSourceLog(rungId),
+  });
+  const contractorName = (id: number | null) => contractors.find((c) => c.id === id)?.name || "Contractor";
+  const developerLabel = `Developer — ${chain.projectName || "Project"}`;
   const { data: detail, isLoading } = useQuery({
     queryKey: ["dependency-activity-assignment", rungId],
     queryFn: () => getRungAssignment(rungId),
@@ -429,6 +494,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     onSuccess: () => {
       toast.success("Assignment saved.");
       queryClient.invalidateQueries({ queryKey: ["dependency-activity-assignment", rungId] });
+      queryClient.invalidateQueries({ queryKey: ["dependency-activity-source-log", rungId] });
       // Prefix match — refreshes Work Allocation's "Saved Flow" list for
       // whichever chain is currently open there, without this modal needing
       // to know that page's exact query key/params.
@@ -569,6 +635,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                     </span>
                   )}
                 </div>
+                <SourceTenure log={sourceLog} kind="LABOUR" source={labourSource} contractorId={labourContractorId} startDate={startDate} developerLabel={developerLabel} nameOf={contractorName} />
               </div>
               <div>
                 <label className={labelCls}>
@@ -600,6 +667,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                     </span>
                   )}
                 </div>
+                <SourceTenure log={sourceLog} kind="MATERIAL" source={materialSource} contractorId={materialContractorId} startDate={startDate} developerLabel={developerLabel} nameOf={contractorName} />
               </div>
             </div>
 

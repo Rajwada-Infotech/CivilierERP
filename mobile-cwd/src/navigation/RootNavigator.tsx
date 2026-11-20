@@ -5,7 +5,7 @@ import AuthStack from "./AuthStack";
 import MainStack from "./MainStack";
 import { SidebarMenu } from "./SidebarMenu";
 import { navigationRef } from "./navigationRef";
-import { colors } from "@/theme/colors";
+import { colors, sheet as S } from "@/theme/colors";
 
 export default function RootNavigator() {
   const { currentUser, isLoading } = useAuth();
@@ -13,7 +13,7 @@ export default function RootNavigator() {
   if (isLoading) {
     return (
       <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={S.blue} />
       </View>
     );
   }

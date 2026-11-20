@@ -10,6 +10,7 @@ import PayslipScreen from "@/screens/pay/PayslipScreen";
 import ProfileScreen from "@/screens/profile/ProfileScreen";
 import HolidaysScreen from "@/screens/profile/HolidaysScreen";
 import LoginHistoryScreen from "@/screens/profile/LoginHistoryScreen";
+import FaceRegistrationScreen from "@/screens/profile/FaceRegistrationScreen";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 
@@ -18,6 +19,7 @@ export type MainParamList = {
   Payslip: { runId: number };
   Holidays: undefined;
   LoginHistory: undefined;
+  FaceRegistration: undefined;
 };
 
 const Stack = createNativeStackNavigator<MainParamList>();
@@ -57,6 +59,7 @@ export default function MainStack() {
       <Stack.Screen name="Payslip" component={PayslipScreen} options={{ title: "Payslip" }} />
       <Stack.Screen name="Holidays" component={HolidaysScreen} options={{ title: "Holiday calendar" }} />
       <Stack.Screen name="LoginHistory" component={LoginHistoryScreen} options={{ title: "Login history" }} />
+      <Stack.Screen name="FaceRegistration" component={FaceRegistrationScreen} options={{ title: "Face registration" }} />
     </Stack.Navigator>
   );
 }

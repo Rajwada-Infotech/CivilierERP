@@ -2,39 +2,44 @@
 // its chains (search by chain / block / unit / room), open a chain to see its activities in order with their
 // status, and tap an activity to allocate it. Only the project you open is fetched, 30 chains at a time.
 import { useEffect, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
-import { ChevronRight, FolderTree, GitBranch, Search, X } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { ChevronRight, FolderTree } from "lucide-react-native";
+import { sheet as S } from "@/theme/colors";
+import { Body, Key, Label, Notice, Press, SearchBox, SheetShell, Skel } from "@/components/sheet/Sheet";
+import { NoAccessPage } from "@/components/sheet/Page";
 import { fonts } from "@/theme/fonts";
 import { StatusPill, displayStatus } from "@/components/StatusPill";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AutoNameLookup } from "@/components/AutoNameLookup";
 import { getChainActivities, getDependencyChains, getScopeProjects, type DependencyChain } from "@/api/cwdApi";
 
-const ACCENT = "#0891b2";
 const PAGE = 30;
 
 function ChainRungs({ chainId }: { chainId: number }) {
   const navigation = useNavigation<{ navigate: (name: string, params?: object) => void }>();
   const q = useQuery({ queryKey: ["cwd-chain", chainId], queryFn: () => getChainActivities(chainId), staleTime: 60_000 });
-  if (q.isLoading) return <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 10 }} />;
-  if (q.error) return <Text style={{ color: colors.destructive, fontSize: 11.5, fontFamily: fonts.body.regular, padding: 8 }}>{(q.error as Error).message}</Text>;
+  if (q.isLoading) return <ActivityIndicator color={S.graphite} style={{ paddingVertical: 10 }} />;
+  if (q.error) return <View style={{ padding: 8 }}><Notice>{(q.error as Error).message}</Notice></View>;
   const rungs = [...(q.data ?? [])].sort((a, b) => (a.sequenceNo ?? 0) - (b.sequenceNo ?? 0));
-  if (!rungs.length) return <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.regular, padding: 8 }}>No activities in this chain.</Text>;
+  if (!rungs.length) return <Body size={12} color={S.graphite} style={{ padding: 10 }}>No activities in this chain.</Body>;
   return (
-    <View style={{ gap: 6, paddingTop: 6 }}>
+    <View style={{ borderTopWidth: 1, borderTopColor: S.ink }}>
       {rungs.map((a) => (
-        <TouchableOpacity key={a.assignmentId} activeOpacity={0.7} onPress={() => navigation.navigate("AllocationForm", { rungId: a.rungId })} style={{ borderRadius: 10, backgroundColor: colors.muted, padding: 10, gap: 5 }}>
+        <Press
+          key={a.assignmentId}
+          onPress={() => navigation.navigate("AllocationForm", { rungId: a.rungId })}
+          style={(pressed) => ({ paddingHorizontal: 10, paddingVertical: 10, gap: 5, borderBottomWidth: 1, borderBottomColor: S.ruleSoft, backgroundColor: pressed ? S.blueWash : "transparent" })}
+        >
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-            <Text style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.foreground }}>{a.sequenceNo}. {a.activityName}</Text>
+            <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.body.semibold, color: S.ink }}>{a.sequenceNo}. {a.activityName}</Text>
             <StatusPill status={displayStatus(a.status, a.resumedAt)} />
           </View>
-          <Text numberOfLines={1} style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>
+          <Text numberOfLines={1} style={{ fontSize: 11.5, color: S.graphite, fontFamily: fonts.body.regular }}>
             {a.engineerNames || "Not assigned yet"}{a.progressPercent ? ` · ${a.progressPercent}%` : ""}
           </Text>
-        </TouchableOpacity>
+        </Press>
       ))}
     </View>
   );
@@ -43,20 +48,18 @@ function ChainRungs({ chainId }: { chainId: number }) {
 function ChainCard({ chain }: { chain: DependencyChain }) {
   const [open, setOpen] = useState(false);
   return (
-    <View style={{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 10 }}>
-      <TouchableOpacity activeOpacity={0.6} onPress={() => setOpen((o) => !o)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <ChevronRight size={14} color={colors.mutedForeground} style={{ transform: [{ rotate: open ? "90deg" : "0deg" }] }} />
-        <View style={{ flex: 1 }}>
-          <Text numberOfLines={1} style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{chain.alias}</Text>
-          <Text numberOfLines={1} style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginTop: 1 }}>{chain.scopePath}</Text>
+    <View style={{ borderWidth: 1, borderColor: open ? S.ink : S.rule }}>
+      <Press onPress={() => setOpen((o) => !o)} style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 8, padding: 10, backgroundColor: pressed ? S.blueWash : "transparent" })}>
+        <ChevronRight size={14} color={S.graphite} style={{ transform: [{ rotate: open ? "90deg" : "0deg" }] }} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.body.semibold, color: S.ink }}>{chain.alias}</Text>
+          <Text numberOfLines={1} style={{ fontSize: 11.5, color: S.graphite, fontFamily: fonts.body.regular, marginTop: 1 }}>{chain.scopePath}</Text>
         </View>
         <View style={{ alignItems: "flex-end", gap: 3 }}>
-          <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: chain.workType === "INTERNAL" ? "#f9731622" : "#0ea5e922" }}>
-            <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: chain.workType === "INTERNAL" ? "#f97316" : "#0ea5e9" }}>{chain.workType}</Text>
-          </View>
-          <Text style={{ fontSize: 10, color: colors.mutedForeground, fontFamily: fonts.body.medium }}>{chain.activityCount} step{chain.activityCount === 1 ? "" : "s"}</Text>
+          <Label color={chain.workType === "INTERNAL" ? S.ink2 : S.blue}>{chain.workType}</Label>
+          <Text style={{ fontSize: 11, color: S.graphite, fontFamily: fonts.heading.medium }}>{chain.activityCount} step{chain.activityCount === 1 ? "" : "s"}</Text>
         </View>
-      </TouchableOpacity>
+      </Press>
       {open && <ChainRungs chainId={chain.id} />}
     </View>
   );
@@ -71,16 +74,14 @@ function ProjectChains({ projectId, term }: { projectId: number; term: string })
     staleTime: 60_000,
   });
   const chains = q.data?.pages.flat() ?? [];
-  if (q.isLoading) return <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 14 }} />;
-  if (q.error) return <Text style={{ color: colors.destructive, fontSize: 11.5, fontFamily: fonts.body.regular, padding: 8 }}>{(q.error as Error).message}</Text>;
-  if (!chains.length) return <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.regular, padding: 8 }}>{term ? "No chains match." : "No chains in this project."}</Text>;
+  if (q.isLoading) return <ActivityIndicator color={S.graphite} style={{ paddingVertical: 14 }} />;
+  if (q.error) return <Notice>{(q.error as Error).message}</Notice>;
+  if (!chains.length) return <Body size={12} color={S.graphite} style={{ padding: 4 }}>{term ? "No chains match." : "No chains in this project."}</Body>;
   return (
-    <View style={{ gap: 8, paddingTop: 4 }}>
+    <View style={{ gap: 8 }}>
       {chains.map((c) => <ChainCard key={c.id} chain={c} />)}
       {q.hasNextPage && (
-        <TouchableOpacity onPress={() => q.fetchNextPage()} disabled={q.isFetchingNextPage} style={{ alignItems: "center", paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: ACCENT }}>
-          {q.isFetchingNextPage ? <ActivityIndicator size="small" color={ACCENT} /> : <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: ACCENT }}>Load more chains</Text>}
-        </TouchableOpacity>
+        <Key label={q.isFetchingNextPage ? "Loading…" : "Load more chains"} disabled={q.isFetchingNextPage} onPress={() => void q.fetchNextPage()} />
       )}
     </View>
   );
@@ -101,57 +102,45 @@ export default function DependencyManagementScreen() {
   // A single project opens by itself.
   useEffect(() => { if (projects.length === 1 && open == null) setOpen(projects[0].id); }, [projects, open]);
 
-  if (!rights.canView) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center", padding: 32 }}>
-        <Text style={{ color: colors.foreground, fontFamily: fonts.heading.semibold, fontSize: 14 }}>No access</Text>
-        <Text style={{ color: colors.mutedForeground, fontFamily: fonts.body.regular, fontSize: 12, marginTop: 4, textAlign: "center" }}>You don't have permission to view Dependency Management.</Text>
-      </View>
-    );
-  }
+  if (!rights.canView) return <NoAccessPage title="Dependency Management" what="Dependency Management" />;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 96 }}
-        keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} tintColor={ACCENT} onRefresh={async () => { setRefreshing(true); await Promise.all([projectsQ.refetch(), qc.invalidateQueries({ queryKey: ["cwd-chains"] }), qc.invalidateQueries({ queryKey: ["cwd-chain"] })]); setRefreshing(false); }} />}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 12, paddingHorizontal: 12 }}>
-          <Search size={14} color={colors.mutedForeground} />
-          <TextInput value={search} onChangeText={setSearch} placeholder="Search chain, block, unit, room or Auto Name…" placeholderTextColor={`${colors.mutedForeground}99`} style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }} />
-          {!!search && <TouchableOpacity onPress={() => setSearch("")}><X size={14} color={colors.mutedForeground} /></TouchableOpacity>}
-        </View>
-
-        <View style={{ marginTop: 12 }}>
-          <AutoNameLookup onOpen={(rungId) => navigation.navigate("AllocationForm", { rungId })} />
-        </View>
-
-        <View style={{ marginTop: 14, gap: 10 }}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: S.paper }}
+      contentContainerStyle={{ paddingBottom: 96 }}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={refreshing} tintColor={S.ink} onRefresh={async () => { setRefreshing(true); await Promise.all([projectsQ.refetch(), qc.invalidateQueries({ queryKey: ["cwd-chains"] }), qc.invalidateQueries({ queryKey: ["cwd-chain"] })]); setRefreshing(false); }} />}
+    >
+      <SheetShell eyebrow="Civil Work DPR" title="Dependency Management" subtitle="Every dependency chain, project by project. Open a chain to see its steps; tap a step to allocate it.">
+        <SearchBox value={search} onChange={setSearch} placeholder="Search chain, block, unit, room or Auto Name" />
+        <AutoNameLookup onOpen={(rungId) => navigation.navigate("AllocationForm", { rungId })} />
+        <View style={{ gap: 10 }}>
           {projectsQ.isLoading ? (
-            <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 40 }} />
+            <><Skel h={46} /><Skel h={46} /></>
           ) : projectsQ.error ? (
-            <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular }}>{(projectsQ.error as Error).message}</Text>
+            <Notice>{(projectsQ.error as Error).message}</Notice>
           ) : projects.length === 0 ? (
-            <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 40 }}>No projects with dependency chains.</Text>
+            <Body size={13} color={S.graphite} style={{ textAlign: "center", paddingVertical: 30 }}>No projects with dependency chains.</Body>
           ) : (
             projects.map((p) => {
               const expanded = open === p.id;
               return (
-                <View key={p.id} style={{ backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: expanded ? `${ACCENT}66` : colors.border, overflow: "hidden" }}>
-                  <TouchableOpacity activeOpacity={0.6} onPress={() => setOpen(expanded ? null : p.id)} style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12 }}>
-                    <ChevronRight size={14} color={colors.mutedForeground} style={{ transform: [{ rotate: expanded ? "90deg" : "0deg" }] }} />
-                    <FolderTree size={15} color="#8b5cf6" />
-                    <Text numberOfLines={1} style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{p.name ?? `Project ${p.id}`}</Text>
-                    <GitBranch size={13} color={colors.mutedForeground} />
-                  </TouchableOpacity>
-                  {expanded && <View style={{ paddingHorizontal: 12, paddingBottom: 12 }}><ProjectChains projectId={p.id} term={term} /></View>}
+                <View key={p.id} style={{ borderWidth: 1, borderColor: S.ink }}>
+                  <Press
+                    onPress={() => setOpen(expanded ? null : p.id)}
+                    style={(pressed) => ({ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderBottomWidth: expanded ? 1 : 0, borderBottomColor: S.ink, backgroundColor: expanded || pressed ? S.blueWash : "transparent" })}
+                  >
+                    <ChevronRight size={14} color={S.graphite} style={{ transform: [{ rotate: expanded ? "90deg" : "0deg" }] }} />
+                    <FolderTree size={15} color={S.ink} />
+                    <Text numberOfLines={1} style={{ flex: 1, fontSize: 13.5, fontFamily: fonts.heading.semibold, color: S.ink }}>{p.name ?? `Project ${p.id}`}</Text>
+                  </Press>
+                  {expanded && <View style={{ padding: 10 }}><ProjectChains projectId={p.id} term={term} /></View>}
                 </View>
               );
             })
           )}
         </View>
-      </ScrollView>
-    </View>
+      </SheetShell>
+    </ScrollView>
   );
 }

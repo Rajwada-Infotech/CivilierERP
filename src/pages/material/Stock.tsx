@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -170,6 +170,12 @@ function ItemLedgerModal({
   });
 
   const rows = data?.data ?? [];
+  const earlier = data?.earlier ?? [];
+  const opening = data?.opening ?? 0;
+  const earlierCount = data?.earlierCount ?? 0;
+  const [showEarlier, setShowEarlier] = useState(false);
+  useEffect(() => setShowEarlier(false), [item?.ItemID]);
+  const fmtDay = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 
   const openDoc = (row: ItemLedgerRow) => {
     const meta = REF_TYPE_META[row.RefType];
@@ -185,7 +191,7 @@ function ItemLedgerModal({
           <p className={LBL}>Stock movements</p>
           <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">{item?.ItemName || "Item"}</DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground mt-1">
-            Every GRN, issue, return and other movement behind this item's in / out figures for the godown and period.
+            Every GRN, issue, return and other movement behind this item's in / out figures for the godown and period, and the opening stock before it.
           </DialogDescription>
         </DialogHeader>
 
@@ -195,17 +201,26 @@ function ItemLedgerModal({
               <div key={i} className="h-10 bg-primary/5 animate-pulse" />
             ))}
           </div>
-        ) : rows.length === 0 ? (
+        ) : rows.length === 0 && earlierCount === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">No stock movements for this item in the selected period.</div>
         ) : (
           <div className="divide-y divide-foreground/10">
-            {rows.map((row) => {
+            {rows.length === 0 && (
+              <div className="px-5 py-4 text-xs text-muted-foreground">No movements in the selected period — the stock below is all opening stock.</div>
+            )}
+            {[...rows, ...(showEarlier ? earlier : [])].map((row, idx) => {
+              const firstEarlier = showEarlier && idx === rows.length;
               const meta = REF_TYPE_META[row.RefType] ?? { label: row.RefType };
               const clickable = !!meta.route;
               const isIn = row.Type === "IN";
               return (
+                <Fragment key={row.StockID}>
+                {firstEarlier && (
+                  <div className="px-5 py-2 bg-primary/5">
+                    <span className={LBL}>Before {fmtDay(data?.periodStart ?? null)} · makes up the opening stock</span>
+                  </div>
+                )}
                 <button
-                  key={row.StockID}
                   type="button"
                   disabled={!clickable}
                   onClick={() => openDoc(row)}
@@ -230,8 +245,24 @@ function ItemLedgerModal({
                   </div>
                   {clickable && <ExternalLink size={12} className="text-muted-foreground shrink-0" />}
                 </button>
+                </Fragment>
               );
             })}
+            {/* Opening stock: the balance brought in from before the period, and the movements behind it. */}
+            {earlierCount > 0 && (
+              <div className="px-5 py-3 flex items-center gap-3" style={{ borderTop: RULE }}>
+                <span className={`${TAG} justify-center border-foreground text-foreground`}>Opening</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[0.6875rem] text-muted-foreground">
+                    Balance before {fmtDay(data?.periodStart ?? null)} · {earlierCount} movement{earlierCount === 1 ? "" : "s"}
+                  </p>
+                  <button type="button" onClick={() => setShowEarlier((v) => !v)} className={`${LBL} mt-1 underline decoration-dashed underline-offset-2 hover:text-foreground`}>
+                    {showEarlier ? "Hide earlier movements" : `Show earlier movements${earlierCount > earlier.length ? ` (latest ${earlier.length})` : ""}`}
+                  </button>
+                </div>
+                <span className="font-heading font-bold text-sm tabular-nums shrink-0">{fmtNum(opening)}</span>
+              </div>
+            )}
           </div>
         )}
       </DialogContent>

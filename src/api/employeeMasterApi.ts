@@ -49,6 +49,7 @@ export interface EmployeeRow {
   SalaryStructureCode: string | null;
   IsActive: boolean;
   DocumentCount: number;
+  FaceStatus?: string | null;
   CreatedBy: string | null;
   CreatedAt: string;
   UpdatedBy: string | null;
@@ -225,3 +226,23 @@ export const getEmployeeSalaryBreakup = async (employeeId: number, asOfDate?: st
   const res = await fetchWithAuth(`${BASE}/${employeeId}/salary-breakup${qs}`);
   return handle(res);
 };
+
+// ── Face registration (HR) ───────────────────────────────────────────────────
+export interface FaceTemplateRow { FaceTemplateId: number; Status: string; Source?: string; ProfileScore?: number | null; HasReviewPhoto?: boolean; DecidedAt?: string | null; DecidedByName?: string | null; SampleCount: number; QualityScore: number | null; ModelVersion: string; EnrolledAt: string;
+  RevokedAt: string | null; RevokeReason: string | null; EnrolledByName: string | null; RevokedByName: string | null }
+export interface FaceCheckRow { Purpose: string; Result: string; Stage: string | null; Score: number | null; Reason: string | null; DistanceM: number | null; AccuracyM: number | null; LocationName: string | null; CreatedAt: string }
+export interface FaceStatus { configured: boolean; faceRequired: boolean; geofenceRequired: boolean; active: FaceTemplateRow | null; pending: FaceTemplateRow | null; history: FaceTemplateRow[];
+  recent: FaceCheckRow[]; locations: { LocationName: string; RadiusMeters: number }[]; exempt: boolean; exemptReason: string | null }
+async function faceCall<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetchWithAuth(`${BASE}${path}`, init ? { ...init, headers: { "Content-Type": "application/json" } } : undefined);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error || `HTTP ${res.status}`);
+  return data as T;
+}
+export const getFaceStatus = (id: number) => faceCall<FaceStatus>(`/${id}/face`);
+export const enrollFace = (id: number, photos: string[]) => faceCall<{ message: string }>(`/${id}/face/enroll`, { method: "POST", body: JSON.stringify({ photos, consent: true }) });
+export const revokeFace = (id: number, reason: string) => faceCall<{ message: string }>(`/${id}/face/revoke`, { method: "POST", body: JSON.stringify({ reason }) });
+export const setFaceExempt = (id: number, exempt: boolean, reason: string) => faceCall<{ message: string }>(`/${id}/face/exempt`, { method: "PUT", body: JSON.stringify({ exempt, reason }) });
+export const getFaceReviewPhoto = (id: number, tid: number) => faceCall<{ photo: string }>(`/${id}/face/review-photo/${tid}`);
+export const approveFace = (id: number, templateId: number) => faceCall<{ message: string }>(`/${id}/face/approve`, { method: "POST", body: JSON.stringify({ templateId }) });
+export const rejectFace = (id: number, templateId: number, reason: string) => faceCall<{ message: string }>(`/${id}/face/reject`, { method: "POST", body: JSON.stringify({ templateId, reason }) });

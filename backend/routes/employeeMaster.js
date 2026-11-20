@@ -8,6 +8,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const faceSvc = require("../services/face/faceService");
 const { pickStructureVersion, calculateStructure } = require("../lib/formulaEngine");
 const salaryStructureRoutes = require("./salaryStructure");
 const { createEmployeeAccountHead, syncEmployeeAccountHead, deleteAccountHeadById } = require("../services/employeeAccountHead");
@@ -17,6 +18,13 @@ const headFields = (body) => ({
 });
 
 const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, (SELECT STRING_AGG(CAST(x.LocationId AS varchar(10)), ',') FROM dbo.EmployeeWorkLocation x WHERE x.EmployeeId = e.EmployeeId) AS WorkLocationIds, (SELECT STRING_AGG(w.LocationName, ', ') WITHIN GROUP (ORDER BY w.LocationName) FROM dbo.EmployeeWorkLocation x JOIN dbo.WorkLocationMaster w ON w.LocationId = x.LocationId WHERE x.EmployeeId = e.EmployeeId) AS WorkLocationNames, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, cand.CandidateCode AS CandidateCode, cand.CandidateName AS CandidateName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.CTCAmount, e.CTCFrequency, e.SalaryStructureCode, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
+// Face registration state per employee (Pending first), once migration 692 has created the table.
+const FACE_STATUS_SQL = ", (SELECT TOP 1 f.Status FROM dbo.EmployeeFaceTemplate f WHERE f.EmployeeId = e.EmployeeId AND f.Status IN (N'Pending', N'Active') ORDER BY CASE f.Status WHEN N'Pending' THEN 0 ELSE 1 END) AS FaceStatus";
+let faceTable = false;
+const faceCols = async (pool) => {
+  if (!faceTable) faceTable = !!(await pool.request().query("SELECT OBJECT_ID('dbo.EmployeeFaceTemplate', 'U') AS t")).recordset[0].t;
+  return faceTable ? FACE_STATUS_SQL : "";
+};
 
 
 // Rolls a transaction back without letting a failed rollback replace the ORIGINAL error: when SQL Server has already
@@ -30,7 +38,7 @@ router.get("/", cache("employee-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(
-      "SELECT " + SELECT_COLUMNS + " FROM dbo.EmployeeMaster e " +
+      "SELECT " + SELECT_COLUMNS + (await faceCols(pool)) + " FROM dbo.EmployeeMaster e " +
       "LEFT JOIN dbo.EmployeeMaster mgr ON mgr.EmployeeId = e.ReportingManagerId " +
       "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = e.CostCenterId " +
       "LEFT JOIN dbo.enterprise comp ON comp.id = e.CompanyId " +
@@ -385,6 +393,45 @@ router.get("/:id/salary-breakup", requirePageRight("employee-master", "view"), a
     console.error("[employee-master] GET /salary-breakup error:", err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+
+// ── Face registration (Employee Master › Face Registration) ──────────────────
+// HR captures 3–5 webcam photos with the employee present and their consent; the server builds an encrypted template.
+const faceDone = (res, out) => { bumpCacheVersion("employee-master").catch(() => {}); res.json(out); };
+const faceFail = (res, err, where) => {
+  if (err instanceof faceSvc.VerifyError) return res.status(err.status).json({ error: err.message, problems: err.problems });
+  console.error(`[employee-master] ${where}:`, err.message);
+  return res.status(500).json({ error: "Face registration failed" });
+};
+const empId = (req) => { const n = Number(req.params.id); return Number.isInteger(n) && n > 0 ? n : null; };
+router.get("/:id/face", requirePageRight("employee-master", "view"), async (req, res) => {
+  if (!empId(req)) return res.status(400).json({ error: "Invalid employee" });
+  try { res.json(await faceSvc.status(getPool(), empId(req))); } catch (e) { faceFail(res, e, "face status"); }
+});
+router.post("/:id/face/enroll", requirePageRight("employee-master", "edit"), async (req, res) => {
+  if (!empId(req)) return res.status(400).json({ error: "Invalid employee" });
+  try { faceDone(res, await faceSvc.enroll(getPool(), empId(req), req.body || {}, req.user?.userId || null, req.ip)); } catch (e) { faceFail(res, e, "face enroll"); }
+});
+router.get("/:id/face/review-photo/:tid", requirePageRight("employee-master", "view"), async (req, res) => {
+  if (!empId(req)) return res.status(400).json({ error: "Invalid employee" });
+  try { res.json({ photo: await faceSvc.reviewPhoto(getPool(), empId(req), Number(req.params.tid)) }); } catch (e) { faceFail(res, e, "face review photo"); }
+});
+router.post("/:id/face/approve", requirePageRight("employee-master", "edit"), async (req, res) => {
+  if (!empId(req)) return res.status(400).json({ error: "Invalid employee" });
+  try { faceDone(res, await faceSvc.approve(getPool(), empId(req), Number(req.body?.templateId), req.user?.userId || null)); } catch (e) { faceFail(res, e, "face approve"); }
+});
+router.post("/:id/face/reject", requirePageRight("employee-master", "edit"), async (req, res) => {
+  if (!empId(req)) return res.status(400).json({ error: "Invalid employee" });
+  try { faceDone(res, await faceSvc.reject(getPool(), empId(req), Number(req.body?.templateId), req.body?.reason, req.user?.userId || null)); } catch (e) { faceFail(res, e, "face reject"); }
+});
+router.post("/:id/face/revoke", requirePageRight("employee-master", "edit"), async (req, res) => {
+  if (!empId(req)) return res.status(400).json({ error: "Invalid employee" });
+  try { faceDone(res, await faceSvc.revoke(getPool(), empId(req), req.body?.reason, req.user?.userId || null)); } catch (e) { faceFail(res, e, "face revoke"); }
+});
+router.put("/:id/face/exempt", requirePageRight("employee-master", "edit"), async (req, res) => {
+  if (!empId(req)) return res.status(400).json({ error: "Invalid employee" });
+  try { faceDone(res, await faceSvc.setExempt(getPool(), empId(req), !!req.body?.exempt, req.body?.reason)); } catch (e) { faceFail(res, e, "face exempt"); }
 });
 
 module.exports = router;

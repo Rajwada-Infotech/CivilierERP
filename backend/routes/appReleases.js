@@ -31,6 +31,8 @@ const APP_CATALOG = {
   "follow-up": { label: "Civilier Follow-Up", packageName: "com.rajwadainfotech.civilierfollowup", fileName: "CivilierERPFollowUp.apk" },
   maintenance: { label: "Civilier Home", packageName: "com.rajwadainfotech.civiliermaintenance", fileName: "CivilierERPMaintenance.apk" },
   cwd: { label: "Civilier Work DPR", packageName: "com.rajwadainfotech.civiliercwd", fileName: "CivilierERPWorkDPR.apk" },
+  // The Employee Portal app (mobile-employee): listed before its first build, so its builds can be published here.
+  employee: { label: "Civilier Employee Portal", packageName: "com.rajwadainfotech.civilieremployee", fileName: "CivilierERPEmployeePortal.apk" },
 };
 
 const upload = multer({
@@ -121,7 +123,7 @@ router.get("/public", async (_req, res) => {
   }
 });
 
-// GET /catalog — the six apps with their current release (APK Manager page).
+// GET /catalog — every app with its current release (APK Manager page).
 router.get("/catalog", authenticateToken, requirePageRight("apk-manager", "view"), async (_req, res) => {
   try {
     const pool = getPool();

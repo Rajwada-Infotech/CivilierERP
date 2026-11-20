@@ -18,8 +18,7 @@ import {
   RefreshControl,
   ScrollView,
   Text,
-  View,
-} from "react-native";
+  View, type ScrollViewInstance } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import {
@@ -54,7 +53,7 @@ const isDueSoon = (due?: string | null) =>
 export default function DashboardScreen() {
   const { currentUser } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   // Section y-offsets within the ScrollView's content, captured via onLayout
   // as each QSection mounts — lets the stat-row tiles jump straight to the
   // matching section instead of just being decorative counts.

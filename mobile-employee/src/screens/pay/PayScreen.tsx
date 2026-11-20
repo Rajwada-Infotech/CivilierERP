@@ -29,6 +29,23 @@ export default function PayScreen() {
         {s?.SalaryStructureName && <Body size={12} color={S.graphite}>Structure: {s.SalaryStructureName}</Body>}
       </Panel>
 
+      {s?.Latest && (["Earnings", "Deductions"] as const).map((k) => {
+        const lines = k === "Earnings" ? s.Latest!.Earnings : s.Latest!.Deductions;
+        const total = k === "Earnings" ? s.Latest!.GrossSalary : s.Latest!.TotalEmployeeDeduction;
+        return (
+          <Panel key={k} title={`${k} · ${MONTHS[s.Latest!.PeriodMonth - 1]} ${s.Latest!.PeriodYear}`}>
+            {lines.length === 0 ? <Body color={S.graphite}>None</Body> : lines.map((l) => (
+              <View key={`${l.HeadCode}-${l.HeadName}`} style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Body>{l.HeadName}</Body><Body>{rupee(l.Amount)}</Body>
+              </View>
+            ))}
+            <View style={{ flexDirection: "row", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: S.ink, paddingTop: 6 }}>
+              <Body weight="semibold">{k === "Earnings" ? "Gross salary" : "Total deductions"}</Body><Body weight="semibold">{rupee(total)}</Body>
+            </View>
+          </Panel>
+        );
+      })}
+
       <Panel title="Payslips">
         {slips.isLoading ? <Skel h={60} /> : slips.isError ? <Notice>{(slips.error as Error).message}</Notice> : !slips.data?.length ? (
           <Body color={S.graphite}>No payslip yet. Payslips appear once HR locks the month's payroll.</Body>

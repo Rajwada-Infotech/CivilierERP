@@ -285,7 +285,7 @@ export default function Landing() {
         className="relative z-10 flex items-center justify-between px-8 py-3"
         style={{ borderTop: "1px solid rgba(167,139,250,0.08)" }}
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.65, duration: 0.6 }}>
-        <span className="text-[0.6875rem]" style={{ color: "rgba(167,139,250,0.30)" }}>© {new Date().getFullYear()} CivilierERP · Rajwada Infotech</span>
+        <span className="text-[0.6875rem]" style={{ color: "rgba(167,139,250,0.30)" }}>© {new Date().getFullYear()} CivilierERP · Rajwada Infotech (RAJWADA GROUP)</span>
         <span className="text-[0.6875rem]" style={{ color: "rgba(167,139,250,0.22)" }}>v{appVersion}</span>
       </motion.div>
     </motion.div>

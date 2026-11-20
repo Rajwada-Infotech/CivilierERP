@@ -87,10 +87,9 @@ export async function fetchWithAuth(
   }
 
   if (response.status === 403) {
-    throw new ApiError(
-      "You do not have permission to perform this action.",
-      response.status,
-    );
+    // Show the server's reason (e.g. "Your face is not registered…"); fall back to the generic text.
+    const body = await response.clone().json().catch(() => null) as { error?: string } | null;
+    throw new ApiError(body?.error || "You do not have permission to perform this action.", response.status);
   }
 
   return response;

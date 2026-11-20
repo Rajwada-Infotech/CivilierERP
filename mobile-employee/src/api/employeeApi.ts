@@ -20,7 +20,7 @@ export interface Me {
 
 export interface BreakRow {
   breakId: number; no: number; start: string; end: string | null; seconds: number | null; open: boolean;
-  type: string; note: string | null; deduct: boolean; overSeconds: number;
+  type: string; note: string | null; deduct: boolean; allowedSeconds?: number | null; overSeconds: number;
 }
 export interface AttendanceRec {
   attendanceId: number; attendanceDate: string; inTime: string; outTime: string | null;
@@ -70,12 +70,33 @@ export interface Salary { CTCAmount: number | null; CTCFrequency: string | null;
 export interface Holiday { HolidayId: number; HolidayName: string; HolidayDate: string }
 export interface LoginRow { LoginHistoryId: number; LoginAt: string; Success: boolean; FailureReason: string | null; IpAddress: string | null; UserAgent: string | null; Portal: string | null }
 
+const challenge = (kind: "in" | "out") => call<{ nonce: string }>("/attendance/challenge", post({ kind }));
+
+export interface FaceSelf { required: boolean; exempt: boolean; configured: boolean; state: "None" | "Pending" | "Active" | "Rejected" | "Revoked";
+  activeSince: string | null; pendingSince: string | null; rejectReason: string | null }
+
+export interface Notice { NoticeId: number; Title: string; Body: string; Priority: string; IsPinned: boolean; PublishFrom: string; ExpiresOn: string | null; PostedBy: string | null; ForWhom: string | null; IsRead: boolean }
+
+export interface MovementPending { movementId: number; kind: "Outside" | "LocationOff"; leftAt: string; returnedAt: string | null }
+export interface LocationPoint { lat: number; lng: number; acc: number | null; at: string }
+
 export const api = {
+  sendLocation: (points: LocationPoint[]) => call<{ tracking: boolean; pending: MovementPending[] }>("/attendance/location", post({ points })),
+  locationStatus: (enabled: boolean) => call<{ tracking: boolean; pending: MovementPending[] }>("/attendance/location-status", post({ enabled, at: new Date().toISOString() })),
+  movementSkip: (id: number) => call<{ pending: MovementPending[] }>(`/attendance/movement/${id}/skip`, post()),
+  movementPending: () => call<{ pending: MovementPending[] }>("/attendance/movement/pending"),
+  movementReason: (id: number, reason: string) => call<{ pending: MovementPending[] }>(`/attendance/movement/${id}/reason`, post({ reason })),
+  notices: () => call<Notice[]>("/notices"),
+  readNotice: (id: number) => call<{ ok: boolean }>(`/notices/${id}/read`, post()),
+  face: () => call<FaceSelf>("/face"),
+  faceEnroll: (photos: string[]) => call<{ message: string }>("/face/enroll", post({ photos, consent: true })),
   me: () => call<Me>("/me"),
   today: () => call<TodayState>("/attendance/today"),
   breakTypes: () => call<BreakType[]>("/attendance/break-types"),
-  punchIn: (e: Evidence) => call<TodayState>("/attendance/in", post(e)),
-  punchOut: (e: Evidence) => call<TodayState>("/attendance/out", post(e)),
+  // Each punch: a single-use challenge first, then photo + location + challenge. The server checks the work-location
+  // geofence and verifies the face against the one HR registered in Employee Master.
+  punchIn: async (e: Evidence) => call<TodayState>("/attendance/in", post({ ...e, nonce: (await challenge("in")).nonce })),
+  punchOut: async (e: Evidence) => call<TodayState>("/attendance/out", post({ ...e, nonce: (await challenge("out")).nonce })),
   breakStart: (type: string, note?: string) => call<TodayState>("/attendance/break-start", post({ type, note })),
   breakStop: () => call<TodayState>("/attendance/break-stop", post()),
   month: (month: string) => call<MonthAttendance>(`/attendance?month=${month}`),

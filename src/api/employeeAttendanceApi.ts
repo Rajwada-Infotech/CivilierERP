@@ -52,9 +52,29 @@ export interface AttendanceRecord {
   /** Device location and live photo captured at an Employee Portal punch (null for other punches). */
   inLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
   outLocation?: { lat: number; lng: number; accuracyM: number | null } | null;
+  /** Location switched off, or a trip outside with no reason, on this day — highlighted for HR. */
+  movementAlerts?: number;
+  /** Work Location matched at the punch (or set by HR), with the distance from its point in metres. */
+  inWorkLocation?: { id: number; name: string | null; distanceM: number | null } | null;
+  outWorkLocation?: { id: number; name: string | null; distanceM: number | null } | null;
   hasInPhoto?: boolean;
   hasOutPhoto?: boolean;
   live: { sessionSeconds: number; breakSeconds: number; netSeconds: number } | null;
+}
+
+/** One on-duty trip: left the own work locations (Outside) or was at another office (Visit). */
+export interface AttendanceMovement {
+  movementId: number;
+  kind: "Outside" | "Visit" | "LocationOff";
+  locationId: number | null;
+  locationName: string | null;
+  start: string;
+  end: string | null;
+  seconds: number | null;
+  hasVisit: boolean;
+  reason: string | null;
+  skipped?: boolean;
+  alert?: boolean;
 }
 
 export type MyState = "NOT_STARTED" | "WORKING" | "ON_BREAK" | "COMPLETED";
@@ -155,13 +175,13 @@ export const getHrRecords = async (f: HrFilters) => parse<AttendanceRecord[]>(aw
 export const getHrSummary = async (f: HrFilters) => parse<AttendanceSummary>(await fetchWithAuth(`${BASE}/hr/summary?${qs(f)}`), "Failed to load summary");
 export const getNotMarked = async (f: HrFilters & { date: string }) => parse<NotMarkedEmployee[]>(await fetchWithAuth(`${BASE}/hr/not-marked?${qs(f)}`), "Failed to load employees");
 export const getHrRecord = async (id: number) =>
-  parse<{ record: AttendanceRecord; audit: AuditEntry[] }>(await fetchWithAuth(`${BASE}/hr/records/${id}`), "Failed to load the record");
+  parse<{ record: AttendanceRecord; audit: AuditEntry[]; movements?: AttendanceMovement[] }>(await fetchWithAuth(`${BASE}/hr/records/${id}`), "Failed to load the record");
 
 export const getHrPunchPhoto = async (id: number, which: "in" | "out") =>
   parse<{ photo: string | null }>(await fetchWithAuth(`${BASE}/hr/records/${id}/photo/${which}`), "Failed to load the photo");
 
 type Corrected = { record: AttendanceRecord; audit: AuditEntry[] };
-export const hrUpdateRecord = async (id: number, body: { inTime?: string; outTime?: string | null; reason: string }) =>
+export const hrUpdateRecord = async (id: number, body: { inTime?: string; outTime?: string | null; inLocationId?: number | null; outLocationId?: number | null; reason: string }) =>
   parse<Corrected>(await post(`/hr/records/${id}`, body, "PUT"), "Could not save the correction");
 export const hrAddBreak = async (id: number, body: { start: string; end?: string | null; reason: string }) =>
   parse<Corrected>(await post(`/hr/records/${id}/breaks`, body), "Could not add the break");

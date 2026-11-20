@@ -3,13 +3,17 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Modal, Pressable, Text, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigation } from "@react-navigation/native";
 import { Coffee, LogIn, LogOut, MapPin, Play } from "lucide-react-native";
 import { api, type BreakType, type TodayState } from "@/api/employeeApi";
-import { captureEvidence, EvidenceError } from "@/services/evidence";
+import { currentPosition, EvidenceError } from "@/services/evidence";
+import { CameraCapture } from "@/components/CameraCapture";
 import { Screen } from "@/components/Screen";
 import { Chip } from "@/components/Chip";
 import { Body, Field, Input, Key, Label, Notice, Panel, SheetFrame, Skel, StatGrid, TitleText } from "@/components/sheet/Sheet";
 import { sheet as S } from "@/theme/colors";
+import HomeDashboard from "./HomeDashboard";
+import NoticesPanel from "./NoticesPanel";
 import { fonts } from "@/theme/fonts";
 import { clock, fmtDate, fmtDur, fmtTime } from "@/utils/format";
 
@@ -66,6 +70,8 @@ export default function HomeScreen() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, staleTime: 10 * 60_000 });
   const today = useQuery({ queryKey: ["today"], queryFn: api.today, refetchInterval: 60_000 });
   const types = useQuery({ queryKey: ["break-types"], queryFn: api.breakTypes, staleTime: 10 * 60_000 });
+  const face = useQuery({ queryKey: ["face"], queryFn: api.face, staleTime: 60_000 });
+  const nav = useNavigation<{ navigate: (name: string) => void }>();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picker, setPicker] = useState(false);
@@ -73,16 +79,31 @@ export default function HomeScreen() {
   const done = (s: TodayState) => { qc.setQueryData(["today"], s); qc.invalidateQueries({ queryKey: ["month"] }); setError(null); };
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : "Something went wrong");
 
+  // Punch: location first (a GPS problem shows before the camera), then the in-app camera, then send.
+  const [camFor, setCamFor] = useState<"in" | "out" | null>(null);
+  const [pos, setPos] = useState<Awaited<ReturnType<typeof currentPosition>> | null>(null);
   const punch = async (kind: "in" | "out") => {
     setError(null);
-    setBusy(kind === "in" ? "Getting your location…" : "Getting your location…");
+    setBusy("Getting your location…");
     try {
-      const ev = await captureEvidence();
-      if (!ev) return;
-      setBusy(kind === "in" ? "Punching in…" : "Punching out…");
-      done(kind === "in" ? await api.punchIn(ev) : await api.punchOut(ev));
+      setPos(await currentPosition());
+      setCamFor(kind);
     } catch (e) {
       fail(e instanceof EvidenceError ? e : e);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const sendPunch = async (photo: string) => {
+    const kind = camFor;
+    setCamFor(null);
+    if (!kind || !pos) return;
+    setBusy(kind === "in" ? "Verifying face and location…" : "Verifying face and location…");
+    try {
+      const ev = { photo, ...pos };
+      done(kind === "in" ? await api.punchIn(ev) : await api.punchOut(ev));
+    } catch (e) {
+      fail(e);
     } finally {
       setBusy(null);
     }
@@ -104,7 +125,7 @@ export default function HomeScreen() {
     ]);
 
   return (
-    <Screen refreshing={today.isRefetching} onRefresh={() => { today.refetch(); me.refetch(); }}>
+    <Screen refreshing={today.isRefetching} onRefresh={() => { qc.invalidateQueries(); }}>
       <SheetFrame>
         <View style={{ padding: 16, flexDirection: "row", alignItems: "center", gap: 12 }}>
           {me.data?.Photo ? (
@@ -121,6 +142,16 @@ export default function HomeScreen() {
           </View>
         </View>
       </SheetFrame>
+
+      {face.data && face.data.required && !face.data.exempt && face.data.state !== "Active" && (
+        <Pressable onPress={() => nav.navigate("FaceRegistration")}>
+          <Notice tone={face.data.state === "Pending" ? "ink" : "red"}>
+            {face.data.state === "Pending" ? "Your face registration is waiting for HR approval. Punches need it approved." : "Register your face to punch In / Out — tap here."}
+          </Notice>
+        </Pressable>
+      )}
+
+      <NoticesPanel />
 
       <Panel title="Today's attendance" icon={<MapPin size={14} color={S.ink} />}>
         {today.isLoading ? (
@@ -139,7 +170,12 @@ export default function HomeScreen() {
                 {d.state === "ON_BREAK" ? clock(breakNow ?? 0) : net != null ? clock(net) : "00:00:00"}
               </Text>
               {d.state === "ON_BREAK" && openBreak?.type && (
-                <Body size={11.5} color={S.graphite}>Working time paused at {fmtDur(cur?.live?.netSeconds)}</Body>
+                <Body size={11.5} color={S.graphite}>
+                  {openBreak.allowedSeconds != null ? `${fmtDur(openBreak.allowedSeconds)} allowed · ` : "No limit · "}Working time paused at {fmtDur(cur?.live?.netSeconds)}
+                </Body>
+              )}
+              {d.state === "ON_BREAK" && openBreak?.allowedSeconds != null && (breakNow ?? 0) > openBreak.allowedSeconds && (
+                <Chip text={`Break over time +${fmtDur((breakNow ?? 0) - openBreak.allowedSeconds)}`} tone="bad" />
               )}
             </View>
             <StatGrid cols={3} size={15} items={[
@@ -147,6 +183,11 @@ export default function HomeScreen() {
               { label: "Out", value: fmtTime(cur?.outTime) },
               { label: "Breaks", value: fmtDur(cur?.live?.breakSeconds ?? cur?.breakSeconds ?? 0) },
             ]} />
+            {cur && (
+              <Body size={11.5} color={S.graphite}>
+                Official out {fmtDur(cur.officialSeconds)} · Extra <Body size={11.5} color={cur.extraSeconds > 0 ? S.red : S.graphite}>{fmtDur(cur.extraSeconds)}</Body>
+              </Body>
+            )}
             {cur?.inLocation && (
               <Body size={11} color={S.graphite}>
                 In location recorded ({cur.inLocation.lat.toFixed(5)}, {cur.inLocation.lng.toFixed(5)}{cur.inLocation.accuracyM != null ? ` · ±${cur.inLocation.accuracyM} m` : ""})
@@ -190,6 +231,11 @@ export default function HomeScreen() {
           ))}
         </Panel>
       )}
+
+      <HomeDashboard />
+
+      <CameraCapture open={!!camFor} title={camFor === "in" ? "Punch In" : "Punch Out"} hint="Look straight at the camera — your face is checked against your registered face."
+        onClose={() => setCamFor(null)} onPhoto={sendPunch} />
 
       <BreakPicker open={picker} types={types.data ?? []} onClose={() => setPicker(false)}
         onPick={(t, n) => { setPicker(false); breakStart.mutate({ t, n }); }} />

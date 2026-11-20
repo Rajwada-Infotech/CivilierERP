@@ -1,21 +1,18 @@
-// Activity Priority pill (Low / High / Urgent / Very Urgent) — same colours as the web's PriorityBadge.
-import { Text, View } from "react-native";
+// Activity Priority (Low / High / Urgent / Very Urgent), in the sheet's capitals: the urgent two in red.
+import { Text } from "react-native";
 import { fonts } from "@/theme/fonts";
+import { sheet as S } from "@/theme/colors";
 import type { AssignmentPriority } from "@/api/cwdApi";
 
 export const PRIORITY_COLOR: Record<AssignmentPriority, string> = {
-  Low: "#64748b",
-  High: "#f59e0b",
-  Urgent: "#f97316",
-  "Very Urgent": "#ef4444",
+  Low: S.graphite,
+  High: S.ink,
+  Urgent: S.red,
+  "Very Urgent": S.red,
 };
 
 export function PriorityBadge({ priority }: { priority?: AssignmentPriority | null }) {
   if (!priority || !PRIORITY_COLOR[priority]) return null;
   const c = PRIORITY_COLOR[priority];
-  return (
-    <View style={{ paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 999, backgroundColor: `${c}26` }}>
-      <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: c, textTransform: "uppercase", letterSpacing: 0.3 }}>{priority}</Text>
-    </View>
-  );
+  return <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: c, textTransform: "uppercase", letterSpacing: 1 }}>{priority}</Text>;
 }

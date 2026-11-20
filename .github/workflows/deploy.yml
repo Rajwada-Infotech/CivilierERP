@@ -29,7 +29,11 @@ jobs:
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          FACE_TEMPLATE_KEY: ${{ secrets.FACE_TEMPLATE_KEY }}
+          FACE_TEMPLATE_KEY_ID: ${{ secrets.FACE_TEMPLATE_KEY_ID }}
         with:
+          envs: FACE_TEMPLATE_KEY,FACE_TEMPLATE_KEY_ID
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
@@ -50,6 +54,18 @@ jobs:
             git fetch origin "$BRANCH"
             git checkout "$BRANCH"
             git pull --ff-only origin "$BRANCH"
+
+            # Face template key (GitHub secrets) -> server env file. Added only when
+            # missing: an existing key is never overwritten, since changing it would
+            # make every registered face unreadable.
+            ENV_FILE="${CIVILIER_ENV_FILE:-backend/.env}"
+            for K in FACE_TEMPLATE_KEY FACE_TEMPLATE_KEY_ID; do
+              V="${!K:-}"
+              if [ -n "$V" ] && ! grep -q "^$K=" "$ENV_FILE"; then
+                printf '\n%s=%s\n' "$K" "$V" >> "$ENV_FILE"
+                echo "Added $K to $ENV_FILE"
+              fi
+            done
 
             # Stamp the real deployed commit into both halves of the app —
             # same shape ci.yml's "Stamp build info" step bakes into an
