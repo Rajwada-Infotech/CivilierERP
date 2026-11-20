@@ -581,8 +581,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
 
     // Contact identity fields (Mobile/AltMobile/Email) get the same
     // protection Status already had — but tighter, since these are used as
-    // the customer portal's own login credentials (email as username,
-    // mobile as the initial password) and as the phone number any
+    // the customer portal's own login (the mobile number signs in, and with
+    // the name makes the first password) and as the phone number any
     // verification call/SMS goes to. crm-applications:edit is held by
     // admin/dba/marketing_head too (see requirePageRight.js's crm- prefix
     // bypass), which is far too wide a blast radius for a field that can

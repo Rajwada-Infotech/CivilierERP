@@ -25,6 +25,7 @@ const { redisGet, redisSet, redisDel } = require("../redis");
 const { redisGetStrict, getRedis } = require("../redis");
 const { blacklistToken } = require("../middleware/blacklist");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
+const { normalizeMobile, defaultPortalPassword } = require("../services/crmPortalProvision");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
 // the staff-side Service Ticket module (crmServiceTickets.js), so every
@@ -63,19 +64,20 @@ async function incrementPortalLoginAttempts(attemptsKey, lockKey) {
   } catch { /* Redis down — never let a cache failure block login */ }
 }
 
-// POST /login — email + password (mobile number initially, forced reset on first
-// login — unchanged). Identity anchor is CustomerId (migration 254); email is
-// the UX credential resolved via CrmCustomer → CrmCustomerPortalUser.
-// UQ_CrmCustomer_Email (migration 255, filtered on active nonblank emails)
-// guarantees the lookup is always unambiguous — no silent wrong-row risk.
+// POST /login — the customer's registered mobile number + password. The first password is the first 4 letters of their
+// name + the last 4 digits of that mobile, all small (crmPortalProvision.js defaultPortalPassword). Identity anchor is
+// CustomerId (migration 254); the mobile resolves CrmCustomer → CrmCustomerPortalUser, matched on its last 10 digits
+// so "+91 98765 43210" and "9876543210" are the same number. UQ_CrmCustomer_Mobile keeps it to one active customer;
+// two records that differ only in formatting are refused rather than guessed. (An older app sends the number in
+// "email": accepted the same way.)
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
+    const { password } = req.body;
+    const mobile = normalizeMobile(req.body.mobile ?? req.body.email);
+    if (!mobile || !password) return res.status(400).json({ error: "Enter your 10-digit registered mobile number and your password" });
 
-    const normalizedEmail = email.trim().toLowerCase();
-    const lockKey = `portal-login:lock:${normalizedEmail}`;
-    const attemptsKey = `portal-login:attempts:${normalizedEmail}`;
+    const lockKey = `portal-login:lock:${mobile}`;
+    const attemptsKey = `portal-login:attempts:${mobile}`;
 
     try {
       const locked = await redisGet(lockKey);
@@ -84,43 +86,35 @@ router.post("/login", async (req, res) => {
 
     const pool = getPool();
 
-    // Resolve Email → CrmCustomer → CrmCustomerPortalUser
-    const result = await pool.request()
-      .input("em", sql.NVarChar(200), normalizedEmail)
+    // Resolve Mobile → CrmCustomer → CrmCustomerPortalUser (narrowed by its last 4 digits, then matched exactly)
+    const candidates = (await pool.request()
+      .input("last4", sql.NVarChar(10), mobile.slice(-4))
       .query(`
         SELECT pu.Id AS PortalUserId, pu.CustomerId, pu.PasswordHash,
                pu.MustChangePassword, pu.IsActive, pu.Email, c.Mobile
         FROM dbo.CrmCustomer c
         JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = c.Id
-        WHERE LOWER(LTRIM(RTRIM(c.Email))) = @em
-          AND c.IsActive = 1
-      `);
-    if (result.recordset.length > 1) {
+        WHERE c.IsActive = 1 AND c.Mobile LIKE '%' + @last4
+      `)).recordset.filter((r) => normalizeMobile(r.Mobile) === mobile);
+    if (candidates.length > 1) {
       return res.status(409).json({
-        error: "This email matches more than one customer record. Please contact the sales office to confirm your mobile number.",
+        error: "This mobile number matches more than one customer record. Please contact the sales office.",
       });
     }
-    const user = result.recordset[0];
+    const user = candidates[0];
     if (!user) {
       // Run dummy comparison to prevent timing-based user enumeration
       await bcrypt.compare(password, '$2b$10$invalidhashfortimingnormalizationXXXXXXXXXXXXXXXXXXXXXX');
       await incrementPortalLoginAttempts(attemptsKey, lockKey);
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: "Invalid mobile number or password" });
     }
     if (!user.IsActive) {
       await incrementPortalLoginAttempts(attemptsKey, lockKey);
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: "Invalid mobile number or password" });
     }
 
-    // Check the submitted password and, for the initial mobile-number
-    // credential, its normalized form against the stored bcrypt hash.
-    const normalizedInput = (password || '').replace(/\D/g, '').slice(-10);
-
-    let ok = await bcrypt.compare(password, user.PasswordHash);
-    if (!ok && normalizedInput) {
-      ok = await bcrypt.compare(normalizedInput, user.PasswordHash);
-    }
-    if (!ok) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
+    const ok = await bcrypt.compare(password, user.PasswordHash);
+    if (!ok) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid mobile number or password" }); }
 
     try { await redisDel(attemptsKey); await redisDel(lockKey); } catch {}
 
@@ -157,7 +151,8 @@ router.post("/login", async (req, res) => {
  * Staff resets a customer's portal password to a new temp value (MustChangePassword = 1 records that it is not
  * the customer's own; setting their own stays their choice and is never forced).
  * Body: { customerId: number, newPassword?: string }
- * If newPassword is omitted, defaults to the customer's mobile number (normalized).
+ * If newPassword is omitted, it goes back to the first password: the first 4 letters of the name + the last 4 digits
+ * of the mobile, all small (crmPortalProvision.js defaultPortalPassword).
  */
 router.post(
   "/admin/reset-password",
@@ -192,17 +187,15 @@ router.post(
       // Resolve portal user record
       const portalUser = (await pool.request()
         .input("cid", sql.Int, cid)
-        .query("SELECT pu.Id, c.Mobile FROM dbo.CrmCustomerPortalUser pu JOIN dbo.CrmCustomer c ON c.Id = pu.CustomerId WHERE pu.CustomerId = @cid AND pu.IsActive = 1"))
+        .query("SELECT pu.Id, c.Mobile, c.CustomerName FROM dbo.CrmCustomerPortalUser pu JOIN dbo.CrmCustomer c ON c.Id = pu.CustomerId WHERE pu.CustomerId = @cid AND pu.IsActive = 1"))
         .recordset[0];
 
       if (!portalUser) {
         return res.status(404).json({ error: "No active portal account found for this customer" });
       }
 
-      // Derive password: explicit value or fall back to normalized mobile
-      const rawPassword = newPassword?.trim() ||
-        (portalUser.Mobile || "").replace(/\D/g, "").slice(-10) ||
-        null;
+      // The password: an explicit one, or the first password (name + mobile rule)
+      const rawPassword = newPassword?.trim() || defaultPortalPassword(portalUser.CustomerName, portalUser.Mobile);
 
       if (!rawPassword || rawPassword.length < 6) {
         return res.status(400).json({ error: "Cannot determine a temporary password — please provide newPassword explicitly" });
@@ -217,13 +210,13 @@ router.post(
       await pool.request()
         .input("id", sql.Int, portalUser.Id)
         .input("hash", sql.NVarChar(255), hash)
-        .query("UPDATE dbo.CrmCustomerPortalUser SET PasswordHash = @hash, MustChangePassword = 1, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+        .query("UPDATE dbo.CrmCustomerPortalUser SET PasswordHash = @hash, MustChangePassword = 1 WHERE Id = @id");
 
       // Invalidate the 15-second in-memory cache for this portal user so the
       // next portal request reflects the new state immediately.
       _portalUserStatusCache.delete(portalUser.Id);
 
-      res.json({ success: true, message: "Portal password reset. Customer must change it on next login." });
+      res.json({ success: true, message: newPassword?.trim() ? "Portal password reset." : "Portal password reset to the first password (name + mobile)." });
     } catch (e) {
       console.error("[crm-portal] POST /admin/reset-password error:", e.message);
       res.status(500).json({ error: "An internal error occurred." });

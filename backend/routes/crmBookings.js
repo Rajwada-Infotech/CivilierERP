@@ -3239,10 +3239,10 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
 });
 
 // GET /:id/portal-status — staff-facing: shows whether the customer portal
-// account has been provisioned for this booking's customer. Includes masked
-// mobile (initial password hint) so support staff can help a customer who
-// forgot their first-login credential. Only meaningful once the booking is
-// Confirmed, but readable at any stage.
+// account has been provisioned for this booking's customer: the mobile number
+// they sign in with and how their first password is made (crmPortalProvision.js),
+// so support staff can help a customer who forgot it. Only meaningful once the
+// booking is Confirmed, but readable at any stage.
 router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
@@ -3295,15 +3295,15 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
       console.warn("[crm-bookings] portal user lookup failed (non-fatal):", pe.message);
     }
 
-    const mob = bkgRow.CustomerMobile;
-    const maskedMobile = mob && mob.length >= 4
-      ? mob.slice(0, 2) + '******' + mob.slice(-2)
-      : (mob ? '**********' : null);
+    const { normalizeMobile, DEFAULT_PASSWORD_RULE } = require("../services/crmPortalProvision");
     res.json({
       hasPortal: !!portalRow,
       portalUserId: portalRow ? portalRow.Id : null,
+      customerId: bkgRow.CustomerId || null,
+      // What the customer signs in with, and how their first password is made
+      loginMobile: normalizeMobile(bkgRow.CustomerMobile),
+      passwordRule: DEFAULT_PASSWORD_RULE,
       email: portalRow ? portalRow.Email : (bkgRow.CustomerEmail || null),
-      maskedMobile,
       isActive: portalRow ? !!portalRow.IsActive : false,
       mustChangePassword: portalRow ? !!portalRow.MustChangePassword : false,
       portalCreatedAt: portalRow ? portalRow.CreatedAt : null,
@@ -3320,7 +3320,7 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
 
 // POST /:id/provision-portal — idempotent recovery route. The portal is
 // normally auto-provisioned at booking confirmation, but if that failed
-// (e.g. customer had no email on file at that moment and it was added later),
+// (e.g. customer had no 10-digit mobile on file at that moment and it was added later),
 // staff can trigger it here without re-running the full approval flow.
 router.post("/:id/provision-portal", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);

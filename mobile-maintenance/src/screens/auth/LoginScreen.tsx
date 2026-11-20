@@ -25,9 +25,11 @@ import type { UserKind } from "@/types/auth";
 
 // One app, two sign-ins: customers (the Customer Portal) and staff (the Maintenance module). The customer
 // wording is the web portal's own (src/pages/CrmCustomerPortal/PortalLogin.tsx).
-const KINDS: { kind: UserKind; label: string; hint: string; placeholder: string }[] = [
-  { kind: "customer", label: "Customer", hint: "Sign in to track your application, agreement and payments", placeholder: "you@example.com" },
-  { kind: "staff", label: "Staff", hint: "Sign in to the CivilierERP Maintenance module", placeholder: "name@company.com" },
+// Customers sign in with their registered mobile number; staff with their email.
+const KINDS: { kind: UserKind; label: string; hint: string; idLabel: string; placeholder: string; phone: boolean }[] = [
+  { kind: "customer", label: "Customer", hint: "Sign in to track your application, agreement and payments",
+    idLabel: "Mobile Number", placeholder: "Your registered mobile number", phone: true },
+  { kind: "staff", label: "Staff", hint: "Sign in to the CivilierERP Maintenance module", idLabel: "Email Address", placeholder: "name@company.com", phone: false },
 ];
 
 const NAV_HOLD_MS = 1800;
@@ -76,7 +78,7 @@ export default function LoginScreen() {
         setLoginSuccess(true);
       }, NAV_HOLD_MS);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Invalid email or password.");
+      setError(e instanceof Error ? e.message : kind === "customer" ? "Invalid mobile number or password." : "Invalid email or password.");
       setLoading(false);
     }
   };
@@ -143,7 +145,7 @@ export default function LoginScreen() {
 
               <View className="gap-4">
                 <AnimatedInput
-                  label="Email Address"
+                  label={meta.idLabel}
                   value={email}
                   placeholder={meta.placeholder}
                   onChangeText={(t) => {
@@ -152,8 +154,8 @@ export default function LoginScreen() {
                   }}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  keyboardType="email-address"
-                  textContentType="emailAddress"
+                  keyboardType={meta.phone ? "phone-pad" : "email-address"}
+                  textContentType={meta.phone ? "telephoneNumber" : "emailAddress"}
                 />
 
                 <AnimatedInput
@@ -172,6 +174,12 @@ export default function LoginScreen() {
                     </Pressable>
                   }
                 />
+
+                {kind === "customer" ? (
+                  <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, fontFamily: fonts.body.regular, marginTop: -6, paddingHorizontal: 4 }}>
+                    First time signing in? Your password is the first 4 letters of your name and the last 4 digits of your mobile number, in small letters.
+                  </Text>
+                ) : null}
 
                 {error && (
                   <View
