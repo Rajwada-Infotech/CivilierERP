@@ -837,7 +837,7 @@ function AppRoutes() {
 
       {/* MAIN */}
       <Route
-        path="/home/:userId?"
+        path="/home/:userName?"
         element={
           currentUser?.role === "supplier"
             ? <Navigate to="/supplier" replace />

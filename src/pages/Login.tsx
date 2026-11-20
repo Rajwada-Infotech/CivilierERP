@@ -55,7 +55,11 @@ export default function Login() {
           if (role === "customer") navigate(`/customer-portal/${uid}`, { replace: true });
           else if (role === "supplier") navigate("/supplier", { replace: true });
           else if (role === "dba") navigate(`/dba/${uid}`, { replace: true });
-          else navigate(`/home/${uid}`, { replace: true });
+          // The Home URL carries the user's name, not their id (the page never reads it; it's only a label).
+          else {
+            const slug = (result.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+            navigate(slug ? `/home/${slug}` : "/home", { replace: true });
+          }
         }, 1800);
       } else {
         setError(result.error || "Invalid email or password.");
