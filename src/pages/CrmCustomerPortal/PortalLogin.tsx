@@ -73,8 +73,8 @@ function TiltCard({ children }: { children: React.ReactNode }) {
 }
 
 // ── Animated input ────────────────────────────────────────────────────────────
-function AnimatedInput({ label, type, value, onChange, placeholder, children }: {
-  label: string; type: string; value: string;
+function AnimatedInput({ label, type, value, onChange, placeholder, children, autoComplete, name, inputMode }: {
+  label: string; type: string; value: string; autoComplete?: string; name?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   placeholder: string; children?: React.ReactNode;
 }) {
@@ -106,7 +106,7 @@ function AnimatedInput({ label, type, value, onChange, placeholder, children }: 
             exit={{ scaleX: 0, opacity: 0 }} transition={{ duration: 0.3 }} />
         )}
       </AnimatePresence>
-      <input type={type} value={value} onChange={onChange}
+      <input type={type} value={value} onChange={onChange} autoComplete={autoComplete} name={name} inputMode={inputMode}
         placeholder={focused ? placeholder : ""}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
         className="w-full rounded-xl px-4 pt-6 pb-2.5 text-sm outline-none transition-colors"
@@ -342,11 +342,12 @@ export default function PortalLogin() {
                 <motion.form className="space-y-4" onSubmit={handleSubmit}
                   initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4, duration: 0.5 }}>
-                  <AnimatedInput label="Mobile Number" type="tel" value={mobile}
+                  {/* A phone number to the browser, so it never fills a saved staff email in here */}
+                  <AnimatedInput label="Mobile Number" type="tel" value={mobile} autoComplete="tel" name="mobile" inputMode="tel"
                     onChange={(e) => { setMobile(e.target.value); setError(""); }}
                     placeholder="Your registered mobile number" />
 
-                  <AnimatedInput label="Password" type={showPass ? "text" : "password"} value={password}
+                  <AnimatedInput label="Password" type={showPass ? "text" : "password"} value={password} autoComplete="current-password" name="password"
                     onChange={(e) => { setPassword(e.target.value); setError(""); }}
                     placeholder="••••••••">
                     <motion.button type="button" onClick={() => setShowPass(!showPass)}
