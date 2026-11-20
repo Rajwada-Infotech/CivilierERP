@@ -60,7 +60,7 @@ export function AssignmentStatusSelect({
       value={status}
       disabled={mutation.isPending}
       onChange={(e) => mutation.mutate(e.target.value as AssignmentStatus)}
-      className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 bg-card cursor-pointer focus:outline-none disabled:opacity-50 ${meta.className}`}
+      className={`sheet-select font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 bg-card cursor-pointer focus:outline-none disabled:opacity-50 ${meta.className}`}
     >
       {options.map((s) => (
         <option key={s} value={s}>

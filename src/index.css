@@ -2486,6 +2486,35 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
     [data-theme="bw"] select option:is(:hover, :focus-visible) { background: hsl(0 0% 92%); }
     [data-theme="bw"] select option:checked { background: hsl(0 0% 86%); }
     [data-theme="bw"] select option::checkmark { color: hsl(0 0% 10%); }
+
+    /* Sheet-style list (drawing sheet): square, one ink rule, no shadow, small capitals; the picked word gets the
+       blue wash. Add `sheet-select` to a <select>. */
+    select.sheet-select { min-height: 0; }
+    select.sheet-select::picker(select),
+    [data-theme="glass"] select.sheet-select::picker(select) {
+        background: hsl(var(--card));
+        color: hsl(var(--foreground));
+        border: 1px solid hsl(var(--foreground));
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
+        backdrop-filter: none;
+        font-family: "Sora", sans-serif;
+        font-size: 0.625rem;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+    }
+    select.sheet-select option {
+        border-radius: 0;
+        min-block-size: 1.75rem;
+        padding: 0.35rem 0.75rem;
+        border-bottom: 1px solid hsl(var(--foreground) / 0.15);
+    }
+    select.sheet-select option:last-child { border-bottom: 0; }
+    select.sheet-select option:is(:hover, :focus-visible) { background: hsl(var(--foreground) / 0.05); }
+    select.sheet-select option:checked { background: hsl(var(--primary) / 0.1); color: hsl(var(--primary)); font-weight: 700; }
+    select.sheet-select option::checkmark { color: hsl(var(--primary)); }
 }
 
 /* Hidden form <select>s (Radix Select's BubbleSelect) must stay invisible. */
