@@ -21,7 +21,7 @@ interface CustomerCtx {
   timeline: UseQueryResult<Timeline>;
   /** The chosen property's money statement (GET /money) — the ONE source of every paid / total / balance figure in the
    *  app (Home, Payments, Profile), so no two screens can disagree. */
-  money: UseQueryResult<MoneyStatement>;
+  money: UseQueryResult<MoneyStatement | null>;
   /** A co-applicant, or a past property: look, don't act (the server enforces the co-applicant rule). */
   readOnly: boolean;
 }
@@ -61,13 +61,14 @@ export function CustomerProvider({ children }: PropsWithChildren) {
   const past = useMemo(() => list.filter((a) => a.Lifecycle === "Past"), [list]);
 
   // Pick: the one already chosen (or named by a notification) → the one they last looked at, if it is still a home →
-  // their first home (the server lists homes first) → anything at all.
+  // their first home (the server lists homes first) → their latest past booking (its payments and papers stay open)
+  // → anything at all.
   useEffect(() => {
     if (!list.length || remembered === undefined) return;
     if (chosen && list.some((a) => a.ApplicationId === chosen)) return;
     const last = remembered != null ? homes.find((a) => a.ApplicationId === remembered) : undefined;
-    setChosen((last || homes[0] || list[0]).ApplicationId);
-  }, [list, homes, chosen, remembered]);
+    setChosen((last || homes[0] || past.find((a) => a.BookingId) || list[0]).ApplicationId);
+  }, [list, homes, past, chosen, remembered]);
 
   const app = useMemo(() => list.find((a) => a.ApplicationId === chosen) || null, [list, chosen]);
   const timeline = useQuery({

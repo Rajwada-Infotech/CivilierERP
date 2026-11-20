@@ -145,7 +145,7 @@ function WelcomeCard() {
 export default function PortalLogin() {
   const navigate = useNavigate();
   const [showPass, setShowPass] = useState(false);
-  const [email, setEmail] = useState("");
+  const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -160,7 +160,7 @@ export default function PortalLogin() {
       const res = await fetch(`${API}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ mobile, password }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
@@ -171,7 +171,7 @@ export default function PortalLogin() {
         navigate("/crm-client-portal/dashboard", { replace: true });
       }, 1800);
     } catch (err: any) {
-      setError(err.message || "Invalid email or password.");
+      setError(err.message || "Invalid mobile number or password.");
       toast.error(err.message || "Login failed");
       setIsLoading(false);
     }
@@ -302,9 +302,9 @@ export default function PortalLogin() {
                 <motion.form className="space-y-4" onSubmit={handleSubmit}
                   initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4, duration: 0.5 }}>
-                  <AnimatedInput label="Email Address" type="email" value={email}
-                    onChange={(e) => { setEmail(e.target.value); setError(""); }}
-                    placeholder="you@example.com" />
+                  <AnimatedInput label="Mobile Number" type="tel" value={mobile}
+                    onChange={(e) => { setMobile(e.target.value); setError(""); }}
+                    placeholder="Your registered mobile number" />
 
                   <AnimatedInput label="Password" type={showPass ? "text" : "password"} value={password}
                     onChange={(e) => { setPassword(e.target.value); setError(""); }}
@@ -326,7 +326,7 @@ export default function PortalLogin() {
                   </AnimatedInput>
 
                   <p className="text-[0.6875rem] -mt-1.5 px-1" style={{ color: TEXT_FAINT }}>
-                    First time signing in? Use your registered mobile number as the password.
+                    First time signing in? Your password is the first 4 letters of your name and the last 4 digits of your mobile number, in small letters.
                   </p>
 
                   <AnimatePresence>

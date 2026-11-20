@@ -492,15 +492,12 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
       if (gst.error) return res.status(400).json({ error: gst.error });
       gstValue = gst.value;
     }
-    if (!email) {
-      // The portal login is keyed on this email (CrmCustomerPortalUser.Email
-      // is NOT NULL), so it can't be cleared while a login exists.
-      const portal = await pool.request().input("id", sql.Int, id)
-        .query("SELECT TOP 1 1 AS x FROM dbo.CrmCustomerPortalUser WHERE CustomerId = @id");
-      if (portal.recordset.length) {
-        return res.status(400).json({ error: "This customer has a portal login, which signs in with their email — enter an email address." });
-      }
-    }
+    // The portal login signs in with the mobile number (crmPortal.js POST /login), so the email is optional here.
+    // Its first password is made from the name and the mobile: when either changes while the customer is still on it,
+    // it is made again below so the rule shown to them keeps working. Read before the edit to see what changes.
+    const before = (await pool.request().input("id", sql.Int, id).query(`
+      SELECT c.CustomerName, c.Mobile, pu.Id AS PortalUserId, pu.MustChangePassword
+      FROM dbo.CrmCustomer c LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = c.Id WHERE c.Id = @id`)).recordset[0];
 
     const cur = resolveCurrentAddress(b);
 
@@ -582,6 +579,18 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
           SET Email = @email
           WHERE CustomerId = @id
         `);
+
+      // Still on the first password, and the name or mobile changed: make it again from the new details.
+      if (before?.PortalUserId && before.MustChangePassword) {
+        const { normalizeMobile, defaultPortalPassword } = require("../services/crmPortalProvision");
+        const name = b.CustomerName || before.CustomerName, mobile = b.Mobile || before.Mobile;
+        const changed = name !== before.CustomerName || normalizeMobile(mobile) !== normalizeMobile(before.Mobile);
+        const pw = changed ? defaultPortalPassword(name, mobile) : null;
+        if (pw) {
+          await tx.request().input("pid", sql.Int, before.PortalUserId).input("hash", sql.NVarChar(255), await require("bcrypt").hash(pw, 10))
+            .query("UPDATE dbo.CrmCustomerPortalUser SET PasswordHash = @hash WHERE Id = @pid");
+        }
+      }
 
       await tx.commit();
     } catch (txErr) {

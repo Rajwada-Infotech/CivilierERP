@@ -62,14 +62,10 @@ const PortalProfile: React.FC = () => {
   const { total: totalDue, paid: totalPaid, pct: pctPaid, balance, closed } = moneyFigures(money);
   const openTickets = (tickets as any[]).filter((t) => t.Status !== "Resolved" && t.Status !== "Closed").length;
 
-  const keyDates = [
-    { label: "Booking Date", value: timeline.booking?.BookingDate, done: !!timeline.booking?.BookingDate },
-    { label: "Welcome Call", value: timeline.welcomeCall?.CallDate, done: !!timeline.welcomeCall },
-    { label: "Agreement Sent", value: timeline.agreement?.SentToCustomerAt, done: !!timeline.agreement?.SentToCustomerAt },
-    { label: "Agreement Date", value: timeline.agreement?.AgreementDate, done: !!timeline.agreement?.AgreementDate },
-    { label: "Sales Deed", value: timeline.salesDeed?.DeedDate, done: !!timeline.salesDeed },
-    { label: "Handover", value: timeline.handover?.ActualHandoverDate, done: !!timeline.handover },
-  ];
+  // Key dates are the purchase's own steps with the day each was done — the server's journey (crmPortal.js
+  // customerJourney), the same list Overview and the app show.
+  const keyDates = ((timeline.journey || []) as { label: string; done: boolean; at: string | null }[])
+    .map((s) => ({ label: s.label, value: s.at, done: s.done }));
 
   return (
     <div className="space-y-5">

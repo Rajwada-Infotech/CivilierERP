@@ -386,7 +386,8 @@ const PortalAgreement: React.FC = () => {
   // Two distinct piles: documents still waiting on the customer (requested
   // but never uploaded, or returned for correction) vs. documents that
   // already have a real file attached, regardless of who put it there.
-  const needsAction = (documents as any[]).filter((d) => d.Status === "Requested" || d.Status === "Rejected");
+  // Asked for and still uploadable (the server's CanUpload: closes once the agreement is signed)
+  const needsAction = (documents as any[]).filter((d) => d.CanUpload);
   const onFile = (documents as any[]).filter((d) => d.FileName && d.Status !== "Rejected");
   const mandatoryOutstanding = needsAction.some((d: any) => d.IsMandatory);
 
@@ -530,7 +531,11 @@ const PortalAgreement: React.FC = () => {
                   <CheckCircle2 size={16} /> You approved this agreement on {fmtDate(agreement.CustomerApprovedAt)}
                 </div>
                 {agreement.Status === "Registered" ? (
-                  <p className="text-sm" style={{ color: TEXT_MUTED }}>It is signed and registered — nothing more is needed from you on it.</p>
+                  <p className="text-sm" style={{ color: TEXT_MUTED }}>
+                    {needsAction.length
+                      ? `It is signed and registered. We still need the document${needsAction.length > 1 ? "s" : ""} below from you.`
+                      : "It is signed and registered — nothing more is needed from you on it."}
+                  </p>
                 ) : agreement.Status === "Executed" ? (
                   <p className="text-sm" style={{ color: TEXT_MUTED }}>It is signed; registration with the government comes next — we'll tell you once it's done.</p>
                 ) : null}

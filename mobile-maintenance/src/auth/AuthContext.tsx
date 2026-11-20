@@ -45,7 +45,7 @@ interface AuthContextValue {
   // A customer signs in to the Customer Portal (its own accounts and token, /api/crm-portal) — same
   // onAuthenticated / navHoldMs contract as the staff login above.
   loginCustomer: (
-    email: string,
+    mobile: string,
     password: string,
     onAuthenticated?: (user: AppUser) => void,
     navHoldMs?: number,
@@ -123,19 +123,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [],
   );
 
+  // Customers sign in with their registered mobile number (crmPortal.js POST /login).
   const loginCustomer = useCallback(
     async (
-      email: string,
+      mobile: string,
       password: string,
       onAuthenticated?: (user: AppUser) => void,
       navHoldMs = 0,
     ) => {
       const res = await fetchWithAuth("/api/crm-portal/login", {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ mobile, password }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Login failed. Please check your credentials.");
+      if (!res.ok) throw new Error(body.error || "Login failed. Please check your mobile number and password.");
       queryClient.clear();
       await persistToken(body.token);
       // The customer's name and number come from their own record. Setting their own password is their choice
@@ -148,10 +149,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const user: AppUser = {
         kind: "customer",
         id: String(me.Id ?? ""),
-        name: me.Name || email,
-        email: me.Email || email,
+        name: me.Name || mobile,
+        email: me.Email || "",
         role: "customer",
-        initials: getInitials(me.Name || email),
+        initials: getInitials(me.Name || mobile),
         pagePermissions: [],
         isActive: true,
       };
