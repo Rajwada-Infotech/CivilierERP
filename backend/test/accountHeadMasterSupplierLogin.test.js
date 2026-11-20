@@ -84,8 +84,9 @@ function makeFakePool() {
         if (/FROM dbo\.users WHERE email/i.test(text)) {
           return { recordset: [] };
         }
-        if (/SELECT Status FROM dbo\.AccountHeadMaster WHERE LHeadId/i.test(text)) {
-          return { recordset: [{ Status: "Draft" }] };
+        // The update route reads the head's status and type (routes/accountHeadMaster.js PUT /:id)
+        if (/SELECT Status(, RTRIM\(LHeadType\) AS LHeadType)? FROM dbo\.AccountHeadMaster WHERE LHeadId/i.test(text)) {
+          return { recordset: [{ Status: "Draft", LHeadType: "S" }] };
         }
         return { recordset: [], recordsets: [[]], rowsAffected: [0] };
       },
