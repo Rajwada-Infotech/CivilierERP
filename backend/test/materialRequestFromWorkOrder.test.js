@@ -53,8 +53,10 @@ const makePool = () => {
     const req = {
       input: () => req,
       query: async (text) => {
+        // The live-request check (materialRequests.js mrSourceStatus): one row, "MRId|DocNo" for the work order's own
+        // live request; nothing raised from its BOQ.
+        if (/AS OwnMR/i.test(text)) return { recordset: [{ OwnMR: mockExisting ? `${mockExisting.MRId}|${mockExisting.DocNo}` : null, BlockMR: null }] };
         if (/FROM dbo\.WorkOrderHeader/i.test(text)) return { recordset: mockWo ? [mockWo] : [] };
-        if (/SourceWOId = @id AND Status NOT IN/i.test(text)) return { recordset: mockExisting ? [mockExisting] : [] };
         if (/FROM dbo\.WorkOrderActivityMaterials/i.test(text)) return { recordset: mockMats };
         if (/SELECT DocNo, Status FROM dbo\.MaterialRequests/i.test(text)) return { recordset: [{ DocNo: "MR-2026-00007", Status: "Pending" }] };
         return { recordset: [], recordsets: [[]], rowsAffected: [0] };
