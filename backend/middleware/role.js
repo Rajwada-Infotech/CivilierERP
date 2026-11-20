@@ -146,6 +146,8 @@ const isSuperAdmin = (role) => canonicalRole(role) === "super_admin";
 module.exports.FULL_ACCESS_ROLES = FULL_ACCESS_ROLES;
 module.exports.hasFullAccess = hasFullAccess;
 module.exports.isSuperAdmin = isSuperAdmin;
+// Who acts at every step of every approval, in parallel with the people Approval Setup names: the full-access roles.
+module.exports.approvesEveryStep = hasFullAccess;
 // For the screens that set access itself (Menu, Widget and Project Access rights, Approval Setup, users, system
 // lookups, tenants, the admin ticket desk): only the full-access roles, never a granted right.
 module.exports.fullAccessOnly = module.exports(...FULL_ACCESS_ROLES);

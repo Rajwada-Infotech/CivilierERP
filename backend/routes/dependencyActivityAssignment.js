@@ -1,5 +1,6 @@
 const express = require("express");
 const { isSuperAdmin: isSuperAdminRole } = require("../middleware/role");
+const { approvesEveryStep } = require("../middleware/role");
 const router = express.Router();
 
 // ── "Auto Name" search ───────────────────────────────────────────────────────
@@ -1216,7 +1217,7 @@ router.get(
       const currentLevel = currentLevelIndex != null ? levels[currentLevelIndex] : null;
 
       const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
-      const isSuperAdmin = isSuperAdminRole(req.user?.role);
+      const isSuperAdmin = approvesEveryStep(req.user?.role); // full-access roles: every approval step, in parallel
       const alreadyActed = currentLevel
         ? approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId))
         : false;
@@ -1257,7 +1258,7 @@ async function handleApproveLevel(req, res) {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
   const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
-  const isSuperAdmin = isSuperAdminRole(req.user?.role);
+  const isSuperAdmin = approvesEveryStep(req.user?.role); // full-access roles: every approval step, in parallel
   if (!viewerUserId) return res.status(401).json({ error: "Not authenticated" });
 
   try {
@@ -1387,7 +1388,7 @@ async function handleRejectLevel(req, res) {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
   const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
-  const isSuperAdmin = isSuperAdminRole(req.user?.role);
+  const isSuperAdmin = approvesEveryStep(req.user?.role); // full-access roles: every approval step, in parallel
   if (!viewerUserId) return res.status(401).json({ error: "Not authenticated" });
   const remarks = String(req.body?.remarks || req.body?.Remarks || req.body?.note || "").trim().slice(0, 1000);
   if (remarks.length < 3) {
@@ -1487,7 +1488,7 @@ router.get(
   requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
   async (req, res) => {
     const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
-    const isSuperAdmin = isSuperAdminRole(req.user?.role);
+    const isSuperAdmin = approvesEveryStep(req.user?.role); // full-access roles: every approval step, in parallel
     if (!viewerUserId) return res.json({ count: 0 });
     try {
       const pool = await getPool();

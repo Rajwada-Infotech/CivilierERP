@@ -133,9 +133,10 @@ describe("isVisibleToViewer", () => {
     expect((await isVisibleToViewer(item, "director", 999, cache)).visible).toBe(false);
   });
 
-  it("admin/super_admin see everything for oversight but may act only where Approval Setup names them", async () => {
+  it("super_admin, admin and dba see everything and may act at every step, in parallel (middleware/role.js approvesEveryStep)", async () => {
     mockCurrentLevel = 1;
-    expect(await isVisibleToViewer(item, "admin", 999, cache)).toMatchObject({ visible: true, canAct: false });
+    expect(await isVisibleToViewer(item, "admin", 999, cache)).toMatchObject({ visible: true, canAct: true });
+    expect(await isVisibleToViewer(item, "dba", 998, cache)).toMatchObject({ visible: true, canAct: true });
     expect(await isVisibleToViewer(item, "super_admin", 1, cache)).toMatchObject({ visible: true, canAct: true });
   });
 
