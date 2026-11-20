@@ -37,6 +37,8 @@ const { requireActiveBooking, requireApprovedBooking, checkLoanProcessingCleared
 const { logCrmAudit } = require("../services/crmAudit");
 const { transition: approvalTransition, recordGLPosting, canPerformCrmGatedAction, isApproverFor } = require("../services/approvalService");
 const { emitNotification } = require("../services/notify");
+// The customer's own phone (Customer Portal): services/pushNotifications.js CUSTOMER_EVENTS.
+const { notifyBookingCustomers } = require("../services/pushNotifications");
 const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const { applyPagination } = require("../services/crmListPagination");
@@ -1768,6 +1770,7 @@ router.post("/query-payment/:id/info", requireAnyPageRight(["crm-query-payment",
       try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
       throw txErr;
     }
+    notifyBookingCustomers(row.BookingId, "govtPaymentInfo");
 
     res.json({ success: true, count: files.length });
   } catch (e) {
@@ -2313,6 +2316,7 @@ router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (re
           id, 'crm_sales_deed');
       } catch (notifErr) { console.error("[crm-sales-deed] approve emitNotification failed:", notifErr.message); }
     }
+    notifyBookingCustomers(deed.BookingId, "salesDeedShared", { no: deed.DeedNo });
 
     res.json({ success: true, ...transitionResult, status: transitionResult.newStatus });
   } catch (e) {
@@ -2554,6 +2558,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
       await tx.rollback().catch(() => {});
       throw txErr;
     }
+    notifyBookingCustomers(row.BookingId, "salesDeedShared", {});
 
     res.json({ success: true });
   } catch (e) {
@@ -2879,6 +2884,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
           summary: "Sales deed executed and shared with the customer via portal, awaiting their approval.",
           createdBy: actorId(req),
         });
+        notifyBookingCustomers(row.BookingId, "salesDeedShared", { no: row.DeedNo });
       } catch (commErr) { console.error("[crm-sales-deed] executed logCommunication failed:", commErr.message); }
     }
 

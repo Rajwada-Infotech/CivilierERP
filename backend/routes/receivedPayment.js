@@ -16,16 +16,35 @@ const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
-const { recordGLPosting } = require("../services/approvalService");
+const { recordGLPosting, receivedPaymentStep, restartReceivedPaymentSteps, writeAuditLog, userMatchesLevel, RP_TABLE } = require("../services/approvalService");
 const { areEarlierMilestonesCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
-const { requireApprover } = require("../middleware/requireApprover");
 
-// Approve/Reject gate: who approves received payments is set in Approval
-// Setup ("received-payment") — its roles or named people, or a super admin.
-const allowApprover = requireApprover("received-payment", "received payments");
+// Approve/Reject gate: who may act on THIS receipt now is set in Approval Setup — its step's roles or named people,
+// or a super admin. A CRM customer payment may have several steps ("crm-customer-payment", e.g. Finance then
+// Directors); every other receipt has one ("received-payment"). See approvalService.js receivedPaymentStep.
+const actorId = (req) => Number(req.user?.userId ?? req.user?.id) || null;
+const stepRefusal = (step) =>
+  `You are not authorized to act on this received payment${step?.total > 1 ? ` at step ${step.level} of ${step.total}${step.levelDef?.label ? ` (${step.levelDef.label})` : ""}` : ""} — Approval Setup doesn't name your role or you.`;
+async function allowApprover(req, res, next) {
+  try {
+    const step = await receivedPaymentStep(parseInt(req.params.id, 10));
+    if (!step) return res.status(404).json({ error: "Received payment not found" });
+    if (userMatchesLevel(step.levelDef, req.user?.role, actorId(req))) return next();
+    return res.status(403).json({ error: stepRefusal(step) });
+  } catch (err) {
+    console.error("[received-payment] approval step check failed:", err.message);
+    return res.status(500).json({ error: "Could not check your approval rights" });
+  }
+}
 
-router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
+// Approve/Reject are exempt from the page's Edit right — the receipt's step in Approval Setup (allowApprover above)
+// is the authority there, as in newPayment.js and expenseBooking.js. A Director named on a step approves without
+// needing the right to edit received payments.
+router.use((req, res, next) => {
+  if (req.method === "PUT" && (req.path.endsWith("/approve") || req.path.endsWith("/reject"))) return next();
+  return checkPermissionForMethod("Finance", "ReceivedPayments")(req, res, next);
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -767,6 +786,11 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
 
     // Recalc invoice status if this payment is linked to a sale invoice
     const updated = result.recordset[0];
+    // A CRM payment changed while it waits: the steps already given were for the old figures, so it is checked again
+    // from the first step (Approval Setup "crm-customer-payment"; a receipt with one step is unaffected).
+    if (updated.RPStatus === "Pending" && updated.CrmBookingId != null) {
+      await restartReceivedPaymentSteps(parseInt(id, 10), req.user?.role, req.user?.email, actorId(req));
+    }
     if (updated.SourceSaleInvoiceId) {
       const { recalcInvoicePaymentStatus } = require("./saleInvoices");
       await recalcInvoicePaymentStatus(pool, updated.SourceSaleInvoiceId);
@@ -1048,6 +1072,25 @@ router.put("/:id/approve", allowApprover, async (req, res) => {
       });
     }
 
+    // The receipt's step, read again under the row lock (another approver may have just acted).
+    const step = await receivedPaymentStep(pid, tx, { restart: true });
+    if (!userMatchesLevel(step?.levelDef, req.user?.role, actorUserId)) {
+      await tx.rollback();
+      return res.status(403).json({ error: stepRefusal(step) });
+    }
+    if (step.total > 1) {
+      await writeAuditLog(RP_TABLE, pid, step.level, req.user?.role || null, req.user?.email || null, "Approved", null, tx, actorUserId);
+      if (step.level < step.total) {
+        // Not the last step: the sign-off is recorded and the payment waits for the next step. Nothing counts or
+        // posts to the ledger yet — that happens only at the last step, below.
+        await tx.commit();
+        await invalidateReceivedPaymentWorkflowCaches();
+        const next = step.defs[step.level];
+        return res.json({ success: true, newStatus: "Pending", level: step.level, totalLevels: step.total,
+          message: `Step ${step.level} of ${step.total} approved — now waiting for ${next?.label || `step ${step.level + 1}`}.` });
+      }
+    }
+
     await tx
       .request()
       .input("id", sql.Int, pid)
@@ -1163,6 +1206,12 @@ router.put("/:id/reject", allowApprover, async (req, res) => {
         .status(400)
         .json({ error: `Cannot reject from status "${status}"` });
     }
+    const step = await receivedPaymentStep(pid, tx);
+    if (!userMatchesLevel(step?.levelDef, req.user?.role, actorId(req))) {
+      await tx.rollback();
+      return res.status(403).json({ error: stepRefusal(step) });
+    }
+    if (step.total > 1) await writeAuditLog(RP_TABLE, pid, step.level, req.user?.role || null, req.user?.email || null, "Rejected", note || null, tx, actorId(req));
     await tx
       .request()
       .input("id", sql.Int, pid)

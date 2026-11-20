@@ -169,16 +169,58 @@ async function siteFeed(pool, { projectId, blockId = null, unitId = null, days =
 }
 
 // A buyer sees only the unit attached to their booking; never fall back to block or project totals.
-async function unitProgress(pool, { projectId, unitId }) {
-  if (!projectId || !unitId) return null;
+async function unitProgress(pool, { projectId, unitId, blockId = null }) {
+  if (!projectId) return null;
   const p = (await constructionProgress(pool, [projectId])).get(Number(projectId));
   if (!p || !p.hasDpr) return null;
-  const flat = p.flats.get(Number(unitId)) || null;
-  if (!flat) return null;
-  const feed = (await siteFeed(pool, { projectId, unitId, days: 30, top: 15 }))
+  // The buyer's own unit when the site records it; until then its tower, then the whole project — never nothing.
+  const flat = unitId ? p.flats.get(Number(unitId)) || null : null;
+  const tower = !flat && blockId ? p.towers.find((t) => Number(t.blockId) === Number(blockId)) || null : null;
+  const scope = flat ? "unit" : tower ? "tower" : "project";
+  const feed = (await siteFeed(pool, { projectId, blockId: scope === "tower" ? blockId : null, unitId: scope === "unit" ? unitId : null, days: 30, top: 15 }))
     .map(({ work, activity, room, from, to, completed, at }) => ({ work, activity, room, from, to, completed, at }));
   const pick = (x) => x && { pct: x.pct, works: x.works.map(({ name, pct }) => ({ name, pct })), now: x.now, next: x.next, allDone: x.allDone };
-  return { unit: pick(flat), feed, scope: "unit" };
+  return { unit: pick(flat || tower || p), feed, scope, towerName: tower?.blockName || null };
+}
+
+/**
+ * Site photos a buyer may see: the "after" shots engineers take on DPR steps (the "before" ones include copies carried
+ * from the day before). Only their own unit's steps, plus shared work on their tower or the whole project — never
+ * another buyer's unit. One rule, for the list and for opening a photo (crm-portal /site-photos/:id).
+ */
+const buyerPhotoScope = `ap.Phase = 'after' AND dm.IsActive = 1 AND dm.ProjectId = @pid
+  AND (dm.FlatId = @uid OR (dm.FlatId IS NULL AND (dm.TowerId IS NULL OR dm.TowerId = @bid)))`;
+async function buyerPhotos(pool, { projectId, blockId = null, unitId = null, top = 24 }) {
+  if (!projectId) return [];
+  const r = await pool.request().input("pid", sql.Int, projectId).input("bid", sql.Int, blockId).input("uid", sql.Int, unitId).input("top", sql.Int, top).query(`
+    SELECT TOP (@top) ap.Id, ap.Note, ap.CapturedAt, ap.LogDate, am.activity_name AS Activity, g.activity_name AS GroupName,
+           dm.Alias, CAST(CASE WHEN dm.FlatId IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS OwnUnit
+    FROM dbo.ActivityPhoto ap
+    JOIN dbo.DependencyMasterActivity dma ON dma.Id = ap.DependencyMasterActivityId
+    JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+    JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+    LEFT JOIN dbo.ActivityMaster g ON g.id = am.group_id
+    WHERE ${buyerPhotoScope}
+    ORDER BY ap.CapturedAt DESC, ap.Id DESC`);
+  return r.recordset.map((x) => ({ id: x.Id, at: x.CapturedAt, day: x.LogDate, work: workName(x.GroupName), activity: x.Activity,
+    room: String(x.Alias || "").split(">").slice(3).join(" > ") || null, note: x.Note || null, ownUnit: !!x.OwnUnit }));
+}
+/** One photo's file, only if it is in the buyer's scope above; null otherwise. */
+async function buyerPhotoFile(pool, photoId, { projectId, blockId = null, unitId = null }) {
+  const r = await pool.request().input("id", sql.Int, photoId).input("pid", sql.Int, projectId).input("bid", sql.Int, blockId).input("uid", sql.Int, unitId).query(`
+    SELECT ap.FileName, ap.MimeType, ap.FileData FROM dbo.ActivityPhoto ap
+    JOIN dbo.DependencyMasterActivity dma ON dma.Id = ap.DependencyMasterActivityId
+    JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+    WHERE ap.Id = @id AND ${buyerPhotoScope}`);
+  return r.recordset[0] || null;
+}
+
+/** The notes staff write for buyers of a project (this page's POST), newest first — customer-visible by design. */
+async function buyerNotes(pool, projectId, top = 10) {
+  if (!projectId) return [];
+  return (await pool.request().input("pid", sql.Int, projectId).input("top", sql.Int, top).query(`
+    SELECT TOP (@top) Id, UpdateDate, PercentComplete, Stage, Summary FROM dbo.CrmConstructionUpdate
+    WHERE ProjectId = @pid ORDER BY UpdateDate DESC, Id DESC`)).recordset;
 }
 
 // GET /progress — every project the user may see that has DPR work (or notes): its figures, works and towers.
@@ -285,4 +327,7 @@ router.post("/", requirePageRight("crm-construction-updates", "create"), async (
 module.exports = router;
 module.exports.constructionProgress = constructionProgress;
 module.exports.unitProgress = unitProgress;
+module.exports.buyerNotes = buyerNotes;
+module.exports.buyerPhotos = buyerPhotos;
+module.exports.buyerPhotoFile = buyerPhotoFile;
 module.exports.siteFeed = siteFeed;

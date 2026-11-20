@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
-import * as Notifications from "expo-notifications";
+import type * as NotificationsModule from "expo-notifications";
 import { useAuth } from "@/auth/AuthContext";
-import { registerForPushAsync } from "./pushNotifications";
+import { notifications, registerForPushAsync } from "./pushNotifications";
+import { CUSTOMER_PUSH } from "@/api/customerPortalApi";
+import { queryClient } from "@/services/queryClient";
 
 export type PushPayload = Record<string, unknown>;
 
@@ -14,31 +16,37 @@ export function PushNotificationsGate({
   appKey, onOpen,
 }: { appKey: string; onOpen?: (data: PushPayload) => void }) {
   const { currentUser } = useAuth();
-  const userId = currentUser?.id;
+  // Staff phones register as the ERP user; a customer's phone through their Customer Portal sign-in (migration 692).
+  const userId = currentUser ? `${currentUser.kind ?? "staff"}:${currentUser.id}` : undefined;
+  const endpoint = currentUser?.kind === "customer" ? CUSTOMER_PUSH : undefined;
   const onOpenRef = useRef(onOpen);
   onOpenRef.current = onOpen;
 
   useEffect(() => {
-    if (!userId) return;
-    void registerForPushAsync(appKey);
-    const sub = Notifications.addPushTokenListener(() => void registerForPushAsync(appKey));
+    const Notifications = notifications();
+    if (!userId || !Notifications) return;
+    void registerForPushAsync(appKey, endpoint);
+    const sub = Notifications.addPushTokenListener(() => void registerForPushAsync(appKey, endpoint));
     return () => sub.remove();
-  }, [userId, appKey]);
+  }, [userId, appKey, endpoint]);
 
   useEffect(() => {
-    if (!userId) return;
-    const handle = (response: Notifications.NotificationResponse) => {
+    const Notifications = notifications();
+    if (!userId || !Notifications) return;
+    const handle = (response: NotificationsModule.NotificationResponse) => {
       const data = (response.notification.request.content.data ?? {}) as PushPayload;
       onOpenRef.current?.(data);
     };
     const sub = Notifications.addNotificationResponseReceivedListener(handle);
+    // A message arriving while the app is open means something changed for this person: refresh what is on screen.
+    const arrived = Notifications.addNotificationReceivedListener(() => { void queryClient.invalidateQueries(); });
     // The tap that started the app from closed.
     const launched = Notifications.getLastNotificationResponse();
     if (launched) {
       handle(launched);
       Notifications.clearLastNotificationResponse();
     }
-    return () => sub.remove();
+    return () => { sub.remove(); arrived.remove(); };
   }, [userId]);
 
   return null;

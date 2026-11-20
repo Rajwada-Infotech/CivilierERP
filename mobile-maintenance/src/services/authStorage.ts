@@ -56,3 +56,13 @@ export async function setStoredUser(user: unknown): Promise<void> {
 export async function clearAuthStorage(): Promise<void> {
   await Promise.all([deleteItem(TOKEN_KEY), deleteItem(USER_KEY)]);
 }
+
+// Which sign-in this phone used last (customer or staff), so the login screen opens on it. Not a secret, and
+// kept after sign-out on purpose.
+const LOGIN_KIND_KEY = "login_kind";
+export async function getLastLoginKind(): Promise<string | null> {
+  return getItem(LOGIN_KIND_KEY);
+}
+export async function setLastLoginKind(kind: string): Promise<void> {
+  await setItem(LOGIN_KIND_KEY, kind);
+}

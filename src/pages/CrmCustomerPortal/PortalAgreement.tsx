@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -10,10 +10,10 @@ import {
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
 import {
   API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDoc, proposeAgreementDate, acceptAgreementDate,
-  respondAgreement, respondSalesDeed, fetchQueryPaymentAttachments, uploadQueryPaymentProof, fmtMoney, fmtDate, fmtBytes, maskAadhaar,
+  respondAgreement, respondSalesDeed, fetchSalesDeed, openSalesDeedDoc, fetchQueryPaymentAttachments, uploadQueryPaymentProof, fmtMoney, fmtDate, fmtBytes, maskAadhaar,
 } from "./portalApi";
 import {
-  PageHeader, Card, CardHeader, InfoField, StatusPill, Stepper, StepState,
+  Card, CardHeader, InfoField, StatusPill, Stepper, StepState, HeroStrip, UrgencyBanner,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
   GOLD, GOLD_SOFT, INK, VIOLET, HAIRLINE, SURFACE, SURFACE_ALT, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
 } from "./portalTheme";
@@ -57,6 +57,8 @@ function agreementSteps(ag: any): { label: string; state: StepState; note?: stri
   const sent = !!ag?.SentToCustomerAt;
   const status = ag?.CustomerApprovalStatus;
   const dated = !!ag?.AgreementDate;
+  const registered = ag?.Status === "Registered";
+  const signed = registered || ag?.Status === "Executed";
   return [
     { label: "Prepared", state: "done", note: fmtDate(ag?.CreatedAt) },
     { label: "Approved In-House", state: senior ? "done" : "current", note: senior ? fmtDate(ag?.SeniorApprovedAt) : "Pending" },
@@ -70,6 +72,13 @@ function agreementSteps(ag: any): { label: string; state: StepState; note?: stri
       label: "Date Confirmed",
       state: dated ? "done" : ag?.DateApprovalStatus === "Pending" ? "current" : "upcoming",
       note: dated ? fmtDate(ag?.AgreementDate) : ag?.DateApprovalStatus === "Pending" ? "Awaiting sign-off" : undefined,
+    },
+    // Signed (Executed) and registered — the agreement's last states (crmAgreements.js: Draft -> Executed -> Registered).
+    { label: "Signed", state: signed ? "done" : dated ? "current" : "upcoming", note: signed ? fmtDate(ag?.AgreementDate) : undefined },
+    {
+      label: "Registered",
+      state: registered ? "done" : signed ? "current" : "upcoming",
+      note: registered ? [fmtDate(ag?.AfsRegistrationDate), ag?.AfsRegistrationNo].filter(Boolean).join(" · ") : undefined,
     },
   ];
 }
@@ -349,6 +358,13 @@ const PortalAgreement: React.FC = () => {
     queryFn: () => fetchQueryPaymentAttachments(applicationId),
     enabled: !!timeline.queryPayment,
   });
+  const { data: deedView } = useQuery({
+    queryKey: ["portal-sales-deed", applicationId],
+    queryFn: () => fetchSalesDeed(applicationId),
+    enabled: !!timeline.salesDeed?.SentToCustomerAt,
+  });
+  const deed: any = deedView?.deed;
+  const deedPapers: any[] = deedView?.documents || [];
   const qpInfoDocs = (qpAttachments as any[]).filter((a) => a.DocType === "Info");
   const qpProofDocs = (qpAttachments as any[]).filter((a) => a.DocType === "Proof");
 
@@ -385,6 +401,7 @@ const PortalAgreement: React.FC = () => {
       setRespondFor(null);
       qc.invalidateQueries({ queryKey: ["portal-timeline"] });
       qc.invalidateQueries({ queryKey: ["portal-agreement", applicationId] });
+      qc.invalidateQueries({ queryKey: ["portal-sales-deed", applicationId] });
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -415,7 +432,7 @@ const PortalAgreement: React.FC = () => {
   if (!agreement && !timeline.salesDeed && documents.length === 0) {
     return (
       <div className="space-y-6">
-        <PageHeader eyebrow="Finance" title="Agreement" />
+        <HeroStrip eyebrow="Finance" title="Agreement" subtitle="Your agreement will appear here as soon as it's ready for review." />
         <Card className="p-10 text-center">
           <div className="w-11 h-11 mx-auto rounded-full flex items-center justify-center mb-3" style={{ background: GOLD_SOFT, color: GOLD }}>
             <ScrollText size={20} />
@@ -429,7 +446,7 @@ const PortalAgreement: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Finance · Legal" title="Agreement" subtitle="Track your full legal journey — agreement, sale deed, government payment, and registration — in one place." />
+      <HeroStrip eyebrow="Finance · Legal" title="Agreement" subtitle="Track your full legal journey — agreement, sale deed, government payment, and registration." />
 
       {agreement && (
         <Card className="overflow-hidden">
@@ -442,7 +459,8 @@ const PortalAgreement: React.FC = () => {
                   <Hash size={10} /> v{agreement.VersionNo || 1} · {agreement.BookingNo}
                 </p>
               </div>
-              <StatusPill status={agreement.CustomerApprovalStatus} />
+              <StatusPill status={agreement.Status === "Registered" || agreement.Status === "Executed" ? "Approved" : agreement.CustomerApprovalStatus}
+                label={agreement.Status === "Registered" ? "Registered" : agreement.Status === "Executed" ? "Signed" : undefined} />
             </div>
           </div>
 
@@ -457,7 +475,15 @@ const PortalAgreement: React.FC = () => {
             <InfoField label="Total Value" value={fmtMoney(agreement.TotalValue)} />
             <InfoField label="PAN (Permanent Account Number)" value={agreement.PanNo} mono />
             <InfoField label="Aadhaar" value={maskAadhaar(agreement.AadhaarNo)} mono />
-            <InfoField label="Agreement Date" value={fmtDate(agreement.AgreementDate) || "Not yet finalized"} />
+            <InfoField label={agreement.Status === "Registered" || agreement.Status === "Executed" ? "Signed On" : "Agreement Date"} value={fmtDate(agreement.AgreementDate) || "Not yet finalized"} />
+            {agreement.Status === "Registered" && (
+              <>
+                <InfoField label="Registered On" value={fmtDate(agreement.AfsRegistrationDate)} />
+                {agreement.AfsRegistrationNo && <InfoField label="Registration No." value={agreement.AfsRegistrationNo} mono />}
+                {agreement.AfsStampDuty != null && <InfoField label="Stamp Duty" value={fmtMoney(agreement.AfsStampDuty)} />}
+                {agreement.AfsRegistrationFee != null && <InfoField label="Registration Fee" value={fmtMoney(agreement.AfsRegistrationFee)} />}
+              </>
+            )}
             {agreement.LegalAddress && <InfoField label="Registered Address" value={agreement.LegalAddress} />}
             <InfoField label="Documents" value={needsAction.length > 0 ? `${onFile.length} on file, ${needsAction.length} needed` : onFile.length} />
           </div>
@@ -503,6 +529,11 @@ const PortalAgreement: React.FC = () => {
                 <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#0F7A44" }}>
                   <CheckCircle2 size={16} /> You approved this agreement on {fmtDate(agreement.CustomerApprovedAt)}
                 </div>
+                {agreement.Status === "Registered" ? (
+                  <p className="text-sm" style={{ color: TEXT_MUTED }}>It is signed and registered — nothing more is needed from you on it.</p>
+                ) : agreement.Status === "Executed" ? (
+                  <p className="text-sm" style={{ color: TEXT_MUTED }}>It is signed; registration with the government comes next — we'll tell you once it's done.</p>
+                ) : null}
                 {!agreement.AgreementDate && (
                   agreement.DateApprovalStatus === "Pending" ? (
                     <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#8A6D14" }}>
@@ -612,14 +643,41 @@ const PortalAgreement: React.FC = () => {
               <InfoField label="Deed Date" value={fmtDate(timeline.salesDeed.DeedDate)} />
               <InfoField label="Sub-Registrar Office" value={timeline.salesDeed.SubRegistrarOffice} />
               <InfoField label="Registration No." value={timeline.salesDeed.RegistrationNo} />
+              {deed?.StampDuty != null && <InfoField label="Stamp Duty" value={fmtMoney(deed.StampDuty)} />}
+              {deed?.RegistrationFee != null && <InfoField label="Registration Fee" value={fmtMoney(deed.RegistrationFee)} />}
+              {Number(deed?.StampDutyCredit) > 0 && <InfoField label="Stamp Duty Already Paid (Credit)" value={fmtMoney(deed.StampDutyCredit)} />}
             </div>
+            {/* The deed and its papers — read before approving */}
+            <div>
+              <p className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-2" style={{ color: TEXT_FAINT }}>The deed and its papers</p>
+              {deedPapers.length ? (
+                <div className="space-y-2">
+                  {deedPapers.map((d) => (
+                    <button key={d.Id} onClick={() => openSalesDeedDoc(d.Id, applicationId).catch((e) => toast.error(e.message))}
+                      className="w-full flex items-center gap-3 text-left text-sm py-2 px-3 rounded-xl hover:opacity-80" style={{ background: SURFACE_ALT }}>
+                      <FileText size={15} style={{ color: GOLD }} />
+                      <span className="flex-1 min-w-0 truncate" style={{ color: TEXT }}>
+                        {d.Label || String(d.DocumentType || "").replace(/([A-Z])/g, " $1").trim()}{d.VersionNo > 1 ? ` (v${d.VersionNo})` : ""}
+                      </span>
+                      <span className="text-xs shrink-0" style={{ color: TEXT_FAINT }}>{[fmtBytes(d.FileSize), d.UploadedAt ? fmtDate(d.UploadedAt) : null].filter(Boolean).join(" · ")}</span>
+                      <Eye size={14} style={{ color: TEXT_MUTED }} />
+                    </button>
+                  ))}
+                </div>
+              ) : <p className="text-xs" style={{ color: TEXT_MUTED }}>The deed papers will appear here as soon as our legal team attaches them.</p>}
+            </div>
+            {timeline.salesDeed.CustomerApprovalStatus === "Recheck" && (
+              <p className="text-xs" style={{ color: TEXT_MUTED }}>
+                You asked for a recheck{deed?.CustomerRecheckRemarks ? `: "${deed.CustomerRecheckRemarks}"` : ""}. Our legal team is revising the deed and will share it again.
+              </p>
+            )}
             {timeline.salesDeed.CustomerApprovalStatus === "Pending" ? (
               <button onClick={() => setRespondFor("salesDeed")}
                 className="px-5 py-2.5 text-white text-sm font-semibold rounded-lg shadow-sm hover:opacity-90" style={{ background: INK }}>
                 Review & Respond
               </button>
             ) : timeline.salesDeed.CustomerApprovalStatus === "Approved" ? (
-              <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#0F7A44" }}><CheckCircle2 size={16} /> You've approved this sales deed</div>
+              <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#0F7A44" }}><CheckCircle2 size={16} /> You approved this sale deed{deed?.CustomerApprovedAt ? ` on ${fmtDate(deed.CustomerApprovedAt)}` : ""}</div>
             ) : null}
           </div>
         </Card>

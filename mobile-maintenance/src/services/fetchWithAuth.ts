@@ -66,10 +66,10 @@ export async function fetchWithAuth(
     throw new Error("Network error. Please check your connection.");
   }
 
-  // The login call's own 401 ("Invalid credentials") / 403 ("User inactive") are
+  // A login call's own 401 (staff or customer) ("Invalid credentials") / 403 ("User inactive") are
   // answers, not an expired session -- hand them back so AuthContext.login()
   // can surface the server's real message.
-  if (/^\/?api\/users\/login(\?|$)/.test(url)) return response;
+  if (/^\/?api\/(users|crm-portal)\/login(\?|$)/.test(url)) return response;
 
   if (response.status === 401) {
     if (!sessionExpiredFlow) {

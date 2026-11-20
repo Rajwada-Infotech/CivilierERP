@@ -259,6 +259,9 @@ async function sendToParties(db, id, actorUserId) {
     for (const a of [apps?.SellerApp, buyer ? apps?.BuyerApp : null].filter(Boolean)) await ensurePortalUser(db, a);
   } catch (e) { console.warn("[transfer-deed] portal access for the parties:", e.message); }
   await log(db, id, "Sent to the parties", { userId: actorUserId });
+  // Each party on their phone (Customer Portal → Transfer Deed): the seller, and the buyer of a deed of assignment.
+  require("./pushNotifications").notifyCustomers([d.FromCustomerId, buyer ? d.ToCustomerId : null], "transferDeedForYou",
+    { no: d.DeedNo, property: d.Property });
 }
 
 /** A party approves the draft or asks for a recheck — in the portal, or staff for them (proxy). */

@@ -289,7 +289,7 @@ router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edi
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, AssignedTo, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
+      .query("SELECT Status, AssignedTo, BookingId, TicketNo, Subject FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -302,6 +302,9 @@ router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edi
     await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
       UPDATE dbo.CrmServiceTicket SET Status = '${CrmStatus.IN_PROGRESS}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id
     `);
+    // The customer follows it on their phone (Customer Portal → Support Tickets).
+    const tk = cur.recordset[0];
+    require("../services/pushNotifications").notifyBookingCustomers(tk.BookingId, "ticketUpdated", { no: tk.TicketNo, status: "In progress", subject: tk.Subject });
     res.json({ success: true, status: CrmStatus.IN_PROGRESS });
   } catch (e) {
     console.error("[crm-service-tickets] mark-in-progress error:", e.message);
@@ -320,7 +323,7 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
     if (!b.ResolutionNotes?.trim()) return res.status(400).json({ error: "ResolutionNotes is required to resolve a ticket" });
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
+      .query("SELECT Status, BookingId, TicketNo, Subject FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -338,6 +341,8 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+    const tk = cur.recordset[0];
+    require("../services/pushNotifications").notifyBookingCustomers(tk.BookingId, "ticketUpdated", { no: tk.TicketNo, status: "Resolved", subject: b.ResolutionNotes.trim() });
     res.json({ success: true, status: CrmStatus.RESOLVED });
   } catch (e) {
     console.error("[crm-service-tickets] resolve error:", e.message);
@@ -380,34 +385,41 @@ router.put("/:id/close", requirePageRight("crm-service-tickets", "edit"), async 
   }
 });
 
+/**
+ * Reopen a Resolved/Closed ticket with a reason — the one rule for staff (below) and the customer (crm-portal
+ * PUT /tickets/:ticketId/reopen). Returns an error message, or null when reopened.
+ */
+async function reopenTicket(pool, id, reason, updatedBy) {
+  if (!String(reason || "").trim()) return "Reason is required to reopen a ticket";
+  const cur = await pool.request().input("id", sql.Int, id)
+    .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
+  if (!cur.recordset.length) return "Ticket not found";
+  const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+  if (activeErr) return activeErr;
+  if (![CrmStatus.RESOLVED, CrmStatus.CLOSED].includes(cur.recordset[0].Status)) {
+    return `Cannot reopen from status '${cur.recordset[0].Status}'`;
+  }
+  await pool.request()
+    .input("id", sql.Int, id)
+    .input("res", sql.NVarChar(sql.MAX), String(reason).trim())
+    .input("ub", sql.Int, updatedBy ?? null)
+    .query(`
+      UPDATE dbo.CrmServiceTicket SET
+        Status = 'Reopened', ResolutionNotes = @res, ResolvedAt = NULL,
+        UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+  return null;
+}
+
 // PUT /:id/reopen — Resolved/Closed -> Reopened. Requires a reason.
 router.put("/:id/reopen", requirePageRight("crm-service-tickets", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
-    const b = req.body || {};
-    if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to reopen a ticket" });
-
-    const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
-    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-    if (![CrmStatus.RESOLVED, CrmStatus.CLOSED].includes(cur.recordset[0].Status)) {
-      return res.status(400).json({ error: `Cannot reopen from status '${cur.recordset[0].Status}'` });
-    }
-
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("res", sql.NVarChar(sql.MAX), b.Reason.trim())
-      .input("ub", sql.Int, actorId(req))
-      .query(`
-        UPDATE dbo.CrmServiceTicket SET
-          Status = 'Reopened', ResolutionNotes = @res, ResolvedAt = NULL,
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    const err = await reopenTicket(pool, id, req.body?.Reason, actorId(req));
+    if (err) return res.status(err === "Ticket not found" ? 404 : 400).json({ error: err });
     res.json({ success: true, status: "Reopened" });
   } catch (e) {
     console.error("[crm-service-tickets] reopen error:", e.message);
@@ -416,3 +428,4 @@ router.put("/:id/reopen", requirePageRight("crm-service-tickets", "edit"), async
 });
 
 module.exports = router;
+module.exports.reopenTicket = reopenTicket;

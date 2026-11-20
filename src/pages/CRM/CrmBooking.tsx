@@ -184,7 +184,7 @@ const CrmBooking: React.FC = () => {
     { id: "customer", label: "Customer", sortKey: "Customer",
       csv: (b) => b.ApplicantName,
       cell: (b) => (
-        <div className="flex items-center gap-2.5 min-w-0 md:w-[12.5rem] whitespace-normal">
+        <div className="flex items-center gap-2.5 min-w-0 md:w-[10.5rem] 2xl:w-[12.5rem] whitespace-normal">
           <Initials name={b.ApplicantName} />
           <div className="min-w-0">
             {/* Joint buyers wrap onto a second line instead of widening the table. */}
@@ -201,7 +201,7 @@ const CrmBooking: React.FC = () => {
     { id: "property", label: "Property",
       csv: (b) => [b.ProjectName, b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / "),
       cell: (b) => (
-        <div className="min-w-0 md:max-w-[10rem]" title={[b.ProjectName, b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}>
+        <div className="min-w-0 md:max-w-[8.5rem] 2xl:max-w-[10rem]" title={[b.ProjectName, b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}>
           <div className="truncate">{b.ProjectName || "—"}</div>
           <div className="text-xs text-muted-foreground truncate">
             {[[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / "), b.AreaSqFt ? `${b.AreaSqFt} sq ft` : null].filter(Boolean).join(" · ")}
@@ -215,7 +215,7 @@ const CrmBooking: React.FC = () => {
         const clearedPct = grand > 0 ? Math.min(100, Math.round((cleared / grand) * 100)) : 0;
         const onAccPct = grand > 0 ? Math.min(100 - clearedPct, Math.round((onAcc / grand) * 100)) : 0;
         return (
-          <div className="space-y-1 md:min-w-[10rem]">
+          <div className="space-y-1 md:min-w-[8.5rem] 2xl:min-w-[10rem]">
             <div className="font-semibold tabular-nums">{fmtShort(grand)}</div>
             {grand > 0 && (
               <>
@@ -248,7 +248,7 @@ const CrmBooking: React.FC = () => {
       cell: (b) => (
         <div className="space-y-1">
           <GridStatusPill status={b.Status} />
-          {stageNote(b) && <div className="md:w-[9rem] whitespace-normal text-[0.6875rem] text-muted-foreground leading-snug">{stageNote(b)}</div>}
+          {stageNote(b) && <div className="md:w-[8rem] 2xl:w-[9rem] whitespace-normal text-[0.6875rem] text-muted-foreground leading-snug">{stageNote(b)}</div>}
           {b.IsFrozen && <div className="flex items-center gap-1 text-[0.625rem] font-medium text-destructive"><Lock size={10} /> Frozen</div>}
           {/* Sent back for correction / resubmitted for a recheck. */}
           <SentBackNote bookingId={b.Id} />

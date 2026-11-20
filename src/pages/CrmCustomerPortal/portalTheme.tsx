@@ -1,4 +1,4 @@
-// Shared design system for the Customer Portal — deliberately distinct from
+﻿// Shared design system for the Customer Portal — deliberately distinct from
 // the internal staff ERP's utilitarian look. Customers see a formal record
 // of their purchase, not another admin dashboard: ink/violet + antique gold,
 // serif headings, monospaced reference numbers, paper-toned surfaces.
@@ -238,3 +238,317 @@ export function Stepper({ steps }: { steps: { label: string; state: StepState; n
 export function GoldRail({ className = "" }: { className?: string }) {
   return <span className={`block w-0.5 rounded-full ${className}`} style={{ background: GOLD }} />;
 }
+
+
+// --- PREMIUM DESIGN SYSTEM v2 ------------------------------------------------
+
+// HeroStrip: Full-width gradient hero at the top of every page
+// Use instead of PageHeader for a more premium feel
+export function HeroStrip({
+  eyebrow,
+  title,
+  subtitle,
+  children,
+  gradient = "violet",
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+  children?: React.ReactNode;
+  gradient?: "violet" | "gold" | "green" | "red";
+}) {
+  const gradients = {
+    violet: `linear-gradient(135deg, var(--portal-ink) 0%, var(--portal-violet-deep) 50%, var(--portal-violet) 100%)`,
+    gold: `linear-gradient(135deg, #2D1A00 0%, #5A3800 50%, #8A5C00 100%)`,
+    green: `linear-gradient(135deg, #052E22 0%, #064E3B 50%, #065F46 100%)`,
+    red: `linear-gradient(135deg, #3B0A0A 0%, #5C1010 50%, #7F1D1D 100%)`,
+  };
+  return (
+    <div
+      className="relative -mx-5 lg:-mx-8 -mt-5 lg:-mt-8 mb-6 px-6 lg:px-10 pt-8 pb-6 overflow-hidden"
+      style={{ background: gradients[gradient] }}
+    >
+      {/* Dot grid overlay */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+        }}
+      />
+      {/* Glow blob */}
+      <div
+        className="absolute top-0 right-0 w-64 h-64 rounded-full pointer-events-none"
+        style={{
+          background: "radial-gradient(circle, rgba(201,162,39,0.18) 0%, transparent 70%)",
+          transform: "translate(30%, -40%)",
+        }}
+      />
+      <div className="relative z-10">
+        <p className="text-[0.6875rem] font-semibold tracking-[0.18em] uppercase mb-1" style={{ color: "rgba(201,162,39,0.85)" }}>
+          {eyebrow}
+        </p>
+        <h1 className="text-2xl sm:text-[1.75rem] font-semibold text-white leading-tight" style={{ fontFamily: "'Fraunces', serif" }}>
+          {title}
+        </h1>
+        {subtitle && (
+          <p className="text-sm mt-1.5 text-white/60 max-w-xl">{subtitle}</p>
+        )}
+        {children && <div className="mt-5">{children}</div>}
+      </div>
+    </div>
+  );
+}
+
+// GlassCard: Frosted-glass card for premium info panels
+export function GlassCard({
+  children,
+  className = "",
+  style,
+  onClick,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+  onClick?: () => void;
+}) {
+  const Tag = onClick ? "button" : "div";
+  return (
+    <Tag
+      onClick={onClick}
+      className={`rounded-2xl ${onClick ? "w-full text-left cursor-pointer hover:shadow-lg transition-all active:scale-[0.99]" : ""} ${className}`}
+      style={{
+        background: "rgba(255,255,255,0.07)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        border: "1px solid rgba(255,255,255,0.14)",
+        borderTop: "1px solid rgba(255,255,255,0.22)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.1)",
+        ...style,
+      }}
+    >
+      {children}
+    </Tag>
+  );
+}
+
+// HeroStatCard: Large number stat for use inside HeroStrip
+export function HeroStatCard({
+  label,
+  value,
+  sub,
+  highlight,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className="rounded-xl px-4 py-3"
+      style={{
+        background: highlight ? "rgba(201,162,39,0.18)" : "rgba(255,255,255,0.08)",
+        border: highlight ? "1px solid rgba(201,162,39,0.4)" : "1px solid rgba(255,255,255,0.12)",
+      }}
+    >
+      <p className="text-[0.625rem] font-semibold uppercase tracking-widest mb-1" style={{ color: highlight ? "rgba(201,162,39,0.9)" : "rgba(255,255,255,0.55)" }}>
+        {label}
+      </p>
+      <p className="text-xl font-semibold text-white leading-tight tabular-nums" style={{ fontFamily: "'Fraunces', serif" }}>
+        {value}
+      </p>
+      {sub && <p className="text-[0.6875rem] mt-0.5" style={{ color: "rgba(255,255,255,0.45)" }}>{sub}</p>}
+    </div>
+  );
+}
+
+// PulseBar: Animated progress bar with optional shimmer
+export function PulseBar({
+  pct,
+  color,
+  height = 10,
+  animated = true,
+}: {
+  pct: number;
+  color?: string;
+  height?: number;
+  animated?: boolean;
+}) {
+  const barColor = color || "var(--portal-gold)";
+  return (
+    <div
+      className="w-full rounded-full overflow-hidden"
+      style={{ height, background: "var(--portal-hairline)" }}
+    >
+      <div
+        className="h-full rounded-full relative overflow-hidden"
+        style={{
+          width: `${Math.min(100, Math.max(0, pct))}%`,
+          background: barColor,
+          transition: "width 0.8s cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
+      >
+        {animated && (
+          <div
+            className="absolute inset-0"
+            style={{
+              background: "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.35) 50%, transparent 100%)",
+              animation: "shimmer 2s infinite",
+              backgroundSize: "200% 100%",
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// RingProgress: SVG donut/ring progress for construction page
+export function RingProgress({
+  pct,
+  size = 120,
+  strokeWidth = 10,
+  color,
+  label,
+  sublabel,
+}: {
+  pct: number;
+  size?: number;
+  strokeWidth?: number;
+  color?: string;
+  label?: string;
+  sublabel?: string;
+}) {
+  const r = (size - strokeWidth) / 2;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (pct / 100) * circ;
+  const ringColor = color || "var(--portal-gold)";
+  return (
+    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--portal-hairline)" strokeWidth={strokeWidth} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none"
+          stroke={ringColor} strokeWidth={strokeWidth}
+          strokeDasharray={circ} strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 1s cubic-bezier(0.16, 1, 0.3, 1)" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+        <span className="text-2xl font-semibold tabular-nums" style={{ fontFamily: "'Fraunces', serif", color: "var(--portal-text)" }}>
+          {pct}%
+        </span>
+        {label && <span className="text-[0.6875rem] font-medium mt-0.5" style={{ color: "var(--portal-text-muted)" }}>{label}</span>}
+        {sublabel && <span className="text-[0.625rem]" style={{ color: "var(--portal-text-faint)" }}>{sublabel}</span>}
+      </div>
+    </div>
+  );
+}
+
+// UrgencyBanner: Full-width alert banner for overdue or action-needed states
+export function UrgencyBanner({
+  icon: Icon,
+  title,
+  sub,
+  cta,
+  onCta,
+  level = "warning",
+}: {
+  icon: any;
+  title: string;
+  sub?: string;
+  cta?: string;
+  onCta?: () => void;
+  level?: "warning" | "error" | "info" | "success";
+}) {
+  const themes = {
+    warning: { bg: "rgba(201,162,39,0.10)", border: "rgba(201,162,39,0.35)", iconBg: "rgba(201,162,39,0.18)", iconColor: "var(--portal-gold)", titleColor: "#7A5C0A", subColor: "#8A6D14", ctaBg: "var(--portal-gold)", ctaColor: "#1E0B42" },
+    error: { bg: "rgba(220,38,38,0.07)", border: "rgba(220,38,38,0.3)", iconBg: "rgba(220,38,38,0.14)", iconColor: "#DC2626", titleColor: "#991B1B", subColor: "#B91C1C", ctaBg: "#DC2626", ctaColor: "#fff" },
+    info: { bg: "rgba(76,29,149,0.07)", border: "rgba(76,29,149,0.25)", iconBg: "rgba(76,29,149,0.12)", iconColor: "var(--portal-violet-light)", titleColor: "var(--portal-ink)", subColor: "var(--portal-text-muted)", ctaBg: "var(--portal-ink)", ctaColor: "#fff" },
+    success: { bg: "rgba(16,150,80,0.07)", border: "rgba(16,150,80,0.25)", iconBg: "rgba(16,150,80,0.14)", iconColor: "#059669", titleColor: "#065F46", subColor: "#047857", ctaBg: "#059669", ctaColor: "#fff" },
+  };
+  const t = themes[level];
+  return (
+    <div
+      className="rounded-2xl p-4 flex items-center gap-4"
+      style={{ background: t.bg, border: `1.5px solid ${t.border}` }}
+    >
+      <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: t.iconBg, color: t.iconColor }}>
+        <Icon size={20} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold" style={{ color: t.titleColor }}>{title}</p>
+        {sub && <p className="text-xs mt-0.5" style={{ color: t.subColor }}>{sub}</p>}
+      </div>
+      {cta && onCta && (
+        <button
+          onClick={onCta}
+          className="shrink-0 px-4 py-2 rounded-xl text-xs font-semibold transition-opacity hover:opacity-85"
+          style={{ background: t.ctaBg, color: t.ctaColor }}
+        >
+          {cta}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// TimelineRow: Premium vertical timeline entry
+export function TimelineRow({
+  icon: Icon,
+  title,
+  detail,
+  time,
+  type = "default",
+  isLast = false,
+  onClick,
+}: {
+  icon: any;
+  title: string;
+  detail?: string;
+  time?: string;
+  type?: "agreement" | "payment" | "document" | "ticket" | "default";
+  isLast?: boolean;
+  onClick?: () => void;
+}) {
+  const typeStyles: Record<string, { iconBg: string; iconColor: string; lineColor: string }> = {
+    agreement: { iconBg: "rgba(76,29,149,0.10)", iconColor: "var(--portal-violet-light)", lineColor: "var(--portal-violet-light)" },
+    payment: { iconBg: "rgba(201,162,39,0.12)", iconColor: "var(--portal-gold)", lineColor: "var(--portal-gold)" },
+    document: { iconBg: "rgba(16,150,80,0.10)", iconColor: "#059669", lineColor: "#059669" },
+    ticket: { iconBg: "rgba(220,38,38,0.08)", iconColor: "#DC2626", lineColor: "#DC2626" },
+    default: { iconBg: "var(--portal-surface-alt)", iconColor: "var(--portal-text-muted)", lineColor: "var(--portal-hairline)" },
+  };
+  const s = typeStyles[type] || typeStyles.default;
+  const Tag = onClick ? "button" : "div";
+  return (
+    <div className="flex gap-4">
+      <div className="flex flex-col items-center">
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 z-10" style={{ background: s.iconBg, color: s.iconColor }}>
+          <Icon size={16} />
+        </div>
+        {!isLast && <div className="w-px flex-1 mt-2" style={{ background: "var(--portal-hairline)" }} />}
+      </div>
+      <Tag
+        onClick={onClick}
+        className={`flex-1 pb-5 min-w-0 ${onClick ? "text-left hover:opacity-80 transition-opacity" : ""}`}
+      >
+        <p className="text-sm font-semibold leading-snug" style={{ color: "var(--portal-text)", fontFamily: "'Fraunces', serif" }}>
+          {title}
+        </p>
+        {detail && <p className="text-xs mt-0.5" style={{ color: "var(--portal-text-muted)" }}>{detail}</p>}
+        {time && <p className="text-[0.6875rem] mt-1" style={{ color: "var(--portal-text-faint)" }}>{time}</p>}
+      </Tag>
+    </div>
+  );
+}
+
+export const SHIMMER_KEYFRAMES = `
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+`;
+
+// ---
