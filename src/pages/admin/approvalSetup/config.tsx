@@ -172,7 +172,7 @@ export const MODULE_OPTIONS = [
     id: "crm-agreements",
     label: "CRM Agreement (Senior Approval)",
     icon: "📝",
-    desc: "Before an agreement is sent to the customer portal",
+    desc: "Before an agreement is sent to the customer on Civilier Home",
   },
   {
     id: "crm-agreement-date",

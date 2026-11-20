@@ -157,7 +157,7 @@ export function LoginCard(p: LoginCardProps) {
             {[
               { to: "/supplier-login", label: "Supplier Portal", title: "Vendor & order portal", Icon: Truck },
               { to: "/employee-login", label: "Employee Portal", title: "Salary, payslips, attendance & leave", Icon: UserRound },
-              { to: "/crm-client-portal/login", label: "Customer Portal", title: "Booking & owner portal", Icon: Building2 },
+              { to: "/crm-client-portal/login", label: "Civilier Home", title: "Booking & owner portal", Icon: Building2 },
             ].map(({ to, label, title, Icon }) => (
               <motion.button key={to} type="button" onClick={() => p.onNavigate(to)} className="ls-portal" title={title} aria-label={label} variants={hop} {...press}>
                 <span className="ls-portal-dot">

@@ -121,7 +121,7 @@ export default function LoginScreen() {
                     style={{ fontSize: 24, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}
                     colors={["#F0C94D", "#C9A227", "#F0C94D"]}
                   >
-                    {kind === "customer" ? "Customer Portal" : "Maintenance"}
+                    {kind === "customer" ? "Civilier Home" : "Maintenance"}
                   </GradientText>
                 </View>
                 <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: fonts.body.regular, marginTop: 6, textAlign: "center" }}>

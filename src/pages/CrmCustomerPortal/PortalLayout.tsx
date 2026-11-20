@@ -315,7 +315,7 @@ const PortalLayout: React.FC = () => {
             <img src="/Civilier.png" alt="" className="w-6 h-6 object-contain" />
           </div>
           <div className="min-w-0">
-            <p className="text-base font-semibold text-white leading-tight truncate" style={serif}>CivilierERP</p>
+            <p className="text-base font-semibold text-white leading-tight truncate" style={serif}>Civilier Home</p>
             <p className="text-[0.625rem] tracking-[0.12em] uppercase leading-tight" style={{ color: GOLD }}>Customer Record</p>
           </div>
         </div>

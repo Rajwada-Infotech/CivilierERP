@@ -56,7 +56,7 @@ const EMPTY_BANK = {
 };
 
 
-const TABS = ["Booking", "Parking & Extra Charges", "Payment Plan", "Bank Details", "Customer Portal", "Attachments", "Payment & Invoice"] as const;
+const TABS = ["Booking", "Parking & Extra Charges", "Payment Plan", "Bank Details", "Civilier Home", "Attachments", "Payment & Invoice"] as const;
 type Tab = typeof TABS[number];
 
 // Where each Data Review checklist item is verified — the tab holding the data
@@ -381,7 +381,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const r = await fetchWithAuth(`${API}/${bookingId}/portal-status`);
       return r.ok ? r.json() : null;
     },
-    enabled: tab === "Customer Portal",
+    enabled: tab === "Civilier Home",
   });
   const [provisioning, setProvisioning] = useState(false);
   const [togglingPortal, setTogglingPortal] = useState(false);
@@ -419,7 +419,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const r = await fetchWithAuth(`${API}/${bookingId}/provision-portal`, { method: "POST" });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) { toast.error(body.error || "Provisioning failed"); return; }
-      toast.success("Customer portal access created");
+      toast.success("Civilier Home access created");
       refetchPortal();
     } finally {
       setProvisioning(false);
@@ -2717,7 +2717,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
-            {tab === "Customer Portal" && (
+            {tab === "Civilier Home" && (
               <div className="space-y-4 pt-2">
                 {portalFetching ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
@@ -2733,7 +2733,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           <ShieldCheck size={20} className={portalStatus.isActive ? "text-foreground" : "text-destructive"} />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-foreground">Customer Portal</p>
+                          <p className="text-sm font-semibold text-foreground">Civilier Home</p>
                           <p className={`text-sm font-bold mt-0.5 ${portalStatus.isActive ? "text-foreground" : "text-destructive"}`}>
                             {portalStatus.isActive ? "Access Active" : "Access Deactivated"}
                           </p>
@@ -2850,11 +2850,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <Lock size={24} className="text-muted-foreground" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-semibold text-foreground">Portal Not Provisioned</h4>
+                      <h4 className="text-sm font-semibold text-foreground">No Civilier Home Account Yet</h4>
                       <p className="text-xs text-muted-foreground mt-1 max-w-xs leading-relaxed">
                         {portalStatus?.workflowStage !== "Confirmed"
-                          ? "The customer portal is provisioned automatically once this booking reaches Confirmed status."
-                          : "This booking is Confirmed but no portal account exists yet. Provision it manually below."}
+                          ? "Civilier Home access is set up automatically once this booking reaches Confirmed status."
+                          : "This booking is Confirmed but has no Civilier Home account yet. Set it up below."}
                       </p>
                     </div>
                     {portalStatus?.workflowStage === "Confirmed" && (
@@ -2864,7 +2864,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         className={`${KEY_INK} h-8 px-3`}
                       >
                         <KeyRound size={15} />
-                        {provisioning ? "Provisioning…" : "Provision Customer Portal"}
+                        {provisioning ? "Setting up…" : "Set up Civilier Home"}
                       </button>
                     )}
                   </div>

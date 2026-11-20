@@ -225,7 +225,7 @@ const CrmBrokerage: React.FC = () => {
                     </button>
                   ))}
                 </div>
-                <span className="ml-auto text-[0.6875rem] text-muted-foreground inline-flex items-center gap-1.5"><ShieldAlert size={12} /> Internal only — never in the customer portal</span>
+                <span className="ml-auto text-[0.6875rem] text-muted-foreground inline-flex items-center gap-1.5"><ShieldAlert size={12} /> Internal only — never shown on Civilier Home</span>
               </div>
               <div className="flex gap-2.5 flex-wrap items-center">
                 <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}

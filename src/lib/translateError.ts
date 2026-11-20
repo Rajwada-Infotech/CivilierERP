@@ -10,7 +10,7 @@
 const ERROR_MAP: [RegExp, string][] = [
   // ── Handover ──────────────────────────────────────────────────────────────
   [/customer.*approve.*sales deed|sales deed.*customer.*approv/i,
-    "The customer hasn't approved the Sales Deed yet. Ask them to log in to the Customer Portal and approve it."],
+    "The customer hasn't approved the Sales Deed yet. Ask them to sign in to Civilier Home and approve it."],
   [/director.*approv.*deed|deed.*director.*approv/i,
     "The Sales Deed must be approved by the Director before this step can proceed."],
   [/unresolved snag|snag.*pending|open snag/i,

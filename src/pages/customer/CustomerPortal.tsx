@@ -489,7 +489,7 @@ export default function CustomerPortal() {
 
         {/* Footer */}
         <p className="text-center text-xs text-muted-foreground/50 pb-4">
-          Civilier Customer Portal · For support, raise a ticket above
+          Civilier Home · For support, raise a ticket above
         </p>
       </div>
     </div>

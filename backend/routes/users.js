@@ -191,7 +191,7 @@ router.post("/login", async (req, res) => {
         return refuse("Employee accounts sign in on the Employee Portal.");
       }
       if (portal === "staff" && normalizedRole === "customer") {
-        return refuse("Customer accounts sign in on the Customer Portal.");
+        return refuse("Customer accounts sign in on Civilier Home.");
       }
       if (portal === "supplier" && !isSupplier) {
         return refuse("This page is for supplier accounts. Please use the main login.");
