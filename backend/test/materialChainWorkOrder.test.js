@@ -127,20 +127,20 @@ describe("the rest of the chain now starts at the work order", () => {
   test("an MR shows its work order above it and its quotation + PO below", async () => {
     const res = await get("mr/55");
     expect(types(res.body.upstream)).toEqual(["wo"]);
-    expect(types(res.body.downstream)).toEqual(["qt", "po"]);
+    expect(types(res.body.downstream)).toEqual(["qt", "po", "grn", "expense"]);
   });
 
   test("a quotation sits between its MR and the PO", async () => {
     const res = await get("qt/5");
     expect(res.body.current.docType).toBe("qt");
     expect(types(res.body.upstream)).toEqual(["wo", "mr"]);
-    expect(types(res.body.downstream)).toEqual(["po"]);
+    expect(types(res.body.downstream)).toEqual(["po", "grn", "expense"]);
   });
 
   test("a PO raised from a quotation shows WO -> MR -> QT above it", async () => {
     const res = await get("po/70");
     expect(types(res.body.upstream)).toEqual(["wo", "mr", "qt"]);
-    expect(types(res.body.downstream)).toEqual(["grn"]);
+    expect(types(res.body.downstream)).toEqual(["grn", "expense"]);
   });
 
   test("a GRN and an invoice carry the whole chain above them", async () => {

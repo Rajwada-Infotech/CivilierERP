@@ -113,7 +113,7 @@ const AgreementActivity: React.FC<{ agreement: any; documents: any[]; dateHistor
   const ev: { at: string; title: string; detail?: string; tone?: AgreementAlertTone | "done" }[] = [];
   if (a.CreatedAt) ev.push({ at: a.CreatedAt, title: "Agreement made", detail: a.CreatedByName ? `by ${a.CreatedByName}` : undefined });
   if (a.SeniorApprovedAt) ev.push({ at: a.SeniorApprovedAt, title: `Senior approval: ${a.SeniorApprovalStatus}`, detail: a.SeniorApprovalRemarks || undefined, tone: a.SeniorApprovalStatus === CrmStatus.APPROVED ? "done" : "stopped" });
-  if (a.SentToCustomerAt) ev.push({ at: a.SentToCustomerAt, title: "Sent to the customer portal" });
+  if (a.SentToCustomerAt) ev.push({ at: a.SentToCustomerAt, title: "Sent to the customer on Civilier Home" });
   if (a.CustomerApprovedAt) ev.push({ at: a.CustomerApprovedAt, title: "Customer approved", tone: "done" });
   if (a.CustomerApprovalStatus === "RecheckRequested") ev.push({ at: a.UpdatedAt, title: `Customer asked for a recheck${a.RecheckCount > 1 ? ` (${a.RecheckCount} times)` : ""}`, detail: a.LastRecheckRemarks || undefined, tone: "stopped" });
   for (const h of dateHistory) ev.push({ at: h.CreatedAt, title: `${h.ProposedBy === "Customer" ? "Customer" : "We"} proposed ${fmtDate(h.ProposedDate)}`, detail: [h.Reason, h.CreatedByName && `by ${h.CreatedByName}`].filter(Boolean).join(" · ") || undefined });
@@ -436,7 +436,7 @@ const CrmAgreement: React.FC = () => {
     else if (!senior) {
       next = seniorStatus === CrmStatus.REJECTED ? `Senior approval rejected${a.SeniorApprovalRemarks ? `: ${a.SeniorApprovalRemarks}` : ""}: correct it and submit again` : "Prepare the papers, then submit for senior approval";
       action = { label: "Go to Legal Work", run: go("legal") };
-    } else if (!sent) { next = "Senior-approved: share with the customer"; action = { label: "Send to Customer Portal", run: () => openSend(a) }; }
+    } else if (!sent) { next = "Senior-approved: share with the customer"; action = { label: "Send to Civilier Home", run: () => openSend(a) }; }
     else if (recheck) { next = `The customer asked for a recheck${a.LastRecheckRemarks ? `: "${a.LastRecheckRemarks}"` : ""}`; action = { label: "Resend to Customer", run: () => openSend(a) }; }
     else if (!custApproved) next = `Sent to the customer on ${fmtDate(a.SentToCustomerAt)}: waiting for their review`;
     else if (!dated) {
@@ -554,7 +554,7 @@ const CrmAgreement: React.FC = () => {
 
                   {x.n === 2 && sent && <p className="text-xs flex items-center gap-1 tabular-nums"><Send size={11} /> Sent {fmtDate(a.SentToCustomerAt)}</p>}
                   {x.n === 2 && recheck && <p className="text-xs text-destructive rounded-md px-2 py-1.5 border border-destructive/40"><strong>Recheck requested{a.RecheckCount > 1 ? ` (${a.RecheckCount} times)` : ""}:</strong> {a.LastRecheckRemarks || "No remark given"}</p>}
-                  {x.n === 2 && senior && (!sent || recheck) && !locked && canWork && <button onClick={() => openSend(a)} className={`${KEY_INK} h-8 px-3`}>{recheck ? "Resend to Customer" : "Send to Customer Portal"}</button>}
+                  {x.n === 2 && senior && (!sent || recheck) && !locked && canWork && <button onClick={() => openSend(a)} className={`${KEY_INK} h-8 px-3`}>{recheck ? "Resend to Customer" : "Send to Civilier Home"}</button>}
 
                   {x.n === 3 && custApproved && a.CustomerApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} /> Approved by the customer {fmtDate(a.CustomerApprovedAt)}</p>}
                   {x.n === 3 && sent && !custApproved && !recheck && !locked && canWork && (
@@ -761,10 +761,10 @@ const CrmAgreement: React.FC = () => {
       )}
 
       {(dialog === "send" || dialog === "propose") && (
-        <GridDialog onClose={close} icon={dialog === "send" ? Send : CalendarDays} width="max-w-2xl" title={dialog === "send" ? (current?.CustomerApprovalStatus === "RecheckRequested" ? "Resend to Customer" : "Send to Customer Portal") : "Propose Signing Date"} description={dsub}
+        <GridDialog onClose={close} icon={dialog === "send" ? Send : CalendarDays} width="max-w-2xl" title={dialog === "send" ? (current?.CustomerApprovalStatus === "RecheckRequested" ? "Resend to Customer" : "Send to Civilier Home") : "Propose Signing Date"} description={dsub}
           footer={<><button onClick={close} className={GRID_BTN}>Cancel</button>
             <button disabled={saving || (dialog === "propose" && !sendDate)} onClick={() => dialog === "send"
-              ? run(() => send(`${API}/${selectedId}/send-to-customer`, "PUT", { proposedDate: sendDate || null }), "Sent to the customer portal")
+              ? run(() => send(`${API}/${selectedId}/send-to-customer`, "PUT", { proposedDate: sendDate || null }), "Sent to the customer on Civilier Home")
               : run(() => send(`${API}/${selectedId}/propose-date`, "PUT", { proposedDate: sendDate }), "Proposed date sent to the customer")} className={GRID_BTN_BRAND}>
               {saving ? "Saving…" : dialog === "send" ? "Send" : "Propose Date"}</button></>}>
           <p className="text-sm text-muted-foreground">{dialog === "send" ? "The customer reviews the agreement and its papers in their portal, and approves it or asks for a recheck." : "This date goes to the customer to review. They can accept it, or propose another back."}</p>

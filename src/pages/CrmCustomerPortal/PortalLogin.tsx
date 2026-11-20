@@ -255,7 +255,7 @@ export default function PortalLogin() {
           </div>
           <p className="text-[0.6875rem] font-semibold tracking-[0.18em] uppercase mb-2" style={{ color: GOLD }}>Customer Record</p>
           <h1 className="text-3xl font-semibold text-white leading-tight mb-3" style={serif}>
-            Customer Portal
+            Civilier Home
           </h1>
           <p className="text-violet-200/70 text-sm leading-relaxed max-w-xs">
             Track your booking, review and approve your agreement, and follow every milestone — from token to handover.
@@ -285,7 +285,7 @@ export default function PortalLogin() {
               style={{ background: "rgba(201,162,39,0.14)", color: GOLD }}>CE</div>
             <div>
               <p className="text-xs font-semibold text-white">Your journey, one place</p>
-              <p className="text-[0.625rem] text-white/40 mt-0.5">CivilierERP · Customer Experience</p>
+              <p className="text-[0.625rem] text-white/40 mt-0.5">Civilier Home · by CivilierERP</p>
             </div>
           </div>
         </motion.div>
@@ -344,7 +344,7 @@ export default function PortalLogin() {
                       style={{ ...serif, background: `linear-gradient(135deg,${INK},${VIOLET_DEEP},${GOLD})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}
                       initial={{ letterSpacing: "0.15em", opacity: 0 }} animate={{ letterSpacing: "-0.01em", opacity: 1 }}
                       transition={{ delay: 0.35, duration: 0.7 }}>
-                      Customer Portal
+                      Civilier Home
                     </motion.h1>
                   </motion.div>
                   <p className="text-xs" style={{ color: TEXT_FAINT }}>Sign in to track your application, agreement and payments</p>
