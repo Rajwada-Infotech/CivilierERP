@@ -1285,13 +1285,23 @@ async function checkLoanProcessingCleared(pool, bookingId) {
            -- the booking's live loan, newest first (a closed one — e.g. a
            -- previous owner's, after a resale — never counts)
            (SELECT TOP 1 l.SanctionStatus FROM dbo.CrmLoanDetail l
-             WHERE l.BookingId = b.Id AND ISNULL(l.SanctionStatus, N'') <> N'Closed' ORDER BY l.Id DESC) AS SanctionStatus
+             WHERE l.BookingId = b.Id AND ISNULL(l.SanctionStatus, N'') <> N'Closed' ORDER BY l.Id DESC) AS SanctionStatus,
+           (SELECT COUNT(*) FROM dbo.CrmLoanDetail l
+             WHERE l.BookingId = b.Id AND ISNULL(l.SanctionStatus, N'') <> N'Closed') AS LoanCount,
+           -- the full price already paid (verified money) — the same "dues cleared" rule as Handover / Possession
+           CAST(CASE WHEN ${bookingFullyFundedSql("b.Id")} THEN 1 ELSE 0 END AS BIT) AS FullyFunded
     FROM dbo.CrmBooking b
     WHERE b.Id = @bid
   `);
   const row = result.recordset[0];
   if (!row) return "Booking not found";
   if (row.FinancingType !== "LoanFinanced") return null;
+  // The loan only exists to pay the price: once the buyer has paid it in full, there is nothing left for the bank to
+  // fund, so the loan no longer holds the booking back.
+  if (row.FullyFunded) return null;
+  if (!Number(row.LoanCount)) {
+    return "This booking is marked Loan financed, but no loan is recorded — add it on the Loan Tracking page (it must be Sanctioned or Disbursed), or set the financing type to Self funded on Customer Bank Details if the buyer isn't taking a loan.";
+  }
   if (!["Sanctioned", "Disbursed"].includes(row.SanctionStatus)) {
     return `Loan must be Sanctioned or Disbursed before this stage can proceed (currently '${row.SanctionStatus || "Not Applied"}') — update it on the Loan Tracking page.`;
   }

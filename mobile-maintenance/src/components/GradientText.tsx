@@ -2,12 +2,13 @@
 // (src/pages/Login.tsx: "linear-gradient(135deg,#4c1d95,#7c3aed,#a78bfa)"
 // clipped to text). CSS background-clip:text has no RN equivalent, so this
 // masks a LinearGradient with the text shape via @react-native-masked-view.
-import { Text, type TextStyle } from "react-native";
-import MaskedViewClass, { type MaskedViewProps } from "@react-native-masked-view/masked-view";
+import { Platform, Text, type TextStyle } from "react-native";
+import RawMaskedView, { type MaskedViewProps } from "@react-native-masked-view/masked-view";
 import type { ComponentType } from "react";
 
-// masked-view 0.3.2 types it as a class without a typed `props`, which React 19.3's JSX types reject. Same component.
-const MaskedView = MaskedViewClass as unknown as ComponentType<MaskedViewProps>;
+// The library's class component is typed for older React; this is the same component, typed for React 19.3
+// (Expo SDK 58). The app's one import of it — AnimatedLogo uses it from here too.
+export const MaskedView = RawMaskedView as unknown as ComponentType<MaskedViewProps>;
 import { LinearGradient } from "expo-linear-gradient";
 
 export function GradientText({
@@ -19,6 +20,9 @@ export function GradientText({
   style?: TextStyle;
   colors?: [string, string, ...string[]];
 }) {
+  // The masked view has no web build (it renders the hidden text, so nothing shows): web gets the gradient's middle
+  // colour as solid text instead.
+  if (Platform.OS === "web") return <Text style={[style, { color: colors[Math.floor(colors.length / 2)] }]}>{children}</Text>;
   return (
     <MaskedView maskElement={<Text style={[style, { backgroundColor: "transparent" }]}>{children}</Text>}>
       <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>

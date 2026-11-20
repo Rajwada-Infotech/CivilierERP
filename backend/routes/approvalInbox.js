@@ -12,6 +12,8 @@ const {
   getWorkflow,
   resolveCurrentLevel,
   isApproverFor,
+  receivedPaymentStep,
+  RP_TABLE,
 } = require("../services/approvalService");
 
 const { isSuperAdmin: isSuperAdminRole, hasFullAccess } = require("../middleware/role");
@@ -157,10 +159,19 @@ async function whoMayAct(item, viewerRole, viewerUserId, workflowCache) {
     }
   }
 
+  // Received Payment: the receipt's own steps (a CRM customer payment may have several — Finance, then Directors;
+  // approvalService.js receivedPaymentStep). Acts on its current step; seen coming by anyone named on a later one.
+  if (item.Module === "received-payment") {
+    const step = await receivedPaymentStep(parseInt(item.RecordId, 10)).catch(() => null);
+    if (!step?.levelDef) return { visible: false, canAct: false };
+    const canAct = isNamedOnLevel(step.levelDef, role, viewerUserId);
+    const named = canAct || step.defs.some((l) => isNamedOnLevel(l, role, viewerUserId));
+    return { visible: named, canAct, currentLevel: step.level, totalLevels: step.total, rpStep: step };
+  }
+
   const map = MODULE_MAP[item.Module];
 
-  // Gates outside the level engine (received-payment,
-  // crm-booking-amendment...) are single-step: level 1 in Approval Setup.
+  // Other gates outside the level engine (crm-booking-amendment...) are single-step: level 1 in Approval Setup.
   if (!map) {
     const ok = await isApproverFor(item.Module, viewerUserId, role);
     return { visible: ok, canAct: ok };
@@ -235,15 +246,19 @@ async function approvalProgress(item, visibility, workflowCache) {
       return { stage, steps };
     }
 
-    const map = MODULE_MAP[item.Module];
-    const workflow = workflowCache.get(item.Module);
+    // A received payment with more than one step (approvalService.js receivedPaymentStep) shows its steps too.
+    const rpStep = item.Module === "received-payment"
+      ? visibility.rpStep || (await receivedPaymentStep(recordId).catch(() => null)) : null;
+    if (item.Module === "received-payment" && !(rpStep?.total > 1)) return null;
+    const map = rpStep ? { table: RP_TABLE } : MODULE_MAP[item.Module];
+    const workflow = rpStep ? { LevelDefs: rpStep.defs, Levels: rpStep.total } : workflowCache.get(item.Module);
     if (!map || !workflow?.LevelDefs?.length) return null;
     const total = workflow.Levels || workflow.LevelDefs.length;
     const tableName = map.table.replace("dbo.", "");
 
     let stage = null;
     if (item.Status === "Pending") {
-      const level = visibility.currentLevel
+      const level = rpStep?.level ?? visibility.currentLevel
         ?? (await resolveCurrentLevel(tableName, recordId, total, workflow.LevelDefs, null, { module: item.Module }));
       if (level && level <= total) stage = { level, total, label: levelLabel(workflow.LevelDefs, level, total) };
     }

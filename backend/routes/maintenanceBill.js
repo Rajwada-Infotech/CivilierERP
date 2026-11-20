@@ -210,6 +210,8 @@ router.post("/", requirePageRight("maintenance-bills", "create"), async (req, re
       }
 
       await tx.commit();
+      // The customer sees it on their phone (Customer Portal → Maintenance Bills).
+      require("../services/pushNotifications").notifyBookingCustomers(bookingId, "maintenanceBill", { no: billNo, amount: grandTotal, due: dueDate || null });
       res.json({ message: "Bill created", Id: billId, BillNo: billNo });
     } catch (err) {
       await tx.rollback();
@@ -341,3 +343,5 @@ router.delete("/:id", requirePageRight("maintenance-bills", "delete"), async (re
 });
 
 module.exports = router;
+// The customer portal reads its own bills through the same query (routes/crmPortal.js).
+module.exports.LIST_SELECT = LIST_SELECT;

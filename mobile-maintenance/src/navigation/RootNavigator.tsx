@@ -4,6 +4,7 @@ import { View, ActivityIndicator } from "react-native";
 import { useAuth } from "@/auth/AuthContext";
 import AuthStack from "./AuthStack";
 import MainStack from "./MainStack";
+import CustomerStack from "./CustomerStack";
 import { SidebarMenu } from "./SidebarMenu";
 import { navigationRef } from "./navigationRef";
 import { colors } from "@/theme/colors";
@@ -34,7 +35,10 @@ export default function RootNavigator() {
         if (navigationRef.isReady()) setActiveRoute(navigationRef.getCurrentRoute()?.name ?? "Dashboard");
       }}
     >
-      {currentUser ? (
+      {currentUser?.kind === "customer" ? (
+        // A customer (Customer Portal sign-in) gets their own screens; staff the Maintenance module below.
+        <CustomerStack />
+      ) : currentUser ? (
         <>
           <MainStack />
           <SidebarMenu activeRoute={activeRoute} />

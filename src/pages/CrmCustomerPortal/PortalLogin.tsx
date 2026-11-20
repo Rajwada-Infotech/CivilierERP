@@ -167,7 +167,8 @@ export default function PortalLogin() {
       localStorage.setItem("crm_portal_token", data.token);
       setLoginSuccess(true);
       setTimeout(() => {
-        navigate(data.mustChangePassword ? "/crm-client-portal/change-password" : "/crm-client-portal/dashboard", { replace: true });
+        // Setting their own password is the customer's choice (Customer 360 → change password), never forced.
+        navigate("/crm-client-portal/dashboard", { replace: true });
       }, 1800);
     } catch (err: any) {
       setError(err.message || "Invalid email or password.");

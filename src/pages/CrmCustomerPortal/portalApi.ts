@@ -15,7 +15,6 @@ async function get(path: string) {
   if (res.status === 401) throw new Error("unauthorized");
   if (res.status === 403) {
     const body = await res.json().catch(() => ({}));
-    if (body.mustChangePassword) throw new Error("password_change_required");
     throw new Error(body.error || "Forbidden");
   }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Request failed");
@@ -45,10 +44,31 @@ export function writeSeen(key: string, v: number) { try { localStorage.setItem(k
 export const fetchTimeline          = (applicationId: number) => get(withAppId("/timeline", applicationId));
 export const fetchTickets           = (applicationId: number) => get(withAppId("/tickets", applicationId));
 export const fetchActivity          = (applicationId: number) => get(withAppId("/activity", applicationId));
+/** What is waiting on the customer for this property — the server's one rule set (crmPortal.js needsYou), shared with the mobile app. */
+export const fetchNeedsYou          = (applicationId: number) => get(withAppId("/needs-you", applicationId)).then((r: any) => r.items as any[]);
 export const fetchAgreement         = (applicationId: number) => get(withAppId("/agreement", applicationId));
 export const fetchAgreementDocuments = (applicationId: number) => get(withAppId("/agreement/documents", applicationId));
 export const fetchInvoices          = (applicationId: number) => get(withAppId("/invoices", applicationId));
 export const fetchReceipts          = (appId: number) => get(withAppId("/receipts", appId));
+/** The property's money statement (crmPortal.js GET /money) — the one source of paid / total / balance, shared with the app. */
+export const fetchMoney             = (applicationId: number) => get(withAppId("/money", applicationId));
+
+/** The headline money figures every portal page shows, all from the money statement so no two pages disagree.
+ *  A closed booking (cancelled, sold…) owes nothing: "paid" is then everything received on it. */
+export function moneyFigures(m: any) {
+  const t = m?.totals || {};
+  const closed = !!m?.booking?.Closed;
+  const total = Number(m?.plan?.total || 0);
+  const paid = Number((closed ? t.received : t.paid) || 0);
+  return {
+    closed, total, paid,
+    balance: closed ? 0 : Number(t.balance || 0),
+    verifying: Number(t.verifying || 0),
+    overPrice: closed ? 0 : Number(t.overPrice || 0),
+    price: Number(m?.price?.total || 0),
+    pct: total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : 0,
+  };
+}
 
 export const downloadReceiptPdf = async (receiptId: number, appId?: number): Promise<Blob> => {
   const token = localStorage.getItem("crm_portal_token");
@@ -77,12 +97,46 @@ export async function uploadAgreementDoc(docId: number, file: File, applicationI
   return res.json();
 }
 
-export async function openPossessionLetter(noticeId: number, applicationId: number) {
-  const res = await fetch(`${API}/possession-notice/${noticeId}/pdf?applicationId=${applicationId}`, { headers: authHeaders() });
-  if (!res.ok) throw new Error("Could not open the letter");
+/** Open a file the portal serves (signed-in fetch → new tab). */
+async function openPortalFile(path: string, failMsg: string) {
+  const res = await fetch(`${API}${path}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(failMsg);
   const url = URL.createObjectURL(await res.blob());
   window.open(url, "_blank", "noopener");
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export const openPossessionLetter = (noticeId: number, applicationId: number) =>
+  openPortalFile(`/possession-notice/${noticeId}/pdf?applicationId=${applicationId}`, "Could not open the letter");
+
+/** The sale deed sent to the customer, with its papers (GET /sales-deed). */
+export const fetchSalesDeed = (applicationId: number) => get(withAppId("/sales-deed", applicationId));
+export const openSalesDeedDoc = (docId: number, applicationId: number) =>
+  openPortalFile(`/sales-deed/documents/${docId}/download?applicationId=${applicationId}`, "Could not open the document");
+
+/** A site photo as an object URL (signed-in fetch); the caller revokes it. */
+export async function sitePhotoUrl(photoId: number, applicationId: number) {
+  const res = await fetch(`${API}/site-photos/${photoId}?applicationId=${applicationId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error("Could not load the photo");
+  return URL.createObjectURL(await res.blob());
+}
+
+/** Reopen a resolved help request that isn't fixed, with what is still wrong. */
+export async function reopenTicket(applicationId: number, ticketId: number, reason: string) {
+  const res = await fetch(`${API}/tickets/${ticketId}/reopen?applicationId=${applicationId}`, {
+    method: "PUT", headers: authHeaders(), body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not reopen it");
+  return res.json();
+}
+
+/** Rate a resolved help request (1–5, optional comment). */
+export async function rateTicket(applicationId: number, ticketId: number, rating: number, feedback: string) {
+  const res = await fetch(`${API}/tickets/${ticketId}/feedback?applicationId=${applicationId}`, {
+    method: "PUT", headers: authHeaders(), body: JSON.stringify({ rating, feedback }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not save the rating");
+  return res.json();
 }
 
 export async function respondPossessionNotice(decision: "Acknowledge" | "Dispute", applicationId: number, reason?: string) {

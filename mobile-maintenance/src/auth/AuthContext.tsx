@@ -2,6 +2,7 @@
 // client actually needs: login, logout, currentUser, permission checks.
 // Profile-editing / avatar / admin-user-management pieces stay on web only.
 import { unregisterPushAsync } from "@/notifications/pushNotifications";
+import { CUSTOMER_PUSH } from "@/api/customerPortalApi";
 import {
   createContext,
   useCallback,
@@ -41,6 +42,17 @@ interface AuthContextValue {
     onAuthenticated?: (user: AppUser) => void,
     navHoldMs?: number,
   ) => Promise<void>;
+  // A customer signs in to the Customer Portal (its own accounts and token, /api/crm-portal) — same
+  // onAuthenticated / navHoldMs contract as the staff login above.
+  loginCustomer: (
+    email: string,
+    password: string,
+    onAuthenticated?: (user: AppUser) => void,
+    navHoldMs?: number,
+  ) => Promise<void>;
+  /** After a customer sets their own password: the server ended every session, so they sign in again. */
+  passwordChanged: () => Promise<void>;
+  isCustomer: boolean;
   logout: () => Promise<void>;
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
@@ -85,6 +97,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       queryClient.clear();
 
       const user: AppUser = {
+        kind: "staff",
         id: String(data.user.id),
         name: data.user.name,
         email: data.user.email,
@@ -110,13 +123,66 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [],
   );
 
+  const loginCustomer = useCallback(
+    async (
+      email: string,
+      password: string,
+      onAuthenticated?: (user: AppUser) => void,
+      navHoldMs = 0,
+    ) => {
+      const res = await fetchWithAuth("/api/crm-portal/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Login failed. Please check your credentials.");
+      queryClient.clear();
+      await persistToken(body.token);
+      // The customer's name and number come from their own record. Setting their own password is their choice
+      // (Customer 360 → Change password), never asked for here.
+      let me: { Id?: number; Name?: string; Email?: string } = {};
+      try {
+        const meRes = await fetchWithAuth("/api/crm-portal/me");
+        if (meRes.ok) me = await meRes.json();
+      } catch { /* the name is shown from the email until the next sign-in */ }
+      const user: AppUser = {
+        kind: "customer",
+        id: String(me.Id ?? ""),
+        name: me.Name || email,
+        email: me.Email || email,
+        role: "customer",
+        initials: getInitials(me.Name || email),
+        pagePermissions: [],
+        isActive: true,
+      };
+      await setStoredUser(user);
+      onAuthenticated?.(user);
+      if (navHoldMs > 0) await new Promise((r) => setTimeout(r, navHoldMs));
+      setCurrentUser(user);
+    },
+    [],
+  );
+
+  const passwordChanged = useCallback(async () => {
+    await clearAuthStorage();
+    queryClient.clear();
+    setCurrentUser(null);
+  }, []);
+
   const logout = useCallback(async () => {
-    await unregisterPushAsync(); // while the session token still exists
+    if (currentUser?.kind === "customer") {
+      // This phone stops getting their notifications, then the token ends on the server too (while it still works);
+      // signing out on the phone always succeeds.
+      await unregisterPushAsync(CUSTOMER_PUSH);
+      await fetchWithAuth("/api/crm-portal/logout", { method: "POST" }).catch(() => {});
+    } else {
+      await unregisterPushAsync(); // while the session token still exists
+    }
     await clearAuthStorage();
     endAppSession();
     queryClient.clear();
     setCurrentUser(null);
-  }, []);
+  }, [currentUser?.kind]);
 
   const { canAccessPage: rawAccess, canDoAction: rawAction } = useMemo(
     () => createPermissionCheckers(currentUser),
@@ -127,6 +193,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     currentUser,
     isLoading,
     login,
+    loginCustomer,
+    passwordChanged,
+    isCustomer: currentUser?.kind === "customer",
     logout,
     canAccessPage: rawAccess,
     canDoAction: rawAction,

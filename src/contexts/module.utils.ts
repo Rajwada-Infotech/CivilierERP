@@ -1,4 +1,13 @@
 import { LEGAL_PAGE_KEYS } from "@/pages/legal/legalMasters";
+import { crmNavItems } from "@/components/layout/sidebars/CrmSidebar";
+import type { NavItem } from "@/components/layout/sidebars/SidebarPrimitives";
+
+/** Every page key in a module's menu — its items, their sub-items and sections — read from the menu itself, so a page
+ *  added there is never missing here. */
+function menuPageKeys(items: NavItem[]): string[] {
+  const keys = items.flatMap((i) => [i.pageKey, ...(i.children || []).map((c) => c.pageKey), ...(i.sections || []).flatMap((x) => x.items.map((c) => c.pageKey))]);
+  return [...new Set(keys.filter((k): k is string => !!k))];
+}
 
 import { isPrivilegedRole } from "@/contexts/auth.utils";
 // Non-component exports for ModuleContext, split out so ModuleContext.tsx
@@ -117,7 +126,8 @@ export const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
   legal:       ["legal-dashboard", ...LEGAL_PAGE_KEYS, "legal-land-reports", "legal-registration-search",
                 "legal-deed-registrations", "legal-approvals", "legal-pending-queue"],
   records:     ["records"],
-  crm:         ["crm-dashboard", "crm-bookings", "crm-applications", "crm-agreements", "crm-sales-deed"],
+  // Every page in the CRM menu, so a user granted only e.g. Money Receipts or Refunds still sees (and can reach) CRM.
+  crm:         menuPageKeys(crmNavItems),
 };
 
 /** Admin-tier roles see every module regardless of individual page rights. */

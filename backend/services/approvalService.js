@@ -987,6 +987,43 @@ async function canUserAct(module, recordId, userRole, userId) {
   return !!levelDef && userMatchesLevel(levelDef, userRole, userId);
 }
 
+/**
+ * Received Payment's approval steps for one receipt, all from Approval Setup:
+ *  - a customer's payment on a CRM booking follows "crm-customer-payment" when that approval has steps
+ *    (for example Finance, then Directors): every step in turn, and only the last one approves the payment;
+ *  - every other receipt, and a CRM one while "crm-customer-payment" is not set up, follows "received-payment":
+ *    its first step approves it outright, as it always has.
+ * Returns where the receipt stands: { status, workflowKey, defs, total, level, levelDef } (level = the step that
+ * acts next). The steps taken are kept in ApprovalAuditLog under table "ReceivedPayment", in the same per-cycle
+ * way as every other module. `restart` (the approve route only): a Pending receipt whose steps all read as done was
+ * changed after approval, so its approval starts again from step 1.
+ */
+const RP_TABLE = "ReceivedPayment";
+const CRM_PAYMENT_WORKFLOW = "crm-customer-payment";
+async function receivedPaymentStep(recordId, executor = null, { restart = false } = {}) {
+  const exec = executor || getPool();
+  const rp = (await exec.request().input("id", sql.Int, recordId)
+    .query("SELECT RPStatus, CrmBookingId FROM dbo.ReceivedPayment WHERE RPPaymentID = @id")).recordset[0];
+  if (!rp) return null;
+  const crmFlow = rp.CrmBookingId != null ? await getWorkflow(CRM_PAYMENT_WORKFLOW) : null;
+  if (crmFlow?.LevelDefs?.length) {
+    const defs = crmFlow.LevelDefs;
+    const total = defs.length;
+    let level = await resolveCurrentLevel(RP_TABLE, recordId, total, defs, executor);
+    if (level > total && rp.RPStatus === "Pending") {
+      if (restart) await writeAuditLog(RP_TABLE, recordId, 0, null, null, "Pending", "Changed after approval — approval starts again", executor);
+      level = 1;
+    }
+    return { status: rp.RPStatus, workflowKey: CRM_PAYMENT_WORKFLOW, defs, total, level, levelDef: defs[level - 1] || null };
+  }
+  const defs = (await getWorkflow("received-payment"))?.LevelDefs || [];
+  return { status: rp.RPStatus, workflowKey: "received-payment", defs: defs.slice(0, 1), total: defs.length ? 1 : 0, level: 1, levelDef: defs[0] || null };
+}
+
+/** A Received Payment was changed while waiting: steps already given no longer count (Finance checks it again). */
+const restartReceivedPaymentSteps = (recordId, role, email, userId, executor = null) =>
+  writeAuditLog(RP_TABLE, recordId, 0, role || null, email || null, "Pending", "Changed — approval starts again", executor, userId ?? null);
+
 const canPerformCrmGatedAction = (module, userId, userRole) => isApproverFor(module, userId, userRole);
 
 /** The active users one step of an Approval Setup workflow names: its named people and everyone in its roles. */
@@ -1022,6 +1059,9 @@ module.exports = {
   userMatchesLevel,
   isApproverFor,
   canUserAct,
+  receivedPaymentStep,
+  restartReceivedPaymentSteps,
+  RP_TABLE,
   canPerformCrmGatedAction,
   usersNamedInStep,
   // Canonical module → {table, pk, status} / GL poster maps — the single
