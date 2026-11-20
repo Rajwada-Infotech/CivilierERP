@@ -11,6 +11,7 @@ const ROLE_HELP: Record<string, string> = {
   "L1 Approver": "First approval in Deed Process; applies to deed register",
   "L2 Approver": "Final approval in Deed Process (not the L1 approver)",
   "Legal Reviewer": "Gives legal clearance, clears court cases",
+  "Amendment Approver": "Approves or rejects changes to a land after it is registered",
 };
 
 /**

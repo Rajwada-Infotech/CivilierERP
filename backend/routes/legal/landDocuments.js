@@ -143,6 +143,7 @@ router.get("/doc/:docId/versions", requirePageRight(PAGE, "view"), async (req, r
 router.post("/:landId", requirePageRight(PAGE, "edit"), async (req, res) => {
   const landId = idParam(req.params.landId);
   if (!landId) return res.status(400).json({ error: "Invalid land" });
+  { const amend = require("./landAmendment"); if (await amend.isLocked(getPool(), landId)) return res.status(409).json({ error: amend.LOCK_MSG }); }
   const b = req.body || {};
   const docTypeId = idParam(b.docTypeId);
   const fileId = idParam(b.fileId);
@@ -207,6 +208,11 @@ router.post("/doc/:docId/versions", requirePageRight(PAGE, "edit"), async (req, 
   const fileId = idParam(req.body?.fileId);
   if (!docId) return res.status(400).json({ error: "Invalid document" });
   if (!fileId) return res.status(400).json({ error: "Upload the new file" });
+  {
+    const amend = require("./landAmendment");
+    const l = (await getPool().request().input("Doc", sql.Int, docId).query("SELECT LandId FROM dbo.LegalLandDocument WHERE DocumentId = @Doc")).recordset[0];
+    if (l && await amend.isLocked(getPool(), l.LandId)) return res.status(409).json({ error: amend.LOCK_MSG });
+  }
   const tx = new sql.Transaction(getPool());
   try {
     await tx.begin();
@@ -315,3 +321,4 @@ router.delete("/:landId/na/:docTypeId", requirePageRight(PAGE, "view"), async (r
 
 module.exports = router;
 module.exports.documentGate = documentGate;
+module.exports.requiredDocuments = requiredDocuments;

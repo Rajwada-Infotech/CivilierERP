@@ -1,0 +1,433 @@
+import React, { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { TickCircle, Clock, MinusCirlce, ArrowRight, ArrowDown2, ArrowUp2, DocumentDownload } from "iconsax-react";
+import { describe } from "@/components/legal/LandAmendmentPanel";
+import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
+import { getFlowLand, getVersionFile, type FlowChange, type FlowStage, type FlowVersion, type FlowSnapshot } from "@/api/legalFlowApi";
+
+// Versions of a land (one full cycle ending in approval each) and the land's pipeline stepper — shared by the
+// Land Workspace (land profile) and the Legal Flow Chart.
+
+type Row = Record<string, unknown>;
+
+// ── Formatting ───────────────────────────────────────────────────────────────
+const isDateKey = (k: string) => /(Date|At|On|From|To)$/.test(k);
+export function fmt(v: unknown, key = ""): string {
+  if (v === null || v === undefined || v === "") return "—";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (typeof v === "string" && isDateKey(key) && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+    const d = new Date(v);
+    return Number.isNaN(+d) ? v : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", ...(v.length > 10 && !v.endsWith("T00:00:00.000Z") ? { hour: "2-digit", minute: "2-digit" } : {}) });
+  }
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+const label = (k: string) => k.replace(/Id$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\bNo\b/, "No.").replace(/^Rs /, "RS ").replace(/^Lr /, "LR ");
+
+// ── Building blocks ──────────────────────────────────────────────────────────
+/** A titled box. With `collapsible` it has an Open / Close button and starts closed unless `defaultOpen`. */
+export const Section: React.FC<{ title: string; count?: number; collapsible?: boolean; defaultOpen?: boolean; children: React.ReactNode }> = ({ title, count, collapsible, defaultOpen, children }) => {
+  const [open, setOpen] = useState(!collapsible || !!defaultOpen);
+  return (
+    <section className="border border-border bg-card">
+      <header className={`flex items-center gap-2 px-4 py-2.5 ${open ? "border-b border-border" : ""}`}>
+        <h3 className="text-xs font-semibold uppercase tracking-[0.12em]">{title}</h3>
+        {count != null && <span className="text-xs text-muted-foreground tabular-nums">{count}</span>}
+        {collapsible && (
+          <button onClick={() => setOpen((o) => !o)} aria-expanded={open}
+            className="ml-auto flex h-8 items-center gap-1.5 border border-foreground/40 px-3 text-[0.6875rem] font-semibold uppercase tracking-[0.1em] hover:border-foreground hover:bg-foreground hover:text-background">
+            {open ? <ArrowUp2 size={12} /> : <ArrowDown2 size={12} />} {open ? "Close" : "Open"}
+          </button>
+        )}
+      </header>
+      {open && <div className="p-4">{children}</div>}
+    </section>
+  );
+};
+
+function Fields({ row, keys }: { row: Row; keys: [string, string?][] }) {
+  return (
+    <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+      {keys.filter(([k]) => row[k] !== undefined).map(([k, l]) => (
+        <div key={k} className="min-w-0">
+          <dt className="text-[0.6875rem] uppercase tracking-[0.1em] text-muted-foreground">{l ?? label(k)}</dt>
+          <dd className="mt-0.5 break-words text-sm font-medium">{fmt(row[k], k)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function Table({ rows, cols, empty }: { rows: Row[]; cols: [string, string][]; empty: string }) {
+  if (!rows.length) return <p className="text-sm text-muted-foreground">{empty}</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead><tr className="text-left text-[0.6875rem] uppercase tracking-[0.1em] text-muted-foreground">{cols.map(([, l]) => <th key={l} className="py-1.5 pr-4 font-semibold">{l}</th>)}</tr></thead>
+        <tbody>{rows.map((r, i) => <tr key={i} className="border-t border-border/60 align-top">{cols.map(([k]) => <td key={k} className="py-2 pr-4">{fmt(r[k], k)}</td>)}</tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+export const STATE_STYLE: Record<FlowStage["state"], { ring: string; text: string; Icon: React.ElementType; word: string }> = {
+  done: { ring: "border-emerald-600 bg-emerald-600 text-white", text: "text-emerald-700 dark:text-emerald-400", Icon: TickCircle, word: "Done" },
+  current: { ring: "border-amber-500 bg-amber-500 text-white", text: "text-amber-700 dark:text-amber-400", Icon: Clock, word: "In progress" },
+  pending: { ring: "border-border bg-background text-muted-foreground", text: "text-muted-foreground", Icon: Clock, word: "Not yet" },
+  skipped: { ring: "border-border bg-muted text-muted-foreground", text: "text-muted-foreground", Icon: MinusCirlce, word: "Not used" },
+};
+
+/** Field-by-field difference between the before and after of one change. */
+function diff(oldV: unknown, newV: unknown): { key: string; from: unknown; to: unknown }[] {
+  const o = oldV && typeof oldV === "object" ? (oldV as Row) : {};
+  const n = newV && typeof newV === "object" ? (newV as Row) : {};
+  if (typeof oldV !== "object" && typeof newV !== "object") return oldV === newV ? [] : [{ key: "Value", from: oldV, to: newV }];
+  return Array.from(new Set([...Object.keys(o), ...Object.keys(n)]))
+    .filter((k) => JSON.stringify(o[k] ?? null) !== JSON.stringify(n[k] ?? null))
+    .map((k) => ({ key: k, from: o[k], to: n[k] }));
+}
+
+/** Every recorded change, oldest first, numbered as versions of the land. */
+function VersionHistory({ items }: { items: FlowChange[] }) {
+  if (!items.length) return <p className="text-sm text-muted-foreground">No versions yet. Every New, edit, verification and stage move made from now on is listed here.</p>;
+  return (
+    <ol className="relative space-y-4 border-l-2 border-border pl-5">
+      {items.map((c, i) => {
+        const d = diff(c.OldValue, c.NewValue);
+        return (
+          <li key={c.EventId} className="relative">
+            <span className="absolute -left-[1.85rem] top-0.5 flex h-6 min-w-6 items-center justify-center border border-foreground bg-background px-1 text-[0.625rem] font-semibold tabular-nums">{i + 1}</span>
+            <div className="border border-border bg-card p-3">
+              <p className="flex flex-wrap items-center gap-x-2 text-sm">
+                <b>{c.Action.replace(/_/g, " ")}</b>
+                {c.baseline && <span className="border border-foreground/40 px-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.1em]">Original</span>}
+                <span className="text-muted-foreground">· {label(c.EntityType)}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{fmt(c.CreatedAt, "At")} · {c.UserName ?? "System"}</span>
+              </p>
+              {c.Remarks && <p className="mt-1 text-xs text-muted-foreground">{c.Remarks}</p>}
+              {d.length > 0 && (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-left uppercase tracking-[0.08em] text-muted-foreground"><th className="py-1 pr-3 font-semibold">Field</th><th className="py-1 pr-3 font-semibold">Before</th><th className="py-1 font-semibold">After</th></tr></thead>
+                    <tbody>{d.slice(0, 40).map((x) => (
+                      <tr key={x.key} className="border-t border-border/60 align-top">
+                        <td className="py-1 pr-3 font-medium">{label(x.key)}</td>
+                        <td className="py-1 pr-3 text-destructive line-through decoration-destructive/40">{fmt(x.from, x.key)}</td>
+                        <td className="py-1 text-emerald-700 dark:text-emerald-400">{fmt(x.to, x.key)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Rows of a record list as comparable text, for added / removed between two versions. */
+const rowKey = (r: Row) => JSON.stringify(Object.keys(r).sort().map((k) => [k, r[k]]));
+const rowText = (r: Row) => Object.entries(r).filter(([k]) => !/Id$/.test(k)).slice(0, 6).map(([k, v]) => `${label(k)}: ${fmt(v, k)}`).join(" · ");
+
+/** What differs between two saved versions of the land: changed fields and added / removed records. */
+function VersionDiff({ prev, cur }: { prev: FlowSnapshot; cur: FlowSnapshot }) {
+  const fields = diff(prev.land, cur.land);
+  const lists: [keyof FlowSnapshot, string][] = [["rsRecords", "RS record"], ["lrRecords", "LR record"], ["owners", "Owner"], ["documents", "Document"], ["clearances", "Clearance"], ["mutations", "Mutation"]];
+  const recs = lists.flatMap(([k, name]) => {
+    const a = (prev[k] as Row[]) ?? [], b = (cur[k] as Row[]) ?? [];
+    const ak = new Set(a.map(rowKey)), bk = new Set(b.map(rowKey));
+    return [...b.filter((r) => !ak.has(rowKey(r))).map((r) => ({ kind: "Added", name, r })), ...a.filter((r) => !bk.has(rowKey(r))).map((r) => ({ kind: "Removed", name, r }))];
+  });
+  if (!fields.length && !recs.length) return <p className="text-sm text-muted-foreground">No difference in the land's details from the previous version.</p>;
+  return (
+    <div className="space-y-3">
+      {fields.length > 0 && (
+        <table className="w-full text-xs">
+          <thead><tr className="text-left uppercase tracking-[0.08em] text-muted-foreground"><th className="py-1 pr-3 font-semibold">Field</th><th className="py-1 pr-3 font-semibold">Previous version</th><th className="py-1 font-semibold">This version</th></tr></thead>
+          <tbody>{fields.map((x) => (
+            <tr key={x.key} className="border-t border-border/60 align-top">
+              <td className="py-1 pr-3 font-medium">{label(x.key)}</td>
+              <td className="py-1 pr-3 text-destructive line-through decoration-destructive/40">{fmt(x.from, x.key)}</td>
+              <td className="py-1 text-emerald-700 dark:text-emerald-400">{fmt(x.to, x.key)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+      {recs.length > 0 && (
+        <ul className="space-y-1 text-xs">
+          {recs.map((x, i) => <li key={i}><b className={x.kind === "Added" ? "text-emerald-700 dark:text-emerald-400" : "text-destructive"}>{x.kind} {x.name}</b> — {rowText(x.r)}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+const tabCls = (on: boolean) => `h-9 border-b-2 px-3 text-xs font-semibold uppercase tracking-[0.1em] ${on ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`;
+
+async function downloadVersion(landId: number, no: number, kind: "pdf" | "zip", code: string) {
+  const blob = await getVersionFile(landId, no, kind);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `${code.replace(/[\\/:*?"<>|]+/g, "-")} - Version ${no}.${kind}`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/** Documents of one version: pending = checklist items still missing or waiting for review. */
+const docPending = (v: FlowVersion) => (v.checklist?.items ?? []).filter((i) => i.state === "Missing" || i.state === "Pending" || i.state === "Rejected");
+const STATE_CLS: Record<string, string> = {
+  Verified: "text-emerald-700 dark:text-emerald-400", Pending: "text-amber-700 dark:text-amber-400", Missing: "text-destructive font-semibold",
+  Rejected: "text-destructive font-semibold", "Not Applicable": "text-muted-foreground",
+};
+
+function VersionDocuments({ v }: { v: FlowVersion }) {
+  const up = v.uploads ?? [];
+  const items = v.checklist?.items ?? [];
+  const pend = docPending(v);
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Uploaded in version {v.no} <span className="tabular-nums">({up.length})</span></p>
+        {up.length ? (
+          <div className="overflow-x-auto"><table className="w-full text-sm">
+            <thead><tr className="text-left text-[0.6875rem] uppercase tracking-[0.08em] text-muted-foreground"><th className="py-1 pr-3 font-semibold">Document</th><th className="py-1 pr-3 font-semibold">Type</th><th className="py-1 pr-3 font-semibold">File version</th><th className="py-1 pr-3 font-semibold">Uploaded</th><th className="py-1 font-semibold">Review</th></tr></thead>
+            <tbody>{up.map((d) => (
+              <tr key={`${d.DocumentCode}-${d.VersionNo}`} className="border-t border-border/60">
+                <td className="py-1.5 pr-3"><b className="font-mono text-xs">{d.DocumentCode}</b> {d.Title}
+                  {d.FileId ? <span className="mt-1 block"><LegalFileLink id={d.FileId} name={d.FileName ?? d.Title ?? d.DocumentCode} /></span>
+                    : d.FileName ? <span className="block text-xs text-muted-foreground">{d.FileName}</span> : null}</td>
+                <td className="py-1.5 pr-3">{d.DocTypeName ?? "—"}</td>
+                <td className="py-1.5 pr-3 tabular-nums">v{d.VersionNo}{d.VersionNo > 1 ? <span className="text-xs text-muted-foreground"> (new file)</span> : null}</td>
+                <td className="py-1.5 pr-3 text-xs">{d.UploadedAt ? fmt(d.UploadedAt, "At") : "—"}{d.UploadedBy ? ` · ${d.UploadedBy}` : ""}</td>
+                <td className={`py-1.5 ${STATE_CLS[d.ReviewStatus ?? ""] ?? ""}`}>{d.ReviewStatus ?? "—"}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        ) : <p className="text-sm text-muted-foreground">No document was uploaded in this version.</p>}
+      </div>
+      <div>
+        <p className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+          Document checklist{v.checklist?.template ? ` · ${v.checklist.template}` : ""} — <span className={pend.length ? "text-destructive" : "text-emerald-700 dark:text-emerald-400"}>{pend.length ? `${pend.length} pending` : "nothing pending"}</span>
+        </p>
+        {v.checklistNow && v.approvedAt && <p className="mb-1.5 text-xs text-amber-700 dark:text-amber-400">Not saved at this version's approval — shown as it is now.</p>}
+        {items.length ? (
+          <div className="overflow-x-auto"><table className="w-full text-sm">
+            <thead><tr className="text-left text-[0.6875rem] uppercase tracking-[0.08em] text-muted-foreground"><th className="py-1 pr-3 font-semibold">Document</th><th className="py-1 pr-3 font-semibold">Needed</th><th className="py-1 pr-3 font-semibold">Stage</th><th className="py-1 font-semibold">State</th></tr></thead>
+            <tbody>{items.map((i) => (
+              <tr key={i.doc} className="border-t border-border/60">
+                <td className="py-1.5 pr-3">{i.doc}</td><td className="py-1.5 pr-3">{i.requirement}</td><td className="py-1.5 pr-3">{i.stage ?? "—"}</td>
+                <td className={`py-1.5 ${STATE_CLS[i.state] ?? ""}`}>{i.state === "Pending" ? "Waiting for review" : i.state}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        ) : <p className="text-sm text-muted-foreground">No document checklist is set for this land, so nothing is marked pending.</p>}
+      </div>
+    </div>
+  );
+}
+
+/** What is still not done in a version: its own steps, pending documents, and — for the latest one — the land's
+ *  remaining pipeline stages (LA & ULC, registration, mutation …). */
+type Open = { what: string; state: string; note?: string | null };
+function incomplete(v: FlowVersion, latest: boolean, stages?: FlowStage[]): Open[] {
+  const out: Open[] = [];
+  v.flow.filter((f) => f.state === "current" || f.state === "pending").forEach((f) => out.push({ what: f.label, state: f.state === "current" ? "In progress" : "Not started", note: "Step of this version" }));
+  docPending(v).forEach((d) => out.push({ what: `Document: ${d.doc}`, state: d.state === "Pending" ? "Waiting for review" : d.state, note: d.requirement }));
+  if (latest) (stages ?? []).filter((s) => s.state === "current" || s.state === "pending").forEach((s) => out.push({ what: s.label, state: s.state === "current" ? "In progress" : "Not started", note: s.note ?? "Land pipeline" }));
+  return out;
+}
+
+function VersionIncomplete({ items }: { items: Open[] }) {
+  if (!items.length) return <p className="text-sm text-emerald-700 dark:text-emerald-400">Everything in this version is complete.</p>;
+  return (
+    <div className="overflow-x-auto"><table className="w-full text-sm">
+      <thead><tr className="text-left text-[0.6875rem] uppercase tracking-[0.08em] text-muted-foreground"><th className="py-1 pr-3 font-semibold">Not done yet</th><th className="py-1 pr-3 font-semibold">State</th><th className="py-1 font-semibold">Detail</th></tr></thead>
+      <tbody>{items.map((o, i) => (
+        <tr key={i} className="border-t border-border/60">
+          <td className="py-1.5 pr-3 font-medium">{o.what}</td>
+          <td className={`py-1.5 pr-3 ${o.state === "In progress" || o.state === "Waiting for review" ? "text-amber-700 dark:text-amber-400" : "font-semibold text-destructive"}`}>{o.state}</td>
+          <td className="py-1.5 text-xs text-muted-foreground">{o.note ?? "—"}</td>
+        </tr>
+      ))}</tbody>
+    </table></div>
+  );
+}
+
+const changeCount = (v: FlowVersion, prev?: FlowVersion) => (prev?.snapshot && v.snapshot ? diff(prev.snapshot.land, v.snapshot.land).length : null);
+
+/**
+ * Versions of the land. A version is one complete round of work that ends in approval:
+ * Version 1 = enquiry → land register → verification; every later change starts the next version, which ends when it is re-verified.
+ */
+export function Versions({ versions, landId, code, stages }: { versions: FlowVersion[]; landId: number | null; code: string; stages?: FlowStage[] }) {
+  const [sel, setSel] = useState(versions.length);
+  const [tab, setTab] = useState<"changes" | "record" | "docs" | "open" | "steps">("changes");
+  const openOf = (x: FlowVersion) => incomplete(x, x.no === versions.length, stages);
+  const [busy, setBusy] = useState("");
+  useEffect(() => setSel(versions.length), [versions.length]);
+  const v = versions.find((x) => x.no === sel) ?? versions[versions.length - 1];
+  if (!v) return <p className="text-sm text-muted-foreground">No versions yet.</p>;
+  const prev = versions.find((x) => x.no === v.no - 1);
+  const dl = async (no: number, kind: "pdf" | "zip") => {
+    if (!landId) return;
+    setBusy(`${no}${kind}`);
+    try { await downloadVersion(landId, no, kind, code); } catch (e) { alert((e as Error).message); } finally { setBusy(""); }
+  };
+  const DlBtn = ({ no, kind }: { no: number; kind: "pdf" | "zip" }) => (
+    <button onClick={(e) => { e.stopPropagation(); dl(no, kind); }} disabled={!landId || !!busy} title={kind === "pdf" ? "Summary PDF of this version" : "PDF + all documents of this version"}
+      className="flex h-8 items-center gap-1 border border-foreground/40 px-2.5 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] hover:border-foreground hover:bg-foreground hover:text-background disabled:opacity-40">
+      <DocumentDownload size={13} /> {busy === `${no}${kind}` ? "…" : kind.toUpperCase()}
+    </button>
+  );
+
+  return (
+    <div className="space-y-4">
+      <p className="border-l-4 border-foreground bg-muted/40 px-3 py-2 text-sm">
+        <b>What is a version?</b> One complete round of work on this land that ends with approval.
+        <b> Version 1</b> = enquiry → land register → verification. Any change after approval starts the <b>next version</b>, which ends when it is re-verified.
+        Each version is saved as it was — download it as a <b>PDF</b> or a <b>ZIP</b> with all its documents.
+      </p>
+
+      {/* The versions in order, left to right. */}
+      <ol className="flex flex-col gap-2 lg:flex-row lg:items-stretch">
+        {versions.map((x, i) => {
+          const n = changeCount(x, versions[i - 1]);
+          const on = x.no === v.no;
+          const ok = !!x.approvedAt;
+          return (
+            <React.Fragment key={x.no}>
+              <li className="flex-1">
+                <div role="button" tabIndex={0} onClick={() => { setSel(x.no); setTab(x.no === 1 ? "record" : "changes"); }} onKeyDown={(e) => { if (e.key === "Enter") setSel(x.no); }}
+                  className={`h-full cursor-pointer border-2 p-3 transition-colors ${x.afterRegistration ? (on ? "border-indigo-600 bg-indigo-500/10" : "border-indigo-400 bg-indigo-500/5 hover:border-indigo-600") : on ? "border-foreground bg-primary/5" : "border-border hover:border-foreground/60"}`}>
+                  {x.afterRegistration && <p className="mb-1.5 inline-block bg-indigo-600 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-white">After registration{x.amendment ? ` · Amendment ${x.amendment.no}` : ""}</p>}
+                  <div className="flex items-center justify-between gap-2">
+                    <b className="text-base">Version {x.no}</b>
+                    <span className={`px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.1em] ${ok ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{ok ? "Approved" : "Waiting for approval"}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">{x.amendment ? `${x.amendment.type} · ${x.amendment.changes.length} field${x.amendment.changes.length === 1 ? "" : "s"}` : x.no === 1 ? "Enquiry → register → verification" : n != null ? `${n} field${n === 1 ? "" : "s"} changed` : "Changes after approval"}</p>
+                  {x.amendment?.remarks && <p className="mt-0.5 text-xs"><b>Remark:</b> {x.amendment.remarks}</p>}
+                  <button onClick={(e) => { e.stopPropagation(); setSel(x.no); setTab("docs"); }} className="mt-1 block text-left text-xs hover:underline">
+                    Documents: <b className="tabular-nums">{x.uploads?.length ?? 0}</b> uploaded
+                    {" · "}<span className={docPending(x).length ? "font-semibold text-destructive" : "text-emerald-700 dark:text-emerald-400"}>{docPending(x).length ? `${docPending(x).length} pending` : "none pending"}</span>
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); setSel(x.no); setTab("open"); }} className="block text-left text-xs hover:underline">
+                    {openOf(x).length ? <span className="font-semibold text-destructive">Incomplete: {openOf(x).length} item{openOf(x).length === 1 ? "" : "s"} not done</span> : <span className="text-emerald-700 dark:text-emerald-400">Process complete</span>}
+                  </button>
+                  <p className="mt-0.5 text-xs">{ok ? `Approved ${fmt(x.approvedAt, "At")}${x.approvedBy ? ` · ${x.approvedBy}` : ""}` : x.status}</p>
+                  <div className="mt-2 flex gap-2"><DlBtn no={x.no} kind="pdf" /><DlBtn no={x.no} kind="zip" /></div>
+                </div>
+              </li>
+              {i < versions.length - 1 && <li className="hidden items-center lg:flex" aria-hidden><ArrowRight size={18} className="text-muted-foreground" /></li>}
+            </React.Fragment>
+          );
+        })}
+      </ol>
+
+      {/* The selected version. */}
+      <div className="border-2 border-foreground bg-card">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-3">
+          <b className="text-lg">Version {v.no}</b>
+          <span className={`text-xs font-semibold uppercase tracking-[0.1em] ${v.approvedAt ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}>{v.status}</span>
+          <span className="text-xs text-muted-foreground">{v.startedAt ? `Started ${fmt(v.startedAt, "At")}` : ""}{v.approvedAt ? ` · Approved ${fmt(v.approvedAt, "At")}${v.approvedBy ? ` by ${v.approvedBy}` : ""}` : ""}</span>
+        </div>
+        {v.amendment && (
+          <div className="space-y-1 border-b border-indigo-500/40 bg-indigo-500/5 px-4 py-3 text-sm">
+            <p><span className="mr-2 bg-indigo-600 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-white">After registration</span>
+              <b>Amendment {v.amendment.no} · {v.amendment.type}</b> — applied to the registered land; no re-registration.</p>
+            <p><b>Reason:</b> {v.amendment.reason}{v.amendment.referenceNo ? ` · Ref. ${v.amendment.referenceNo}` : ""}{v.amendment.requestedBy ? ` · asked by ${v.amendment.requestedBy}` : ""}</p>
+            {v.amendment.remarks && <p><b>Approval remark:</b> {v.amendment.remarks}{v.approvedBy ? ` — ${v.approvedBy}` : ""}</p>}
+          </div>
+        )}
+        <div className="flex gap-1 border-b border-border px-2" role="tablist">
+          <button className={tabCls(tab === "changes")} onClick={() => setTab("changes")}>{v.no === 1 ? "Summary" : `Changes from version ${v.no - 1}`}</button>
+          <button className={tabCls(tab === "record")} onClick={() => setTab("record")}>Full record</button>
+          <button className={tabCls(tab === "docs")} onClick={() => setTab("docs")}>Documents ({v.uploads?.length ?? 0}{docPending(v).length ? ` · ${docPending(v).length} pending` : ""})</button>
+          <button className={tabCls(tab === "open")} onClick={() => setTab("open")}>Incomplete ({openOf(v).length})</button>
+          <button className={tabCls(tab === "steps")} onClick={() => setTab("steps")}>Steps &amp; approvals</button>
+        </div>
+        <div className="p-4">
+          {(v.approxSnapshot || (tab === "changes" && prev?.approxSnapshot)) && (
+            <p className="mb-3 text-xs text-amber-700 dark:text-amber-400">Approved before versions were saved — this version's details are shown as they are now.</p>
+          )}
+          {tab === "changes" && v.amendment && (
+            <table className="w-full text-xs">
+              <thead><tr className="text-left uppercase tracking-[0.08em] text-muted-foreground"><th className="py-1 pr-3 font-semibold">What</th><th className="py-1 pr-3 font-semibold">Registered value</th><th className="py-1 font-semibold">{v.amendment.pending ? "Asked to change to" : "Amended to"}</th></tr></thead>
+              <tbody>{v.amendment.changes.map((c, i) => (
+                <tr key={i} className="border-t border-border/60"><td className="py-1 pr-3 font-medium">{c.label}</td>
+                  <td className="py-1 pr-3 text-destructive line-through decoration-destructive/40">{typeof c.from === "object" && c.from ? describe(c.from) : fmt(c.from, c.field)}</td>
+                  <td className="py-1 text-emerald-700 dark:text-emerald-400">{(c as { op?: string }).op === "remove" ? "Removed" : typeof c.to === "object" && c.to ? describe(c.to) : fmt(c.to, c.field)}</td></tr>
+              ))}</tbody>
+            </table>
+          )}
+          {tab === "changes" && !v.amendment && (v.no === 1 || !prev?.snapshot || !v.snapshot
+            ? <p className="text-sm">This is the <b>first version</b> of the land: everything entered from the enquiry up to its first verification. See <b>Full record</b> for all its details.</p>
+            : <VersionDiff prev={prev.snapshot} cur={v.snapshot} />)}
+          {tab === "record" && (v.snapshot ? (
+            <div className="space-y-4">
+              <Fields row={v.snapshot.land} keys={Object.keys(v.snapshot.land).map((k) => [k] as [string])} />
+              <Table rows={v.snapshot.rsRecords} empty="No RS record." cols={[["MouzaName", "RS · Mouza"], ["RsKhatianNo", "Khatian"], ["RsDagNo", "Dag"], ["RecordedHolder", "Holder"], ["Area", "Area"]]} />
+              <Table rows={v.snapshot.lrRecords} empty="No LR record." cols={[["MouzaName", "LR · Mouza"], ["LrKhatianNo", "Khatian"], ["LrDagNo", "Dag"], ["RecordedHolder", "Holder"], ["Area", "Area"]]} />
+              <Table rows={v.snapshot.owners} empty="No owner." cols={[["OwnerName", "Owner"], ["OwnerGuardian", "Father / husband"], ["SharePct", "Share %"], ["ValidFrom", "From"]]} />
+              <Table rows={v.snapshot.documents} empty="No document." cols={[["DocumentCode", "Document"], ["DocTypeName", "Type"], ["Title", "Title"], ["DocumentNo", "No."], ["CurrentVersionNo", "File version"]]} />
+            </div>
+          ) : <p className="text-sm text-muted-foreground">Not a land yet — see the enquiry above.</p>)}
+          {tab === "docs" && <VersionDocuments v={v} />}
+          {tab === "open" && <VersionIncomplete items={openOf(v)} />}
+          {tab === "steps" && (
+            <div className="space-y-4">
+              <ol className="flex flex-wrap items-center gap-2">
+                {v.flow.map((f, i) => {
+                  const st = STATE_STYLE[f.state];
+                  return (
+                    <React.Fragment key={f.label}>
+                      <li className={`border px-3 py-2 text-xs ${f.state === "done" ? "border-emerald-600/60" : f.state === "current" ? "border-amber-500" : "border-border"}`}>
+                        <span className="flex items-center gap-1 font-semibold"><st.Icon size={12} className={st.text} /> {f.label}</span>
+                        {f.date && <span className="block text-muted-foreground">{fmt(f.date, "At")}</span>}
+                      </li>
+                      {i < v.flow.length - 1 && <ArrowRight size={14} className="text-muted-foreground" />}
+                    </React.Fragment>
+                  );
+                })}
+              </ol>
+              <VersionHistory items={v.events} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/** The land's pipeline as a compact stepper: where it is now. */
+export function LandStageStepper({ landId }: { landId: number }) {
+  const { data } = useQuery({ queryKey: ["legal-flow", landId, null], queryFn: () => getFlowLand(landId) });
+  if (!data?.stages?.length) return null;
+  return (
+    <ol className="flex flex-wrap items-stretch gap-1.5">
+      {data.stages.map((s, i) => {
+        const st = STATE_STYLE[s.state];
+        return (
+          <React.Fragment key={s.key}>
+            <li title={s.note ?? undefined}
+              className={`flex min-w-0 items-center gap-1.5 border px-2.5 py-1.5 text-xs ${s.state === "current" ? "border-amber-500 bg-amber-500/10 font-semibold" : s.state === "done" ? "border-emerald-600/50" : "border-border text-muted-foreground"}`}>
+              <span className={`flex h-5 w-5 shrink-0 items-center justify-center border text-[0.625rem] font-semibold ${st.ring}`}>{s.state === "done" ? "✓" : i + 1}</span>
+              <span className="truncate">{s.label}</span>
+            </li>
+            {i < data.stages.length - 1 && <li aria-hidden className="flex items-center"><ArrowRight size={12} className="text-muted-foreground" /></li>}
+          </React.Fragment>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** The Versions panel for one land (cards, changes, full record, steps, PDF / ZIP). */
+export function LandVersionsPanel({ landId }: { landId: number }) {
+  const { data, isLoading, error } = useQuery({ queryKey: ["legal-flow", landId, null], queryFn: () => getFlowLand(landId) });
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading versions…</p>;
+  if (error || !data) return <p className="text-sm text-destructive">{(error as Error)?.message ?? "Could not load versions"}</p>;
+  return <Versions versions={data.versions ?? []} landId={landId} code={String(data.land?.LandCode ?? "land")} stages={data.stages} />;
+}

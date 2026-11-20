@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import { useProjectScope } from "@/components/legal/ProjectPicker";
 // a converted enquiry stays as it was, linked to its land.
 export default function LandEnquiryPage() {
   const entry = legalMasterByKey("land-enquiry")!;
+  const openEnquiry = useSearchParams()[0].get("edit");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const landRights = usePageRights("legal-land-master");
@@ -101,7 +102,7 @@ export default function LandEnquiryPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", entry.label]} />
-      <LegalShell title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and Land Profile." icon={MessageQuestion}>
+      <LegalShell stage="enquiry" title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and Land Profile." icon={MessageQuestion}>
         {orphanN > 0 && scope !== "none" && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border border-amber-500/60 bg-amber-500/10 px-4 py-2 text-sm">
             <span><b>{orphanN} enquir{orphanN > 1 ? "ies have" : "y has"} no project</b> — raised before a project was required, so {orphanN > 1 ? "they don't" : "it doesn't"} show under any project but still count on the dashboard.</span>
@@ -129,8 +130,11 @@ export default function LandEnquiryPage() {
         <LegalMasterTable
           key={scope ?? projectId ?? 0}
           entry={entry}
+          // ?edit=<id> (from Lands → Find a land) opens that enquiry.
+          requestEditId={openEnquiry}
           // Only this project's enquiries; a new enquiry is raised under it.
-          rowFilter={(raw) => inScope(raw) && active[2](raw)}
+          serverFilter={active[0] === "all" ? undefined : active[0]}
+          projectScoped
           // Without a project: no new enquiry here, and editing one asks for its project.
           // One project: a new enquiry is raised under it. All projects: the form asks for the project.
           fixed={scope ? undefined : { ProjectId: String(projectId) }}

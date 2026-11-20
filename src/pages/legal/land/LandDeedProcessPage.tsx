@@ -1,11 +1,11 @@
+import { usePaged } from "@/components/legal/usePaged";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { DocumentText } from "iconsax-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
-import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getDeedProcessLands, updateDeedProcess, approveDeedProcess, type DeedProcessLand } from "@/api/legalLandApi";
 import { askLegal } from "@/components/legal/LegalAsk";
@@ -22,7 +22,8 @@ export default function LandDeedProcessPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const canEdit = usePageRights("legal-land-master").canEdit;
-  const { data, isLoading, error } = useQuery({ queryKey: ["legal-deed-process"], queryFn: getDeedProcessLands });
+  const list = usePaged(["legal-deed-process"], (qs) => getDeedProcessLands(qs));
+  const { data, isLoading, error } = list;
   const [editing, setEditing] = useState<{ id: number; date: string } | null>(null);
 
   const save = async (l: DeedProcessLand, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null }) => {
@@ -33,8 +34,7 @@ export default function LandDeedProcessPage() {
       qc.invalidateQueries({ queryKey: ["legal-land-final", l.LandId] });
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   };
-  const { inScope } = useProjectScope();
-  const lands = (data?.lands ?? []).filter((l) => inScope(l.ProjectId));
+  const lands = data?.lands ?? []; // one page, already limited to the picked project on the server
   const act = async (l: DeedProcessLand, level: 1 | 2, action: "Approve" | "Reject" | "Hold") => {
     let remarks: string | undefined;
     // Every decision carries remarks (Approve too); Hold / Reject give the reason.
@@ -71,12 +71,13 @@ export default function LandDeedProcessPage() {
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Deed Process" }]} />
-      <LegalShell title="Deed Process" subtitle="Verified lands for the deed department, with the timeline set by the verifier." icon={DocumentText}>
+      <LegalShell stage="deed" title="Deed Process" subtitle="Verified lands for the deed department, with the timeline set by the verifier." icon={DocumentText}>
         {overdueCount > 0 && (
           <p className="mb-3 border border-destructive bg-destructive/10 p-3 text-sm font-semibold text-destructive">
             {overdueCount} land{overdueCount > 1 ? "s are" : " is"} past the deed timeline.
           </p>
         )}
+        {list.search("Search land ID, name, mouza…")}
         {error ? <p className="p-6 text-destructive">{(error as Error).message}</p> : isLoading ? <p className="p-6 text-muted-foreground">Loading…</p> : !lands.length ? (
           <p className="border border-border p-6 text-sm text-muted-foreground">No land in Deed Process yet. A land comes here after its Final verification (end of the Land page).</p>
         ) : (
@@ -154,6 +155,7 @@ export default function LandDeedProcessPage() {
             </table>
           </div>
         )}
+        {list.pager}
       </LegalShell>
     </>
   );

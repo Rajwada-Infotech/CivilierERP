@@ -33,7 +33,7 @@ export interface RevisionRow { RevisionId: number; RevisionDate: string; OldTota
 export interface ValuationRow { ValuationId: number; ValuationDate: string; GovernmentValuation: number | null; EstimatedMarketValue: number | null; MarketRate: number | null; ValuationSource: string | null }
 export interface TrackRow { TrackId: number; StatusDate: string; IgrStatus: string | null; DeedLocation: string | null; TrackingUrl: string | null; Remarks: string | null; ByName: string | null }
 
-export const getDeedRegList = async (tab: "active" | "registered") => handle<{ lands: DeedRegRow[]; canApply: boolean }>(await fetchWithAuth(`${BASE}/list?tab=${tab}`));
+export const getDeedRegList = async (tab: "active" | "registered", qs = "") => handle<{ lands: DeedRegRow[]; canApply: boolean } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/list?tab=${tab}${qs ? `&${qs}` : ""}`));
 export const getDeedRegLand = async (id: number) => handle<{ land: DeedRegLand; queries: StampQuery[]; tracking: TrackRow[]; payments: PaymentRow[]; schedule: ScheduleRow[]; revisions: RevisionRow[]; valuation: ValuationRow | null; canApply: boolean }>(await fetchWithAuth(`${BASE}/${id}`));
 export const saveConsideration = async (id: number, b: { total: string; rate: string; rateUnitId: string; consDate: string; paymentModeId: string; remarks: string; reason?: string; valuationId?: number | null }) =>
   handle<Msg>(await fetchWithAuth(`${BASE}/${id}/consideration`, send("PUT", b)));

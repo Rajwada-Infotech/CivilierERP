@@ -420,21 +420,119 @@ router.get("/files/:id", anyLegalView, async (req, res) => {
   }
 });
 
+// ── Lists: whole (no ?page) or one page at a time (?page=1&pageSize=20&q=…&status=active&sort=…&dir=asc&project=…&filter=…)
+const PAGE_MAX = 100;
+// Named row filters a page may ask for (Lands stage chips). SQL on the base row `b`.
+const NAMED_FILTERS = {
+  land: {
+    verification: "ISNULL(b.LandStatus, N'') NOT IN (N'Disposed / Transferred', N'Inactive') AND b.IsActive = 1 AND (b.WorkflowStatus IS NULL OR b.WorkflowStatus LIKE N'Draft%')",
+    deed: "ISNULL(b.LandStatus, N'') NOT IN (N'Disposed / Transferred', N'Inactive') AND b.IsActive = 1 AND b.WorkflowStatus = N'Deed Process'",
+    registration: "ISNULL(b.LandStatus, N'') NOT IN (N'Disposed / Transferred', N'Inactive') AND b.IsActive = 1 AND b.WorkflowStatus IN (N'Deed Completed', N'Deed Registration')",
+    registered: "ISNULL(b.LandStatus, N'') NOT IN (N'Disposed / Transferred', N'Inactive') AND b.IsActive = 1 AND b.WorkflowStatus = N'Registered'",
+    sold: "(b.LandStatus IN (N'Disposed / Transferred', N'Inactive') OR b.IsActive = 0)",
+  },
+  "land-enquiry": {
+    search: "b.LandId IS NULL AND ISNULL(b.OfficesPending, 0) > 0",
+    overdue: "b.LandId IS NULL AND ISNULL(b.OfficesOverdue, 0) > 0",
+    ready: "b.LandId IS NULL AND ISNULL(b.OfficesPending, 0) = 0 AND ISNULL(b.EnquiryStatus, N'') NOT IN (N'Rejected', N'On Hold')",
+    New: "b.EnquiryStatus = N'New'", "Under Review": "b.EnquiryStatus = N'Under Review'", Interested: "b.EnquiryStatus = N'Interested'",
+    "On Hold": "b.EnquiryStatus = N'On Hold'", Rejected: "b.EnquiryStatus = N'Rejected'", converted: "b.LandId IS NOT NULL",
+  },
+};
+const hasCol = (cfg, name) => cfg.fields.some((f) => f.name === name) || (cfg.table === "LegalLand" && name === "ProjectId");
+/** Columns a search looks in: text-like fields, the labels of picked values, and the page's extra columns. */
+const searchCols = (cfg) => [
+  ...cfg.fields.filter((f) => !["file", "bit", "password"].includes(f.type) && f.type !== "ref").map((f) => f.name),
+  ...cfg.fields.filter((f) => f.type === "ref").map((f) => `${f.name}__label`),
+  ...(cfg.extras || []).map((x) => x.name),
+];
+
+function baseSql(cfg, parentId, withWa) {
+  const labels = cfg.fields.filter((f) => f.type === "ref" || f.type === "file").map((f) => `, ${refLabelSql(f, "t")} AS ${f.name}__label`).join("");
+  return `
+      SELECT t.*${labels}${(cfg.extras || []).map((x) => `, ${x.sql} AS ${x.name}${x.whatsapp && withWa ? `, ${x.whatsapp} AS ${x.name}__wa` : ""}${x.userId ? `, ${x.userId} AS ${x.name}__uid` : ""}`).join("")},
+             (SELECT name FROM dbo.users WHERE id = t.CreatedBy) AS CreatedByName,
+             (SELECT name FROM dbo.users WHERE id = t.UpdatedBy) AS UpdatedByName
+      FROM dbo.${cfg.table} t WHERE 1 = 1${scopeSql(cfg, "t")}${parentId !== null ? ` AND t.${cfg.parent} = @Parent` : ""}`;
+}
+
+/** WHERE for a paged list / suggestions: search, project scope and a named filter (status is applied apart). */
+function pagedWhere(cfg, master, q, request) {
+  const where = [];
+  const s = String(q.q || "").trim().slice(0, 100);
+  if (s) {
+    request.input("Q", sql.NVarChar(120), `%${s.replace(/[%_[\]]/g, (c) => `[${c}]`)}%`);
+    where.push(`(${searchCols(cfg).map((c) => `CAST(b.[${c}] AS NVARCHAR(400)) LIKE @Q`).join(" OR ") || "1 = 0"})`);
+  }
+  if (q.project !== undefined && q.project !== "" && q.project !== "all" && hasCol(cfg, "ProjectId")) {
+    if (q.project === "none") where.push("b.ProjectId IS NULL");
+    else { const p = Number(q.project); if (Number.isInteger(p) && p > 0) { request.input("Proj", sql.Int, p); where.push("b.ProjectId = @Proj"); } }
+  }
+  const nf = NAMED_FILTERS[master]?.[String(q.filter || "")];
+  if (nf) where.push(nf);
+  return where;
+}
+
 router.get("/:master", withRight("view"), listCache, async (req, res) => {
   const cfg = MASTERS[req.params.master];
   const parentId = req.query.parent === undefined ? null : Number(req.query.parent);
   if (parentId !== null && (!cfg.parent || !Number.isInteger(parentId) || parentId <= 0)) return res.status(400).json({ error: "Invalid parent" });
   try {
-    const labels = cfg.fields.filter((f) => f.type === "ref" || f.type === "file").map((f) => `, ${refLabelSql(f, "t")} AS ${f.name}__label`).join("");
     const withWa = (cfg.extras || []).some((x) => x.whatsapp) && (await usersHaveWhatsApp(getPool()));
-    const result = await getPool().request().input("Parent", sql.Int, parentId).query(`
-      SELECT t.*${labels}${(cfg.extras || []).map((x) => `, ${x.sql} AS ${x.name}${x.whatsapp && withWa ? `, ${x.whatsapp} AS ${x.name}__wa` : ""}${x.userId ? `, ${x.userId} AS ${x.name}__uid` : ""}`).join("")},
-             (SELECT name FROM dbo.users WHERE id = t.CreatedBy) AS CreatedByName,
-             (SELECT name FROM dbo.users WHERE id = t.UpdatedBy) AS UpdatedByName
-      FROM dbo.${cfg.table} t WHERE 1 = 1${scopeSql(cfg, "t")}${parentId !== null ? ` AND t.${cfg.parent} = @Parent` : ""} ORDER BY ${cfg.orderBy.split(",").map((s) => `t.${s.trim()}`).join(", ")}`);
-    res.json(maskRows(cfg, result.recordset));
+    const order = cfg.orderBy.split(",").map((s) => s.trim());
+    if (req.query.page === undefined) {
+      const result = await getPool().request().input("Parent", sql.Int, parentId)
+        .query(`${baseSql(cfg, parentId, withWa)} ORDER BY ${order.map((s) => `t.${s}`).join(", ")}`);
+      return res.json(maskRows(cfg, result.recordset));
+    }
+    // One page: the base list wrapped, then searched / filtered / sorted / cut on the server.
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(PAGE_MAX, Math.max(1, Number.parseInt(req.query.pageSize, 10) || 20));
+    const request = getPool().request().input("Parent", sql.Int, parentId).input("Off", sql.Int, (page - 1) * pageSize).input("Size", sql.Int, pageSize);
+    const where = pagedWhere(cfg, req.params.master, req.query, request);
+    const hasActive = hasCol(cfg, "IsActive");
+    const status = String(req.query.status || "all");
+    const statusSql = hasActive && status === "active" ? "b.IsActive = 1" : hasActive && status === "inactive" ? "b.IsActive = 0" : null;
+    const sortable = new Set([...cfg.fields.map((f) => f.name), ...cfg.fields.filter((f) => f.type === "ref").map((f) => `${f.name}__label`), ...(cfg.extras || []).map((x) => x.name)]);
+    const sortCol = sortable.has(String(req.query.sort)) ? String(req.query.sort) : null;
+    const sort = sortCol ? `b.[${sortCol}] ${req.query.dir === "desc" ? "DESC" : "ASC"}${order.some((o) => o !== sortCol) ? ", " : ""}` : "";
+    const w = (extra) => { const all = [...where, ...(extra ? [extra] : [])]; return all.length ? `WHERE ${all.join(" AND ")}` : ""; };
+    const r = await request.query(`
+      WITH b AS (${baseSql(cfg, parentId, withWa)})
+      SELECT * FROM b ${w(statusSql)} ORDER BY ${sort}${order.filter((o) => o !== sortCol).map((s) => `b.${s}`).join(", ")} OFFSET @Off ROWS FETCH NEXT @Size ROWS ONLY;
+      WITH b AS (${baseSql(cfg, parentId, withWa)})
+      SELECT COUNT(*) AS allRows${hasActive ? ", SUM(CASE WHEN b.IsActive = 1 THEN 1 ELSE 0 END) AS active, SUM(CASE WHEN b.IsActive = 0 THEN 1 ELSE 0 END) AS inactive" : ""} FROM b ${w(null)};`);
+    const c = r.recordsets[1][0] || {};
+    const counts = { all: c.allRows || 0, active: hasActive ? c.active || 0 : c.allRows || 0, inactive: hasActive ? c.inactive || 0 : 0 };
+    res.json({ rows: maskRows(cfg, r.recordsets[0]), total: status === "active" ? counts.active : status === "inactive" ? counts.inactive : counts.all, page, pageSize, counts });
   } catch (err) {
     sendDbError(res, cfg, err, "list");
+  }
+});
+
+// GET /:master/suggest?q=… — up to 10 values matching what is typed (any searched column), for the search box.
+router.get("/:master/suggest", withRight("view"), async (req, res) => {
+  const cfg = MASTERS[req.params.master];
+  const s = String(req.query.q || "").trim();
+  if (!cfg || s.length < 1) return res.json([]);
+  const parentId = req.query.parent === undefined ? null : Number(req.query.parent);
+  if (parentId !== null && (!cfg.parent || !Number.isInteger(parentId) || parentId <= 0)) return res.json([]);
+  try {
+    const request = getPool().request().input("Parent", sql.Int, parentId);
+    const { q: _q, ...rest } = req.query;
+    const where = pagedWhere(cfg, req.params.master, rest, request);
+    request.input("S", sql.NVarChar(120), `%${s.replace(/[%_[\]]/g, (c) => `[${c}]`)}%`);
+    const labelOf = Object.fromEntries([...cfg.fields.map((f) => [f.name, f.label]), ...cfg.fields.filter((f) => f.type === "ref").map((f) => [`${f.name}__label`, f.label]), ...(cfg.extras || []).map((x) => [x.name, x.label || x.name])]);
+    const cols = searchCols(cfg);
+    const r = await request.query(`
+      WITH b AS (${baseSql(cfg, parentId, false)})
+      SELECT TOP 10 v, col FROM (
+        ${cols.map((c) => `SELECT DISTINCT CAST(b.[${c}] AS NVARCHAR(400)) AS v, N'${c}' AS col FROM b WHERE CAST(b.[${c}] AS NVARCHAR(400)) LIKE @S${where.length ? ` AND ${where.join(" AND ")}` : ""}`).join("\n        UNION ")}
+      ) x WHERE v IS NOT NULL AND LTRIM(v) <> N'' ORDER BY CASE WHEN v LIKE @S THEN LEN(v) END, v`);
+    res.json(r.recordset.map((x) => ({ value: x.v, field: labelOf[x.col] || x.col })));
+  } catch (err) {
+    console.error("[legal-masters] suggest:", err.message);
+    res.json([]);
   }
 });
 
@@ -542,6 +640,29 @@ router.put("/approval-authority/by-role", requirePageRight("legal-approval-autho
 });
 
 // Approval Control: several users picked at once → one row per user (users who already hold the role are skipped).
+// A registered land is locked: the land row and every record on it change only through an approved amendment
+// (landAmendment.js). Records that keep running after registration stay open.
+const OPEN_AFTER_REGISTRATION = new Set(["land-tax", "payment", "valuation", "land-photo", "mutation", "mutation-hearing", "mutation-record", "land-sale", "legal-case", "case-hearing", "mortgage", "expense", "settlement"]);
+const landLinked = (cfg) => cfg.table === "LegalLand" || cfg.parent === "LandId" || (cfg.fields || []).some((f) => f.name === "LandId");
+router.all(["/:master", "/:master/:id"], async (req, res, next) => {
+  const cfg = MASTERS[req.params.master];
+  if (req.method === "GET" || !cfg || OPEN_AFTER_REGISTRATION.has(req.params.master) || !landLinked(cfg)) return next();
+  try {
+    const pool = getPool();
+    const id = Number(req.params.id);
+    let landId = null;
+    if (cfg.table === "LegalLand") landId = Number.isInteger(id) && id > 0 ? id : null;
+    else if (Number.isInteger(id) && id > 0) landId = (await pool.request().input("Id", sql.Int, id).query(`SELECT LandId FROM dbo.${cfg.table} WHERE ${cfg.pk} = @Id`)).recordset[0]?.LandId ?? null;
+    else landId = Number(req.body?.LandId) || null;
+    const amend = require("./landAmendment");
+    if (await amend.isLocked(pool, landId)) return res.status(409).json({ error: amend.LOCK_MSG });
+    next();
+  } catch (e) {
+    console.error("[legal-masters] lock check:", e.message);
+    next();
+  }
+});
+
 router.post("/:master", withRight("create"), async (req, res, next) => {
   const cfg = MASTERS[req.params.master];
   if (req.params.master !== "approval-authority" || !Array.isArray(req.body?.ApproverId)) return next();
@@ -661,6 +782,11 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    // A registered land is locked: its details change only through an approved amendment (landAmendment.js).
+    if (cfg?.table === "LegalLand") {
+      const st = (await pool.request().input("Id", sql.Int, id).query("SELECT WorkflowStatus FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
+      if (st?.WorkflowStatus === "Registered") return res.status(409).json({ error: "This land is registered and locked. Use Request amendment (Legal Flow Chart) to change its details." });
+    }
     await resolveParties(pool, cfg, req.body, req.user?.userId, res.locals.added = []);
     await resolveNewRefs(pool, cfg, req.body, req.user?.userId, res.locals.added);
     // A refused save (validation, a business rule, a duplicate…) takes back the list entries it just added.

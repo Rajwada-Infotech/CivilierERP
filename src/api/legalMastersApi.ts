@@ -98,6 +98,16 @@ export const getLegalLookup = async (ref: string): Promise<LegalOption[]> => {
 };
 export const getLegalRows = async (master: string, parent?: number): Promise<LegalRow[]> =>
   handle(await fetchWithAuth(`${BASE}/${master}${parent ? `?parent=${parent}` : ""}`));
+
+/** One page of a Legal list, searched / filtered / sorted on the server (20 rows by default). */
+export interface LegalPageQuery { parent?: number; page: number; pageSize?: number; q?: string; status?: "active" | "inactive" | "all"; sort?: string | null; dir?: "asc" | "desc"; project?: string; filter?: string }
+export interface LegalPage { rows: LegalRow[]; total: number; page: number; pageSize: number; counts: { active: number; inactive: number; all: number } }
+const pageQs = (o: Omit<LegalPageQuery, "page"> & { page?: number }) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)])).toString();
+export const getLegalPage = async (master: string, o: LegalPageQuery): Promise<LegalPage> =>
+  handle(await fetchWithAuth(`${BASE}/${master}?${pageQs({ ...o, pageSize: o.pageSize ?? 20 })}`));
+/** Values matching what is typed in a Legal list's search box (any searched column). */
+export const suggestLegal = async (master: string, q: string, o: Omit<LegalPageQuery, "page"> = {}): Promise<{ value: string; field?: string }[]> =>
+  handle(await fetchWithAuth(`${BASE}/${master}/suggest?${pageQs({ ...o, q })}`));
 export const addLegalRow = async (master: string, payload: LegalRow) =>
   handle<{ id: number; message: string }>(await fetchWithAuth(`${BASE}/${master}`, json("POST", payload)));
 export const updateLegalRow = async (master: string, id: number, payload: LegalRow) =>

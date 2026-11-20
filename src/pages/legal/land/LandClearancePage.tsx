@@ -1,10 +1,10 @@
+import { usePaged } from "@/components/legal/usePaged";
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { ClipboardTick } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
-import { useProjectScope } from "@/components/legal/ProjectPicker";
 import { LandClearancePanel } from "@/components/legal/LandClearancePanel";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getClearanceList } from "@/api/legalLandApi";
@@ -14,14 +14,15 @@ export default function LandClearancePage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const canEdit = usePageRights("legal-land-master").canEdit;
-  const { data, isLoading, error } = useQuery({ queryKey: ["legal-clearance-list"], queryFn: getClearanceList });
+  const list = usePaged(["legal-clearance-list"], (qs) => getClearanceList(qs));
+  const { data, isLoading, error } = list;
   const refresh = () => { qc.invalidateQueries({ queryKey: ["legal-clearance-list"] }); qc.invalidateQueries({ queryKey: ["legal-post-registration"] }); };
-  const { inScope } = useProjectScope();
-  const lands = (data?.lands ?? []).filter((l) => inScope(l.ProjectId));
+  const lands = data?.lands ?? []; // one page, already limited to the picked project on the server
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "LA & ULC Clearance" }]} />
-      <LegalShell title="LA & ULC Clearance" subtitle="Land Acquisition and Urban Land Ceiling clearance: apply, track, obtain. The certificate is attached at Post-Registration." icon={ClipboardTick}>
+      <LegalShell stage="clearance" title="LA & ULC Clearance" subtitle="Land Acquisition and Urban Land Ceiling clearance: apply, track, obtain. The certificate is attached at Post-Registration." icon={ClipboardTick}>
+        {list.search("Search land ID, name, mouza…")}
         {error ? <p className="p-6 text-destructive">{(error as Error).message}</p> : isLoading ? <p className="p-6 text-muted-foreground">Loading…</p> : !lands.length ? (
           <p className="border border-border p-6 text-sm text-muted-foreground">No land at this stage yet. Lands appear here once they reach Deed Process.</p>
         ) : (
@@ -46,6 +47,7 @@ export default function LandClearancePage() {
             })}
           </div>
         )}
+        {list.pager}
       </LegalShell>
     </>
   );
