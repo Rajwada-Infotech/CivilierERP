@@ -325,6 +325,12 @@ export const MODULE_OPTIONS = [
     desc: "Money received, before it posts to the ledger",
   },
   {
+    id: "crm-customer-payment",
+    label: "CRM Customer Payment",
+    icon: "🧾",
+    desc: "A customer's payment on a booking, step by step (for example Finance, then Directors) — it counts and posts to the ledger only after the last step. Not set up: Received Payment's approval is used",
+  },
+  {
     id: "crm-bank-details-edit",
     label: "Edit locked bank / KYC details",
     icon: "🔐",
@@ -416,7 +422,7 @@ export const MODULE_GROUPS = [
     id: "finance",
     label: "Finance",
     icon: "💰",
-    modules: ["NewPayment", "received-payment", "account-heads", "CrmRefundPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
+    modules: ["NewPayment", "received-payment", "crm-customer-payment", "account-heads", "CrmRefundPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
   },
   {
     id: "sales",

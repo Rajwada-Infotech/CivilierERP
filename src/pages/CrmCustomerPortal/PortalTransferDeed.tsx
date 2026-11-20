@@ -1,9 +1,9 @@
-import React, { useRef, useState } from "react";
+﻿import React, { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Check, Eye, FileSignature, Upload } from "lucide-react";
 import { API, authHeaders } from "./portalApi";
-import { PageHeader, Card, CardHeader, INK, GOLD, GOLD_SOFT, HAIRLINE, SURFACE_ALT, TEXT, TEXT_MUTED, TEXT_FAINT } from "./portalTheme";
+import { HeroStrip, Card, CardHeader, INK, GOLD, GOLD_SOFT, HAIRLINE, SURFACE_ALT, TEXT, TEXT_MUTED, TEXT_FAINT } from "./portalTheme";
 
 // Transfer Deed — when the customer's property is being resold (they are the
 // seller), when they are buying one from another owner (the buyer), or when
@@ -183,7 +183,7 @@ const PortalTransferDeed: React.FC = () => {
   const replace = (next: any) => qc.setQueryData<any[]>(["portal-transfer-deeds"], (old) => (old || []).map((x) => (x.deed.Id === next.deed.Id ? next : x)));
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Legal" title="Transfer Deed" subtitle="When a property passes to a new owner — or back to us — the deed is reviewed, dated, stamped and registered here." />
+      <HeroStrip eyebrow="Legal" title="Transfer Deed" subtitle="When a property passes to a new owner — the deed is reviewed, dated, stamped and registered here." />
       {q.isLoading ? <p className="text-sm" style={{ color: TEXT_MUTED }}>Loading…</p>
         : q.isError ? <p className="text-sm" style={{ color: "#b91c1c" }}>{(q.error as any)?.message}</p>
         : !(q.data || []).length ? <Card><p className="p-6 text-sm" style={{ color: TEXT_MUTED }}>Nothing here — this is where a resale or buy-back deed appears when you are part of one.</p></Card>

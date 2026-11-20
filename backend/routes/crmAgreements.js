@@ -17,6 +17,8 @@ const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
+// The customer's own phone (Customer Portal): services/pushNotifications.js CUSTOMER_EVENTS.
+const { notifyBookingCustomers } = require("../services/pushNotifications");
 const { agreementStepFlagsSql, validateAgreementPreparationPrerequisites, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
@@ -875,6 +877,7 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
             summary: "Agreement shared with the customer via portal, awaiting their approval.",
             createdBy: actorId(req),
           });
+          notifyBookingCustomers(notifyRow?.BookingId, "agreementShared", { no: notifyRow?.AgreementNo });
         } catch (sideErr) { console.error("[crm-agreements] approve send-to-customer side effects failed:", sideErr.message); }
       }
     }
@@ -905,6 +908,7 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
           summary: "Agreement shared with the customer via portal, awaiting their approval.",
           createdBy: actorId(req),
         });
+        notifyBookingCustomers(notifyRow?.BookingId, "agreementShared", { no: notifyRow?.AgreementNo });
       } catch (sideErr) { console.error("[crm-agreements] approve send-to-customer side effects failed:", sideErr.message); }
     }
     res.json({ success: true, status: result.newStatus, ...result });
@@ -1184,7 +1188,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
     const ag = await pool.request().input("id", sql.Int, id).query(`
       SELECT
         ag.SeniorApprovalStatus,
-        ag.BookingId,
+        ag.BookingId, ag.AgreementNo,
         (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = ag.Id) AS DocumentCount
       FROM dbo.CrmAgreement ag
       WHERE ag.Id = @id
@@ -1267,6 +1271,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
       try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
       throw txErr;
     }
+    notifyBookingCustomers(ag.recordset[0].BookingId, "agreementShared", { no: ag.recordset[0].AgreementNo });
 
     res.json({ success: true });
   } catch (e) {
@@ -1328,6 +1333,7 @@ router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), asyn
         createdBy: actorId(req),
       });
       await tx.commit();
+      notifyBookingCustomers(locked.BookingId, "agreementDateProposed", { date: proposedDate });
     } catch (txErr) {
       await tx.rollback().catch(() => {});
       throw txErr;
@@ -1600,6 +1606,11 @@ router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), asyn
 // — one side accepting the other's proposed date, then a super_admin
 // sign-off — never typed in here, so execution itself is proof the "both
 // ends agreed on a date" mandate was actually satisfied.
+/** An agreement's number, for the customer's push message. */
+async function agreementNo(pool, id) {
+  return (await pool.request().input("id", sql.Int, id).query("SELECT AgreementNo FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0]?.AgreementNo || null;
+}
+
 router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -1722,6 +1733,8 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
       throw err;
     }
 
+    // The customer hears their agreement is signed (Civilier Home push; sent only to a customer with the app).
+    require("../services/pushNotifications").notifyBookingCustomers(row.BookingId, "agreementSigned", { no: await agreementNo(pool, id), date: row.AgreementDate });
     res.json({ success: true, status: CrmStatus.EXECUTED });
   } catch (e) {
     console.error("[crm-agreements] mark-executed error:", e.message);
@@ -1840,6 +1853,8 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
       throw err;
     }
 
+    // The customer hears their agreement is registered (Civilier Home push).
+    require("../services/pushNotifications").notifyBookingCustomers(cur.recordset[0].BookingId, "agreementRegistered", { no: await agreementNo(pool, id), regNo, date: regDate });
     res.json({ success: true, status: CrmStatus.REGISTERED });
   } catch (e) {
     console.error("[crm-agreements] mark-registered error:", e.message);

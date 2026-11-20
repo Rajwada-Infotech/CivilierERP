@@ -6,7 +6,7 @@ import {
   LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers,
   FileSignature,
 } from "lucide-react";
-import { fetchMe, fetchApplications, fetchTimeline, fetchTransferDeeds, fetchCreditNotes, creditNotesSeenKey, readSeen } from "./portalApi";
+import { fetchMe, fetchApplications, fetchTimeline, fetchTransferDeeds, fetchCreditNotes, creditNotesSeenKey, readSeen, fetchMoney } from "./portalApi";
 import {
   INK, VIOLET_DEEP, VIOLET, VIOLET_LIGHT, GOLD, GOLD_SOFT, PORCELAIN, SURFACE, SURFACE_ALT, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
   applyPortalAccent, getStoredPortalAccent, applyPortalMode, getStoredPortalMode, StatusPill,
@@ -44,7 +44,7 @@ function initials(name: string | null | undefined) {
   return name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-const SIDEBAR_BG = `linear-gradient(180deg, ${INK} 0%, ${VIOLET_DEEP} 55%, ${VIOLET} 100%)`;
+const SIDEBAR_BG = `linear-gradient(175deg, ${INK} 0%, ${VIOLET_DEEP} 60%, ${VIOLET} 100%)`;
 
 const ACCOUNT_WIDE_PATHS = ["/crm-client-portal/transfer-deed"];
 
@@ -58,28 +58,14 @@ function ApplicationSelector({
   onSelect: (id: number) => void;
   me: any;
 }) {
-
-  return (
-    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: PORCELAIN }}>
-      <div className="w-full max-w-2xl">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-white border shadow-sm flex items-center justify-center mx-auto mb-4 overflow-hidden"
-            style={{ borderColor: `${GOLD}40` }}>
-            <Layers size={24} style={{ color: GOLD }} />
-          </div>
-          <h1 className="text-2xl font-semibold mb-1" style={{ ...serif, color: INK }}>
-            Select an Application
-          </h1>
-          <p className="text-sm" style={{ color: TEXT_MUTED }}>
-            Welcome back, <strong>{me?.Name || "Customer"}</strong>. You have {applications.length} applications — pick one to view its details.
-          </p>
-        </div>
-
-        {/* Application cards */}
-        <div className="space-y-3">
-          {applications.map((app: any) => {
-            const stage = app.BookingStatus
+  // The server marks each property Home / InProgress / Past (crmPortal.js propertyState): past ones are listed apart.
+  const live = applications.filter((a: any) => a.Lifecycle !== "Past");
+  const past = applications.filter((a: any) => a.Lifecycle === "Past");
+  const card = (app: any) => {
+            const isPast = app.Lifecycle === "Past";
+            const stage = app.StateLabel
+              ? app.StateLabel
+              : app.BookingStatus
               ? `Booking · ${app.BookingStatus}`
               : `Application · ${app.ApplicationStatus || "Draft"}`;
             return (
@@ -90,6 +76,7 @@ function ApplicationSelector({
                 style={{
                   background: "white",
                   borderColor: HAIRLINE,
+                  opacity: isPast ? 0.75 : 1,
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${GOLD}80`; e.currentTarget.style.boxShadow = `0 4px 20px ${GOLD}15`; }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = HAIRLINE; e.currentTarget.style.boxShadow = ""; }}
@@ -115,14 +102,42 @@ function ApplicationSelector({
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
-                    <StatusPill status={app.BookingStatus || app.ApplicationStatus || "Draft"} label={stage} />
+                    <StatusPill status={isPast ? (app.BookingStatus || app.ApplicationStatus) : (app.BookingStatus || app.ApplicationStatus || "Draft")} label={stage} />
                     <ChevronRight size={16} style={{ color: TEXT_FAINT }} />
                   </div>
                 </div>
               </button>
             );
-          })}
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: PORCELAIN }}>
+      <div className="w-full max-w-2xl">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="w-14 h-14 rounded-2xl bg-white border shadow-sm flex items-center justify-center mx-auto mb-4 overflow-hidden"
+            style={{ borderColor: `${GOLD}40` }}>
+            <Layers size={24} style={{ color: GOLD }} />
+          </div>
+          <h1 className="text-2xl font-semibold mb-1" style={{ ...serif, color: INK }}>
+            Select an Application
+          </h1>
+          <p className="text-sm" style={{ color: TEXT_MUTED }}>
+            Welcome back, <strong>{me?.Name || "Customer"}</strong>. You have {live.length} applications — pick one to view its details.
+          </p>
         </div>
+
+        {/* Application cards */}
+        <div className="space-y-3">
+          {live.map(card)}
+        </div>
+
+        {past.length > 0 && (
+          <div className="mt-8">
+            <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: TEXT_FAINT }}>Past properties</p>
+            <div className="space-y-3">{past.map(card)}</div>
+          </div>
+        )}
 
         <p className="text-center text-xs mt-6" style={{ color: TEXT_FAINT }}>
           You can switch between applications at any time from the sidebar.
@@ -170,12 +185,12 @@ const PortalLayout: React.FC = () => {
   const { data: me, error: meError } = useQuery({ queryKey: ["portal-me"], queryFn: fetchMe, retry: false, staleTime: 60_000 });
   const { data: applications, error: appsError } = useQuery({ queryKey: ["portal-applications"], queryFn: fetchApplications, retry: false, staleTime: 60_000 });
 
-  // Auto-select if the customer has exactly one application — invisible to them
+  // Auto-select when the customer has exactly one live property (past ones don't count) — invisible to them
   useEffect(() => {
-    if (!applications) return;
-    if (applications.length === 1 && !selectedApplicationId) {
-      handleSelectApplication(applications[0].ApplicationId);
-    }
+    if (!applications || selectedApplicationId) return;
+    const live = applications.filter((a: any) => a.Lifecycle !== "Past");
+    if (live.length === 1) handleSelectApplication(live[0].ApplicationId);
+    else if (applications.length === 1) handleSelectApplication(applications[0].ApplicationId);
   }, [applications, selectedApplicationId]);
 
   // Same cache as the Transfer Deed page, so an answer given there clears the badge at once.
@@ -191,6 +206,14 @@ const PortalLayout: React.FC = () => {
     staleTime: 30_000,
   });
 
+  // The money statement, loaded once here for every page (Overview, Payments, Profile read the same figures).
+  const { data: money } = useQuery({
+    queryKey: ["portal-money", selectedApplicationId],
+    queryFn: () => fetchMoney(selectedApplicationId!),
+    enabled: !!selectedApplicationId,
+    staleTime: 30_000,
+  });
+
   useEffect(() => {
     applyPortalAccent(getStoredPortalAccent());
     applyPortalMode(getStoredPortalMode());
@@ -198,13 +221,11 @@ const PortalLayout: React.FC = () => {
 
   useEffect(() => {
     const isUnauthorized = [meError, appsError, tlError].some((e: any) => e?.message === "unauthorized");
-    const needsPasswordChange = [meError, appsError, tlError].some((e: any) => e?.message === "password_change_required");
     if (isUnauthorized) {
       sessionStorage.removeItem("crm_portal_app_id");
       localStorage.removeItem("crm_portal_token");
       navigate("/crm-client-portal/login");
     }
-    if (needsPasswordChange) navigate("/crm-client-portal/change-password");
   }, [meError, appsError, tlError, navigate]);
 
   const handleLogout = () => {
@@ -223,7 +244,8 @@ const PortalLayout: React.FC = () => {
     if (timeline?.salesDeed?.CustomerApprovalStatus === "Pending" && timeline?.salesDeed?.SentToCustomerAt) b.agreement = (b.agreement || 0) + 1;
     if (timeline?.queryPayment?.Status === "InfoSent") b.agreement = (b.agreement || 0) + 1;
     if (timeline?.possessionNotice?.Status === "Sent") b.construction = 1;
-    const pendingMilestones = (timeline?.paymentMilestones || []).filter((m: any) => m.Status === "Pending").length;
+    // Instalments genuinely still to pay — Status stays "Pending" while paid money is held On Account (timeline Covered).
+    const pendingMilestones = (timeline?.paymentMilestones || []).filter((m: any) => !m.Covered && !m.Verifying && Number(m.Outstanding) > 0).length;
     if (pendingMilestones) b.payments = pendingMilestones;
     // Transfer deeds belong to the customer, not one application.
     const deedTodo = (deeds || []).reduce((n: number, v: any) => n + Number(v.todo || 0), 0);
@@ -253,16 +275,17 @@ const PortalLayout: React.FC = () => {
     const key = badgeKeyFor(to);
     const count = key ? badges[key] : 0;
     return (
-      <div className="relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+      <div className="relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all"
         style={{
-          color: active ? "#fff" : "rgba(233,225,250,0.68)",
-          background: active ? "rgba(255,255,255,0.08)" : "transparent",
+          color: active ? "#fff" : "rgba(233,225,250,0.65)",
+          background: active ? "rgba(255,255,255,0.11)" : "transparent",
+          boxShadow: active ? "0 1px 8px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.08)" : "none",
         }}>
-        {active && <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full" style={{ background: GOLD }} />}
-        <Icon size={16} className="shrink-0" />
+        {active && <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full" style={{ background: GOLD }} />}
+        <Icon size={16} className="shrink-0" style={{ opacity: active ? 1 : 0.72 }} />
         <span className="flex-1">{label}</span>
         {!!count && (
-          <span className="text-[0.625rem] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1"
+          <span className="text-[0.625rem] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 shadow-sm"
             style={{ background: GOLD, color: INK }}>
             {count}
           </span>
@@ -359,13 +382,13 @@ const PortalLayout: React.FC = () => {
 
       {/* ── Mobile top bar + drawer ── */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 py-3" style={{ background: SIDEBAR_BG }}>
-        <button onClick={() => setMobileOpen(true)} className="text-white p-1"><Menu size={20} /></button>
-        <span className="text-sm font-semibold text-white" style={serif}>CivilierERP</span>
+        <button onClick={() => setMobileOpen(true)} className="text-white p-2 -ml-1" style={{ touchAction: "manipulation" }}><Menu size={20} /></button>
+        <span className="text-sm font-semibold text-white leading-tight" style={serif}>{activeItem?.label || "Dashboard"}</span>
         <div className="flex items-center gap-3">
           <div className="relative">
-            <Bell size={18} className="text-white/80" />
+            <Bell size={18} className={totalAlerts > 0 ? "text-white" : "text-white/60"} />
             {totalAlerts > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[0.5625rem] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5"
+              <span className="absolute -top-2 -right-2 text-[0.5625rem] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-0.5 shadow-md"
                 style={{ background: GOLD, color: INK }}>
                 {totalAlerts}
               </span>
@@ -428,7 +451,7 @@ const PortalLayout: React.FC = () => {
           <div className="relative">
             <Bell size={17} style={{ color: VIOLET_LIGHT }} />
             {totalAlerts > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[0.5625rem] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5"
+              <span className="absolute -top-2 -right-2 text-[0.5625rem] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-0.5 shadow-md"
                 style={{ background: GOLD, color: INK }}>
                 {totalAlerts}
               </span>
@@ -447,7 +470,7 @@ const PortalLayout: React.FC = () => {
             />
           ) : accountWide ? (
             <Suspense fallback={<PortalSkeleton />}>
-              <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />
+              <Outlet context={{ me, timeline, money, applicationId: selectedApplicationId, applications }} />
             </Suspense>
           ) : !selectedApplicationId ? (
             <div className="min-h-[60vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>
@@ -462,7 +485,7 @@ const PortalLayout: React.FC = () => {
                   You are a co-applicant on this booking — you can follow everything here; approvals, uploads and requests are made by the main applicant, {selectedApp.ApplicantName}.
                 </div>
               ) : null}
-              <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />
+              <Outlet context={{ me, timeline, money, applicationId: selectedApplicationId, applications }} />
             </Suspense>
           )}
         </div>

@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -12,7 +12,7 @@ const portalAuth = require("../middleware/crmPortalAuth");
 const { getNextDocNumber } = require("../services/docNumber");
 const { emitNotification } = require("../services/notify");
 const { getPossessionLetterBuffer } = require("../services/possessionLetterPdf");
-const { proposeAgreementDate, acceptAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
+const { proposeAgreementDate, acceptAgreementDate, syncLegalMilestoneStep, getProjectSaleGate } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { getMoneyReceiptPdfBuffer } = require("../services/moneyReceiptPdf");
@@ -33,12 +33,14 @@ const CUSTOMER_TICKET_CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "
 const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal priority
 
 const rateLimit = require("../middleware/rateLimiter");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));
+// Per customer (rateLimiter.js counts the signed-in person): one visit to Civilier Home makes 10-15 requests, so 600 per
+// 15 minutes (~40 a minute) leaves room for real use and still stops scripted scraping.
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600, validate: false, message: { error: "Too many requests, please try again later." } }));
 
-// 15-second in-memory cache for portal user active/mustChangePassword status.
+// 15-second in-memory cache for portal user active status.
 // Declared at module scope so both the staff admin endpoint and the portal
 // per-request middleware can access it.
-const _portalUserStatusCache = new Map(); // portalUserId -> { isActive, mustChangePassword, cachedAt }
+const _portalUserStatusCache = new Map(); // portalUserId -> { isActive, cachedAt }
 const PORTAL_STATUS_CACHE_TTL_MS = 15_000;
 
 // Per-account brute-force lockout — mirrors the staff login's own protection
@@ -152,8 +154,8 @@ router.post("/login", async (req, res) => {
 
 /**
  * POST /api/crm-portal/admin/reset-password
- * Staff resets a customer's portal password to a new temp value and forces
- * MustChangePassword = 1 so the customer must set their own password on login.
+ * Staff resets a customer's portal password to a new temp value (MustChangePassword = 1 records that it is not
+ * the customer's own; setting their own stays their choice and is never forced).
  * Body: { customerId: number, newPassword?: string }
  * If newPassword is omitted, defaults to the customer's mobile number (normalized).
  */
@@ -233,10 +235,9 @@ router.post(
 
 router.use(portalAuth);
 
-// Server-side enforcement of (1) account deactivation and (2) the forced
-// first-login password reset. IsActive is checked first and blocks EVERY
-// route with no exception. MustChangePassword only blocks routes other than
-// /change-password, which is the one place that actually resolves it.
+// Server-side enforcement of account deactivation: blocks EVERY route with no exception. Setting their own password
+// is the customer's choice (decided 2026-11-18), so MustChangePassword (still set by a staff reset) no longer blocks
+// anything — the customer can change it from their profile whenever they like.
 router.use(async (req, res, next) => {
   try {
     const uid = req.portalUser?.portalUserId;
@@ -246,30 +247,23 @@ router.use(async (req, res, next) => {
     const cached = _portalUserStatusCache.get(uid);
     if (cached && Date.now() - cached.cachedAt < PORTAL_STATUS_CACHE_TTL_MS) {
       if (!cached.isActive) return res.status(401).json({ error: "This portal account has been deactivated" });
-      if (req.path !== "/change-password" && cached.mustChangePassword) {
-        return res.status(403).json({ error: "You must set a new password before continuing", mustChangePassword: true });
-      }
       return next();
     }
 
     const pool = getPool();
     const row = await pool.request().input("id", sql.Int, uid)
-      .query("SELECT IsActive, MustChangePassword FROM dbo.CrmCustomerPortalUser WHERE Id = @id");
+      .query("SELECT IsActive FROM dbo.CrmCustomerPortalUser WHERE Id = @id");
     if (!row.recordset.length) return res.status(401).json({ error: "Portal account not found" });
-    const { IsActive, MustChangePassword } = row.recordset[0];
+    const { IsActive } = row.recordset[0];
 
     // Populate cache (only cache active accounts; deactivated ones stay uncached so
     // re-activation takes immediate effect)
     if (IsActive) {
-      _portalUserStatusCache.set(uid, { isActive: true, mustChangePassword: !!MustChangePassword, cachedAt: Date.now() });
+      _portalUserStatusCache.set(uid, { isActive: true, cachedAt: Date.now() });
     }
 
     if (!IsActive) {
       return res.status(401).json({ error: "This portal account has been deactivated" });
-    }
-    if (req.path === "/change-password") return next();
-    if (MustChangePassword) {
-      return res.status(403).json({ error: "You must set a new password before continuing", mustChangePassword: true });
     }
     next();
   } catch (e) {
@@ -300,6 +294,33 @@ router.post("/change-password", async (req, res) => {
   } catch (e) {
     console.error("[crm-portal] POST /change-password error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST /push-devices/register, /push-devices/unregister — this customer's phone (the Maintenance app's customer
+// side) gets their notifications. Always bound to the signed-in portal login, never an id from the body; the same
+// store and rules as staff phones (services/pushNotifications.js, migration 692).
+router.post("/push-devices/register", async (req, res) => {
+  try {
+    const { registerToken } = require("../services/pushNotifications");
+    await registerToken({ portalUserId: Number(req.portalUser.portalUserId) }, String(req.body?.token ?? ""), {
+      appKey: req.body?.appKey, platform: req.body?.platform, versionCode: req.body?.versionCode,
+    });
+    res.json({ success: true });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error("[crm-portal] push register:", e.message);
+    res.status(500).json({ error: "Could not register this device for notifications." });
+  }
+});
+router.post("/push-devices/unregister", async (req, res) => {
+  try {
+    const { unregisterToken } = require("../services/pushNotifications");
+    const removed = await unregisterToken({ portalUserId: Number(req.portalUser.portalUserId) }, String(req.body?.token ?? ""));
+    res.json({ success: true, removed });
+  } catch (e) {
+    console.error("[crm-portal] push unregister:", e.message);
+    res.status(500).json({ error: "Could not unregister this device." });
   }
 });
 
@@ -358,10 +379,28 @@ async function resolveAndAssertApplication(pool, req, res) {
 // ─── GET /applications — summary listing of ALL applications for this customer ─
 // This is the new landing page after login: every Application + its Booking
 // stage, so the customer can pick which unit's timeline to view.
-router.get("/applications", async (req, res) => {
-  try {
-    const pool = getPool();
-    const customerId = req.portalUser.customerId;
+// What one entry in the customer's list of properties is, for them:
+//   Home       — a live booking (not in DEAD_BOOKING_STATUSES);
+//   InProgress — an application the sales team is still working on, no booking yet;
+//   Past       — the booking or application ended (StateLabel says how, in the customer's words).
+// A staff Draft is not shown at all — nobody has submitted it yet. One rule for the web portal and the app.
+const PAST_LABEL = { Cancelled: "Cancelled", Rejected: "Not approved", Expired: "Expired", Transferred: "Sold", UnitChanged: "Moved to another unit" };
+const LIFECYCLE_ORDER = { Home: 0, InProgress: 1, Past: 2 };
+function propertyState(r) {
+  if (r.BookingId) {
+    return DEAD_BOOKING_STATUSES.includes(r.BookingStatus)
+      ? { Lifecycle: "Past", StateLabel: PAST_LABEL[r.BookingStatus] || r.BookingStatus }
+      : { Lifecycle: "Home", StateLabel: null };
+  }
+  if (r.ApplicationStatus === CrmStatus.DRAFT) return null;
+  if (PAST_LABEL[r.ApplicationStatus]) return { Lifecycle: "Past", StateLabel: PAST_LABEL[r.ApplicationStatus] };
+  // "Converted" with no live booking row left: the booking it became is gone.
+  if (r.ApplicationStatus === "Converted") return { Lifecycle: "Past", StateLabel: "Closed" };
+  return { Lifecycle: "InProgress", StateLabel: "Being prepared" };
+}
+
+/** The customer's properties: homes first, then those in progress, then past ones (newest first within each). */
+async function loadApplications(pool, customerId) {
     const result = await pool.request().input("cid", sql.Int, customerId).query(`
       SELECT
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Status AS ApplicationStatus,
@@ -389,7 +428,14 @@ router.get("/applications", async (req, res) => {
       WHERE a.IsActive = 1 AND (a.CustomerId = @cid OR ${CO_APPLICANT_OF("a")})
       ORDER BY a.CreatedAt DESC
     `);
-    res.json(result.recordset);
+    return result.recordset
+      .map((r) => { const st = propertyState(r); return st && { ...r, ...st }; })
+      .filter(Boolean)
+      .sort((x, y) => LIFECYCLE_ORDER[x.Lifecycle] - LIFECYCLE_ORDER[y.Lifecycle]);
+}
+router.get("/applications", async (req, res) => {
+  try {
+    res.json(await loadApplications(getPool(), req.portalUser.customerId));
   } catch (e) {
     console.error("[crm-portal] GET /applications error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -414,12 +460,132 @@ router.get("/me", async (req, res) => {
 
 // ─── GET /timeline — per-application step-by-step milestone view ─────────────
 // Requires ?applicationId= — validated against req.portalUser.customerId.
-router.get("/timeline", async (req, res) => {
-  try {
-    const pool = getPool();
-    const appId = await resolveAndAssertApplication(pool, req, res);
-    if (appId === null) return;
+/** Everything the customer sees about one application. `lite` skips the construction progress (the heaviest part),
+ * for callers that only need the booking's state — e.g. what needs the customer across all their homes. */
+// ─── Home facts — what the customer bought, in their words (shown only when recorded) ─────────────────────────────
+const sqftText = (n) => (Number(n) > 0 ? `${Number(n).toLocaleString("en-IN")} sq ft` : null);
+const feetText = (n) => (Number(n) > 0 ? `${Number(n)} ft` : null);
+const keepShown = (rows) => rows.filter(([, v]) => v != null && v !== "").map(([label, value]) => ({ label, value: String(value) }));
+function homeFacts(b) {
+  // A plot not yet built on has no home to describe — its plots carry the facts.
+  if (b.IsPlotSale && !b.UnitType && !b.UnitKind) return [];
+  const anyArea = b.CarpetAreaSqFt || b.BuiltUpAreaSqFt || b.SuperBuiltUpAreaSqFt;
+  return keepShown([
+    ["Type", b.UnitType || b.UnitKind],
+    ["Tower / block", b.BlockName],
+    ["Floor", b.FloorNo],
+    ["Carpet area", sqftText(b.CarpetAreaSqFt)],
+    ["Built-up area", sqftText(b.BuiltUpAreaSqFt)],
+    ["Super built-up area", sqftText(b.SuperBuiltUpAreaSqFt)],
+    ["Open terrace", sqftText(b.OpenTerraceAreaSqFt)],
+    ["Area", anyArea ? null : sqftText(b.AreaSqFt)],
+    ["Facing", b.Facing],
+  ]);
+}
+/** The project, ready to show: its facts (only what is recorded), a description, and where it is on a map. */
+function projectView(p) {
+  if (!p) return null;
+  const address = [p.address, p.address_line2, p.address_line3, p.city, p.state, p.pincode].map((x) => String(x || "").trim()).filter(Boolean)
+    .filter((x, i, all) => all.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i).join(", ");
+  const lat = Number(p.latitude), lng = Number(p.longitude);
+  return {
+    name: p.name,
+    facts: keepShown([["Type", p.TypeName], ["Developer", p.Developer], ["Address", address || null], ["Website", p.website]]),
+    description: String(p.description || "").trim() || null,
+    // A map pin only when a real location is recorded; otherwise the address can still be searched.
+    location: Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0) ? { lat, lng } : null,
+    mapQuery: address ? `${p.name}, ${address}` : null,
+  };
+}
+function plotFacts(p) {
+  return keepShown([
+    ["Area", sqftText(p.AreaSqFt)],
+    ["Size", feetText(p.PlotWidthFt) && feetText(p.PlotDepthFt) ? `${feetText(p.PlotWidthFt)} × ${feetText(p.PlotDepthFt)}` : null],
+    ["Facing", p.Facing],
+    ["Position", p.IsCornerPlot ? "Corner plot" : null],
+    ["Road in front", feetText(p.RoadWidthFt) ? `${feetText(p.RoadWidthFt)} wide` : null],
+  ]);
+}
 
+/** A price line in the customer's words — for the app and the web portal. */
+function priceLineText(l, { plot = false, area = null, rate = null, base = null, gstRate = null, noGst = null } = {}) {
+  const gst = l.gst ? `Includes GST of ${inr(l.gst)}` : null;
+  // Area × rate, shown only when it is exactly how the price was reached (to the rupee).
+  const byArea = Number(area) > 0 && Number(rate) > 0 && Math.abs(Number(area) * Number(rate) - Number(base)) < 1
+    ? `${Number(area).toLocaleString("en-IN")} sq ft × ${inr(rate)} per sq ft` : null;
+  switch (l.key) {
+    case "home": return { title: plot ? "Plot price" : "Home price", note: byArea };
+    case "homeGst": return {
+      title: plot ? "GST on the plot" : "GST on the home",
+      note: Number(l.amount) > 0
+        ? (Number(gstRate) > 0 ? `${Number(gstRate)}% of the ${plot ? "plot" : "home"} price` : null)
+        // Why there is none: a building completed before any payment (Schedule III — outside GST), or land.
+        : noGst?.why === "completed"
+          ? `No GST: the building's completion certificate${noGst.certDate ? ` came on ${day(noGst.certDate)},` : " came"} before your first payment, so this sale is outside GST`
+          : noGst?.why === "land" ? "No GST: land is not taxed under GST"
+          : "No GST is charged on this booking",
+    };
+    case "parking": return { title: `Parking${l.label ? ` · ${l.label}` : ""}${l.quantity > 1 ? ` × ${l.quantity}` : ""}`, note: gst };
+    case "extra": return { title: l.label || "Extra charges", note: gst };
+    case "creditNotes": return { title: "Credit notes", note: "Taken off your price" };
+    default: return { title: "Other adjustments", note: "Changes made to your price by our accounts team" };
+  }
+}
+
+/** A payment's state, and where its money went, in the customer's words — for the app and the web portal. */
+function paymentStatus(x) {
+  switch (x.stage) {
+    case "settled": return { label: "Counted", sub: null };
+    case "held": return { label: "Received", sub: "Waiting to be matched to your instalments" };
+    case "split": return { label: "Received", sub: null };
+    case "finance":
+    case "recorded": return { label: "Being verified", sub: "Our accounts team is checking it. It counts once confirmed." };
+    case "returned": return { label: "Not accepted", sub: "This entry could not be accepted. Please contact us about it." };
+    case "bounced": return { label: "Bounced", sub: x.note || "This payment did not go through." };
+    case "unitChange": return { label: "Moved to your new unit", sub: null };
+    case "out": return { label: Number(x.refunded) > 0 ? "Refunded" : "Moved", sub: null };
+    default: return { label: "Adjustment", sub: "A credit or transfer made by us — not a payment from you" };
+  }
+}
+
+/**
+ * The purchase as the customer lives it, in order — each step done (with when), the current one, or still to come.
+ * The same rules the CRM enforces, so the journey never claims more than has happened:
+ *   welcome call — done once the customer is Welcomed (an unanswered call is not done);
+ *   agreement — approved by the customer, then signed and registered (Status Registered);
+ *   payments — every instalment covered (paid, or covered by verified money held — MoneyStage);
+ *   sale deed — approved by the customer (a draft is not done); then the government fees and the registration;
+ *   key handover — Completed (a scheduled one is not done). On an under-construction project the handover comes
+ *   before the sale deed (crmWorkflowGuards getProjectSaleGate: the deed is prepared after possession).
+ */
+function customerJourney({ booking, welcomeCall, agreement, milestones = [], salesDeed, queryPayment, registry, handover, handoverFirst }) {
+  const step = (key, label, hint, done, at) => ({ key, label, hint, done: !!done, at: done ? at || null : null });
+  const handoverStep = step("handover", "Key handover", "You receive the keys and move in.",
+    handover?.Status === "Completed" || !!handover?.ActualHandoverDate, handover?.ActualHandoverDate);
+  const steps = [
+    step("booking", "Booking confirmed", "Your home is reserved in your name.", !!booking, booking?.BookingDate),
+    step("welcome", "Welcome call", "Our team calls to welcome you, answer questions and take your details.",
+      welcomeCall?.Outcome === "Welcomed", welcomeCall?.CallDate),
+    step("agreement", "Agreement", "You read and approve the agreement for sale.",
+      agreement?.CustomerApprovalStatus === CrmStatus.APPROVED, agreement?.CustomerApprovedAt),
+    step("agreementRegistered", "Agreement registered", "The agreement is signed and registered with the government.",
+      agreement?.Status === CrmStatus.REGISTERED, agreement?.AfsRegistrationDate),
+    step("payments", "Payments", "You pay the instalments as they fall due.",
+      milestones.length > 0 && milestones.every((m) => m.Covered), null),
+    ...(handoverFirst ? [handoverStep] : []),
+    step("saleDeed", "Sale deed", "You read and approve the final sale deed for your home.",
+      salesDeed?.CustomerApprovalStatus === CrmStatus.APPROVED, salesDeed?.CustomerApprovedAt),
+    step("govtFees", "Government fees", "Stamp duty and registration fees are paid.",
+      queryPayment?.Status === "Confirmed", queryPayment?.ConfirmedAt),
+    step("registration", "Registration", "The sale deed is registered in your name.",
+      registry?.Status === "Completed" || !!salesDeed?.RegistrationNo, registry?.CompletedDate || salesDeed?.RegistrationDate),
+    ...(handoverFirst ? [] : [handoverStep]),
+  ];
+  const current = steps.findIndex((x) => !x.done);
+  return steps.map((x, i) => ({ ...x, state: x.done ? "done" : i === current ? "current" : "upcoming" }));
+}
+
+async function loadTimeline(pool, appId, { lite = false } = {}) {
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT b.Id, b.BookingNo,
              COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
@@ -429,7 +595,12 @@ router.get("/timeline", async (req, res) => {
              b.TotalValue, b.BookingAmount,
              b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate,
              b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
-             CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale
+             CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
+             -- What the home is, as Unit Master records it (a converted villa's unit for a plot sale; plots are listed apart)
+             um.UnitType, um.UnitKind, um.FloorNo, um.AreaSqFt, um.CarpetAreaSqFt, um.BuiltUpAreaSqFt, um.SuperBuiltUpAreaSqFt,
+             um.OpenTerraceAreaSqFt, um.Facing, blk.BlockName,
+             -- Who looks after the booking: name only (by decision: no staff phone numbers to customers)
+             asg.name AS LookedAfterBy
       FROM dbo.CrmBooking b
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       OUTER APPLY (
@@ -439,6 +610,8 @@ router.get("/timeline", async (req, res) => {
         ORDER BY bp.IsPrimary DESC, bp.Id
       ) plot
       LEFT JOIN dbo.UnitMaster um ON um.Id = COALESCE(b.UnitId, plot.ConvertedUnitId)
+      LEFT JOIN dbo.BlockMaster blk ON blk.Id = COALESCE(um.BlockId, plot.BlockId)
+      LEFT JOIN dbo.users asg ON asg.id = b.AssignedTo
       WHERE b.ApplicationId = @aid AND b.IsActive = 1
     `);
     const bk = booking.recordset[0];
@@ -456,9 +629,9 @@ router.get("/timeline", async (req, res) => {
       ORDER BY h.HoldUntil
     `);
 
-    if (!bk) return res.json({ stage: "Application", steps: [], holds: holds.recordset });
+    if (!bk) return { stage: "Application", steps: [], holds: holds.recordset };
 
-    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, possessionNotice, legalMilestone, nocs, prePossession, queryPayment, registry, onAccountTotal] = await Promise.all([
+    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, possessionNotice, legalMilestone, nocs, prePossession, queryPayment, registry, onAccountTotal, plots, snags, project] = await Promise.all([
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 * FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT TOP 1
@@ -476,14 +649,15 @@ router.get("/timeline", async (req, res) => {
         WHERE BookingId = @bid
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
-        SELECT Id, AgreementNo, Status, SeniorApprovalStatus, CustomerApprovalStatus,
+        SELECT Id, AgreementNo, Status, SeniorApprovalStatus, CustomerApprovalStatus, CustomerApprovedAt,
                ProposedDate, ProposedDateStatus, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
+               AfsRegistrationNo, AfsRegistrationDate,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','${CrmStatus.REJECTED}')) AS DocumentsNeedingAction
         FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL AND Status <> 'Cancelled'
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
-        SELECT MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status
+        SELECT Id, MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status
         FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
@@ -498,7 +672,9 @@ router.get("/timeline", async (req, res) => {
       `),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT OverallStatus FROM dbo.CrmLegalMilestone WHERE BookingId = @bid"),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT NocType, Status, NocNo, IssuedDate FROM dbo.CrmNoc WHERE BookingId = @bid"),
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, ScheduledInspectionDate FROM dbo.CrmPrePossession WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT Status, ScheduledInspectionDate, InspectionCompletedDate, DuesClearedCheck, DocumentationCheck, QualityInspectionCheck, UtilityReadinessCheck
+        FROM dbo.CrmPrePossession WHERE BookingId = @bid`),
       // Query Payment: the customer's own government payment (stamp duty +
       // registration fee) — required amount is read live from the Sales
       // Deed, same as the staff-side route, never duplicated here.
@@ -520,25 +696,79 @@ router.get("/timeline", async (req, res) => {
       pool.request().input("bid", sql.Int, bk.Id).// only the part not yet applied to a milestone — applied money is already in
       // the milestones' AmountPaid, so the full Amount counted it twice
       query("SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0) THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
+      // Every plot on a plot sale (one or many), with its size and frontage
+      pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT pm.PlotNo, pm.PlotName, bp.AreaSqFt, pm.PlotWidthFt, pm.PlotDepthFt, pm.Facing, pm.IsCornerPlot, pm.RoadWidthFt, bp.IsPrimary
+        FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
+        WHERE bp.BookingId = @bid AND bp.Status = N'${CrmStatus.ACTIVE}' ORDER BY bp.IsPrimary DESC, bp.Id`),
+      // Snags found at the handover inspection and whether each is fixed — the buyer's own home
+      pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT s.Id, s.Category, s.Description, s.Status, s.ResolvedAt, s.CreatedAt,
+               CAST(CASE WHEN s.Status IN (N'${CrmStatus.OPEN}', N'${CrmStatus.IN_PROGRESS}') THEN 1 ELSE 0 END AS BIT) AS IsOpen
+        FROM dbo.CrmSnagItem s JOIN dbo.CrmHandover h ON h.Id = s.HandoverId
+        WHERE h.BookingId = @bid AND ISNULL(h.Status, '') <> 'Cancelled' ORDER BY s.CreatedAt`),
+      // The project as Project Master records it, with its type and the developer (the project's company).
+      // rera_no is NOT read: Project Master currently saves Priority into it (known bug) — showing it would mislead.
+      pool.request().input("pid", sql.Int, bk.ProjectId || 0).query(`
+        SELECT p.name, p.address, p.address_line2, p.address_line3, p.city, p.state, p.pincode, p.latitude, p.longitude,
+               p.website, p.description, pt.Name AS TypeName, c.name AS Developer
+        FROM dbo.enterprise p
+        LEFT JOIN dbo.ProjectTypeMaster pt ON pt.Id = p.project_type_id
+        LEFT JOIN dbo.enterprise c ON c.id = p.company_id AND c.business_type = 'C'
+        WHERE p.id = @pid AND p.business_type = 'P'`),
     ]);
 
-    res.json({
+    // Whether each instalment is actually paid. Money is held On Account until the full price is in (crmOnAccountCoverage),
+    // so a paid instalment can still say Status = 'Pending'. Its money stage is the truth — the same one the staff
+    // screens and the money statement use: Covered = paid (settled, or covered by verified money held for it);
+    // Verifying = paid, being checked; Outstanding = what is genuinely still to pay on it.
+    const stageOf = new Map((await getMilestoneMoneyStages(pool, bk.Id)).milestones.map((m) => [m.Id, m]));
+    const paymentMilestones = milestones.recordset.map((m) => {
+      const st = stageOf.get(m.Id) || {};
+      const stage = st.MoneyStage ?? null;
+      return {
+        ...m, MoneyStage: stage,
+        Covered: ["Adjusted", "Verified", "Waived"].includes(stage),
+        Verifying: ["InVerification", "Recorded"].includes(stage),
+        Outstanding: stage === "Waived" ? 0 : Math.max(0, Math.round((Number(m.AmountDue || 0) - Number(m.AmountPaid || 0) - Number(st.HeldOnAccount || 0)) * 100) / 100),
+      };
+    });
+    return {
       booking: bk,
       welcomeCall: welcomeCall.recordset[0] || null,
       customerDetails: customerDetails.recordset[0] || null,
       agreement: agreement.recordset[0] || null,
-      paymentMilestones: milestones.recordset,
+      paymentMilestones,
       onAccountTotalReceived: Number(onAccountTotal.recordset[0]?.Total) || 0,
       salesDeed: deed.recordset[0] || null,
       handover: handover.recordset[0] || null,
       possessionNotice: possessionNotice.recordset[0] || null,
+      // The purchase, step by step — one list for the app and the web portal (customerJourney below).
+      journey: customerJourney({
+        booking: bk, welcomeCall: welcomeCall.recordset[0], agreement: agreement.recordset[0], milestones: paymentMilestones,
+        salesDeed: deed.recordset[0], queryPayment: queryPayment.recordset[0], registry: registry.recordset[0], handover: handover.recordset[0],
+        handoverFirst: (await getProjectSaleGate(pool, bk.Id).catch(() => ({}))).requiresHandoverBeforeDeed === true,
+      }),
       // The buyer's own unit as the site records it (DPR), with its tower and project for context.
-      constructionProgress: bk.ProjectId
+      constructionProgress: bk.ProjectId && !lite
         ? await require("./crmConstructionUpdates").unitProgress(pool, { projectId: bk.ProjectId, unitId: bk.UnitId, blockId: bk.BlockId }).catch((e) => {
           console.error("[crm-portal] construction progress error:", e.message);
           return null;
         })
         : null,
+      siteNotes: bk.ProjectId && !lite ? await require("./crmConstructionUpdates").buyerNotes(pool, bk.ProjectId) : [],
+      // Photos from site of their own unit and shared work on their tower / project (the file opens via /site-photos/:id)
+      sitePhotos: bk.ProjectId && !lite
+        ? await require("./crmConstructionUpdates").buyerPhotos(pool, { projectId: bk.ProjectId, blockId: bk.BlockId, unitId: bk.UnitId }).catch((e) => {
+          console.error("[crm-portal] site photos error:", e.message);
+          return [];
+        })
+        : [],
+      // What the home is, and each plot, as ready-to-show facts — built once here for the app and the web portal.
+      homeFacts: homeFacts(bk),
+      project: projectView(project.recordset[0]),
+      plots: plots.recordset.map((p) => ({ ...p, facts: plotFacts(p) })),
+      snags: snags.recordset,
       holds: holds.recordset,
       // Customer-facing framing of internal process trackers — raw step
       // names (DocCollection/LegalReview/etc) and NOC bank details are never
@@ -554,9 +784,20 @@ router.get("/timeline", async (req, res) => {
       queryPayment: queryPayment.recordset[0] || null,
       registry: registry.recordset[0] || null,
       prePossession: prePossession.recordset[0]
-        ? { status: prePossession.recordset[0].Status, scheduledDate: prePossession.recordset[0].ScheduledInspectionDate }
+        ? (({ Status, ScheduledInspectionDate, InspectionCompletedDate, DuesClearedCheck, DocumentationCheck, QualityInspectionCheck, UtilityReadinessCheck }) => ({
+          status: Status, scheduledDate: ScheduledInspectionDate, completedDate: InspectionCompletedDate,
+          checks: { duesCleared: !!DuesClearedCheck, documentation: !!DocumentationCheck, quality: !!QualityInspectionCheck, utilities: !!UtilityReadinessCheck },
+        }))(prePossession.recordset[0])
         : null,
-    });
+    };
+}
+
+router.get("/timeline", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    res.json(await loadTimeline(pool, appId));
   } catch (e) {
     console.error("[crm-portal] GET /timeline error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -593,6 +834,15 @@ const pdfRateLimiter = rateLimit({
   max: 20,
   keyGenerator: (req) => `pdf:portal:${req.portalUser?.portalUserId || req.ip}`,
   message: { error: "Too many PDF requests — please wait a moment before downloading more" },
+  validate: false,
+});
+
+// Site photos load as a grid, so they get their own, larger allowance (not the PDF one).
+const photoRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 150,
+  keyGenerator: (req) => `photo:portal:${req.portalUser?.portalUserId || req.ip}`,
+  message: { error: "Too many photo requests — please wait a moment" },
   validate: false,
 });
 
@@ -650,6 +900,131 @@ router.get("/receipts", async (req, res) => {
   }
 });
 
+// ─── GET /money — the whole money picture of one property, for the customer ─────────────────────────────────────────
+// Transparent by construction: every figure comes from the same place the staff screens read it, never re-derived here.
+//   price    — how the total price is made up: the same sum crmGst.js saleTotals stores as GrandTotal (home price + GST on
+//              the home + parking incl. GST + extra charges incl. GST − credit notes), itemised; any legacy difference is
+//              shown as its own line so the lines always add up to the total.
+//   plan     — each instalment with the money against it and its stage (crmOnAccountCoverage getMilestoneMoneyStages).
+//   payments — every payment, from when it was entered to where it sits now (getBookingMoneyTrail): counted, waiting to
+//              be matched, being verified, refunded, moved, bounced. Only the customer's own receipt number is shown, and
+//              only an approved receipt can be opened.
+const { getMilestoneMoneyStages, getBookingMoneyTrail } = require("../services/crmOnAccountCoverage");
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+router.get("/money", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const bk = (await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT b.Id, b.BookingNo, b.Status, b.TotalValue, ISNULL(b.UnitGstAmount, 0) AS UnitGstAmount,
+             ISNULL(b.ParkingTotal, 0) AS ParkingTotal, ISNULL(b.ParkingGstAmount, 0) AS ParkingGstAmount,
+             ISNULL(b.ExtraChargesTotal, 0) AS ExtraChargesTotal, ISNULL(b.ExtraWorkGstAmount, 0) AS ExtraWorkGstAmount,
+             ISNULL(b.CreditNoteTotal, 0) AS CreditNoteTotal, ISNULL(b.TotalGstAmount, 0) AS TotalGstAmount, b.GrandTotal,
+             b.AreaSqFt, b.RatePerSqFt, b.UnitParkingGstRate,
+             CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale
+      FROM dbo.CrmBooking b WHERE b.ApplicationId = @aid AND b.IsActive = 1`)).recordset[0];
+    if (!bk) return res.json({ booking: null });
+    const bid = () => pool.request().input("bid", sql.Int, bk.Id);
+    const [extras, parking, dates, approved, stages, trail, exemption, landSplit, plotShares] = await Promise.all([
+      bid().query("SELECT Description, Amount, GstAmount, TotalAmount FROM dbo.CrmExtraCharge WHERE BookingId = @bid AND IsActive = 1 ORDER BY Id"),
+      bid().query("SELECT ParkingSlotNo, Quantity, RateSnapshot, GstAmount, TotalAmount FROM dbo.CrmParkingAllotment WHERE BookingId = @bid AND IsActive = 1 ORDER BY Id"),
+      bid().query("SELECT Id, DueDate, DemandStatus FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid"),
+      bid().query("SELECT Id FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status = 'Approved'"),
+      getMilestoneMoneyStages(pool, bk.Id),
+      getBookingMoneyTrail(pool, bk.Id),
+      // Why a booking carries no GST, when it carries none — the same rules crmGst.js recalculateBookingGst applies.
+      require("../services/crmGst").checkGstExemption(pool, bk.Id),
+      require("../services/projectType").getBookingLandSplit(pool, bk.Id, bk.TotalValue),
+      bid().query(`SELECT pm.PlotNo, pm.PlotName, bp.AreaSqFt, bp.RatePerSqFt, bp.PremiumAmount, bp.AllocatedValue
+                   FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster pm ON pm.Id = bp.PlotId
+                   WHERE bp.BookingId = @bid AND bp.Status = N'${CrmStatus.ACTIVE}' ORDER BY bp.IsPrimary DESC, bp.Id`),
+    ]);
+
+    const lines = [
+      { key: "home", amount: r2(bk.TotalValue) },
+      { key: "homeGst", amount: r2(bk.UnitGstAmount) },
+      ...parking.recordset.map((x) => ({ key: "parking", label: x.ParkingSlotNo, quantity: x.Quantity, amount: r2(x.TotalAmount), gst: r2(x.GstAmount) })),
+      ...extras.recordset.map((x) => ({ key: "extra", label: x.Description, amount: r2(x.TotalAmount), gst: r2(x.GstAmount) })),
+      { key: "creditNotes", amount: -r2(bk.CreditNoteTotal) },
+    ];
+    // Parking / extra charges whose rows are gone but whose totals remain (old bookings) still add up, as one line each.
+    const sumOf = (k) => r2(lines.filter((l) => l.key === k).reduce((n, l) => n + l.amount, 0));
+    if (r2(bk.ParkingTotal) !== sumOf("parking")) lines.push({ key: "parking", label: null, amount: r2(bk.ParkingTotal - sumOf("parking")), gst: null });
+    if (r2(bk.ExtraChargesTotal) !== sumOf("extra")) lines.push({ key: "extra", label: null, amount: r2(bk.ExtraChargesTotal - sumOf("extra")), gst: null });
+    const shown = r2(lines.reduce((n, l) => n + l.amount, 0));
+    if (r2(bk.GrandTotal) !== shown) lines.push({ key: "other", amount: r2(bk.GrandTotal - shown) });
+
+    const dateOf = new Map(dates.recordset.map((d) => [d.Id, d]));
+    const instalments = stages.milestones.map((m) => ({
+      no: m.MilestoneNo, name: m.MilestoneName, due: r2(m.AmountDue), dueDate: dateOf.get(m.Id)?.DueDate || null,
+      demanded: (dateOf.get(m.Id)?.DemandStatus || "Pending") !== "Pending", waived: m.Status === "Waived",
+      settled: r2(m.AmountPaid), held: r2(m.HeldOnAccount), verifying: r2((m.WithFinanceCover || 0) + (m.RecordedCover || 0)),
+      stage: m.MoneyStage,
+    }));
+    const planTotal = r2(instalments.filter((m) => !m.waived).reduce((n, m) => n + m.due, 0));
+    const waived = r2(instalments.filter((m) => m.waived).reduce((n, m) => n + m.due - m.settled, 0));
+
+    const ok = new Set(approved.recordset.map((x) => x.Id));
+    const payments = trail.rows.map((x) => ({
+      date: x.date, mode: x.mode, ref: x.ref, amount: r2(x.amount), stage: x.stage,
+      // How they paid (from their Money Receipt) and which instalment it was paid against
+      chequeNo: x.chequeNo, chequeDate: x.chequeDate, bankName: x.bankName, txnRef: x.txnRef, milestone: x.milestone || null,
+      status: paymentStatus(x),
+      // Every detail of how they paid, ready to show (built once here for the app and the web portal; only what is recorded)
+      details: keepShown([
+        ["Amount", inr(x.amount)],
+        ["Date", x.date ? day(x.date) : null],
+        ["Paid by", x.mode],
+        ["Cheque / DD no.", x.chequeNo],
+        ["Cheque date", x.chequeDate ? day(x.chequeDate) : null],
+        ["Drawn on (your bank)", x.bankName],
+        ["Transaction ref / UTR", x.txnRef || (!x.chequeNo ? x.ref : null)],
+        ["Paid towards", x.milestone],
+        ["Receipt no.", x.receiptNo],
+      ]),
+      receiptNo: x.receiptNo, receiptId: x.receiptId && ok.has(x.receiptId) ? x.receiptId : null,
+      settled: r2(x.settled), held: r2(x.held), refunded: r2(x.refunded), movedOut: r2(x.otherOut),
+      // Only a bounce reason is the customer's to read; other notes are staff remarks.
+      note: x.stage === "bounced" ? x.note : null,
+    }));
+    const t = trail.totals;
+    const paid = r2(t.settled + t.held);
+    res.json({
+      // Closed: the booking ended (DEAD_BOOKING_STATUSES) — nothing is owed; the question is where the money went.
+      booking: { BookingNo: bk.BookingNo, Status: bk.Status, IsPlotSale: !!bk.IsPlotSale, Closed: DEAD_BOOKING_STATUSES.includes(bk.Status) },
+      price: {
+        lines: lines.filter((l) => l.amount !== 0 || l.key === "home" || l.key === "homeGst")
+          .map((l) => ({ ...l, ...priceLineText(l, { plot: !!bk.IsPlotSale, area: bk.AreaSqFt, rate: bk.RatePerSqFt, base: bk.TotalValue, gstRate: bk.UnitParkingGstRate,
+            noGst: exemption.exempt ? { why: "completed", certDate: exemption.certDate } : landSplit.isPureLand ? { why: "land" } : null }) }))
+          // A plot sale of several plots: each plot's share of the price, under the price line (they add up to it)
+          .map((l) => (l.key === "home" && plotShares.recordset.length > 1
+            ? { ...l, parts: plotShares.recordset.map((p) => ({
+              title: `Plot ${p.PlotName || p.PlotNo}`,
+              note: [Number(p.AreaSqFt) > 0 ? `${Number(p.AreaSqFt).toLocaleString("en-IN")} sq ft` : null,
+                Number(p.RatePerSqFt) > 0 ? `at ${inr(p.RatePerSqFt)} per sq ft` : null,
+                Number(p.PremiumAmount) > 0 ? `incl. ${inr(p.PremiumAmount)} premium` : null].filter(Boolean).join(" ") || null,
+              amount: r2(p.AllocatedValue),
+            })) }
+            : l)),
+        total: r2(bk.GrandTotal), gstIncluded: r2(bk.TotalGstAmount),
+      },
+      plan: { instalments, total: planTotal, waived },
+      payments,
+      totals: {
+        paid, received: r2(t.received), settled: r2(t.settled), held: r2(t.held), verifying: r2(t.finance + t.recorded),
+        refunded: r2(t.refunded), movedOut: r2(t.otherOut),
+        balance: r2(Math.max(0, planTotal - paid)), extra: r2(Math.max(0, paid - planTotal)),
+        // Paid beyond the price itself — e.g. a credit note lowered the price after the plan was paid in full.
+        overPrice: r2(Math.max(0, paid - r2(bk.GrandTotal))),
+      },
+    });
+  } catch (e) {
+    console.error("[crm-portal] GET /money error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 // GET /receipts/:receiptId/pdf — scoped to receipts on a booking belonging to
 // THIS logged-in customer only (same ownership check as /invoices/:id/pdf).
 router.get("/receipts/:receiptId/pdf", pdfRateLimiter, async (req, res) => {
@@ -681,11 +1056,8 @@ router.get("/receipts/:receiptId/pdf", pdfRateLimiter, async (req, res) => {
 });
 
 // GET /agreement — requires ?applicationId=
-router.get("/agreement", async (req, res) => {
-  try {
-    const pool = getPool();
-    const appId = await resolveAndAssertApplication(pool, req, res);
-    if (appId === null) return;
+/** The agreement shared with the customer for this application (null until one is sent). */
+async function loadAgreement(pool, appId) {
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT ag.Id, ag.AgreementNo, ag.Status, ag.AgreementDate, ag.LegalName, ag.LegalAddress,
              CASE WHEN LEN(ag.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(ag.PanNo) - 4), RIGHT(ag.PanNo, 4)) ELSE ag.PanNo END AS PanNo,
@@ -695,6 +1067,8 @@ router.get("/agreement", async (req, res) => {
              ag.CustomerApprovalStatus, ag.CustomerApprovedAt, ag.RecheckCount,
              ag.ProposedDate, ag.ProposedDateStatus, ag.DateApprovalStatus,
              ag.SentToCustomerAt, ag.LastRecheckRemarks,
+             -- Signed (Executed) and registered: the registration staff record (crmAgreements.js mark-registered)
+             ag.AfsRegistrationNo, ag.AfsRegistrationDate, ag.AfsStampDuty, ag.AfsRegistrationFee,
              b.BookingNo,
              COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
              COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
@@ -704,8 +1078,15 @@ router.get("/agreement", async (req, res) => {
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
     `);
+    return result.recordset[0] || null;
+}
+router.get("/agreement", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
     // Not having an agreement shared yet is a normal, expected state — 200 + null.
-    res.json(result.recordset[0] || null);
+    res.json(await loadAgreement(pool, appId));
   } catch (e) {
     console.error("[crm-portal] GET /agreement error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -713,11 +1094,8 @@ router.get("/agreement", async (req, res) => {
 });
 
 // GET /agreement/documents — requires ?applicationId=
-router.get("/agreement/documents", async (req, res) => {
-  try {
-    const pool = getPool();
-    const appId = await resolveAndAssertApplication(pool, req, res);
-    if (appId === null) return;
+/** The agreement papers the customer can see for this application. */
+async function loadAgreementDocuments(pool, appId) {
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT d.Id, d.DocumentType, d.Label, d.IsMandatory, d.UploadedByType,
              d.FileName, d.FileSize, d.MimeType, d.Status, d.Remarks, d.VersionNo,
@@ -734,7 +1112,14 @@ router.get("/agreement/documents", async (req, res) => {
       WHERE b.ApplicationId = @aid AND (ag.SentToCustomerAt IS NOT NULL OR d.DocumentType = 'IdentityProof')
       ORDER BY d.CreatedAt DESC
     `);
-    res.json(result.recordset);
+    return result.recordset;
+}
+router.get("/agreement/documents", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    res.json(await loadAgreementDocuments(pool, appId));
   } catch (e) {
     console.error("[crm-portal] GET /agreement/documents error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -1589,7 +1974,7 @@ router.get("/tickets", async (req, res) => {
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT t.Id, t.TicketNo, t.Category, t.Priority, t.Subject, t.Description,
              t.Status, t.ResolvedAt, t.ResolutionNotes, t.CustomerRating, t.CustomerFeedback,
-             t.RaisedByCustomer, t.CreatedAt
+             t.RaisedByCustomer, t.CreatedAt, t.SlaDueDate
       FROM dbo.CrmServiceTicket t
       JOIN dbo.CrmBooking b ON b.Id = t.BookingId
       WHERE b.ApplicationId = @aid AND b.IsActive = 1 AND b.Status <> 'Cancelled'
@@ -1654,6 +2039,93 @@ router.post("/tickets", async (req, res) => {
   }
 });
 
+// PUT /tickets/:ticketId/feedback — the customer rates how a resolved request was handled (1–5, optional comment).
+// Only on their own request, once it is Resolved or Closed; it can be changed. Staff still close it (crmServiceTickets
+// /:id/close keeps a rating already given — ISNULL(@rate, CustomerRating)).
+router.put("/tickets/:ticketId/feedback", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const ticketId = parseId(req.params.ticketId);
+    if (ticketId === null) return res.status(400).json({ error: "Invalid request" });
+    const rating = Number(req.body?.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: "Choose a rating from 1 to 5" });
+    const feedback = String(req.body?.feedback || "").trim() || null;
+    const t = (await pool.request().input("id", sql.Int, ticketId).input("aid", sql.Int, appId).query(`
+      SELECT t.Id, t.Status, t.TicketNo, t.Subject, t.BookingId FROM dbo.CrmServiceTicket t JOIN dbo.CrmBooking b ON b.Id = t.BookingId
+      WHERE t.Id = @id AND b.ApplicationId = @aid`)).recordset[0];
+    if (!t) return res.status(404).json({ error: "Request not found" });
+    if (![CrmStatus.RESOLVED, CrmStatus.CLOSED].includes(t.Status)) return res.status(400).json({ error: "You can rate a request once it is resolved" });
+    await pool.request().input("id", sql.Int, ticketId).input("rate", sql.Int, rating).input("fb", sql.NVarChar(sql.MAX), feedback)
+      .query("UPDATE dbo.CrmServiceTicket SET CustomerRating = @rate, CustomerFeedback = @fb, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    await logCommunication(pool, {
+      bookingId: t.BookingId, direction: "Inbound",
+      subject: `Support request rated — ${t.TicketNo}`,
+      summary: `${rating}/5${feedback ? `: ${feedback}` : ""} (${t.Subject})`,
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-portal] PUT /tickets/:ticketId/feedback error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /tickets/:ticketId/reopen — the customer says a resolved request isn't fixed: it reopens with their reason
+// (the same rule staff use, crmServiceTickets reopenTicket) and the person handling it is told.
+router.put("/tickets/:ticketId/reopen", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const ticketId = parseId(req.params.ticketId);
+    if (ticketId === null) return res.status(400).json({ error: "Invalid request" });
+    const reason = String(req.body?.reason || "").trim();
+    if (!reason) return res.status(400).json({ error: "Tell us what is still wrong" });
+    const t = (await pool.request().input("id", sql.Int, ticketId).input("aid", sql.Int, appId).query(`
+      SELECT t.Id, t.TicketNo, t.Subject, t.BookingId, t.AssignedTo, b.AssignedTo AS BookingOwner, b.BookingNo
+      FROM dbo.CrmServiceTicket t JOIN dbo.CrmBooking b ON b.Id = t.BookingId
+      WHERE t.Id = @id AND b.ApplicationId = @aid`)).recordset[0];
+    if (!t) return res.status(404).json({ error: "Request not found" });
+    const err = await require("./crmServiceTickets").reopenTicket(pool, ticketId, `Reopened by the customer: ${reason}`, null);
+    if (err) return res.status(400).json({ error: err });
+    const notifyTo = t.AssignedTo || t.BookingOwner;
+    if (notifyTo) {
+      await emitNotification(pool, notifyTo, "service_ticket_reopened_by_customer", "Customer Reopened a Ticket",
+        `${t.TicketNo}: ${t.Subject} (${t.BookingNo}) — ${reason}`, ticketId, "service_ticket");
+    }
+    await logCommunication(pool, { bookingId: t.BookingId, direction: "Inbound", subject: `Support request reopened — ${t.TicketNo}`, summary: reason });
+    res.json({ success: true, status: "Reopened" });
+  } catch (e) {
+    console.error("[crm-portal] PUT /tickets/:ticketId/reopen error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /site-photos/:photoId — one site photo, only if it is of the customer's own unit or shared work on their
+// tower / project (crmConstructionUpdates buyerPhotoFile holds the rule).
+router.get("/site-photos/:photoId", photoRateLimiter, async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const photoId = parseId(req.params.photoId);
+    if (photoId === null) return res.status(400).json({ error: "Invalid photo" });
+    const t = await loadTimeline(pool, appId, { lite: true });
+    if (!t.booking?.ProjectId) return res.status(404).json({ error: "Photo not found" });
+    const f = await require("./crmConstructionUpdates").buyerPhotoFile(pool, photoId,
+      { projectId: t.booking.ProjectId, blockId: t.booking.BlockId, unitId: t.booking.UnitId });
+    if (!f) return res.status(404).json({ error: "Photo not found" });
+    res.setHeader("Content-Type", f.MimeType || "image/jpeg");
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.setHeader("Content-Disposition", `inline; filename="${String(f.FileName || "site-photo.jpg").replace(/"/g, "")}"`);
+    res.send(Buffer.isBuffer(f.FileData) ? f.FileData : Buffer.from(String(f.FileData || ""), "base64"));
+  } catch (e) {
+    console.error("[crm-portal] GET /site-photos/:photoId error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 // Only these CrmAgreementApprovalLog actions are safe to show a customer —
 // everything else (SeniorApprove/SeniorReject, internal review) is staff-only.
 const CUSTOMER_VISIBLE_LOG_ACTIONS = [
@@ -1662,13 +2134,68 @@ const CUSTOMER_VISIBLE_LOG_ACTIONS = [
 ];
 
 // GET /activity — chronological feed for one application. Requires ?applicationId=
+// ─── Maintenance & electricity bills — the customer's own (read-only) ────────
+// The same queries as the staff Maintenance screens (maintenanceBill.js LIST_SELECT, electricityMaintenance.js
+// BILL_SELECT), limited to bills billed to this application: a bill raised before a resale stays the old owner's
+// (BillToApplicationId, migration 563). Electricity bills show once staff have verified them.
+router.get("/maintenance-bills", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const { LIST_SELECT } = require("./maintenanceBill");
+    const bills = (await pool.request().input("aid", sql.Int, appId)
+      .query(`${LIST_SELECT} WHERE a.Id = @aid AND b.Status <> N'Cancelled' ORDER BY b.BillDate DESC, b.Id DESC`)).recordset;
+    res.json(bills);
+  } catch (e) {
+    console.error("[crm-portal] GET /maintenance-bills error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+router.get("/maintenance-bills/:billId", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const billId = parseId(req.params.billId);
+    if (billId === null) return res.status(400).json({ error: "Invalid bill" });
+    const { LIST_SELECT } = require("./maintenanceBill");
+    const bill = (await pool.request().input("aid", sql.Int, appId).input("id", sql.Int, billId)
+      .query(`${LIST_SELECT} WHERE a.Id = @aid AND b.Id = @id AND b.Status <> N'Cancelled'`)).recordset[0];
+    if (!bill) return res.status(404).json({ error: "Bill not found" });
+    const items = (await pool.request().input("id", sql.Int, billId).query(`
+      SELECT Id, ChargeHeadName, HsnCode, Rate, TaxPct, TaxAmount, TotalAmount FROM dbo.MaintenanceBillItem WHERE BillId = @id ORDER BY Id`)).recordset;
+    res.json({ ...bill, items });
+  } catch (e) {
+    console.error("[crm-portal] GET /maintenance-bills/:billId error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+router.get("/electricity-bills", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const { BILL_SELECT } = require("./electricityMaintenance");
+    const bills = (await pool.request().input("aid", sql.Int, appId)
+      .query(`${BILL_SELECT} WHERE capp.Id = @aid AND b.BillStatus IN (N'Verified', N'AddedToCustomerBill')
+              ORDER BY b.BillingPeriodTo DESC, b.Id DESC`)).recordset;
+    res.json(bills);
+  } catch (e) {
+    console.error("[crm-portal] GET /electricity-bills error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 router.get("/activity", async (req, res) => {
   try {
     const pool = getPool();
     const appId = await resolveAndAssertApplication(pool, req, res);
     if (appId === null) return;
 
-    const [agreementLog, payments, documents, tickets, salesDeed, queryPayment, qpProofs, registry, nocs] = await Promise.all([
+    const [agreementLog, payments, documents, tickets, salesDeed, queryPayment, qpProofs, registry, nocs, agreementState] = await Promise.all([
       pool.request().input("aid", sql.Int, appId)
         .query(`
           SELECT l.Action, l.Remarks, l.CreatedAt, ag.AgreementNo
@@ -1740,6 +2267,12 @@ router.get("/activity", async (req, res) => {
         JOIN dbo.CrmBooking b ON b.Id = n.BookingId
         WHERE b.ApplicationId = @aid AND n.IssuedDate IS NOT NULL
       `),
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT TOP 1 ag.AgreementNo, ag.Status, ag.AgreementDate, ag.AfsRegistrationNo, ag.AfsRegistrationDate, ag.UpdatedAt
+        FROM dbo.CrmAgreement ag JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+        WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
+        ORDER BY ag.Id DESC
+      `),
     ]);
 
     const feed = [];
@@ -1756,6 +2289,22 @@ router.get("/activity", async (req, res) => {
       if (!fn) continue;
       const { title, detail } = fn(r);
       feed.push({ type: "agreement", title, detail, at: r.CreatedAt });
+    }
+    // Signed and registered have no customer-facing log row — read from the agreement itself, so an agreement that
+    // reached them before this existed shows them too. Signing is on the agreed date; registration on its own date.
+    const agS = agreementState.recordset[0];
+    // Those dates carry no time (midnight). When the agreement was last updated that same day, that is when it was
+    // recorded — use it, so the event sorts after what happened earlier that day, not under it.
+    const sameDay = (d, t) => d && t && day(d) === day(t);
+    const when = (d, t) => (sameDay(d, t) ? new Date(t) : d || t);
+    if (agS && [CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agS.Status)) {
+      const at = when(agS.AgreementDate, agS.UpdatedAt);
+      // Signed comes just before registered when both were recorded at the same moment.
+      feed.push({ type: "agreement", title: "Agreement signed", detail: agS.AgreementNo, at: at instanceof Date ? new Date(at.getTime() - 1000) : at });
+    }
+    if (agS && agS.Status === CrmStatus.REGISTERED) {
+      feed.push({ type: "agreement", title: "Agreement registered", detail: [agS.AgreementNo, agS.AfsRegistrationNo ? `Reg. no. ${agS.AfsRegistrationNo}` : null].filter(Boolean).join(" · "),
+        at: when(agS.AfsRegistrationDate, agS.UpdatedAt) });
     }
     for (const r of payments.recordset) {
       feed.push({ type: "payment", title: `Payment received — ${r.MilestoneName}`, detail: `₹${Number(r.Amount).toLocaleString("en-IN")}${r.PaymentMode ? ` via ${r.PaymentMode}` : ""}`, at: r.CreatedAt });
@@ -1842,13 +2391,22 @@ function portalView(st, role) {
   const payer = !!pay && (pay.PayableBy === role || pay.PayableBy === "Shared");
   // What is waiting on this customer right now (the portal's menu badge).
   const papersOpen = ["Draft", "UnderReview"].includes(d.Status);
-  const todo = st.documents.filter((x) => x.Party === role && papersOpen && ["Requested", "Rejected"].includes(x.Status)).length
-    + (d.Status === "WithParties" && d[`${role}Approval`] === "Pending" ? 1 : 0)
-    + (d.Status === "PartiesApproved" && (!d.ProposedDate || !d[`${role}DateAccepted`]) ? 1 : 0)
-    + (payer && pay.Status === "InfoSent" ? 1 : 0);
+  const papers = st.documents.filter((x) => x.Party === role && papersOpen && ["Requested", "Rejected"].includes(x.Status));
+  const approve = d.Status === "WithParties" && d[`${role}Approval`] === "Pending";
+  const date = d.Status === "PartiesApproved" && (!d.ProposedDate || !d[`${role}DateAccepted`]);
+  const duty = payer && pay.Status === "InfoSent";
+  const todo = papers.length + [approve, date, duty].filter(Boolean).length;
+  // The same items in the customer's words, for the mobile app's "Please do this next".
+  const asks = [
+    papers.length ? `Upload ${papers.length === 1 ? "1 document" : `${papers.length} documents`}: ${papers.map((x) => x.Label || x.DocumentType).join(", ")}` : null,
+    approve ? "Read the deed draft and approve it" : null,
+    date ? (d.ProposedDate ? "Accept the proposed signing date or suggest another" : "Suggest a date to sign the deed") : null,
+    duty ? "Pay the stamp duty and upload the payment proof" : null,
+  ].filter(Boolean);
   return {
     role,
     todo,
+    asks,
     deed: {
       Id: d.Id, DeedNo: d.DeedNo, DeedType: d.DeedType, Property: d.Property, BookingNo: d.BookingNo, Status: d.Status, StatusLabel: d.StatusLabel,
       SellerName: d.SellerName, BuyerName: d.DeedType === "Assignment" ? d.BuyerName : null, VersionNo: d.VersionNo,
@@ -1893,10 +2451,8 @@ const deedUpload = (fn, where) => (req, res) => portalDocUpload.single("file")(r
   return deedAction(fn, where)(req, res);
 });
 
-router.get("/transfer-deeds", async (req, res) => {
-  try {
-    const pool = getPool();
-    const cid = Number(req.portalUser.customerId);
+/** Every live transfer deed the customer is a party to, each as their side sees it (portalView). */
+async function loadTransferDeeds(pool, cid) {
     const rows = (await pool.request().input("c", sql.Int, cid).query(`
       SELECT d.Id FROM dbo.CrmTransferDeed d JOIN dbo.CrmUnitResale r ON r.Id = d.ResaleId
       WHERE d.IsActive = 1 AND d.Status <> N'Cancelled'
@@ -1907,8 +2463,93 @@ router.get("/transfer-deeds", async (req, res) => {
       const st = await deedSvc.deedState(pool, r.Id);
       out.push(portalView(st, Number(st.deed.SellerCustomerId) === cid ? "Seller" : "Buyer"));
     }
-    res.json(out);
+    return out;
+}
+router.get("/transfer-deeds", async (req, res) => {
+  try {
+    res.json(await loadTransferDeeds(getPool(), Number(req.portalUser.customerId)));
   } catch (e) { deedFail(res, e, "GET /transfer-deeds"); }
+});
+
+// ─── What is waiting on the customer — the ONE set of rules ─────────────────
+// The web portal's "Needs Your Action" and the mobile app's "Up next" both read this; neither keeps its own copy.
+// Each item: kind (what it is), label + sub (the customer's words), target (which page takes the action:
+// documents | payments | construction | transferDeed), urgent (blocks progress), applicationId (whose it is).
+const { inr, day } = require("../services/pushNotifications");
+function needsYou({ applicationId, timeline: t, agreement, documents, deeds }) {
+  const out = [];
+  const add = (kind, label, sub, target, urgent = false) => out.push({ applicationId, kind, label, sub, target, urgent });
+  if (agreement?.SentToCustomerAt && agreement.CustomerApprovalStatus === "Pending") {
+    add("agreementReview", "Your agreement is waiting for your review", `${agreement.AgreementNo || ""} — approve or request a recheck`, "documents");
+  }
+  const mandatory = (documents || []).filter((d) => (d.Status === "Requested" || d.Status === CrmStatus.REJECTED) && d.IsMandatory);
+  if (mandatory.length) {
+    add("documentsNeeded", `${mandatory.length} required document${mandatory.length > 1 ? "s" : ""} needed`, mandatory.map((d) => d.Label || d.DocumentType).join(", "), "documents", true);
+  }
+  if (agreement?.CustomerApprovalStatus === CrmStatus.APPROVED && !agreement.AgreementDate && agreement.DateApprovalStatus !== "Pending"
+      && agreement.ProposedDateStatus !== "PendingCompanyReview") {
+    const ours = agreement.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW;
+    add("agreementDate", ours ? "Respond to our proposed agreement date" : "Propose an agreement date",
+      ours ? `We proposed ${day(agreement.ProposedDate)} — accept or suggest another` : "Suggest a date that works for you", "documents");
+  }
+  if (t?.salesDeed?.SentToCustomerAt && t.salesDeed.CustomerApprovalStatus === "Pending") {
+    add("salesDeedReview", "Your sales deed is waiting for your review", "Approve or request a recheck", "documents");
+  }
+  if (t?.queryPayment?.Status === "InfoSent") {
+    add("govtPaymentProof", "Government payment proof needed", `${inr(t.queryPayment.RequiredAmount)} — upload your proof once paid`, "documents", true);
+  }
+  if (t?.possessionNotice?.Status === "Sent") {
+    add("possessionNotice", `Possession Notice — ${t.possessionNotice.NoticeNo}`,
+      t.possessionNotice.ResponseDeadline ? `Respond by ${day(t.possessionNotice.ResponseDeadline)}` : "Acknowledge or dispute", "construction");
+  }
+  for (const v of deeds || []) {
+    if (v.todo > 0) {
+      add("transferDeed", `Your transfer deed for ${v.deed.Property} needs you`,
+        v.asks?.length ? v.asks.join(". ") : `${v.deed.DeedNo} — ${v.steps.find((x) => x.state === "current")?.label || v.deed.StatusLabel}`, "transferDeed");
+    }
+  }
+  // Due = not covered by money already paid and not being verified (loadTimeline's money stages — never Status alone,
+  // which stays 'Pending' while paid money is held On Account).
+  const next = (t?.paymentMilestones || []).find((m) => m.Status !== "Waived" && !m.Covered && !m.Verifying && m.Outstanding > 0);
+  if (next) add("paymentDue", `${next.MilestoneName} payment is due`, `${inr(next.Outstanding)}${next.DueDate ? ` · Due ${day(next.DueDate)}` : ""}`, "payments");
+  return out;
+}
+
+/** What needs the customer on one application they are the main applicant on (a co-applicant takes no actions). */
+async function needsYouFor(pool, app, deeds) {
+  if (app.IsCoApplicant || app.Lifecycle === "Past") return [];
+  const [timeline, agreement, documents] = await Promise.all([
+    loadTimeline(pool, app.ApplicationId, { lite: true }), loadAgreement(pool, app.ApplicationId), loadAgreementDocuments(pool, app.ApplicationId),
+  ]);
+  // A transfer deed belongs to people, not an application: it shows against the booking it transfers.
+  const mine = (deeds || []).filter((v) => app.BookingNo && v.deed.BookingNo === app.BookingNo);
+  return needsYou({ applicationId: app.ApplicationId, timeline, agreement, documents, deeds: mine });
+}
+
+// GET /needs-you            — everything waiting on the customer, across all their homes (deeds not tied to a home
+//                             of theirs, e.g. a buyer's, come last with applicationId null).
+// GET /needs-you?applicationId=… — just that property's.
+router.get("/needs-you", async (req, res) => {
+  try {
+    const pool = getPool();
+    const cid = Number(req.portalUser.customerId);
+    if (req.query.applicationId != null) {
+      const appId = await resolveAndAssertApplication(pool, req, res);
+      if (appId === null) return;
+    }
+    const [apps, deeds] = await Promise.all([loadApplications(pool, cid), loadTransferDeeds(pool, cid)]);
+    const wanted = req.query.applicationId != null ? apps.filter((a) => a.ApplicationId === Number(req.query.applicationId)) : apps;
+    const items = (await Promise.all(wanted.map((a) => needsYouFor(pool, a, deeds)))).flat();
+    if (req.query.applicationId == null) {
+      // Deeds already shown against one of their live homes are not repeated.
+      const placed = new Set(apps.filter((a) => !a.IsCoApplicant && a.Lifecycle !== "Past").map((a) => a.BookingNo).filter(Boolean));
+      items.push(...needsYou({ applicationId: null, deeds: deeds.filter((v) => !placed.has(v.deed.BookingNo)) }));
+    }
+    res.json({ items });
+  } catch (e) {
+    console.error("[crm-portal] GET /needs-you error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
 });
 
 router.get("/transfer-deeds/:deedId/documents/:docId/file", async (req, res) => {

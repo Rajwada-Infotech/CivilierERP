@@ -2687,3 +2687,9 @@ html[data-anim-pages="off"] .animate-in { animation: none !important; }
 }
 @container (min-width: 900px) { .legal-g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .legal-span { grid-column: 1 / -1; }
+
+/* Civilier portal shimmer animation */
+@keyframes civ-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

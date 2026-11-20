@@ -1138,3 +1138,5 @@ router.get("/audit-log", requirePageRight(MAIN_PAGE, "view"), async (req, res) =
 });
 
 module.exports = router;
+// The customer portal reads its own bills through the same query (routes/crmPortal.js).
+module.exports.BILL_SELECT = BILL_SELECT;
