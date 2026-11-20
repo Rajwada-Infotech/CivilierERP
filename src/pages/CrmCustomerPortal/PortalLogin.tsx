@@ -9,7 +9,8 @@ import { INK, VIOLET_DEEP, VIOLET, GOLD, PORCELAIN, serif, TEXT_MUTED, TEXT_FAIN
 const API = "/api/crm-portal";
 
 // The customers' own app only — Civilier Home (APK Manager's "maintenance" app), as the app itself checks for updates
-// (GET /api/app-releases/latest, public). Hidden until a build is published there.
+// (GET /api/app-releases/latest, public). Always shown: until a build is published there it says so (an older APK
+// copied to the server by hand is not offered — it may not match today's sign-in).
 const CUSTOMER_APP_KEY = "maintenance";
 interface AppBuild { available: boolean; versionName?: string | null; versionCode?: number; sizeBytes?: number; downloadPath?: string }
 
@@ -21,27 +22,38 @@ function CustomerAppDownload() {
       .then((r) => (r.ok ? r.json() : null)).then((b) => live && setBuild(b)).catch(() => undefined);
     return () => { live = false; };
   }, []);
-  if (!build?.available || !build.downloadPath) return null;
-  const url = `${window.location.origin}${build.downloadPath}`;
-  const facts = [build.versionName ? `Version ${build.versionName}` : null, build.sizeBytes ? `${(build.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : null]
-    .filter(Boolean).join(" · ");
+  const ready = !!build?.available && !!build.downloadPath;
+  const url = ready ? `${window.location.origin}${build!.downloadPath}` : "";
+  const facts = ready ? [build!.versionName ? `Version ${build!.versionName}` : null, build!.sizeBytes ? `${(build!.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : null]
+    .filter(Boolean).join(" · ") : "";
   return (
     <div className="mt-5 rounded-xl p-3.5 flex items-center gap-3.5" style={{ border: `1px solid ${HAIRLINE}`, background: "rgba(124,58,237,0.04)" }}>
       {/* On a computer: a code to scan with the phone. On the phone itself the button downloads it. */}
-      <div className="hidden md:block shrink-0 rounded-lg bg-white p-1.5" style={{ border: `1px solid ${HAIRLINE}` }}>
-        <QRCodeSVG value={url} size={72} />
-      </div>
+      {ready && (
+        <div className="hidden md:block shrink-0 rounded-lg bg-white p-1.5" style={{ border: `1px solid ${HAIRLINE}` }}>
+          <QRCodeSVG value={url} size={72} />
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: TEXT }}>
           <Smartphone size={14} style={{ color: VIOLET }} /> Civilier Home for Android
         </p>
-        <p className="text-[0.6875rem] mt-0.5" style={{ color: TEXT_FAINT }}>
-          <span className="hidden md:inline">Scan with your phone's camera, or download it on your phone. </span>{facts}
-        </p>
-        <a href={build.downloadPath} download className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white hover:opacity-90"
-          style={{ background: VIOLET }}>
-          <Download size={13} /> Download the app
-        </a>
+        {ready && (
+          <p className="text-[0.6875rem] mt-0.5" style={{ color: TEXT_FAINT }}>
+            <span className="hidden md:inline">Scan with your phone's camera, or download it on your phone. </span>{facts}
+          </p>
+        )}
+        {ready ? (
+          <a href={build!.downloadPath} download className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white hover:opacity-90"
+            style={{ background: VIOLET }}>
+            <Download size={13} /> Download the app
+          </a>
+        ) : (
+          <span className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-not-allowed"
+            style={{ background: HAIRLINE, color: TEXT_FAINT }} aria-disabled="true">
+            <Download size={13} /> Not published yet
+          </span>
+        )}
       </div>
     </div>
   );
@@ -73,8 +85,8 @@ function TiltCard({ children }: { children: React.ReactNode }) {
 }
 
 // ── Animated input ────────────────────────────────────────────────────────────
-function AnimatedInput({ label, type, value, onChange, placeholder, children }: {
-  label: string; type: string; value: string;
+function AnimatedInput({ label, type, value, onChange, placeholder, children, autoComplete, name, inputMode }: {
+  label: string; type: string; value: string; autoComplete?: string; name?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   placeholder: string; children?: React.ReactNode;
 }) {
@@ -106,7 +118,7 @@ function AnimatedInput({ label, type, value, onChange, placeholder, children }: 
             exit={{ scaleX: 0, opacity: 0 }} transition={{ duration: 0.3 }} />
         )}
       </AnimatePresence>
-      <input type={type} value={value} onChange={onChange}
+      <input type={type} value={value} onChange={onChange} autoComplete={autoComplete} name={name} inputMode={inputMode}
         placeholder={focused ? placeholder : ""}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
         className="w-full rounded-xl px-4 pt-6 pb-2.5 text-sm outline-none transition-colors"
@@ -342,11 +354,12 @@ export default function PortalLogin() {
                 <motion.form className="space-y-4" onSubmit={handleSubmit}
                   initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4, duration: 0.5 }}>
-                  <AnimatedInput label="Mobile Number" type="tel" value={mobile}
+                  {/* A phone number to the browser, so it never fills a saved staff email in here */}
+                  <AnimatedInput label="Mobile Number" type="tel" value={mobile} autoComplete="tel" name="mobile" inputMode="tel"
                     onChange={(e) => { setMobile(e.target.value); setError(""); }}
                     placeholder="Your registered mobile number" />
 
-                  <AnimatedInput label="Password" type={showPass ? "text" : "password"} value={password}
+                  <AnimatedInput label="Password" type={showPass ? "text" : "password"} value={password} autoComplete="current-password" name="password"
                     onChange={(e) => { setPassword(e.target.value); setError(""); }}
                     placeholder="••••••••">
                     <motion.button type="button" onClick={() => setShowPass(!showPass)}
