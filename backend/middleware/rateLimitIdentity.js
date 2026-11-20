@@ -19,11 +19,21 @@ const jwt = require("jsonwebtoken");
  * It also reports the person to nginx in a response header (X-Auth-User, stripped before it reaches the browser) so
  * the access log can say WHO sent the requests - without it, finding the one tab causing a storm took guesswork.
  */
+// Staff tokens are signed with JWT_SECRET; customer-portal tokens with their own PORTAL_JWT_SECRET (crmPortal.js
+// login) — so both are tried, or every customer would fall back to the shared IP bucket.
+function verifyAny(token) {
+  for (const secret of [process.env.JWT_SECRET, process.env.PORTAL_JWT_SECRET]) {
+    if (!secret) continue;
+    try { return jwt.verify(token, secret); } catch { /* try the next */ }
+  }
+  throw new Error("invalid token");
+}
+
 function attachRateLimitUser(req, res, next) {
   const header = req.headers.authorization || "";
   if (header.startsWith("Bearer ")) {
     try {
-      const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
+      const payload = verifyAny(header.slice(7));
       if (payload && payload.userId != null) {
         req.rateLimitUserId = payload.userId;
         if (res && typeof res.setHeader === "function") res.setHeader("X-Auth-User", `user-${payload.userId}`);

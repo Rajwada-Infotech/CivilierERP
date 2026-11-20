@@ -36,7 +36,10 @@ const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal prio
 const rateLimit = require("../middleware/rateLimiter");
 // Per customer (rateLimiter.js counts the signed-in person): one visit to Civilier Home makes 10-15 requests, so 600 per
 // 15 minutes (~40 a minute) leaves room for real use and still stops scripted scraping.
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600, validate: false, message: { error: "Too many requests, please try again later." } }));
+// Per signed-in customer (rateLimitIdentity.js), not per IP: customers on one office network or one mobile carrier
+// share an address, and keyed by IP they all shared this one allowance.
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600, validate: false, keyGenerator: require("../middleware/rateLimitIdentity").rateLimitKey,
+  message: { error: "Too many requests, please try again later." } }));
 
 // 15-second in-memory cache for portal user active status.
 // Declared at module scope so both the staff admin endpoint and the portal
