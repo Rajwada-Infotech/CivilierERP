@@ -558,6 +558,9 @@ function paymentStatus(x) {
  *   key handover — Completed (a scheduled one is not done). On an under-construction project the handover comes
  *   before the sale deed (crmWorkflowGuards getProjectSaleGate: the deed is prepared after possession).
  */
+/** Every instalment is paid or covered by verified money held (MoneyStage) — the one "payments are done" rule. */
+const instalmentsCovered = (milestones = []) => milestones.length > 0 && milestones.every((m) => m.Covered);
+
 function customerJourney({ booking, welcomeCall, agreement, milestones = [], salesDeed, queryPayment, registry, handover, handoverFirst }) {
   const step = (key, label, hint, done, at) => ({ key, label, hint, done: !!done, at: done ? at || null : null });
   const handoverStep = step("handover", "Key handover", "You receive the keys and move in.",
@@ -571,7 +574,7 @@ function customerJourney({ booking, welcomeCall, agreement, milestones = [], sal
     step("agreementRegistered", "Agreement registered", "The agreement is signed and registered with the government.",
       agreement?.Status === CrmStatus.REGISTERED, agreement?.AfsRegistrationDate),
     step("payments", "Payments", "You pay the instalments as they fall due.",
-      milestones.length > 0 && milestones.every((m) => m.Covered), null),
+      instalmentsCovered(milestones), null),
     ...(handoverFirst ? [handoverStep] : []),
     step("saleDeed", "Sale deed", "You read and approve the final sale deed for your home.",
       salesDeed?.CustomerApprovalStatus === CrmStatus.APPROVED, salesDeed?.CustomerApprovedAt),
@@ -653,7 +656,8 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
                ProposedDate, ProposedDateStatus, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
                AfsRegistrationNo, AfsRegistrationDate,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
-               (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','${CrmStatus.REJECTED}')) AS DocumentsNeedingAction
+               (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','${CrmStatus.REJECTED}')
+                  AND CrmAgreement.Status NOT IN (${AGREEMENT_SIGNED.map((s) => `'${s}'`).join(", ")})) AS DocumentsNeedingAction
         FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL AND Status <> 'Cancelled'
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
@@ -786,7 +790,9 @@ async function loadTimeline(pool, appId, { lite = false } = {}) {
       prePossession: prePossession.recordset[0]
         ? (({ Status, ScheduledInspectionDate, InspectionCompletedDate, DuesClearedCheck, DocumentationCheck, QualityInspectionCheck, UtilityReadinessCheck }) => ({
           status: Status, scheduledDate: ScheduledInspectionDate, completedDate: InspectionCompletedDate,
-          checks: { duesCleared: !!DuesClearedCheck, documentation: !!DocumentationCheck, quality: !!QualityInspectionCheck, utilities: !!UtilityReadinessCheck },
+          // Dues are cleared when staff ticked it, or when every instalment is covered — a fully paid home never reads
+          // "payments pending" here while the money statement says nothing is owed.
+          checks: { duesCleared: !!DuesClearedCheck || instalmentsCovered(paymentMilestones), documentation: !!DocumentationCheck, quality: !!QualityInspectionCheck, utilities: !!UtilityReadinessCheck },
         }))(prePossession.recordset[0])
         : null,
     };
@@ -911,6 +917,9 @@ router.get("/receipts", async (req, res) => {
 //              only an approved receipt can be opened.
 const { getMilestoneMoneyStages, getBookingMoneyTrail } = require("../services/crmOnAccountCoverage");
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+// A payment mode as people read it: stored codes like "CreditNote" / "BankTransfer" become "Credit note" / "Bank
+// transfer"; plain words and abbreviations (NEFT, Cheque) stay as they are.
+const modeText = (m) => (m && /[a-z][A-Z]/.test(m) ? m.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/ ([A-Z])(?=[a-z])/g, (_, c) => ` ${c.toLowerCase()}`) : m);
 router.get("/money", async (req, res) => {
   try {
     const pool = getPool();
@@ -967,7 +976,7 @@ router.get("/money", async (req, res) => {
 
     const ok = new Set(approved.recordset.map((x) => x.Id));
     const payments = trail.rows.map((x) => ({
-      date: x.date, mode: x.mode, ref: x.ref, amount: r2(x.amount), stage: x.stage,
+      date: x.date, mode: modeText(x.mode), ref: x.ref, amount: r2(x.amount), stage: x.stage,
       // How they paid (from their Money Receipt) and which instalment it was paid against
       chequeNo: x.chequeNo, chequeDate: x.chequeDate, bankName: x.bankName, txnRef: x.txnRef, milestone: x.milestone || null,
       status: paymentStatus(x),
@@ -975,7 +984,7 @@ router.get("/money", async (req, res) => {
       details: keepShown([
         ["Amount", inr(x.amount)],
         ["Date", x.date ? day(x.date) : null],
-        ["Paid by", x.mode],
+        ["Paid by", modeText(x.mode)],
         ["Cheque / DD no.", x.chequeNo],
         ["Cheque date", x.chequeDate ? day(x.chequeDate) : null],
         ["Drawn on (your bank)", x.bankName],
@@ -1093,13 +1102,19 @@ router.get("/agreement", async (req, res) => {
   }
 });
 
+// The agreement takes papers from the customer until it is signed: once Executed or Registered, uploads close (the
+// upload route refuses them), so a paper still marked requested is no longer the customer's to send.
+const AGREEMENT_SIGNED = [CrmStatus.EXECUTED, CrmStatus.REGISTERED];
+const agreementTakesUploads = (status) => !AGREEMENT_SIGNED.includes(status);
+
 // GET /agreement/documents — requires ?applicationId=
-/** The agreement papers the customer can see for this application. */
+/** The agreement papers the customer can see for this application. CanUpload: requested (or sent back) and the
+ *  agreement still takes uploads — the one rule the app, the web portal and "needs you" ask by. */
 async function loadAgreementDocuments(pool, appId) {
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT d.Id, d.DocumentType, d.Label, d.IsMandatory, d.UploadedByType,
              d.FileName, d.FileSize, d.MimeType, d.Status, d.Remarks, d.VersionNo,
-             d.RequestedAt, d.UploadedAt, d.CreatedAt
+             d.RequestedAt, d.UploadedAt, d.CreatedAt, ag.Status AS AgreementStatus
       FROM dbo.CrmAgreementDocument d
       JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
@@ -1112,7 +1127,9 @@ async function loadAgreementDocuments(pool, appId) {
       WHERE b.ApplicationId = @aid AND (ag.SentToCustomerAt IS NOT NULL OR d.DocumentType = 'IdentityProof')
       ORDER BY d.CreatedAt DESC
     `);
-    return result.recordset;
+    return result.recordset.map(({ AgreementStatus, ...d }) => ({
+      ...d, CanUpload: agreementTakesUploads(AgreementStatus) && (d.Status === "Requested" || d.Status === CrmStatus.REJECTED),
+    }));
 }
 router.get("/agreement/documents", async (req, res) => {
   try {
@@ -1185,7 +1202,7 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
           FROM dbo.CrmAgreement WITH (UPDLOCK, HOLDLOCK) WHERE Id = @agid
         `)).recordset[0];
         if (!agreement) throw Object.assign(new Error("Agreement not found"), { status: 404 });
-        if ([CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agreement.Status)) {
+        if (!agreementTakesUploads(agreement.Status)) {
           throw Object.assign(new Error(`Cannot upload after the Agreement is ${agreement.Status}`), { status: 409 });
         }
         const doc = (await tx.request().input("did", sql.Int, docId).input("agid", sql.Int, ref.AgreementId).query(`
@@ -2206,14 +2223,15 @@ router.get("/activity", async (req, res) => {
             AND l.Action IN (${CUSTOMER_VISIBLE_LOG_ACTIONS.map((a) => `'${a}'`).join(",")})
           ORDER BY l.CreatedAt DESC
         `),
-      pool.request().input("aid", sql.Int, appId).query(`
-        SELECT r.Amount, r.ReceivedDate, r.PaymentMode, r.CreatedAt, m.MilestoneName
-        FROM dbo.CrmPaymentReceipt r
-        JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
-        JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-        WHERE b.ApplicationId = @aid
-        ORDER BY r.CreatedAt DESC
-      `),
+      // The customer's own payments: the money statement's list (getBookingMoneyTrail, as GET /money shows them) — never
+      // the internal matching of money to instalments, which also holds credit-note adjustments and their reversals.
+      (async () => {
+        const b = (await pool.request().input("aid", sql.Int, appId)
+          .query("SELECT Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset[0];
+        if (!b) return { recordset: [] };
+        const trail = await getBookingMoneyTrail(pool, b.Id);
+        return { recordset: trail.rows.filter((x) => x.stage !== "adjustment" && x.stage !== "returned") };
+      })(),
       pool.request().input("aid", sql.Int, appId).query(`
         SELECT d.DocumentType, d.Label, d.Status, d.Remarks, d.UploadedAt, ISNULL(d.UploadedAt, d.CreatedAt) AS EventAt
         FROM dbo.CrmAgreementDocument d
@@ -2307,7 +2325,9 @@ router.get("/activity", async (req, res) => {
         at: when(agS.AfsRegistrationDate, agS.UpdatedAt) });
     }
     for (const r of payments.recordset) {
-      feed.push({ type: "payment", title: `Payment received — ${r.MilestoneName}`, detail: `₹${Number(r.Amount).toLocaleString("en-IN")}${r.PaymentMode ? ` via ${r.PaymentMode}` : ""}`, at: r.CreatedAt });
+      const status = paymentStatus(r).label;
+      feed.push({ type: "payment", title: r.milestone ? `Payment received — ${r.milestone}` : "Payment received",
+        detail: [`₹${Number(r.amount).toLocaleString("en-IN")}${r.mode ? ` via ${modeText(r.mode)}` : ""}`, status].filter(Boolean).join(" · "), at: r.date });
     }
     for (const r of documents.recordset) {
       const label = r.Label || r.DocumentType?.replace(/([A-Z])/g, " $1").trim();
@@ -2482,7 +2502,7 @@ function needsYou({ applicationId, timeline: t, agreement, documents, deeds }) {
   if (agreement?.SentToCustomerAt && agreement.CustomerApprovalStatus === "Pending") {
     add("agreementReview", "Your agreement is waiting for your review", `${agreement.AgreementNo || ""} — approve or request a recheck`, "documents");
   }
-  const mandatory = (documents || []).filter((d) => (d.Status === "Requested" || d.Status === CrmStatus.REJECTED) && d.IsMandatory);
+  const mandatory = (documents || []).filter((d) => d.CanUpload && d.IsMandatory);
   if (mandatory.length) {
     add("documentsNeeded", `${mandatory.length} required document${mandatory.length > 1 ? "s" : ""} needed`, mandatory.map((d) => d.Label || d.DocumentType).join(", "), "documents", true);
   }

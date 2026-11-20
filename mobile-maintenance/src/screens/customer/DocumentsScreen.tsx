@@ -147,7 +147,8 @@ export default function CustomerDocumentsScreen() {
   if (timeline.error || agreementQ.error) return <Page><ErrorText error={timeline.error || agreementQ.error} /></Page>;
   const ag = agreementQ.data;
   const documents = docsQ.data || [];
-  const needsAction = documents.filter((d) => d.Status === "Requested" || d.Status === "Rejected");
+  // Asked for and still uploadable (the server's CanUpload: closes once the agreement is signed)
+  const needsAction = documents.filter((d) => d.CanUpload);
   const onFile = documents.filter((d) => d.FileName && d.Status !== "Rejected");
   const mandatoryOutstanding = needsAction.filter((d) => d.IsMandatory);
   const sd = t?.salesDeed;
@@ -204,7 +205,9 @@ export default function CustomerDocumentsScreen() {
             <View style={{ gap: 8 }}>
               <Muted>
                 You approved this agreement on {fmtDate(ag.CustomerApprovedAt)}.
-                {ag.Status === "Registered" ? " It is signed and registered — nothing more is needed from you on it."
+                {ag.Status === "Registered" ? (needsAction.length
+                  ? ` It is signed and registered. We still need the document${needsAction.length > 1 ? "s" : ""} below from you.`
+                  : " It is signed and registered — nothing more is needed from you on it.")
                   : ag.Status === "Executed" ? " It is signed; registration with the government comes next — we'll tell you once it's done." : ""}
               </Muted>
               {!ag.AgreementDate && (
