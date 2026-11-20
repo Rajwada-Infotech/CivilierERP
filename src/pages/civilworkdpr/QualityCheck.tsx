@@ -124,10 +124,11 @@ function InspectDialog({
           </div>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-5 gap-y-3">
           {[
             ["Chain", row.alias],
             ["Engineer", row.engineerNames || "—"],
+            ["Quality check by", row.qcNames || "—"],
             ["Start", fmtDate(row.startDate)],
             ["End", fmtDate(row.endDate)],
           ].map(([k, v]) => (
@@ -380,6 +381,7 @@ export default function QualityCheck() {
                   <th className="px-4 py-2.5 text-left">Activity</th>
                   <th className="px-4 py-2.5 text-left">Location</th>
                   <th className="px-4 py-2.5 text-left">Engineer</th>
+                  <th className="px-4 py-2.5 text-left">Quality check by</th>
                   <th className="px-4 py-2.5 text-left">Start date</th>
                   <th className="px-4 py-2.5 text-left">Material</th>
                   <th className="w-28" />
@@ -387,10 +389,10 @@ export default function QualityCheck() {
               </thead>
               <tbody>
                 {isLoading ? (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">Loading…</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">Loading…</td></tr>
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                    <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
                       {projectId || debouncedSearch ? "Nothing waiting for inspection matches these filters." : "Nothing is waiting for inspection right now."}
                     </td>
                   </tr>
@@ -410,6 +412,7 @@ export default function QualityCheck() {
                         {r.projectName ? `${r.projectName} > ` : ""}{r.scopePath}
                       </td>
                       <td className="px-4 py-3 text-xs text-foreground">{r.engineerNames || "—"}</td>
+                      <td className="px-4 py-3 text-xs text-foreground">{r.qcNames || "—"}</td>
                       <td className="px-4 py-3 text-xs text-foreground whitespace-nowrap tabular-nums">{fmtDate(r.startDate)}</td>
                       <td className="px-4 py-3 text-xs">
                         {r.materials.length === 0 ? (
