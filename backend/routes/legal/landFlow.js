@@ -119,8 +119,8 @@ function stages(land, enquiry, x) {
     st("enquiry", "Land Enquiry", enquiry ? "done" : land ? "skipped" : "pending", enquiry?.EnquiryDate, enquiry ? `${enquiry.EnquiryNo} · ${enquiry.EnquiryStatus || ""}` : land ? "Registered directly (no enquiry)" : null),
     st("deed-search", "Deed Registry Search", !searches ? (land ? "skipped" : "pending") : searchesDone === searches ? "done" : "current", null, searches ? `${searchesDone} / ${searches} searches done` : null),
     st("register", "Land Register", land ? "done" : enquiry ? "current" : "pending", land?.CreatedAt, land ? `${land.LandCode} · ${land.EntryType || ""}` : null),
-    st("verification", "Verification (L1 / L2 / Final)", !land ? "pending" : land.FinalVerifiedAt || at >= 1 ? "done" : "current", land?.FinalVerifiedAt || land?.L2ApprovedAt || land?.L1ReviewedAt,
-      land ? `L1 ${land.L1Status || "—"} · L2 ${land.L2Status || "—"}${land.FinalVerifiedAt ? " · Final verified" : ""}` : null),
+    st("verification", "Verification & approval", !land ? "pending" : land.FinalVerifiedAt || at >= 1 ? "done" : "current", land?.FinalVerifiedAt || land?.L2ApprovedAt || land?.L1ReviewedAt,
+      land ? `Approval ${land.L2Status === "Approved" ? "Approved" : land.L1Status || "—"}${land.FinalVerifiedAt ? " · Final verified" : ""}` : null),
     st("deed", "Deed Process", !land || at < 1 ? "pending" : land.DeedCompletedAt || at >= 2 ? "done" : "current", land?.DeedCompletedAt || land?.DeedTargetDate,
       land?.DeedTargetDate ? `Target ${new Date(land.DeedTargetDate).toISOString().slice(0, 10)}${land.DeedApprovalStatus ? ` · ${land.DeedApprovalStatus}` : ""}` : null),
     st("clearance", "LA & ULC Clearance", !land || at < 1 ? "pending" : clearDone === x.clearances.length && x.clearances.length ? "done" : clearAny ? "current" : "pending", null,
@@ -283,7 +283,7 @@ function versionFlow(v, i, st) {
       { label: "Deed registry search", state: st.enquiry?.deedSearches?.length ? "done" : "skipped", date: null },
       { label: "Land register", state: "done", date: st.land.CreatedAt },
       { label: "RS / LR records & documents", state: ok(v.snapshot?.rsRecords?.length || v.snapshot?.lrRecords?.length || has(/record|document/i)), date: null },
-      { label: "Verification (L1 / L2)", state: v.approvedAt ? "done" : st.land.L1Status && st.land.L1Status !== "Pending" ? "current" : "pending", date: st.land.L2ApprovedAt || st.land.L1ReviewedAt || null },
+      { label: "Verification & approval", state: v.approvedAt ? "done" : st.land.L1Status && st.land.L1Status !== "Pending" ? "current" : "pending", date: st.land.L2ApprovedAt || st.land.L1ReviewedAt || null },
       { label: "Approved", state: v.approvedAt ? "done" : "pending", date: v.approvedAt },
     ];
   }

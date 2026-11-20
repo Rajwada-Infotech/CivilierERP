@@ -104,7 +104,7 @@ export interface LandStats {
   /** Lands in Deed Process whose timeline has passed. */
   /** Counters along the legal flow (Legal dashboard). */
   pipeline?: Partial<Record<"enquiries" | "pendingOwnership" | "pendingDiligence" | "pendingInheritance" | "pendingReview" | "highRisk" | "restricted" | "pendingFinal"
-    | "pendingL1" | "pendingL2" | "pendingRegistration" | "deedOverdue" | "pendingMutation" | "registered" | "pendingDeedSearch" | "deedSearchOverdue" | "paymentOverdue", number>>;
+    | "pendingL1" | "pendingRegistration" | "deedOverdue" | "pendingMutation" | "registered" | "pendingDeedSearch" | "deedSearchOverdue" | "paymentOverdue", number>>;
   deedOverdue?: { LandId: number; LandCode: string; LandName: string; DeedTargetDate: string; DaysOver: number }[];
   pendingRegistration: number;
   mutationPending: number;
@@ -237,11 +237,11 @@ export interface DeedProcessLand {
 }
 export const reverifyDeedChanges = async (id: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/reverify`, post({})));
-export const approveDeedProcess = async (id: number, level: 1 | 2, action: "Approve" | "Reject" | "Hold", remarks?: string) =>
-  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/approve`, post({ level, action, remarks })));
+export const approveDeedProcess = async (id: number, action: "Approve" | "Reject" | "Hold", remarks?: string) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/approve`, post({ action, remarks })));
 export const deedRegistrationAction = async (id: number, action: "apply" | "submit", fileId?: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-registration`, post({ action, fileId })));
-export const getDeedProcessLands = async (qs = "") => handle<{ lands: DeedProcessLand[]; canEditTimeline: boolean; canL1?: boolean; canL2?: boolean } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/deed-process/list${qs ? `?${qs}` : ""}`));
+export const getDeedProcessLands = async (qs = "") => handle<{ lands: DeedProcessLand[]; canEditTimeline: boolean; canApprove?: boolean } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/deed-process/list${qs ? `?${qs}` : ""}`));
 export const updateDeedProcess = async (id: number, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null }) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 

@@ -841,7 +841,7 @@ const deedGate = (stage) => async (req, res, next) => {
         .query("SELECT CreatedBy, L1ReviewerId FROM dbo.LegalDeedDossier WHERE DossierId = @Id")).recordset[0];
       const own = d ? ownWork(req, d.CreatedBy, "this deed") : null;
       if (own) return res.status(403).json({ error: own });
-      if (d && stage === "L2 Approver" && !isSuperAdmin(req) && Number(d.L1ReviewerId) === Number(userOf(req))) {
+      if (false) {
         return res.status(403).json({ error: "You approved this deed at L1 — another user must approve it at L2" });
       }
     }
@@ -853,7 +853,7 @@ const deedGate = (stage) => async (req, res, next) => {
 };
 
 // POST /api/legal/deeds/:id/l1-action (Approve / Return)
-router.post("/deeds/:id/l1-action", requirePageRight("legal-approvals", "view"), deedGate("L1 Approver"), async (req, res) => {
+router.post("/deeds/:id/l1-action", requirePageRight("legal-approvals", "view"), deedGate("Approver"), async (req, res) => {
   const { id } = req.params;
   const { action, remarks } = req.body;
 
@@ -914,7 +914,7 @@ router.post("/deeds/:id/l1-action", requirePageRight("legal-approvals", "view"),
 });
 
 // POST /api/legal/deeds/:id/l2-action (Approve / Return / Reject)
-router.post("/deeds/:id/l2-action", requirePageRight("legal-approvals", "view"), deedGate("L2 Approver"), async (req, res) => {
+router.post("/deeds/:id/l2-action", requirePageRight("legal-approvals", "view"), deedGate("Approver"), async (req, res) => {
   const { id } = req.params;
   const { action, remarks } = req.body;
 

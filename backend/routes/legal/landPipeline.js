@@ -354,7 +354,6 @@ async function pipelineCounters(pool) {
     "(SELECT COUNT(*) FROM dbo.LegalLandEnquiry WHERE IsActive = 1) AS enquiries",
     `(SELECT COUNT(*) FROM dbo.LegalLand l WHERE ${PRE}) AS pendingFinal`,
     "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND ISNULL(L1Status, N'Pending') <> N'Approved') AS pendingL1",
-    "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Process' AND L1Status = N'Approved') AS pendingL2",
     "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Deed Registration') AS pendingRegistration",
     "(SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = N'Registered') AS registered",
   ];
@@ -415,10 +414,9 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
         UNION ALL SELECT N'Legal records' FROM dbo.LegalLandLegalRecord WHERE IsActive = 1 AND VerificationStatus = N'Pending'
         UNION ALL SELECT N'Land tax receipts' FROM dbo.LegalLandTax WHERE IsActive = 1 AND VerificationStatus = N'Pending'
       ) x GROUP BY x.Kind ORDER BY N DESC;
-      -- Land waiting for its record approval (Data Verification → L1 → L2), oldest first.
+      -- Land waiting for its record approval (Data Verification → Approval), oldest first.
       SELECT TOP 8 l.LandId, l.LandCode, l.LandName, l.WorkflowStatus,
-             CASE WHEN l.L1Status = N'Approved' THEN N'L2 Executive Approval'
-                  WHEN ISNULL(l.VerificationStatus, N'Draft') = N'Verified' THEN N'L1 Legal Review'
+             CASE WHEN ISNULL(l.VerificationStatus, N'Draft') = N'Verified' THEN N'Approval'
                   ELSE N'Data Verification' END AS Stage,
              ISNULL(l.UpdatedAt, l.CreatedAt) AS Since
       FROM dbo.LegalLand l
@@ -1785,8 +1783,8 @@ router.post("/:id/final-verify", requirePageRight(LAND_PAGE, "view"), async (req
 router.get("/deed-process/list", requirePageRight(LAND_PAGE, "view"), pageable("lands", { kinds: {
   process: (l) => l.WorkflowStatus === "Deed Process",
   reverify: (l) => l.WorkflowStatus === "Deed Process" && !!l.DeedChangedAt,
-  l1: (l) => l.WorkflowStatus === "Deed Process" && !l.DeedChangedAt && l.L1Status !== "Approved",
-  l2: (l) => l.WorkflowStatus === "Deed Process" && !l.DeedChangedAt && l.L1Status === "Approved" && l.L2Status !== "Approved",
+  approve: (l) => l.WorkflowStatus === "Deed Process" && !l.DeedChangedAt && l.L2Status !== "Approved",
+  l1: (l) => l.WorkflowStatus === "Deed Process" && !l.DeedChangedAt && l.L2Status !== "Approved",
   overdue: (l) => l.WorkflowStatus === "Deed Process" && !!l.DeedTargetDate && !l.DeedCompletedAt && String(l.DeedTargetDate).slice(0, 10) < new Date().toISOString().slice(0, 10),
 } }), async (req, res) => {
   try {
@@ -1810,7 +1808,7 @@ router.get("/deed-process/list", requirePageRight(LAND_PAGE, "view"), pageable("
       WHERE l.IsActive = 1 AND l.WorkflowStatus IN (N'Deed Process', N'Deed Completed')
       ORDER BY CASE WHEN l.WorkflowStatus = N'Deed Process' THEN 0 ELSE 1 END, l.DeedTargetDate`);
     res.json({ lands: r.recordset, canEditTimeline: await canAct(req, "Verifier", LAND_PAGE),
-      canL1: await canAct(req, "L1 Approver", LAND_PAGE), canL2: await canAct(req, "L2 Approver", LAND_PAGE) });
+      canApprove: await canAct(req, "Approver", LAND_PAGE) });
   } catch (err) {
     console.error("[legal-land] deed-process list:", err.message);
     res.status(500).json({ error: "Could not load the Deed Process list" });
@@ -1890,32 +1888,30 @@ router.post("/:id/deed-process/reverify", requirePageRight(LAND_PAGE, "view"), a
   }
 });
 
-// POST /:id/deed-process/approve { level: 1|2, action: "Approve"|"Reject"|"Hold", remarks }
-// Two-level approval on the Deed Process page. L1 (L1 Approver) needs the deed copy and no unverified change;
-// L2 (L2 Approver, not the L1 approver) moves the land to Deed Registration. Reject sends it back to L1;
-// Hold parks it at that level (it can be approved later). Reject and Hold need a reason.
+// POST /:id/deed-process/approve { action: "Approve"|"Reject"|"Hold", remarks }
+// One approval on the Deed Process page (Approver in Setup → Approval Control). Approve needs the deed copy and no
+// unverified change, and moves the land to Deed Registration. Reject / Hold keep it in Deed Process with the reason.
 router.post("/:id/deed-process/approve", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
-  const level = Number(req.body?.level);
   const action = req.body?.action;
   const remarks = text(req.body?.remarks, 1000);
-  if (!id || ![1, 2].includes(level) || !["Approve", "Reject", "Hold"].includes(action)) return res.status(400).json({ error: "Invalid request" });
+  if (!id || !["Approve", "Reject", "Hold"].includes(action)) return res.status(400).json({ error: "Invalid request" });
   if (!remarks) return res.status(400).json({ error: action === "Approve" ? "Write the approval remarks" : "Give the reason" });
   const pool = getPool();
   try {
-    const role = level === 1 ? "L1 Approver" : "L2 Approver";
-    if (!(await canAct(req, role, LAND_PAGE))) return res.status(403).json({ error: `Only an ${role} (Setup → Approval Control) can do this` });
+    if (!(await canAct(req, "Approver", LAND_PAGE))) return res.status(403).json({ error: "Only an Approver (Setup → Approval Control) can do this" });
     const cols = (await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'DeedFileId') AS a, COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') AS b, COL_LENGTH('dbo.LegalLand', 'DeedApprovalNote') AS c")).recordset[0];
     const l = (await pool.request().input("Id", sql.Int, id).query(`
-      SELECT LandCode, CreatedBy, WorkflowStatus, ISNULL(L1Status, N'Pending') AS L1Status, L1ReviewerId
+      SELECT LandCode, CreatedBy, WorkflowStatus
              ${cols.a ? ", DeedFileId" : ""} ${cols.b ? ", DeedChangedAt" : ""}
       FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1`)).recordset[0];
     if (!l) return res.status(404).json({ error: "Land not found" });
     if (l.WorkflowStatus !== "Deed Process") return res.status(409).json({ error: `${l.LandCode} is not in Deed Process` });
     const own = ownWork(req, l.CreatedBy, "this land");
     if (own) return res.status(409).json({ error: own });
-    if (action === "Approve" && l.DeedChangedAt) return res.status(409).json({ error: `${l.LandCode} was changed after verification — a verifier must re-verify it first` });
     if (action === "Approve") {
+      if (l.DeedChangedAt) return res.status(409).json({ error: `${l.LandCode} was changed after verification — a verifier must re-verify it first` });
+      if (cols.a && !l.DeedFileId) return res.status(409).json({ error: "Upload the deed copy before approval" });
       const stops = await require("./dueDiligence").processingBlockers(pool, id);
       if (stops.length) return res.status(409).json({ error: `Cannot approve: ${stops.join("; ")}` });
     }
@@ -1923,30 +1919,19 @@ router.post("/:id/deed-process/approve", requirePageRight(LAND_PAGE, "view"), as
     const note = cols.c ? ", DeedApprovalNote = @R" : "";
     const q = pool.request().input("Id", sql.Int, id).input("U", sql.Int, userId).input("R", sql.NVarChar(1000), remarks);
     let message;
-    if (level === 1) {
-      if (l.L1Status === "Approved") return res.status(409).json({ error: "L1 is already approved — waiting for L2" });
-      if (action === "Approve" && cols.a && !l.DeedFileId) return res.status(409).json({ error: "Upload the deed copy before approval" });
-      const st = { Approve: "Approved", Reject: "Rejected", Hold: "On Hold" }[action];
-      await q.input("S", sql.NVarChar(30), st).query(
-        `UPDATE dbo.LegalLand SET L1Status = @S, L1ReviewerId = @U, L1ReviewedAt = SYSUTCDATETIME(), L1Remarks = @R, L2Status = N'Pending'${note}, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
-      message = { Approve: `${l.LandCode}: L1 approved — waiting for L2`, Reject: `${l.LandCode}: rejected at L1`, Hold: `${l.LandCode}: on hold at L1` }[action];
+    if (action === "Approve") {
+      // L1 and L2 columns both record the one approval, so older reports keep reading "Approved".
+      await q.query(`UPDATE dbo.LegalLand SET L1Status = N'Approved', L1ReviewerId = @U, L1ReviewedAt = SYSUTCDATETIME(), L1Remarks = @R,
+                     L2Status = N'Approved', L2ApproverId = @U, L2ApprovedAt = SYSUTCDATETIME(), L2Remarks = @R${note},
+                     WorkflowStatus = N'Deed Registration', UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
+      message = `${l.LandCode}: approved — moved to Deed Registration`;
     } else {
-      if (l.L1Status !== "Approved") return res.status(409).json({ error: "L1 approval comes before L2" });
-      if (!isSuperAdmin(req) && l.L1ReviewerId != null && Number(l.L1ReviewerId) === Number(userId)) return res.status(409).json({ error: "You gave the L1 approval — another user must give L2" });
-      if (action === "Approve") {
-        await q.query(`UPDATE dbo.LegalLand SET L2Status = N'Approved', L2ApproverId = @U, L2ApprovedAt = SYSUTCDATETIME(), L2Remarks = @R,
-                       WorkflowStatus = N'Deed Registration', UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
-        message = `${l.LandCode}: L2 approved — moved to Deed Registration`;
-      } else if (action === "Hold") {
-        await q.query(`UPDATE dbo.LegalLand SET L2Status = N'On Hold', L2ApproverId = @U, L2ApprovedAt = SYSUTCDATETIME(), L2Remarks = @R${note}, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
-        message = `${l.LandCode}: on hold at L2`;
-      } else {
-        await q.query(`UPDATE dbo.LegalLand SET L2Status = N'Rejected', L2ApproverId = @U, L2ApprovedAt = SYSUTCDATETIME(), L2Remarks = @R,
-                       L1Status = N'Pending'${note}, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
-        message = `${l.LandCode}: rejected at L2 — back to L1`;
-      }
+      const st = action === "Hold" ? "On Hold" : "Rejected";
+      await q.input("S", sql.NVarChar(30), st).query(`UPDATE dbo.LegalLand SET L1Status = @S, L1ReviewerId = @U, L1ReviewedAt = SYSUTCDATETIME(), L1Remarks = @R,
+                     L2Status = N'Pending'${note}, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Id`);
+      message = `${l.LandCode}: ${action === "Hold" ? "on hold" : "rejected"}`;
     }
-    await writeAudit(pool, req, { action: `Deed L${level} ${action === "Approve" ? "approved" : action === "Reject" ? "rejected" : "on hold"}`, entityType: "Land Property", entityId: id, landId: id, remarks });
+    await writeAudit(pool, req, { action: `Deed ${action === "Approve" ? "approved" : action === "Reject" ? "rejected" : "on hold"}`, entityType: "Land Property", entityId: id, landId: id, remarks });
     res.json({ message });
   } catch (err) {
     console.error("[legal-land] deed approve:", err.message);
@@ -2053,7 +2038,7 @@ router.post("/:id/registry-search", requirePageRight(LAND_PAGE, "edit"), async (
   }
 });
 
-// POST /:id/deed-registration { action: "apply" } — an approver (L1 / L2 Approver) applies for registration; who and
+// POST /:id/deed-registration { action: "apply" } — an Approver applies for registration; who and
 // when are kept and the days open are counted from then. { action: "submit", fileId } — after registration, the
 // registered deed copy is uploaded and submitted: the land becomes "Registered" and shows in Land & Projects.
 router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
@@ -2063,7 +2048,7 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
   const pool = getPool();
   try {
     if (!(await pool.request().query("SELECT COL_LENGTH('dbo.LegalLand', 'RegAppliedAt') AS c")).recordset[0].c) return res.status(503).json({ error: "Deed registration is not set up yet (migration 648)" });
-    if (!(await canAct(req, "L1 Approver", LAND_PAGE)) && !(await canAct(req, "L2 Approver", LAND_PAGE))) return res.status(403).json({ error: "Only an approver (Setup → Approval Control) can do this" });
+    if (!(await canAct(req, "Approver", LAND_PAGE))) return res.status(403).json({ error: "Only an approver (Setup → Approval Control) can do this" });
     const l = (await pool.request().input("Id", sql.Int, id).query("SELECT LandCode, WorkflowStatus, RegAppliedAt FROM dbo.LegalLand WHERE LandId = @Id AND IsActive = 1")).recordset[0];
     if (!l) return res.status(404).json({ error: "Land not found" });
     if (l.WorkflowStatus !== "Deed Registration") return res.status(409).json({ error: `${l.LandCode} is not waiting for deed registration` });

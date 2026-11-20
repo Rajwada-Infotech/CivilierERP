@@ -285,8 +285,8 @@ const MASTERS = {
       { name: "LandStatus", label: "Land status", type: "select", required: true, options: ["Owned", "Active", "Identified", "Under Negotiation", "Agreement Done", "Registered", "Mutated", "In Dispute", "On Hold", "Disposed / Transferred", "Inactive"], default: "Owned" },
       { name: "PossessionStatus", label: "Possession status", type: "select", options: ["In Possession", "Partly in Possession", "Not in Possession", "Disputed", "Unknown"], default: "In Possession" },
       { name: "VerificationStatus", label: "Verification status", type: "select", system: true, options: ["Draft", "Verified", "Rejected"], default: "Draft" },
-      { name: "L1Status", label: "L1 approval status", type: "select", system: true, options: ["Pending", "Approved", "Returned"], default: "Pending" },
-      { name: "L2Status", label: "L2 approval status", type: "select", system: true, options: ["Pending", "Approved", "Returned", "Rejected"], default: "Pending" },
+      { name: "L1Status", label: "Approval status", type: "select", system: true, options: ["Pending", "Approved", "Returned"], default: "Pending" },
+      { name: "L2Status", label: "Final approval status", type: "select", system: true, options: ["Pending", "Approved", "Returned", "Rejected"], default: "Pending" },
       { name: "AcquisitionType", label: "Acquisition type", type: "select", options: ["Purchase", "Gift", "Inheritance", "Transfer", "Other"], default: "Purchase" },
       // When it was acquired (history) — the date it was entered here is kept separately (Created).
       { name: "AcquisitionDate", label: "Acquisition date (if known)", type: "date" },
@@ -1594,11 +1594,11 @@ const MASTERS = {
   // Who verifies and who approves at L1 / L2 — the super admin's control panel (see approvalAuthority.js).
   "approval-authority": {
     title: "Approval Control", group: "Workflow", pageKey: "legal-approval-authority-master", table: "LegalApprovalAuthority", pk: "AuthorityId",
-    desc: "Which users verify records and documents, and which users approve deeds at L1 and at L2. Only an administrator can change it.",
+    desc: "Which users verify records and documents, which user approves lands in Deed Process, who gives legal clearance and who approves amendments. Only an administrator can change it.",
     label: "Stage + ' - ' + (SELECT name FROM dbo.users WHERE id = r.ApproverId)", orderBy: "Stage, ApproverId", adminOnly: true,
     unique: [["Stage", "ApproverId"], "This user already has this approval role"],
     fields: [
-      { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "L1 Approver", "L2 Approver", "Legal Reviewer", "Amendment Approver"] },
+      { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "Approver", "Legal Reviewer", "Amendment Approver"] },
       // Several users can be picked when adding (one row each); a row is edited one user at a time.
       { name: "ApproverId", label: "Users", type: "ref", ref: "user", required: true, multi: true },
       { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },

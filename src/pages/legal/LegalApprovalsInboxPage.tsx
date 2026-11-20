@@ -15,15 +15,14 @@ import { getPendingAmendments } from "@/api/legalAmendmentApi";
 
 /**
  * Approvals — one inbox for everything waiting for a decision in the Legal module:
- *   Final verification · Re-verification of changes · Deed approval L1 · Deed approval L2 · Amendments (after registration)
+ *   Final verification · Re-verification of changes · Deed approval · Amendments (after registration)
  * Each item shows the land and acts in place (or opens the land's full verification screen when that needs every detail).
  */
-type Tab = "verify" | "reverify" | "l1" | "l2" | "amend";
+type Tab = "verify" | "reverify" | "approve" | "amend";
 const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: "verify", label: "Final verification", hint: "New lands — check every detail and document, then verify (goes to Deed Process)" },
   { key: "reverify", label: "Re-verification", hint: "Verified lands changed afterwards — confirm the changes" },
-  { key: "l1", label: "Deed approval · L1", hint: "First approval of the deed in Deed Process" },
-  { key: "l2", label: "Deed approval · L2", hint: "Final approval — the land moves to Deed Registration" },
+  { key: "approve", label: "Deed approval", hint: "Approve the deed — the land moves to Deed Registration" },
   { key: "amend", label: "Amendments", hint: "Changes asked for on registered lands" },
 ];
 
@@ -63,12 +62,12 @@ function Card({ landId, code, name, place, since, note, children, onOpen }: {
   );
 }
 
-/** Approve / Hold / Reject a deed at L1 or L2, with a remark. */
-function DeedDecision({ land, level }: { land: DeedProcessLand; level: 1 | 2 }) {
+/** Approve / Hold / Reject a deed, with a remark. */
+function DeedDecision({ land }: { land: DeedProcessLand }) {
   const qc = useQueryClient();
   const [remark, setRemark] = useState("");
   const act = useMutation({
-    mutationFn: (a: "Approve" | "Hold" | "Reject") => approveDeedProcess(land.LandId, level, a, remark.trim() || undefined),
+    mutationFn: (a: "Approve" | "Hold" | "Reject") => approveDeedProcess(land.LandId, a, remark.trim() || undefined),
     onSuccess: (r) => { toast.success(r.message); setRemark(""); qc.invalidateQueries({ queryKey: ["legal-deed-process"] }); qc.invalidateQueries({ queryKey: ["legal-flow"] }); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -78,7 +77,7 @@ function DeedDecision({ land, level }: { land: DeedProcessLand; level: 1 | 2 }) 
       <div className="flex gap-2">
         <button disabled={act.isPending || !remark.trim()} onClick={() => act.mutate("Reject")} className={`${btn} border-destructive text-destructive hover:bg-destructive hover:text-white`}>Reject</button>
         <button disabled={act.isPending || !remark.trim()} onClick={() => act.mutate("Hold")} className={`${btn} border-amber-600 text-amber-700 hover:bg-amber-600 hover:text-white`}>Hold</button>
-        <button disabled={act.isPending} onClick={() => act.mutate("Approve")} className={`${btn} border-emerald-700 bg-emerald-700 text-white hover:opacity-90`}>Approve L{level}</button>
+        <button disabled={act.isPending} onClick={() => act.mutate("Approve")} className={`${btn} border-emerald-700 bg-emerald-700 text-white hover:opacity-90`}>Approve</button>
       </div>
     </div>
   );
@@ -91,8 +90,7 @@ export default function LegalApprovalsInboxPage() {
   // Tab counts: one-row pages of each kind (their totals). The open tab: one page (20) from the server.
   const cVerify = usePaged(["legal-land-pending-queue", "count"], (qs) => getLandPendingPage(qs), { kind: "verify", pageSize: 1 });
   const cRe = usePaged(["legal-deed-process", "count", "reverify"], (qs) => getDeedProcessLands(qs), { kind: "reverify", pageSize: 1 });
-  const cL1 = usePaged(["legal-deed-process", "count", "l1"], (qs) => getDeedProcessLands(qs), { kind: "l1", pageSize: 1 });
-  const cL2 = usePaged(["legal-deed-process", "count", "l2"], (qs) => getDeedProcessLands(qs), { kind: "l2", pageSize: 1 });
+  const cAp = usePaged(["legal-deed-process", "count", "approve"], (qs) => getDeedProcessLands(qs), { kind: "approve", pageSize: 1 });
   const cAm = usePaged(["legal-amend", "pending", "count"], (qs) => getPendingAmendments(qs), { pageSize: 1 });
   const reverify = useMutation({
     mutationFn: (id: number) => reverifyDeedChanges(id),
@@ -100,19 +98,19 @@ export default function LegalApprovalsInboxPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const counts: Record<Tab, number> = { verify: cVerify.total, reverify: cRe.total, l1: cL1.total, l2: cL2.total, amend: cAm.total };
+  const counts: Record<Tab, number> = { verify: cVerify.total, reverify: cRe.total, approve: cAp.total, amend: cAm.total };
   const first = (TABS.find((t) => counts[t.key] > 0)?.key ?? "verify") as Tab;
   const tab = (TABS.find((t) => t.key === params.get("tab"))?.key ?? first) as Tab;
-  const loading = cVerify.isLoading || cRe.isLoading || cL1.isLoading || cL2.isLoading || cAm.isLoading;
+  const loading = cVerify.isLoading || cRe.isLoading || cAp.isLoading || cAm.isLoading;
   const verifyL = usePaged(["legal-land-pending-queue"], (qs) => getLandPendingPage(qs), { kind: "verify", enabled: tab === "verify" });
-  const isDeedTab = tab === "reverify" || tab === "l1" || tab === "l2";
+  const isDeedTab = tab === "reverify" || tab === "approve";
   const deedL = usePaged(["legal-deed-process", "inbox", tab], (qs) => getDeedProcessLands(qs), { kind: isDeedTab ? tab : undefined, enabled: isDeedTab });
   const amendL = usePaged(["legal-amend", "pending"], (qs) => getPendingAmendments(qs), { enabled: tab === "amend" });
   const verify = verifyL.data?.items ?? [];
   const deedRows = deedL.data?.lands ?? [];
-  const changed = deedRows, l1 = deedRows, l2 = deedRows;
+  const changed = deedRows;
   const amends = amendL.data?.items ?? [];
-  const deedQ = { data: deedL.data ?? cL1.data };
+  const deedQ = { data: deedL.data ?? cAp.data };
   const amendQ = { data: amendL.data ?? cAm.data };
   const active = tab === "verify" ? verifyL : isDeedTab ? deedL : amendL;
   const open = (id: number) => navigate(`/legal/land/properties/${id}`);
@@ -124,7 +122,7 @@ export default function LegalApprovalsInboxPage() {
       <LegalShell stage={tab === "verify" ? "verify" : undefined} title="Approvals" subtitle="Everything waiting for a decision — verification, deed approval and amendments — in one inbox." icon={ClipboardTick}>
         <div className="space-y-4">
           {/* One tab per kind of approval, with how many are waiting. */}
-          <div className="grid grid-cols-2 border border-border bg-card sm:grid-cols-5" role="tablist">
+          <div className="grid grid-cols-2 border border-border bg-card sm:grid-cols-4" role="tablist">
             {TABS.map((t, i) => (
               <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setParams({ tab: t.key })}
                 className={`relative px-3 py-3 text-left ${tab === t.key ? "bg-primary/5" : "hover:bg-primary/5"} ${i ? "border-l border-border" : ""}`}>
@@ -154,18 +152,13 @@ export default function LegalApprovalsInboxPage() {
             </Card>
           )) : <Empty text="No verified land has been changed." />)}
 
-          {(tab === "l1" || tab === "l2") && (() => {
-            const rows = tab === "l1" ? l1 : l2;
-            const may = tab === "l1" ? deedQ.data?.canL1 : deedQ.data?.canL2;
-            return rows.length ? rows.map((l) => (
-              <Card key={l.LandId} landId={l.LandId} code={l.LandCode} name={l.LandName} place={place(l)} since={l.FinalVerifiedAt} onOpen={() => open(l.LandId)}
-                note={<>Deed target {when(l.DeedTargetDate)}{l.DeedFileId ? <> · deed copy: <LegalFileLink id={l.DeedFileId} name={l.DeedFileName ?? "Deed copy"} /></> : " · deed copy not uploaded yet"}
-                  {tab === "l2" && l.L1By ? ` · L1 by ${l.L1By}` : ""}{l.DeedApprovalNote ? ` · note: ${l.DeedApprovalNote}` : ""}
-                  {(tab === "l1" ? l.L1Status : l.L2Status) && (tab === "l1" ? l.L1Status : l.L2Status) !== "Pending" ? ` · now ${tab === "l1" ? l.L1Status : l.L2Status}` : ""}</>}>
-                {may ? <DeedDecision land={l} level={tab === "l1" ? 1 : 2} /> : <p className="text-xs text-muted-foreground">Only an {tab === "l1" ? "L1" : "L2"} Approver (Setup → Approval Control) can decide.</p>}
-              </Card>
-            )) : <Empty text={tab === "l1" ? "No deed is waiting for L1 approval." : "No deed is waiting for L2 approval."} />;
-          })()}
+          {tab === "approve" && (deedRows.length ? deedRows.map((l) => (
+            <Card key={l.LandId} landId={l.LandId} code={l.LandCode} name={l.LandName} place={place(l)} since={l.FinalVerifiedAt} onOpen={() => open(l.LandId)}
+              note={<>Deed target {when(l.DeedTargetDate)}{l.DeedFileId ? <> · deed copy: <LegalFileLink id={l.DeedFileId} name={l.DeedFileName ?? "Deed copy"} /></> : " · deed copy not uploaded yet"}
+                {l.DeedApprovalNote ? ` · note: ${l.DeedApprovalNote}` : ""}{l.L1Status && l.L1Status !== "Pending" ? ` · now ${l.L1Status}` : ""}</>}>
+              {deedQ.data?.canApprove ? <DeedDecision land={l} /> : <p className="text-xs text-muted-foreground">Only an Approver (Setup → Approval Control) can decide.</p>}
+            </Card>
+          )) : <Empty text="No deed is waiting for approval." />)}
 
           {tab === "amend" && (amends.length ? amends.map((a) => (
             <div key={a.AmendmentId} className="space-y-1">

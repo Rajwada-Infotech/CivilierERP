@@ -8,8 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 const ROLE_HELP: Record<string, string> = {
   Verifier: "Checks due diligence, does Final Verification, re-verifies changes",
-  "L1 Approver": "First approval in Deed Process; applies to deed register",
-  "L2 Approver": "Final approval in Deed Process (not the L1 approver)",
+  Approver: "Approves the deed in Deed Process (moves it to Deed Registration); applies for registration",
   "Legal Reviewer": "Gives legal clearance, clears court cases",
   "Amendment Approver": "Approves or rejects changes to a land after it is registered",
 };

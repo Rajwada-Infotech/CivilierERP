@@ -12,16 +12,14 @@ export function WaitingForMe() {
   // Each tile is the total of a one-row page of that kind (the same queries the Approvals inbox counts with).
   const cVerify = usePaged(["legal-land-pending-queue", "count"], (qs) => getLandPendingPage(qs), { kind: "verify", pageSize: 1 });
   const cRe = usePaged(["legal-deed-process", "count", "reverify"], (qs) => getDeedProcessLands(qs), { kind: "reverify", pageSize: 1 });
-  const cL1 = usePaged(["legal-deed-process", "count", "l1"], (qs) => getDeedProcessLands(qs), { kind: "l1", pageSize: 1 });
-  const cL2 = usePaged(["legal-deed-process", "count", "l2"], (qs) => getDeedProcessLands(qs), { kind: "l2", pageSize: 1 });
+  const cAp = usePaged(["legal-deed-process", "count", "approve"], (qs) => getDeedProcessLands(qs), { kind: "approve", pageSize: 1 });
   const cAm = usePaged(["legal-amend", "pending", "count"], (qs) => getPendingAmendments(qs), { pageSize: 1 });
   const cLate = usePaged(["legal-deed-process", "count", "overdue"], (qs) => getDeedProcessLands(qs), { kind: "overdue", pageSize: 1 });
   const can = (b?: boolean) => b !== false;
   const tiles: { label: string; n: number; to: string; mine: boolean; tone?: string }[] = [
     { label: "Final verification", n: cVerify.total, to: "/legal/approvals?tab=verify", mine: true },
     { label: "Re-verification", n: cRe.total, to: "/legal/approvals?tab=reverify", mine: true },
-    { label: "Deed approval · L1", n: cL1.total, to: "/legal/approvals?tab=l1", mine: can(cL1.data?.canL1) },
-    { label: "Deed approval · L2", n: cL2.total, to: "/legal/approvals?tab=l2", mine: can(cL2.data?.canL2) },
+    { label: "Deed approval", n: cAp.total, to: "/legal/approvals?tab=approve", mine: can(cAp.data?.canApprove) },
     { label: "Amendments", n: cAm.total, to: "/legal/approvals?tab=amend", mine: !!cAm.data?.canApprove },
     { label: "Deed overdue", n: cLate.total, to: "/legal/land/deed-process", mine: true, tone: "red" },
   ];
@@ -32,7 +30,7 @@ export function WaitingForMe() {
         <h2 className="text-xs font-semibold uppercase tracking-[0.12em]">Waiting for me</h2>
         <span className="text-xs text-muted-foreground">{total ? `${total} item${total === 1 ? "" : "s"} need you` : "Nothing waiting — all clear"}</span>
       </header>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         {tiles.map((t, i) => (
           <button key={t.label} onClick={() => navigate(t.to)} disabled={!t.mine}
             className={`px-4 py-3 text-left transition-colors hover:bg-primary/5 disabled:cursor-default disabled:opacity-50 ${i ? "border-l border-border" : ""} ${t.n && t.mine ? (t.tone === "red" ? "bg-destructive/5" : "bg-amber-500/5") : ""}`}

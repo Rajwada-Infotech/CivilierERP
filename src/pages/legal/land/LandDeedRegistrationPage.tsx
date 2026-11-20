@@ -183,7 +183,7 @@ function LandWork({ id }: { id: number }) {
           <div><dt className="text-muted-foreground">LR Dag / Khatian</dt><dd className="font-semibold">{l.LrDagNo ?? "—"} / {l.LrKhatianNo ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">Sellers (current owners)</dt><dd className="font-semibold">{l.Owners ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">Govt. valuation</dt><dd className="font-semibold">{inr(l.GovtValue)}</dd></div>
-          <div><dt className="text-muted-foreground">Approved</dt><dd className="font-semibold">L1 {l.L1By ?? "—"} · L2 {l.L2By ?? "—"}</dd></div>
+          <div><dt className="text-muted-foreground">Approved</dt><dd className="font-semibold">{l.L2By ?? l.L1By ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">Deed copy (Deed Process)</dt><dd>{l.DeedFileId ? <LegalFileLink id={l.DeedFileId} name={l.DeedFileName ?? "Deed copy"} /> : "—"}</dd></div>
         </dl>
       </div>
@@ -615,7 +615,7 @@ function Apply({ l, canApply, onSaved }: { l: DeedRegLand; canApply: boolean; on
         <p className="text-sm">Applied by <b>{l.RegAppliedByName ?? "—"}</b> on <b>{String(l.RegAppliedAt).slice(0, 10)}</b> · <span className="font-semibold text-sky-700">{l.RegDaysOpen} day{l.RegDaysOpen === 1 ? "" : "s"} open</span></p>
       ) : canApply ? (
         <button className={primary} disabled={busy} onClick={apply}>Apply to deed register</button>
-      ) : <p className="text-xs text-amber-700">Only an L1 or L2 Approver (Setup → Approval Control) can apply.</p>}
+      ) : <p className="text-xs text-amber-700">Only an Approver (Setup → Approval Control) can apply.</p>}
       <details className="border border-border">
         <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">Registry search records for this land (add, edit, delete)</summary>
         <div className="border-t border-border"><RegistrySearchPanel landCode={l.LandCode} /></div>
@@ -673,7 +673,7 @@ function FinalRegistration({ l, editable, canSubmit, onSaved }: { l: DeedRegLand
         ) : !l.RegAppliedAt ? <p className="text-xs text-muted-foreground">Apply to the deed register (step 3) first.</p>
           : !finalSaved ? <p className="text-xs text-muted-foreground">Save the date, office and mode, then upload the registered deed.</p>
           : canSubmit ? <button className={primary} disabled={busy} onClick={submit}>Upload registered deed & submit</button>
-          : <p className="text-xs text-amber-700">Only an L1 or L2 Approver can submit the registered deed.</p>}
+          : <p className="text-xs text-amber-700">Only an Approver can submit the registered deed.</p>}
       </div>
     </div>
   );
