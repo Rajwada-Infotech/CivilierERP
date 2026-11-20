@@ -3276,7 +3276,7 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
       let pResult = null;
       if (bkgRow.CustomerId) {
         pResult = await pool.request().input("cid", sql.Int, bkgRow.CustomerId).query(`
-          SELECT Id, Email, IsActive, MustChangePassword, CreatedAt
+          SELECT Id, Email, IsActive, MustChangePassword, CreatedAt, LastLoginAt
           FROM dbo.CrmCustomerPortalUser
           WHERE CustomerId = @cid
         `);
@@ -3284,7 +3284,7 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
       // Fall back to ApplicationId-keyed lookup (pre-migration-254 rows)
       if ((!pResult || !pResult.recordset.length) && bkgRow.ApplicationId) {
         pResult = await pool.request().input("aid", sql.Int, bkgRow.ApplicationId).query(`
-          SELECT Id, Email, IsActive, MustChangePassword, CreatedAt
+          SELECT Id, Email, IsActive, MustChangePassword, CreatedAt, LastLoginAt
           FROM dbo.CrmCustomerPortalUser
           WHERE ApplicationId = @aid
         `);
@@ -3295,7 +3295,7 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
       console.warn("[crm-bookings] portal user lookup failed (non-fatal):", pe.message);
     }
 
-    const { normalizeMobile, DEFAULT_PASSWORD_RULE } = require("../services/crmPortalProvision");
+    const { normalizeMobile, defaultPortalPassword, DEFAULT_PASSWORD_RULE } = require("../services/crmPortalProvision");
     res.json({
       hasPortal: !!portalRow,
       portalUserId: portalRow ? portalRow.Id : null,
@@ -3303,6 +3303,10 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
       // What the customer signs in with, and how their first password is made
       loginMobile: normalizeMobile(bkgRow.CustomerMobile),
       passwordRule: DEFAULT_PASSWORD_RULE,
+      // While the customer is still on it, the first password itself (made from the name and mobile staff already see),
+      // so staff can tell them exactly what to type. Never shown once they set their own.
+      firstPassword: portalRow && portalRow.MustChangePassword ? defaultPortalPassword(bkgRow.CustomerName, bkgRow.CustomerMobile) : null,
+      lastLoginAt: portalRow ? portalRow.LastLoginAt || null : null,
       email: portalRow ? portalRow.Email : (bkgRow.CustomerEmail || null),
       isActive: portalRow ? !!portalRow.IsActive : false,
       mustChangePassword: portalRow ? !!portalRow.MustChangePassword : false,

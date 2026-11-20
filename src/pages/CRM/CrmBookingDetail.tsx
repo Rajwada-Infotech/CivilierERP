@@ -2780,7 +2780,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             ? "bg-card text-foreground border-foreground/30"
                             : "bg-card text-foreground border-foreground/30"
                         }`}>
-                          {portalStatus.mustChangePassword ? "First login pending" : "Password set by customer"}
+                          {portalStatus.mustChangePassword ? "First password" : "Own password"}
+                        </span>
+                      </div>
+                      <div className="px-5 py-3 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                          <Clock size={13} className="text-foreground shrink-0" />
+                          <span>Last Signed In</span>
+                        </div>
+                        <span className="text-xs text-foreground">
+                          {portalStatus.lastLoginAt
+                            ? new Date(portalStatus.lastLoginAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+                            : "Never"}
                         </span>
                       </div>
                       {portalStatus.customerName && (
@@ -2809,8 +2820,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="px-5 py-3 bg-muted/30 border-t border-border flex items-start gap-2.5 text-xs text-muted-foreground">
                       <Hourglass size={13} className="shrink-0 mt-0.5 text-foreground" />
                       <p className="flex-1">
-                        The customer signs in with their mobile number. Their first password is {portalStatus.passwordRule}.
-                        {portalStatus.mustChangePassword ? " They have not set their own password." : " They have set their own password."}
+                        {portalStatus.firstPassword ? (
+                          <>Signs in with <span className="font-heading tabular-nums font-medium text-foreground">{portalStatus.loginMobile}</span> and
+                            password <span className="font-heading tabular-nums font-medium text-foreground">{portalStatus.firstPassword}</span> ({portalStatus.passwordRule}).</>
+                        ) : (
+                          <>Signs in with <span className="font-heading tabular-nums font-medium text-foreground">{portalStatus.loginMobile || "their mobile number"}</span> and
+                            the password they set. Reset password sends it back to the first one ({portalStatus.passwordRule}).</>
+                        )}
                       </p>
                       {confirmReset ? (
                         <span className="flex items-center gap-2 shrink-0">
