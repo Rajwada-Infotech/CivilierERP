@@ -135,11 +135,12 @@ async function getStageState(pool, bookingId, viewer = null) {
   };
 }
 
-// May this user act at the given stage? Super Admin can act in parallel;
+// May this user act at the given stage? The full-access roles act in parallel (approvalService approvesEveryStep);
 // otherwise decided by the crm-bookings workflow in Approval Setup.
 async function canApproveStage(role, stage, userId = null) {
-  const { isSuperAdmin, getWorkflow, userMatchesLevel } = require("./approvalService");
-  if (isSuperAdmin && isSuperAdmin(role)) return true;
+  const { getWorkflow, userMatchesLevel } = require("./approvalService");
+  const { approvesEveryStep } = require("../middleware/role");
+  if (approvesEveryStep(role)) return true;
   const level = STAGE_LEVEL[stage];
   if (!level) return false;
   const wf = await getWorkflow("crm-bookings").catch(() => null);
