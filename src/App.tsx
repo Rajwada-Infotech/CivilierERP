@@ -146,6 +146,7 @@ const LandDetailsPage = lazy(() => import("./pages/legal/land/LandDetailsPage"))
 const LandDeedProcessPage = lazy(() => import("./pages/legal/land/LandDeedProcessPage"));
 const LandPostRegistrationPage = lazy(() => import("./pages/legal/land/LandPostRegistrationPage"));
 const LandClearancePage = lazy(() => import("./pages/legal/land/LandClearancePage"));
+const LegalFlowChartPage = lazy(() => import("./pages/legal/land/LegalFlowChartPage"));
 const LandProfilePage = lazy(() => import("./pages/legal/land/LandProfilePage"));
 const LandSalesPage = lazy(() => import("./pages/legal/land/LandSalesPage"));
 const LandProjectMapPage = lazy(() => import("./pages/legal/land/LandProjectMapPage"));
@@ -1131,6 +1132,8 @@ function AppRoutes() {
       <Route path="/legal/land/properties/:id/final-verify" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage verify /></ProtectedRoute>} />
       <Route path="/legal/land/deed-process" element={<ProtectedRoute pageKey="legal-land-master"><LandDeedProcessPage /></ProtectedRoute>} />
       <Route path="/legal/land/la-ulc" element={<ProtectedRoute pageKey="legal-land-master"><LandClearancePage /></ProtectedRoute>} />
+      <Route path="/legal/flow-chart" element={<ProtectedRoute pageKey="legal-land-master"><LegalFlowChartPage /></ProtectedRoute>} />
+      <Route path="/legal/versions" element={<ProtectedRoute pageKey="legal-land-master"><LegalFlowChartPage /></ProtectedRoute>} />
       <Route path="/legal/land/post-registration" element={<ProtectedRoute pageKey="legal-land-master"><LandPostRegistrationPage /></ProtectedRoute>} />
       <Route path="/legal/land/post-registration/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage from="post-registration" /></ProtectedRoute>} />
       <Route path="/legal/land/deed-process/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage from="deed-process" /></ProtectedRoute>} />

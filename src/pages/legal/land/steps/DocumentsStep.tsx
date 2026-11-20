@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Plus, Upload } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useLegalLock } from "@/components/legal/LegalLock";
 import { uploadLegalFile, getLegalLookup } from "@/api/legalMastersApi";
 import {
   getLandDocuments, getDocumentVersions, addLandDocument, addDocumentVersion, reviewDocumentVersion, markDocumentNA, undoDocumentNA,
@@ -140,7 +141,9 @@ const AddDocument: React.FC<{
 };
 
 export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = ({ landId, onSaved }) => {
-  const rights = usePageRights("legal-land-master");
+  const pageRights = usePageRights("legal-land-master");
+  const lock = useLegalLock(); // registered land: changes go through an amendment
+  const rights = lock ? { ...pageRights, canCreate: false, canEdit: false, canDelete: false } : pageRights;
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-land-docs", landId], queryFn: () => getLandDocuments(landId) });
   const [adding, setAdding] = useState<RequiredDocument | null | false>(false);
@@ -275,7 +278,9 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
 
 /** The documents filed under one legal record or loan, with "Attach document" (opened from that record's row). */
 export const RecordDocuments: React.FC<{ landId: number; link: DocLink; onSaved?: () => void }> = ({ landId, link, onSaved }) => {
-  const rights = usePageRights("legal-land-master");
+  const pageRights = usePageRights("legal-land-master");
+  const lock = useLegalLock(); // registered land: changes go through an amendment
+  const rights = lock ? { ...pageRights, canCreate: false, canEdit: false, canDelete: false } : pageRights;
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ["legal-land-docs", landId], queryFn: () => getLandDocuments(landId) });
   const [adding, setAdding] = useState(false);

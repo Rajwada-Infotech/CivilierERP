@@ -187,6 +187,8 @@ const ALL_ROUTES = [
   { path: "/api/legal/diligence", file: "./routes/legal/dueDiligence" },
   { path: "/api/legal/enquiry-search", file: "./routes/legal/enquirySearch" },
   { path: "/api/legal/deed-reg", file: "./routes/legal/deedRegistration" },
+  { path: "/api/legal/flow", file: "./routes/legal/landFlow" },
+  { path: "/api/legal/amendments", file: "./routes/legal/landAmendment" },
   { path: "/api/legal", file: "./routes/legal/legalOperations" },
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
   { path: "/api/work-location-master", file: "./routes/workLocationMaster" },

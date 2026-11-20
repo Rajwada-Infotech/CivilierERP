@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowRight, Circle, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useLegalLock } from "@/components/legal/LegalLock";
 import { getLegalLookup, getLegalRows, uploadLegalFile, type LegalRow } from "@/api/legalMastersApi";
 import { recordOwnershipChange, undoOwnershipChange, updateOwnershipChange, type OwnershipChange } from "@/api/legalLandApi";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
@@ -296,7 +297,9 @@ const EditChange: React.FC<{ landId: number; date: string; evs: LegalRow[]; reco
 
 /** Current owners, the chain from the first owner to today, and the one form to extend it. */
 const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
-  const rights = usePageRights("legal-land-master");
+  const pageRights = usePageRights("legal-land-master");
+  const lock = useLegalLock(); // registered land: changes go through an amendment
+  const rights = lock ? { ...pageRights, canCreate: false, canEdit: false, canDelete: false } : pageRights;
   const queryClient = useQueryClient();
   const records = useQuery({ queryKey: ["legal-master", "ownership-record", landId], queryFn: () => getLegalRows("ownership-record", landId) });
   const events = useQuery({ queryKey: ["legal-master", "ownership-event", landId], queryFn: () => getLegalRows("ownership-event", landId) });

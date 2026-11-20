@@ -1,3 +1,4 @@
+import { WaitingForMe } from "@/components/legal/WaitingForMe";
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getOverdueSearches } from "@/api/legalEnquirySearchApi";
@@ -88,6 +89,7 @@ export default function LegalDashboard() {
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal" }]} />
       <LegalShell title="Company Land Records" subtitle="Centralized property registers, ownership history, and document archive" icon={Judge}>
         <div className="space-y-5">
+          <WaitingForMe />
           {error && <div className={`${card} p-4 text-sm text-destructive`}>Could not load the Legal summary: {(error as Error).message}</div>}
 
           {/* ── Hero ── */}

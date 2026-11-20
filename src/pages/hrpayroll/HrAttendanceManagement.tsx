@@ -128,10 +128,11 @@ function PunchEvidence({ rec }: { rec: AttendanceRecord }) {
 
 // Trips outside the employee's own work locations and visits to other offices, from the app's location (every 100 m move).
 function MovementLog({ items }: { items: AttendanceMovement[] }) {
-  if (!items.length) return null;
   return (
     <div className="bg-card p-4" style={{ border: HR_RULE }}>
       <p className={`${HR_HEAD} mb-3`}>Movement while on duty <span className="text-xs text-muted-foreground font-normal normal-case tracking-normal">— from the app's location</span></p>
+      {!items.length && <p className="text-sm text-muted-foreground">No movement recorded yet. Trips outside the office, visits to other offices and location-off times appear here when the employee uses the Employee Portal App 1.1.0 or newer.</p>}
+      {items.length > 0 && (
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className={`${HR_LBL} text-left`}><th className="py-1.5 pr-3">What</th><th className="py-1.5 pr-3">From</th><th className="py-1.5 pr-3">To</th><th className="py-1.5 pr-3">Time</th><th className="py-1.5">Reason</th></tr></thead>
@@ -151,6 +152,7 @@ function MovementLog({ items }: { items: AttendanceMovement[] }) {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

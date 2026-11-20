@@ -35,6 +35,10 @@ export interface YearBody { calendarYear?: number; result: "Found" | "Not Found"
 export const getSearchOptions = async () => handle<SearchOptions>(await fetchWithAuth(`${BASE}/options`));
 export const findEnquiries = async (projectId: number | "all" | "none", q: string, tab: SearchTab = "all") =>
   handle<EnquiryHit[]>(await fetchWithAuth(`${BASE}/find?projectId=${projectId}&tab=${tab}&q=${encodeURIComponent(q)}`));
+/** One page of enquiries for the Deed Registry Search queue (kind: pending · overdue · ontime · done). */
+export const findEnquiriesPage = async (projectId: number | "all" | "none", q: string, page: number, kind?: string, pageSize = 20) =>
+  handle<{ items: EnquiryHit[]; total: number; page: number; pageSize: number }>(await fetchWithAuth(
+    `${BASE}/find?projectId=${projectId}&tab=all&q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}${kind ? `&kind=${kind}` : ""}`));
 export const getEnquirySearches = async (enquiryId: number) => handle<{ offices: OfficeSearch[]; years: YearResult[] }>(await fetchWithAuth(`${BASE}/${enquiryId}`));
 export const getOverdueSearches = async () => handle<OfficeSearch[]>(await fetchWithAuth(`${BASE}/overdue`));
 export const setOfficeOf = async (id: number, officeId: number | null) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/office/${id}`, send("PUT", { officeId })));

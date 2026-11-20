@@ -28,6 +28,7 @@
     "ioredis": "^5.3.2",
     "jpeg-js": "^0.4.4",
     "jsonwebtoken": "^9.0.3",
+    "jszip": "^3.10.1",
     "mssql": "^12.2.1",
     "multer": "^2.4.0",
     "nodemailer": "^10.2.1",
