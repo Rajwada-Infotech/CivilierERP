@@ -45,7 +45,7 @@ const MANUAL_CHECKS = [
 const CHECK_LABEL: Record<string, string> = { Pending: "Pending", InProgress: "In progress", Ready: "Ready", Blocked: "Blocked" };
 const NOTICE_LABEL: Record<string, string> = { Draft: "Draft", Sent: "Sent", Acknowledged: "Acknowledged", Disputed: "Disputed" };
 const DELIVERY_MODES = ["Portal", "Email", "Post", "Courier", "InPerson"] as const;
-const MODE_LABEL: Record<string, string> = { Portal: "Customer portal", Email: "Email", Post: "Post", Courier: "Courier", InPerson: "In person" };
+const MODE_LABEL: Record<string, string> = { Portal: "Civilier Home", Email: "Email", Post: "Post", Courier: "Courier", InPerson: "In person" };
 const RESPONSE_DAYS = 15;
 const HANDOVER_DEFAULT_DAYS = 7;
 // The server's state machine, mirrored so no step is offered that it would refuse.

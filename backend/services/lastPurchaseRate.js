@@ -112,7 +112,7 @@ async function getLastPurchaseRateByCompany(pool, companyId, itemId) {
     let gstPct = Number(grnRow.GstPct || 0);
     if (!gstPct) {
       const im = await pool.request().input("ItemId", sql.NVarChar(100), String(itemId))
-        .query("SELECT ISNULL(M_CGST,0)+ISNULL(M_SGST,0) AS TotalGst FROM dbo.ItemMaster WHERE M_ItemId = @ItemId");
+        .query("SELECT ISNULL(M_CGST,0)+ISNULL(M_SGST,0) AS TotalGst FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100), M_Id) = @ItemId");
       gstPct = Number(im.recordset[0]?.TotalGst || 0);
     }
     return {
@@ -144,7 +144,7 @@ async function getLastPurchaseRateByCompany(pool, companyId, itemId) {
   if (poRow) {
     // PO path — fall back to item master for GST %
     const im = await pool.request().input("ItemId", sql.NVarChar(100), String(itemId))
-      .query("SELECT ISNULL(M_CGST,0)+ISNULL(M_SGST,0) AS TotalGst FROM dbo.ItemMaster WHERE M_ItemId = @ItemId");
+      .query("SELECT ISNULL(M_CGST,0)+ISNULL(M_SGST,0) AS TotalGst FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100), M_Id) = @ItemId");
     const gstPct = Number(im.recordset[0]?.TotalGst || 0);
     return {
       rate: Number(poRow.Rate),

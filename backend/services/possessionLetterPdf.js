@@ -114,7 +114,7 @@ function renderPossessionLetterBuffer(d) {
     doc.x = left; doc.y = boxTop + boxH + 12;
 
     if (balance > 0) para(`Our records show a balance of ${rupees(balance)}. Please clear it before the handover.`);
-    para(`Please confirm your acceptance by ${fmtDate(d.ResponseDeadline)}, by signing the acknowledgement below and returning a copy to us or through your customer portal. Any objection may be raised with us by the same date.`);
+    para(`Please confirm your acceptance by ${fmtDate(d.ResponseDeadline)}, by signing the acknowledgement below and returning a copy to us or through the Civilier Home app. Any objection may be raised with us by the same date.`);
     if (d.CertType !== "CC") para("Under Section 19(10) of the Real Estate (Regulation and Development) Act, 2016, an allottee is required to take physical possession of the unit within two months of the occupancy certificate being issued.");
     para("At the handover, our team will inspect the unit jointly with you and record any defects for rectification.");
 

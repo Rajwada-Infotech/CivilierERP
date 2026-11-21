@@ -1198,7 +1198,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
       return res.status(400).json({ error: "Agreement must receive senior approval before it can be sent to the customer" });
     }
     if (!ag.recordset[0].DocumentCount) {
-      return res.status(400).json({ error: "Upload at least one agreement document before sending it to the customer portal" });
+      return res.status(400).json({ error: "Upload at least one agreement document before sending it to the customer on Civilier Home" });
     }
 
     // Up to 5 writes describing one event (send-to-customer, optionally
@@ -1229,7 +1229,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
         SELECT Id FROM dbo.CrmAgreementDocument WITH (UPDLOCK, HOLDLOCK) WHERE AgreementId = @id
       `);
       if (!documents.recordset.length) {
-        throw Object.assign(new Error("Upload at least one agreement document before sending it to the customer portal"), { status: 400 });
+        throw Object.assign(new Error("Upload at least one agreement document before sending it to the customer on Civilier Home"), { status: 400 });
       }
       // Preserve the prior proposed date (if any) in history before it's
       // overwritten — nothing about the negotiation is ever lost. If

@@ -254,9 +254,11 @@ function ChainGroupList({
                 <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-left">
-                        <th className="px-5 py-2">Activity</th>
-                        <th className="px-3 py-2">Engineer</th>
+                      {/* Activity and Engineer keep a readable width on narrower screens (the box scrolls sideways instead
+                          of wrapping them a word per line); headers stay on one line. */}
+                      <tr className="text-left whitespace-nowrap">
+                        <th className="px-5 py-2 min-w-[15rem]">Activity</th>
+                        <th className="px-3 py-2 min-w-[10rem]">Engineer</th>
                         <th className="px-3 py-2">Tag</th>
                         <th className="px-3 py-2">Priority</th>
                         <th className="px-3 py-2">Start Date</th>

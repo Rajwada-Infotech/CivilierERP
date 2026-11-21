@@ -428,7 +428,7 @@ const CrmSalesDeed: React.FC = () => {
       if (ready && canActAsLegal) action = { label: "Submit for Senior Approval", run: handleResubmit };
     } else if (d.SeniorApprovalStatus === "Rejected") { next = `Senior approval rejected${d.SeniorApprovalRemarks ? `: ${d.SeniorApprovalRemarks}` : ""}`; action = { label: "Resubmit for Approval", run: handleResubmit }; }
     else if (d.SeniorApprovalStatus !== "Approved") next = "Waiting for senior approval";
-    else if (!d.SentToCustomerAt) { next = "Senior-approved: share with the customer"; action = { label: "Send to Customer Portal", run: handleSendToCustomer }; }
+    else if (!d.SentToCustomerAt) { next = "Senior-approved: share with the customer"; action = { label: "Send to Civilier Home", run: handleSendToCustomer }; }
     else if (d.CustomerApprovalStatus === "RecheckRequested") { next = `The customer asked for a recheck${d.CustomerRecheckRemarks ? `: "${d.CustomerRecheckRemarks}"` : ""}. Resend it as it is, or send it back to legal to correct it (Legal Work and Approvals).`; action = { label: "Resend to Customer", run: handleSendToCustomer }; }
     else if (d.CustomerApprovalStatus !== "Approved") next = `Sent to the customer${d.SentToCustomerAt ? ` on ${fmtDate(d.SentToCustomerAt)}` : ""}: waiting for their review`;
     else if (d.DirectorApprovalStatus !== "Approved") next = "The customer approved: waiting for the director's sign-off";
@@ -528,7 +528,7 @@ const CrmSalesDeed: React.FC = () => {
                     {a.n === 1 && s1 === "Pending" && !closed && <div className="flex items-center gap-2 flex-wrap pt-0.5"><ApprovalActions status={s1} recordId={d.Id} endpoint={API} actionPathSuffix="" module="crm-sales-deed-senior" submitOnly={false} onSuccess={invalidate} /></div>}
                     {a.n === 1 && s1 === "Rejected" && canWork && <button onClick={handleResubmit} className={`${KEY_INK} h-8 px-3 mt-1`}>Resubmit for Approval</button>}
                     {a.n === 2 && d.SentToCustomerAt && <p className="text-xs flex items-center gap-1 tabular-nums"><Send size={11} /> Sent {fmtDate(d.SentToCustomerAt)}</p>}
-                    {a.n === 2 && d.SeniorApprovalStatus === "Approved" && canWork && d.CustomerApprovalStatus !== "Approved" && <button onClick={handleSendToCustomer} disabled={sendingToCustomer} className={`${KEY_INK} h-8 px-3 mt-0.5`}>{sendingToCustomer ? "Sending…" : d.SentToCustomerAt ? "Resend to Customer" : "Send to Customer Portal"}</button>}
+                    {a.n === 2 && d.SeniorApprovalStatus === "Approved" && canWork && d.CustomerApprovalStatus !== "Approved" && <button onClick={handleSendToCustomer} disabled={sendingToCustomer} className={`${KEY_INK} h-8 px-3 mt-0.5`}>{sendingToCustomer ? "Sending…" : d.SentToCustomerAt ? "Resend to Customer" : "Send to Civilier Home"}</button>}
                     {a.n === 3 && done && d.CustomerApprovedAt && <p className="text-xs flex items-center gap-1 tabular-nums"><CheckCircle2 size={11} /> Approved {fmtDate(d.CustomerApprovedAt)}</p>}
                     {a.n === 3 && s1 === "RecheckRequested" && d.CustomerRecheckRemarks && <p className="text-xs text-destructive rounded-md px-2 py-1.5 border border-destructive/40"><strong>Recheck reason:</strong> {d.CustomerRecheckRemarks}</p>}
                     {a.n === 3 && s1 === "RecheckRequested" && canWork && (
