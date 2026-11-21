@@ -9,6 +9,7 @@ import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { PortalFetchButtons } from "@/components/legal/PortalFetch";
 import { usePageRights } from "@/hooks/usePageRights";
 import { convertEnquiry, setEnquiryStatus, getMyWhatsApp, setMyWhatsApp } from "@/api/legalLandApi";
+import { getEnquirySearches } from "@/api/legalEnquirySearchApi";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { LegalMasterTable } from "../LegalMasterPage";
 import { getLegalRows, type LegalRow } from "@/api/legalMastersApi";
@@ -176,6 +177,20 @@ export default function LandEnquiryPage() {
             </>;
             // Deed Registry Search comes first: Convert / Hold / Reject open once every office's search is complete.
             // No office type set up for this enquiry's state: nothing to search yet, so it cannot be converted.
+            // Office types exist for its state but the timelines were never created (e.g. loaded data): start them here.
+            if (Number(raw.OfficesTotal ?? 0) === 0 && st !== "Rejected" && Number(raw.OfficeTypesForState ?? 0) > 0) {
+              return (
+                <span className="inline-flex flex-wrap justify-end gap-1.5">
+                  {map}{portal}
+                  <button className={`${small} border-sky-600 bg-sky-500/10 font-semibold text-sky-800`} title="Create this enquiry's deed search timelines (one per registration office type of its state)"
+                    onClick={async () => {
+                      try { await getEnquirySearches(id); toast.success(`${no}: deed search started`); queryClient.invalidateQueries({ queryKey: ["legal-master", "land-enquiry"] }); }
+                      catch (e) { toast.error((e as Error).message); }
+                    }}>Start deed search</button>
+                  {holdReject}
+                </span>
+              );
+            }
             if (Number(raw.OfficesTotal ?? 0) === 0 && st !== "Rejected") {
               return (
                 <span className="inline-flex flex-wrap justify-end gap-1.5">

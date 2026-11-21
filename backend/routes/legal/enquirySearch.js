@@ -49,7 +49,9 @@ async function ensureOfficeTimelines(pool, enquiryId) {
     FROM dbo.LegalLandEnquiry e
     LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = e.DistrictId
     JOIN dbo.LegalRegistrationOfficeType t ON t.IsActive = 1 AND t.OnEnquiry = 1 AND (t.StateName IS NULL OR t.StateName = d.State)
-    WHERE e.EnquiryId = @id AND NOT EXISTS (SELECT 1 FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = e.EnquiryId AND x.OfficeType = t.TypeName)`);
+    WHERE e.EnquiryId = @id AND e.LandId IS NULL AND e.EnquiryStatus <> N'Rejected'
+      AND NOT EXISTS (SELECT 1 FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = e.EnquiryId AND x.OfficeType = t.TypeName)`);
+  // (A converted enquiry's search is finished — it never gets new timelines; a rejected one is not searched.)
 }
 
 // Per enquiry: offices total / complete, the nearest open due date, the worst overdue.
