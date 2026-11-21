@@ -1,11 +1,77 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import net from "net";
 
-// Suppress ECONNREFUSED noise when backend is not running
-function silentProxyError(err: NodeJS.ErrnoException) {
-  if (err.code === "ECONNREFUSED" || err.code === "ECONNRESET") return;
-  console.error("[proxy error]", err.message);
+// Dev proxy while the backend restarts (nodemon restarts it on every backend file change, e.g. after a pull):
+//  - GET / HEAD requests wait for it (its port is checked every 500 ms, for up to 20 s) and are then sent once, so a
+//    page loading mid-restart just takes a moment longer instead of failing;
+//  - anything else (a save) gets a 503 with a plain message rather than a bare 502, since its body can't be replayed;
+//  - the log says once that the backend is down and once that it's back, instead of a stack trace per request.
+// Vite adds its own error listener after `configure` (it logs every failure and answers 502); ours replaces it.
+type ProxyLike = {
+  on: (event: string, fn: (...args: any[]) => void) => unknown;
+  web: (req: any, res: any, opts?: any) => void;
+};
+const CHECK_EVERY_MS = 500;
+const WAIT_UP_TO_MS = 20_000;
+let backendDown = false;
+
+function portOpen(target: string): Promise<boolean> {
+  const u = new URL(target);
+  return new Promise((resolve) => {
+    const sock = net.connect({ host: u.hostname === "localhost" ? "127.0.0.1" : u.hostname, port: Number(u.port || 80) });
+    const done = (ok: boolean) => { sock.destroy(); resolve(ok); };
+    sock.setTimeout(1000, () => done(false));
+    sock.once("connect", () => done(true));
+    sock.once("error", () => done(false));
+  });
+}
+async function waitForBackend(target: string, isGone: () => boolean): Promise<boolean> {
+  const until = Date.now() + WAIT_UP_TO_MS;
+  while (Date.now() < until && !isGone()) {
+    if (await portOpen(target)) return true;
+    await new Promise((r) => setTimeout(r, CHECK_EVERY_MS));
+  }
+  return false;
+}
+
+function gracefulProxy(target: string) {
+  return (proxy: ProxyLike) => {
+    const on = proxy.on.bind(proxy);
+    let ours = false;
+    proxy.on = (event: string, fn: (...args: any[]) => void) => (event === "error" && ours ? proxy : on(event, fn));
+    on("error", async (err: NodeJS.ErrnoException, req: any, res: any) => {
+      const down = err.code === "ECONNREFUSED" || err.code === "ECONNRESET" || err.code === "ECONNABORTED";
+      if (!down) console.error("[proxy error]", req?.url, err.message);
+      else if (!backendDown) {
+        backendDown = true;
+        console.log(`[proxy] backend at ${target} is not answering (restarting?) - holding page requests until it is back`);
+      }
+      // WebSocket upgrade: res is the socket; the client (socket.io) reconnects by itself.
+      if (!res || typeof res.writeHead !== "function") {
+        res?.end?.();
+        return;
+      }
+      if (res.headersSent || res.writableEnded) return;
+      const method = String(req?.method || "GET").toUpperCase();
+      if (down && (method === "GET" || method === "HEAD") && !req.__proxyRetried) {
+        req.__proxyRetried = true;
+        if (await waitForBackend(target, () => res.writableEnded || req.socket?.destroyed)) {
+          if (backendDown) {
+            backendDown = false;
+            console.log("[proxy] backend is back");
+          }
+          proxy.web(req, res);
+          return;
+        }
+      }
+      if (res.headersSent || res.writableEnded) return;
+      res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "2" });
+      res.end(JSON.stringify({ error: "The server is restarting. Try again in a moment." }));
+    });
+    ours = true;
+  };
 }
 
 // https://vitejs.dev/config/
@@ -31,18 +97,14 @@ export default defineConfig(({ mode }) => {
         // enough for slow reports/exports but still bounded.
         timeout: 30_000,
         proxyTimeout: 30_000,
-        configure: (proxy) => {
-          proxy.on("error", silentProxyError);
-        },
+        configure: gracefulProxy(backendUrl),
       },
       "/socket.io": {
         target: backendUrl,
         changeOrigin: true,
         ws: true,
         secure: false,
-        configure: (proxy) => {
-          proxy.on("error", silentProxyError);
-        },
+        configure: gracefulProxy(backendUrl),
       },
     },
   },
