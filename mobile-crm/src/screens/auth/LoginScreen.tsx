@@ -1,16 +1,8 @@
-// The Civilier CRM sign-in — staff, with their CivilierERP account. Ported from mobile-Fixed-Asset's
-// LoginScreen — same Animated API + expo-linear-gradient, rebranded from
-// the FA amber accent to the Maintenance lime-green accent.
+// The Civilier CRM sign-in — Civilier Home's design (mobile-maintenance LoginScreen.tsx): the deep purple page, a glass
+// card with accent corners, the logo ring and the app's name — for staff, with their CivilierERP email and password
+// (AuthContext login → /api/users/login). The accent is the one the person picked on this phone (rose at first).
 import { useEffect, useRef, useState } from "react";
-import {
-  Animated,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import { Animated, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Eye, EyeOff, AlertCircle } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
@@ -19,13 +11,13 @@ import { ShimmerButton } from "@/components/ShimmerButton";
 import { GradientText } from "@/components/GradientText";
 import { LogoRing } from "@/components/LogoRing";
 import { WelcomeOverlay } from "@/components/WelcomeOverlay";
+import { useBrand } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
 
 const NAV_HOLD_MS = 1800;
 
-function CornerAccents() {
+function CornerAccents({ color }: { color: string }) {
   const corner = "absolute w-5 h-5";
-  const color = "rgba(101,163,13,0.4)";
   return (
     <>
       <View className={`${corner} top-0 left-0 border-t-2 border-l-2 rounded-tl-2xl`} style={{ borderColor: color }} />
@@ -37,6 +29,7 @@ function CornerAccents() {
 }
 
 export default function LoginScreen() {
+  const b = useBrand();
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -71,7 +64,7 @@ export default function LoginScreen() {
   return (
     <View className="flex-1">
       <LinearGradient
-        colors={["#fefce8", "#fef9c3", "#ffffff", "#fffdf5"]}
+        colors={[b.heroFrom, b.heroMid, b.heroTo, b.heroMid]}
         locations={[0, 0.3, 0.65, 1]}
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.9, y: 1 }}
@@ -79,37 +72,31 @@ export default function LoginScreen() {
       />
 
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
-        <ScrollView
-          contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 20 }}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 20 }} keyboardShouldPersistTaps="handled">
           <Animated.View style={{ opacity: cardFade, transform: [{ translateY: cardY }] }}>
             <View
               className="rounded-3xl p-6 overflow-hidden"
               style={{
-                backgroundColor: "rgba(255,255,255,0.92)",
+                backgroundColor: "rgba(30,27,58,0.98)",
                 borderWidth: 1,
-                borderColor: "rgba(202,138,4,0.12)",
-                shadowColor: "#ca8a04",
-                shadowOpacity: 0.1,
+                borderColor: b.accentBorder,
+                shadowColor: b.accent,
+                shadowOpacity: 0.12,
                 shadowRadius: 24,
                 shadowOffset: { width: 0, height: 10 },
                 elevation: 6,
               }}
             >
-              <CornerAccents />
+              <CornerAccents color={b.accentBorder} />
 
               <View className="items-center mb-6">
                 <LogoRing size={64} />
                 <View className="mt-3">
-                  <GradientText
-                    style={{ fontSize: 24, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}
-                    colors={["#365314", "#65a30d", "#bef264"]}
-                  >
+                  <GradientText style={{ fontSize: 24, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }} colors={[b.accentGradient[0], b.accent, b.accentGradient[0]]}>
                     Civilier CRM
                   </GradientText>
                 </View>
-                <Text style={{ color: "#94a3b8", fontSize: 12, fontFamily: fonts.body.regular, marginTop: 6 }}>
+                <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: fonts.body.regular, marginTop: 6, textAlign: "center" }}>
                   Sign in with your CivilierERP staff account
                 </Text>
               </View>
@@ -119,10 +106,7 @@ export default function LoginScreen() {
                   label="Email Address"
                   value={email}
                   placeholder="name@company.com"
-                  onChangeText={(t) => {
-                    setEmail(t);
-                    setError(null);
-                  }}
+                  onChangeText={(t) => { setEmail(t); setError(null); }}
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="email-address"
@@ -133,10 +117,7 @@ export default function LoginScreen() {
                   label="Password"
                   value={password}
                   placeholder="••••••••"
-                  onChangeText={(t) => {
-                    setPassword(t);
-                    setError(null);
-                  }}
+                  onChangeText={(t) => { setPassword(t); setError(null); }}
                   secureTextEntry={!showPass}
                   textContentType="password"
                   rightElement={
@@ -147,30 +128,17 @@ export default function LoginScreen() {
                 />
 
                 {error && (
-                  <View
-                    className="flex-row items-center gap-2 px-4 py-2.5 rounded-xl"
-                    style={{ backgroundColor: "rgba(254,226,226,0.8)", borderWidth: 1, borderColor: "rgba(252,165,165,0.5)" }}
-                  >
+                  <View className="flex-row items-center gap-2 px-4 py-2.5 rounded-xl"
+                    style={{ backgroundColor: "rgba(254,226,226,0.8)", borderWidth: 1, borderColor: "rgba(252,165,165,0.5)" }}>
                     <AlertCircle size={14} color="#dc2626" />
-                    <Text className="text-sm flex-1" style={{ color: "#dc2626", fontFamily: fonts.body.medium }}>
-                      {error}
-                    </Text>
+                    <Text className="text-sm flex-1" style={{ color: "#dc2626", fontFamily: fonts.body.medium }}>{error}</Text>
                   </View>
                 )}
 
                 <ShimmerButton onPress={onSubmit} disabled={loading || !email || !password || loginSuccess}>
                   {loading ? (
                     <>
-                      <Animated.View
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: 8,
-                          borderWidth: 2,
-                          borderColor: "rgba(255,255,255,0.3)",
-                          borderTopColor: "#fff",
-                        }}
-                      />
+                      <Animated.View style={{ width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} />
                       <Text style={{ color: "#fff", fontSize: 14, fontFamily: fonts.body.semibold }}>Signing in…</Text>
                     </>
                   ) : (

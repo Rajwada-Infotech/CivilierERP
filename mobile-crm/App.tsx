@@ -13,6 +13,7 @@ import { openNotification } from "@/navigation/navigationRef";
 import { APP_KEY } from "@/services/appSession";
 import { useAppFonts } from "@/theme/fonts";
 import { colors } from "@/theme/colors";
+import { ThemeProvider, useTheme } from "@/theme/ThemeContext";
 
 // A tapped notification opens what it is about — an approval opens the Approval Inbox, a booking or ticket its own
 // screen, anything else the Notifications screen (navigationRef.ts openNotification). The app may have been closed,
@@ -23,29 +24,43 @@ function openFromNotification(data?: Record<string, unknown>) {
   openNotification(data);
 }
 
+/** The signed-in app, redrawn when the theme changes (light / dark, accent) so every screen picks it up. */
+function ThemedApp() {
+  const { themeKey, mode } = useTheme();
+  return (
+    <>
+      <View key={themeKey} style={{ flex: 1, backgroundColor: colors.background }}>
+        <RootNavigator />
+      </View>
+      <StatusBar style={mode === "dark" ? "light" : "dark"} />
+    </>
+  );
+}
+
 export default function App() {
   const [fontsLoaded] = useAppFonts();
 
   if (!fontsLoaded) {
     return (
       <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
-        <ActivityIndicator color="#eab308" />
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
 
   return (
     <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <ToastProvider>
-            <RootNavigator />
-            <PushNotificationsGate appKey={APP_KEY} onOpen={openFromNotification} />
-          </ToastProvider>
-        </AuthProvider>
-      </QueryClientProvider>
-      <UpdateGate appKey={APP_KEY} />
-      <StatusBar style="light" />
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <ToastProvider>
+              <ThemedApp />
+              <PushNotificationsGate appKey={APP_KEY} onOpen={openFromNotification} />
+            </ToastProvider>
+          </AuthProvider>
+        </QueryClientProvider>
+        <UpdateGate appKey={APP_KEY} />
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

@@ -14,6 +14,10 @@ export function navigate<RouteName extends keyof MainStackParamList>(name: Route
   go(name, params);
 }
 
+/** The CRM lists that have their own tab (MainStack.tsx): Bookings. The CRM tab leaves it out, so no page is in
+ * two places. */
+export const TAB_LISTS = ["bookings"];
+
 /** Open one of the bottom tabs from anywhere. */
 export function openTab(tab: keyof TabParamList) {
   go("Tabs", { screen: tab });
@@ -30,7 +34,7 @@ export function notificationTarget(n: NotificationRef): { route: string; params?
   const type = String(n.type ?? "");
   const refType = String(n.refType ?? "");
   const refId = Number(n.refId);
-  if (type.startsWith("approval-")) return { route: "Tabs", params: { screen: "Approvals" } };
+  if (type.startsWith("approval-")) return { route: "Approvals" };
   if (refId > 0 && (refType === "crm_booking" || refType === "crm_payment")) return { route: "CrmBooking", params: { bookingId: refId } };
   if (refId > 0 && refType === "service_ticket") return { route: "CrmTicket", params: { ticketId: refId } };
   if (refType === "payment_milestone") return { route: "CrmRegister", params: { register: "demands" } };

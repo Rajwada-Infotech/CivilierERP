@@ -6,6 +6,7 @@
 import { useRef, useState } from "react";
 import { Animated, TextInput, View, type TextInputProps } from "react-native";
 import { fonts } from "@/theme/fonts";
+import { useBrand } from "@/theme/ThemeContext";
 
 interface AnimatedInputProps extends Omit<TextInputProps, "placeholder"> {
   label: string;
@@ -23,6 +24,7 @@ export function AnimatedInput({
   onBlur,
   ...inputProps
 }: AnimatedInputProps) {
+  const b = useBrand();
   const [focused, setFocused] = useState(false);
   const anim = useRef(new Animated.Value(value ? 1 : 0)).current;
   const active = focused || value.length > 0;
@@ -32,12 +34,14 @@ export function AnimatedInput({
   };
 
   return (
-    <View className="relative">
+    <View className="relative" style={{ position: "relative" }}>
       <Animated.Text
         pointerEvents="none"
         className="absolute left-4 z-10"
+        // The position also as a plain style: a class on an animated text isn't applied everywhere (the web preview).
         style={{
-          color: focused ? "#ca8a04" : "rgba(100,116,139,0.8)",
+          position: "absolute", left: 16, zIndex: 10,
+          color: focused ? b.accent : "rgba(100,116,139,0.8)",
           top: anim.interpolate({ inputRange: [0, 1], outputRange: [18, 6] }),
           fontSize: anim.interpolate({ inputRange: [0, 1], outputRange: [13, 9] }),
           letterSpacing: active ? 0.8 : 0,
@@ -50,7 +54,7 @@ export function AnimatedInput({
         style={{
           borderRadius: 12,
           borderWidth: focused ? 2 : 1.5,
-          borderColor: focused ? "rgba(5,150,105,0.35)" : "rgba(203,213,225,0.8)",
+          borderColor: focused ? b.accentBorder : "rgba(203,213,225,0.8)",
           backgroundColor: focused ? "rgba(255,255,255,0.98)" : "rgba(248,250,252,0.9)",
           overflow: "hidden",
         }}

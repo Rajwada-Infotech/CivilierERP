@@ -1,39 +1,39 @@
-// The More tab: who is signed in (name, email, role, the parts of the app their rights open), notifications, the app
-// itself (installed version, check for update), changing their own password (the web profile's route,
-// backend/routes/userProfile.js) and signing out.
+// Profile & settings (from the account menu), laid out like Civilier Home's: who is signed in and what their rights
+// open; Appearance (dark mode and the accent colour, kept on this phone); notifications; the app (installed version,
+// check for update); changing their own password (the web profile's route, backend/routes/userProfile.js); sign out.
 import { useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Alert, Platform, Switch, Text, TextInput, View } from "react-native";
 import * as Application from "expo-application";
-import { Bell, KeyRound, LogOut, RefreshCw } from "lucide-react-native";
+import { Bell, Check, KeyRound, LogOut, RefreshCw } from "lucide-react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "@/auth/AuthContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
+import { roleText } from "@/navigation/TopHeader";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { checkForUpdateNow } from "@/updater/UpdateGate";
 import { useAppVersion } from "@/hooks/useAppVersion";
-import { colors, moduleAccents } from "@/theme/colors";
+import { ACCENTS, useBrand, useTheme, type AccentKey } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
-import { useHasCrm } from "@/screens/crm/CrmHubScreen";
+import { useHasCrm } from "@/screens/crm/crmRegisters";
 import { useHasMaintenance } from "@/screens/dashboard/MaintenanceScreen";
 import { useBellCount } from "@/screens/notifications/NotificationsScreen";
-import { Kv, LinkRow, Section } from "@/screens/crm/ui";
-
-const CRM = moduleAccents.crm;
-const roleText = (r?: string) => (r || "").split("_").filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+import { AccentAvatar, Button, HeroSurface, Kv, LinkRow, ON_HERO, Page, Section, Tap } from "@/screens/crm/ui";
 
 function PasswordInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const b = useBrand();
   return (
-    <View style={{ marginBottom: 10 }}>
-      <Text style={{ fontSize: 10, fontFamily: fonts.body.medium, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 5 }}>{label}</Text>
+    <View style={{ gap: 6 }}>
+      <Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: b.textSecondary }}>{label}</Text>
       <TextInput value={value} onChangeText={onChange} secureTextEntry autoCapitalize="none" autoCorrect={false}
-        style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13.5 }} />
+        style={{ borderRadius: 14, backgroundColor: b.surfaceGlass, paddingHorizontal: 14, paddingVertical: 12, color: b.textPrimary, fontFamily: fonts.body.regular, fontSize: 15 }} />
     </View>
   );
 }
 
 function ChangePassword({ userId }: { userId: string }) {
+  const b = useBrand();
   const [open, setOpen] = useState(false);
   const [cur, setCur] = useState("");
   const [next, setNext] = useState("");
@@ -64,34 +64,31 @@ function ChangePassword({ userId }: { userId: string }) {
 
   if (!open) return <LinkRow title="Change password" icon={KeyRound} onPress={() => setOpen(true)} />;
   return (
-    <View style={{ paddingVertical: 8 }}>
+    <View style={{ gap: 12, paddingVertical: 8 }}>
       <PasswordInput label="Current password" value={cur} onChange={setCur} />
       <PasswordInput label="New password" value={next} onChange={setNext} />
       <PasswordInput label="New password again" value={again} onChange={setAgain} />
-      {error ? <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular, marginBottom: 8 }}>{error}</Text> : null}
+      {error ? <Text style={{ color: b.danger, fontSize: 13, fontFamily: fonts.body.medium }}>{error}</Text> : null}
       <View style={{ flexDirection: "row", gap: 10 }}>
-        <Pressable onPress={() => { setOpen(false); setError(null); }} style={{ flex: 1, alignItems: "center", paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: colors.border }}>
-          <Text style={{ color: colors.foreground, fontFamily: fonts.heading.semibold, fontSize: 13 }}>Cancel</Text>
-        </Pressable>
-        <Pressable onPress={save} disabled={busy} style={{ flex: 1, alignItems: "center", paddingVertical: 11, borderRadius: 12, backgroundColor: CRM, opacity: busy ? 0.6 : 1 }}>
-          {busy ? <ActivityIndicator color="#fff" /> : <Text style={{ color: "#fff", fontFamily: fonts.heading.semibold, fontSize: 13 }}>Change password</Text>}
-        </Pressable>
+        <View style={{ flex: 1 }}><Button label="Cancel" kind="line" onPress={() => { setOpen(false); setError(null); }} /></View>
+        <View style={{ flex: 1 }}><Button label="Save" onPress={save} busy={busy} /></View>
       </View>
     </View>
   );
 }
 
-export default function MoreScreen() {
+export default function ProfileScreen() {
+  const b = useBrand();
+  const { mode, toggleMode, accentKey, setAccent } = useTheme();
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { currentUser, logout, canAccessPage } = useAuth();
   const { appVersion } = useAppVersion();
   const bell = useBellCount();
+  const hasCrm = useHasCrm();
+  const hasMaintenance = useHasMaintenance();
   const [checking, setChecking] = useState(false);
-  const opens = [
-    useHasCrm() && "CRM",
-    canAccessPage("approval-inbox") && "Approvals",
-    useHasMaintenance() && "Maintenance",
-  ].filter(Boolean).join(", ");
+  const opens = [hasCrm && "CRM", canAccessPage("approval-inbox") && "Approvals", hasMaintenance && "Maintenance"].filter(Boolean).join(", ");
+  const initials = (currentUser?.name || "?").split(" ").filter(Boolean).map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 
   const checkUpdate = async () => {
     if (Platform.OS !== "android") return toast.info("Updates are installed from the Android app.");
@@ -111,23 +108,45 @@ export default function MoreScreen() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 12 }}>
-        <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: CRM, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ color: "#fff", fontSize: 18, fontFamily: fonts.heading.bold }}>{currentUser?.initials}</Text>
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text numberOfLines={1} style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: colors.foreground }}>{currentUser?.name}</Text>
-          <Text numberOfLines={1} style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>{currentUser?.email}</Text>
-          <Text style={{ fontSize: 11, fontFamily: fonts.heading.semibold, color: CRM, marginTop: 4 }}>{roleText(currentUser?.role)}</Text>
-        </View>
+    <Page gap={0}>
+      <View style={{ marginBottom: 14 }}>
+        <HeroSurface>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+            <AccentAvatar text={initials} size={56} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text numberOfLines={1} style={{ fontSize: 20, fontFamily: fonts.heading.semibold, color: ON_HERO.primary }}>{currentUser?.name}</Text>
+              <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.body.regular, color: ON_HERO.secondary, marginTop: 2 }}>{currentUser?.email}</Text>
+              <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, marginTop: 6 }}>{roleText(currentUser?.role)}</Text>
+            </View>
+          </View>
+        </HeroSurface>
       </View>
 
       <Section title="Your access">
         <Kv label="You can open" value={opens || "Home only"} />
-        <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, paddingBottom: 6 }}>
+        <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: b.textSecondary, paddingBottom: 4 }}>
           Set by your Menu Rights on the web. Ask your admin to change them.
         </Text>
+      </Section>
+
+      <Section title="Appearance">
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8 }}>
+          <Text style={{ fontSize: 15, fontFamily: fonts.body.medium, color: b.textPrimary }}>Dark mode</Text>
+          <Switch value={mode === "dark"} onValueChange={toggleMode} trackColor={{ true: b.accent, false: b.surfaceGlass }} thumbColor="#fff" />
+        </View>
+        <Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: b.textSecondary, paddingTop: 6, paddingBottom: 10 }}>Accent colour</Text>
+        <View style={{ flexDirection: "row", gap: 12, paddingBottom: 6 }}>
+          {(Object.keys(ACCENTS) as AccentKey[]).map((k) => (
+            <Tap key={k} onPress={() => setAccent(k)} accessibilityRole="button" accessibilityLabel={ACCENTS[k].label} accessibilityState={{ selected: accentKey === k }}
+              style={{ alignItems: "center", gap: 6 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: ACCENTS[k].hex, alignItems: "center", justifyContent: "center",
+                borderWidth: accentKey === k ? 3 : 0, borderColor: b.textPrimary }}>
+                {accentKey === k ? <Check size={18} color="#fff" /> : null}
+              </View>
+              <Text style={{ fontSize: 11.5, fontFamily: fonts.body.medium, color: accentKey === k ? b.textPrimary : b.textSecondary }}>{ACCENTS[k].label}</Text>
+            </Tap>
+          ))}
+        </View>
       </Section>
 
       <Section title="Notifications">
@@ -144,10 +163,7 @@ export default function MoreScreen() {
         {currentUser ? <ChangePassword userId={currentUser.id} /> : null}
       </Section>
 
-      <Pressable onPress={signOut} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 13, borderRadius: 14, borderWidth: 1, borderColor: `${colors.destructive}66`, opacity: pressed ? 0.7 : 1 })}>
-        <LogOut size={16} color={colors.destructive} />
-        <Text style={{ color: colors.destructive, fontFamily: fonts.heading.semibold, fontSize: 14 }}>Sign out</Text>
-      </Pressable>
-    </ScrollView>
+      <Button label="Sign out" icon={LogOut} kind="line" onPress={signOut} />
+    </Page>
   );
 }

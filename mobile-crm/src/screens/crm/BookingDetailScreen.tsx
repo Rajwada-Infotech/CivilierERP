@@ -13,11 +13,10 @@ import { CheckCircle2, Circle, FileText, Lock, PhoneCall, Ticket, Wallet } from 
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
 import { getTicketsForBooking } from "@/api/serviceTicketApi";
-import { Pill } from "@/components/list/DataList";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { ActionKey, CRM, ContactKeys, Empty, Figure, Kv, LinkRow, Section, fmtDate, joinDot, money } from "./ui";
+import { ActionKey, CRM, ContactKeys, Empty, Figure, Kv, LinkRow, Section, fmtDate, joinDot, money, Pill, useCardStyle } from "./ui";
 import { useCrmOpen } from "./CrmRegisterScreen";
 import { milestoneMissing, nextOpenMilestone } from "./CrmForms";
 
@@ -30,6 +29,7 @@ const STEP_TONE: Record<string, string> = { done: "#10b981", active: CRM, locked
 
 export default function BookingDetailScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmBooking">>();
+  const card = useCardStyle();
   const id = params.bookingId;
   const { canAccessPage, canDoAction } = useAuth();
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -97,7 +97,7 @@ export default function BookingDetailScreen() {
       ) : (
         <>
           {/* Who and what */}
-          <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: `${CRM}40`, padding: 16, marginBottom: 12 }}>
+          <View style={{ ...card, padding: 18, marginBottom: 12 }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <Text style={{ fontSize: 18, fontFamily: fonts.heading.bold, color: colors.foreground }}>{head.BookingNo || params.title}</Text>
               {head.Status || head.BookingStatus ? <Pill label={head.Status || head.BookingStatus} /> : null}
@@ -132,12 +132,8 @@ export default function BookingDetailScreen() {
           {canCall || canDeposit || canTicket ? (
             <View style={{ gap: 8, marginBottom: 12 }}>
               {canCall ? <View style={{ flexDirection: "row" }}><ActionKey label="Log welcome call" icon={PhoneCall} outline onPress={() => nav.navigate("CrmWelcomeCall", { bookingId: id, title })} /></View> : null}
-              {canDeposit || canTicket ? (
-                <View style={{ flexDirection: "row", gap: 8 }}>
-                  {canDeposit ? <ActionKey label="Deposit on account" icon={Wallet} outline onPress={() => nav.navigate("CrmPayment", { bookingId: id, title })} /> : null}
-                  {canTicket ? <ActionKey label="Raise ticket" icon={Ticket} outline onPress={() => nav.navigate("CrmTicketNew", { bookingId: id, title })} /> : null}
-                </View>
-              ) : null}
+              {canDeposit ? <View style={{ flexDirection: "row" }}><ActionKey label="Deposit on account" icon={Wallet} outline onPress={() => nav.navigate("CrmPayment", { bookingId: id, title })} /></View> : null}
+              {canTicket ? <View style={{ flexDirection: "row" }}><ActionKey label="Raise ticket" icon={Ticket} outline onPress={() => nav.navigate("CrmTicketNew", { bookingId: id, title })} /></View> : null}
             </View>
           ) : null}
 

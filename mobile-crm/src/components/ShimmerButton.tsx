@@ -8,6 +8,7 @@ import { useRef, useState } from "react";
 import { Animated, Pressable, Text, Easing, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { fonts } from "@/theme/fonts";
+import { useBrand } from "@/theme/ThemeContext";
 
 export function ShimmerButton({
   children,
@@ -18,6 +19,8 @@ export function ShimmerButton({
   disabled?: boolean;
   onPress?: () => void;
 }) {
+  // The accent the person picked on this phone (ThemeContext.tsx).
+  const b = useBrand();
   const scale = useRef(new Animated.Value(1)).current;
   const shimmer = useRef(new Animated.Value(0)).current;
   const [shimmering, setShimmering] = useState(false);
@@ -49,7 +52,7 @@ export function ShimmerButton({
           borderRadius: 12,
           overflow: "hidden",
           opacity: disabled ? 0.6 : 1,
-          shadowColor: "#ca8a04",
+          shadowColor: b.accent,
           shadowOpacity: 0.35,
           shadowRadius: 16,
           shadowOffset: { width: 0, height: 6 },
@@ -57,7 +60,7 @@ export function ShimmerButton({
         }}
       >
         <LinearGradient
-          colors={["#ca8a04", "#a16207"]}
+          colors={[b.accent, b.accentGradient[2]]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={{ paddingVertical: 14, alignItems: "center", justifyContent: "center" }}

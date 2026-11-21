@@ -11,20 +11,20 @@ import {
   assignServiceTicket, closeServiceTicket, getAssignableStaff, getServiceTicket, markTicketInProgress, reopenServiceTicket, resolveServiceTicket,
 } from "@/api/serviceTicketApi";
 import { OptionPickerModal } from "@/components/OptionPicker";
-import { Pill } from "@/components/list/DataList";
 import { toast } from "@/components/Toast";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { NotePrompt } from "./CrmForms";
 import { useCrmOpen } from "./CrmRegisterScreen";
-import { ActionKey, CRM, ContactKeys, Empty, Kv, LinkRow, Section, fmtDate, joinDot } from "./ui";
+import { ActionKey, CRM, ContactKeys, Empty, Kv, LinkRow, Section, fmtDate, joinDot, Pill, useCardStyle } from "./ui";
 
 const PRIORITY_TONE: Record<string, string> = { Urgent: "#ef4444", High: "#f97316", Normal: "#0ea5e9", Low: colors.mutedForeground };
 const words = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, "$1 $2") : "");
 
 export default function TicketScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmTicket">>();
+  const card = useCardStyle();
   const id = params.ticketId;
   const qc = useQueryClient();
   const { canAccessPage, canDoAction } = useAuth();
@@ -71,7 +71,7 @@ export default function TicketScreen() {
         : !t ? <Empty text="This ticket was not found." />
         : (
           <>
-            <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: `${CRM}40`, padding: 16, marginBottom: 12 }}>
+            <View style={{ ...card, padding: 18, marginBottom: 12 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <Text style={{ flex: 1, fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.mutedForeground }}>{t.TicketNo}</Text>
                 <Pill label={t.Status} />

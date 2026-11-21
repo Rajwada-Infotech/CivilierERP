@@ -1,18 +1,18 @@
-// Civilier CRM's layout: five bottom tabs — Home, CRM, Approvals, Maintenance, More — each shown only to staff with a
-// right on it (the web's Menu Rights), and every other screen pushed over them with a back arrow (TopHeader.tsx).
-import { Text, View, Pressable } from "react-native";
+// Civilier CRM's layout, as Civilier Home's (mobile-maintenance CustomerStack.tsx): a floating, rounded tab bar —
+// Home, Bookings, CRM (every other CRM list), Maintenance, each shown only to staff with a right on it — and Menu,
+// which pops up the Approval Inbox, Notifications and Profile & settings (TopHeader.tsx NavMenuSheet). Every other
+// screen is pushed over the tabs with a round back key.
+import { Text, View } from "react-native";
 import { createBottomTabNavigator, type BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator, type NativeStackHeaderProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery } from "@tanstack/react-query";
-import { Briefcase, Home, Inbox, Menu, Wrench } from "lucide-react-native";
+import { Briefcase, ClipboardList, Home, LayoutGrid, Wrench } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import { fetchInbox } from "@/api/approvalInboxApi";
-import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
+import { useBrand } from "@/theme/ThemeContext";
 import HomeScreen from "@/screens/dashboard/DashboardScreen";
 import MaintenanceScreen, { useHasMaintenance } from "@/screens/dashboard/MaintenanceScreen";
-import MoreScreen from "@/screens/dashboard/ProfileScreen";
+import ProfileScreen from "@/screens/dashboard/ProfileScreen";
 import NotificationsScreen from "@/screens/notifications/NotificationsScreen";
 import DirectoryScreen from "@/screens/directory/DirectoryScreen";
 import CustomerProfileScreen from "@/screens/directory/CustomerProfileScreen";
@@ -23,27 +23,29 @@ import AttendanceScreen from "@/screens/attendance/AttendanceScreen";
 import ElectricityScreen from "@/screens/electricity/ElectricityScreen";
 import ServiceRequestsScreen from "@/screens/tickets/ServiceRequestsScreen";
 import ApprovalInboxScreen from "@/screens/approvals/ApprovalInboxScreen";
-import CrmHubScreen, { useHasCrm } from "@/screens/crm/CrmHubScreen";
+import CrmHubScreen from "@/screens/crm/CrmHubScreen";
 import CrmDashboardScreen from "@/screens/crm/CrmDashboardScreen";
 import CrmRegisterScreen from "@/screens/crm/CrmRegisterScreen";
 import BookingDetailScreen from "@/screens/crm/BookingDetailScreen";
 import Customer360Screen from "@/screens/crm/Customer360Screen";
 import TicketScreen from "@/screens/crm/TicketScreen";
 import { NewTicketScreen, PaymentScreen, WelcomeCallScreen } from "@/screens/crm/CrmForms";
-import { registerByKey } from "@/screens/crm/crmRegisters";
-import { TopHeader } from "./TopHeader";
+import { pairParent, registerByKey, useHasCrm } from "@/screens/crm/crmRegisters";
+import { Tap } from "@/screens/crm/ui";
+import { ShellMenusProvider, TopHeader, useMenuCount, useShellMenus } from "./TopHeader";
 
 export type TabParamList = {
   Home: undefined;
+  Bookings: { register: string };
   CRM: undefined;
-  Approvals: undefined;
   Maintenance: undefined;
-  More: undefined;
 };
 
 export type MainStackParamList = {
   Tabs: { screen?: keyof TabParamList } | undefined;
   Notifications: undefined;
+  Profile: undefined;
+  Approvals: undefined;
   // Maintenance
   Directory: undefined;
   CustomerProfile: { bookingId: number; customerName?: string | null };
@@ -67,45 +69,56 @@ export type MainStackParamList = {
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
-const ACCENT = moduleAccents.crm;
 
-const TAB_ICON = { Home, CRM: Briefcase, Approvals: Inbox, Maintenance: Wrench, More: Menu } as const;
+const TABS = {
+  Home: { label: "Home", icon: Home },
+  Bookings: { label: "Bookings", icon: ClipboardList },
+  CRM: { label: "CRM", icon: Briefcase },
+  Maintenance: { label: "Maintenance", icon: Wrench },
+} as const;
 
-function TabBar({ state, navigation, descriptors }: BottomTabBarProps) {
+/** A floating, rounded tab bar (Civilier Home's): the active tab in an accent pill; Menu pops up the other pages. */
+function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const { canAccessPage } = useAuth();
-  const canApprove = canAccessPage("approval-inbox");
-  // The inbox's own list (same query key as the Approval Inbox), so the badge and the inbox agree.
-  const inboxQ = useQuery({ queryKey: ["approval-inbox"], queryFn: fetchInbox, enabled: canApprove, staleTime: 30_000 });
-  const waiting = (inboxQ.data ?? []).filter((i) => i._canAct !== false).length;
-  return (
-    <View style={{ flexDirection: "row", backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 6), paddingTop: 6 }}>
-      {state.routes.map((route, i) => {
-        const focused = state.index === i;
-        const Icon = TAB_ICON[route.name as keyof typeof TAB_ICON];
-        const badge = route.name === "Approvals" && waiting > 0 ? waiting : 0;
-        const onPress = () => {
-          const e = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
-          if (!focused && !e.defaultPrevented) navigation.navigate(route.name as never);
-        };
-        return (
-          <Pressable key={route.key} onPress={onPress} accessibilityRole="tab" accessibilityState={{ selected: focused }}
-            accessibilityLabel={descriptors[route.key].options.title}
-            style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 4 }}>
-            <View style={{ paddingHorizontal: 14, paddingVertical: 4, borderRadius: 14, backgroundColor: focused ? `${ACCENT}26` : "transparent" }}>
-              <Icon size={20} color={focused ? ACCENT : colors.mutedForeground} strokeWidth={focused ? 2.3 : 1.9} />
-              {badge ? (
-                <View style={{ position: "absolute", top: -2, right: 4, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3, backgroundColor: "#ef4444", alignItems: "center", justifyContent: "center" }}>
-                  <Text style={{ color: "#fff", fontSize: 9, fontFamily: fonts.heading.bold }}>{badge > 99 ? "99+" : badge}</Text>
-                </View>
-              ) : null}
+  const b = useBrand();
+  const menus = useShellMenus();
+  // The Menu's badge: approvals waiting + unread notifications (what the Menu opens).
+  const menuCount = useMenuCount();
+  const item = (key: string, label: string, Icon: typeof Home, focused: boolean, onPress: () => void, badge = 0) => (
+    <Tap key={key} onPress={onPress} accessibilityRole="tab" accessibilityState={{ selected: focused }} accessibilityLabel={label}
+      style={{ flex: 1, alignItems: "center", justifyContent: "center", height: 56 }}>
+      <View style={{ alignItems: "center", justifyContent: "center", gap: 3, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 18, backgroundColor: focused ? b.accentSoft : "transparent" }}>
+        <View>
+          <Icon size={21} color={focused ? b.accent : b.textFaint} strokeWidth={focused ? 2.3 : 1.9} />
+          {badge > 0 ? (
+            <View style={{ position: "absolute", top: -6, right: -12, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, backgroundColor: b.danger, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: b.isDark ? "#1C1C25" : "#FFFFFF" }}>
+              <Text style={{ color: "#fff", fontSize: 9.5, fontFamily: fonts.heading.semibold }}>{badge > 99 ? "99+" : badge}</Text>
             </View>
-            <Text style={{ fontSize: 10.5, marginTop: 2, fontFamily: focused ? fonts.heading.semibold : fonts.body.medium, color: focused ? colors.foreground : colors.mutedForeground }}>
-              {descriptors[route.key].options.title}
-            </Text>
-          </Pressable>
-        );
-      })}
+          ) : null}
+        </View>
+        <Text numberOfLines={1} style={{ fontSize: 11, fontFamily: focused ? fonts.heading.semibold : fonts.body.medium, color: focused ? b.accent : b.textSecondary }}>{label}</Text>
+      </View>
+    </Tap>
+  );
+  return (
+    <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: Math.max(insets.bottom, 10) + 6, paddingHorizontal: 14 }}>
+      <View style={{
+        flexDirection: "row", alignItems: "center", height: 68, borderRadius: 26, paddingHorizontal: 6,
+        backgroundColor: b.isDark ? "#1C1C25" : "#FFFFFF", borderWidth: 1, borderColor: b.border,
+        shadowColor: "#000", shadowOpacity: b.isDark ? 0.5 : 0.12, shadowRadius: 22, shadowOffset: { width: 0, height: 10 }, elevation: 14,
+      }}>
+        {state.routes.map((route, i) => {
+          const focused = state.index === i;
+          const tab = TABS[route.name as keyof typeof TABS];
+          const onPress = () => {
+            const e = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
+            if (!focused && !e.defaultPrevented) navigation.navigate(route.name as never);
+          };
+          return item(route.key, tab?.label ?? descriptors[route.key].options.title ?? route.name, tab?.icon ?? Home, focused, onPress);
+        })}
+        {/* Menu: not a page of its own — it pops up the Approval Inbox, Notifications and Profile & settings. */}
+        {item("menu", "Menu", LayoutGrid, false, menus.nav, menuCount)}
+      </View>
     </View>
   );
 }
@@ -114,39 +127,46 @@ function Tabs() {
   const { canAccessPage } = useAuth();
   const hasCrm = useHasCrm();
   const hasMaintenance = useHasMaintenance();
-  const canApprove = canAccessPage("approval-inbox");
+  const b = useBrand();
+  const header = (p: unknown) => <TopHeader {...(p as NativeStackHeaderProps)} />;
   return (
-    <Tab.Navigator tabBar={(p) => <TabBar {...p} />} screenOptions={{ header: (p) => <TopHeader {...(p as unknown as NativeStackHeaderProps)} /> }}>
+    <Tab.Navigator tabBar={(p) => <FloatingTabBar {...p} />} screenOptions={{ header, sceneStyle: { backgroundColor: b.surface } }}>
       <Tab.Screen name="Home" component={HomeScreen} options={{ title: "Home" }} />
+      {canAccessPage("crm-bookings") ? (
+        <Tab.Screen name="Bookings" component={CrmRegisterScreen as never} initialParams={{ register: "bookings" }} options={{ title: "Bookings" }} />
+      ) : null}
       {hasCrm ? <Tab.Screen name="CRM" component={CrmHubScreen} options={{ title: "CRM" }} /> : null}
-      {canApprove ? <Tab.Screen name="Approvals" component={ApprovalInboxScreen} options={{ title: "Approvals" }} /> : null}
       {hasMaintenance ? <Tab.Screen name="Maintenance" component={MaintenanceScreen} options={{ title: "Maintenance" }} /> : null}
-      <Tab.Screen name="More" component={MoreScreen} options={{ title: "More" }} />
     </Tab.Navigator>
   );
 }
 
 export default function MainStack() {
+  const b = useBrand();
   return (
-    <Stack.Navigator screenOptions={{ header: (props) => <TopHeader {...props} /> }}>
-      <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
-      <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
-      <Stack.Screen name="Directory" component={DirectoryScreen} options={{ title: "Customer Directory" }} />
-      <Stack.Screen name="CustomerProfile" component={CustomerProfileScreen} options={{ title: "Customer Profile" }} />
-      <Stack.Screen name="Bills" component={BillsScreen} options={{ title: "Maintenance Bills" }} />
-      <Stack.Screen name="BillView" component={BillViewScreen} options={{ title: "Bill" }} />
-      <Stack.Screen name="BillForm" component={BillFormScreen} options={({ route }) => ({ title: route.params?.billId ? "Edit Bill" : "Create Bill" })} />
-      <Stack.Screen name="ServiceRequests" component={ServiceRequestsScreen} options={{ title: "Service Requests" }} />
-      <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "Security Attendance" }} />
-      <Stack.Screen name="Electricity" component={ElectricityScreen} options={{ title: "Electricity Maintenance" }} />
-      <Stack.Screen name="CrmDashboard" component={CrmDashboardScreen} options={{ title: "CRM Dashboard" }} />
-      <Stack.Screen name="CrmRegister" component={CrmRegisterScreen} options={({ route }) => ({ title: registerByKey(route.params.register)?.label ?? "CRM" })} />
-      <Stack.Screen name="CrmBooking" component={BookingDetailScreen} options={({ route }) => ({ title: route.params.title || "Booking" })} />
-      <Stack.Screen name="CrmCustomer" component={Customer360Screen} options={({ route }) => ({ title: route.params.title || "Customer 360" })} />
-      <Stack.Screen name="CrmTicket" component={TicketScreen} options={{ title: "Service Ticket" }} />
-      <Stack.Screen name="CrmTicketNew" component={NewTicketScreen} options={{ title: "New Service Ticket" }} />
-      <Stack.Screen name="CrmWelcomeCall" component={WelcomeCallScreen} options={{ title: "Log Welcome Call" }} />
-      <Stack.Screen name="CrmPayment" component={PaymentScreen} options={({ route }) => ({ title: route.params.milestoneId ? "Submit Payment" : "On-account Deposit" })} />
-    </Stack.Navigator>
+    <ShellMenusProvider>
+      <Stack.Navigator screenOptions={{ header: (props) => <TopHeader {...props} />, contentStyle: { backgroundColor: b.surface } }}>
+        <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
+        <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
+        <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile & settings" }} />
+        <Stack.Screen name="Approvals" component={ApprovalInboxScreen} options={{ title: "Approval Inbox" }} />
+        <Stack.Screen name="Directory" component={DirectoryScreen} options={{ title: "Customer Directory" }} />
+        <Stack.Screen name="CustomerProfile" component={CustomerProfileScreen} options={{ title: "Customer Profile" }} />
+        <Stack.Screen name="Bills" component={BillsScreen} options={{ title: "Maintenance Bills" }} />
+        <Stack.Screen name="BillView" component={BillViewScreen} options={{ title: "Bill" }} />
+        <Stack.Screen name="BillForm" component={BillFormScreen} options={({ route }) => ({ title: route.params?.billId ? "Edit Bill" : "Create Bill" })} />
+        <Stack.Screen name="ServiceRequests" component={ServiceRequestsScreen} options={{ title: "Service Requests" }} />
+        <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "Security Attendance" }} />
+        <Stack.Screen name="Electricity" component={ElectricityScreen} options={{ title: "Electricity Maintenance" }} />
+        <Stack.Screen name="CrmDashboard" component={CrmDashboardScreen} options={{ title: "CRM Dashboard" }} />
+        <Stack.Screen name="CrmRegister" component={CrmRegisterScreen} options={({ route }) => ({ title: (pairParent(route.params.register) ?? registerByKey(route.params.register))?.label ?? "CRM" })} />
+        <Stack.Screen name="CrmBooking" component={BookingDetailScreen} options={({ route }) => ({ title: route.params.title || "Booking" })} />
+        <Stack.Screen name="CrmCustomer" component={Customer360Screen} options={({ route }) => ({ title: route.params.title || "Customer 360" })} />
+        <Stack.Screen name="CrmTicket" component={TicketScreen} options={{ title: "Service Ticket" }} />
+        <Stack.Screen name="CrmTicketNew" component={NewTicketScreen} options={{ title: "New Service Ticket" }} />
+        <Stack.Screen name="CrmWelcomeCall" component={WelcomeCallScreen} options={{ title: "Log Welcome Call" }} />
+        <Stack.Screen name="CrmPayment" component={PaymentScreen} options={({ route }) => ({ title: route.params.milestoneId ? "Submit Payment" : "On-account Deposit" })} />
+      </Stack.Navigator>
+    </ShellMenusProvider>
   );
 }

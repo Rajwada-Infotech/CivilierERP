@@ -15,7 +15,6 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 
-const ACCENT = "#65a30d";
 
 export const STATUS_COLOR: Record<string, string> = {
   Active: "#10b981",
@@ -137,12 +136,12 @@ export function DataList<T>({
                   paddingHorizontal: 14,
                   paddingVertical: 7,
                   borderRadius: 999,
-                  backgroundColor: active ? "rgba(101,163,13,0.14)" : colors.card,
+                  backgroundColor: active ? `${colors.primary}26` : colors.card,
                   borderWidth: 1,
-                  borderColor: active ? "rgba(101,163,13,0.35)" : colors.border,
+                  borderColor: active ? `${colors.primary}80` : colors.border,
                 }}
               >
-                <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: active ? "#bef264" : colors.mutedForeground }}>
+                <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: active ? colors.foreground : colors.mutedForeground }}>
                   {statusText(f)}
                 </Text>
               </Pressable>
@@ -165,7 +164,7 @@ export function DataList<T>({
           keyExtractor={keyOf}
           renderItem={({ item }) => renderCard(item)}
           contentContainerStyle={{ paddingHorizontal: 16, paddingTop: filters ? 8 : 16, paddingBottom: 112 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           ListEmptyComponent={
             <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, textAlign: "center", paddingVertical: 40 }}>
               {emptyText}

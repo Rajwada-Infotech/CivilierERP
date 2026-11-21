@@ -10,13 +10,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Search, SlidersHorizontal, X } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { DataList, Pill } from "@/components/list/DataList";
+import { DataList } from "@/components/list/DataList";
 import { crmGet, type Row } from "@/api/crmApi";
 import { openDocument } from "@/utils/documents";
 import { useAuth } from "@/auth/AuthContext";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { registerByKey, type CrmOpen, type CrmRegister } from "./crmRegisters";
-import { CRM, ContactKeys } from "./ui";
+import { pairParent, registerByKey, type CrmOpen, type CrmRegister } from "./crmRegisters";
+import { CRM, ContactKeys, Pill, useCardStyle } from "./ui";
 
 const ALL = "All";
 
@@ -129,6 +129,10 @@ export default function CrmRegisterScreen() {
   const [period, setPeriod] = useState<Period>("all");
   const [sort, setSort] = useState<Sort>("default");
   const [sheet, setSheet] = useState(false);
+  // A paired list (Welcome Calls: To call / History) switches in place; filters start afresh on the other list.
+  const parent = reg.pair ? reg : pairParent(reg.key);
+  useEffect(() => { setStatus(ALL); setProject(ALL); setPeriod("all"); setSort("default"); }, [reg.key]);
+  const card = useCardStyle();
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300);
@@ -185,19 +189,32 @@ export default function CrmRegisterScreen() {
         emptyText={debounced || status !== ALL || activeFilters ? "Nothing matches." : reg.empty}
         header={
           <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+            {parent?.pair ? (
+              <View style={{ flexDirection: "row", padding: 4, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, marginBottom: 10 }}>
+                {[parent.key, parent.pair.key].map((k, i) => {
+                  const on = reg.key === k;
+                  return (
+                    <Pressable key={k} onPress={() => !on && nav.setParams({ register: k } as never)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                      style={{ flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: 12, backgroundColor: on ? CRM : "transparent" }}>
+                      <Text style={{ fontSize: 13.5, fontFamily: fonts.heading.semibold, color: on ? "#fff" : colors.mutedForeground }}>{parent.pair!.labels[i]}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
             <View style={{ flexDirection: "row", gap: 8 }}>
-              <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}>
+              <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}>
                 <Search size={13} color={colors.mutedForeground} />
                 <TextInput
                   value={search}
                   onChangeText={setSearch}
                   placeholder="Search name, mobile, booking, unit…"
                   placeholderTextColor={`${colors.mutedForeground}99`}
-                  style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 12.5, paddingVertical: 10 }}
+                  style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 14, paddingVertical: 12 }}
                 />
               </View>
               <Pressable onPress={() => setSheet(true)} accessibilityLabel="Filter and sort"
-                style={{ width: 44, alignItems: "center", justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: activeFilters ? `${CRM}80` : colors.border, backgroundColor: activeFilters ? `${CRM}22` : colors.card }}>
+                style={{ width: 48, alignItems: "center", justifyContent: "center", borderRadius: 16, borderWidth: 1, borderColor: activeFilters ? `${CRM}80` : colors.border, backgroundColor: activeFilters ? `${CRM}22` : colors.card }}>
                 <SlidersHorizontal size={16} color={activeFilters ? CRM : colors.mutedForeground} />
                 {activeFilters ? (
                   <View style={{ position: "absolute", top: -5, right: -5, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: CRM, alignItems: "center", justifyContent: "center" }}>
@@ -207,7 +224,7 @@ export default function CrmRegisterScreen() {
               </Pressable>
             </View>
             {query.data ? (
-              <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 8 }}>
+              <Text style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 10, paddingHorizontal: 4 }}>
                 {items.length === rows.length ? `${rows.length} shown` : `${items.length} of ${rows.length} shown`}
                 {project !== ALL ? ` · ${project}` : ""}
                 {period !== "all" ? ` · ${PERIODS.find((p) => p.value === period)?.label}` : ""}
@@ -227,32 +244,31 @@ export default function CrmRegisterScreen() {
               disabled={!target}
               onPress={() => open(target)}
               style={({ pressed }) => ({
-                backgroundColor: pressed ? colors.muted : colors.card, borderRadius: 14, borderWidth: 1,
-                borderColor: pressed ? `${CRM}55` : colors.border, padding: 14, marginBottom: 10,
+                ...card, padding: 16, marginBottom: 12, opacity: pressed ? 0.8 : 1,
               })}
             >
               <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text numberOfLines={1} style={{ fontSize: 14, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{reg.title(r) || "—"}</Text>
-                  {reg.sub(r) ? <Text numberOfLines={1} style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>{reg.sub(r)}</Text> : null}
+                  <Text numberOfLines={1} style={{ fontSize: 15.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{reg.title(r) || "—"}</Text>
+                  {reg.sub(r) ? <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 3 }}>{reg.sub(r)}</Text> : null}
                 </View>
                 {amount ? (
                   <View style={{ alignItems: "flex-end" }}>
-                    <Text style={{ fontSize: 14, fontFamily: fonts.heading.bold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{amount.value}</Text>
-                    <Text style={{ fontSize: 9.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{amount.label}</Text>
+                    <Text style={{ fontSize: 15.5, fontFamily: fonts.heading.semibold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{amount.value}</Text>
+                    <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{amount.label}</Text>
                   </View>
                 ) : null}
               </View>
-              {st ? <View style={{ flexDirection: "row", marginTop: 8 }}><Pill label={st} /></View> : null}
+              {st ? <View style={{ flexDirection: "row", marginTop: 10 }}><Pill label={st} /></View> : null}
               {lines.map((l, i) => (
-                <Text key={i} numberOfLines={2} style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 4 }}>{l}</Text>
+                <Text key={i} numberOfLines={2} style={{ fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 5 }}>{l}</Text>
               ))}
               {mobile || action ? (
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
                   <View><ContactKeys mobile={mobile} compact /></View>
                   {action ? (
                     <Pressable onPress={() => { const to = action.to(r); nav.navigate(to.screen, to.params); }}
-                      style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, backgroundColor: CRM, opacity: pressed ? 0.75 : 1 })}>
+                      style={({ pressed }) => ({ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, backgroundColor: CRM, opacity: pressed ? 0.75 : 1 })}>
                       <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: "#fff" }}>{action.label}</Text>
                     </Pressable>
                   ) : null}

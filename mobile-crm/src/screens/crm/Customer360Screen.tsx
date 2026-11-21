@@ -6,15 +6,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useAuth } from "@/auth/AuthContext";
 import { getCustomer360 } from "@/api/crmApi";
-import { Pill } from "@/components/list/DataList";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { CRM, Empty, Figure, Kv, LinkRow, Section, fmtDate, joinDot, money } from "./ui";
+import { CRM, Empty, Figure, Kv, LinkRow, Section, fmtDate, joinDot, money, Pill, useCardStyle } from "./ui";
 import { useCrmOpen } from "./CrmRegisterScreen";
 
 export default function Customer360Screen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmCustomer">>();
+  const card = useCardStyle();
   const { canAccessPage } = useAuth();
   const open = useCrmOpen();
   const allowed = canAccessPage("crm-customer-360");
@@ -42,7 +42,7 @@ export default function Customer360Screen() {
         <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular }}>{(q.error as Error).message}</Text>
       ) : !c ? null : (
         <>
-          <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: `${CRM}40`, padding: 16, marginBottom: 12 }}>
+          <View style={{ ...card, padding: 18, marginBottom: 12 }}>
             <Text style={{ fontSize: 18, fontFamily: fonts.heading.bold, color: colors.foreground }}>{c.CustomerName}</Text>
             <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 4 }}>{joinDot(c.CustomerNo, c.Mobile, c.AltMobile)}</Text>
             {c.Email ? <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>{c.Email}</Text> : null}

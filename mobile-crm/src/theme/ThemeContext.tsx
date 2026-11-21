@@ -1,8 +1,10 @@
-﻿// Dynamic brand theme context — dark/light mode + accent colour picker.
-// Wraps the customer portal so every screen can call useBrand() instead of
-// importing the static `brand` object directly, enabling live theme switching.
+// The app's theme — Civilier Home's (mobile-maintenance src/theme/ThemeContext.tsx): dark / light mode and the accent
+// the person picks (More → Appearance), kept on the phone. Screens built on the kit (screens/crm/ui.tsx) read it with
+// useBrand(); every other screen reads `colors` / `sheet` (theme/colors.ts), which applyPalette keeps in step, and the
+// app redraws when the theme changes (themeKey, App.tsx).
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { applyPalette, type Palette } from "./colors";
 
 // ---------------------------------------------------------------------------
 // Accent palette
@@ -88,10 +90,19 @@ function buildTokens(mode: "dark" | "light", accentKey: AccentKey): BrandTokens 
   };
 }
 
+/** The same theme as hex colours, for the screens that read `colors` (they add alphas: `${colors.border}80`). */
+function paletteOf(mode: "dark" | "light", accent: string): Palette {
+  return mode === "dark"
+    ? { background: "#0B0B10", card: "#16161E", surface: "#1C1C26", muted: "#22222C", foreground: "#F5F5F7", mutedForeground: "#9A9AA6", border: "#26262F", accent, destructive: "#F87171" }
+    : { background: "#F2F3F6", card: "#FFFFFF", surface: "#FFFFFF", muted: "#E8E9EE", foreground: "#0F111A", mutedForeground: "#5F6270", border: "#E1E3EA", accent, destructive: "#DC2626" };
+}
+
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
 type ThemeCtx = {
+  /** Changes whenever the theme does: the app redraws on it, so screens reading `colors` pick the new one up. */
+  themeKey: string;
   mode: "dark" | "light";
   accentKey: AccentKey;
   brand: BrandTokens;
@@ -101,12 +112,14 @@ type ThemeCtx = {
 
 const ThemeContext = createContext<ThemeCtx | null>(null);
 
-const STORAGE_MODE   = "civ_theme_mode";
-const STORAGE_ACCENT = "civ_theme_accent";
+const STORAGE_MODE   = "civ_crm_theme_mode";
+const STORAGE_ACCENT = "civ_crm_theme_accent";
+/** Civilier CRM opens dark, in the CRM's rose — the person can change both. */
+const DEFAULT_ACCENT: AccentKey = "rose";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mode,      setMode]      = useState<"dark" | "light">("dark");
-  const [accentKey, setAccentKey] = useState<AccentKey>("gold");
+  const [accentKey, setAccentKey] = useState<AccentKey>(DEFAULT_ACCENT);
 
   // Load persisted prefs on mount
   useEffect(() => {
@@ -131,10 +144,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     AsyncStorage.setItem(STORAGE_ACCENT, key);
   }, []);
 
-  const brand = useMemo(() => buildTokens(mode, accentKey), [mode, accentKey]);
+  // The palette is applied as the theme is worked out, so this very render already draws in it.
+  const brand = useMemo(() => {
+    applyPalette(paletteOf(mode, ACCENTS[accentKey].hex));
+    return buildTokens(mode, accentKey);
+  }, [mode, accentKey]);
+  const themeKey = `${mode}-${accentKey}`;
 
   return (
-    <ThemeContext.Provider value={{ mode, accentKey, brand, toggleMode, setAccent }}>
+    <ThemeContext.Provider value={{ themeKey, mode, accentKey, brand, toggleMode, setAccent }}>
       {children}
     </ThemeContext.Provider>
   );
@@ -143,7 +161,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 /** Returns the current dynamic brand token set. Use instead of the static `brand` import in customer screens. */
 export function useBrand(): BrandTokens {
   const ctx = useContext(ThemeContext);
-  if (!ctx) return buildTokens("dark", "gold"); // fallback outside provider
+  if (!ctx) return buildTokens("dark", DEFAULT_ACCENT); // fallback outside provider
   return ctx.brand;
 }
 

@@ -8,12 +8,13 @@ import { AlertTriangle, Bell, ChevronRight, Clock, Info } from "lucide-react-nat
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fonts } from "@/theme/fonts";
-import { colors, moduleAccents } from "@/theme/colors";
+import { colors, accent } from "@/theme/colors";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { navigate, notificationTarget } from "@/navigation/navigationRef";
 import { useMaintenanceAlerts, type MaintenanceAlertType } from "@/hooks/useMaintenanceAlerts";
+import { Tap, useCardStyle } from "@/screens/crm/ui";
 
-const ACCENT = moduleAccents.crm;
+
 
 export interface BellItem { id: number; type: string; title: string; body: string | null; refId: number | null; refType: string | null; isRead: boolean; createdAt: string }
 
@@ -70,7 +71,7 @@ const META: Record<MaintenanceAlertType, { icon: React.ComponentType<{ size?: nu
 function SectionTitle({ children, right }: { children: string; right?: React.ReactNode }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8, marginBottom: 10 }}>
-      <Text style={{ fontSize: 10, fontFamily: fonts.heading.bold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 1.4 }}>{children}</Text>
+      <Text style={{ fontSize: 17, fontFamily: fonts.heading.semibold, letterSpacing: -0.2, color: colors.foreground }}>{children}</Text>
       {right}
     </View>
   );
@@ -80,11 +81,11 @@ function Item({ title, body, time, tag, tagColor, unread, Icon, onPress }: {
   title: string; body?: string | null; time?: string | null; tag: string; tagColor: string; unread?: boolean;
   Icon: React.ComponentType<{ size?: number; color?: string }>; onPress: () => void;
 }) {
+  const card = useCardStyle();
   return (
-    <Pressable onPress={onPress}
-      style={({ pressed }) => ({ flexDirection: "row", gap: 12, borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 10,
-        borderColor: unread ? `${tagColor}55` : colors.border, backgroundColor: pressed ? colors.muted : colors.card })}>
-      <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: `${tagColor}1f`, alignItems: "center", justifyContent: "center" }}>
+    <Tap onPress={onPress}
+      style={({ pressed }) => ({ ...card, flexDirection: "row", gap: 12, padding: 16, marginBottom: 10, opacity: pressed ? 0.75 : 1 })}>
+      <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: `${tagColor}1f`, alignItems: "center", justifyContent: "center" }}>
         <Icon size={16} color={tagColor} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -97,7 +98,7 @@ function Item({ title, body, time, tag, tagColor, unread, Icon, onPress }: {
         <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: tagColor, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 6 }}>{tag}</Text>
       </View>
       <ChevronRight size={14} color={colors.mutedForeground} style={{ marginTop: 2 }} />
-    </Pressable>
+    </Tap>
   );
 }
 
@@ -136,14 +137,14 @@ export default function NotificationsScreen() {
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} />}
     >
       <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 6 }}>
         {unread + alerts.length === 0 ? "All caught up." : `${unread} unread${alerts.length ? ` · ${alerts.length} Maintenance alert${alerts.length === 1 ? "" : "s"}` : ""}`}
       </Text>
 
       <SectionTitle right={unread > 0 ? (
-        <Pressable onPress={markAllRead} hitSlop={8}><Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: ACCENT }}>Mark all read</Text></Pressable>
+        <Pressable onPress={markAllRead} hitSlop={8}><Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: accent }}>Mark all read</Text></Pressable>
       ) : undefined}>CRM</SectionTitle>
       {crmQ.isLoading ? (
         <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 24 }} />
@@ -152,7 +153,7 @@ export default function NotificationsScreen() {
       ) : items.length === 0 ? (
         <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, paddingVertical: 12 }}>No CRM notifications yet.</Text>
       ) : items.map((n) => (
-        <Item key={n.id} title={n.title} body={n.body} time={n.createdAt} tag="CRM" tagColor={ACCENT} unread={!n.isRead} Icon={Bell} onPress={() => open(n)} />
+        <Item key={n.id} title={n.title} body={n.body} time={n.createdAt} tag="CRM" tagColor={accent} unread={!n.isRead} Icon={Bell} onPress={() => open(n)} />
       ))}
 
       {alertsLoading || alerts.length ? <SectionTitle>Maintenance</SectionTitle> : null}

@@ -21,7 +21,9 @@ export const colors = {
   border: "#272735",
   surface: "#191924",
   accentBlue: "#3c83f6",
-} as const;
+};
+// Not `as const`: the light / dark switch and the accent picker (ThemeContext.tsx) rewrite these in place through
+// applyPalette below, so every screen that reads them — the Maintenance and Approval screens included — follows.
 
 // Per-module accent colors — these are hardcoded hex in the web app too
 // (Home.tsx passes them as literal props, not theme tokens), so they're
@@ -43,7 +45,7 @@ export const moduleAccents = {
   maintenance: "#65a30d",
   // The CRM module — the web's own CRM tile colour (src/pages/home/homeTiles.ts).
   crm: "#e11d48",
-} as const;
+};
 
 // The drawing sheet's own tones, the same derivation the other CivilierERP apps use (mobile-employee / mobile-admin
 // src/theme/colors.ts sheetOf, from the web's .crm-sheet): ink is the foreground colour, everything else a step of
@@ -52,7 +54,7 @@ const rgba = (hex: string, a: number) => {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 };
-export const sheet = {
+export const sheet: Record<string, string> = {
   paper: colors.card,
   ink: colors.foreground,
   ink2: rgba(colors.foreground, 0.78),
@@ -71,27 +73,26 @@ export const sheet = {
   hatch: rgba(colors.foreground, 0.24),
 };
 
-// -- Customer-facing premium brand palette ------------------------------------
-// Used by src/customer/ui.tsx and customer screens ONLY.
-export const brand = {
-  heroFrom:      "#0F0C29",
-  heroMid:       "#1a1448",
-  heroTo:        "#302b63",
-  gold:          "#C9A227",
-  goldLight:     "#F0C94D",
-  goldSoft:      "rgba(201,162,39,0.15)",
-  surface:       "#15132B",
-  surfaceCard:   "#1E1B3A",
-  surfaceGlass:  "rgba(255,255,255,0.06)",
-  textPrimary:   "#FFFFFF",
-  textSecondary: "rgba(255,255,255,0.65)",
-  textFaint:     "rgba(255,255,255,0.35)",
-  success:       "#22C55E",
-  successSoft:   "rgba(34,197,94,0.15)",
-  warning:       "#F59E0B",
-  warningSoft:   "rgba(245,158,11,0.15)",
-  danger:        "#EF4444",
-  dangerSoft:    "rgba(239,68,68,0.15)",
-  border:        "rgba(255,255,255,0.08)",
-  borderGold:    "rgba(201,162,39,0.3)",
-} as const;
+/** The palette the app shows, from the theme (ThemeContext.tsx): the page, card, text and line colours as hex (screens
+ * add an alpha to them, e.g. `${colors.border}80`), the accent, and the drawing sheet's tones derived from them. */
+export interface Palette {
+  background: string; card: string; surface: string; muted: string;
+  foreground: string; mutedForeground: string; border: string; accent: string; destructive: string;
+}
+/** The accent the person picked (ThemeContext.tsx) — read it as a live value (`import { accent }`), not copied once. */
+export let accent = moduleAccents.crm;
+export function applyPalette(p: Palette) {
+  accent = p.accent;
+  Object.assign(colors, {
+    background: p.background, card: p.card, surface: p.surface, muted: p.muted,
+    foreground: p.foreground, mutedForeground: p.mutedForeground, border: p.border, primary: p.accent, destructive: p.destructive,
+  });
+  moduleAccents.crm = p.accent;
+  Object.assign(sheet, {
+    paper: colors.card, ink: colors.foreground, ink2: rgba(colors.foreground, 0.78), graphite: colors.mutedForeground,
+    faint: rgba(colors.mutedForeground, 0.6), rule: colors.border, ruleSoft: rgba(colors.border, 0.55),
+    line40: rgba(colors.foreground, 0.4), line15: rgba(colors.foreground, 0.15), blue: colors.primary,
+    blueWash: rgba(colors.primary, 0.1), blueTint: rgba(colors.primary, 0.18), red: colors.destructive,
+    redWash: rgba(colors.destructive, 0.1), grid: rgba(colors.foreground, 0.04), hatch: rgba(colors.foreground, 0.24),
+  });
+}
