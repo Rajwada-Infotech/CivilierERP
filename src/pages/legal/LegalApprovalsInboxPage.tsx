@@ -126,7 +126,7 @@ export default function LegalApprovalsInboxPage() {
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Approvals" }]} />
-      <LegalShell stage={tab === "verify" ? "verify" : undefined} title="Approvals" subtitle="Land verification → Versions → Deed approval, and Amendments for registered lands." icon={ClipboardTick}>
+      <LegalShell title="Approvals" subtitle="Land verification → Land approval → Deed approval, and Amendments for registered lands." icon={ClipboardTick}>
         <div className="space-y-4">
           {/* One tab per kind of approval, with how many are waiting. */}
           <div className="grid grid-cols-2 border border-border bg-card sm:grid-cols-4" role="tablist">

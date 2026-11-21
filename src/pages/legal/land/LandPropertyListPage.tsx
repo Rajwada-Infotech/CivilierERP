@@ -23,15 +23,15 @@ const BACKLOG = "Existing / Backlog"; // every land added here; enquiry-approved
 const wf = (r: LegalRow) => String(r.WorkflowStatus ?? "");
 const sold = (r: LegalRow) => r.LandStatus === "Disposed / Transferred" || r.LandStatus === "Inactive" || r.IsActive === false;
 const FILTERS: Record<string, { label: string; test: (r: LegalRow) => boolean }> = {
-  verification: { label: "Verification", test: (r) => !sold(r) && (!wf(r) || wf(r).startsWith("Draft")) },
+  verification: { label: "Land conversion", test: (r) => !sold(r) && (!wf(r) || wf(r).startsWith("Draft")) },
   deed: { label: "Deed Process", test: (r) => !sold(r) && wf(r) === "Deed Process" },
   registration: { label: "Deed Registration", test: (r) => !sold(r) && (wf(r) === "Deed Completed" || wf(r) === "Deed Registration") },
   registered: { label: "Registered", test: (r) => !sold(r) && wf(r) === "Registered" },
   sold: { label: "Sold / Inactive", test: sold },
 };
-const stageLabel = (r: LegalRow) => (sold(r) ? "Sold / Inactive" : wf(r).startsWith("Draft") || !wf(r) ? "Verification" : wf(r) === "Deed Completed" ? "Deed Registration" : wf(r));
+const stageLabel = (r: LegalRow) => (sold(r) ? "Sold / Inactive" : wf(r).startsWith("Draft") || !wf(r) ? "Land conversion" : wf(r) === "Deed Completed" ? "Deed Registration" : wf(r));
 const STAGE_TONE: Record<string, string> = {
-  Verification: "border-amber-500/60 text-amber-700 dark:text-amber-400", "Deed Process": "border-sky-500/60 text-sky-700 dark:text-sky-400",
+  "Land conversion": "border-amber-500/60 text-amber-700 dark:text-amber-400", "Deed Process": "border-sky-500/60 text-sky-700 dark:text-sky-400",
   "Deed Registration": "border-violet-500/60 text-violet-700 dark:text-violet-300", Registered: "border-emerald-600/60 text-emerald-700 dark:text-emerald-400",
   "Sold / Inactive": "border-border text-muted-foreground",
 };

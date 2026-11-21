@@ -363,6 +363,8 @@ const MASTERS = {
       // Deed Registry Search: offices still open (the enquiry's actions open once every office's search is complete).
       { name: "OfficesPending", label: "Deed search offices open", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND x.Status = N'Pending')" },
       { name: "OfficesTotal", label: "Deed search offices", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId)" },
+      // Office types that apply to the enquiry's state: 0 means the setup is missing; more means its timelines just need creating.
+      { name: "OfficeTypesForState", label: "Office types for the state", sql: "(SELECT COUNT(*) FROM dbo.LegalRegistrationOfficeType ot LEFT JOIN dbo.LegalDistrict dd ON dd.DistrictId = t.DistrictId WHERE ot.IsActive = 1 AND ot.OnEnquiry = 1 AND (ot.StateName IS NULL OR ot.StateName = dd.State))" },
       { name: "OfficesOverdue", label: "Deed search offices overdue", sql: "(SELECT COUNT(*) FROM dbo.LegalEnquiryOfficeSearch x WHERE x.EnquiryId = t.EnquiryId AND t.EnquiryStatus <> N'Rejected' AND x.Status = N'Pending' AND x.DueDate < CAST(GETDATE() AS DATE))" },
       // Who raised the enquiry, with a WhatsApp link so anyone can talk to them about it.
       { name: "EnquiryBy", label: "Entry by", after: "EnquiryNo", sql: "(SELECT u.name FROM dbo.users u WHERE u.id = t.CreatedBy)",

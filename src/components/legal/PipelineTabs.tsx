@@ -3,14 +3,15 @@ import { ArrowRight2 } from "iconsax-react";
 
 /**
  * The land pipeline as one set of tabs, shown on top of every stage page so the seven stages read as one page:
- * Enquiry → Deed registry search → Verification → Deed Process → LA & ULC → Deed Registration → Post-registration.
+ * Enquiry → Deed registry search → Land conversion → Deed Process → LA & ULC → Deed Registration → Post-registration.
+ * (Verification and approvals are in Approvals, not a pipeline stage.)
  */
 export type PipelineStage = "enquiry" | "search" | "verify" | "deed" | "clearance" | "registration" | "post";
 export const PIPELINE: { key: PipelineStage; label: string; path: string; hint: string }[] = [
   { key: "enquiry", label: "Enquiries", path: "/legal/land/enquiries", hint: "Land offered or found — record it under a project" },
   { key: "search", label: "Deed search", path: "/legal/land/deed-search", hint: "Search the registry offices year by year" },
-  { key: "verify", label: "Land verification", path: "/legal/approvals?tab=landverify", hint: "Verifier ticks every section; the Approver approves it as a version" },
-  { key: "deed", label: "Deed Process", path: "/legal/land/deed-process", hint: "Deed drafted, approved at L1 and L2" },
+  { key: "verify", label: "Land conversion", path: "/legal/land/properties?filter=verification", hint: "Converted lands being entered and verified — before Deed Process" },
+  { key: "deed", label: "Deed Process", path: "/legal/land/deed-process", hint: "Deed details completed, then sent for final approval" },
   { key: "clearance", label: "LA & ULC", path: "/legal/land/la-ulc", hint: "Apply for and obtain the clearances" },
   { key: "registration", label: "Deed Registration", path: "/legal/deed-registration", hint: "Consideration, stamp duty, registration" },
   { key: "post", label: "Post-registration", path: "/legal/land/post-registration", hint: "Mutation and the tasks after registration" },

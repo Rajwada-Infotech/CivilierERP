@@ -9,6 +9,7 @@ import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { PortalFetchButtons } from "@/components/legal/PortalFetch";
 import { usePageRights } from "@/hooks/usePageRights";
 import { convertEnquiry, setEnquiryStatus, getMyWhatsApp, setMyWhatsApp } from "@/api/legalLandApi";
+import { getEnquirySearches } from "@/api/legalEnquirySearchApi";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { LegalMasterTable } from "../LegalMasterPage";
 import { getLegalRows, type LegalRow } from "@/api/legalMastersApi";
@@ -44,16 +45,16 @@ export default function LandEnquiryPage() {
   const inScope = (r: LegalRow) => (scope === "all" ? true : orphans ? r.ProjectId == null || r.ProjectId === "" : Number(r.ProjectId) === projectId);
   const rows = allRows.filter((r) => inScope(r) && isActive(r));
   const FILTERS: [string, string, (r: LegalRow) => boolean, string][] = [
-    ["all", "All", () => true, "border-border"],
+    ["all", "All open", (r) => !r.LandId, "border-border"],
     ["search", "Deed search pending", (r) => !r.LandId && Number(r.OfficesPending) > 0, "border-amber-500"],
     ["overdue", "Search overdue", (r) => !r.LandId && Number(r.OfficesOverdue) > 0, "border-destructive"],
     ["ready", "Ready to convert", (r) => !r.LandId && Number(r.OfficesPending) === 0 && !["Rejected", "On Hold"].includes(String(r.EnquiryStatus)), "border-emerald-600"],
-    ["New", "New", (r) => r.EnquiryStatus === "New", "border-zinc-300"],
-    ["Under Review", "Under review", (r) => r.EnquiryStatus === "Under Review", "border-sky-500"],
-    ["Interested", "Interested", (r) => r.EnquiryStatus === "Interested", "border-emerald-500"],
-    ["On Hold", "On hold", (r) => r.EnquiryStatus === "On Hold", "border-amber-500"],
-    ["Rejected", "Rejected", (r) => r.EnquiryStatus === "Rejected", "border-rose-500"],
-    ["converted", "Converted", (r) => !!r.LandId, "border-[#7c4a2e]"],
+    ["New", "New", (r) => !r.LandId && r.EnquiryStatus === "New", "border-zinc-300"],
+    ["Under Review", "Under review", (r) => !r.LandId && r.EnquiryStatus === "Under Review", "border-sky-500"],
+    ["Interested", "Interested", (r) => !r.LandId && r.EnquiryStatus === "Interested", "border-emerald-500"],
+    ["On Hold", "On hold", (r) => !r.LandId && r.EnquiryStatus === "On Hold", "border-amber-500"],
+    ["Rejected", "Rejected", (r) => !r.LandId && r.EnquiryStatus === "Rejected", "border-rose-500"],
+    // Converted enquiries are lands now: Pipeline · Land conversion.
   ];
   const active = FILTERS.find((f) => f[0] === filter) ?? FILTERS[0];
 
@@ -133,7 +134,7 @@ export default function LandEnquiryPage() {
           // ?edit=<id> (from Lands → Find a land) opens that enquiry.
           requestEditId={openEnquiry}
           // Only this project's enquiries; a new enquiry is raised under it.
-          serverFilter={active[0] === "all" ? undefined : active[0]}
+          serverFilter={active[0] === "all" ? "open" : active[0]}
           projectScoped
           // Without a project: no new enquiry here, and editing one asks for its project.
           // One project: a new enquiry is raised under it. All projects: the form asks for the project.
@@ -176,6 +177,20 @@ export default function LandEnquiryPage() {
             </>;
             // Deed Registry Search comes first: Convert / Hold / Reject open once every office's search is complete.
             // No office type set up for this enquiry's state: nothing to search yet, so it cannot be converted.
+            // Office types exist for its state but the timelines were never created (e.g. loaded data): start them here.
+            if (Number(raw.OfficesTotal ?? 0) === 0 && st !== "Rejected" && Number(raw.OfficeTypesForState ?? 0) > 0) {
+              return (
+                <span className="inline-flex flex-wrap justify-end gap-1.5">
+                  {map}{portal}
+                  <button className={`${small} border-sky-600 bg-sky-500/10 font-semibold text-sky-800`} title="Create this enquiry's deed search timelines (one per registration office type of its state)"
+                    onClick={async () => {
+                      try { await getEnquirySearches(id); toast.success(`${no}: deed search started`); queryClient.invalidateQueries({ queryKey: ["legal-master", "land-enquiry"] }); }
+                      catch (e) { toast.error((e as Error).message); }
+                    }}>Start deed search</button>
+                  {holdReject}
+                </span>
+              );
+            }
             if (Number(raw.OfficesTotal ?? 0) === 0 && st !== "Rejected") {
               return (
                 <span className="inline-flex flex-wrap justify-end gap-1.5">
