@@ -121,10 +121,10 @@ BEGIN
     (@L4, N'{"rebuild":true,"exclude":[["land-tax",' + CAST(@Tax4 AS NVARCHAR(10)) + N']]}', N'Version 1 approved — Land review approved', @U, DATEADD(DAY, -60, @Now)),
     (@L4, N'{"rebuild":true,"exclude":[]}', N'Version 2 approved — Land review approved', @U, DATEADD(DAY, -3, @Now));
   INSERT INTO dbo.LegalLandReview (LandId, VersionNo, Status, ChecksJson, EntrySubmittedBy, EntrySubmittedAt, SubmittedBy, SubmittedAt, DecidedBy, DecidedAt, Remarks) VALUES
-    (@L2, 1, N'Approved', N'{}', @U, DATEADD(DAY, -12, @Now), @U, DATEADD(DAY, -11, @Now), @U, DATEADD(DAY, -10, @Now), N'First verification — all sections checked'),
-    (@L3, 1, N'Approved', N'{}', @U, DATEADD(DAY, -42, @Now), @U, DATEADD(DAY, -41, @Now), @U, DATEADD(DAY, -40, @Now), N'First verification — all sections checked'),
-    (@L4, 1, N'Approved', N'{}', @U, DATEADD(DAY, -62, @Now), @U, DATEADD(DAY, -61, @Now), @U, DATEADD(DAY, -60, @Now), N'First verification — all sections checked'),
-    (@L4, 2, N'Approved', N'{}', @U, DATEADD(DAY, -5, @Now), @U, DATEADD(DAY, -4, @Now), @U, DATEADD(DAY, -3, @Now), N'Tax receipt verified'),
+    (@L2, 1, N'Approved', N'{"*all":{"hash":"*","by":"Verifier","at":"' + @At + N'"}}', @U, DATEADD(DAY, -12, @Now), @U, DATEADD(DAY, -11, @Now), @U, DATEADD(DAY, -10, @Now), N'First verification — all sections checked'),
+    (@L3, 1, N'Approved', N'{"*all":{"hash":"*","by":"Verifier","at":"' + @At + N'"}}', @U, DATEADD(DAY, -42, @Now), @U, DATEADD(DAY, -41, @Now), @U, DATEADD(DAY, -40, @Now), N'First verification — all sections checked'),
+    (@L4, 1, N'Approved', N'{"*all":{"hash":"*","by":"Verifier","at":"' + @At + N'"}}', @U, DATEADD(DAY, -62, @Now), @U, DATEADD(DAY, -61, @Now), @U, DATEADD(DAY, -60, @Now), N'First verification — all sections checked'),
+    (@L4, 2, N'Approved', N'{"*all":{"hash":"*","by":"Verifier","at":"' + @At + N'"}}', @U, DATEADD(DAY, -5, @Now), @U, DATEADD(DAY, -4, @Now), @U, DATEADD(DAY, -3, @Now), N'Tax receipt verified'),
     (@L3, 2, N'Submitted', N'{"*all":{"hash":"*","by":"Verifier","at":"' + @At + N'"}}', @U, @Now, @U, @Now, NULL, NULL, N'Survey report checked against the RS map'),
     (@L1, 1, N'Verifying', N'{"basic":{"hash":"*","by":"Verifier","at":"' + @At + N'"},"ownership":{"hash":"*","by":"Verifier","at":"' + @At + N'"},"acquisition":{"hash":"*","by":"Verifier","at":"' + @At + N'"},"records":{"hash":"*","by":"Verifier","at":"' + @At + N'"}}',
       @U, @Now, NULL, NULL, NULL, NULL, N'All old-file papers entered');

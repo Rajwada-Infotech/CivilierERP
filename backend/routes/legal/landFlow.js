@@ -227,21 +227,35 @@ async function healPlaceholders(pool, landId) {
     const entry = await entrySections(pool, landId).catch(() => null);
     for (const p of ph) {
       const ex = new Set(((parse(p.SnapshotJson) || {}).exclude || []).map(([m, id]) => `${m}#${id}`));
-      const e = entry ? entry.map((sec) => ({ ...sec, records: sec.records.filter((r) => !ex.has(`${r.master}#${r.id}`)) })) : null;
+      // ["master", id] leaves out one entry; ["master", "*"] every entry of that kind (e.g. the registration, before it).
+      const e = entry ? entry.map((sec) => ({ ...sec, records: sec.records.filter((r) => !ex.has(`${r.master}#${r.id}`) && !ex.has(`${r.master}#*`)) })).filter((sec) => sec.key !== "registration" || sec.records.length) : null;
       await pool.request().input("Id", sql.Int, p.SnapshotId).input("J", sql.NVarChar(sql.MAX), JSON.stringify({ ...snapshotOf(st), checklist, entry: e }))
         .query("UPDATE dbo.LegalLandRegisterSnapshot SET SnapshotJson = @J WHERE SnapshotId = @Id");
     }
   }
   const rv = await safe(async () => (await pool.request().input("L", sql.Int, landId).query(
-    "SELECT ReviewId, ChecksJson FROM dbo.LegalLandReview WHERE LandId = @L AND ChecksJson LIKE N'%\"hash\":\"*\"%'")).recordset, []);
+    "SELECT ReviewId, ChecksJson FROM dbo.LegalLandReview WHERE LandId = @L AND (ChecksJson LIKE N'%\"hash\":\"*\"%' OR ChecksJson LIKE N'%\"auto\":%')")).recordset, []);
   if (rv.length) {
     const entry = await entrySections(pool, landId);
     const hashes = Object.fromEntries(entry.map((sec) => [sec.key, sectionHash(sec)]));
+    const secOf = Object.fromEntries(entry.map((sec) => [sec.key, sec]));
     for (const r of rv) {
       const c = parse(r.ChecksJson) || {};
       // "*all" ticks every section (a submitted demo review).
       if (c["*all"]) { const by = c["*all"]; delete c["*all"]; for (const k of Object.keys(hashes)) c[k] = { hash: hashes[k], by: by.by, at: by.at }; }
       for (const k of Object.keys(c)) if (c[k]?.hash === "*") { if (hashes[k]) c[k].hash = hashes[k]; else delete c[k]; }
+      // { auto: "ok", bad: [field names], pending: [field names] } → field-by-field ✓ / ✗ on the section as it now is.
+      for (const k of Object.keys(c)) if (c[k]?.auto) {
+        const sec = secOf[k];
+        if (!sec) { delete c[k]; continue; }
+        const bad = new Set(c[k].bad || []), pend = new Set(c[k].pending || []);
+        const fields = {};
+        for (const rec of sec.records) for (const fd of rec.fields) {
+          if (pend.has(fd.n) || !needsCheck(fd)) continue;
+          fields[`${rec.master}#${rec.id}#${fd.n}`] = { d: bad.has(fd.n) ? "bad" : fd.v == null || fd.v === "" ? "na" : "ok", v: fd.v ?? null };
+        }
+        c[k] = { fields, ...(sec.records.length ? {} : { empty: true }), by: c[k].by, at: c[k].at };
+      }
       await pool.request().input("Id", sql.Int, r.ReviewId).input("J", sql.NVarChar(sql.MAX), JSON.stringify(c)).query("UPDATE dbo.LegalLandReview SET ChecksJson = @J WHERE ReviewId = @Id");
     }
   }
@@ -288,16 +302,25 @@ async function buildVersions(pool, st, history) {
       approval: a.remarks?.replace(/^Version \d+ approved — /, "") || null, snapshot: a.snapshot, approxSnapshot: a.approx, events });
     prevAt = a.at;
   });
-  const open = history.filter((h) => (versions.length ? !h.baseline && new Date(h.CreatedAt || 0) > prevAt : true));
+  // Workflow steps (review, deed, registration, amendment decisions) are not changes to the land's data.
+  const WORKFLOW = /^(Land review|Land verified|Deed |Applied for deed|Amendment|Registry search|Due diligence|Risk assessed|Legal review|Court case cleared|Post-registration|Stamp duty)/;
+  const open = history.filter((h) => !WORKFLOW.test(h.Action || "") && (versions.length ? !h.baseline && new Date(h.CreatedAt || 0) > prevAt : true));
   const changedSince = !!st.land.DeedChangedAt;
   const pending = await safe(async () => (await pool.request().input("L", sql.Int, st.land.LandId).query(`
     SELECT TOP 1 a.AmendmentId, a.AmendmentNo, a.AmendType, a.Reason, a.ReferenceNo, a.ChangesJson, a.RequestedAt, u.name AS RequestedByName
     FROM dbo.LegalLandAmendment a LEFT JOIN dbo.users u ON u.id = a.RequestedBy WHERE a.LandId = @L AND a.Status = N'Pending'`)).recordset[0] || null, null);
-  if (!versions.length || open.length || changedSince || pending) {
+  // An open (next) version exists only when the land's data differs from the last saved version — not for a request,
+  // a review or a workflow step alone (a waiting amendment shows in its own box until its edits are entered).
+  const nowEntry = await entrySections(pool, st.land.LandId, st).catch(() => null);
+  const lastEntry = approvals.length ? approvals[approvals.length - 1].snapshot?.entry : null;
+  const strip = (e) => (e || []).filter((x) => x.key !== "registration");
+  const differs = !lastEntry || !nowEntry ? open.length > 0 || changedSince
+    : JSON.stringify(strip(nowEntry).map((x) => [x.key, sectionHash(x)])) !== JSON.stringify(strip(lastEntry).map((x) => [x.key, sectionHash(x)]));
+  if (!versions.length || differs) {
     versions.push({ no: versions.length + 1, afterRegistration: !!pending || st.land.WorkflowStatus === "Registered" && versions.length > 0 && open.some((e) => /Amendment/.test(e.Action)),
       amendment: pending ? { no: pending.AmendmentNo, type: pending.AmendType, reason: pending.Reason, referenceNo: pending.ReferenceNo, requestedBy: pending.RequestedByName, changes: parse(pending.ChangesJson), pending: true, id: pending.AmendmentId } : null,
       status: pending ? `Amendment ${pending.AmendmentNo} requested — waiting for approval` : versions.length ? (changedSince ? "Changed — waiting for re-verification" : "Open") : "In progress — not approved yet",
-      startedAt: open[0]?.CreatedAt || prevAt || st.land.CreatedAt, approvedAt: null, approvedBy: null, approval: null, snapshot: { ...current, entry: await entrySections(pool, st.land.LandId).catch(() => null) }, approxSnapshot: false, events: open });
+      startedAt: open[0]?.CreatedAt || prevAt || st.land.CreatedAt, approvedAt: null, approvedBy: null, approval: null, snapshot: { ...current, entry: nowEntry }, approxSnapshot: false, events: open });
   }
   // Documents of each version: what was uploaded in its period, and the checklist (saved at approval; now for the open one).
   // A document "belongs" to the version whose saved record first has it at that file version.
@@ -307,6 +330,9 @@ async function buildVersions(pool, st, history) {
   const info = new Map(all.map((u) => [key(u.DocumentCode, u.VersionNo), u]));
   const seen = new Set();
   const out = [];
+  const reviews = await safe(async () => (await pool.request().input("L", sql.Int, st.land.LandId).query(`
+    SELECT r.VersionNo, r.Status, r.ChecksJson, u.name AS VerifierName FROM dbo.LegalLandReview r LEFT JOIN dbo.users u ON u.id = r.SubmittedBy
+    WHERE r.LandId = @L ORDER BY r.ReviewId DESC`)).recordset, []);
   for (let i = 0; i < versions.length; i++) {
     const v = versions[i];
     const docs = (v.snapshot && typeof v.snapshot === "object" ? v.snapshot.documents : null) || [];
@@ -319,7 +345,18 @@ async function buildVersions(pool, st, history) {
       uploads = await uploadsBetween(pool, st.land.LandId, i === 0 ? null : versions[i - 1].approvedAt, v.approvedAt);
     }
     const saved = v.snapshot && typeof v.snapshot === "object" && !v.approxSnapshot ? v.snapshot.checklist : null;
-    out.push({ ...v, flow: versionFlow(v, i, st), uploads, checklist: saved || now, checklistNow: !saved });
+    // Which sections the verifier ticked for this version (its approved review; the open review for the open version).
+    const rv = reviews.find((x) => x.VersionNo === v.no && (v.approvedAt ? x.Status === "Approved" : ["Verifying", "Submitted"].includes(x.Status)));
+    const cj = rv ? parse(rv.ChecksJson) || {} : {};
+    const ticks = Object.keys(cj).filter((k) => !k.startsWith("*"));
+    // Field decisions of this version (✓ / ✗), keyed master#id#field; an older whole-section tick means ✓ on all its fields.
+    const fieldDecisions = {};
+    for (const k of ticks) {
+      if (cj[k]?.fields) for (const [fk, x] of Object.entries(cj[k].fields)) fieldDecisions[fk] = x.d;
+      // (an old whole-section tick gives no field marks)
+    }
+    out.push({ ...v, flow: versionFlow(v, i, st), uploads, checklist: saved || now, checklistNow: !saved,
+      verifiedSections: ticks, verifiedBy: rv?.VerifierName ?? null, fieldDecisions });
   }
   return out;
 }
@@ -462,7 +499,7 @@ const shown = (f, raw, row) => {
 };
 
 /** Every entry section of a land: its entries, each with all its fields (value or empty) and attached files. */
-async function entrySections(pool, landId) {
+async function entrySections(pool, landId, given = null) {
   const { MASTERS } = require("./masterConfig");
   const { baseSql } = require("./legalMasters");
   const rowsOf = async (key) => {
@@ -476,11 +513,13 @@ async function entrySections(pool, landId) {
       master: key, title: cfg.title, id: row[cfg.pk],
       fields: cfg.fields.filter((fd) => !SKIP_FIELD(fd)).map((fd) => {
         const v = shown(fd, row[fd.name], row);
-        return { n: fd.name, l: fd.label, v, req: !!fd.required, ...(fd.type === "file" && row[fd.name] ? { file: row[fd.name] } : {}) };
+        // info: not entered data (the land it belongs to, generated codes) — shown, never verified.
+        const info = fd.name === cfg.parent || fd.name === "LandId" || !!fd.auto;
+        return { n: fd.name, l: fd.label, v, req: !!fd.required, ...(info ? { info: true } : {}), ...(fd.type === "file" && row[fd.name] ? { file: row[fd.name] } : {}) };
       }),
     }));
   };
-  const st = await landState(pool, landId);
+  const st = given || await landState(pool, landId);
   const checklist = await checklistNow(pool, landId);
   const out = [];
   for (const [key, label, masters] of ENTRY_SECTIONS) {
@@ -488,13 +527,10 @@ async function entrySections(pool, landId) {
     for (const m of masters) records = records.concat(await rowsOf(m));
     if (key === "documents") {
       records = (st?.documents || []).map((d) => ({ master: "land-document", title: "Document", id: d.DocumentId, fields: [
-        { n: "DocumentCode", l: "Document code", v: d.DocumentCode ?? null, req: true },
         { n: "Title", l: "Title", v: d.Title ?? null, req: true },
         { n: "DocTypeName", l: "Document type", v: d.DocTypeName ?? null, req: true },
         { n: "DocumentNo", l: "Document number", v: d.DocumentNo ?? null, req: false },
         { n: "DocumentDate", l: "Document date", v: d.DocumentDate ? new Date(d.DocumentDate).toISOString().slice(0, 10) : null, req: false },
-        { n: "CurrentVersionNo", l: "File version", v: d.CurrentVersionNo ? `v${d.CurrentVersionNo}` : null, req: false },
-        { n: "ReviewStatus", l: "Review", v: d.ReviewStatus ?? null, req: false },
         { n: "File", l: "File", v: d.FileName ?? null, req: true, ...(d.FileId ? { file: d.FileId } : {}) },
       ] }));
     }
@@ -591,6 +627,9 @@ async function registrationSection(pool, landId) {
     filled: all.filter((x) => x.v != null).length, total: all.length,
     missingRequired: r.RegCompletedAt ? all.filter((x) => x.req && x.v == null).map((x) => x.l) : [], files: all.filter((x) => x.file).length };
 }
+/** A field the verifier must mark: it has a value, or it is required. Empty optional fields are "not needed". */
+// Every entered field is decided by the verifier (✓ correct, ✗ wrong, N/A not needed); information fields are not.
+const needsCheck = (fd) => !fd.info;
 const sectionHash = (sec) => hashOf(sec.records.map((r) => [r.master, r.id, r.fields.map((x) => [x.n, x.v, x.file ?? null])]));
 
 const hashOf = (x) => crypto.createHash("sha1").update(JSON.stringify(x ?? null)).digest("hex");
@@ -602,7 +641,7 @@ async function reviewState(pool, landId) {
   const st = await landState(pool, landId);
   if (!st) return null;
   // Deed registration is recorded by the deed team (it shows in versions), not entered — it is not verified here.
-  const now = (await entrySections(pool, landId)).filter((sec) => sec.key !== "registration");
+  const now = (await entrySections(pool, landId, st)).filter((sec) => sec.key !== "registration");
   const last = (await pool.request().input("L", sql.Int, landId).query(`
     SELECT TOP 1 SnapshotJson FROM dbo.LegalLandRegisterSnapshot WHERE LandId = @L AND Remarks LIKE N'Version %' ORDER BY CreatedAt DESC, SnapshotId DESC`)).recordset[0];
   const prev = last ? parse(last.SnapshotJson) : null;
@@ -616,9 +655,14 @@ async function reviewState(pool, landId) {
     SELECT TOP 1 AmendmentId, AmendmentNo, AmendType, Reason, Status FROM dbo.LegalLandAmendment
     WHERE LandId = @L AND Status IN (N'Pending', N'Open') ORDER BY AmendmentId DESC`)).recordset[0] || null, null);
   const lastReturn = open ? null : (await pool.request().input("L", sql.Int, landId).query(`
-    SELECT TOP 1 r.Remarks, r.DecidedAt, d.name AS DecidedByName FROM dbo.LegalLandReview r LEFT JOIN dbo.users d ON d.id = r.DecidedBy
+    SELECT TOP 1 r.Remarks, r.DecidedAt, r.ChecksJson, d.name AS DecidedByName FROM dbo.LegalLandReview r LEFT JOIN dbo.users d ON d.id = r.DecidedBy
     WHERE r.LandId = @L AND r.Status = N'Returned' ORDER BY r.ReviewId DESC`)).recordset[0] || null;
   const checks = open ? parse(open.ChecksJson) || {} : {};
+  const lastVerified = (await pool.request().input("L", sql.Int, landId).query(`
+    SELECT TOP 1 r.SubmittedBy, u.name AS Name, r.Remarks FROM dbo.LegalLandReview r LEFT JOIN dbo.users u ON u.id = r.SubmittedBy
+    WHERE r.LandId = @L AND r.Status = N'Approved' ORDER BY r.ReviewId DESC`)).recordset[0] || null;
+  // Sent back: the fields the verifier marked ✗, so data entry sees exactly what to correct (fixed once the value changes).
+  const returnedChecks = !open && lastReturn ? parse(lastReturn.ChecksJson) || {} : {};
   const prevEntry = prev && Array.isArray(prev.entry) ? prev.entry : null;
   const steps = now.map((sec) => {
     const before = prevEntry ? prevEntry.find((p) => p.key === sec.key) || { records: [] } : null;
@@ -626,9 +670,45 @@ async function reviewState(pool, landId) {
     // A version saved before sections were kept has nothing to compare with: every step is checked again.
     const changed = !prev || !before || sectionHash(before) !== hash;
     const c = checks[sec.key];
-    return { ...sec, changed, previous: prev && before ? before.records : null, hash,
-      checked: !!c && c.hash === hash, checkedBy: c?.hash === hash ? c.by : null, checkedAt: c?.hash === hash ? c.at : null, staleTick: !!c && c.hash !== hash };
+    // Field-by-field: each field gets ✓ (correct) or ✗ (wrong); a decision holds while the field keeps that value.
+    // An older whole-section tick (hash) counts as ✓ on every field while the section is unchanged.
+    const whole = false; // an old whole-section tick no longer stands for field decisions — every field is marked by the verifier
+    const decisions = {};
+    let total = 0;
+    for (const r of sec.records) for (const fd of r.fields) {
+      if (!needsCheck(fd)) continue;
+      total++;
+      const fk = `${r.master}#${r.id}#${fd.n}`;
+      const dcs = c?.fields?.[fk];
+      if (whole) decisions[fk] = "ok";
+      else if (dcs && (dcs.v ?? null) === (fd.v ?? null)) decisions[fk] = dcs.d;
+    }
+    const decided = Object.keys(decisions).length;
+    const crosses = Object.values(decisions).filter((d) => d === "bad").length;
+    // An empty section is verified with one tick ("nothing to enter").
+    const emptyOk = !sec.records.length && !!c && (c.empty || c.hash === hash) && (!c.hash || c.hash === hash);
+    const checked = sec.records.length ? decided === total && total > 0 : emptyOk;
+    const staleTick = !!c && ((c.hash && c.hash !== hash && !c.fields) || (!!c.fields && Object.keys(c.fields).length > decided));
+    return { ...sec, changed, previous: prev && before ? before.records : null, hash, decisions, decided, fieldTotal: total, crosses,
+      checked, checkedBy: checked ? c?.by ?? null : null, checkedAt: checked ? c?.at ?? null : null, staleTick };
   });
+  const toFix = [];
+  if (lastReturn && !open) {
+    for (const sec of now) {
+      const rc = returnedChecks[sec.key];
+      if (!rc?.fields) continue;
+      for (const [fk, x] of Object.entries(rc.fields)) {
+        if (x.d !== "bad") continue;
+        const [master, rid, fname] = fk.split("#");
+        const rec = sec.records.find((r) => r.master === master && String(r.id) === rid);
+        const fd = rec?.fields.find((y) => y.n === fname);
+        const fixed = !rec || (fd?.v ?? null) !== (x.v ?? null);
+        toFix.push({ section: sec.label, sectionKey: sec.key, entry: rec?.title ?? "Removed entry", field: fd?.l ?? fname, was: x.v ?? null, now: fd?.v ?? null, fixed, key: fk });
+        const st2 = steps.find((y) => y.key === sec.key);
+        if (st2 && !fixed) st2.decisions[fk] = "bad";
+      }
+    }
+  }
   // When anything changed, every step is verified again (ticked) for the new version — changed ones are highlighted.
   const anyChanged = steps.some((s) => s.changed);
   const toCheck = anyChanged ? steps : [];
@@ -639,7 +719,10 @@ async function reviewState(pool, landId) {
     review: open ? { ReviewId: open.ReviewId, Status: open.Status, SubmittedBy: open.SubmittedBy, SubmittedByName: open.SubmittedByName, SubmittedAt: open.SubmittedAt, Remarks: open.Remarks,
       EntrySubmittedByName: open.EntrySubmittedByName, EntrySubmittedAt: open.EntrySubmittedAt, EntrySubmittedBy: open.EntrySubmittedBy } : null,
     registered: st.land.WorkflowStatus === "Registered", amendment,
-    returned: lastReturn };
+    // Fully verified (latest version saved, nothing changed since) but not yet in Deed Process → waits for the Approver.
+    awaitingApproval: !open && !anyChanged && !!prev && st.land.VerificationStatus === "Verified" && !IN_PIPELINE.includes(st.land.WorkflowStatus),
+    lastVerifiedBy: lastVerified?.SubmittedBy ?? null, lastVerifiedByName: lastVerified?.Name ?? null, lastVerifiedRemarks: lastVerified?.Remarks ?? null,
+    returned: lastReturn ? { Remarks: lastReturn.Remarks, DecidedAt: lastReturn.DecidedAt, DecidedByName: lastReturn.DecidedByName } : null, toFix };
 }
 
 async function openReview(pool, landId, versionNo) {
@@ -716,49 +799,114 @@ router.put("/land/:id/review/check", requirePageRight(PAGE, "view"), async (req,
   try {
     const pool = getPool();
     if (!(await canAct(req, "Verifier", PAGE))) return res.status(403).json({ error: "Only a Verifier (Setup → Approval Control) can tick the steps" });
+    // Fast path: the page sends the values it shows ({ values: { fieldKey: value } }), so one small read + one write,
+    // without rebuilding the whole land. The next full load re-checks every mark against the current values anyway.
+    if (req.body && typeof req.body.values === "object" && req.body.values) {
+      const b = req.body;
+      const r = (await pool.request().input("L", sql.Int, id).query(
+        "SELECT TOP 1 ReviewId, ChecksJson FROM dbo.LegalLandReview WHERE LandId = @L AND Status = N'Verifying' ORDER BY ReviewId DESC")).recordset[0];
+      if (!r) return res.status(409).json({ error: "Not sent for verification yet" });
+      const checks = parse(r.ChecksJson) || {};
+      const cur = checks[key] && checks[key].fields ? checks[key] : { fields: {} };
+      const vals = b.values;
+      if (b.field) {
+        if (["ok", "bad", "na"].includes(b.decision)) cur.fields[b.field] = { d: b.decision, v: vals[b.field] ?? null };
+        else delete cur.fields[b.field];
+      } else if (b.all === "ok") {
+        for (const [fk, v] of Object.entries(vals)) if (v != null && v !== "" && (!cur.fields[fk] || cur.fields[fk].v !== v)) cur.fields[fk] = { d: "ok", v };
+        if (!Object.keys(vals).length) cur.empty = true;
+      } else if (b.all === "clear") { cur.fields = {}; delete cur.empty; }
+      else return res.status(400).json({ error: "Nothing to save" });
+      cur.by = req.user?.name || req.user?.email || `User ${userOf(req)}`; cur.at = new Date().toISOString();
+      checks[key] = cur;
+      await pool.request().input("R", sql.Int, r.ReviewId).input("J", sql.NVarChar(sql.MAX), JSON.stringify(checks))
+        .query("UPDATE dbo.LegalLandReview SET ChecksJson = @J WHERE ReviewId = @R AND Status = N'Verifying'");
+      return res.json({ ok: true });
+    }
     const st = await reviewState(pool, id);
     if (!st) return res.status(404).json({ error: "Land not found" });
     if (st.status !== "Verifying") return res.status(409).json({ error: st.status === "Submitted" ? "Already submitted — waiting for the Approver" : "Not sent for verification yet" });
     const step = st.steps.find((s) => s.key === key);
     if (!step) return res.status(400).json({ error: "This land has no such step" });
     const r = await openReview(pool, id, st.versionNo);
+    if (!r) return res.status(409).json({ error: "Not sent for verification yet" });
     const checks = parse(r.ChecksJson) || {};
-    if (req.body?.checked) checks[key] = { hash: step.hash, by: req.user?.name || req.user?.email || `User ${userOf(req)}`, at: new Date().toISOString() };
-    else delete checks[key];
+    const by = req.user?.name || req.user?.email || `User ${userOf(req)}`;
+    const cur = checks[key] && checks[key].fields ? checks[key] : { fields: {} };
+    const valueOf = Object.fromEntries(step.records.flatMap((rec) => rec.fields.filter(needsCheck).map((fd) => [`${rec.master}#${rec.id}#${fd.n}`, fd.v ?? null])));
+    const body = req.body || {};
+    let message;
+    if (body.field) {
+      // { step, field, decision: "ok" | "bad" | "na" | null }
+      if (!(body.field in valueOf)) return res.status(400).json({ error: "Unknown field" });
+      if (body.decision === "ok" || body.decision === "bad" || body.decision === "na") cur.fields[body.field] = { d: body.decision, v: valueOf[body.field] };
+      else delete cur.fields[body.field];
+      message = "Saved";
+    } else if (body.all === "ok" || body.checked === true) {
+      // ✓ on every field not yet decided (or "nothing to enter" for an empty section)
+      // ✓ on filled fields, N/A on empty ones (the verifier can change any of them).
+      // ✓ on every filled field not marked yet; empty fields stay for the verifier to mark (✓, ✗ or N/A).
+      for (const [fk, v] of Object.entries(valueOf)) if (v != null && v !== "" && (!cur.fields[fk] || cur.fields[fk].v !== v)) cur.fields[fk] = { d: "ok", v };
+      if (!step.records.length) cur.empty = true;
+      message = `${step.label}: all ✓`;
+    } else if (body.all === "clear" || body.checked === false) {
+      cur.fields = {}; delete cur.empty;
+      message = `${step.label}: cleared`;
+    } else return res.status(400).json({ error: "Nothing to save" });
+    cur.by = by; cur.at = new Date().toISOString();
+    checks[key] = cur;
     await pool.request().input("R", sql.Int, r.ReviewId).input("J", sql.NVarChar(sql.MAX), JSON.stringify(checks))
       .query("UPDATE dbo.LegalLandReview SET ChecksJson = @J WHERE ReviewId = @R");
-    res.json({ message: req.body?.checked ? `${step.label} verified` : `${step.label} unticked` });
+    res.json({ message });
   } catch (err) {
     console.error("[legal-flow] review check:", err.message);
     res.status(500).json({ error: "Could not save" });
   }
 });
 
-// POST /land/:id/review/submit — every step to check is ticked: send to the Approver.
+// POST /land/:id/review/submit { remarks } — the verifier has marked every field (✓ / N/A, no ✗): verify and save the
+// version with the remarks. A land not yet in Deed Process then waits for the Approver (Approvals · Land approval), who
+// sends it on to Deed Process. Later versions (changes in Deed Process, amendments after registration) are complete here.
 router.post("/land/:id/review/submit", requirePageRight(PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
+  const remarks = String(req.body?.remarks || "").trim().slice(0, 1000);
   if (!id) return res.status(400).json({ error: "Invalid land" });
+  if (remarks.length < 3) return res.status(400).json({ error: "Write the verification remarks" });
   try {
     const pool = getPool();
-    if (!(await canAct(req, "Verifier", PAGE))) return res.status(403).json({ error: "Only a Verifier can submit the review" });
+    if (!(await canAct(req, "Verifier", PAGE))) return res.status(403).json({ error: "Only a Verifier can verify the land" });
     const st = await reviewState(pool, id);
     if (!st) return res.status(404).json({ error: "Land not found" });
-    if (st.status !== "Verifying") return res.status(409).json({ error: st.status === "Submitted" ? "Already submitted" : "Not sent for verification yet" });
+    if (st.status !== "Verifying") return res.status(409).json({ error: "Not sent for verification yet" });
     const left = st.steps.filter((s) => !s.checked);
-    if (left.length) return res.status(409).json({ error: `Verify every step first: ${left.map((s) => s.label).join(", ")}` });
+    if (left.length) return res.status(409).json({ error: `Mark every field (✓, ✗ or N/A) first: ${left.map((s) => s.label).join(", ")}` });
+    const wrong = st.steps.filter((s) => s.crosses);
+    if (wrong.length) return res.status(409).json({ error: `Fields marked ✗ in ${wrong.map((s) => s.label).join(", ")} — send it back to data entry to correct` });
     const r = await openReview(pool, id, st.versionNo);
-    await pool.request().input("R", sql.Int, r.ReviewId).input("U", sql.Int, userOf(req)).input("M", sql.NVarChar(1000), String(req.body?.remarks || "").trim().slice(0, 1000) || null)
-      .query("UPDATE dbo.LegalLandReview SET Status = N'Submitted', SubmittedBy = @U, SubmittedAt = SYSUTCDATETIME(), Remarks = @M WHERE ReviewId = @R");
-    await writeAudit(pool, req, { action: "Land review submitted", entityType: "Land Property", entityId: id, landId: id, remarks: `Version ${st.versionNo}` });
-    res.json({ message: `${st.land.LandCode}: version ${st.versionNo} sent for approval` });
+    const amend = st.registered && st.amendment?.Status === "Open" ? st.amendment : null;
+    const no = await snapshotVersion(pool, id, userOf(req), "Land verified", amend ? { no: amend.AmendmentNo, type: amend.AmendType, reason: amend.Reason, remarks, changes: [] } : null);
+    await pool.request().input("R", sql.Int, r.ReviewId).input("U", sql.Int, userOf(req)).input("M", sql.NVarChar(1000), remarks).input("N", sql.Int, no)
+      .query("UPDATE dbo.LegalLandReview SET Status = N'Approved', VersionNo = ISNULL(@N, VersionNo), SubmittedBy = @U, SubmittedAt = SYSUTCDATETIME(), DecidedBy = @U, DecidedAt = SYSUTCDATETIME(), Remarks = @M WHERE ReviewId = @R");
+    if (amend) await pool.request().input("A", sql.Int, amend.AmendmentId).input("N", sql.Int, no).query("UPDATE dbo.LegalLandAmendment SET Status = N'Completed', VersionNo = @N WHERE AmendmentId = @A");
+    // Verifying is also the re-verification of changes made in Deed Process.
+    await pool.request().input("L", sql.Int, id).input("U", sql.Int, userOf(req)).query(`
+      IF COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') IS NOT NULL
+        EXEC sp_executesql N'UPDATE dbo.LegalLand SET DeedChangedAt = NULL, DeedChangedBy = NULL, DeedReverifiedAt = SYSUTCDATETIME(), DeedReverifiedBy = @U WHERE LandId = @L AND DeedChangedAt IS NOT NULL', N'@L INT, @U INT', @L = @L, @U = @U;`);
+    const pre = !IN_PIPELINE.includes(st.land.WorkflowStatus);
+    if (pre) await pool.request().input("L", sql.Int, id).input("U", sql.Int, userOf(req))
+      .query("UPDATE dbo.LegalLand SET VerificationStatus = N'Verified', FinalVerifiedBy = @U, FinalVerifiedAt = SYSUTCDATETIME() WHERE LandId = @L");
+    await writeAudit(pool, req, { action: "Land review approved", entityType: "Land Property", entityId: id, landId: id, remarks: `Version ${no} verified — ${remarks}` });
+    res.json({ message: `${st.land.LandCode}: verified — version ${no} saved${pre ? "; waiting for the Approver to send it to Deed Process" : amend ? ` (amendment ${amend.AmendmentNo} done, land locked again)` : ""}` });
   } catch (err) {
     console.error("[legal-flow] review submit:", err.message);
-    res.status(500).json({ error: "Could not submit" });
+    res.status(500).json({ error: "Could not verify" });
   }
 });
 
-// POST /land/:id/review/decide { action: "Approve" | "Return", remarks } — the Approver. Approve saves the next version;
-// Return sends it back to the verifier with the reason. A land changed after submission cannot be approved.
+const IN_PIPELINE = ["Deed Process", "Deed Completed", "Deed Registration", "Registered"];
+
+// POST /land/:id/review/decide { action: "Approve" | "Return", remarks } — the Approver, for a fully verified land not yet in
+// Deed Process: Approve sends it to Deed Process (towards registration); Return sends it back to data entry with the reason.
 router.post("/land/:id/review/decide", requirePageRight(PAGE, "view"), async (req, res) => {
   const id = idParam(req.params.id);
   const action = req.body?.action;
@@ -770,39 +918,19 @@ router.post("/land/:id/review/decide", requirePageRight(PAGE, "view"), async (re
     if (!(await canAct(req, "Approver", PAGE))) return res.status(403).json({ error: "Only an Approver (Setup → Approval Control) can decide" });
     const st = await reviewState(pool, id);
     if (!st) return res.status(404).json({ error: "Land not found" });
-    if (st.status !== "Submitted") return res.status(409).json({ error: "Not submitted for approval" });
-    if (action === "Approve" && !isSuperAdmin(req) && Number(st.review.SubmittedBy) === Number(userOf(req)))
-      return res.status(409).json({ error: "You verified this review — another user must approve it" });
-    const stale = st.steps.filter((s) => !s.checked);
-    if (action === "Approve" && stale.length) {
-      await pool.request().input("R", sql.Int, st.review.ReviewId).query("UPDATE dbo.LegalLandReview SET Status = N'Verifying', SubmittedBy = NULL, SubmittedAt = NULL WHERE ReviewId = @R");
-      return res.status(409).json({ error: `Changed after it was verified (${stale.map((s) => s.label).join(", ")}) — back to the verifier` });
-    }
-    await pool.request().input("R", sql.Int, st.review.ReviewId).input("U", sql.Int, userOf(req)).input("M", sql.NVarChar(1000), remarks || null)
-      .input("S", sql.NVarChar(20), action === "Approve" ? "Approved" : "Returned")
-      .query("UPDATE dbo.LegalLandReview SET Status = @S, DecidedBy = @U, DecidedAt = SYSUTCDATETIME(), Remarks = COALESCE(@M, Remarks) WHERE ReviewId = @R");
+    if (!st.awaitingApproval) return res.status(409).json({ error: st.status === "Draft" ? "Changed after it was verified — it must be verified again first" : "Not waiting for approval" });
+    if (action === "Approve" && !isSuperAdmin(req) && Number(st.lastVerifiedBy) === Number(userOf(req)))
+      return res.status(409).json({ error: "You verified this land — another user must approve it" });
     if (action === "Approve") {
-      const flowAmend = st.registered && st.amendment?.Status === "Open" ? st.amendment : null;
-      const no = await snapshotVersion(pool, id, userOf(req), "Land review approved", flowAmend ? { no: flowAmend.AmendmentNo, type: flowAmend.AmendType, reason: flowAmend.Reason, remarks: remarks || null, changes: [] } : null);
-      if (flowAmend) await pool.request().input("A", sql.Int, flowAmend.AmendmentId).input("N", sql.Int, no)
-        .query("UPDATE dbo.LegalLandAmendment SET Status = N'Completed', VersionNo = @N WHERE AmendmentId = @A");
-      // The first approved version of a draft land sends it to Deed Process.
-      const IN_PIPE = ["Deed Process", "Deed Completed", "Deed Registration", "Registered"];
-      if (!IN_PIPE.includes(st.land.WorkflowStatus)) {
-        await pool.request().input("L", sql.Int, id).input("V", sql.Int, st.review.SubmittedBy).input("U", sql.Int, userOf(req)).query(`
-          UPDATE dbo.LegalLand SET VerificationStatus = N'Verified', WorkflowStatus = N'Deed Process', FinalVerifiedBy = @V, FinalVerifiedAt = SYSUTCDATETIME(),
-                 L1Status = N'Pending', L1ReviewerId = NULL, L1ReviewedAt = NULL, L1Remarks = NULL, L2Status = N'Pending', L2ApproverId = NULL, L2ApprovedAt = NULL, L2Remarks = NULL,
-                 UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @L`);
-        await writeAudit(pool, req, { action: "Land verified — sent to Deed Process", entityType: "Land Property", entityId: id, landId: id, remarks: `Version ${no}` });
-      }
-      // The approval is also the re-verification of changes made in Deed Process.
-      await pool.request().input("L", sql.Int, id).input("U", sql.Int, userOf(req)).query(`
-        IF COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') IS NOT NULL
-          EXEC sp_executesql N'UPDATE dbo.LegalLand SET DeedChangedAt = NULL, DeedChangedBy = NULL, DeedReverifiedAt = SYSUTCDATETIME(), DeedReverifiedBy = @U WHERE LandId = @L AND DeedChangedAt IS NOT NULL', N'@L INT, @U INT', @L = @L, @U = @U;`);
-      await writeAudit(pool, req, { action: "Land review approved", entityType: "Land Property", entityId: id, landId: id, remarks: remarks || `Version ${no}` });
-      const moved = !IN_PIPE.includes(st.land.WorkflowStatus);
-      return res.json({ message: `${st.land.LandCode}: version ${no} approved${moved ? " — moved to Deed Process" : flowAmend ? ` — amendment ${flowAmend.AmendmentNo} done, land locked again` : ""}` });
+      await pool.request().input("L", sql.Int, id).input("U", sql.Int, userOf(req)).input("R", sql.NVarChar(1000), remarks || null).query(`
+        UPDATE dbo.LegalLand SET WorkflowStatus = N'Deed Process', L1Status = N'Pending', L1ReviewerId = NULL, L1ReviewedAt = NULL, L1Remarks = NULL,
+               L2Status = N'Pending', L2ApproverId = NULL, L2ApprovedAt = NULL, L2Remarks = NULL, UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @L`);
+      await writeAudit(pool, req, { action: "Land verified — sent to Deed Process", entityType: "Land Property", entityId: id, landId: id, remarks: remarks || `Version ${st.versionNo - 1} approved` });
+      return res.json({ message: `${st.land.LandCode}: approved — moved to Deed Process` });
     }
+    await pool.request().input("L", sql.Int, id).query("UPDATE dbo.LegalLand SET VerificationStatus = N'Draft' WHERE LandId = @L");
+    await pool.request().input("L", sql.Int, id).input("V", sql.Int, st.versionNo).input("U", sql.Int, userOf(req)).input("M", sql.NVarChar(1000), remarks)
+      .query("INSERT INTO dbo.LegalLandReview (LandId, VersionNo, Status, ChecksJson, DecidedBy, DecidedAt, Remarks) VALUES (@L, @V, N'Returned', N'{}', @U, SYSUTCDATETIME(), @M)");
     await writeAudit(pool, req, { action: "Land review returned", entityType: "Land Property", entityId: id, landId: id, remarks });
     res.json({ message: `${st.land.LandCode}: sent back to data entry` });
   } catch (err) {
@@ -819,9 +947,12 @@ router.get("/reviews", requirePageRight(PAGE, "view"), require("./paging").pagea
     const approve = req.query.kind === "approve";
     const r = await pool.request().query(approve ? `
       SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, l.WorkflowStatus, m.MouzaName, r.VersionNo, r.SubmittedAt AS Since, u.name AS ByName
-      FROM dbo.LegalLandReview r JOIN dbo.LegalLand l ON l.LandId = r.LandId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      FROM dbo.LegalLand l LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      CROSS APPLY (SELECT TOP 1 * FROM dbo.LegalLandReview x WHERE x.LandId = l.LandId ORDER BY x.ReviewId DESC) r
       LEFT JOIN dbo.users u ON u.id = r.SubmittedBy
-      WHERE r.Status = N'Submitted' AND l.IsActive = 1 ORDER BY r.SubmittedAt` : `
+      WHERE l.IsActive = 1 AND l.VerificationStatus = N'Verified' AND r.Status = N'Approved'
+        AND ISNULL(l.WorkflowStatus, N'') NOT IN (N'Deed Process', N'Deed Completed', N'Deed Registration', N'Registered')
+      ORDER BY r.SubmittedAt` : `
       SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, l.WorkflowStatus, m.MouzaName, r.VersionNo, r.EntrySubmittedAt AS Since, u.name AS ByName
       FROM dbo.LegalLandReview r JOIN dbo.LegalLand l ON l.LandId = r.LandId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
       LEFT JOIN dbo.users u ON u.id = r.EntrySubmittedBy
@@ -838,3 +969,4 @@ module.exports = router;
 module.exports.snapshotVersion = snapshotVersion;
 module.exports.APPROVAL_ACTIONS = APPROVAL_ACTIONS;
 module.exports.reviewState = reviewState;
+module.exports.loadLand = loadLand;

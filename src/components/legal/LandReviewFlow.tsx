@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
 import { askLegal } from "@/components/legal/LegalAsk";
+import { InlineRecordEditor, SECTION_MASTERS } from "@/components/legal/InlineRecordEditor";
 import { clearCourtCase, getDiligence } from "@/api/legalDiligenceApi";
-import { checkReviewStep, decideReview, getLandReview, returnReview, submitReview, type EntryField, type EntryRecord, type ReviewStep } from "@/api/legalFlowApi";
+import { checkReviewStep, decideReview, getLandReview, returnReview, submitReview, type EntryField, type EntryRecord, type LandReview, type ReviewStep } from "@/api/legalFlowApi";
 
 const val = (x: unknown) => {
   if (x === null || x === undefined || x === "") return "—";
@@ -16,12 +17,29 @@ const btn = "h-9 border px-4 text-xs font-semibold uppercase tracking-[0.08em] d
 const DOC_STATE: Record<string, string> = { Verified: "text-emerald-700 dark:text-emerald-400", Pending: "text-amber-700 dark:text-amber-400", Missing: "font-semibold text-destructive", Rejected: "font-semibold text-destructive" };
 
 /** One field: its value (or "Not filled" / "Required — not filled"), the file link, and the old value when it changed. */
-function FieldCell({ f, old, diff }: { f: EntryField; old?: EntryField; diff: boolean }) {
+type Dec = "ok" | "bad" | "na";
+type Decide = { decisions?: Record<string, Dec>; onDecide?: (fieldKey: string, d: Dec | null) => void };
+function FieldCell({ f, old, diff, fk, decisions, onDecide }: { f: EntryField; old?: EntryField; diff: boolean; fk?: string } & Decide) {
+  const d = fk ? decisions?.[fk] : undefined;
   const changed = diff && old !== undefined && (old?.v ?? null) !== (f.v ?? null);
   const empty = f.v == null;
   return (
-    <div className={`px-1.5 py-1 ${changed ? "bg-amber-500/10" : empty ? (f.req ? "bg-destructive/5" : "bg-muted/40") : ""}`}>
-      <dt className="text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground">{f.l}{f.req && <span className="text-destructive"> *</span>}</dt>
+    <div className={`relative border-l-2 px-1.5 py-1 ${d === "bad" ? "outline outline-2 -outline-offset-2 outline-destructive" : d === "ok" ? "outline outline-1 -outline-offset-1 outline-emerald-600" : d === "na" ? "opacity-60" : ""} ${changed ? "border-amber-500 bg-amber-500/10" : empty ? (f.req ? "border-destructive bg-destructive/5" : "border-border bg-muted/40") : "border-sky-500 bg-sky-500/5"}`}>
+      <dt className="flex items-start justify-between gap-1 text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground">
+        <span>{f.l}{f.req && <span className="text-destructive"> *</span>}</span>
+        {f.info ? (
+          <span className="shrink-0 text-[0.5625rem] normal-case text-muted-foreground" title="Not entered data — nothing to verify">info</span>
+        ) : fk && onDecide ? (
+          <span className="flex shrink-0 gap-0.5 normal-case">
+            <button type="button" title="Correct" onClick={() => onDecide(fk, d === "ok" ? null : "ok")}
+              className={`h-5 w-5 border text-[0.6875rem] font-bold leading-none ${d === "ok" ? "border-emerald-600 bg-emerald-600 text-white" : "border-emerald-600/50 text-emerald-700 hover:bg-emerald-600/10"}`}>✓</button>
+            <button type="button" title="Wrong" onClick={() => onDecide(fk, d === "bad" ? null : "bad")}
+              className={`h-5 w-5 border text-[0.6875rem] font-bold leading-none ${d === "bad" ? "border-destructive bg-destructive text-white" : "border-destructive/50 text-destructive hover:bg-destructive/10"}`}>✗</button>
+            <button type="button" title="Not needed / not required" onClick={() => onDecide(fk, d === "na" ? null : "na")}
+              className={`h-5 border px-1 text-[0.5625rem] font-bold leading-none ${d === "na" ? "border-foreground bg-foreground text-background" : "border-foreground/30 text-muted-foreground hover:bg-muted"}`}>N/A</button>
+          </span>
+        ) : d ? <span className={`text-xs font-bold ${d === "ok" ? "text-emerald-700" : d === "bad" ? "text-destructive" : "text-muted-foreground"}`}>{d === "ok" ? "✓" : d === "bad" ? "✗" : "N/A"}</span> : null}
+      </dt>
       <dd className="text-sm">
         {empty ? <span className={f.req ? "font-semibold text-destructive" : "italic text-muted-foreground"}>{f.req ? "Required — not filled" : "Not filled"}</span>
           : f.file ? <LegalFileLink id={f.file} name={f.v ?? "File"} /> : <span className="font-medium">{val(f.v)}</span>}
@@ -31,7 +49,7 @@ function FieldCell({ f, old, diff }: { f: EntryField; old?: EntryField; diff: bo
   );
 }
 
-export function RecordCard({ r, prev, diff, tag }: { r: EntryRecord; prev?: EntryRecord; diff: boolean; tag?: "new" | "gone" }) {
+export function RecordCard({ r, prev, diff, tag, decisions, onDecide, onEdit }: { r: EntryRecord; prev?: EntryRecord; diff: boolean; tag?: "new" | "gone"; onEdit?: () => void } & Decide) {
   const filled = r.fields.filter((f) => f.v != null).length;
   const reqMissing = r.fields.filter((f) => f.req && f.v == null).length;
   return (
@@ -40,22 +58,27 @@ export function RecordCard({ r, prev, diff, tag }: { r: EntryRecord; prev?: Entr
         <b>{r.title}</b>
         {tag === "new" && <span className="bg-emerald-600 px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase text-white">New</span>}
         {tag === "gone" && <span className="bg-destructive px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase text-white">Removed</span>}
-        <span className="ml-auto text-muted-foreground">{filled} / {r.fields.length} filled{reqMissing ? <b className="ml-1.5 text-destructive">· {reqMissing} required missing</b> : null}</span>
+        {onEdit && <button onClick={onEdit} className="ml-auto h-7 border border-foreground/50 px-2.5 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] hover:border-foreground hover:bg-foreground hover:text-background">Edit</button>}
+        <span className={`${onEdit ? "" : "ml-auto "}text-muted-foreground`}>{filled} / {r.fields.length} filled{reqMissing ? <b className="ml-1.5 text-destructive">· {reqMissing} required missing</b> : null}</span>
       </div>
       <dl className={`grid grid-cols-2 gap-1 p-2 sm:grid-cols-3 lg:grid-cols-4 ${tag === "gone" ? "line-through" : ""}`}>
-        {r.fields.map((f) => <FieldCell key={f.n} f={f} old={prev?.fields.find((x) => x.n === f.n)} diff={diff && !!prev} />)}
+        {r.fields.map((f) => <FieldCell key={f.n} f={f} old={prev?.fields.find((x) => x.n === f.n)} diff={diff && !!prev}
+          fk={tag === "gone" ? undefined : `${r.master}#${r.id}#${f.n}`} decisions={decisions} onDecide={onDecide} />)}
       </dl>
     </div>
   );
 }
 
-export function StepBody({ s, first }: { s: ReviewStep; first: boolean }) {
+export function StepBody({ s, first, onDecide, renderRecord }: { s: ReviewStep; first: boolean; onDecide?: Decide["onDecide"]; renderRecord?: (r: EntryRecord, card: React.ReactNode) => React.ReactNode }) {
   const diff = !first && s.changed && !!s.previous;
   const prevOf = (r: EntryRecord) => s.previous?.find((p) => p.master === r.master && p.id === r.id);
   const gone = diff ? (s.previous ?? []).filter((p) => !s.records.some((r) => r.master === p.master && r.id === p.id)) : [];
   return (
     <div className="space-y-2">
-      {s.records.length ? s.records.map((r) => <RecordCard key={`${r.master}-${r.id}`} r={r} prev={prevOf(r)} diff={diff} tag={diff && !prevOf(r) ? "new" : undefined} />)
+      {s.records.length ? s.records.map((r) => {
+        const card = <RecordCard key={`${r.master}-${r.id}`} r={r} prev={prevOf(r)} diff={diff} tag={diff && !prevOf(r) ? "new" : undefined} decisions={s.decisions} onDecide={onDecide} />;
+        return renderRecord ? <React.Fragment key={`${r.master}-${r.id}`}>{renderRecord(r, card)}</React.Fragment> : card;
+      })
         : (
           <div className={`border border-dashed px-3 py-2 ${s.needed ? "border-destructive/60 bg-destructive/5" : "border-border"}`}>
             <p className={`text-sm ${s.needed ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{s.needed ? "Nothing entered — this section is needed." : "Nothing entered (optional)."}</p>
@@ -77,7 +100,7 @@ export function StepBody({ s, first }: { s: ReviewStep; first: boolean }) {
   );
 }
 
-function StepCard({ n, s, first, canTick, onTick, busy }: { n: number; s: ReviewStep; first: boolean; canTick: boolean; onTick: (v: boolean) => void; busy: boolean }) {
+function StepCard({ n, s, first, canTick, onAll, onDecide, busy }: { n: number; s: ReviewStep; first: boolean; canTick: boolean; onAll: (a: "ok" | "clear") => void; onDecide: Decide["onDecide"]; busy: boolean }) {
   const [open, setOpen] = useState(s.changed);
   const tone = !s.changed ? "border-border" : s.checked ? "border-emerald-600" : "border-amber-500";
   const missingDocs = (s.checklist ?? []).filter((c) => c.state === "Missing").length;
@@ -96,31 +119,41 @@ function StepCard({ n, s, first, canTick, onTick, busy }: { n: number; s: Review
           <span className="text-xs text-muted-foreground">
             {s.records.length} entr{s.records.length === 1 ? "y" : "ies"} · {s.filled} / {s.total} fields filled{s.files ? ` · ${s.files} file${s.files === 1 ? "" : "s"}` : ""}
           </span>
-          {/* Complete = the verifier has ticked this step. Missing data is shown apart, in red. */}
-          <span className={`px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.08em] ${s.checked ? "bg-emerald-600 text-white" : "bg-amber-500/15 text-amber-700 dark:text-amber-300"}`}>
-            {s.checked ? "Complete · verified" : "Not verified yet"}
+          {/* Verified = every field has ✓ or ✗ (section shows ✗ count in red). Missing data is shown apart, in red. */}
+          <span className={`px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.08em] ${s.checked ? (s.crosses ? "bg-destructive text-white" : "bg-emerald-600 text-white") : "bg-amber-500/15 text-amber-700 dark:text-amber-300"}`}>
+            {s.checked ? (s.crosses ? `Verified · ${s.crosses} ✗ wrong` : "Verified") : `Pending · ${s.decided ?? 0}/${s.fieldTotal ?? 0} fields`}
           </span>
           {incomplete && <span className="text-xs font-semibold text-destructive">{[s.needed && !s.records.length ? "nothing entered" : "", s.missingRequired.length ? `${s.missingRequired.length} required field${s.missingRequired.length === 1 ? "" : "s"} empty` : "", missingDocs ? `${missingDocs} document${missingDocs === 1 ? "" : "s"} missing` : ""].filter(Boolean).join(" · ")}</span>}
           {s.staleTick && <span className="text-xs text-destructive">Changed again after it was ticked — check it again</span>}
           <button onClick={() => setOpen((x) => !x)} className="ml-auto text-xs underline">{open ? "Hide" : "Show"}</button>
-          {(canTick || s.checked || s.changed) && (
-            <label className={`flex items-center gap-2 border px-3 py-1.5 text-sm font-semibold ${s.checked ? "border-emerald-600 text-emerald-700 dark:text-emerald-400" : "border-foreground/40"} ${canTick ? "cursor-pointer" : "opacity-60"}`}>
-              <input type="checkbox" className="h-4 w-4 accent-emerald-600" checked={s.checked} disabled={!canTick || busy} onChange={(e) => onTick(e.target.checked)} />
-              Verified
-            </label>
+          {canTick && (
+            <span className="flex gap-1">
+              <button disabled={busy} onClick={() => onAll("ok")} title={s.records.length ? "✓ on filled fields and N/A on empty ones, for every field not yet marked" : "Nothing to enter — mark verified"}
+                className="h-8 border border-emerald-700 px-3 text-xs font-semibold uppercase tracking-[0.06em] text-emerald-700 hover:bg-emerald-700 hover:text-white disabled:opacity-40">✓ {s.records.length ? "All" : "Verified"}</button>
+              <button disabled={busy || !(s.decided || s.checked)} onClick={() => onAll("clear")} className="h-8 border border-foreground/40 px-2 text-xs disabled:opacity-40">Clear</button>
+            </span>
           )}
         </header>
-        {s.checked && s.checkedBy && <p className="-mt-2 px-4 pb-2 text-xs text-muted-foreground">Ticked by {s.checkedBy}{s.checkedAt ? ` · ${val(s.checkedAt)}` : ""}</p>}
-        {open && <div className="border-t border-border px-4 py-3"><StepBody s={s} first={first} /></div>}
+        {s.checked && s.checkedBy && <p className="-mt-2 px-4 pb-2 text-xs text-muted-foreground">Last marked by {s.checkedBy}{s.checkedAt ? ` · ${val(s.checkedAt)}` : ""}</p>}
+        {open && <div className="border-t border-border px-4 py-3"><StepBody s={s} first={first} onDecide={canTick ? onDecide : undefined} /></div>}
       </div>
     </li>
   );
 }
 
+const NEW_LABEL: Record<string, string> = {
+  "ownership-record": "owner", inheritance: "inheritance", partition: "partition", "property-restriction": "restriction",
+  "ownership-event": "transfer", "land-purchase": "purchase", "land-rs-record": "RS record", "land-lr-record": "LR record",
+  "legal-case": "court case", "land-legal-record": "legal record",
+};
+
 /** The land's record, every section row by row, read-only — every field shown, empty ones marked (land page). */
 export function LandRecordView({ landId, editor }: { landId: number; editor?: (key: string) => React.ReactNode }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
+  // Inline editing: "<master>#<id>" for an entry, "new:<section>:<master>" for a new one.
+  const [inline, setInline] = useState<string | null>(null);
+  const done = () => { setInline(null); qc.invalidateQueries({ queryKey: ["legal-review", landId] }); };
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-review", landId], queryFn: () => getLandReview(landId) });
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (error || !data) return <p className="text-sm text-destructive">{(error as Error)?.message ?? "Could not load"}</p>;
@@ -128,22 +161,42 @@ export function LandRecordView({ landId, editor }: { landId: number; editor?: (k
     <div className="space-y-4">
       {data.steps.map((s, i) => {
         const req = s.missingRequired.length, docs = (s.checklist ?? []).filter((c) => c.state === "Missing").length;
+        const wrong = Object.values(s.decisions ?? {}).filter((d) => d === "bad").length;
         const empty = !s.records.length;
         return (
-          <section key={s.key} className="border border-border bg-card">
+          <section key={s.key} className={`border bg-card ${wrong ? "border-2 border-destructive" : "border-border"}`}>
             <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2.5">
               <span className="flex h-6 w-6 items-center justify-center bg-foreground text-xs font-bold text-background">{i + 1}</span>
               <h3 className="font-semibold">{s.label}</h3>
               <span className="text-xs text-muted-foreground">{s.records.length} entr{s.records.length === 1 ? "y" : "ies"} · {s.filled} / {s.total} fields filled{s.files ? ` · ${s.files} file${s.files === 1 ? "" : "s"}` : ""}</span>
+              {wrong > 0 && <span className="bg-destructive px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-white">✗ {wrong} field{wrong === 1 ? "" : "s"} to correct</span>}
               {(req > 0 || docs > 0 || (empty && s.needed)) && <span className="text-xs font-semibold text-destructive">{[empty && s.needed ? "nothing entered" : "", req ? `${req} required empty` : "", docs ? `${docs} document${docs === 1 ? "" : "s"} missing` : ""].filter(Boolean).join(" · ")}</span>}
-              {editor && (
+              {editor && SECTION_MASTERS[s.key] && s.key !== "basic" && (
+                <span className="ml-auto flex gap-1">
+                  {SECTION_MASTERS[s.key].map((m) => (
+                    <button key={m} onClick={() => setInline(`new:${s.key}:${m}`)}
+                      className="h-8 border border-foreground bg-foreground px-3 text-xs font-semibold uppercase tracking-[0.06em] text-background hover:opacity-90">
+                      + New{SECTION_MASTERS[s.key].length > 1 ? ` ${NEW_LABEL[m] ?? ""}` : ""}
+                    </button>
+                  ))}
+                </span>
+              )}
+              {/* Documents keep their own editor (upload, file versions). */}
+              {editor && !SECTION_MASTERS[s.key] && s.key !== "registration" && (
                 <button onClick={() => { if (editing === s.key) qc.invalidateQueries({ queryKey: ["legal-review", landId] }); setEditing(editing === s.key ? null : s.key); }}
                   className={`ml-auto h-8 border px-3 text-xs font-semibold uppercase tracking-[0.06em] ${editing === s.key ? "border-foreground bg-foreground text-background" : "border-foreground/50 hover:border-foreground"}`}>
                   {editing === s.key ? "Done" : "Edit"}
                 </button>
               )}
             </header>
-            <div className="p-3">{editing === s.key && editor ? editor(s.key) : <StepBody s={s} first />}</div>
+            <div className="space-y-2 p-3">
+              {inline?.startsWith(`new:${s.key}:`) && <InlineRecordEditor master={inline.split(":")[2]} id={null} landId={landId} onDone={done} />}
+              {editing === s.key && editor ? editor(s.key) : (
+                <StepBody s={s} first renderRecord={editor && SECTION_MASTERS[s.key] ? (rec, card) => inline === `${rec.master}#${rec.id}`
+                  ? <InlineRecordEditor master={rec.master} id={rec.id} landId={landId} title={rec.title} onDone={done} />
+                  : React.cloneElement(card as React.ReactElement, { onEdit: () => setInline(`${rec.master}#${rec.id}`) }) : undefined} />
+              )}
+            </div>
           </section>
         );
       })}
@@ -180,7 +233,7 @@ function CourtClearance({ landId }: { landId: number }) {
   );
 }
 
-/** Approve / send back a submitted land review (Approvals → Versions). */
+/** The Approver: a fully verified land goes to Deed Process, or back to data entry (Approvals → Land approval). */
 export function ReviewDecision({ landId, versionNo }: { landId: number; versionNo: number }) {
   const qc = useQueryClient();
   const [remark, setRemark] = useState("");
@@ -194,7 +247,7 @@ export function ReviewDecision({ landId, versionNo }: { landId: number; versionN
       <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="Remarks (needed to send back)" className="h-8 flex-1 border border-foreground/30 bg-background px-2 text-sm" />
       <div className="flex gap-2">
         <button disabled={decide.isPending || !remark.trim()} onClick={() => decide.mutate("Return")} className="h-8 border border-destructive px-3 text-xs font-semibold uppercase tracking-[0.06em] text-destructive hover:bg-destructive hover:text-white disabled:opacity-40">Send back</button>
-        <button disabled={decide.isPending} onClick={() => decide.mutate("Approve")} className="h-8 border border-emerald-700 bg-emerald-700 px-3 text-xs font-semibold uppercase tracking-[0.06em] text-white hover:opacity-90 disabled:opacity-40">Approve — version {versionNo}</button>
+        <button disabled={decide.isPending} onClick={() => decide.mutate("Approve")} className="h-8 border border-emerald-700 bg-emerald-700 px-3 text-xs font-semibold uppercase tracking-[0.06em] text-white hover:opacity-90 disabled:opacity-40">Approve — send to Deed Process</button>
       </div>
     </div>
   );
@@ -210,13 +263,66 @@ export function LandReviewFlow({ landId }: { landId: number }) {
   const [remark, setRemark] = useState("");
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-review", landId], queryFn: () => getLandReview(landId) });
   const done = (m: string) => { toast.success(m); setRemark(""); qc.invalidateQueries({ queryKey: ["legal-review"] }); qc.invalidateQueries({ queryKey: ["legal-flow"] }); qc.invalidateQueries({ queryKey: ["legal-review-queue"] }); };
-  const tick = useMutation({ mutationFn: ({ k, v }: { k: string; v: boolean }) => checkReviewStep(landId, k, v), onSuccess: () => qc.invalidateQueries({ queryKey: ["legal-review", landId] }), onError: (e: Error) => toast.error(e.message) });
+  // Marks update the screen at once (optimistic); saves go one after another in the background, and the page re-syncs
+  // with the server a moment after the last click.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const pending = useRef(0);
+  const resync = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const applyLocal = (stepKey: string, change: (d: Record<string, "ok" | "bad" | "na">, s: ReviewStep) => void) => {
+    qc.setQueryData<LandReview>(["legal-review", landId], (old) => {
+      if (!old) return old;
+      const steps = old.steps.map((st) => {
+        if (st.key !== stepKey) return st;
+        const d = { ...(st.decisions ?? {}) };
+        change(d, st);
+        const keys = st.records.flatMap((rec) => rec.fields.filter((f) => !f.info).map((f) => `${rec.master}#${rec.id}#${f.n}`));
+        const decided = keys.filter((k) => d[k]).length;
+        const checked = st.records.length ? decided === keys.length && keys.length > 0 : Object.keys(d).length > 0 || st.checked;
+        return { ...st, decisions: d, decided, fieldTotal: keys.length, crosses: keys.filter((k) => d[k] === "bad").length, checked };
+      });
+      return { ...old, steps, ticked: steps.filter((x) => x.checked).length };
+    });
+  };
+  const send = (body: Parameters<typeof checkReviewStep>[1] & { values: Record<string, string | null> }) => {
+    pending.current++;
+    if (resync.current) clearTimeout(resync.current);
+    queue.current = queue.current.then(() => checkReviewStep(landId, body)).catch((e: Error) => { toast.error(e.message); }).finally(() => {
+      if (--pending.current === 0) resync.current = setTimeout(() => qc.invalidateQueries({ queryKey: ["legal-review", landId] }), 1200);
+    });
+  };
+  const valuesOf = (st: ReviewStep) => Object.fromEntries(st.records.flatMap((rec) => rec.fields.filter((f) => !f.info).map((f) => [`${rec.master}#${rec.id}#${f.n}`, f.v ?? null])));
+  const decide = (st: ReviewStep, field: string, decision: "ok" | "bad" | "na" | null) => {
+    applyLocal(st.key, (d) => { if (decision) d[field] = decision; else delete d[field]; });
+    send({ step: st.key, field, decision, values: { [field]: valuesOf(st)[field] ?? null } });
+  };
+  const markAll = (st: ReviewStep, a: "ok" | "clear") => {
+    const vals = valuesOf(st);
+    applyLocal(st.key, (d, s2) => {
+      if (a === "clear") { for (const k of Object.keys(d)) delete d[k]; return; }
+      for (const [k, v] of Object.entries(vals)) if (v != null && v !== "" && !d[k]) d[k] = "ok";
+      void s2;
+    });
+    if (!st.records.length) qc.setQueryData<LandReview>(["legal-review", landId], (old) => {
+      if (!old) return old;
+      const steps = old.steps.map((x) => (x.key === st.key ? { ...x, checked: a === "ok" } : x));
+      return { ...old, steps, ticked: steps.filter((x) => x.checked).length };
+    });
+    send({ step: st.key, all: a, values: vals });
+  };
+  const tick = { isPending: false };
   const submit = useMutation({ mutationFn: () => submitReview(landId, remark.trim() || undefined), onSuccess: (r) => done(r.message), onError: (e: Error) => toast.error(e.message) });
-  const sendBack = useMutation({ mutationFn: () => returnReview(landId, remark.trim()), onSuccess: (r) => done(r.message), onError: (e: Error) => toast.error(e.message) });
+  const sendBack = useMutation({ mutationFn: () => returnReview(landId, remark.trim() || autoReason()), onSuccess: (r) => done(r.message), onError: (e: Error) => toast.error(e.message) });
 
+  // Send back without a remark: the reason is the list of fields marked ✗.
+  const autoReason = () => {
+    const out: string[] = [];
+    for (const st of data?.steps ?? []) for (const rec of st.records) for (const f of rec.fields) if (st.decisions?.[`${rec.master}#${rec.id}#${f.n}`] === "bad") out.push(`${st.label} › ${f.l}`);
+    return out.length ? `Correct the fields marked ✗: ${out.join("; ")}`.slice(0, 1000) : "";
+  };
+  const crossCount = (data?.steps ?? []).reduce((n, st) => n + (st.crosses ?? 0), 0);
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading the flowchart…</p>;
   if (error || !data) return <p className="text-sm text-destructive">{(error as Error)?.message ?? "Could not load"}</p>;
-  const submitted = data.status === "Submitted";
+  const submitted = false;
   const canTick = data.canVerify && data.status === "Verifying";
   const allTicked = data.toCheck > 0 && data.ticked === data.toCheck;
   const pct = data.toCheck ? Math.round((data.ticked / data.toCheck) * 100) : 100;
@@ -227,7 +333,7 @@ export function LandReviewFlow({ landId }: { landId: number }) {
         <div>
           <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Version {data.versionNo} · {data.first ? "first verification" : "changes since version " + (data.versionNo - 1)}</p>
           <p className="mt-1 text-lg font-semibold">
-            {data.status === "Up to date" ? `Up to date — version ${data.versionNo - 1} is current` : data.status === "Draft" ? "Not sent for verification yet" : submitted ? "Verified — waiting for the Approver" : `${data.ticked} of ${data.toCheck} sections verified`}
+            {data.status === "Up to date" ? (data.awaitingApproval ? `Verified — version ${data.versionNo - 1} saved, waiting for the Approver` : `Up to date — version ${data.versionNo - 1} is current`) : data.status === "Draft" ? "Not sent for verification yet" : `${data.ticked} of ${data.toCheck} sections verified`}
           </p>
         </div>
         {data.status !== "Up to date" && (
@@ -248,27 +354,28 @@ export function LandReviewFlow({ landId }: { landId: number }) {
       {/* The flowchart: one step after another, joined by a line. */}
       <ol className="relative space-y-3 before:absolute before:bottom-4 before:left-4 before:top-4 before:w-0.5 before:bg-border">
         {data.steps.map((s, i) => (
-          <StepCard key={s.key} n={i + 1} s={s} first={data.first} canTick={canTick} busy={tick.isPending} onTick={(v) => tick.mutate({ k: s.key, v })} />
+          <StepCard key={s.key} n={i + 1} s={s} first={data.first} canTick={canTick} busy={tick.isPending}
+            onAll={(a) => markAll(s, a)} onDecide={(field, decision) => decide(s, field, decision)} />
         ))}
         <li className="relative pl-12">
-          <span className={`absolute left-0 top-3 flex h-8 w-8 items-center justify-center border-2 text-sm font-bold ${submitted ? "border-foreground bg-foreground text-background" : "border-border bg-muted text-muted-foreground"}`}>{data.steps.length + 1}</span>
+          <span className={`absolute left-0 top-3 flex h-8 w-8 items-center justify-center border-2 text-sm font-bold ${allTicked ? "border-foreground bg-foreground text-background" : "border-border bg-muted text-muted-foreground"}`}>{data.steps.length + 1}</span>
           <div className="border-2 border-foreground/60 bg-card px-4 py-3">
-            <h3 className="text-base font-semibold">{submitted ? "Approval" : "Submit for approval"}</h3>
+            <h3 className="text-base font-semibold">Verify &amp; save version {data.versionNo}</h3>
             {data.status === "Up to date" ? (
-              <p className="mt-1 flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400"><CheckCircle2 size={16} /> Nothing changed since the last version. Any new entry or edit on this land will appear here for verification.</p>
-            ) : submitted ? (
-              <div className="mt-2 space-y-2">
-                <p className="text-sm text-muted-foreground">Verified by <b className="text-foreground">{data.review?.SubmittedByName ?? "—"}</b>{data.review?.SubmittedAt ? ` on ${val(data.review.SubmittedAt)}` : ""}{data.review?.Remarks ? ` — “${data.review.Remarks}”` : ""}</p>
-                <p className="text-sm">The Approver approves it in <b>Approvals → Versions</b>; it then becomes version {data.versionNo}.</p>
-                <a href="/legal/approvals?tab=versions" className={`${btn} inline-flex items-center border-foreground bg-foreground text-background hover:opacity-90`}>{data.canApprove ? "Approve in Approvals →" : "Open Approvals →"}</a>
-              </div>
+              data.awaitingApproval
+                ? <p className="mt-1 text-sm">Verified by <b>{data.lastVerifiedByName ?? "the verifier"}</b>{data.lastVerifiedRemarks ? ` — “${data.lastVerifiedRemarks}”` : ""}. Version {data.versionNo - 1} is saved; it now waits for the <b>Approver</b> (Approvals → Land approval) to go to Deed Process.</p>
+                : <p className="mt-1 flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400"><CheckCircle2 size={16} /> Nothing changed since the last version. New entries or edits come back here once data entry sends them.</p>
             ) : (
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="Remarks (needed to send back)" disabled={!canTick} className="h-9 flex-1 border border-foreground/30 bg-background px-2 text-sm" />
-                <button disabled={!canTick || !remark.trim() || sendBack.isPending} onClick={() => sendBack.mutate()} title="Send back to data entry to correct"
-                  className={`${btn} border-destructive text-destructive hover:bg-destructive hover:text-white`}>Send back</button>
-                <button disabled={!canTick || !allTicked || submit.isPending} onClick={() => submit.mutate()} title={allTicked ? undefined : "Tick every step first"}
-                  className={`${btn} border-foreground bg-foreground text-background hover:opacity-90`}>Submit for approval</button>
+              <div className="mt-2 space-y-2">
+                <p className="text-xs text-muted-foreground">Mark every field ✓, ✗ or N/A. With nothing ✗, write your remarks and verify — the land is saved as version {data.versionNo}. With fields ✗, send it back.</p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder={crossCount ? `Remarks (optional — the ${crossCount} field(s) marked ✗ are sent back)` : "Verification remarks (needed)"} disabled={!canTick} className="h-9 flex-1 border border-foreground/30 bg-background px-2 text-sm" />
+                  <button disabled={!canTick || (!remark.trim() && !crossCount) || sendBack.isPending} onClick={() => sendBack.mutate()} title="Send back to data entry to correct"
+                    className={`${btn} border-destructive text-destructive hover:bg-destructive hover:text-white`}>Send back</button>
+                  <button disabled={!canTick || !allTicked || crossCount > 0 || remark.trim().length < 3 || submit.isPending} onClick={() => submit.mutate()}
+                    title={!allTicked ? "Mark every field first" : crossCount ? "Fields are marked ✗ — send it back" : remark.trim().length < 3 ? "Write the remarks" : undefined}
+                    className={`${btn} border-emerald-700 bg-emerald-700 text-white hover:opacity-90`}>Verify &amp; save version {data.versionNo}</button>
+                </div>
               </div>
             )}
           </div>
