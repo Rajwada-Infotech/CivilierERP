@@ -108,8 +108,11 @@ export function FormSection({ title, children }: { title: string; children: Reac
 }
 
 export function FormScaffold({
-  children, onSubmit, submitLabel = "Save", onCancel, submitting, disabled,
+  children, onSubmit, submitLabel = "Save", onCancel, submitting, disabled, tone = "#65a30d", toneInk = "#1a1a1a",
 }: {
+  /** The submit key's colour and its text colour: Maintenance green by default; the CRM forms pass the CRM colour. */
+  tone?: string;
+  toneInk?: string;
   children: ReactNode;
   onSubmit: () => void;
   submitLabel?: string;
@@ -145,13 +148,13 @@ export function FormScaffold({
           onPress={submitting || disabled ? undefined : onSubmit}
           style={{
             flex: 1.5, paddingVertical: 13, borderRadius: 12, alignItems: "center",
-            backgroundColor: "#65a30d", opacity: submitting || disabled ? 0.6 : 1,
+            backgroundColor: tone, opacity: submitting || disabled ? 0.6 : 1,
           }}
         >
           {submitting ? (
-            <ActivityIndicator color="#1a1a1a" size="small" />
+            <ActivityIndicator color={toneInk} size="small" />
           ) : (
-            <Text style={{ color: "#1a1a1a", fontSize: 13, fontFamily: fonts.heading.bold }}>{submitLabel}</Text>
+            <Text style={{ color: toneInk, fontSize: 13, fontFamily: fonts.heading.bold }}>{submitLabel}</Text>
           )}
         </Pressable>
       </View>

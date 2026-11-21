@@ -2,7 +2,11 @@
 // (backend/middleware/activityAudit.js) with the X-Session-Id and X-Client headers sent here; without them a person
 // using only the app showed 0 sessions next to their changes. One session per sign-in (or per app launch when
 // already signed in) — the web app does the same per browser tab (src/lib/fetchWithAuth.ts activityHeaders).
-export const APP_CLIENT = "mobile-maintenance";
+export const APP_CLIENT = "mobile-crm";
+
+/** This app's key: its builds in the APK Manager (backend/routes/appReleases.js APP_CATALOG "crm") and the phones
+ * the server's pushes for it reach (services/pushNotifications.js `apps`). */
+export const APP_KEY = "crm";
 
 let sessionId: string | null = null;
 

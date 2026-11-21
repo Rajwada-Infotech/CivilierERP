@@ -12,7 +12,18 @@ export const CRM_GROUPS: CrmGroup[] = ["Buyers & Bookings", "Finance", "Legal & 
 export type CrmOpen =
   | { to: "booking"; bookingId: number; title: string }
   | { to: "customer"; customerId: number; title: string }
+  | { to: "ticket"; ticketId: number }
   | { to: "document"; path: string; name: string };
+
+/** Welcome-call outcomes and their words — the web's (src/pages/CRM/welcomeCalls/config.tsx OUTCOMES / OUTCOME_LABEL),
+ * the server's list (crmWelcomeCalls.js OUTCOMES). */
+export const WELCOME_OUTCOMES = ["Welcomed", "NotReachable", "RequestedCallback", "VoiceMail", "Busy", "SwitchedOff"] as const;
+export const OUTCOME_LABEL: Record<string, string> = {
+  Welcomed: "Welcomed", NotReachable: "Not reachable", RequestedCallback: "Callback asked", VoiceMail: "Voicemail", Busy: "Busy", SwitchedOff: "Switched off",
+};
+
+/** A key on the card that starts a job there (Log call), for staff with that right on one of the pages. */
+export interface CardAction { label: string; pages: string[]; right: "create" | "edit"; to: (r: Row) => { screen: "CrmWelcomeCall"; params: { bookingId: number; title?: string } } }
 
 export interface CrmRegister {
   key: string;
@@ -33,6 +44,15 @@ export interface CrmRegister {
   /** Searched on the phone, for lists the server sends whole. */
   searchIn?: (r: Row) => unknown[];
   open?: (r: Row) => CrmOpen | null;
+  /** The buyer's mobile, for the card's Call / WhatsApp keys. Default: the row's Mobile. */
+  mobile?: (r: Row) => string | null | undefined;
+  /** The row's date, for the period filter and the date sort (newest first). */
+  dateOf?: (r: Row) => string | null | undefined;
+  /** The row's amount, for the amount sort. */
+  amountOf?: (r: Row) => number | null | undefined;
+  /** The row's project, for the project filter. Default: the row's ProjectName. */
+  projectOf?: (r: Row) => string | null | undefined;
+  cardAction?: CardAction;
   empty: string;
 }
 
@@ -57,6 +77,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     ],
     searchIn: (r) => [r.CustomerName, r.Mobile, r.LeadUid, r.CustomerNo],
     open: (r) => (r.CustomerId ? { to: "customer", customerId: Number(r.CustomerId), title: r.CustomerName } : null),
+    dateOf: (r) => r.DateGenerated, projectOf: () => null,
     empty: "No leads handed over to the CRM.",
   },
   {
@@ -67,6 +88,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     lines: (r) => [String(r.ProjectNames ?? "").split("|").filter(Boolean).join(", "), joinDot(r.PermanentCity, r.Email)],
     searchIn: (r) => [r.CustomerName, r.Mobile, r.CustomerNo, r.Email, r.PanNo, r.ProjectNames],
     open: (r) => ({ to: "customer", customerId: Number(r.Id), title: r.CustomerName }),
+    dateOf: (r) => r.CreatedAt, projectOf: () => null,
     empty: "No customers yet.",
   },
   {
@@ -81,6 +103,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     ],
     searchIn: (r) => [r.ApplicantName, r.Mobile, r.ApplicationNo, r.InterestedProject, r.InterestedUnit, r.Status],
     open: (r) => (r.CustomerId ? { to: "customer", customerId: Number(r.CustomerId), title: r.ApplicantName } : null),
+    dateOf: (r) => r.DateOfApply, amountOf: (r) => r.BookingAmount, projectOf: (r) => r.InterestedProject,
     empty: "No applications yet.",
   },
   {
@@ -92,18 +115,37 @@ export const CRM_REGISTERS: CrmRegister[] = [
     lines: (r) => [joinDot(r.UnitType, r.AreaSqFt && `${r.AreaSqFt} sq ft`, r.BookingDate && `Booked ${fmtDate(r.BookingDate)}`)],
     searchIn: (r) => [r.BookingNo, r.UnitNo, r.BlockName, r.ProjectName, r.Status],
     open: (r) => ({ to: "booking", bookingId: Number(r.Id), title: r.BookingNo }),
+    dateOf: (r) => r.BookingDate, amountOf: (r) => r.GrandTotal ?? r.TotalValue,
     empty: "No bookings yet.",
   },
   {
-    key: "welcome-calls", label: "Welcome Calls", group: "Buyers & Bookings", pages: ["crm-welcome-calls"], path: "/api/crm/welcome-calls",
+    // The web's call queue (crmWelcomeCalls.js GET /queue): approved bookings still waiting for their welcome call.
+    key: "welcome-calls", label: "Welcome Calls", group: "Buyers & Bookings", pages: ["crm-welcome-calls"], path: "/api/crm/welcome-calls/queue",
+    rows: list, id: (r) => String(r.BookingId),
+    title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.ProjectName, r.UnitNo),
+    status: (r) => (r.LastOutcome ? OUTCOME_LABEL[r.LastOutcome] ?? r.LastOutcome : "Not called"),
+    lines: (r) => [
+      r.LastCallDate ? `Last call ${fmtDate(r.LastCallDate)}` : r.BookingDate && `Booked ${fmtDate(r.BookingDate)}`,
+      r.NextCallDate && `Next call ${fmtDate(r.NextCallDate)}`,
+      Number(r.ConsecutiveNonReached) > 1 && `${r.ConsecutiveNonReached} calls in a row not reached`,
+    ],
+    dateOf: (r) => r.NextCallDate || r.BookingDate,
+    searchIn: (r) => [...buyerSearch(r), r.LastOutcome],
+    open: toBooking,
+    cardAction: { label: "Log call", pages: ["crm-welcome-calls"], right: "create", to: (r) => ({ screen: "CrmWelcomeCall", params: { bookingId: Number(r.BookingId), title: r.ApplicantName } }) },
+    empty: "No bookings waiting for a welcome call.",
+  },
+  {
+    key: "call-history", label: "Call History", group: "Buyers & Bookings", pages: ["crm-welcome-calls"], path: "/api/crm/welcome-calls",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.ProjectName, r.UnitNo),
-    status: (r) => r.Outcome,
+    status: (r) => (r.Outcome ? OUTCOME_LABEL[r.Outcome] ?? r.Outcome : null),
     lines: (r) => [
       joinDot(`Called ${fmtDate(r.CallDate)}`, r.CalledByName),
       r.NextCallDate && `Next call ${fmtDate(r.NextCallDate)}`,
       r.Notes,
     ],
+    dateOf: (r) => r.CallDate,
     searchIn: (r) => [...buyerSearch(r), r.Outcome, r.CalledByName],
     open: toBooking, empty: "No welcome calls logged.",
   },
@@ -120,7 +162,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       r.DemandStatus !== "Paid" && Number(r.Missing) > 0 && `Still to collect ${money(r.Missing)}`,
     ],
     searchIn: (r) => [...buyerSearch(r), r.MilestoneName, r.DemandNo, r.DemandStatus],
-    open: toBooking, empty: "No demands.",
+    open: toBooking, dateOf: (r) => r.DueDate, amountOf: (r) => r.AmountDue,
+    empty: "No demands.",
   },
   {
     key: "money-receipts", label: "Money Receipts", group: "Finance", pages: ["crm-money-receipts"], path: "/api/crm/money-receipts", serverSearch: true,
@@ -133,6 +176,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
       r.BouncedReason ? `Bounced: ${r.BouncedReason}` : r.RPRejectionNote && `Sent back: ${r.RPRejectionNote}`,
     ],
     open: (r) => ({ to: "document", path: `/api/crm/money-receipts/${r.Id}/pdf`, name: r.ReceiptNo || "Money Receipt" }),
+    dateOf: (r) => r.ReceivedDate, amountOf: (r) => r.Amount,
     empty: "No money receipts.",
   },
   {
@@ -145,7 +189,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(`Received ${money(r.Amount)}`, `Applied ${money(r.AppliedAmount)}`),
       joinDot(fmtDate(r.ReceivedDate), r.PaymentMode, r.DepositBankName),
     ],
-    open: toBooking, empty: "Nothing held on account.",
+    open: toBooking, dateOf: (r) => r.ReceivedDate, amountOf: (r) => r.AvailableBalance,
+    empty: "Nothing held on account.",
   },
   // ── Legal & Possession ─────────────────────────────────────────────────────
   {
@@ -159,7 +204,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(r.CheckStatus && `Checklist ${r.CheckStatus}`, r.NoticeStatus && `Notice ${r.NoticeStatus}`, r.HandoverStatus && `Handover ${r.HandoverStatus}`),
       Number(r.OpenSnags) > 0 && `${plural(r.OpenSnags, "open snag")}`,
     ],
-    open: toBooking, empty: "No bookings on the possession board.",
+    open: toBooking, amountOf: (r) => r.Balance,
+    empty: "No bookings on the possession board.",
   },
   // ── After-Sales ────────────────────────────────────────────────────────────
   {
@@ -170,6 +216,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     lines: (r) => [r.Units, joinDot(plural(r.ActiveBookingCount, "active booking"), `Paid ${money(r.TotalPaid)}`)],
     searchIn: (r) => [r.CustomerName, r.Mobile, r.CustomerNo, r.Units, r.City],
     open: (r) => ({ to: "customer", customerId: Number(r.Id), title: r.CustomerName }),
+    dateOf: (r) => r.CreatedAt, amountOf: (r) => r.TotalOutstanding, projectOf: () => null,
     empty: "No customers yet.",
   },
   {
@@ -182,7 +229,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       joinDot(`Raised ${fmtDate(r.CreatedAt)}`, r.SlaDueDate && `Due ${fmtDate(r.SlaDueDate)}`, r.RaisedByCustomer && "By customer"),
     ],
     searchIn: (r) => [...buyerSearch(r), r.TicketNo, r.Subject, r.Category, r.Status],
-    open: toBooking, empty: "No service tickets.",
+    open: (r) => ({ to: "ticket", ticketId: Number(r.Id) }), dateOf: (r) => r.CreatedAt,
+    empty: "No service tickets.",
   },
   {
     key: "construction-updates", label: "Construction Updates", group: "After-Sales", pages: ["crm-construction-updates"], path: "/api/crm/construction-updates/progress",
@@ -195,7 +243,8 @@ export const CRM_REGISTERS: CrmRegister[] = [
       stepName(r.next) && `Next: ${stepName(r.next)}`,
       Number(r.late) > 0 && `${r.late} running late`,
     ],
-    searchIn: (r) => [r.projectName], empty: "No projects.",
+    searchIn: (r) => [r.projectName], amountOf: (r) => r.pct, projectOf: (r) => r.projectName, mobile: () => null,
+    empty: "No projects.",
   },
 ];
 

@@ -2,17 +2,17 @@
 // Lists all CrmServiceTickets for handed-over (post-possession) residents
 // — the same handedOverOnly=true filter used by the web app's
 // src/pages/maintenance/MaintenanceServiceRequests.tsx.
-// Staff can mark tickets In Progress, Resolve, and Close from this screen.
+// Tap a ticket to work it (assign, start, resolve with notes, close, reopen) on the ticket screen (crm/TicketScreen).
 import { useState, useCallback } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, TextInput } from "react-native";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ticket, Clock, CheckCircle, XCircle, Search } from "lucide-react-native";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { Ticket, Search } from "lucide-react-native";
+import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { toast } from "@/components/Toast";
-import {
-  getHandedOverTickets, markTicketInProgress, resolveServiceTicket, closeServiceTicket,
-} from "@/api/serviceTicketApi";
+import { getHandedOverTickets } from "@/api/serviceTicketApi";
 
 const VIOLET = "#a78bfa";
 
@@ -42,11 +42,10 @@ const fmtDate = (d: string | null | undefined) =>
   d ? new Date(d).toLocaleDateString("en-IN") : "";
 
 export default function ServiceRequestsScreen() {
-  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusTab, setStatusTab] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
 
   const { data = [], isLoading, error, refetch } = useQuery({
     queryKey: ["maint-service-requests", statusTab, search],
@@ -58,19 +57,6 @@ export default function ServiceRequestsScreen() {
     await refetch();
     setRefreshing(false);
   }, [refetch]);
-
-  const doAction = async (id: number, fn: () => Promise<void>, msg: string) => {
-    setActionLoading(id);
-    try {
-      await fn();
-      toast.success(msg);
-      qc.invalidateQueries({ queryKey: ["maint-service-requests"] });
-    } catch (err: unknown) {
-      toast.error((err as Error).message || "Failed");
-    } finally {
-      setActionLoading(null);
-    }
-  };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -134,11 +120,11 @@ export default function ServiceRequestsScreen() {
           <View style={{ gap: 10 }}>
             {data.map((t) => {
               const sc = STATUS_COLOR[t.Status] || STATUS_COLOR.Closed;
-              const isActing = actionLoading === t.Id;
               return (
-                <View
+                <Pressable
                   key={t.Id}
-                  style={{ borderRadius: 14, borderWidth: 1, borderColor: sc.border, backgroundColor: colors.card, padding: 13, gap: 8 }}
+                  onPress={() => nav.navigate("CrmTicket", { ticketId: t.Id })}
+                  style={({ pressed }) => ({ borderRadius: 14, borderWidth: 1, borderColor: sc.border, backgroundColor: pressed ? colors.muted : colors.card, padding: 13, gap: 8 })}
                 >
                   {/* Header row */}
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -174,42 +160,7 @@ export default function ServiceRequestsScreen() {
                     </Text>
                   )}
 
-                  {/* Action buttons */}
-                  {(["Assigned", "InProgress", "Reopened", "Resolved"].includes(t.Status)) && (
-                    <View style={{ flexDirection: "row", gap: 8, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, marginTop: 2 }}>
-                      {t.Status === "Assigned" && (
-                        <Pressable
-                          onPress={() => doAction(t.Id, () => markTicketInProgress(t.Id), "Marked In Progress")}
-                          disabled={isActing}
-                          style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: `${VIOLET}50`, backgroundColor: `${VIOLET}12`, opacity: isActing ? 0.5 : 1 }}
-                        >
-                          {isActing ? <ActivityIndicator size="small" color={VIOLET} /> : <Clock size={13} color={VIOLET} />}
-                          <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: VIOLET }}>In Progress</Text>
-                        </Pressable>
-                      )}
-                      {["Assigned", "InProgress", "Reopened"].includes(t.Status) && (
-                        <Pressable
-                          onPress={() => doAction(t.Id, () => resolveServiceTicket(t.Id, "Resolved via mobile app"), "Resolved")}
-                          disabled={isActing}
-                          style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: "#34d39940", backgroundColor: "#d1fae512", opacity: isActing ? 0.5 : 1 }}
-                        >
-                          {isActing ? <ActivityIndicator size="small" color="#059669" /> : <CheckCircle size={13} color="#059669" />}
-                          <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: "#059669" }}>Resolve</Text>
-                        </Pressable>
-                      )}
-                      {t.Status === "Resolved" && (
-                        <Pressable
-                          onPress={() => doAction(t.Id, () => closeServiceTicket(t.Id), "Ticket closed")}
-                          disabled={isActing}
-                          style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.muted, opacity: isActing ? 0.5 : 1 }}
-                        >
-                          {isActing ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <XCircle size={13} color={colors.mutedForeground} />}
-                          <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Close</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  )}
-                </View>
+                </Pressable>
               );
             })}
           </View>

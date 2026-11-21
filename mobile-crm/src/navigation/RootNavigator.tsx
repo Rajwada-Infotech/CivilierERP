@@ -1,19 +1,13 @@
-import { useState } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { View, ActivityIndicator } from "react-native";
 import { useAuth } from "@/auth/AuthContext";
 import AuthStack from "./AuthStack";
 import MainStack from "./MainStack";
-import { SidebarMenu } from "./SidebarMenu";
 import { navigationRef } from "./navigationRef";
 import { colors } from "@/theme/colors";
 
 export default function RootNavigator() {
   const { currentUser, isLoading } = useAuth();
-  // Dashboard is MainStack's initial route, so this is accurate before the
-  // container's own state exists — see SidebarMenu.tsx for why this isn't
-  // read from navigationRef directly.
-  const [activeRoute, setActiveRoute] = useState("Dashboard");
 
   if (isLoading) {
     return (
@@ -24,24 +18,8 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer
-      ref={navigationRef}
-      onStateChange={() => {
-        // isReady() is the one navigationRef method safe to call before
-        // attachment (per React Navigation's own docs) — onStateChange's
-        // very first firing can still race the ref attaching, so every
-        // other method (getCurrentRoute included) stays behind this guard.
-        if (navigationRef.isReady()) setActiveRoute(navigationRef.getCurrentRoute()?.name ?? "Dashboard");
-      }}
-    >
-      {currentUser ? (
-        <>
-          <MainStack />
-          <SidebarMenu activeRoute={activeRoute} />
-        </>
-      ) : (
-        <AuthStack />
-      )}
+    <NavigationContainer ref={navigationRef}>
+      {currentUser ? <MainStack /> : <AuthStack />}
     </NavigationContainer>
   );
 }

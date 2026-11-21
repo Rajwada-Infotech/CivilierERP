@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getMeters } from "@/api/electricityMaintenanceApi";
 import { getSecurityPersonnel, getSecurityAttendance } from "@/api/securityAttendanceApi";
+import { useAuth } from "@/auth/AuthContext";
 
 export type MaintenanceAlertType = "reading_due" | "not_checked_in" | "info";
 
@@ -23,9 +24,13 @@ export interface MaintenanceAlert {
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function useMaintenanceAlerts() {
-  const metersQ = useQuery({ queryKey: ["mnt-meters"], queryFn: () => getMeters(), staleTime: 60_000 });
-  const personnelQ = useQuery({ queryKey: ["mnt-personnel"], queryFn: () => getSecurityPersonnel(), staleTime: 60_000 });
-  const attendanceQ = useQuery({ queryKey: ["mnt-attendance-today"], queryFn: () => getSecurityAttendance({ date: today() }), staleTime: 60_000 });
+  // Each feed only for staff with a right on its page (the web's Maintenance menu keys).
+  const { canAccessPage } = useAuth();
+  const meters = canAccessPage("maintenance-electricity");
+  const security = canAccessPage("maintenance-security-attendance");
+  const metersQ = useQuery({ queryKey: ["mnt-meters"], queryFn: () => getMeters(), staleTime: 60_000, enabled: meters });
+  const personnelQ = useQuery({ queryKey: ["mnt-personnel"], queryFn: () => getSecurityPersonnel(), staleTime: 60_000, enabled: security });
+  const attendanceQ = useQuery({ queryKey: ["mnt-attendance-today"], queryFn: () => getSecurityAttendance({ date: today() }), staleTime: 60_000, enabled: security });
 
   const alerts = useMemo<MaintenanceAlert[]>(() => {
     const out: MaintenanceAlert[] = [];
@@ -37,8 +42,7 @@ export function useMaintenanceAlerts() {
           type: "reading_due",
           title: `Reading pending · ${m.MeterNumber}`,
           subtitle: `${m.CustomerName ?? "—"} · ${[m.BlockName, m.UnitNo].filter(Boolean).join(" / ") || "—"}`,
-          route: "MeterDetail",
-          params: { id: m.Id },
+          route: "Electricity",
         });
       }
     }
@@ -61,7 +65,7 @@ export function useMaintenanceAlerts() {
 
   return {
     alerts,
-    isLoading: metersQ.isLoading || personnelQ.isLoading || attendanceQ.isLoading,
-    refetch: async () => { await Promise.all([metersQ.refetch(), personnelQ.refetch(), attendanceQ.refetch()]); },
+    isLoading: (meters && metersQ.isLoading) || (security && (personnelQ.isLoading || attendanceQ.isLoading)),
+    refetch: async () => { await Promise.all([meters && metersQ.refetch(), security && personnelQ.refetch(), security && attendanceQ.refetch()]); },
   };
 }

@@ -70,6 +70,7 @@ export const createServiceTicket = async (data: {
   Priority?: TicketPriority;
   Subject: string;
   Description?: string;
+  AssignedTo?: number;
 }): Promise<void> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
@@ -90,3 +91,21 @@ export const resolveServiceTicket = (id: number, ResolutionNotes: string) =>
 
 export const closeServiceTicket = (id: number) =>
   act(`${BASE}/${id}/close`, {}, "Failed to close ticket");
+/** Assign or reassign (crmServiceTickets.js PUT /:id — an Open ticket becomes Assigned). */
+export const assignServiceTicket = (id: number, AssignedTo: number) =>
+  act(`${BASE}/${id}`, { AssignedTo }, "Failed to assign ticket");
+
+export const reopenServiceTicket = (id: number, Reason: string) =>
+  act(`${BASE}/${id}/reopen`, { Reason }, "Failed to reopen ticket");
+
+/** One ticket, from the tickets list the web page reads (there is no single-ticket route). */
+export const getServiceTicket = async (id: number): Promise<ServiceTicketRow | null> =>
+  (await getJson<ServiceTicketRow[]>(BASE, "Failed to load the ticket")).find((t) => t.Id === id) ?? null;
+
+/** Staff a ticket can be assigned to — the web's list (saLeads.js GET /users). */
+export const getAssignableStaff = (): Promise<{ Id: number; Name: string }[]> =>
+  getJson(`/api/sa/leads/users`, "Failed to load staff");
+
+/** The words a category reads as ("ServiceRequest" → "Service Request"), as the web shows it. */
+export const TICKET_CATEGORIES: TicketCategory[] = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
+export const TICKET_PRIORITIES: TicketPriority[] = ["Low", "Normal", "High", "Urgent"];

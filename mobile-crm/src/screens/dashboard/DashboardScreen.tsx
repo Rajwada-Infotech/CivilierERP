@@ -1,225 +1,130 @@
-// RN port of src/pages/maintenance/MaintenanceDashboard.tsx (web) — same
-// four stat cards (Confirmed Customers, Active Charge Heads, Bills Issued,
-// Total Billed) and the same Breakdown section (Bill Status donut, Billed
-// vs Unbilled Customers donut, 14-day billing trend line), pulling from the
-// exact same three endpoints. Charts are hand-drawn with react-native-svg
-// (see components/charts/*) since recharts has no RN equivalent. Stat
-// cards are laid out as explicit paired rows rather than a flex-wrap
-// cluster — the latter doesn't balance widths across wrap lines in RN and
-// produced uneven card sizes (same issue found and fixed on Electricity's
-// Reports tab).
-import { useMemo, useState } from "react";
+// Home: the day's work first. Approvals waiting for this person, then the CRM — the collection and what needs
+// attention (the CRM Dashboard's own parts, CrmDashboardScreen.tsx) — the lists they work most, unread notifications
+// and, for Maintenance staff, the Maintenance alerts. Each part shows only to staff with a right on it.
+import { useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { Users, Receipt, ListChecks, Wallet, TrendingUp, Inbox, ChevronRight, Briefcase } from "lucide-react-native";
-import { useHasCrm } from "@/screens/crm/CrmHubScreen";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { Bell, ChevronRight, Inbox, PhoneCall, ReceiptIndianRupee, Ticket, Wrench, ClipboardList, LayoutDashboard } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { fetchInbox } from "@/api/approvalInboxApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
+import { openTab } from "@/navigation/navigationRef";
 import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { formatINR } from "@/utils/formatCurrency";
-import { SectionLabel } from "@/components/home/SectionLabel";
-import { DonutChart } from "@/components/charts/DonutChart";
-import { TrendLineChart } from "@/components/charts/TrendLineChart";
-import { getMaintenanceDirectory } from "@/api/maintenanceApi";
-import { getActiveChargeHeads } from "@/api/chargeHeadApi";
-import { getMaintenanceBills } from "@/api/maintenanceBillApi";
+import { useMaintenanceAlerts } from "@/hooks/useMaintenanceAlerts";
+import { useCrmNotifications } from "@/screens/notifications/NotificationsScreen";
+import { AttentionList, MoneyFigures, useCrmDashboard } from "@/screens/crm/CrmDashboardScreen";
+import { useHasMaintenance } from "@/screens/dashboard/MaintenanceScreen";
+import { registerByKey } from "@/screens/crm/crmRegisters";
+import { LinkRow, Section } from "@/screens/crm/ui";
 
-const ACCENT = "#65a30d";
+const CRM = moduleAccents.crm;
 
-function StatCard({ label, value, icon: Icon, color }: {
-  label: string; value: string; icon: React.ComponentType<{ size?: number; color?: string }>; color: string;
+// The lists staff open most, straight from Home (each needs its page right, crmRegisters.ts).
+const SHORTCUTS: { register: string; icon: React.ComponentType<{ size?: number; color?: string }> }[] = [
+  { register: "welcome-calls", icon: PhoneCall },
+  { register: "demands", icon: ReceiptIndianRupee },
+  { register: "bookings", icon: ClipboardList },
+  { register: "service-tickets", icon: Ticket },
+];
+
+const greeting = () => {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+};
+
+function Card({ icon: Icon, tone, title, sub, onPress, strong }: {
+  icon: React.ComponentType<{ size?: number; color?: string }>; tone: string; title: string; sub: string; onPress: () => void; strong?: boolean;
 }) {
   return (
-    <View
-      style={{ flex: 1, backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: `${color}30`, padding: 14, overflow: "hidden" }}
-    >
-      <View style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 2.5, borderRadius: 2, backgroundColor: color }} />
-      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
-        <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.bold, color, opacity: 0.9, textTransform: "uppercase", letterSpacing: 1.2, flex: 1, marginRight: 6 }}>
-          {label}
-        </Text>
-        <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: `${color}20`, borderWidth: 1, borderColor: `${color}40`, alignItems: "center", justifyContent: "center" }}>
-          <Icon size={12} color={color} />
-        </View>
+    <Pressable onPress={onPress}
+      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, marginBottom: 12, borderRadius: 14,
+        backgroundColor: colors.card, borderWidth: 1, borderColor: strong ? tone : colors.border, opacity: pressed ? 0.8 : 1 })}>
+      <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: `${tone}1f`, alignItems: "center", justifyContent: "center" }}>
+        <Icon size={19} color={tone} />
       </View>
-      <Text style={{ fontSize: 20, fontFamily: fonts.heading.bold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{value}</Text>
-    </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 14, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{title}</Text>
+        <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 1 }}>{sub}</Text>
+      </View>
+      <ChevronRight size={18} color={colors.mutedForeground} />
+    </Pressable>
   );
 }
 
-function ChartCard({ title, icon: Icon, children }: {
-  title: string; icon: React.ComponentType<{ size?: number; color?: string }>; children: React.ReactNode;
-}) {
-  return (
-    <View style={{ borderRadius: 14, borderWidth: 1, borderColor: `${ACCENT}30`, backgroundColor: colors.card, marginBottom: 14, overflow: "hidden" }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: `${ACCENT}20` }}>
-        <View style={{ width: 20, height: 20, borderRadius: 6, backgroundColor: `${ACCENT}26`, alignItems: "center", justifyContent: "center" }}>
-          <Icon size={11} color={ACCENT} />
-        </View>
-        <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{title}</Text>
-      </View>
-      <View style={{ padding: 14 }}>{children}</View>
-    </View>
-  );
-}
-
-// The Maintenance pages (the web's MaintenanceSidebar.ts keys): the overview below is for staff with a right on any.
-const MAINTENANCE_PAGES = ["maintenance-directory", "maintenance-bills", "maintenance-security-attendance", "maintenance-electricity"];
-
-export default function DashboardScreen() {
-  const [refreshing, setRefreshing] = useState(false);
-  const { canAccessPage } = useAuth();
+export default function HomeScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const { currentUser, canAccessPage } = useAuth();
+  const [refreshing, setRefreshing] = useState(false);
   const canApprove = canAccessPage("approval-inbox");
-  const maintenance = MAINTENANCE_PAGES.some((p) => canAccessPage(p));
-  const hasCrm = useHasCrm();
+  const seesDashboard = canAccessPage("crm-dashboard");
+  const hasMaintenance = useHasMaintenance();
 
-  // Approvals waiting for this person — the inbox's own list (same query key, so the two stay in step); items they
-  // can only watch (another level's turn) don't count.
   const inboxQ = useQuery({ queryKey: ["approval-inbox"], queryFn: fetchInbox, enabled: canApprove, staleTime: 30_000 });
   const waiting = (inboxQ.data ?? []).filter((i) => i._canAct !== false).length;
-
-  const directoryQ = useQuery({ queryKey: ["maint-directory", ""], queryFn: () => getMaintenanceDirectory(""), staleTime: 60_000, enabled: maintenance });
-  const chargeHeadsQ = useQuery({ queryKey: ["charge-heads-active"], queryFn: getActiveChargeHeads, staleTime: 60_000, enabled: maintenance });
-  const billsQ = useQuery({ queryKey: ["maint-bills", {}], queryFn: () => getMaintenanceBills(), staleTime: 60_000, enabled: maintenance });
-
-  const directoryRows = directoryQ.data ?? [];
-  const chargeHeadRows = chargeHeadsQ.data ?? [];
-  const billRows = billsQ.data ?? [];
-  const activeBills = billRows.filter((b) => b.Status === "Active");
-  const cancelledBills = billRows.filter((b) => b.Status === "Cancelled");
-  const totalBilled = activeBills.reduce((s, b) => s + (Number(b.GrandTotal) || 0), 0);
-
-  const billedCustomerCount = new Set(activeBills.map((b) => b.BookingId)).size;
-  const unbilledCustomerCount = Math.max(0, directoryRows.length - billedCustomerCount);
-
-  const trendData = useMemo(() => {
-    const days: { date: string; amount: number }[] = [];
-    const byDate = new Map<string, number>();
-    activeBills.forEach((b) => {
-      if (!b.BillDate) return;
-      const key = b.BillDate.slice(0, 10);
-      byDate.set(key, (byDate.get(key) || 0) + (Number(b.GrandTotal) || 0));
-    });
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      days.push({ date: key, amount: byDate.get(key) || 0 });
-    }
-    return days;
-  }, [activeBills]);
-
-  const loading = maintenance && (directoryQ.isLoading || chargeHeadsQ.isLoading || billsQ.isLoading);
+  const dashQ = useCrmDashboard(null, seesDashboard);
+  const notesQ = useCrmNotifications();
+  const unread = (notesQ.data ?? []).filter((n) => !n.isRead).length;
+  const { alerts } = useMaintenanceAlerts();
+  const shortcuts = SHORTCUTS.map((s) => ({ ...s, reg: registerByKey(s.register)! })).filter((s) => s.reg.pages.some((p) => canAccessPage(p)));
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([canApprove ? inboxQ.refetch() : null, ...(maintenance ? [directoryQ.refetch(), chargeHeadsQ.refetch(), billsQ.refetch()] : [])]);
+    await Promise.all([canApprove && inboxQ.refetch(), seesDashboard && dashQ.refetch(), notesQ.refetch()]);
     setRefreshing(false);
   };
+
+  const firstName = (currentUser?.name || "").split(" ")[0];
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 96 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
+      contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={CRM} />}
     >
+      <Text style={{ fontSize: 20, fontFamily: fonts.heading.bold, color: colors.foreground }}>{greeting()}{firstName ? `, ${firstName}` : ""}</Text>
+      <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2, marginBottom: 16 }}>
+        {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+      </Text>
+
       {canApprove ? (
-        <Pressable onPress={() => nav.navigate("ApprovalInbox")}
-          style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, marginBottom: 18, borderRadius: 14,
-            backgroundColor: colors.card, borderWidth: 1, borderColor: waiting > 0 ? ACCENT : colors.border, opacity: pressed ? 0.8 : 1 })}>
-          <Inbox size={20} color={waiting > 0 ? ACCENT : colors.mutedForeground} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 14, fontFamily: fonts.heading.semibold, color: colors.foreground }}>
-              {inboxQ.isLoading ? "Checking approvals…" : waiting > 0 ? `${waiting} approval${waiting > 1 ? "s" : ""} waiting for you` : "No approvals waiting for you"}
-            </Text>
-            <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>Approval Inbox</Text>
-          </View>
-          <ChevronRight size={18} color={colors.mutedForeground} />
-        </Pressable>
+        <Card icon={Inbox} tone={waiting > 0 ? CRM : colors.mutedForeground} strong={waiting > 0}
+          title={inboxQ.isLoading ? "Checking approvals…" : waiting > 0 ? `${waiting} approval${waiting > 1 ? "s" : ""} waiting for you` : "No approvals waiting for you"}
+          sub="Approval Inbox" onPress={() => openTab("Approvals")} />
       ) : null}
 
-      {hasCrm ? (
-        <Pressable onPress={() => nav.navigate(canAccessPage("crm-dashboard") ? "CrmDashboard" : "Crm")}
-          style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, marginBottom: 18, borderRadius: 14,
-            backgroundColor: colors.card, borderWidth: 1, borderColor: `${moduleAccents.crm}55`, opacity: pressed ? 0.8 : 1 })}>
-          <Briefcase size={20} color={moduleAccents.crm} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 14, fontFamily: fonts.heading.semibold, color: colors.foreground }}>CRM</Text>
-            <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
-              {canAccessPage("crm-dashboard") ? "Collection, what needs attention, the week ahead" : "Bookings, payments and after-sales"}
-            </Text>
-          </View>
-          <ChevronRight size={18} color={colors.mutedForeground} />
-        </Pressable>
+      {unread > 0 ? (
+        <Card icon={Bell} tone="#f59e0b" title={`${unread} unread notification${unread > 1 ? "s" : ""}`} sub="Payments due, tickets, agreements and reminders"
+          onPress={() => nav.navigate("Notifications")} />
       ) : null}
 
-      {!maintenance ? null : <SectionLabel>Maintenance Overview</SectionLabel>}
+      {seesDashboard ? (
+        dashQ.isLoading ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 30 }} />
+          : dashQ.error ? <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular, marginBottom: 12 }}>{(dashQ.error as Error).message}</Text>
+          : (
+            <>
+              <MoneyFigures d={dashQ.data} />
+              <AttentionList d={dashQ.data} />
+            </>
+          )
+      ) : null}
 
-      {!maintenance ? null : loading ? (
-        <View style={{ paddingVertical: 60, alignItems: "center" }}>
-          <ActivityIndicator color={colors.mutedForeground} />
-        </View>
-      ) : (
-        <>
-          <View style={{ gap: 10, marginBottom: 20 }}>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <StatCard label="Confirmed Customers" value={String(directoryRows.length)} icon={Users} color={ACCENT} />
-              <StatCard label="Active Charge Heads" value={String(chargeHeadRows.length)} icon={ListChecks} color="#0ea5e9" />
-            </View>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <StatCard label="Bills Issued" value={String(activeBills.length)} icon={Receipt} color="#f59e0b" />
-              <StatCard label="Total Billed" value={formatINR(totalBilled)} icon={Wallet} color="#22c55e" />
-            </View>
-          </View>
+      {shortcuts.length || seesDashboard ? (
+        <Section title="Go to">
+          {seesDashboard ? <LinkRow title="CRM Dashboard" icon={LayoutDashboard} onPress={() => nav.navigate("CrmDashboard")} /> : null}
+          {shortcuts.map((s) => (
+            <LinkRow key={s.register} title={s.reg.label} icon={s.icon} onPress={() => nav.navigate("CrmRegister", { register: s.register })} />
+          ))}
+        </Section>
+      ) : null}
 
-          <SectionLabel>Breakdown</SectionLabel>
-
-          <ChartCard title="Bill Status" icon={Receipt}>
-            {billRows.length === 0 ? (
-              <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 24 }}>
-                No data yet
-              </Text>
-            ) : (
-              <DonutChart
-                data={[
-                  { name: "Active", value: activeBills.length, color: ACCENT },
-                  { name: "Cancelled", value: cancelledBills.length, color: "#ef4444" },
-                ]}
-              />
-            )}
-          </ChartCard>
-
-          <ChartCard title="Billed vs Unbilled Customers" icon={Users}>
-            {directoryRows.length === 0 && billedCustomerCount === 0 ? (
-              <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 24 }}>
-                No data yet
-              </Text>
-            ) : (
-              <DonutChart
-                data={[
-                  { name: "Billed", value: billedCustomerCount, color: ACCENT },
-                  { name: "Not Yet Billed", value: unbilledCustomerCount, color: "#94a3b8" },
-                ]}
-              />
-            )}
-          </ChartCard>
-
-          <ChartCard title="Billing Amount — Last 14 Days" icon={TrendingUp}>
-            <TrendLineChart data={trendData} color={ACCENT} />
-          </ChartCard>
-        </>
-      )}
-
-      {(directoryQ.error || chargeHeadsQ.error || billsQ.error) && (
-        <Text style={{ color: colors.destructive, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 4 }}>
-          {(directoryQ.error as Error)?.message || (chargeHeadsQ.error as Error)?.message || (billsQ.error as Error)?.message}
-        </Text>
-      )}
+      {hasMaintenance ? (
+        <Card icon={Wrench} tone="#65a30d" title="Maintenance"
+          sub={alerts.length ? `${alerts.length} alert${alerts.length > 1 ? "s" : ""} need attention` : "Directory, bills, attendance and electricity"}
+          onPress={() => openTab("Maintenance")} />
+      ) : null}
     </ScrollView>
   );
 }

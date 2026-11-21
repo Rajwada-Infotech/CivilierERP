@@ -30,37 +30,78 @@ const ATTENTION: { key: string; label: string; note: string; hot: boolean; regis
 
 const n0 = (v: unknown) => Number(v) || 0;
 
-export default function CrmDashboardScreen() {
-  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
-  const { canAccessPage } = useAuth();
-  const [projectId, setProjectId] = useState<number | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const q = useQuery({
+/** The CRM Dashboard's figures, for one project or all (crmDashboard.js GET /) — one query key, so Home and the
+ * dashboard share it. */
+export function useCrmDashboard(projectId: number | null = null, enabled = true) {
+  return useQuery({
     queryKey: ["crm-dashboard", projectId],
     queryFn: () => crmGet<any>(`/api/crm/dashboard${projectId ? `?projectId=${projectId}` : ""}`),
+    enabled,
   });
+}
 
-  const d = q.data ?? {};
-  const alerts = d.alerts ?? {};
-  const metrics = d.metrics ?? {};
-  const payments = d.payments ?? {};
+/** Open a CRM list when the person has a right on it; null when they don't (the row then shows without a link). */
+function useOpenRegister() {
+  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const { canAccessPage } = useAuth();
+  return (key?: string) => {
+    const reg = key ? registerByKey(key) : undefined;
+    return reg && reg.pages.some((p) => canAccessPage(p)) ? () => nav.navigate("CrmRegister", { register: reg.key }) : undefined;
+  };
+}
+
+/** Due, paid, with Finance, outstanding — the collection at a glance (the web's band). */
+export function MoneyFigures({ d }: { d: any }) {
+  const openRegister = useOpenRegister();
+  const payments = d?.payments ?? {};
   const due = n0(payments.TotalDue);
   const paid = n0(payments.TotalPaid);
   const withFinance = n0(payments.WithFinance);
   const outstanding = Math.max(0, due - paid - withFinance);
+  return (
+    <View style={{ gap: 10, marginBottom: 12 }}>
+      <View style={{ flexDirection: "row", gap: 10 }}>
+        <Figure label="Due" value={money(due)} tone="#3b82f6" />
+        <Figure label="Paid" value={money(paid)} tone="#10b981" sub={due ? `${Math.round((paid / due) * 100)}% of due` : undefined} />
+      </View>
+      <View style={{ flexDirection: "row", gap: 10 }}>
+        <Figure label="With Finance" value={money(withFinance)} tone="#8b5cf6" />
+        <Figure label="Outstanding" value={money(outstanding)} tone="#f59e0b" sub={n0(payments.OverdueCount) ? `${payments.OverdueCount} overdue` : undefined}
+          onPress={openRegister("demands")} />
+      </View>
+    </View>
+  );
+}
 
-  const openRegister = (key?: string) => {
-    const reg = key ? registerByKey(key) : undefined;
-    if (reg && reg.pages.some((p) => canAccessPage(p))) nav.navigate("CrmRegister", { register: reg.key });
-  };
-  const opens = (key?: string) => { const reg = key ? registerByKey(key) : undefined; return !!reg && reg.pages.some((p) => canAccessPage(p)); };
-
+/** What needs attention, with the list each one opens. */
+export function AttentionList({ d }: { d: any }) {
+  const openRegister = useOpenRegister();
+  const alerts = d?.alerts ?? {};
   const attention = ATTENTION.filter((a) => n0(alerts[a.key]) > 0);
+  return (
+    <Section title="Needs attention">
+      {attention.length === 0 ? (
+        <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, paddingVertical: 10 }}>Nothing needs attention.</Text>
+      ) : attention.map((a) => (
+        <LinkRow key={a.key} title={a.label} sub={a.note}
+          right={<Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: a.hot ? "#ef4444" : colors.foreground, fontVariant: ["tabular-nums"] }}>{n0(alerts[a.key])}</Text>}
+          onPress={openRegister(a.register)} />
+      ))}
+    </Section>
+  );
+}
+
+export default function CrmDashboardScreen() {
+  const [projectId, setProjectId] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const q = useCrmDashboard(projectId);
+  const d = q.data ?? {};
+  const metrics = d.metrics ?? {};
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 96 }}
+      contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await q.refetch(); setRefreshing(false); }} tintColor={CRM} />}
     >
       {(d.projects ?? []).length > 1 ? (
@@ -83,27 +124,8 @@ export default function CrmDashboardScreen() {
         <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular }}>{(q.error as Error).message}</Text>
       ) : (
         <>
-          <View style={{ gap: 10, marginBottom: 12 }}>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <Figure label="Due" value={money(due)} tone="#3b82f6" />
-              <Figure label="Paid" value={money(paid)} tone="#10b981" sub={due ? `${Math.round((paid / due) * 100)}% of due` : undefined} />
-            </View>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <Figure label="With Finance" value={money(withFinance)} tone="#8b5cf6" />
-              <Figure label="Outstanding" value={money(outstanding)} tone="#f59e0b" sub={n0(payments.OverdueCount) ? `${payments.OverdueCount} overdue` : undefined}
-                onPress={opens("demands") ? () => openRegister("demands") : undefined} />
-            </View>
-          </View>
-
-          <Section title="Needs attention">
-            {attention.length === 0 ? (
-              <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, paddingVertical: 10 }}>Nothing needs attention.</Text>
-            ) : attention.map((a) => (
-              <LinkRow key={a.key} title={a.label} sub={a.note}
-                right={<Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: a.hot ? "#ef4444" : colors.foreground, fontVariant: ["tabular-nums"] }}>{n0(alerts[a.key])}</Text>}
-                onPress={opens(a.register) ? () => openRegister(a.register) : undefined} />
-            ))}
-          </Section>
+          <MoneyFigures d={d} />
+          <AttentionList d={d} />
 
           <Section title="This month and next">
             <Kv label="Units sold this month" value={String(n0(metrics.unitsSoldThisMonth))} strong />

@@ -1,21 +1,18 @@
-// Shared stack header — mirrors mobile-supplier's TopHeader.tsx:
-// animated logo on the left (on a screen opened from another — a CRM list, a booking, a customer — a back arrow and
-// the screen's name instead), notification bell (badge =
-// useMaintenanceAlerts().alerts.length) and profile avatar on the right. No
-// hamburger/menu button — there's nothing behind it yet (see MainStack.tsx),
-// and Dashboard/Notifications/Profile are all reachable without one.
+// The app's header: the logo and "Civilier CRM" on a tab, or a back arrow and the screen's name on a screen opened
+// from another; on the right the bell (unread notifications + Maintenance alerts, NotificationsScreen useBellCount)
+// and the person's initials, which open the More tab.
 import { View, Text, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
 import { Bell, ChevronLeft } from "lucide-react-native";
-import { colors } from "@/theme/colors";
+import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
-import { useMaintenanceAlerts } from "@/hooks/useMaintenanceAlerts";
+import { useBellCount } from "@/screens/notifications/NotificationsScreen";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
-import { navigate } from "./navigationRef";
+import { navigate, openTab } from "./navigationRef";
 
-const ACCENT = "#65a30d";
+const ACCENT = moduleAccents.crm;
 
 function initialsOf(name?: string) {
   return (name ?? "?")
@@ -29,8 +26,7 @@ function initialsOf(name?: string) {
 
 export function TopHeader({ back, navigation, options }: NativeStackHeaderProps) {
   const { currentUser } = useAuth();
-  const { alerts } = useMaintenanceAlerts();
-  const alertCount = alerts.length;
+  const alertCount = useBellCount();
 
   return (
     <SafeAreaView
@@ -80,9 +76,9 @@ export function TopHeader({ back, navigation, options }: NativeStackHeaderProps)
             </View>
           </Pressable>
 
-          <Pressable onPress={() => navigate("Profile")}>
+          <Pressable onPress={() => openTab("More")}>
             <View className="w-8 h-8 rounded-full items-center justify-center" style={{ backgroundColor: ACCENT }}>
-              <Text style={{ color: "#1a1a1a", fontSize: 11, fontFamily: fonts.heading.bold }}>
+              <Text style={{ color: "#fff", fontSize: 11, fontFamily: fonts.heading.bold }}>
                 {initialsOf(currentUser?.name)}
               </Text>
             </View>

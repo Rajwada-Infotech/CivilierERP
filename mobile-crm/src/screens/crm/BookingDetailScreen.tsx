@@ -1,19 +1,29 @@
-// One booking on the phone: the money first (price, paid, balance, overdue, on account), then the journey from booking
-// to mutation, the payment milestones, the buyer and the agreement. Each part comes from the route the web page uses
-// and shows only to staff with that page's right: Bookings (crm-bookings) or Payment Milestones (crm-payments).
+// One booking on the phone: the buyer (Call / WhatsApp), the money first (price, paid, balance, overdue, on account),
+// what can be done here (log a welcome call, take a payment, raise a ticket), the journey from booking to mutation,
+// the payment milestones (Pay on the open ones), the booking's papers (money receipts, invoices, documents), its
+// service tickets, the buyer and the agreement. Each part comes from the route the web page uses and shows only to
+// staff with that page's right.
 import { useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useRoute, type RouteProp } from "@react-navigation/native";
-import { CheckCircle2, Circle, Lock } from "lucide-react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { CheckCircle2, Circle, FileText, Lock, PhoneCall, Ticket, Wallet } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import { getBooking, getBookingLifecycle, getBookingPayments } from "@/api/crmApi";
+import { crmGet, getBooking, getBookingLifecycle, getBookingPayments, type Row } from "@/api/crmApi";
+import { getTicketsForBooking } from "@/api/serviceTicketApi";
 import { Pill } from "@/components/list/DataList";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { CRM, Empty, Figure, Kv, LinkRow, Section, fmtDate, joinDot, money } from "./ui";
+import { ActionKey, CRM, ContactKeys, Empty, Figure, Kv, LinkRow, Section, fmtDate, joinDot, money } from "./ui";
 import { useCrmOpen } from "./CrmRegisterScreen";
+import { milestoneMissing, nextOpenMilestone } from "./CrmForms";
+
+// A booking that no longer takes money here (the web's "closed" plan).
+const CLOSED = ["Cancelled", "UnitChanged", "Rejected"];
+const kb = (n: unknown) => { const b = Number(n) || 0; return b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b ? `${Math.max(1, Math.round(b / 1024))} KB` : ""; };
 
 const STEP_ICON = { done: CheckCircle2, active: Circle, locked: Lock } as const;
 const STEP_TONE: Record<string, string> = { done: "#10b981", active: CRM, locked: colors.mutedForeground };
@@ -21,7 +31,8 @@ const STEP_TONE: Record<string, string> = { done: "#10b981", active: CRM, locked
 export default function BookingDetailScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, "CrmBooking">>();
   const id = params.bookingId;
-  const { canAccessPage } = useAuth();
+  const { canAccessPage, canDoAction } = useAuth();
+  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const open = useCrmOpen();
   const seesBooking = canAccessPage("crm-bookings");
   const seesMoney = canAccessPage("crm-payments");
@@ -30,10 +41,19 @@ export default function BookingDetailScreen() {
   const bookingQ = useQuery({ queryKey: ["crm-booking", id], queryFn: () => getBooking(id), enabled: seesBooking });
   const lifeQ = useQuery({ queryKey: ["crm-booking-life", id], queryFn: () => getBookingLifecycle(id), enabled: seesBooking });
   const payQ = useQuery({ queryKey: ["crm-booking-pay", id], queryFn: () => getBookingPayments(id), enabled: seesMoney });
+  // The booking's papers and tickets, each behind the right its route checks.
+  const seesReceipts = canAccessPage("crm-money-receipts") || seesMoney;
+  const seesInvoices = seesBooking || canAccessPage("crm-invoices");
+  const seesTickets = canAccessPage("crm-service-tickets");
+  const receiptsQ = useQuery({ queryKey: ["crm-booking-receipts", id], queryFn: () => crmGet<Row[]>(`/api/crm/money-receipts?bookingId=${id}`), enabled: seesReceipts });
+  const invoicesQ = useQuery({ queryKey: ["crm-booking-invoices", id], queryFn: () => crmGet<Row[]>(`/api/crm/bookings/${id}/invoices`), enabled: seesInvoices });
+  const docsQ = useQuery({ queryKey: ["crm-booking-docs", id], queryFn: () => crmGet<Row[]>(`/api/crm/bookings/${id}/attachments`), enabled: seesBooking });
+  const ticketsQ = useQuery({ queryKey: ["crm-booking-tickets", id], queryFn: () => getTicketsForBooking(id), enabled: seesTickets });
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([seesBooking && bookingQ.refetch(), seesBooking && lifeQ.refetch(), seesMoney && payQ.refetch()]);
+    await Promise.all([seesBooking && bookingQ.refetch(), seesBooking && lifeQ.refetch(), seesMoney && payQ.refetch(),
+      seesReceipts && receiptsQ.refetch(), seesInvoices && invoicesQ.refetch(), seesBooking && docsQ.refetch(), seesTickets && ticketsQ.refetch()]);
     setRefreshing(false);
   };
 
@@ -47,6 +67,18 @@ export default function BookingDetailScreen() {
   const overdue = Number(payQ.data?.summary?.overdue) || 0;
   const loading = (seesBooking && bookingQ.isLoading) || (seesMoney && payQ.isLoading);
   const error = (bookingQ.error || payQ.error) as Error | null;
+  const status = head.Status || head.BookingStatus;
+  const live = !CLOSED.includes(status);
+  const title = head.BookingNo || params.title || "Booking";
+  const canPay = live && canDoAction("crm-payments", "edit");
+  const canDeposit = live && canDoAction("crm-payments", "create");
+  const canCall = live && canDoAction("crm-welcome-calls", "create");
+  const canTicket = live && canDoAction("crm-service-tickets", "create");
+  const nextOpenId = nextOpenMilestone(milestones)?.Id;
+  const receipts = receiptsQ.data ?? [];
+  const invoices = invoicesQ.data ?? [];
+  const docs = docsQ.data ?? [];
+  const tickets = ticketsQ.data ?? [];
 
   if (!seesBooking && !seesMoney) {
     return <View style={{ flex: 1, backgroundColor: colors.background, padding: 16 }}><Empty text="You don't have a right on Bookings or Payment Milestones." /></View>;
@@ -80,6 +112,7 @@ export default function BookingDetailScreen() {
             {head.BookingDate ? (
               <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>Booked {fmtDate(head.BookingDate)}</Text>
             ) : null}
+            <View style={{ marginTop: 12 }}><ContactKeys mobile={customer?.Mobile || head.Mobile} /></View>
           </View>
 
           {/* Money first */}
@@ -93,6 +126,18 @@ export default function BookingDetailScreen() {
                 <Figure label="Balance" value={money(sum.balance)} tone="#f59e0b" />
                 <Figure label="Overdue" value={String(overdue)} sub={`milestone${overdue === 1 ? "" : "s"}`} tone={overdue > 0 ? "#ef4444" : colors.mutedForeground} />
               </View>
+            </View>
+          ) : null}
+
+          {canCall || canDeposit || canTicket ? (
+            <View style={{ gap: 8, marginBottom: 12 }}>
+              {canCall ? <View style={{ flexDirection: "row" }}><ActionKey label="Log welcome call" icon={PhoneCall} outline onPress={() => nav.navigate("CrmWelcomeCall", { bookingId: id, title })} /></View> : null}
+              {canDeposit || canTicket ? (
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {canDeposit ? <ActionKey label="Deposit on account" icon={Wallet} outline onPress={() => nav.navigate("CrmPayment", { bookingId: id, title })} /> : null}
+                  {canTicket ? <ActionKey label="Raise ticket" icon={Ticket} outline onPress={() => nav.navigate("CrmTicketNew", { bookingId: id, title })} /> : null}
+                </View>
+              ) : null}
             </View>
           ) : null}
 
@@ -147,10 +192,51 @@ export default function BookingDetailScreen() {
                   {Number(m.PendingVerificationAmount) > 0 ? (
                     <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: "#f59e0b", marginTop: 2 }}>{money(m.PendingVerificationAmount)} with Finance for approval</Text>
                   ) : null}
+                  {canPay && payQ.data && m.Status !== "Waived" && m.Status !== "Paid" && milestoneMissing(m) > 0 ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 8 }}>
+                      <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>Balance {money(milestoneMissing(m))}</Text>
+                      <View style={{ width: 96, flexDirection: "row" }}>
+                        <ActionKey label="Pay" outline={m.Id !== nextOpenId} onPress={() => nav.navigate("CrmPayment", { bookingId: id, milestoneId: m.Id, title })} />
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
               );
             })}
           </Section>
+
+          {/* Papers */}
+          {seesReceipts || seesInvoices || seesBooking ? (
+            <Section title="Papers">
+              {seesReceipts ? receipts.map((r) => (
+                <LinkRow key={`r${r.Id}`} icon={FileText} title={`Money receipt ${r.ReceiptNo}`} sub={joinDot(money(r.Amount), fmtDate(r.ReceivedDate), r.PaymentMode, r.Status)}
+                  onPress={() => open({ to: "document", path: `/api/crm/money-receipts/${r.Id}/pdf`, name: r.ReceiptNo || "Money Receipt" })} />
+              )) : null}
+              {seesInvoices ? invoices.map((v) => (
+                <LinkRow key={`i${v.Id}`} icon={FileText} tone="#3b82f6" title={`Invoice ${v.InvoiceNo ?? v.Id}`}
+                  sub={joinDot(v.InvoiceType, money(v.TotalAmount ?? v.GrandTotal ?? v.Amount), fmtDate(v.InvoiceDate ?? v.CreatedAt), v.Status)}
+                  onPress={() => open({ to: "document", path: `/api/crm/bookings/${id}/invoices/${v.Id}/pdf`, name: v.InvoiceNo || "Invoice" })} />
+              )) : null}
+              {seesBooking ? docs.map((d) => (
+                <LinkRow key={`${d.Source}${d.Id}`} icon={FileText} tone="#8b5cf6" title={d.Label || d.FileName}
+                  sub={joinDot(d.FileName !== d.Label && d.FileName, kb(d.FileSize), fmtDate(d.CreatedAt), d.UploaderName)}
+                  onPress={() => open({ to: "document", name: d.FileName || "Document",
+                    path: d.Source === "booking" ? `/api/crm/bookings/${id}/attachments/file/${d.Id}` : `/api/crm/booking-documents/file/${d.Id}` })} />
+              )) : null}
+              {receiptsQ.isLoading || invoicesQ.isLoading || docsQ.isLoading ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 10 }} />
+                : !receipts.length && !invoices.length && !docs.length ? <Empty text="No receipts, invoices or documents yet." /> : null}
+            </Section>
+          ) : null}
+
+          {/* Service tickets */}
+          {seesTickets && (tickets.length || canTicket) ? (
+            <Section title={`Service Tickets (${tickets.length})`}>
+              {tickets.length === 0 ? <Empty text="No service tickets." /> : tickets.map((t) => (
+                <LinkRow key={t.Id} title={t.Subject || t.TicketNo} sub={joinDot(t.TicketNo, t.Category, fmtDate(t.CreatedAt), t.AssigneeName)}
+                  right={<Pill label={t.Status} />} onPress={() => open({ to: "ticket", ticketId: t.Id })} />
+              ))}
+            </Section>
+          ) : null}
 
           {/* Buyer */}
           {customer ? (

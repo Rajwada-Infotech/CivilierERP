@@ -68,8 +68,10 @@ export async function fetchWithAuth(
 
   // A login call's own 401 (staff or customer) ("Invalid credentials") / 403 ("User inactive") are
   // answers, not an expired session -- hand them back so AuthContext.login()
-  // can surface the server's real message.
+  // can surface the server's real message. Changing one's password is the same: its 401 means "Current password is
+  // incorrect" (backend/routes/userProfile.js), 403 "managed by HR".
   if (/^\/?api\/(users|crm-portal)\/login(\?|$)/.test(url)) return response;
+  if (/^\/?api\/user-profile\/\d+\/change-password$/.test(url)) return response;
 
   if (response.status === 401) {
     if (!sessionExpiredFlow) {

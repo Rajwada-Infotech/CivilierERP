@@ -1,13 +1,12 @@
 // Direct port of mobile-supplier's AnimatedLogo.tsx — same three
 // animations: the icon spring-entrances in on mount (rotate -180°→0°,
-// scale 0→1, opacity 0→1), the wordmark is a purple→blue gradient, and the
+// scale 0→1, opacity 0→1), the wordmark "Civilier CRM" in the foreground colour (readable on the dark header), and the
 // version line "matrix-scrambles" between "app. vX" and "db. vX" every 5s.
 // Shared brand asset — not module-tinted, same as on mobile-supplier.
 import { useEffect, useRef, useState } from "react";
 import { Animated, Text, View } from "react-native";
-import { MaskedView } from "./GradientText";
-import { LinearGradient } from "expo-linear-gradient";
 import { fonts } from "@/theme/fonts";
+import { colors } from "@/theme/colors";
 import { useAppVersion } from "@/hooks/useAppVersion";
 
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&";
@@ -98,12 +97,8 @@ export function AnimatedLogo({ iconSize = 32 }: { iconSize?: number }) {
     <View className="flex-row items-center gap-2">
       <AnimatedLogoIcon size={iconSize} />
       <View>
-        <MaskedView maskElement={<Text style={{ fontSize: 15, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}>CivilierERP</Text>}>
-          <LinearGradient colors={["#8b5cf6", "#3b82f6"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-            <Text style={{ fontSize: 15, fontFamily: fonts.heading.bold, letterSpacing: -0.3, opacity: 0 }}>CivilierERP</Text>
-          </LinearGradient>
-        </MaskedView>
-        <Text style={{ color: "rgba(101,163,13,0.85)", fontSize: 10, fontFamily: fonts.body.medium, letterSpacing: 0.4 }}>
+        <Text style={{ color: colors.foreground, fontSize: 15, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}>Civilier CRM</Text>
+        <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, letterSpacing: 0.4 }}>
           {isLoading ? "…" : display}
         </Text>
       </View>

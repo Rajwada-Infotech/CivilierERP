@@ -9,21 +9,18 @@ import { ToastProvider } from "@/components/Toast";
 import RootNavigator from "@/navigation/RootNavigator";
 import { UpdateGate } from "@/updater/UpdateGate";
 import { PushNotificationsGate } from "@/notifications/PushNotificationsGate";
-import { navigationRef } from "@/navigation/navigationRef";
+import { openNotification } from "@/navigation/navigationRef";
+import { APP_KEY } from "@/services/appSession";
 import { useAppFonts } from "@/theme/fonts";
 import { colors } from "@/theme/colors";
 
-// A tapped notification opens the app's Notifications screen (the app may have been
-// closed, so wait briefly for the navigator to mount).
+// A tapped notification opens what it is about — an approval opens the Approval Inbox, a booking or ticket its own
+// screen, anything else the Notifications screen (navigationRef.ts openNotification). The app may have been closed,
+// so it waits briefly for the navigator to mount.
 function openFromNotification(data?: Record<string, unknown>) {
   // "Update available": opening the app is enough — UpdateGate checks for the new build as the app comes forward.
   if (data?.type === "app-update") return;
-  let tries = 0;
-  const go = () => {
-    if (navigationRef.isReady()) navigationRef.navigate("Notifications" as never);
-    else if (tries++ < 20) setTimeout(go, 250);
-  };
-  go();
+  openNotification(data);
 }
 
 export default function App() {
@@ -43,11 +40,11 @@ export default function App() {
         <AuthProvider>
           <ToastProvider>
             <RootNavigator />
-            <PushNotificationsGate appKey="maintenance" onOpen={openFromNotification} />
+            <PushNotificationsGate appKey={APP_KEY} onOpen={openFromNotification} />
           </ToastProvider>
         </AuthProvider>
       </QueryClientProvider>
-      <UpdateGate appKey="maintenance" />
+      <UpdateGate appKey={APP_KEY} />
       <StatusBar style="light" />
     </SafeAreaProvider>
   );

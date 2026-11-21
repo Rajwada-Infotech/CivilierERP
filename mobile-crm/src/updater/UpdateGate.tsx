@@ -38,6 +38,12 @@ type Latest = {
 };
 
 const CHECK_TIMEOUT_MS = 10_000;
+
+/** What a check found: a newer build (the update prompt opens), this is the newest, or the server couldn't be asked. */
+export type UpdateCheck = "update" | "latest" | "unavailable";
+let checkNow: (() => Promise<UpdateCheck>) | null = null;
+/** "Check for update" (Profile): asks right away, even after "Later". */
+export const checkForUpdateNow = (): Promise<UpdateCheck> => (checkNow ? checkNow() : Promise.resolve("unavailable"));
 const mb = (b?: number) => (b ? `${(b / (1024 * 1024)).toFixed(1)} MB` : "");
 
 export function UpdateGate({ appKey }: { appKey: string }) {
@@ -50,8 +56,8 @@ export function UpdateGate({ appKey }: { appKey: string }) {
   const dismissedFor = useRef<number | null>(null);
   const checking = useRef(false);
 
-  const check = useCallback(async () => {
-    if (Platform.OS !== "android" || checking.current) return;
+  const check = useCallback(async (manual = false): Promise<UpdateCheck> => {
+    if (Platform.OS !== "android" || checking.current) return "unavailable";
     checking.current = true;
     try {
       const installed = parseInt(Application.nativeBuildVersion ?? "0", 10) || 0;
@@ -59,18 +65,25 @@ export function UpdateGate({ appKey }: { appKey: string }) {
       const timer = setTimeout(() => ctrl.abort(), CHECK_TIMEOUT_MS);
       const res = await fetch(apiUrl(`/api/app-releases/latest?app=${encodeURIComponent(appKey)}`), { signal: ctrl.signal });
       clearTimeout(timer);
-      if (!res.ok) return;
+      if (!res.ok) return "unavailable";
       const data: Latest = await res.json();
-      if (!data.available || !data.versionCode || data.versionCode <= installed) return;
-      if (!data.mandatory && dismissedFor.current === data.versionCode) return;
+      if (!data.available || !data.versionCode || data.versionCode <= installed) return "latest";
+      if (!manual && !data.mandatory && dismissedFor.current === data.versionCode) return "update";
       setLatest(data);
       setVisible(true);
+      return "update";
     } catch {
       // Offline or server unreachable: never block the app over an update check.
+      return "unavailable";
     } finally {
       checking.current = false;
     }
   }, [appKey]);
+
+  useEffect(() => {
+    checkNow = () => check(true);
+    return () => { checkNow = null; };
+  }, [check]);
 
   useEffect(() => {
     check();

@@ -1,7 +1,7 @@
 // The small kit every CRM screen shares: dates and money as the web CRM prints them, a section card, label / value
 // rows and a figure tile. One place, so the screens look and read alike.
-import { View, Text, Pressable } from "react-native";
-import { ChevronRight } from "lucide-react-native";
+import { Alert, Linking, View, Text, Pressable } from "react-native";
+import { ChevronRight, MessageCircle, Phone } from "lucide-react-native";
 import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
@@ -57,9 +57,17 @@ export function Figure({ label, value, tone, sub, onPress }: { label: string; va
   );
 }
 
-export function LinkRow({ title, sub, right, onPress }: { title: string; sub?: string; right?: React.ReactNode; onPress?: () => void }) {
+export function LinkRow({ title, sub, right, onPress, icon: Icon, tone = CRM }: {
+  title: string; sub?: string; right?: React.ReactNode; onPress?: () => void;
+  icon?: React.ComponentType<{ size?: number; color?: string }>; tone?: string;
+}) {
   return (
     <Pressable disabled={!onPress} onPress={onPress} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, opacity: pressed ? 0.7 : 1 })}>
+      {Icon ? (
+        <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: `${tone}1f`, alignItems: "center", justifyContent: "center" }}>
+          <Icon size={15} color={tone} />
+        </View>
+      ) : null}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{title}</Text>
         {sub ? <Text numberOfLines={2} style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>{sub}</Text> : null}
@@ -73,3 +81,44 @@ export function LinkRow({ title, sub, right, onPress }: { title: string; sub?: s
 export const Empty = ({ text }: { text: string }) => (
   <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, paddingVertical: 10 }}>{text}</Text>
 );
+
+/** The digits to dial: an Indian 10-digit number gets +91; a number already carrying its country code is kept. */
+const dialDigits = (mobile: string) => {
+  const d = String(mobile).replace(/\D/g, "");
+  return d.length === 10 ? `91${d}` : d.replace(/^0+/, "");
+};
+const openLink = (url: string) => Linking.openURL(url).catch(() => Alert.alert("Can't open", "This phone has no app for that."));
+
+/** Call and WhatsApp keys for a buyer's mobile number — on cards, bookings, customers and tickets. */
+export function ContactKeys({ mobile, compact }: { mobile?: string | null; compact?: boolean }) {
+  if (!mobile || String(mobile).replace(/\D/g, "").length < 10) return null;
+  const size = compact ? 30 : 38;
+  const key = (Icon: typeof Phone, tone: string, label: string, onPress: () => void) => (
+    <Pressable onPress={onPress} accessibilityLabel={label} hitSlop={6}
+      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 6, height: size, paddingHorizontal: compact ? 0 : 14, width: compact ? size : undefined,
+        justifyContent: "center", borderRadius: size / 2, backgroundColor: `${tone}1f`, borderWidth: 1, borderColor: `${tone}55`, opacity: pressed ? 0.7 : 1 })}>
+      <Icon size={compact ? 14 : 16} color={tone} />
+      {compact ? null : <Text style={{ fontSize: 12.5, fontFamily: fonts.heading.semibold, color: tone }}>{label}</Text>}
+    </Pressable>
+  );
+  return (
+    <View style={{ flexDirection: "row", gap: 8 }}>
+      {key(Phone, "#3b82f6", "Call", () => openLink(`tel:+${dialDigits(mobile)}`))}
+      {key(MessageCircle, "#22c55e", "WhatsApp", () => openLink(`https://wa.me/${dialDigits(mobile)}`))}
+    </View>
+  );
+}
+
+/** A full-width action key (Log welcome call, Submit payment…). */
+export function ActionKey({ label, icon: Icon, onPress, tone = CRM, outline }: {
+  label: string; icon?: React.ComponentType<{ size?: number; color?: string }>; onPress: () => void; tone?: string; outline?: boolean;
+}) {
+  return (
+    <Pressable onPress={onPress}
+      style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, paddingHorizontal: 10, borderRadius: 12,
+        backgroundColor: outline ? "transparent" : tone, borderWidth: 1, borderColor: outline ? `${tone}66` : tone, opacity: pressed ? 0.75 : 1 })}>
+      {Icon ? <Icon size={15} color={outline ? tone : "#fff"} /> : null}
+      <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: outline ? tone : "#fff" }}>{label}</Text>
+    </Pressable>
+  );
+}
