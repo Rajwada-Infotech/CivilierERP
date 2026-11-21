@@ -250,6 +250,8 @@ const MASTERS = {
       { name: "EnquiryBy", label: "Entry by", sql: "(SELECT u.name FROM dbo.LegalLandEnquiry e JOIN dbo.users u ON u.id = e.CreatedBy WHERE e.EnquiryId = t.EnquiryId)",
         whatsapp: "(SELECT u.WhatsAppNo FROM dbo.LegalLandEnquiry e JOIN dbo.users u ON u.id = e.CreatedBy WHERE e.EnquiryId = t.EnquiryId)",
         userId: "(SELECT e.CreatedBy FROM dbo.LegalLandEnquiry e WHERE e.EnquiryId = t.EnquiryId)" },
+      // A registered land opens for editing while an approved amendment is open (migration 702).
+      { name: "AmendmentOpen", label: "Amendment open", sql: "(SELECT COUNT(*) FROM dbo.LegalLandAmendment a WHERE a.LandId = t.LandId AND a.Status = N'Open')" },
     ],
     // The same Mouza and Dag number twice is almost always the same land entered twice.
     check: async (pool, values, id) => {

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { getDeedProcessLands, updateDeedProcess, approveDeedProcess, type DeedProcessLand } from "@/api/legalLandApi";
+import { getDeedProcessLands, updateDeedProcess, approveDeedProcess, requestDeedApproval, type DeedProcessLand } from "@/api/legalLandApi";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { uploadLegalFile, openLegalFile } from "@/api/legalMastersApi";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
@@ -50,6 +50,14 @@ export default function LandDeedProcessPage() {
       qc.invalidateQueries({ queryKey: ["legal-deed-process"] });
       qc.invalidateQueries({ queryKey: ["legal-deed-registration"] });
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
+  };
+  const askFinal = async (l: DeedProcessLand) => {
+    const ok = await askLegal({ title: `Send ${l.LandCode} for final approval?`, message: "All deed details are complete. It goes to Approvals → Deed approval.", confirmText: "Send" });
+    if (ok == null) return;
+    try {
+      toast.success((await requestDeedApproval(l.LandId)).message);
+      qc.invalidateQueries({ queryKey: ["legal-deed-process"] });
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not send"); }
   };
   const [uploading, setUploading] = useState<number | null>(null);
   const upload = (l: DeedProcessLand) => {
@@ -124,23 +132,29 @@ export default function LandDeedProcessPage() {
                         ) : "—"}
                       </td>
                       <td className="px-3 py-2 text-xs">
-                        {l.DeedChangedAt ? <b className="block text-amber-600">Re-verification Required{l.DeedChangedByName ? ` (changed by ${l.DeedChangedByName})` : ""}</b> : null}
+                        {l.DeedChangedAt ? <b className="block text-amber-600">Changed — new version needed{l.DeedChangedByName ? ` (changed by ${l.DeedChangedByName})` : ""}</b> : null}
+                        {l.DeedApprovalRequestedAt && l.L2Status !== "Approved" && <span className="block text-sky-700 dark:text-sky-400">Sent for final approval{l.DeedApprovalRequestedByName ? ` by ${l.DeedApprovalRequestedByName}` : ""}</span>}
                         <span className="block">Approval: <b className={l.L2Status === "Approved" ? "text-emerald-600" : l.L1Status === "Rejected" ? "text-destructive" : l.L1Status === "On Hold" ? "text-amber-600" : ""}>{l.L2Status === "Approved" ? "Approved" : l.L1Status ?? "Pending"}</b>{l.L1By && l.L1Status !== "Pending" ? ` · ${l.L1By}` : ""}</span>
                         {(l.L1Status === "Rejected" || l.L1Status === "On Hold" || l.L2Status === "Rejected" || l.L2Status === "On Hold") && l.DeedApprovalNote && <span className="block text-muted-foreground">“{l.DeedApprovalNote}”</span>}
                       </td>
                       <td className="px-3 py-2 text-right">
                         <span className="inline-flex flex-wrap justify-end gap-1.5">
-                          {data?.canApprove && l.L2Status !== "Approved" && l.WorkflowStatus === "Deed Process" && <>
-                            <button className={`${small} bg-foreground text-card disabled:cursor-not-allowed disabled:opacity-40`} disabled={!l.DeedFileId || !!l.DeedChangedAt}
-                              title={!l.DeedFileId ? "Upload the deed copy first" : l.DeedChangedAt ? "Changed after verification — re-verify first" : undefined} onClick={() => act(l, "Approve")}>Approve</button>
-                            {l.L1Status !== "On Hold" && <button className={small} onClick={() => act(l, "Hold")}>Hold</button>}
-                            <button className={`${small} text-destructive`} onClick={() => act(l, "Reject")}>Reject</button>
+                          {/* Deed team: finish the deed details, then send for final approval (→ Approvals → Deed approval). */}
+                          {l.WorkflowStatus === "Deed Process" && l.L2Status !== "Approved" && !l.DeedApprovalRequestedAt && (data?.canRequest
+                            ? <button className={`${small} bg-foreground text-card disabled:cursor-not-allowed disabled:opacity-40`} disabled={!l.DeedFileId || !!l.DeedChangedAt}
+                                title={!l.DeedFileId ? "Upload the deed copy first" : l.DeedChangedAt ? "Changed — get the new version verified and approved first" : undefined} onClick={() => askFinal(l)}>Submit for final approval</button>
+                            : <span className="text-xs text-muted-foreground">Deed work in progress</span>)}
+                          {l.WorkflowStatus === "Deed Process" && l.L2Status !== "Approved" && l.DeedApprovalRequestedAt && <>
+                            {data?.canApprove ? <>
+                              <button className={`${small} bg-foreground text-card disabled:cursor-not-allowed disabled:opacity-40`} disabled={!!l.DeedChangedAt} onClick={() => act(l, "Approve")}>Approve</button>
+                              {l.L1Status !== "On Hold" && <button className={small} onClick={() => act(l, "Hold")}>Hold</button>}
+                              <button className={`${small} text-destructive`} onClick={() => act(l, "Reject")}>Reject</button>
+                            </> : <span className="text-xs text-muted-foreground">Waiting for final approval</span>}
                           </>}
-                          {!data?.canApprove && l.L2Status !== "Approved" && <span className="text-xs text-muted-foreground">Waiting for approval</span>}
                         </span>
                         {/* Why approval is not open yet (shown, not only on hover). */}
-                        {data?.canApprove && l.L2Status !== "Approved" && !l.DeedFileId && <span className="mt-1 block text-[0.6875rem] text-amber-600">Upload the deed copy to approve</span>}
-                        {data?.canApprove && l.DeedChangedAt && <span className="mt-1 block text-[0.6875rem] text-amber-600">Re-verify the changes to approve</span>}
+                        {data?.canRequest && !l.DeedApprovalRequestedAt && l.L2Status !== "Approved" && !l.DeedFileId && <span className="mt-1 block text-[0.6875rem] text-amber-600">Upload the deed copy to approve</span>}
+                        {l.DeedChangedAt && <span className="mt-1 block text-[0.6875rem] text-amber-600">Changed — submit the changes for verification; the new version must be approved first</span>}
                       </td>
                     </tr>
                   );

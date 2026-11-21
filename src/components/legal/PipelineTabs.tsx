@@ -9,7 +9,7 @@ export type PipelineStage = "enquiry" | "search" | "verify" | "deed" | "clearanc
 export const PIPELINE: { key: PipelineStage; label: string; path: string; hint: string }[] = [
   { key: "enquiry", label: "Enquiries", path: "/legal/land/enquiries", hint: "Land offered or found — record it under a project" },
   { key: "search", label: "Deed search", path: "/legal/land/deed-search", hint: "Search the registry offices year by year" },
-  { key: "verify", label: "Verification", path: "/legal/approvals?tab=verify", hint: "Final check of every detail and document" },
+  { key: "verify", label: "Land verification", path: "/legal/approvals?tab=landverify", hint: "Verifier ticks every section; the Approver approves it as a version" },
   { key: "deed", label: "Deed Process", path: "/legal/land/deed-process", hint: "Deed drafted, approved at L1 and L2" },
   { key: "clearance", label: "LA & ULC", path: "/legal/land/la-ulc", hint: "Apply for and obtain the clearances" },
   { key: "registration", label: "Deed Registration", path: "/legal/deed-registration", hint: "Consideration, stamp duty, registration" },

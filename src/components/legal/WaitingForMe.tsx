@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { usePaged } from "@/components/legal/usePaged";
 import { getDeedProcessLands, getLandPendingPage } from "@/api/legalLandApi";
 import { getPendingAmendments } from "@/api/legalAmendmentApi";
+import { getReviewQueue } from "@/api/legalFlowApi";
 
 /**
  * Dashboard → "Waiting for me": what needs a decision now (the Approvals inbox, by kind) and what is running late
@@ -13,12 +14,14 @@ export function WaitingForMe() {
   const cVerify = usePaged(["legal-land-pending-queue", "count"], (qs) => getLandPendingPage(qs), { kind: "verify", pageSize: 1 });
   const cRe = usePaged(["legal-deed-process", "count", "reverify"], (qs) => getDeedProcessLands(qs), { kind: "reverify", pageSize: 1 });
   const cAp = usePaged(["legal-deed-process", "count", "approve"], (qs) => getDeedProcessLands(qs), { kind: "approve", pageSize: 1 });
+  const cV1 = usePaged(["legal-review-queue", "count", "verify"], (qs) => getReviewQueue(qs), { kind: "verify", pageSize: 1 });
+  const cV2 = usePaged(["legal-review-queue", "count", "approve"], (qs) => getReviewQueue(qs), { kind: "approve", pageSize: 1 });
   const cAm = usePaged(["legal-amend", "pending", "count"], (qs) => getPendingAmendments(qs), { pageSize: 1 });
   const cLate = usePaged(["legal-deed-process", "count", "overdue"], (qs) => getDeedProcessLands(qs), { kind: "overdue", pageSize: 1 });
   const can = (b?: boolean) => b !== false;
   const tiles: { label: string; n: number; to: string; mine: boolean; tone?: string }[] = [
-    { label: "Final verification", n: cVerify.total, to: "/legal/approvals?tab=verify", mine: true },
-    { label: "Re-verification", n: cRe.total, to: "/legal/approvals?tab=reverify", mine: true },
+    { label: "Land verification", n: cV1.total, to: "/legal/approvals?tab=landverify", mine: cV1.data?.canVerify !== false },
+    { label: "Versions · approve", n: cV2.total, to: "/legal/approvals?tab=versions", mine: cV2.data?.canApprove !== false },
     { label: "Deed approval", n: cAp.total, to: "/legal/approvals?tab=approve", mine: can(cAp.data?.canApprove) },
     { label: "Amendments", n: cAm.total, to: "/legal/approvals?tab=amend", mine: !!cAm.data?.canApprove },
     { label: "Deed overdue", n: cLate.total, to: "/legal/land/deed-process", mine: true, tone: "red" },

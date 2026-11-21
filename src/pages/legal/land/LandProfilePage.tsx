@@ -20,7 +20,9 @@ import { LegalMasterTable, WhatsAppName } from "../LegalMasterPage";
 import { useAuth } from "@/contexts/AuthContext";
 import { OwnershipStep } from "./steps/OwnershipStep";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
-import { FinalVerifyBar } from "@/components/legal/FinalVerifyBar";
+import { NextVersionCard } from "@/components/legal/LandVersions";
+import { LandRecordView } from "@/components/legal/LandReviewFlow";
+import { getLandAmendments } from "@/api/legalAmendmentApi";
 import { DueDiligencePanel } from "@/components/legal/DueDiligencePanel";
 import { PortalFetchButtons } from "@/components/legal/PortalFetch";
 import { DocumentsStep, RecordDocuments, type DocLink } from "./steps/DocumentsStep";
@@ -65,11 +67,16 @@ const TABS: { key: TabKey; label: string; count?: keyof LandOverview["counts"] }
   { key: "survey", label: "Survey & Valuation", count: "valuations" },
   // Each section uploads its own documents; this tab is for everything else (and lists them all).
   { key: "documents", label: "Other Documents", count: "documents" },
-  { key: "diligence", label: "Due Diligence" },
   { key: "photos", label: "Notes & Attachments" },
   { key: "versions", label: "Versions & Amendments" },
   { key: "activity", label: "Activity History" },
 ];
+
+// Land-review section key → this page's editor (tab) key.
+const SECTION_TAB: Record<string, string> = { acquisition: "transfers" };
+
+// Sections in the order they are entered (edit mode).
+const EDIT_ORDER: TabKey[] = ["basic", "ownership", "transfers", "records", "legal", "loans", "mutation", "payments", "tax", "survey", "documents", "photos"];
 
 const QUICK_SECTIONS: { tab: TabKey; label: string; count: keyof LandOverview["counts"]; hint: string }[] = [
   { tab: "ownership", label: "Ownership History", count: "ownershipRecords", hint: "Earliest known owner, then every change up to the company" },
@@ -197,109 +204,20 @@ export default function LandProfilePage() {
   // Acquisition & Purchase: for a new acquisition it is the company's purchase, so it appears only once the deed is
   // registered — as a read-only record built from Deed Registration. Earlier transfers live in Ownership History.
   const registered = land?.WorkflowStatus === "Registered";
+  const [mode, setMode] = useState<"view" | "edit">("view");
+  // A registered land is locked, except while an approved amendment is open for editing.
+  const amendQ = useQuery({ queryKey: ["legal-amend", "land", landId], queryFn: () => getLandAmendments(landId), enabled: registered });
+  const amendOpen = !!amendQ.data?.items?.some((a) => a.Status === "Open");
   const tabs = TABS.filter((t) => (t.key !== "payments" || ownPurchaseHere) && (t.key !== "transfers" || ownPurchaseHere || registered));
   const quickSections = QUICK_SECTIONS.filter((s) => (s.tab !== "payments" && s.tab !== "transfers") || ownPurchaseHere);
   const { currentUser } = useAuth();
   const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
   const c = data?.counts;
   const btn = "inline-flex items-center gap-1.5 border border-foreground px-3 py-1.5 text-xs font-heading font-semibold uppercase tracking-[0.08em] hover:bg-primary/10";
-
-  return (
-    <>
-      <Breadcrumbs items={["Dashboard", "Legal", "Land Register", land ? land.LandCode : "Property"]} />
-      <LegalShell
-        title={land ? `${land.LandCode} · ${land.LandName}` : "Property"}
-        subtitle={
-          land
-            ? `${land.MouzaName ?? "—"}${land.JLNo ? ` (J.L. ${land.JLNo})` : ""} · ${land.DistrictName ?? "—"} · ${
-                land.Area ?? "—"
-              } ${land.UnitName ?? ""}`
-            : undefined
-        }
-        icon={Global}
-        action={
-          land && (
-            <div className="flex flex-wrap gap-2">
-              {!registered && (
-                <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
-                  <Pencil size={13} /> Edit basic info
-                </button>
-              )}
-              <button className={btn} onClick={() => navigate(`/legal/land/properties/${landId}/details`)}>
-                <FileText size={13} /> Full report & PDF
-              </button>
-            </div>
-          )
-        }
-      >
-        {error && <p className="text-sm text-destructive">Could not load this land property: {(error as Error).message}</p>}
-        {isLoading && <p className="text-sm text-muted-foreground">Loading land property profile…</p>}
-        {land && c && (
-          <LegalLockContext.Provider value={registered ? REGISTERED_LOCK : null}>
-          <div className="space-y-5">
-            {/* Where the land is in the pipeline, and the one thing to do next. */}
-            <div className="space-y-3 border border-border bg-card p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Stage · <span className="text-foreground">{land.WorkflowStatus ?? "—"}</span></p>
-                {(() => {
-                  const wf = String(land.WorkflowStatus ?? "");
-                  const next: [string, () => void] | null =
-                    wf === "Registered" ? ["Request amendment", () => setTab("versions")]
-                    : wf === "Deed Registration" || wf === "Deed Completed" ? ["Open in Deed Registration", () => navigate(`/legal/deed-registration/${landId}`)]
-                    : wf === "Deed Process" ? ["Open in Deed Process", () => navigate(`/legal/land/deed-process/${landId}`)]
-                    : wf.startsWith("Draft") ? ["Final verification", () => navigate(`/legal/land/properties/${landId}/final-verify`)]
-                    : null;
-                  return next ? <button onClick={next[1]} className="h-9 border border-foreground bg-foreground px-4 text-xs font-semibold uppercase tracking-[0.1em] text-background hover:opacity-90">{next[0]} →</button> : null;
-                })()}
-              </div>
-              <LandStageStepper landId={landId} />
-            </div>
-            {registered && <LockedBanner landCode={land.LandCode} onRequest={() => setTab("versions")} />}
-
-            {/* Modal: Action confirmation dialog */}
-            <Dialog open={!!child} onOpenChange={(o) => { if (!o) setChild(null); }}>
-              <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>{child?.title}</DialogTitle>
-                  <DialogDescription>Records belonging to this one only; a new one is added under it.</DialogDescription>
-                </DialogHeader>
-                {child && (
-                  <LegalMasterTable key={`${child.key}-${child.id}`} entry={table(child.key, child.label)} parentId={landId} onSaved={refresh}
-                    fixed={{ [child.field]: String(child.id) }} rowFilter={(r) => Number(r[child.field]) === child.id} />
-                )}
-              </DialogContent>
-            </Dialog>
-            <Dialog open={!!docsFor} onOpenChange={(o) => { if (!o) setDocsFor(null); }}>
-              <DialogContent className="max-w-3xl">
-                <DialogHeader>
-                  <DialogTitle>Documents · {docsFor?.label}</DialogTitle>
-                  <DialogDescription>Documents filed under this {docsFor?.kind === "loan" ? "loan / mortgage" : "legal record"}. They also show on the Documents tab.</DialogDescription>
-                </DialogHeader>
-                {docsFor && <RecordDocuments landId={landId} link={docsFor} onSaved={refresh} />}
-              </DialogContent>
-            </Dialog>
-            {/* 14 tabs: one swipeable row on phones, wrapped on wider screens */}
-            <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible" role="tablist">
-              {tabs.map((t) => (
-                <button
-                  key={t.key}
-                  role="tab"
-                  aria-selected={tab === t.key}
-                  onClick={() => setTab(t.key)}
-                  className={`shrink-0 whitespace-nowrap border px-2.5 py-1.5 text-xs font-heading font-semibold transition-colors ${
-                    tab === t.key
-                      ? "border-foreground bg-foreground text-card"
-                      : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"
-                  }`}
-                >
-                  {t.label}
-                  {t.count !== undefined && c[t.count] !== undefined ? (
-                    <span className="ml-1 tabular-nums opacity-70">({c[t.count]})</span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-
+  const renderTab = (tab: TabKey) => {
+    if (!land || !c) return null;
+    return (
+      <>
             {/* TAB 1: OVERVIEW */}
             {tab === "overview" && (
               <div className="space-y-4">
@@ -474,7 +392,7 @@ export default function LandProfilePage() {
                   district: land.DistrictName, mouza: land.MouzaName, jlNo: land.JLNo, location: land.LocationAddress, lat: land.GpsLatitude, lng: land.GpsLongitude,
                   rsDag: land.RsDagNo, lrDag: land.LrDagNo, rsKhatian: land.RsKhatianNo, lrKhatian: land.LrKhatianNo, landCode: land.LandCode,
                 }} />} />
-                {!registered && (
+                {(!registered || amendOpen) && (
                   <div className="sm:col-span-2 lg:col-span-3 pt-2">
                     <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
                       <Pencil size={13} /> Edit basic information
@@ -513,6 +431,84 @@ export default function LandProfilePage() {
               </div>
             )}
             {tab === "transfers" && !ownPurchaseHere && registered && <AcquisitionRecord landId={landId} onOpen={() => navigate("/legal/deed-registration")} />}
+
+            {/* TAB 10: PAYMENT HISTORY */}
+            {tab === "records" && (
+              <div className="space-y-6">
+                <Section
+                  title="Revisional Survey (RS) Records"
+                  note="RS Khatian, RS Plot (Dag) numbers, recorded holder names, and land classifications."
+                >
+                  <LegalMasterTable entry={table("land-rs-record", "RS Record")} parentId={landId} onSaved={refresh} />
+                </Section>
+                <Section
+                  title="Land Reforms (LR) Records of Rights (RoR)"
+                  note="LR Khatian (Parcha), LR Plot (Dag) numbers, and mapping from old RS plots."
+                >
+                  <LegalMasterTable entry={table("land-lr-record", "LR Record of Rights")} parentId={landId} onSaved={refresh} />
+                </Section>
+              </div>
+            )}
+
+
+            {tab === "documents" && (
+              <Section
+                title="Centralized Document Archive"
+                note="Complete document storage for this property: Sale Deeds, Parent Deeds, Khatians, Mutation Certificates, Tax Receipts, Court Orders, Survey Reports, and Bank NOCs."
+              >
+                <DocumentsStep landId={landId} onSaved={refresh} />
+              </Section>
+            )}
+
+            {/* TAB 7: LEGAL INFORMATION */}
+            {tab === "legal" && (
+              <div className="space-y-6">
+                <Section
+                  title="Court Cases & Disputes"
+                  note="Past and ongoing court cases, plaintiffs, defendants, advocates, and case statuses."
+                >
+                  <LegalMasterTable entry={table("legal-case", "Court Case")} parentId={landId} onSaved={refresh}
+                    rowActions={(raw) => childButton({ key: "case-hearing", field: "CaseId", id: Number(raw.CaseId), title: `Hearings · ${String(raw.CaseNumber ?? "case")}`, label: "Hearings" }, hearingRows)} />
+                </Section>
+                <Section
+                  title="Legal Orders, Notices & Opinions"
+                  note="Judgments, court orders, legal notices, legal opinions, and due-diligence clearance reports."
+                >
+                  <LegalMasterTable entry={table("land-legal-record", "Legal Record")} parentId={landId} onSaved={refresh}
+                    rowActions={(raw) => docsButton({ kind: "legal", id: Number(raw.LegalRecordId), label: `${String(raw.RecordType ?? "Legal record")}${raw.CaseNumber ? ` ${String(raw.CaseNumber)}` : ""}` })} />
+                </Section>
+              </div>
+            )}
+
+            {/* TAB 8: LOAN & MORTGAGE */}
+            {tab === "loans" && (
+              <Section
+                title="Loan & Mortgage History"
+                note="Historical and active mortgages, bank loans, loan amounts, release dates, and bank NOCs. Closed loans are preserved."
+              >
+                <LegalMasterTable entry={table("mortgage", "Mortgage & Loan")} parentId={landId} onSaved={refresh}
+                  rowActions={(raw) => docsButton({ kind: "loan", id: Number(raw.MortgageId), label: `${String(raw.LenderName ?? "Loan")}${raw.LoanAccountRef ? ` · ${String(raw.LoanAccountRef)}` : ""}` })} />
+              </Section>
+            )}
+
+            {/* TAB 9: MUTATION RECORDS */}
+            {tab === "mutation" && (
+              <div className="space-y-6">
+                <Section
+                  title="Mutation Applications & Certificates"
+                  note="BL&LRO mutation case numbers, previous and new owners, order dates, and certificate records."
+                >
+                  <LegalMasterTable entry={table("mutation", "Mutation")} parentId={landId} onSaved={refresh}
+                    rowActions={(raw) => childButton({ key: "mutation-record", field: "MutationId", id: Number(raw.MutationId), title: `New Khatian / RoR · ${String(raw.ApplicationNo ?? raw.CaseNo ?? "mutation")}`, label: "New Khatian" }, khatianRows)} />
+                </Section>
+                <Section
+                  title="New Khatian / RoR Post-Mutation"
+                  note="New Khatian and plot records created by each mutation. Add one with New Khatian on its mutation's row above."
+                >
+                  <LegalMasterTable entry={table("mutation-record", "New Khatian / RoR")} parentId={landId} onSaved={refresh} noAdd />
+                </Section>
+              </div>
+            )}
 
             {/* TAB 10: PAYMENT HISTORY */}
             {tab === "payments" && ownPurchaseHere && (
@@ -570,9 +566,100 @@ export default function LandProfilePage() {
                 <Activity landId={landId} />
               </Section>
             )}
+      </>
+    );
+  };
 
-            {/* All data entered → the verifier checks everything on one page and sends the land to Deed Process. */}
-            <FinalVerifyBar landId={landId} />
+  return (
+    <>
+      <Breadcrumbs items={["Dashboard", "Legal", "Land Register", land ? land.LandCode : "Property"]} />
+      <LegalShell
+        title={land ? `${land.LandCode} · ${land.LandName}` : "Property"}
+        subtitle={
+          land
+            ? `${land.MouzaName ?? "—"}${land.JLNo ? ` (J.L. ${land.JLNo})` : ""} · ${land.DistrictName ?? "—"} · ${
+                land.Area ?? "—"
+              } ${land.UnitName ?? ""}`
+            : undefined
+        }
+        icon={Global}
+        action={
+          land && (
+            <div className="flex flex-wrap gap-2">
+              {(!registered || amendOpen) && (
+                <button className={`${btn} ${mode === "edit" ? "bg-foreground text-card" : ""}`} onClick={() => setMode(mode === "edit" ? "view" : "edit")}>
+                  <Pencil size={13} /> {mode === "edit" ? "Done editing" : "Edit"}
+                </button>
+              )}
+              <button className={btn} onClick={() => navigate(`/legal/land/properties/${landId}/details`)}>
+                <FileText size={13} /> Full report & PDF
+              </button>
+            </div>
+          )
+        }
+      >
+        {error && <p className="text-sm text-destructive">Could not load this land property: {(error as Error).message}</p>}
+        {isLoading && <p className="text-sm text-muted-foreground">Loading land property profile…</p>}
+        {land && c && (
+          <LegalLockContext.Provider value={registered && !amendOpen ? REGISTERED_LOCK : null}>
+          <div className="space-y-5">
+            {/* Data entry → Submit for verification → Land verification → Version approval. */}
+            <NextVersionCard landId={landId} />
+            {/* Where the land is in the pipeline, and the one thing to do next. */}
+            <div className="space-y-3 border border-border bg-card p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Stage · <span className="text-foreground">{land.WorkflowStatus ?? "—"}</span></p>
+              </div>
+              <LandStageStepper landId={landId} />
+            </div>
+            {registered && <LandAmendmentActions landId={landId} />}
+
+            {/* Modal: Action confirmation dialog */}
+            <Dialog open={!!child} onOpenChange={(o) => { if (!o) setChild(null); }}>
+              <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>{child?.title}</DialogTitle>
+                  <DialogDescription>Records belonging to this one only; a new one is added under it.</DialogDescription>
+                </DialogHeader>
+                {child && (
+                  <LegalMasterTable key={`${child.key}-${child.id}`} entry={table(child.key, child.label)} parentId={landId} onSaved={refresh}
+                    fixed={{ [child.field]: String(child.id) }} rowFilter={(r) => Number(r[child.field]) === child.id} />
+                )}
+              </DialogContent>
+            </Dialog>
+            <Dialog open={!!docsFor} onOpenChange={(o) => { if (!o) setDocsFor(null); }}>
+              <DialogContent className="max-w-3xl">
+                <DialogHeader>
+                  <DialogTitle>Documents · {docsFor?.label}</DialogTitle>
+                  <DialogDescription>Documents filed under this {docsFor?.kind === "loan" ? "loan / mortgage" : "legal record"}. They also show on the Documents tab.</DialogDescription>
+                </DialogHeader>
+                {docsFor && <RecordDocuments landId={landId} link={docsFor} onSaved={refresh} />}
+              </DialogContent>
+            </Dialog>
+            {/* All sections, row by row. View: read-only with every field (empty ones marked). Edit: every section's editor. */}
+            {mode === "view" ? <LandRecordView landId={landId} editor={!registered || amendOpen ? (k) => renderTab((SECTION_TAB[k] ?? k) as TabKey) : undefined} /> : (
+              <div className="space-y-5">
+                {EDIT_ORDER.filter((k) => tabs.some((t) => t.key === k)).map((k, i) => (
+                  <section key={k} className="border-2 border-foreground/70 bg-card p-4">
+                    <h2 className="mb-3 flex items-center gap-2 text-base font-semibold"><span className="flex h-6 w-6 items-center justify-center bg-foreground text-xs text-background">{i + 1}</span>{TABS.find((t) => t.key === k)?.label}</h2>
+                    {renderTab(k)}
+                  </section>
+                ))}
+                <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 border-2 border-foreground bg-card px-4 py-3">
+                  <span className="mr-auto text-xs text-muted-foreground">Each row saves when you save it. When everything is entered, send it for verification.</span>
+                  <button className="h-9 border border-foreground px-4 text-xs font-semibold uppercase tracking-[0.08em]" onClick={() => { setMode("view"); window.scrollTo({ top: 0 }); }}>Done</button>
+                </div>
+              </div>
+            )}
+            <details className="border border-border bg-card">
+              <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Versions</summary>
+              <div className="border-t border-border p-4">{renderTab("versions")}</div>
+            </details>
+            <details className="border border-border bg-card">
+              <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Activity history</summary>
+              <div className="border-t border-border p-4">{renderTab("activity")}</div>
+            </details>
+
           </div>
           </LegalLockContext.Provider>
         )}

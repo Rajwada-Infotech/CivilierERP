@@ -234,6 +234,7 @@ export interface DeedProcessLand {
   DeedFileId?: number | null; DeedFileName?: string | null;
   DeedChangedAt?: string | null; DeedChangedByName?: string | null;
   L1Status?: string; L1By?: string | null; L2Status?: string; DeedApprovalNote?: string | null;
+  DeedApprovalRequestedAt?: string | null; DeedApprovalRequestedByName?: string | null;
 }
 export const reverifyDeedChanges = async (id: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/reverify`, post({})));
@@ -241,7 +242,7 @@ export const approveDeedProcess = async (id: number, action: "Approve" | "Reject
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/approve`, post({ action, remarks })));
 export const deedRegistrationAction = async (id: number, action: "apply" | "submit", fileId?: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-registration`, post({ action, fileId })));
-export const getDeedProcessLands = async (qs = "") => handle<{ lands: DeedProcessLand[]; canEditTimeline: boolean; canApprove?: boolean } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/deed-process/list${qs ? `?${qs}` : ""}`));
+export const getDeedProcessLands = async (qs = "") => handle<{ lands: DeedProcessLand[]; canEditTimeline: boolean; canApprove?: boolean; canRequest?: boolean } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/deed-process/list${qs ? `?${qs}` : ""}`));
 export const updateDeedProcess = async (id: number, body: { targetDate?: string; completed?: boolean; deedFileId?: number | null }) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 
@@ -315,3 +316,5 @@ export const saveLandClearance = async (landId: number, kind: string, body: { ac
   handle<{ message: string; items: LandClearance[] }>(await fetchWithAuth(`${BASE}/${landId}/clearance/${kind}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 export interface ClearanceLand { LandId: number; ProjectId?: number | null; LandCode: string; LandName: string; WorkflowStatus: string; DistrictName: string | null; MouzaName: string | null; clearances: LandClearance[] }
 export const getClearanceList = async (qs = "") => handle<{ lands: ClearanceLand[]; statuses: string[] } & { total?: number; page?: number; pageSize?: number }>(await fetchWithAuth(`${BASE}/clearance/list${qs ? `?${qs}` : ""}`));
+export const requestDeedApproval = async (id: number) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/deed-process/request-approval`, post({})));

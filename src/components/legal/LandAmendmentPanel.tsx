@@ -257,7 +257,7 @@ export function AmendmentDecision({ a, canApprove, userId }: { a: Amendment; can
           <label className="block flex-1"><span className={lbl}>Remark *</span>
             <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="e.g. Checked BLRO order; LR record updated" className={input} /></label>
           <button disabled={busy || remark.trim().length < 3} onClick={() => reject.mutate()} className={`${btn} border-destructive text-destructive hover:bg-destructive hover:text-white`}>Reject</button>
-          <button disabled={busy || remark.trim().length < 3} onClick={() => approve.mutate()} className={`${btn} border-emerald-700 bg-emerald-700 text-white hover:opacity-90`}>Approve &amp; apply</button>
+          <button disabled={busy || remark.trim().length < 3} onClick={() => approve.mutate()} className={`${btn} border-emerald-700 bg-emerald-700 text-white hover:opacity-90`}>{a.changes.length ? "Approve & apply" : "Approve — open for editing"}</button>
         </div>
       )}
       {Number(a.RequestedBy) === Number(userId) && (
@@ -280,7 +280,46 @@ function RequestLoader({ landId, onClose }: { landId: number; onClose: () => voi
       </div>
     );
   }
-  return <RequestDialog landId={landId} current={data.land} rows={data.current} onClose={onClose} />;
+  return <AmendRequest landId={landId} onClose={onClose} />;
+}
+
+/**
+ * Ask for an amendment: type, reason, reference. Once an Amendment Approver approves it, the registered land opens for
+ * editing; the edits then go through Land verification and approval and become the next version (no new deed process).
+ */
+function AmendRequest({ landId, onClose }: { landId: number; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["legal-amend-fields"], queryFn: getAmendFields, staleTime: 3600_000 });
+  const [type, setType] = useState("");
+  const [reason, setReason] = useState("");
+  const [ref, setRef] = useState("");
+  const send = useMutation({
+    mutationFn: () => requestAmendment(landId, { type, reason, referenceNo: ref, changes: [] }),
+    onSuccess: (r) => { toast.success(r.message); qc.invalidateQueries({ queryKey: ["legal-amend"] }); qc.invalidateQueries({ queryKey: ["legal-flow"] }); qc.invalidateQueries({ queryKey: ["legal-review"] }); onClose(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg bg-background" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-border p-4"><h2 className="text-lg font-semibold">Request amendment</h2>
+          <p className="mt-1 text-xs text-muted-foreground">After approval the land opens for editing. Make the changes, then send it for verification — it becomes the next version. No new deed process.</p></div>
+        <div className="space-y-3 p-4">
+          <label className="block"><span className={lbl}>Amendment type *</span>
+            <select value={type} onChange={(e) => setType(e.target.value)} className="h-9 w-full border border-foreground/30 bg-background px-2 text-sm">
+              <option value="">Choose…</option>{(data?.types ?? []).map((t: string) => <option key={t}>{t}</option>)}
+            </select></label>
+          <label className="block"><span className={lbl}>Reference no. (court order, mutation case…)</span>
+            <input value={ref} onChange={(e) => setRef(e.target.value)} maxLength={150} className="h-9 w-full border border-foreground/30 bg-background px-2 text-sm" /></label>
+          <label className="block"><span className={lbl}>Reason / what will change *</span>
+            <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={4} maxLength={1000} className="w-full border border-foreground/30 bg-background p-2 text-sm" /></label>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border p-4">
+          <button onClick={onClose} className={line}>Cancel</button>
+          <button onClick={() => send.mutate()} disabled={send.isPending || !type || reason.trim().length < 5} className={ink}>{send.isPending ? "Sending…" : "Send for approval"}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** The waiting amendment in a dialog: approvers approve / reject with a remark, the requester can withdraw. */
@@ -352,15 +391,21 @@ export function LandAmendmentActions({ landId }: { landId: number }) {
   const { data } = useQuery({ queryKey: ["legal-amend", "land", landId], queryFn: () => getLandAmendments(landId) });
   if (!data?.locked) return null;
   const pending = data.items.find((a) => a.Status === "Pending");
+  const openA = data.items.find((a) => a.Status === "Open");
   return (
     <div className="space-y-3">
-      {pending ? <AmendmentDecision a={pending} canApprove={data.canApprove} userId={data.userId} /> : (
+      {openA ? (
+        <div className="border-2 border-indigo-500 bg-indigo-500/5 px-4 py-3 text-sm">
+          <b>Amendment {openA.AmendmentNo} approved — the land is open for editing.</b> Make the changes ({openA.AmendType}: {openA.Reason}), then click
+          <b> Submit for verification</b>. When the new version is approved the land locks again.
+        </div>
+      ) : pending ? <AmendmentDecision a={pending} canApprove={data.canApprove} userId={data.userId} /> : (
         <div className="flex flex-wrap items-center justify-between gap-3 border border-indigo-500/60 bg-indigo-500/5 px-4 py-3">
-          <p className="text-sm"><b>Need to change this registered land?</b> Ask for an amendment — after approval it becomes the next version, without re-registration.</p>
+          <p className="text-sm"><b>Need to change this registered land?</b> Request an amendment. Once approved, the land opens for editing; the edits are verified and approved as the next version — no new deed process.</p>
           <button onClick={() => setOpen(true)} className={ink}>Request amendment</button>
         </div>
       )}
-      {open && data.land && <RequestDialog landId={landId} current={data.land} rows={data.current} onClose={() => setOpen(false)} />}
+      {open && <AmendRequest landId={landId} onClose={() => setOpen(false)} />}
     </div>
   );
 }

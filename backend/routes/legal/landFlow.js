@@ -16,6 +16,19 @@ const idParam = (v) => { const n = Number.parseInt(v, 10); return Number.isInteg
 const parse = (s) => { if (s == null) return null; try { return JSON.parse(s); } catch { return s; } };
 const safe = async (fn, fallback) => { try { return await fn(); } catch { return fallback; } };
 
+// GET /lands — every active land with its RS / LR numbers (Land Flowchart's land tabs; filtered by project on the page).
+router.get("/lands", requirePageRight(PAGE, "view"), async (_req, res) => {
+  try {
+    const r = await getPool().request().query(`
+      SELECT LandId, LandCode, LandName, ProjectId, WorkflowStatus, RsKhatianNo, RsDagNo, LrKhatianNo, LrDagNo
+      FROM dbo.LegalLand WHERE IsActive = 1 AND ISNULL(IsCancelled, 0) = 0 ORDER BY LandCode`);
+    res.json({ lands: r.recordset });
+  } catch (err) {
+    console.error("[legal-flow] lands:", err.message);
+    res.status(500).json({ error: "Could not load the lands" });
+  }
+});
+
 router.get("/search", requirePageRight(PAGE, "view"), async (req, res) => {
   const q = String(req.query.q || "").trim().slice(0, 60);
   if (q.length < 1) return res.json({ results: [] });
@@ -165,7 +178,9 @@ async function landState(pool, landId) {
 // is verified and sent to Deed Process. Any change after that opens the next version, approved when a verifier
 // re-verifies the changes. At each approval the whole land is saved (LegalLandRegisterSnapshot, Remarks "Version N …"),
 // so every version can be shown as it was and compared with the one before.
-const APPROVAL_ACTIONS = new Set(["Land verified — sent to Deed Process", "Deed changes re-verified"]);
+// Since migration 701 a version is made only when an Approver approves a land review (see the Land review section below).
+// decide() saves the version itself (it needs to know about an open amendment).
+const APPROVAL_ACTIONS = new Set([]);
 const META = /^(IsActive|CreatedBy|CreatedAt|UpdatedBy|UpdatedAt|VerifiedBy|VerifiedAt|DocFileId|LandId|EnquiryId)$/;
 const LAND_SKIP = /^(L1|L2|Final|Deed|Reg|Igr|Workflow|Verification|IsOnHold|IsCancelled|Cancel|Checklist|CreatedBy|CreatedAt|UpdatedBy|UpdatedAt|IsActive)|FileId$|Id$/;
 const clean = (rows) => rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k, v]) => !META.test(k) && v != null && v !== "")));
@@ -190,10 +205,46 @@ async function snapshotVersion(pool, landId, userId, action, amendment = null) {
   const n = (await pool.request().input("L", sql.Int, landId)
     .query("SELECT COUNT(*) AS n FROM dbo.LegalLandRegisterSnapshot WHERE LandId = @L AND Remarks LIKE N'Version %'")).recordset[0].n + 1;
   const checklist = await checklistNow(pool, landId);
-  await pool.request().input("L", sql.Int, landId).input("J", sql.NVarChar(sql.MAX), JSON.stringify({ ...snapshotOf(st), checklist, ...(amendment ? { amendment } : {}) }))
+  const entry = await entrySections(pool, landId).catch(() => null);
+  await pool.request().input("L", sql.Int, landId).input("J", sql.NVarChar(sql.MAX), JSON.stringify({ ...snapshotOf(st), checklist, entry, ...(amendment ? { amendment } : {}) }))
     .input("R", sql.NVarChar(500), `Version ${n} approved — ${action}`).input("U", sql.Int, userId || null)
     .query("INSERT INTO dbo.LegalLandRegisterSnapshot (LandId, SnapshotJson, Remarks, CreatedBy) VALUES (@L, @J, @R, @U)");
   return n;
+}
+
+/**
+ * Migration 704 (live presentation data) inserts versions as placeholders — SnapshotJson {"rebuild":true,"exclude":[[master,id]…]}
+ * — because a version's record is built here, not in SQL. The first time the land is opened each placeholder is
+ * filled with the land as it now is, leaving out the rows named in "exclude" (entries added after that version).
+ * Review ticks saved as hash "*" are fixed to the section as it now is in the same way.
+ */
+async function healPlaceholders(pool, landId) {
+  const ph = await safe(async () => (await pool.request().input("L", sql.Int, landId).query(
+    "SELECT SnapshotId, SnapshotJson FROM dbo.LegalLandRegisterSnapshot WHERE LandId = @L AND SnapshotJson LIKE N'{\"rebuild\":true%' ORDER BY SnapshotId")).recordset, []);
+  if (ph.length) {
+    const st = await landState(pool, landId);
+    const checklist = await checklistNow(pool, landId);
+    const entry = await entrySections(pool, landId).catch(() => null);
+    for (const p of ph) {
+      const ex = new Set(((parse(p.SnapshotJson) || {}).exclude || []).map(([m, id]) => `${m}#${id}`));
+      const e = entry ? entry.map((sec) => ({ ...sec, records: sec.records.filter((r) => !ex.has(`${r.master}#${r.id}`)) })) : null;
+      await pool.request().input("Id", sql.Int, p.SnapshotId).input("J", sql.NVarChar(sql.MAX), JSON.stringify({ ...snapshotOf(st), checklist, entry: e }))
+        .query("UPDATE dbo.LegalLandRegisterSnapshot SET SnapshotJson = @J WHERE SnapshotId = @Id");
+    }
+  }
+  const rv = await safe(async () => (await pool.request().input("L", sql.Int, landId).query(
+    "SELECT ReviewId, ChecksJson FROM dbo.LegalLandReview WHERE LandId = @L AND ChecksJson LIKE N'%\"hash\":\"*\"%'")).recordset, []);
+  if (rv.length) {
+    const entry = await entrySections(pool, landId);
+    const hashes = Object.fromEntries(entry.map((sec) => [sec.key, sectionHash(sec)]));
+    for (const r of rv) {
+      const c = parse(r.ChecksJson) || {};
+      // "*all" ticks every section (a submitted demo review).
+      if (c["*all"]) { const by = c["*all"]; delete c["*all"]; for (const k of Object.keys(hashes)) c[k] = { hash: hashes[k], by: by.by, at: by.at }; }
+      for (const k of Object.keys(c)) if (c[k]?.hash === "*") { if (hashes[k]) c[k].hash = hashes[k]; else delete c[k]; }
+      await pool.request().input("Id", sql.Int, r.ReviewId).input("J", sql.NVarChar(sql.MAX), JSON.stringify(c)).query("UPDATE dbo.LegalLandReview SET ChecksJson = @J WHERE ReviewId = @Id");
+    }
+  }
 }
 
 /** The land's document checklist as it stands now: each required / optional document and its state. */
@@ -246,7 +297,7 @@ async function buildVersions(pool, st, history) {
     versions.push({ no: versions.length + 1, afterRegistration: !!pending || st.land.WorkflowStatus === "Registered" && versions.length > 0 && open.some((e) => /Amendment/.test(e.Action)),
       amendment: pending ? { no: pending.AmendmentNo, type: pending.AmendType, reason: pending.Reason, referenceNo: pending.ReferenceNo, requestedBy: pending.RequestedByName, changes: parse(pending.ChangesJson), pending: true, id: pending.AmendmentId } : null,
       status: pending ? `Amendment ${pending.AmendmentNo} requested — waiting for approval` : versions.length ? (changedSince ? "Changed — waiting for re-verification" : "Open") : "In progress — not approved yet",
-      startedAt: open[0]?.CreatedAt || prevAt || st.land.CreatedAt, approvedAt: null, approvedBy: null, approval: null, snapshot: current, approxSnapshot: false, events: open });
+      startedAt: open[0]?.CreatedAt || prevAt || st.land.CreatedAt, approvedAt: null, approvedBy: null, approval: null, snapshot: { ...current, entry: await entrySections(pool, st.land.LandId).catch(() => null) }, approxSnapshot: false, events: open });
   }
   // Documents of each version: what was uploaded in its period, and the checklist (saved at approval; now for the open one).
   // A document "belongs" to the version whose saved record first has it at that file version.
@@ -296,13 +347,14 @@ function versionFlow(v, i, st) {
     ];
   }
   return [
-    { label: "Changes made", state: v.events.length ? "done" : "pending", date: v.events[0]?.CreatedAt || v.startedAt },
-    { label: "Re-verification", state: v.approvedAt ? "done" : v.events.length ? "current" : "pending", date: null },
+    { label: "Entries / edits made", state: v.events.length ? "done" : "pending", date: v.events[0]?.CreatedAt || v.startedAt },
+    { label: "Verified in Land Flowchart", state: v.approvedAt ? "done" : v.events.length ? "current" : "pending", date: null },
     { label: "Approved", state: v.approvedAt ? "done" : "pending", date: v.approvedAt },
   ];
 }
 
 async function loadLand(pool, landId) {
+  await healPlaceholders(pool, landId);
   const st = await landState(pool, landId);
   if (!st) return null;
   const { enquiryId, ...x } = st;
@@ -365,6 +417,334 @@ router.get("/enquiry/:id", requirePageRight(PAGE, "view"), async (req, res) => {
   }
 });
 
+// ── Land review (Land Flowchart) ─────────────────────────────────────────────
+// Every version goes through one review: the verifier opens the land, goes through it step by step (basic information,
+// RS records, LR records, ownership history, documents, …), ticks each step, and submits; an Approver then approves and
+// the land is saved as the next version. The first review covers every step; later reviews only the steps that changed
+// since the last approved version. A tick holds for the step as it was when ticked — if the step changes again, the tick
+// drops off. Table LegalLandReview (migration 701); one open review per land.
+const crypto = require("crypto");
+const { canAct, isSuperAdmin, userOf } = require("./approvalAuthority");
+const { writeAudit } = require("./legalAudit");
+// The steps: the land's entry sections as on the land workspace, each with every field of every entry (filled or not)
+// and the documents attached to them.
+const ENTRY_SECTIONS = [
+  ["basic", "Basic Information", ["land"]],
+  ["ownership", "Ownership History", ["ownership-record", "inheritance", "partition", "property-restriction"]],
+  ["acquisition", "Acquisition & Purchase", ["ownership-event", "land-purchase"]],
+  ["records", "Land Records (RS / LR)", ["land-rs-record", "land-lr-record"]],
+  ["legal", "Legal Dispute Information", ["legal-case", "land-legal-record"]],
+  ["loans", "Loan & Mortgage", ["mortgage"]],
+  ["mutation", "Mutation Records", ["mutation"]],
+  ["payments", "Payment History", ["payment"]],
+  ["tax", "Land Tax (Khajna)", ["land-tax"]],
+  ["survey", "Survey & Valuation", ["valuation"]],
+  ["documents", "Other Documents", []],
+  ["photos", "Notes & Attachments", ["land-photo"]],
+];
+// Sections a land needs at least one entry in; the rest may stay empty.
+const NEEDED = new Set(["basic", "ownership", "records", "documents"]);
+const SKIP_FIELD = (f) => f.system || f.hidden || f.type === "password" || f.name === "IsActive";
+const shown = (f, raw, row) => {
+  if (raw === null || raw === undefined || raw === "") return null;
+  if (f.type === "ref") return row[`${f.name}__label`] ?? String(raw);
+  if (f.type === "file") return row[`${f.name}__label`] ?? "File";
+  if (f.type === "bit") return raw ? "Yes" : "No";
+  if (raw instanceof Date) return raw.toISOString().slice(0, 10);
+  return String(raw);
+};
+
+/** Every entry section of a land: its entries, each with all its fields (value or empty) and attached files. */
+async function entrySections(pool, landId) {
+  const { MASTERS } = require("./masterConfig");
+  const { baseSql } = require("./legalMasters");
+  const rowsOf = async (key) => {
+    const cfg = MASTERS[key];
+    if (!cfg) return [];
+    const where = key === "land" ? " AND t.LandId = @Parent" : "";
+    const sqlText = key === "land" ? baseSql(cfg, null, false) + where : baseSql(cfg, landId, false);
+    const run = (extra) => pool.request().input("Parent", sql.Int, landId).query(sqlText + extra);
+    const r = await run(" AND t.IsActive = 1").catch(() => run("")).catch(() => ({ recordset: [] }));
+    return r.recordset.map((row) => ({
+      master: key, title: cfg.title, id: row[cfg.pk],
+      fields: cfg.fields.filter((fd) => !SKIP_FIELD(fd)).map((fd) => {
+        const v = shown(fd, row[fd.name], row);
+        return { n: fd.name, l: fd.label, v, req: !!fd.required, ...(fd.type === "file" && row[fd.name] ? { file: row[fd.name] } : {}) };
+      }),
+    }));
+  };
+  const st = await landState(pool, landId);
+  const checklist = await checklistNow(pool, landId);
+  const out = [];
+  for (const [key, label, masters] of ENTRY_SECTIONS) {
+    let records = [];
+    for (const m of masters) records = records.concat(await rowsOf(m));
+    if (key === "documents") {
+      records = (st?.documents || []).map((d) => ({ master: "land-document", title: "Document", id: d.DocumentId, fields: [
+        { n: "DocumentCode", l: "Document code", v: d.DocumentCode ?? null, req: true },
+        { n: "Title", l: "Title", v: d.Title ?? null, req: true },
+        { n: "DocTypeName", l: "Document type", v: d.DocTypeName ?? null, req: true },
+        { n: "DocumentNo", l: "Document number", v: d.DocumentNo ?? null, req: false },
+        { n: "DocumentDate", l: "Document date", v: d.DocumentDate ? new Date(d.DocumentDate).toISOString().slice(0, 10) : null, req: false },
+        { n: "CurrentVersionNo", l: "File version", v: d.CurrentVersionNo ? `v${d.CurrentVersionNo}` : null, req: false },
+        { n: "ReviewStatus", l: "Review", v: d.ReviewStatus ?? null, req: false },
+        { n: "File", l: "File", v: d.FileName ?? null, req: true, ...(d.FileId ? { file: d.FileId } : {}) },
+      ] }));
+    }
+    const all = records.flatMap((r) => r.fields);
+    // An empty section still lists what it asks for, so the verifier sees what is not filled.
+    const template = records.length ? undefined : masters.map((m) => ({ title: MASTERS[m]?.title ?? m, fields: (MASTERS[m]?.fields || []).filter((fd) => !SKIP_FIELD(fd)).map((fd) => ({ l: fd.label, req: !!fd.required })) }));
+    out.push({ key, label, records, template, needed: NEEDED.has(key),
+      filled: all.filter((x) => x.v != null).length, total: all.length,
+      missingRequired: all.filter((x) => x.req && x.v == null).map((x) => x.l),
+      files: all.filter((x) => x.file).length,
+      checklist: key === "documents" ? (checklist?.items || []) : undefined });
+  }
+  return out;
+}
+const sectionHash = (sec) => hashOf(sec.records.map((r) => [r.master, r.id, r.fields.map((x) => [x.n, x.v, x.file ?? null])]));
+
+const hashOf = (x) => crypto.createHash("sha1").update(JSON.stringify(x ?? null)).digest("hex");
+const reviewReady = async (pool) => !!(await pool.request().query("SELECT OBJECT_ID('dbo.LegalLandReview', 'U') AS t")).recordset[0].t;
+
+/** The land's review as it stands: each step with what it holds now, what it held at the last version, and its tick. */
+async function reviewState(pool, landId) {
+  await healPlaceholders(pool, landId);
+  const st = await landState(pool, landId);
+  if (!st) return null;
+  const now = await entrySections(pool, landId);
+  const last = (await pool.request().input("L", sql.Int, landId).query(`
+    SELECT TOP 1 SnapshotJson FROM dbo.LegalLandRegisterSnapshot WHERE LandId = @L AND Remarks LIKE N'Version %' ORDER BY CreatedAt DESC, SnapshotId DESC`)).recordset[0];
+  const prev = last ? parse(last.SnapshotJson) : null;
+  const versionNo = (await pool.request().input("L", sql.Int, landId).query(
+    "SELECT COUNT(*) AS n FROM dbo.LegalLandRegisterSnapshot WHERE LandId = @L AND Remarks LIKE N'Version %'")).recordset[0].n + 1;
+  const open = (await pool.request().input("L", sql.Int, landId).query(`
+    SELECT TOP 1 r.*, s.name AS SubmittedByName, d.name AS DecidedByName, e.name AS EntrySubmittedByName FROM dbo.LegalLandReview r
+    LEFT JOIN dbo.users s ON s.id = r.SubmittedBy LEFT JOIN dbo.users d ON d.id = r.DecidedBy LEFT JOIN dbo.users e ON e.id = r.EntrySubmittedBy
+    WHERE r.LandId = @L AND r.Status IN (N'Verifying', N'Submitted') ORDER BY r.ReviewId DESC`)).recordset[0] || null;
+  const amendment = await safe(async () => (await pool.request().input("L", sql.Int, landId).query(`
+    SELECT TOP 1 AmendmentId, AmendmentNo, AmendType, Reason, Status FROM dbo.LegalLandAmendment
+    WHERE LandId = @L AND Status IN (N'Pending', N'Open') ORDER BY AmendmentId DESC`)).recordset[0] || null, null);
+  const lastReturn = open ? null : (await pool.request().input("L", sql.Int, landId).query(`
+    SELECT TOP 1 r.Remarks, r.DecidedAt, d.name AS DecidedByName FROM dbo.LegalLandReview r LEFT JOIN dbo.users d ON d.id = r.DecidedBy
+    WHERE r.LandId = @L AND r.Status = N'Returned' ORDER BY r.ReviewId DESC`)).recordset[0] || null;
+  const checks = open ? parse(open.ChecksJson) || {} : {};
+  const prevEntry = prev && Array.isArray(prev.entry) ? prev.entry : null;
+  const steps = now.map((sec) => {
+    const before = prevEntry ? prevEntry.find((p) => p.key === sec.key) || { records: [] } : null;
+    const hash = sectionHash(sec);
+    // A version saved before sections were kept has nothing to compare with: every step is checked again.
+    const changed = !prev || !before || sectionHash(before) !== hash;
+    const c = checks[sec.key];
+    return { ...sec, changed, previous: prev && before ? before.records : null, hash,
+      checked: !!c && c.hash === hash, checkedBy: c?.hash === hash ? c.by : null, checkedAt: c?.hash === hash ? c.at : null, staleTick: !!c && c.hash !== hash };
+  });
+  // When anything changed, every step is verified again (ticked) for the new version — changed ones are highlighted.
+  const anyChanged = steps.some((s) => s.changed);
+  const toCheck = anyChanged ? steps : [];
+  return { land: { LandId: st.land.LandId, LandCode: st.land.LandCode, LandName: st.land.LandName, WorkflowStatus: st.land.WorkflowStatus },
+    versionNo, first: !prev, steps, toCheck: toCheck.length, ticked: toCheck.filter((s) => s.checked).length,
+    // Draft = entries not yet sent for verification; Verifying = with the verifier; Submitted = with the Approver.
+    status: open?.Status === "Submitted" ? "Submitted" : open ? "Verifying" : anyChanged ? "Draft" : "Up to date",
+    review: open ? { ReviewId: open.ReviewId, Status: open.Status, SubmittedBy: open.SubmittedBy, SubmittedByName: open.SubmittedByName, SubmittedAt: open.SubmittedAt, Remarks: open.Remarks,
+      EntrySubmittedByName: open.EntrySubmittedByName, EntrySubmittedAt: open.EntrySubmittedAt, EntrySubmittedBy: open.EntrySubmittedBy } : null,
+    registered: st.land.WorkflowStatus === "Registered", amendment,
+    returned: lastReturn };
+}
+
+async function openReview(pool, landId, versionNo) {
+  const r = (await pool.request().input("L", sql.Int, landId).query(
+    "SELECT TOP 1 ReviewId, Status, ChecksJson FROM dbo.LegalLandReview WHERE LandId = @L AND Status IN (N'Verifying', N'Submitted') ORDER BY ReviewId DESC")).recordset[0];
+  return r || null;
+}
+
+// GET /land/:id/review — the review of the land's next version.
+router.get("/land/:id/review", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land" });
+  try {
+    const pool = getPool();
+    if (!(await reviewReady(pool))) return res.status(503).json({ error: "Land review is not set up yet (migration 701)" });
+    const out = await reviewState(pool, id);
+    if (!out) return res.status(404).json({ error: "Land not found" });
+    res.json({ ...out, canVerify: await canAct(req, "Verifier", PAGE), canApprove: await canAct(req, "Approver", PAGE), userId: userOf(req) });
+  } catch (err) {
+    console.error("[legal-flow] review:", err.message);
+    res.status(500).json({ error: "Could not load the review" });
+  }
+});
+
+// POST /land/:id/review/request { remarks } — data entry sends the land (its new or changed entries) for verification.
+router.post("/land/:id/review/request", requirePageRight(PAGE, "edit"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land" });
+  try {
+    const pool = getPool();
+    const st = await reviewState(pool, id);
+    if (!st) return res.status(404).json({ error: "Land not found" });
+    if (st.status === "Verifying" || st.status === "Submitted") return res.status(409).json({ error: "Already sent for verification" });
+    if (st.status === "Up to date") return res.status(409).json({ error: "Nothing new to verify — enter or change something first" });
+    if (st.registered && st.amendment?.Status !== "Open") return res.status(409).json({ error: "This land is registered — its changes need an approved amendment first" });
+    await pool.request().input("L", sql.Int, id).input("V", sql.Int, st.versionNo).input("U", sql.Int, userOf(req))
+      .input("A", sql.Int, st.amendment?.Status === "Open" ? st.amendment.AmendmentId : null).input("M", sql.NVarChar(1000), String(req.body?.remarks || "").trim().slice(0, 1000) || null)
+      .query(`INSERT INTO dbo.LegalLandReview (LandId, VersionNo, Status, ChecksJson, EntrySubmittedBy, EntrySubmittedAt, AmendmentId, Remarks)
+              VALUES (@L, @V, N'Verifying', N'{}', @U, SYSUTCDATETIME(), @A, @M)`);
+    await writeAudit(pool, req, { action: "Land review submitted", entityType: "Land Property", entityId: id, landId: id, remarks: `Sent for verification — version ${st.versionNo}` });
+    res.json({ message: `${st.land.LandCode}: sent for verification (version ${st.versionNo})` });
+  } catch (err) {
+    console.error("[legal-flow] review request:", err.message);
+    res.status(500).json({ error: "Could not send for verification" });
+  }
+});
+
+// POST /land/:id/review/return { remarks } — the verifier sends it back to data entry (something is wrong or missing).
+router.post("/land/:id/review/return", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  const remarks = String(req.body?.remarks || "").trim().slice(0, 1000);
+  if (!id) return res.status(400).json({ error: "Invalid land" });
+  if (!remarks) return res.status(400).json({ error: "Write what needs correcting" });
+  try {
+    const pool = getPool();
+    if (!(await canAct(req, "Verifier", PAGE))) return res.status(403).json({ error: "Only a Verifier can send it back" });
+    const st = await reviewState(pool, id);
+    if (!st || st.status !== "Verifying") return res.status(409).json({ error: "Not with the verifier" });
+    await pool.request().input("R", sql.Int, st.review.ReviewId).input("U", sql.Int, userOf(req)).input("M", sql.NVarChar(1000), remarks)
+      .query("UPDATE dbo.LegalLandReview SET Status = N'Returned', DecidedBy = @U, DecidedAt = SYSUTCDATETIME(), Remarks = @M WHERE ReviewId = @R");
+    await writeAudit(pool, req, { action: "Land review returned", entityType: "Land Property", entityId: id, landId: id, remarks });
+    res.json({ message: `${st.land.LandCode}: sent back to data entry` });
+  } catch (err) {
+    console.error("[legal-flow] review return:", err.message);
+    res.status(500).json({ error: "Could not send back" });
+  }
+});
+
+// PUT /land/:id/review/check { step, checked } — the verifier ticks or unticks one step.
+router.put("/land/:id/review/check", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  const key = String(req.body?.step || "");
+  if (!id || !ENTRY_SECTIONS.some(([k]) => k === key)) return res.status(400).json({ error: "Invalid step" });
+  try {
+    const pool = getPool();
+    if (!(await canAct(req, "Verifier", PAGE))) return res.status(403).json({ error: "Only a Verifier (Setup → Approval Control) can tick the steps" });
+    const st = await reviewState(pool, id);
+    if (!st) return res.status(404).json({ error: "Land not found" });
+    if (st.status !== "Verifying") return res.status(409).json({ error: st.status === "Submitted" ? "Already submitted — waiting for the Approver" : "Not sent for verification yet" });
+    const step = st.steps.find((s) => s.key === key);
+    if (!step) return res.status(400).json({ error: "This land has no such step" });
+    const r = await openReview(pool, id, st.versionNo);
+    const checks = parse(r.ChecksJson) || {};
+    if (req.body?.checked) checks[key] = { hash: step.hash, by: req.user?.name || req.user?.email || `User ${userOf(req)}`, at: new Date().toISOString() };
+    else delete checks[key];
+    await pool.request().input("R", sql.Int, r.ReviewId).input("J", sql.NVarChar(sql.MAX), JSON.stringify(checks))
+      .query("UPDATE dbo.LegalLandReview SET ChecksJson = @J WHERE ReviewId = @R");
+    res.json({ message: req.body?.checked ? `${step.label} verified` : `${step.label} unticked` });
+  } catch (err) {
+    console.error("[legal-flow] review check:", err.message);
+    res.status(500).json({ error: "Could not save" });
+  }
+});
+
+// POST /land/:id/review/submit — every step to check is ticked: send to the Approver.
+router.post("/land/:id/review/submit", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land" });
+  try {
+    const pool = getPool();
+    if (!(await canAct(req, "Verifier", PAGE))) return res.status(403).json({ error: "Only a Verifier can submit the review" });
+    const st = await reviewState(pool, id);
+    if (!st) return res.status(404).json({ error: "Land not found" });
+    if (st.status !== "Verifying") return res.status(409).json({ error: st.status === "Submitted" ? "Already submitted" : "Not sent for verification yet" });
+    const left = st.steps.filter((s) => !s.checked);
+    if (left.length) return res.status(409).json({ error: `Verify every step first: ${left.map((s) => s.label).join(", ")}` });
+    const r = await openReview(pool, id, st.versionNo);
+    await pool.request().input("R", sql.Int, r.ReviewId).input("U", sql.Int, userOf(req)).input("M", sql.NVarChar(1000), String(req.body?.remarks || "").trim().slice(0, 1000) || null)
+      .query("UPDATE dbo.LegalLandReview SET Status = N'Submitted', SubmittedBy = @U, SubmittedAt = SYSUTCDATETIME(), Remarks = @M WHERE ReviewId = @R");
+    await writeAudit(pool, req, { action: "Land review submitted", entityType: "Land Property", entityId: id, landId: id, remarks: `Version ${st.versionNo}` });
+    res.json({ message: `${st.land.LandCode}: version ${st.versionNo} sent for approval` });
+  } catch (err) {
+    console.error("[legal-flow] review submit:", err.message);
+    res.status(500).json({ error: "Could not submit" });
+  }
+});
+
+// POST /land/:id/review/decide { action: "Approve" | "Return", remarks } — the Approver. Approve saves the next version;
+// Return sends it back to the verifier with the reason. A land changed after submission cannot be approved.
+router.post("/land/:id/review/decide", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  const action = req.body?.action;
+  const remarks = String(req.body?.remarks || "").trim().slice(0, 1000);
+  if (!id || !["Approve", "Return"].includes(action)) return res.status(400).json({ error: "Invalid request" });
+  if (action === "Return" && !remarks) return res.status(400).json({ error: "Give the reason" });
+  try {
+    const pool = getPool();
+    if (!(await canAct(req, "Approver", PAGE))) return res.status(403).json({ error: "Only an Approver (Setup → Approval Control) can decide" });
+    const st = await reviewState(pool, id);
+    if (!st) return res.status(404).json({ error: "Land not found" });
+    if (st.status !== "Submitted") return res.status(409).json({ error: "Not submitted for approval" });
+    if (action === "Approve" && !isSuperAdmin(req) && Number(st.review.SubmittedBy) === Number(userOf(req)))
+      return res.status(409).json({ error: "You verified this review — another user must approve it" });
+    const stale = st.steps.filter((s) => !s.checked);
+    if (action === "Approve" && stale.length) {
+      await pool.request().input("R", sql.Int, st.review.ReviewId).query("UPDATE dbo.LegalLandReview SET Status = N'Verifying', SubmittedBy = NULL, SubmittedAt = NULL WHERE ReviewId = @R");
+      return res.status(409).json({ error: `Changed after it was verified (${stale.map((s) => s.label).join(", ")}) — back to the verifier` });
+    }
+    await pool.request().input("R", sql.Int, st.review.ReviewId).input("U", sql.Int, userOf(req)).input("M", sql.NVarChar(1000), remarks || null)
+      .input("S", sql.NVarChar(20), action === "Approve" ? "Approved" : "Returned")
+      .query("UPDATE dbo.LegalLandReview SET Status = @S, DecidedBy = @U, DecidedAt = SYSUTCDATETIME(), Remarks = COALESCE(@M, Remarks) WHERE ReviewId = @R");
+    if (action === "Approve") {
+      const flowAmend = st.registered && st.amendment?.Status === "Open" ? st.amendment : null;
+      const no = await snapshotVersion(pool, id, userOf(req), "Land review approved", flowAmend ? { no: flowAmend.AmendmentNo, type: flowAmend.AmendType, reason: flowAmend.Reason, remarks: remarks || null, changes: [] } : null);
+      if (flowAmend) await pool.request().input("A", sql.Int, flowAmend.AmendmentId).input("N", sql.Int, no)
+        .query("UPDATE dbo.LegalLandAmendment SET Status = N'Completed', VersionNo = @N WHERE AmendmentId = @A");
+      // The first approved version of a draft land sends it to Deed Process.
+      const IN_PIPE = ["Deed Process", "Deed Completed", "Deed Registration", "Registered"];
+      if (!IN_PIPE.includes(st.land.WorkflowStatus)) {
+        await pool.request().input("L", sql.Int, id).input("V", sql.Int, st.review.SubmittedBy).input("U", sql.Int, userOf(req)).query(`
+          UPDATE dbo.LegalLand SET VerificationStatus = N'Verified', WorkflowStatus = N'Deed Process', FinalVerifiedBy = @V, FinalVerifiedAt = SYSUTCDATETIME(),
+                 L1Status = N'Pending', L1ReviewerId = NULL, L1ReviewedAt = NULL, L1Remarks = NULL, L2Status = N'Pending', L2ApproverId = NULL, L2ApprovedAt = NULL, L2Remarks = NULL,
+                 UpdatedBy = @U, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @L`);
+        await writeAudit(pool, req, { action: "Land verified — sent to Deed Process", entityType: "Land Property", entityId: id, landId: id, remarks: `Version ${no}` });
+      }
+      // The approval is also the re-verification of changes made in Deed Process.
+      await pool.request().input("L", sql.Int, id).input("U", sql.Int, userOf(req)).query(`
+        IF COL_LENGTH('dbo.LegalLand', 'DeedChangedAt') IS NOT NULL
+          EXEC sp_executesql N'UPDATE dbo.LegalLand SET DeedChangedAt = NULL, DeedChangedBy = NULL, DeedReverifiedAt = SYSUTCDATETIME(), DeedReverifiedBy = @U WHERE LandId = @L AND DeedChangedAt IS NOT NULL', N'@L INT, @U INT', @L = @L, @U = @U;`);
+      await writeAudit(pool, req, { action: "Land review approved", entityType: "Land Property", entityId: id, landId: id, remarks: remarks || `Version ${no}` });
+      const moved = !IN_PIPE.includes(st.land.WorkflowStatus);
+      return res.json({ message: `${st.land.LandCode}: version ${no} approved${moved ? " — moved to Deed Process" : flowAmend ? ` — amendment ${flowAmend.AmendmentNo} done, land locked again` : ""}` });
+    }
+    await writeAudit(pool, req, { action: "Land review returned", entityType: "Land Property", entityId: id, landId: id, remarks });
+    res.json({ message: `${st.land.LandCode}: sent back to data entry` });
+  } catch (err) {
+    console.error("[legal-flow] review decide:", err.message);
+    res.status(500).json({ error: "Could not save" });
+  }
+});
+
+// GET /reviews?kind=verify|approve — "verify" = sent for verification by data entry; "approve" = verified, waiting for the Approver.
+router.get("/reviews", requirePageRight(PAGE, "view"), require("./paging").pageable("items"), async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await reviewReady(pool))) return res.json({ items: [] });
+    const approve = req.query.kind === "approve";
+    const r = await pool.request().query(approve ? `
+      SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, l.WorkflowStatus, m.MouzaName, r.VersionNo, r.SubmittedAt AS Since, u.name AS ByName
+      FROM dbo.LegalLandReview r JOIN dbo.LegalLand l ON l.LandId = r.LandId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      LEFT JOIN dbo.users u ON u.id = r.SubmittedBy
+      WHERE r.Status = N'Submitted' AND l.IsActive = 1 ORDER BY r.SubmittedAt` : `
+      SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, l.WorkflowStatus, m.MouzaName, r.VersionNo, r.EntrySubmittedAt AS Since, u.name AS ByName
+      FROM dbo.LegalLandReview r JOIN dbo.LegalLand l ON l.LandId = r.LandId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      LEFT JOIN dbo.users u ON u.id = r.EntrySubmittedBy
+      WHERE r.Status = N'Verifying' AND l.IsActive = 1
+      ORDER BY r.EntrySubmittedAt, r.ReviewId`);
+    res.json({ items: r.recordset, canVerify: await canAct(req, "Verifier", PAGE), canApprove: await canAct(req, "Approver", PAGE) });
+  } catch (err) {
+    console.error("[legal-flow] reviews:", err.message);
+    res.status(500).json({ error: "Could not load the reviews" });
+  }
+});
+
 module.exports = router;
 module.exports.snapshotVersion = snapshotVersion;
 module.exports.APPROVAL_ACTIONS = APPROVAL_ACTIONS;
+module.exports.reviewState = reviewState;

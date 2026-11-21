@@ -18,7 +18,7 @@ export interface AmendChange { section?: "land" | SectionKey; op?: "add" | "edit
 export type CurrentRows = Record<SectionKey, (Record<string, unknown> & { id: number | string })[]>;
 export interface Amendment {
   AmendmentId: number; LandId: number; LandCode: string; LandName: string; AmendmentNo: number; AmendType: string; Reason: string;
-  ReferenceNo: string | null; Status: "Pending" | "Approved" | "Rejected" | "Withdrawn"; changes: AmendChange[];
+  ReferenceNo: string | null; Status: "Pending" | "Approved" | "Open" | "Completed" | "Rejected" | "Withdrawn"; changes: AmendChange[];
   RequestedBy: number | null; RequestedByName: string | null; RequestedAt: string; DecidedByName: string | null; DecidedAt: string | null;
   DecisionRemarks: string | null; VersionNo: number | null;
 }
