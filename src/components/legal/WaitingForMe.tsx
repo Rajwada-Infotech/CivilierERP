@@ -21,7 +21,7 @@ export function WaitingForMe() {
   const can = (b?: boolean) => b !== false;
   const tiles: { label: string; n: number; to: string; mine: boolean; tone?: string }[] = [
     { label: "Land verification", n: cV1.total, to: "/legal/approvals?tab=landverify", mine: cV1.data?.canVerify !== false },
-    { label: "Versions · approve", n: cV2.total, to: "/legal/approvals?tab=versions", mine: cV2.data?.canApprove !== false },
+    { label: "Land approval", n: cV2.total, to: "/legal/approvals?tab=versions", mine: cV2.data?.canApprove !== false },
     { label: "Deed approval", n: cAp.total, to: "/legal/approvals?tab=approve", mine: can(cAp.data?.canApprove) },
     { label: "Amendments", n: cAm.total, to: "/legal/approvals?tab=amend", mine: !!cAm.data?.canApprove },
     { label: "Deed overdue", n: cLate.total, to: "/legal/land/deed-process", mine: true, tone: "red" },

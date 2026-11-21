@@ -13,7 +13,7 @@ export const legalNavItems: NavItem[] = [
   { label: "Dashboard", icon: Judge, path: "/legal", isDashboard: true, pageKey: "legal-dashboard" },
 
   // ── Company Land Records & Verification / Approvals ───────────────────────
-  { label: "Lands", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
+  { label: "Land Flowchart", icon: Layer, path: "/legal/versions", pageKey: "legal-land-master" },
   {
     label: "Pipeline", icon: Note1,
     children: [
@@ -27,7 +27,7 @@ export const legalNavItems: NavItem[] = [
     ],
   },
   { label: "Approvals", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
-  { label: "Land Flowchart", icon: Layer, path: "/legal/versions", pageKey: "legal-land-master" },
+  { label: "Lands", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
   {
     label: "Registers", icon: DocumentText,
     children: [

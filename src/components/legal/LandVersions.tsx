@@ -311,6 +311,184 @@ function overview(rows: EntryChange[]) {
   return [...by.entries()].map(([section, g]) => ({ section, text: [g.added ? `+${g.added} new` : "", g.removed ? `−${g.removed} removed` : "", g.fields ? `${g.fields} field${g.fields === 1 ? "" : "s"} edited` : ""].filter(Boolean).join(" · ") }));
 }
 
+/**
+ * History across versions as a comparison: one column per version (v1, v2, v3 …); each section is a row, its entries
+ * sub-rows and their fields sub-rows under them. A cell is the field's value in that version — amber where it changed
+ * from the version before, green where the entry came in, struck out where it was removed.
+ */
+function EntryHistory({ versions, onOpen }: { versions: FlowVersion[]; onOpen: (no: number) => void }) {
+  const [onlyChanges, setOnlyChanges] = useState(true);
+  const [closed, setClosed] = useState<Record<string, boolean>>({});
+  const vs = versions.filter((v) => v.snapshot?.entry);
+  if (!vs.length) return <p className="text-sm text-muted-foreground">No version of this land was saved section by section yet.</p>;
+  type Ent = { key: string; title: string; fields: { n: string; l: string }[] };
+  const sections: { key: string; label: string; entries: Ent[] }[] = [];
+  const val: Record<number, Record<string, Record<string, { v: string | null; file?: number }>>> = {};
+  for (const v of vs) {
+    val[v.no] = {};
+    for (const sec of v.snapshot!.entry!) {
+      let S = sections.find((x) => x.key === sec.key);
+      if (!S) { S = { key: sec.key, label: sec.label, entries: [] }; sections.push(S); }
+      for (const r of sec.records) {
+        const k = `${r.master}#${r.id}`;
+        let E = S.entries.find((x) => x.key === k);
+        if (!E) { E = { key: k, title: r.title, fields: [] }; S.entries.push(E); }
+        val[v.no][k] = {};
+        for (const f of r.fields as { n: string; l: string; v: string | null; file?: number }[]) {
+          if (!E.fields.some((x) => x.n === f.n)) E.fields.push({ n: f.n, l: f.l });
+          val[v.no][k][f.n] = { v: f.v ?? null, file: f.file };
+        }
+      }
+    }
+  }
+  const present = (no: number, k: string) => !!val[no]?.[k];
+  const cell = (no: number, k: string, n: string) => val[no]?.[k]?.[n];
+  const fieldChanged = (k: string, n: string) => vs.some((v, i) => i > 0 && (present(v.no, k) !== present(vs[i - 1].no, k) || (cell(v.no, k, n)?.v ?? null) !== (cell(vs[i - 1].no, k, n)?.v ?? null)));
+  const entryChanged = (E: Ent) => vs.some((v, i) => i > 0 && present(v.no, E.key) !== present(vs[i - 1].no, E.key)) || E.fields.some((f) => fieldChanged(E.key, f.n));
+  const cols = vs.length;
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <label className="flex items-center gap-1.5"><input type="checkbox" checked={onlyChanges} onChange={(e) => setOnlyChanges(e.target.checked)} /> Only what changed</label>
+        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 bg-emerald-500/30" /> came in</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 bg-amber-500/30" /> changed from the version before</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 bg-destructive/20" /> removed</span>
+        <span className="text-muted-foreground">“= same” — unchanged from the version before</span>
+      </div>
+      <div className="overflow-x-auto border border-border">
+        <table className="w-full min-w-max text-xs">
+          <thead className="bg-muted/60">
+            <tr className="text-left uppercase tracking-[0.06em] text-muted-foreground">
+              <th className="sticky left-0 z-10 bg-muted/90 px-2 py-2 font-semibold">Section / entry / field</th>
+              {vs.map((v) => (
+                <th key={v.no} className="px-2 py-2 font-semibold">
+                  <button onClick={() => onOpen(v.no)} className="border border-foreground/40 px-2 py-0.5 hover:bg-foreground hover:text-background">v{v.no}</button>
+                  <span className="ml-1 normal-case tracking-normal">{v.approvedAt ? fmt(v.approvedAt, "At") : "in progress"}</span>
+                  {(() => { const i = vs.indexOf(v); if (i === 0) return null;
+                    const same = sections.every((S) => S.entries.every((E) => present(v.no, E.key) === present(vs[i - 1].no, E.key) && E.fields.every((f) => (cell(v.no, E.key, f.n)?.v ?? null) === (cell(vs[i - 1].no, E.key, f.n)?.v ?? null))));
+                    return same ? <span className="ml-1 normal-case tracking-normal text-muted-foreground">· no change from v{vs[i - 1].no}</span> : null; })()}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sections.map((S) => {
+              const ents = onlyChanges ? S.entries.filter(entryChanged) : S.entries;
+              if (onlyChanges && !ents.length) return null;
+              const isClosed = closed[S.key];
+              return (
+                <React.Fragment key={S.key}>
+                  <tr className="border-t-2 border-foreground/60 bg-card">
+                    <td colSpan={cols + 1} className="sticky left-0 px-2 py-1.5">
+                      <button onClick={() => setClosed((c) => ({ ...c, [S.key]: !c[S.key] }))} className="text-sm font-semibold">{isClosed ? "▸" : "▾"} {S.label}</button>
+                      <span className="ml-2 text-muted-foreground">{ents.length} entr{ents.length === 1 ? "y" : "ies"}</span>
+                    </td>
+                  </tr>
+                  {!isClosed && ents.map((E) => {
+                    const flds = onlyChanges ? E.fields.filter((f) => fieldChanged(E.key, f.n)) : E.fields;
+                    return (
+                      <React.Fragment key={E.key}>
+                        <tr className="border-t border-border bg-muted/30">
+                          <td className="sticky left-0 bg-muted/60 py-1 pl-5 pr-2 font-semibold">{E.title}</td>
+                          {vs.map((v, i) => {
+                            const p = present(v.no, E.key), was = i > 0 && present(vs[i - 1].no, E.key);
+                            return <td key={v.no} className={`px-2 py-1 text-[0.6875rem] font-semibold ${p && i > 0 && !was ? "bg-emerald-500/20 text-emerald-800 dark:text-emerald-300" : !p && was ? "bg-destructive/15 text-destructive" : "text-muted-foreground"}`}>
+                              {p ? (i > 0 && !was ? "Added" : i === 0 ? "Present" : "") : was ? "Removed" : "—"}
+                            </td>;
+                          })}
+                        </tr>
+                        {flds.map((f) => (
+                          <tr key={f.n} className="border-t border-border/50">
+                            <td className="sticky left-0 bg-card py-1 pl-9 pr-2 text-muted-foreground">{f.l}</td>
+                            {vs.map((v, i) => {
+                              const c = cell(v.no, E.key, f.n), p = present(v.no, E.key);
+                              const prev = i > 0 ? cell(vs[i - 1].no, E.key, f.n) : undefined, prevP = i > 0 && present(vs[i - 1].no, E.key);
+                              const tone = !p ? (prevP ? "bg-destructive/10 text-destructive line-through" : "") : i > 0 && !prevP ? "bg-emerald-500/15" : i > 0 && (prev?.v ?? null) !== (c?.v ?? null) ? "bg-amber-500/20 font-semibold" : "";
+                              return (
+                                <td key={v.no} className={`max-w-[16rem] px-2 py-1 align-top ${tone}`}>
+                                  {!p ? (prevP ? (prev?.v ?? "—") : "")
+                                    // Same as the version before: say so instead of repeating the value, so only real changes stand out.
+                                    : i > 0 && prevP && (prev?.v ?? null) === (c?.v ?? null) ? <span className="text-muted-foreground/70">= same</span>
+                                    : c?.file ? <LegalFileLink id={c.file} name={c.v ?? "File"} /> : c?.v ?? <span className="italic text-muted-foreground">empty</span>}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {onlyChanges && sections.every((S) => !S.entries.some(entryChanged)) && <p className="text-sm text-muted-foreground">Nothing changed between the versions — untick “Only what changed” to see every field.</p>}
+    </div>
+  );
+}
+
+/** One version's sections as tiles: verified by the verifier (green tick), and how complete (blue = every field filled,
+ *  amber = some fields empty, grey = nothing entered). */
+function SectionTiles({ v }: { v: FlowVersion; onOpen?: () => void }) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const entry = v.snapshot?.entry;
+  if (!entry) return null;
+  const openSec = entry.find((x) => x.key === openKey);
+  const ticked = new Set(v.verifiedSections ?? []);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.6875rem] text-muted-foreground">
+        <span><b className="text-emerald-700">✓ Verified</b> by the verifier{v.verifiedBy ? ` (${v.verifiedBy})` : ""} — fields: <b className="text-emerald-700">✓</b> correct · <b className="text-destructive">✗</b> wrong · <b>N/A</b> not needed</span>
+        <span><span className="mr-1 inline-block h-2.5 w-2.5 bg-sky-500 align-middle" />All fields filled</span>
+        <span><span className="mr-1 inline-block h-2.5 w-2.5 bg-amber-500 align-middle" />Some fields empty</span>
+        <span><span className="mr-1 inline-block h-2.5 w-2.5 bg-muted-foreground/40 align-middle" />Nothing entered</span>
+      </div>
+      <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+        {entry.map((sec) => {
+          const fields = sec.records.flatMap((r) => r.fields);
+          const filled = fields.filter((f) => f.v != null && f.v !== "").length;
+          const tone = !sec.records.length ? "border-border bg-muted/30 text-muted-foreground" : filled === fields.length ? "border-sky-500 bg-sky-500/10" : "border-amber-500 bg-amber-500/10";
+          const ok = ticked.has(sec.key);
+          const ds = sec.records.flatMap((r) => r.fields.map((f) => v.fieldDecisions?.[`${r.master}#${r.id}#${f.n}`]));
+          const bad = ds.filter((d) => d === "bad").length, good = ds.filter((d) => d === "ok").length, na = ds.filter((d) => d === "na").length;
+          return (
+            <li key={sec.key}>
+              <button onClick={() => setOpenKey(openKey === sec.key ? null : sec.key)} aria-expanded={openKey === sec.key}
+                className={`${openKey === sec.key ? "ring-2 ring-foreground " : ""}flex w-full items-start justify-between gap-2 border-l-4 border px-2.5 py-1.5 text-left text-xs ${tone}`}>
+                <span className="min-w-0">
+                  <span className="block font-semibold">{sec.label}</span>
+                  <span className="block opacity-80">{sec.records.length ? `${sec.records.length} entr${sec.records.length === 1 ? "y" : "ies"} · ${filled}/${fields.length} fields` : "Nothing entered"}</span>
+                  {(good + bad + na) > 0 && <span className="mt-0.5 block font-semibold"><span className="text-emerald-700">✓ {good}</span> · <span className={bad ? "text-destructive" : "text-muted-foreground"}>✗ {bad}</span> · <span className="text-muted-foreground">N/A {na}</span></span>}
+                </span>
+                <span className="flex shrink-0 flex-col items-end gap-0.5">
+                  {sec.records.length > 0 && filled === fields.length && <span className="font-bold text-sky-700 dark:text-sky-300">✓ Complete</span>}
+                  {ok ? <span className={`px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase text-white ${bad ? "bg-destructive" : "bg-emerald-600"}`}>{bad ? `✗ ${bad} wrong` : "✓ Verified"}</span>
+                    : sec.key !== "registration" && <span className="text-[0.625rem] uppercase text-muted-foreground">Not verified</span>}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {openSec && (
+        <div className="border-2 border-foreground bg-card">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <b className="text-sm">{openSec.label} — version {v.no}</b>
+            <button onClick={() => setOpenKey(null)} className="text-xs underline">Close</button>
+          </div>
+          <div className="space-y-2 p-3">
+            {openSec.records.length
+              ? openSec.records.map((r) => <RecordCard key={`${r.master}-${r.id}`} r={r as EntryRecord} diff={false} decisions={v.fieldDecisions} />)
+              : <p className="text-sm text-muted-foreground">Nothing entered in this section.</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Every section of one version, field by field (as saved at its approval; now, for the open version). */
 function VersionDetails({ v }: { v: FlowVersion }) {
   const entry = v.snapshot?.entry;
@@ -323,7 +501,7 @@ function VersionDetails({ v }: { v: FlowVersion }) {
             <span>{sec.label}</span><span className="normal-case tracking-normal">{sec.records.length} entr{sec.records.length === 1 ? "y" : "ies"}</span>
           </p>
           {sec.records.length
-            ? <div className="space-y-2">{sec.records.map((r) => <RecordCard key={`${r.master}-${r.id}`} r={r as EntryRecord} diff={false} />)}</div>
+            ? <div className="space-y-2">{sec.records.map((r) => <RecordCard key={`${r.master}-${r.id}`} r={r as EntryRecord} diff={false} decisions={v.fieldDecisions} />)}</div>
             : <p className="border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">Nothing entered.</p>}
         </div>
       ))}
@@ -356,16 +534,23 @@ export function Versions({ versions, landId, code, stages }: { versions: FlowVer
     </button>
   );
   const open = (no: number, t: typeof tab = "changes") => { setSel(sel === no && t === tab ? null : no); setTab(t); };
+  const [view, setView] = useState<"versions" | "history">("versions");
 
   return (
     <div className="space-y-4">
       <p className="border-l-4 border-foreground bg-muted/40 px-3 py-2 text-sm">
-        <b>How a version is made:</b> enter the land's details → click <b>Submit for verification</b> → a <b>Verifier</b> ticks every section in <b>Approvals → Land verification</b> →
-        an <b>Approver</b> approves it in <b>Approvals</b> → it is saved as the next version. Click a version to see everything in it.
+        <b>How a version is made:</b> enter the land's details → click <b>Submit for verification</b> → a <b>Verifier</b> marks every field ✓ / ✗ / N/A in <b>Approvals → Land verification</b> and verifies with remarks → saved as the next version (a new land then goes to the <b>Approver</b> for Deed Process).
+        Click a version to see everything in it.
       </p>
 
+      <div className="flex gap-1 border-b border-border" role="tablist">
+        <button className={tabCls(view === "versions")} onClick={() => setView("versions")}>Versions ({versions.length})</button>
+        <button className={tabCls(view === "history")} onClick={() => setView("history")}>History — entries &amp; files by version</button>
+      </div>
+      {view === "history" && <EntryHistory versions={versions} onOpen={(no) => { setView("versions"); setSel(no); setTab("details"); }} />}
+
       {/* Version 1 → Version 2 → …, each with an overview of what changed. */}
-      <ol className="flex gap-2 overflow-x-auto pb-1">
+      {view === "versions" && <ol className="flex gap-2 overflow-x-auto pb-1">
         {versions.map((x, i) => {
           const ok = !!x.approvedAt, on = x.no === sel;
           const ch = changesOf(x);
@@ -396,10 +581,10 @@ export function Versions({ versions, landId, code, stages }: { versions: FlowVer
             </React.Fragment>
           );
         })}
-      </ol>
+      </ol>}
 
       {/* The opened version: everything in it. */}
-      {v && (
+      {view === "versions" && v && (
         <div className="border-2 border-foreground bg-card">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-3">
             <b className="text-lg">Version {v.no}</b>
@@ -434,12 +619,10 @@ export function Versions({ versions, landId, code, stages }: { versions: FlowVer
             {tab === "changes" && !v.amendment && (v.no === 1 ? (
               <div className="space-y-2 text-sm">
                 <p>The <b>first version</b>: everything entered from the enquiry up to its first verification.</p>
-                {v.snapshot?.entry && <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3">{v.snapshot.entry.map((sec) => (
-                  <li key={sec.key} className="flex justify-between border border-border px-2 py-1 text-xs"><span>{sec.label}</span><b className={sec.records.length ? "" : "text-muted-foreground"}>{sec.records.length ? `${sec.records.length} entr${sec.records.length === 1 ? "y" : "ies"}` : "—"}</b></li>
-                ))}</ul>}
+                <SectionTiles v={v} onOpen={() => setTab("details")} />
                 <button onClick={() => setTab("details")} className="text-xs underline">See all details →</button>
               </div>
-            ) : (() => { const e = entryChanges(prev?.snapshot, v.snapshot); return e ? <EntryDiff rows={e} /> : prev?.snapshot && v.snapshot ? <VersionDiff prev={prev.snapshot} cur={v.snapshot} /> : <p className="text-sm text-muted-foreground">No saved record to compare with.</p>; })())}
+            ) : (() => { const e = entryChanges(prev?.snapshot, v.snapshot); return e ? <div className="space-y-4"><SectionTiles v={v} onOpen={() => setTab("details")} /><EntryDiff rows={e} /></div> : prev?.snapshot && v.snapshot ? <VersionDiff prev={prev.snapshot} cur={v.snapshot} /> : <p className="text-sm text-muted-foreground">No saved record to compare with.</p>; })())}
             {tab === "details" && <VersionDetails v={v} />}
             {tab === "docs" && <VersionDocuments v={v} />}
             {tab === "open" && <VersionIncomplete items={openOf(v)} />}
@@ -527,8 +710,8 @@ export function NextVersionCard({ landId }: { landId: number }) {
   const changed = data.steps.filter((s) => s.changed);
   const lockedReg = data.registered && data.amendment?.Status !== "Open";
   const tone = data.status === "Up to date" ? "border-emerald-600/60 bg-emerald-500/5" : data.status === "Draft" ? "border-foreground bg-card" : "border-sky-600 bg-sky-500/5";
-  const STEP = ["Data entry", "Land verification", "Version approval"];
-  const at = data.status === "Draft" ? 0 : data.status === "Verifying" ? 1 : data.status === "Submitted" ? 2 : 3;
+  const STEP = data.awaitingApproval || (!data.registered && data.status !== "Up to date") ? ["Data entry", "Verification → version", "Approval → Deed Process"] : ["Data entry", "Verification → version"];
+  const at = data.status === "Draft" ? 0 : data.status === "Verifying" ? 1 : data.awaitingApproval ? 2 : STEP.length;
   return (
     <div className={`border-2 px-4 py-3 ${tone}`}>
       <div className="flex flex-wrap items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-[0.1em]">
@@ -543,13 +726,28 @@ export function NextVersionCard({ landId }: { landId: number }) {
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="font-semibold">
-            {data.status === "Up to date" ? `Up to date — version ${data.versionNo - 1} is current.${lockedReg ? " Registered and locked." : " New entries or edits will start the next version."}`
+            {data.awaitingApproval ? `Verified — version ${data.versionNo - 1} saved${data.lastVerifiedByName ? ` by ${data.lastVerifiedByName}` : ""}. Waiting for the Approver to send it to Deed Process.`
+              : data.status === "Up to date" ? `Up to date — version ${data.versionNo - 1} is current.${lockedReg ? " Registered and locked." : " New entries or edits will start the next version."}`
               : data.status === "Draft" ? (lockedReg ? "Registered — locked. Request an amendment to change it." : `${changed.length} section${changed.length === 1 ? "" : "s"} entered or changed — not sent for verification yet`)
               : data.status === "Verifying" ? `With the verifier — sent by ${data.review?.EntrySubmittedByName ?? "data entry"}${data.review?.EntrySubmittedAt ? ` on ${fmt(data.review.EntrySubmittedAt, "At")}` : ""}`
               : `Verified by ${data.review?.SubmittedByName ?? "the verifier"} — waiting for the Approver`}
           </p>
           {data.status !== "Up to date" && !lockedReg && <p className="mt-0.5 text-xs text-muted-foreground">{changed.map((s) => s.label).join(" · ")}</p>}
           {data.returned && data.status === "Draft" && <p className="mt-1 text-sm text-destructive">Sent back by {data.returned.DecidedByName ?? "the verifier"}: <b>{data.returned.Remarks}</b> — correct it and submit again.</p>}
+          {data.status === "Draft" && (data.toFix?.length ?? 0) > 0 && (
+            <div className="mt-2 border border-destructive/50 bg-destructive/5 p-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-destructive">Fields marked ✗ by the verifier — {data.toFix!.filter((x) => !x.fixed).length} to correct</p>
+              <ul className="mt-1 space-y-0.5 text-sm">
+                {data.toFix!.map((x) => (
+                  <li key={x.key} className={x.fixed ? "text-emerald-700 dark:text-emerald-400" : ""}>
+                    <b className={x.fixed ? "" : "text-destructive"}>{x.fixed ? "✓" : "✗"}</b> {x.section} › {x.entry} › <b>{x.field}</b>
+                    <span className="text-muted-foreground"> — was “{x.was ?? "empty"}”{x.fixed ? `, now “${x.now ?? "empty"}”` : ""}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-xs text-muted-foreground">They are outlined in red in their sections below. Correct them (Edit on the section), then Submit for verification.</p>
+            </div>
+          )}
           {data.amendment?.Status === "Open" && <p className="mt-1 text-xs text-indigo-700 dark:text-indigo-300">Amendment {data.amendment.AmendmentNo} open — the version you submit now is the amendment.</p>}
         </div>
         {data.status === "Draft" && !lockedReg && (

@@ -23,7 +23,7 @@ import { getPendingAmendments } from "@/api/legalAmendmentApi";
 type Tab = "verify" | "landverify" | "versions" | "reverify" | "approve" | "amend";
 const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: "landverify", label: "Land verification", hint: "Lands sent by data entry — open, check every section, tick it, then submit for approval (or send back to correct)" },
-  { key: "versions", label: "Versions", hint: "Verified lands — approve to save the next version. A new land's first approved version moves it to Deed Process" },
+  { key: "versions", label: "Land approval", hint: "Fully verified new lands (version saved) — approve to send to Deed Process, or send back" },
   { key: "approve", label: "Deed approval", hint: "Deed Process done and sent for final approval — approve to move the land to Deed Registration" },
   { key: "amend", label: "Amendments", hint: "Registered lands that need a change — approve to open the land for editing; the edits then come back through Land verification" },
 ];
