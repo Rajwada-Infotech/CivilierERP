@@ -19,7 +19,7 @@ export const legalNavItems: NavItem[] = [
     children: [
       { label: "1 · Enquiries", path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
       { label: "2 · Deed search", path: "/legal/land/deed-search", pageKey: "legal-land-enquiry" },
-      { label: "3 · Land verification", path: "/legal/approvals?tab=landverify", pageKey: "legal-approvals" },
+      { label: "3 · Land conversion", path: "/legal/land/properties?filter=verification", pageKey: "legal-land-master" },
       { label: "4 · Deed Process", path: "/legal/land/deed-process", pageKey: "legal-land-master" },
       { label: "5 · LA & ULC", path: "/legal/land/la-ulc", pageKey: "legal-land-master" },
       { label: "6 · Deed Registration", path: "/legal/deed-registration", pageKey: "legal-approvals" },

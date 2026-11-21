@@ -45,16 +45,16 @@ export default function LandEnquiryPage() {
   const inScope = (r: LegalRow) => (scope === "all" ? true : orphans ? r.ProjectId == null || r.ProjectId === "" : Number(r.ProjectId) === projectId);
   const rows = allRows.filter((r) => inScope(r) && isActive(r));
   const FILTERS: [string, string, (r: LegalRow) => boolean, string][] = [
-    ["all", "All", () => true, "border-border"],
+    ["all", "All open", (r) => !r.LandId, "border-border"],
     ["search", "Deed search pending", (r) => !r.LandId && Number(r.OfficesPending) > 0, "border-amber-500"],
     ["overdue", "Search overdue", (r) => !r.LandId && Number(r.OfficesOverdue) > 0, "border-destructive"],
     ["ready", "Ready to convert", (r) => !r.LandId && Number(r.OfficesPending) === 0 && !["Rejected", "On Hold"].includes(String(r.EnquiryStatus)), "border-emerald-600"],
-    ["New", "New", (r) => r.EnquiryStatus === "New", "border-zinc-300"],
-    ["Under Review", "Under review", (r) => r.EnquiryStatus === "Under Review", "border-sky-500"],
-    ["Interested", "Interested", (r) => r.EnquiryStatus === "Interested", "border-emerald-500"],
-    ["On Hold", "On hold", (r) => r.EnquiryStatus === "On Hold", "border-amber-500"],
-    ["Rejected", "Rejected", (r) => r.EnquiryStatus === "Rejected", "border-rose-500"],
-    ["converted", "Converted", (r) => !!r.LandId, "border-[#7c4a2e]"],
+    ["New", "New", (r) => !r.LandId && r.EnquiryStatus === "New", "border-zinc-300"],
+    ["Under Review", "Under review", (r) => !r.LandId && r.EnquiryStatus === "Under Review", "border-sky-500"],
+    ["Interested", "Interested", (r) => !r.LandId && r.EnquiryStatus === "Interested", "border-emerald-500"],
+    ["On Hold", "On hold", (r) => !r.LandId && r.EnquiryStatus === "On Hold", "border-amber-500"],
+    ["Rejected", "Rejected", (r) => !r.LandId && r.EnquiryStatus === "Rejected", "border-rose-500"],
+    // Converted enquiries are lands now: Pipeline · Land conversion.
   ];
   const active = FILTERS.find((f) => f[0] === filter) ?? FILTERS[0];
 
@@ -134,7 +134,7 @@ export default function LandEnquiryPage() {
           // ?edit=<id> (from Lands → Find a land) opens that enquiry.
           requestEditId={openEnquiry}
           // Only this project's enquiries; a new enquiry is raised under it.
-          serverFilter={active[0] === "all" ? undefined : active[0]}
+          serverFilter={active[0] === "all" ? "open" : active[0]}
           projectScoped
           // Without a project: no new enquiry here, and editing one asks for its project.
           // One project: a new enquiry is raised under it. All projects: the form asks for the project.

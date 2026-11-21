@@ -435,8 +435,10 @@ const NAMED_FILTERS = {
     search: "b.LandId IS NULL AND ISNULL(b.OfficesPending, 0) > 0",
     overdue: "b.LandId IS NULL AND ISNULL(b.OfficesOverdue, 0) > 0",
     ready: "b.LandId IS NULL AND ISNULL(b.OfficesPending, 0) = 0 AND ISNULL(b.EnquiryStatus, N'') NOT IN (N'Rejected', N'On Hold')",
-    New: "b.EnquiryStatus = N'New'", "Under Review": "b.EnquiryStatus = N'Under Review'", Interested: "b.EnquiryStatus = N'Interested'",
-    "On Hold": "b.EnquiryStatus = N'On Hold'", Rejected: "b.EnquiryStatus = N'Rejected'", converted: "b.LandId IS NOT NULL",
+    // The Enquiries page lists only enquiries not yet converted; a converted one is its land now (Pipeline · Land conversion).
+    open: "b.LandId IS NULL",
+    New: "b.LandId IS NULL AND b.EnquiryStatus = N'New'", "Under Review": "b.LandId IS NULL AND b.EnquiryStatus = N'Under Review'", Interested: "b.LandId IS NULL AND b.EnquiryStatus = N'Interested'",
+    "On Hold": "b.LandId IS NULL AND b.EnquiryStatus = N'On Hold'", Rejected: "b.LandId IS NULL AND b.EnquiryStatus = N'Rejected'", converted: "b.LandId IS NOT NULL",
   },
 };
 const hasCol = (cfg, name) => cfg.fields.some((f) => f.name === name) || (cfg.table === "LegalLand" && name === "ProjectId");
