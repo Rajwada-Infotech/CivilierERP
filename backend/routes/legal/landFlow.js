@@ -338,6 +338,13 @@ function versionFlow(v, i, st) {
       { label: "Approved", state: v.approvedAt ? "done" : "pending", date: v.approvedAt },
     ];
   }
+  if (/^Deed registered/.test(v.approval || "")) {
+    return [
+      { label: "Deed approved", state: "done", date: st.land.L2ApprovedAt || null },
+      { label: "Applied for registration", state: "done", date: st.land.RegAppliedAt || null },
+      { label: "Registered", state: "done", date: v.approvedAt },
+    ];
+  }
   if (v.afterRegistration) {
     return [
       { label: "Registered land", state: "done", date: st.land.RegCompletedAt || null },
@@ -500,7 +507,89 @@ async function entrySections(pool, landId) {
       files: all.filter((x) => x.file).length,
       checklist: key === "documents" ? (checklist?.items || []) : undefined });
   }
+  const reg = await registrationSection(pool, landId);
+  if (reg) out.push(reg);
   return out;
+}
+
+/**
+ * The deed registration of a land (Deed Registration page), shown in its versions once it is in registration:
+ * consideration, payment schedule, payments made, registration & stamp duty, and the registration itself.
+ */
+async function registrationSection(pool, landId) {
+  const r = await safe(async () => (await pool.request().input("L", sql.Int, landId).query(`
+    SELECT l.LandId, l.WorkflowStatus, l.RegAppliedAt, ua.name AS RegAppliedByName, l.RegFinalDate, o.OfficeName, mv.Name AS RegMode, l.RegDeedNo,
+           l.RegDeedFileId, f.FileName AS RegDeedFileName, l.RegCompletedAt, uc.name AS RegCompletedByName,
+           l.ConsDate, l.ConsTotalAmount, l.ConsRate, ru.UnitName AS ConsRateUnit, l.ConsAdvanceAmount, pm.Name AS ConsPaymentMode, l.ConsRemarks
+    FROM dbo.LegalLand l LEFT JOIN dbo.users ua ON ua.id = l.RegAppliedBy LEFT JOIN dbo.users uc ON uc.id = l.RegCompletedBy
+    LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = l.RegOfficeId LEFT JOIN dbo.LegalLookupValue mv ON mv.LookupId = l.RegModeId
+    LEFT JOIN dbo.LegalLookupValue pm ON pm.LookupId = l.ConsPaymentModeId LEFT JOIN dbo.LegalAreaUnit ru ON ru.AreaUnitId = l.ConsRateUnitId
+    LEFT JOIN dbo.LegalMasterFile f ON f.FileId = l.RegDeedFileId WHERE l.LandId = @L`)).recordset[0], null);
+  if (!r || !(r.RegAppliedAt || r.RegCompletedAt || r.ConsTotalAmount != null || ["Deed Registration", "Registered"].includes(r.WorkflowStatus))) return null;
+  const q = (text) => safe(async () => (await pool.request().input("L", sql.Int, landId).query(text)).recordset, []);
+  const d = (x) => (x ? new Date(x).toISOString().slice(0, 10) : null);
+  const n = (x) => (x == null ? null : String(Number(x)));
+  const F = (name, label, v, req = false, file) => ({ n: name, l: label, v: v ?? null, req, ...(file ? { file } : {}) });
+  const records = [];
+
+  // 1. Consideration
+  records.push({ master: "reg-consideration", title: "Consideration", id: r.LandId, fields: [
+    F("ConsDate", "Agreement / consideration date", d(r.ConsDate), true), F("ConsTotalAmount", "Total consideration (₹)", n(r.ConsTotalAmount), true),
+    F("ConsRate", "Rate (₹)", r.ConsRate != null ? `${n(r.ConsRate)}${r.ConsRateUnit ? ` per ${r.ConsRateUnit}` : ""}` : null),
+    F("ConsAdvanceAmount", "Advance (₹)", n(r.ConsAdvanceAmount)), F("ConsPaymentMode", "Payment mode", r.ConsPaymentMode), F("ConsRemarks", "Remarks", r.ConsRemarks),
+  ] });
+
+  // 2. Payment schedule (instalments) and 3. payments made, with paid / balance.
+  const sched = await q(`SELECT s.ScheduleId, s.Label, s.DueDate, s.Amount, s.SharePct, t.Name AS TxnType, s.Remarks
+    FROM dbo.LegalPaymentSchedule s LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = s.TxnTypeId WHERE s.LandId = @L ORDER BY s.DueDate, s.ScheduleId`);
+  sched.forEach((x, i) => records.push({ master: "reg-schedule", title: `Instalment ${i + 1}`, id: x.ScheduleId, fields: [
+    F("Label", "Instalment", x.Label), F("DueDate", "Due date", d(x.DueDate), true), F("Amount", "Amount (₹)", n(x.Amount), true),
+    F("SharePct", "Share %", n(x.SharePct)), F("TxnType", "Type", x.TxnType), F("Remarks", "Remarks", x.Remarks),
+  ] }));
+  const pays = await q(`SELECT p.PaymentId, p.PaymentDate, t.Name AS TxnType, p.Amount, m.Name AS Mode, p.Payer, p.Payee, p.TransactionRef, p.ReceiptNo,
+      p.ReceiptFileId, f.FileName AS ReceiptName, p.VerificationStatus
+    FROM dbo.LegalPayment p LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = p.TxnTypeId LEFT JOIN dbo.LegalLookupValue m ON m.LookupId = p.PaymentModeId
+    LEFT JOIN dbo.LegalMasterFile f ON f.FileId = p.ReceiptFileId WHERE p.LandId = @L AND p.IsActive = 1 ORDER BY p.PaymentDate, p.PaymentId`);
+  pays.forEach((x) => records.push({ master: "reg-payment", title: `Payment · ${x.TxnType ?? ""}`.trim(), id: x.PaymentId, fields: [
+    F("PaymentDate", "Date", d(x.PaymentDate), true), F("TxnType", "Type", x.TxnType, true), F("Amount", "Amount (₹)", n(x.Amount), true), F("Mode", "Mode", x.Mode),
+    F("Payer", "Paid by", x.Payer), F("Payee", "Paid to", x.Payee), F("TransactionRef", "Transaction ref.", x.TransactionRef), F("ReceiptNo", "Receipt no.", x.ReceiptNo),
+    F("Receipt", "Receipt", x.ReceiptName, false, x.ReceiptFileId), F("VerificationStatus", "Verified", x.VerificationStatus),
+  ] }));
+  const paid = pays.reduce((s2, x) => s2 + (x.TxnType === "Refund" ? -Number(x.Amount || 0) : ["Sale Receipt", "Expense"].includes(x.TxnType) ? 0 : Number(x.Amount || 0)), 0);
+  records.push({ master: "reg-paid", title: "Paid so far", id: r.LandId, fields: [
+    F("Total", "Total consideration (₹)", n(r.ConsTotalAmount)), F("Paid", "Paid (₹)", n(paid)),
+    F("Balance", "Balance (₹)", r.ConsTotalAmount != null ? n(Number(r.ConsTotalAmount) - paid) : null), F("Instalments", "Instalments / payments", `${sched.length} / ${pays.length}`),
+  ] });
+
+  // 4. Registration & stamp duty: calculation (if any) and the fee / duty entries.
+  const duty = await q(`SELECT CalculationId, CalculationDate, GovtMarketValue, ConsiderationValue, StampDuty, RegistrationFee, ScanningFee, OtherCharges, TotalPayable, CalculationSource
+    FROM dbo.LegalStampDuty WHERE LandId = @L AND IsActive = 1 ORDER BY CalculationDate`);
+  duty.forEach((x) => records.push({ master: "reg-duty", title: "Stamp duty calculation", id: x.CalculationId, fields: [
+    F("CalculationDate", "Calculated on", d(x.CalculationDate)), F("GovtMarketValue", "Govt. market value (₹)", n(x.GovtMarketValue)), F("ConsiderationValue", "Consideration value (₹)", n(x.ConsiderationValue)),
+    F("StampDuty", "Stamp duty (₹)", n(x.StampDuty)), F("RegistrationFee", "Registration fee (₹)", n(x.RegistrationFee)), F("ScanningFee", "Scanning fee (₹)", n(x.ScanningFee)),
+    F("OtherCharges", "Other charges (₹)", n(x.OtherCharges)), F("TotalPayable", "Total payable (₹)", n(x.TotalPayable)), F("CalculationSource", "Source", x.CalculationSource),
+  ] }));
+  const fees = await q(`SELECT x.QueryId, x.QueryDate, t.Name AS FeeType, x.Amount, x.Remarks FROM dbo.LegalStampDutyQuery x
+    LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = x.FeeTypeId WHERE x.LandId = @L ORDER BY x.QueryDate, x.QueryId`);
+  fees.forEach((x) => records.push({ master: "reg-fee", title: `Registration & stamp duty · ${x.FeeType ?? "fee"}`, id: x.QueryId, fields: [
+    F("QueryDate", "Date", d(x.QueryDate), true), F("FeeType", "Fee / duty", x.FeeType, true), F("Amount", "Amount (₹)", n(x.Amount), true), F("Remarks", "Remarks", x.Remarks),
+  ] }));
+  if (fees.length) records.push({ master: "reg-fee-total", title: "Registration & stamp duty — total", id: r.LandId, fields: [
+    F("Total", "Total (₹)", n(fees.reduce((s2, x) => s2 + Number(x.Amount || 0), 0))), F("Entries", "Entries", String(fees.length)),
+  ] });
+
+  // 5. The registration itself.
+  records.push({ master: "registration", title: r.RegCompletedAt ? "Deed registered" : "Deed registration (in progress)", id: r.LandId, fields: [
+    F("RegAppliedAt", "Applied for registration", d(r.RegAppliedAt), true), F("RegAppliedBy", "Applied by", r.RegAppliedByName),
+    F("RegFinalDate", "Registration date", d(r.RegFinalDate), true), F("RegOffice", "Registration office", r.OfficeName, true), F("RegMode", "Registration mode", r.RegMode, true),
+    F("RegDeedNo", "Registered deed number", r.RegDeedNo, true), F("RegDeedFile", "Registered deed copy", r.RegDeedFileName, true, r.RegDeedFileId),
+    F("RegCompletedAt", "Registered on", d(r.RegCompletedAt)), F("RegCompletedBy", "Registered by", r.RegCompletedByName),
+  ] });
+
+  const all = records.flatMap((x) => x.fields);
+  return { key: "registration", label: "Consideration, Payments & Deed Registration", records, needed: false, readOnly: true,
+    filled: all.filter((x) => x.v != null).length, total: all.length,
+    missingRequired: r.RegCompletedAt ? all.filter((x) => x.req && x.v == null).map((x) => x.l) : [], files: all.filter((x) => x.file).length };
 }
 const sectionHash = (sec) => hashOf(sec.records.map((r) => [r.master, r.id, r.fields.map((x) => [x.n, x.v, x.file ?? null])]));
 
@@ -512,7 +601,8 @@ async function reviewState(pool, landId) {
   await healPlaceholders(pool, landId);
   const st = await landState(pool, landId);
   if (!st) return null;
-  const now = await entrySections(pool, landId);
+  // Deed registration is recorded by the deed team (it shows in versions), not entered — it is not verified here.
+  const now = (await entrySections(pool, landId)).filter((sec) => sec.key !== "registration");
   const last = (await pool.request().input("L", sql.Int, landId).query(`
     SELECT TOP 1 SnapshotJson FROM dbo.LegalLandRegisterSnapshot WHERE LandId = @L AND Remarks LIKE N'Version %' ORDER BY CreatedAt DESC, SnapshotId DESC`)).recordset[0];
   const prev = last ? parse(last.SnapshotJson) : null;
