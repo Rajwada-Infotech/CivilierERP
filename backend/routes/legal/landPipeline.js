@@ -2115,6 +2115,9 @@ router.post("/:id/deed-registration", requirePageRight(LAND_PAGE, "view"), async
         INSERT INTO dbo.LegalRegisteredDeed (LandId, DeedId, RegisteredDeedNo, RegistrationDate, RegistrationOfficeId, DeedFileId, CertifiedCopyStatus, ApprovalStatus, ApprovedAt, IsActive, CreatedBy)
         SELECT LandId, NULL, ISNULL(RegDeedNo, LandCode), CAST(ISNULL(RegFinalDate, RegCompletedAt) AS DATE), RegOfficeId, RegDeedFileId, N'Not Applied', N'Approved', RegCompletedAt, 1, @U
         FROM dbo.LegalLand WHERE LandId = @Id`).catch((e) => console.error("[legal-land] registered deed row:", e.message));
+    // The registration is saved as a new version of the land, with its registration details.
+    { const flow = require("./landFlow"); const no = (await pool.request().input("Id", sql.Int, id).query("SELECT RegDeedNo FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0]?.RegDeedNo;
+      await flow.snapshotVersion(pool, id, userId, `Deed registered${no ? ` — ${no}` : ""}`).catch((e) => console.error("[legal-land] registration version:", e.message)); }
     await recordCompanyTransfer(pool, req, id, fileId);
     await createPostRegTasks(pool, req, id);
     res.json({ message: `${l.LandCode}: deed registered — now in Land & Projects` });
