@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 import net from "net";
+import fs from "fs";
 
 // Dev proxy while the backend restarts (nodemon restarts it on every backend file change, e.g. after a pull):
 //  - GET / HEAD requests wait for it (its port is checked every 500 ms, for up to 20 s) and are then sent once, so a
@@ -74,11 +75,17 @@ function gracefulProxy(target: string) {
   };
 }
 
+// The project folder as Windows actually spells it. Started from a differently-cased path (e.g. "...\desktop\..."),
+// Vite served some files twice - once as /src/..., once as /@fs/<other casing>/... - so modules like AuthContext existed
+// twice and the page crashed ("useAuth must be used inside AuthProvider").
+const ROOT = fs.realpathSync.native(import.meta.dirname);
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "");
+  const env = loadEnv(mode, ROOT, "");
   const backendUrl = env.VITE_BACKEND_URL || "http://localhost:5000";
   return {
+  root: ROOT,
   server: {
     host: "::",
     port: 8080,
@@ -221,7 +228,7 @@ export default defineConfig(({ mode }) => {
   },
   resolve: {
     alias: {
-      "@": path.resolve(import.meta.dirname, "./src"),
+      "@": path.resolve(ROOT, "./src"),
     },
   },
 };
