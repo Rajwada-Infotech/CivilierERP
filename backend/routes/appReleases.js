@@ -33,6 +33,8 @@ const APP_CATALOG = {
   cwd: { label: "Civilier Work DPR", packageName: "com.rajwadainfotech.civiliercwd", fileName: "CivilierERPWorkDPR.apk" },
   // The Employee Portal app (mobile-employee): listed before its first build, so its builds can be published here.
   employee: { label: "Civilier Employee Portal", packageName: "com.rajwadainfotech.civilieremployee", fileName: "CivilierERPEmployeePortal.apk" },
+  // The staff app (mobile-crm): CRM + the Maintenance module; Civilier Home above is the customers' app.
+  crm: { label: "Civilier CRM", packageName: "com.rajwadainfotech.civiliercrm", fileName: "CivilierCRM.apk" },
 };
 
 const upload = multer({

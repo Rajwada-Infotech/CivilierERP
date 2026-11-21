@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "Civilier CRM",
+    "slug": "mobile-crm",
+    "scheme": "civiliercrm",
+    "version": "1.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rajwadainfotech.civiliercrm",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Civilier Home uses the camera to attach photos to your documents and maintenance records.",
+        "NSPhotoLibraryUsageDescription": "Civilier Home needs access to your photo library to attach existing photos to your documents and records."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E9F5E1",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.rajwadainfotech.civiliercrm",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      "expo-notifications",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Civilier Home uses the camera so you can photograph or scan papers to upload."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "owner": "rahuladhikari3105",
+    "extra": {
+      "eas": {
+        "projectId": "22bf9c06-805e-4ba2-abea-6d9abeb7b8b4"
+      }
+    }
+  }
+}

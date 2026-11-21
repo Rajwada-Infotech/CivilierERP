@@ -21,7 +21,7 @@ const { getPool, sql } = require("../db");
 const { emitNotification } = require("./notify");
 
 // Phone apps that show CRM follow-up work; SLA reminders are pushed to these only.
-const SLA_PUSH = { push: true, apps: ["follow-up", "admin"] };
+const SLA_PUSH = { push: true, apps: ["follow-up", "admin", "crm"] };
 const logger = require("../logger");
 
 const INTERVAL_MS = 60 * 60 * 1000; // hourly, same cadence as escalationEngine.js

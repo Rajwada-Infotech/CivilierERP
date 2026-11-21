@@ -23,6 +23,7 @@ const ABOUT: Record<string, string> = {
   "fixed-asset": "For asset custodians: tag and track fixed assets.",
   "follow-up": "For task follow-ups: tasks, close / cancel, transfer and performance.",
   maintenance: "For customers: your booking, payments, documents, maintenance bills and help.",
+  crm: "For staff: CRM — leads, bookings, payments, approvals and after-sales — and the Maintenance module.",
   cwd: "For site engineers, QC and approvers: allocation, reporting, quality check and transfer.",
   employee: "For employees: punch in and out, breaks, attendance, leave and payslips.",
 };
