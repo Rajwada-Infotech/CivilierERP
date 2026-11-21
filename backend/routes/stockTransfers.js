@@ -31,17 +31,22 @@ router.param("id", async (req, res, next, id) => {
   }
 });
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
 
 // Approve/Reject are exempt — transition() (approvalService.js) is the real
 // authority there (role whitelist / approval-inbox edit right / named
-// workflow approver), not this blanket per-module permission gate.
+// workflow approver), not this blanket permission gate.
+// The gate is the Stock Transfer page right granted in Role / Menu Rights (role + personal), as on the
+// inter-company route. It used to be the old Material/StockTransfer module right, which the rights screens never
+// save, so everyone but full-access roles got "Access denied" on a same-company transfer.
+const METHOD_PAGE_ACTION = { GET: "view", HEAD: "view", POST: "create", PUT: "edit", PATCH: "edit", DELETE: "delete" };
 router.use((req, res, next) => {
   if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
-  return checkPermissionForMethod("Material", "StockTransfer")(req, res, next);
+  const action = METHOD_PAGE_ACTION[req.method];
+  if (!action) return res.status(405).json({ error: "Method not allowed" });
+  return requirePageRight("stock-transfers", action)(req, res, next);
 });
 
 function parseItems(raw) {
