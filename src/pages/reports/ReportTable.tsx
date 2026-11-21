@@ -910,7 +910,7 @@ export const ReportTable: React.FC<{
 
     {/* ── Row detail card ── */}
     <Dialog open={!!selectedRow} onOpenChange={(o) => { if (!o) setSelectedRow(null); }}>
-      <DialogContent className={onSheet ? "sheet-frame max-w-lg" : "max-w-lg"} style={onSheet ? { margin: 0 } : undefined}>
+      <DialogContent className={onSheet ? "sheet-frame max-w-5xl max-h-[90vh] overflow-y-auto" : "max-w-5xl max-h-[90vh] overflow-y-auto"} style={onSheet ? { margin: 0 } : undefined}>
         <DialogHeader>
           <DialogTitle className={onSheet ? "font-heading text-lg font-bold tracking-tight pb-3 border-b border-foreground" : "flex items-center gap-2.5"}>
             {!onSheet && (
@@ -942,18 +942,15 @@ export const ReportTable: React.FC<{
           </div>
         )}
         {selectedRow && (
-          <div className="divide-y divide-border">
+          // Landscape: fields flow across three columns (two on tablets, one on phones), label above value.
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6">
             {effectiveColumns.map((col) => {
               const val = cell(selectedRow, col);
               if (!val || val === "—") return null;
               return (
-                <div key={col.header} className="flex items-start justify-between gap-6 py-2.5">
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide shrink-0 w-28 pt-0.5">
-                    {col.header}
-                  </span>
-                  <span className="text-sm text-foreground text-right break-all">
-                    {val}
-                  </span>
+                <div key={col.header} className="min-w-0 py-2.5 border-b border-border">
+                  <p className="text-[0.625rem] font-medium text-muted-foreground uppercase tracking-wide">{col.header}</p>
+                  <p className="mt-0.5 text-sm text-foreground break-words tabular-nums">{val}</p>
                 </div>
               );
             })}
