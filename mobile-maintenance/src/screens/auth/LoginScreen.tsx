@@ -1,6 +1,5 @@
-﻿// RN login card for the Maintenance app. Ported from mobile-Fixed-Asset's
-// LoginScreen — same Animated API + expo-linear-gradient, rebranded from
-// the FA amber accent to the Maintenance lime-green accent.
+﻿// The Civilier Home sign-in — customers only, with their registered mobile number (AuthContext loginCustomer).
+// Staff use the Civilier CRM app.
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -20,17 +19,6 @@ import { GradientText } from "@/components/GradientText";
 import { LogoRing } from "@/components/LogoRing";
 import { WelcomeOverlay } from "@/components/WelcomeOverlay";
 import { fonts } from "@/theme/fonts";
-import { getLastLoginKind, setLastLoginKind } from "@/services/authStorage";
-import type { UserKind } from "@/types/auth";
-
-// One app, two sign-ins: customers (the Customer Portal) and staff (the Maintenance module). The customer
-// wording is the web portal's own (src/pages/CrmCustomerPortal/PortalLogin.tsx).
-// Customers sign in with their registered mobile number; staff with their email.
-const KINDS: { kind: UserKind; label: string; hint: string; idLabel: string; placeholder: string; phone: boolean }[] = [
-  { kind: "customer", label: "Customer", hint: "Sign in to track your application, agreement and payments",
-    idLabel: "Mobile Number", placeholder: "Your registered mobile number", phone: true },
-  { kind: "staff", label: "Staff", hint: "Sign in to the CivilierERP Maintenance module", idLabel: "Email Address", placeholder: "name@company.com", phone: false },
-];
 
 const NAV_HOLD_MS = 1800;
 
@@ -48,11 +36,8 @@ function CornerAccents() {
 }
 
 export default function LoginScreen() {
-  const { login, loginCustomer } = useAuth();
-  const [kind, setKind] = useState<UserKind>("customer");
-  useEffect(() => { void getLastLoginKind().then((k) => { if (k === "staff" || k === "customer") setKind(k); }); }, []);
-  const meta = KINDS.find((k) => k.kind === kind)!;
-  const [email, setEmail] = useState("");
+  const { loginCustomer } = useAuth();
+  const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -72,13 +57,12 @@ export default function LoginScreen() {
     setError(null);
     setLoading(true);
     try {
-      await setLastLoginKind(kind);
-      await (kind === "customer" ? loginCustomer : login)(email.trim(), password, (user) => {
+      await loginCustomer(mobile.trim(), password, (user) => {
         setLoginName(user.name || "");
         setLoginSuccess(true);
       }, NAV_HOLD_MS);
     } catch (e) {
-      setError(e instanceof Error ? e.message : kind === "customer" ? "Invalid mobile number or password." : "Invalid email or password.");
+      setError(e instanceof Error ? e.message : "Invalid mobile number or password.");
       setLoading(false);
     }
   };
@@ -121,41 +105,27 @@ export default function LoginScreen() {
                     style={{ fontSize: 24, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}
                     colors={["#F0C94D", "#C9A227", "#F0C94D"]}
                   >
-                    {kind === "customer" ? "Civilier Home" : "Maintenance"}
+                    Civilier Home
                   </GradientText>
                 </View>
                 <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: fonts.body.regular, marginTop: 6, textAlign: "center" }}>
-                  {meta.hint}
+                  Sign in to track your application, agreement and payments
                 </Text>
-              </View>
-
-              <View className="flex-row mb-5 p-1 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.06)" }} accessibilityRole="tablist">
-                {KINDS.map((k) => {
-                  const on = k.kind === kind;
-                  return (
-                    <Pressable key={k.kind} accessibilityRole="tab" accessibilityState={{ selected: on }}
-                      onPress={() => { setKind(k.kind); setError(null); }}
-                      className="flex-1 items-center py-2 rounded-lg"
-                      style={on ? { backgroundColor: "rgba(201,162,39,0.18)", shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4, elevation: 1 } : undefined}>
-                      <Text style={{ fontSize: 13, fontFamily: on ? fonts.body.semibold : fonts.body.medium, color: on ? "#C9A227" : "rgba(255,255,255,0.5)" }}>{k.label}</Text>
-                    </Pressable>
-                  );
-                })}
               </View>
 
               <View className="gap-4">
                 <AnimatedInput
-                  label={meta.idLabel}
-                  value={email}
-                  placeholder={meta.placeholder}
+                  label="Mobile Number"
+                  value={mobile}
+                  placeholder="Your registered mobile number"
                   onChangeText={(t) => {
-                    setEmail(t);
+                    setMobile(t);
                     setError(null);
                   }}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  keyboardType={meta.phone ? "phone-pad" : "email-address"}
-                  textContentType={meta.phone ? "telephoneNumber" : "emailAddress"}
+                  keyboardType="phone-pad"
+                  textContentType="telephoneNumber"
                 />
 
                 <AnimatedInput
@@ -175,11 +145,9 @@ export default function LoginScreen() {
                   }
                 />
 
-                {kind === "customer" ? (
-                  <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, fontFamily: fonts.body.regular, marginTop: -6, paddingHorizontal: 4 }}>
-                    First time signing in? Your password is the first 4 letters of your name and the last 4 digits of your mobile number, in small letters.
-                  </Text>
-                ) : null}
+                <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, fontFamily: fonts.body.regular, marginTop: -6, paddingHorizontal: 4 }}>
+                  First time signing in? Your password is the first 4 letters of your name and the last 4 digits of your mobile number, in small letters.
+                </Text>
 
                 {error && (
                   <View
@@ -193,7 +161,7 @@ export default function LoginScreen() {
                   </View>
                 )}
 
-                <ShimmerButton onPress={onSubmit} disabled={loading || !email || !password || loginSuccess}>
+                <ShimmerButton onPress={onSubmit} disabled={loading || !mobile || !password || loginSuccess}>
                   {loading ? (
                     <>
                       <Animated.View
@@ -212,6 +180,11 @@ export default function LoginScreen() {
                     <Text style={{ color: "#fff", fontSize: 14, fontFamily: fonts.body.semibold }}>Sign In →</Text>
                   )}
                 </ShimmerButton>
+
+                {/* Staff have their own app (Civilier CRM) */}
+                <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 11.5, fontFamily: fonts.body.regular, textAlign: "center" }}>
+                  Staff? Use the Civilier CRM app.
+                </Text>
               </View>
             </View>
           </Animated.View>

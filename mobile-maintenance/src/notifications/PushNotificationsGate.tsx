@@ -16,9 +16,9 @@ export function PushNotificationsGate({
   appKey, onOpen,
 }: { appKey: string; onOpen?: (data: PushPayload) => void }) {
   const { currentUser } = useAuth();
-  // Staff phones register as the ERP user; a customer's phone through their Customer Portal sign-in (migration 692).
-  const userId = currentUser ? `${currentUser.kind ?? "staff"}:${currentUser.id}` : undefined;
-  const endpoint = currentUser?.kind === "customer" ? CUSTOMER_PUSH : undefined;
+  // A customer's phone registers through their own sign-in (migration 692).
+  const userId = currentUser ? `customer:${currentUser.id}` : undefined;
+  const endpoint = CUSTOMER_PUSH;
   const onOpenRef = useRef(onOpen);
   onOpenRef.current = onOpen;
 

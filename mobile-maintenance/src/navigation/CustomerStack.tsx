@@ -1,7 +1,6 @@
-// The customer side of the app (Customer Portal sign-in), laid out like the other CivilierERP apps (Employee): along
-// the bottom Home, Payments, Bills, Help — and Menu, which pops up every other Customer Portal page (TopHeader.tsx
-// NavMenuSheet, grouped as the web sidebar). Titles are the web portal's own menu names (PortalLayout.tsx NAV_GROUPS). Staff get MainStack instead
-// (RootNavigator.tsx).
+// Civilier Home's screens (customers only — staff use the Civilier CRM app), laid out like the other CivilierERP apps
+// (Employee): along the bottom Home, Payments, Bills, Help — and Menu, which pops up every other page (TopHeader.tsx
+// NavMenuSheet, grouped as the web sidebar). Titles are the web portal's own menu names (PortalLayout.tsx NAV_GROUPS).
 import { Tap } from "@/customer/ui";
 import { Text, View } from "react-native";
 import { createBottomTabNavigator, type BottomTabBarProps } from "@react-navigation/bottom-tabs";

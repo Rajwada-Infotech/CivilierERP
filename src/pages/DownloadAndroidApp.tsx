@@ -22,7 +22,7 @@ const ABOUT: Record<string, string> = {
   supplier: "For suppliers: the Supplier Portal — enquiries, quotes and orders.",
   "fixed-asset": "For asset custodians: tag and track fixed assets.",
   "follow-up": "For task follow-ups: tasks, close / cancel, transfer and performance.",
-  maintenance: "For customers: your booking, payments, documents and maintenance bills. For maintenance and security teams: bills, attendance, electricity and the directory.",
+  maintenance: "For customers: your booking, payments, documents, maintenance bills and help.",
   cwd: "For site engineers, QC and approvers: allocation, reporting, quality check and transfer.",
   employee: "For employees: punch in and out, breaks, attendance, leave and payslips.",
 };

@@ -14,19 +14,17 @@ import { showApplication } from "@/customer/CustomerContext";
 import { useAppFonts } from "@/theme/fonts";
 import { colors } from "@/theme/colors";
 
-// A tapped notification opens the app's Notifications screen (the app may have been
-// closed, so wait briefly for the navigator to mount).
+// A tapped notification opens the screen it is about, on its property (backend pushNotifications.js CUSTOMER_EVENTS).
+// The app may have been closed, so wait briefly for the navigator to mount.
 function openFromNotification(data?: Record<string, unknown>) {
   // "Update available": opening the app is enough — UpdateGate checks for the new build as the app comes forward.
   if (data?.type === "app-update") return;
-  // A customer's: that property, on the screen the message is about (backend pushNotifications.js CUSTOMER_EVENTS).
-  const portal = data?.type === "portal";
-  if (portal && Number.isInteger(Number(data?.applicationId))) showApplication(Number(data?.applicationId));
-  const screen = portal && typeof data?.screen === "string" ? data.screen : "Notifications";
+  if (Number.isInteger(Number(data?.applicationId))) showApplication(Number(data?.applicationId));
+  const screen = typeof data?.screen === "string" ? data.screen : "CustomerTabs";
   let tries = 0;
   const go = () => {
-    // A customer's screen may be a bottom tab (Payments, Bills, Help) — openCustomerScreen routes it through the tabs.
-    if (navigationRef.isReady()) { if (portal) openCustomerScreen(screen); else navigationRef.navigate(screen as never); }
+    // A screen may be a bottom tab (Payments, Bills, Help) — openCustomerScreen routes it through the tabs.
+    if (navigationRef.isReady()) openCustomerScreen(screen);
     else if (tries++ < 20) setTimeout(go, 250);
   };
   go();
