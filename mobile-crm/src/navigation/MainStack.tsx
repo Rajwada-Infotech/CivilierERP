@@ -11,6 +11,12 @@ import AttendanceScreen from "@/screens/attendance/AttendanceScreen";
 import ElectricityScreen from "@/screens/electricity/ElectricityScreen";
 import ServiceRequestsScreen from "@/screens/tickets/ServiceRequestsScreen";
 import ApprovalInboxScreen from "@/screens/approvals/ApprovalInboxScreen";
+import CrmHubScreen from "@/screens/crm/CrmHubScreen";
+import CrmDashboardScreen from "@/screens/crm/CrmDashboardScreen";
+import CrmRegisterScreen from "@/screens/crm/CrmRegisterScreen";
+import BookingDetailScreen from "@/screens/crm/BookingDetailScreen";
+import Customer360Screen from "@/screens/crm/Customer360Screen";
+import { registerByKey } from "@/screens/crm/crmRegisters";
 import { TopHeader } from "./TopHeader";
 
 // Every module screen this app has: Dashboard (overview), the five
@@ -29,6 +35,12 @@ export type MainStackParamList = {
   Attendance: undefined;
   Electricity: undefined;
   ApprovalInbox: undefined;
+  // The CRM (screens/crm): its menu, dashboard, any list from crmRegisters.ts, one booking, one customer.
+  Crm: undefined;
+  CrmDashboard: undefined;
+  CrmRegister: { register: string };
+  CrmBooking: { bookingId: number; title?: string };
+  CrmCustomer: { customerId: number; title?: string };
   Profile: undefined;
   Notifications: undefined;
 };
@@ -48,6 +60,11 @@ export default function MainStack() {
       <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "Security Attendance" }} />
       <Stack.Screen name="Electricity" component={ElectricityScreen} options={{ title: "Electricity Maintenance" }} />
       <Stack.Screen name="ApprovalInbox" component={ApprovalInboxScreen} options={{ title: "Approval Inbox" }} />
+      <Stack.Screen name="Crm" component={CrmHubScreen} options={{ title: "CRM" }} />
+      <Stack.Screen name="CrmDashboard" component={CrmDashboardScreen} options={{ title: "CRM Dashboard" }} />
+      <Stack.Screen name="CrmRegister" component={CrmRegisterScreen} options={({ route }) => ({ title: registerByKey(route.params.register)?.label ?? "CRM" })} />
+      <Stack.Screen name="CrmBooking" component={BookingDetailScreen} options={({ route }) => ({ title: route.params.title || "Booking" })} />
+      <Stack.Screen name="CrmCustomer" component={Customer360Screen} options={({ route }) => ({ title: route.params.title || "Customer 360" })} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
     </Stack.Navigator>

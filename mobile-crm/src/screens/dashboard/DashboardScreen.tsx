@@ -11,13 +11,14 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { Users, Receipt, ListChecks, Wallet, TrendingUp, Inbox, ChevronRight } from "lucide-react-native";
+import { Users, Receipt, ListChecks, Wallet, TrendingUp, Inbox, ChevronRight, Briefcase } from "lucide-react-native";
+import { useHasCrm } from "@/screens/crm/CrmHubScreen";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "@/auth/AuthContext";
 import { fetchInbox } from "@/api/approvalInboxApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { colors } from "@/theme/colors";
+import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import { SectionLabel } from "@/components/home/SectionLabel";
@@ -75,6 +76,7 @@ export default function DashboardScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const canApprove = canAccessPage("approval-inbox");
   const maintenance = MAINTENANCE_PAGES.some((p) => canAccessPage(p));
+  const hasCrm = useHasCrm();
 
   // Approvals waiting for this person — the inbox's own list (same query key, so the two stay in step); items they
   // can only watch (another level's turn) don't count.
@@ -136,6 +138,21 @@ export default function DashboardScreen() {
               {inboxQ.isLoading ? "Checking approvals…" : waiting > 0 ? `${waiting} approval${waiting > 1 ? "s" : ""} waiting for you` : "No approvals waiting for you"}
             </Text>
             <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>Approval Inbox</Text>
+          </View>
+          <ChevronRight size={18} color={colors.mutedForeground} />
+        </Pressable>
+      ) : null}
+
+      {hasCrm ? (
+        <Pressable onPress={() => nav.navigate(canAccessPage("crm-dashboard") ? "CrmDashboard" : "Crm")}
+          style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, marginBottom: 18, borderRadius: 14,
+            backgroundColor: colors.card, borderWidth: 1, borderColor: `${moduleAccents.crm}55`, opacity: pressed ? 0.8 : 1 })}>
+          <Briefcase size={20} color={moduleAccents.crm} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14, fontFamily: fonts.heading.semibold, color: colors.foreground }}>CRM</Text>
+            <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>
+              {canAccessPage("crm-dashboard") ? "Collection, what needs attention, the week ahead" : "Bookings, payments and after-sales"}
+            </Text>
           </View>
           <ChevronRight size={18} color={colors.mutedForeground} />
         </Pressable>

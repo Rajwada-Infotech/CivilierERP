@@ -1,12 +1,13 @@
-// Shared stack header — mirrors mobile-supplier's TopHeader.tsx exactly:
-// animated logo on the left, notification bell (badge =
+// Shared stack header — mirrors mobile-supplier's TopHeader.tsx:
+// animated logo on the left (on a screen opened from another — a CRM list, a booking, a customer — a back arrow and
+// the screen's name instead), notification bell (badge =
 // useMaintenanceAlerts().alerts.length) and profile avatar on the right. No
 // hamburger/menu button — there's nothing behind it yet (see MainStack.tsx),
 // and Dashboard/Notifications/Profile are all reachable without one.
 import { View, Text, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
-import { Bell } from "lucide-react-native";
+import { Bell, ChevronLeft } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
@@ -26,7 +27,7 @@ function initialsOf(name?: string) {
     .slice(0, 2);
 }
 
-export function TopHeader(_props: NativeStackHeaderProps) {
+export function TopHeader({ back, navigation, options }: NativeStackHeaderProps) {
   const { currentUser } = useAuth();
   const { alerts } = useMaintenanceAlerts();
   const alertCount = alerts.length;
@@ -38,7 +39,16 @@ export function TopHeader(_props: NativeStackHeaderProps) {
     >
       <View className="flex-row items-center justify-between px-4 py-2.5">
         <View className="flex-1 min-w-0">
-          <AnimatedLogo iconSize={28} />
+          {back ? (
+            <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 }}>
+              <ChevronLeft size={22} color={colors.foreground} />
+              <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 15, fontFamily: fonts.heading.semibold, color: colors.foreground }}>
+                {typeof options.title === "string" ? options.title : ""}
+              </Text>
+            </Pressable>
+          ) : (
+            <AnimatedLogo iconSize={28} />
+          )}
         </View>
 
         <View className="flex-row items-center gap-3">

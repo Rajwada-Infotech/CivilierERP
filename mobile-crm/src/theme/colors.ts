@@ -1,4 +1,4 @@
-﻿// Hex conversion of the web app's default dark theme HSL tokens
+// Hex conversion of the web app's default dark theme HSL tokens
 // (src/index.css :root, @layer base — "DARK THEME (default)"). RN styles
 // take hex/rgba, not CSS custom properties, so these are computed once
 // here rather than re-deriving HSL math in every component.
@@ -41,6 +41,8 @@ export const moduleAccents = {
   // This app's own module — matches web's MAINTENANCE_ACCENT
   // (src/components/maintenance/MaintenanceShell.tsx).
   maintenance: "#65a30d",
+  // The CRM module — the web's own CRM tile colour (src/pages/home/homeTiles.ts).
+  crm: "#e11d48",
 } as const;
 
 // The drawing sheet's own tones, the same derivation the other CivilierERP apps use (mobile-employee / mobile-admin

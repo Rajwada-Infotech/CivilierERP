@@ -33,13 +33,41 @@ export const STATUS_COLOR: Record<string, string> = {
   Overdue: "#ef4444",
   Reversed: "#ef4444",
   Cancelled: "#818898",
+  // CRM statuses (bookings, demands, receipts, on-account, tickets, possession)
+  Approved: "#10b981",
+  Confirmed: "#10b981",
+  Paid: "#10b981",
+  Applied: "#10b981",
+  Acknowledged: "#10b981",
+  Resolved: "#10b981",
+  Ready: "#10b981",
+  Demanded: "#3b82f6",
+  Checklist: "#3b82f6",
+  Notice: "#3b82f6",
+  Handover: "#3b82f6",
+  "In Progress": "#3b82f6",
+  Open: "#f59e0b",
+  Partial: "#f59e0b",
+  Unapplied: "#f59e0b",
+  Submitted: "#f59e0b",
+  Bounced: "#ef4444",
+  Rejected: "#ef4444",
+  Disputed: "#ef4444",
+  Blocked: "#ef4444",
+  Closed: "#818898",
+  NotReady: "#818898",
+  PartiallyApplied: "#f59e0b",
+  Inactive: "#818898",
 };
+
+/** A status code read as words: "PartiallyApplied" → "Partially Applied". */
+export const statusText = (s: string) => s.replace(/([a-z])([A-Z])/g, "$1 $2");
 
 export function Pill({ label, tone }: { label: string; tone?: string }) {
   const c = tone || STATUS_COLOR[label] || "#818898";
   return (
     <View style={{ backgroundColor: `${c}1f`, paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 999 }}>
-      <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: c }}>{label}</Text>
+      <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: c }}>{statusText(label)}</Text>
     </View>
   );
 }
@@ -115,7 +143,7 @@ export function DataList<T>({
                 }}
               >
                 <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: active ? "#bef264" : colors.mutedForeground }}>
-                  {f}
+                  {statusText(f)}
                 </Text>
               </Pressable>
             );

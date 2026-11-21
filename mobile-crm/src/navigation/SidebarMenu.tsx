@@ -12,7 +12,8 @@
 import { useEffect, useState } from "react";
 import { View, Text, Pressable, Modal, Animated } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Home, Users, Receipt, ShieldCheck, Zap, Grip, X, Ticket, Inbox } from "lucide-react-native";
+import { Home, Users, Receipt, ShieldCheck, Zap, Grip, X, Ticket, Inbox, Briefcase } from "lucide-react-native";
+import { useHasCrm } from "@/screens/crm/CrmHubScreen";
 import { useAuth } from "@/auth/AuthContext";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
@@ -22,12 +23,14 @@ import type { MainStackParamList } from "./MainStack";
 const ACCENT = "#65a30d";
 const ACCENT_SOFT = "#bef264";
 
-type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "Directory" | "Bills" | "ServiceRequests" | "Attendance" | "Electricity" | "ApprovalInbox">;
+type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "Crm" | "Directory" | "Bills" | "ServiceRequests" | "Attendance" | "Electricity" | "ApprovalInbox">;
 
 // Each entry is shown only to staff with a right on its page — the web menu's own page keys (MaintenanceSidebar.ts,
-// AdminSidebar.ts), so the app and the web agree on who sees what. The Dashboard has no page of its own.
-const NAV_ITEMS: { route: NavRoute; label: string; icon: React.ComponentType<{ size?: number; color?: string }>; pageKey?: string }[] = [
+// AdminSidebar.ts), so the app and the web agree on who sees what. The Dashboard has no page of its own; the CRM shows
+// to anyone with a right on any CRM page (CrmHubScreen.tsx useHasCrm).
+const NAV_ITEMS: { route: NavRoute; label: string; icon: React.ComponentType<{ size?: number; color?: string }>; pageKey?: string; crm?: boolean }[] = [
   { route: "Dashboard",        label: "Dashboard",             icon: Home        },
+  { route: "Crm",              label: "CRM",                   icon: Briefcase,   crm: true },
   { route: "ApprovalInbox",    label: "Approval Inbox",        icon: Inbox,       pageKey: "approval-inbox" },
   { route: "Directory",        label: "Customer Directory",    icon: Users,       pageKey: "maintenance-directory" },
   { route: "Bills",            label: "Maintenance Bills",     icon: Receipt,     pageKey: "maintenance-bills" },
@@ -38,7 +41,8 @@ const NAV_ITEMS: { route: NavRoute; label: string; icon: React.ComponentType<{ s
 
 export function SidebarMenu({ activeRoute }: { activeRoute: string }) {
   const { canAccessPage } = useAuth();
-  const items = NAV_ITEMS.filter((i) => !i.pageKey || canAccessPage(i.pageKey));
+  const hasCrm = useHasCrm();
+  const items = NAV_ITEMS.filter((i) => (i.crm ? hasCrm : !i.pageKey || canAccessPage(i.pageKey)));
   const [open, setOpen] = useState(false);
   const insets = useSafeAreaInsets();
   const slide = useState(() => new Animated.Value(0))[0];
