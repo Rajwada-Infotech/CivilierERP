@@ -49,7 +49,32 @@ export function useBellCount() {
 // times, src/utils/vehicleInOutDocument.ts). So they are compared with the phone's own wall-clock time, read the same
 // way — the phone and the office keep the same clock.
 const wallNow = () => Date.now() - new Date().getTimezoneOffset() * 60_000;
-const fmtRelative = (d?: string | null) => {
+/** Mark one or all of the shown notifications read — on this phone at once, and on the server (the web bell too).
+ * "All" means the CRM ones shown here; other modules' alerts stay unread for the web. Opening one marks it read and
+ * goes where it points (navigationRef.ts notificationTarget). Used by this page and the bell's drop-down. */
+export function useNotificationActions() {
+  const qc = useQueryClient();
+  const crmQ = useCrmNotifications();
+  const items = crmQ.data ?? [];
+  const markRead = (id: number) => {
+    qc.setQueryData<BellItem[]>(NOTIFICATIONS_KEY, (old) => old?.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    fetchWithAuth(`/api/sa/notifications/${id}/read`, { method: "PUT" }).catch(() => {});
+  };
+  const markAllRead = async () => {
+    const ids = items.filter((n) => !n.isRead).map((n) => n.id);
+    qc.setQueryData<BellItem[]>(NOTIFICATIONS_KEY, (old) => old?.map((n) => (ids.includes(n.id) ? { ...n, isRead: true } : n)));
+    await Promise.all(ids.map((id) => fetchWithAuth(`/api/sa/notifications/${id}/read`, { method: "PUT" }).catch(() => {})));
+    crmQ.refetch();
+  };
+  const open = (n: BellItem) => {
+    if (!n.isRead) markRead(n.id);
+    const t = notificationTarget(n);
+    if (t.route !== "Notifications") navigate(t.route as never, t.params as never);
+  };
+  return { markAllRead, open };
+}
+
+export const fmtRelative = (d?: string | null) => {
   if (!d) return "";
   const mins = Math.floor((wallNow() - new Date(d).getTime()) / 60_000);
   if (mins < 1) return "Just now";
@@ -78,7 +103,7 @@ function SectionTitle({ children, right }: { children: string; right?: React.Rea
 }
 
 function Item({ title, body, time, tag, tagColor, unread, Icon, onPress }: {
-  title: string; body?: string | null; time?: string | null; tag: string; tagColor: string; unread?: boolean;
+  title: string; body?: string | null; time?: string | null; tag?: string; tagColor: string; unread?: boolean;
   Icon: React.ComponentType<{ size?: number; color?: string }>; onPress: () => void;
 }) {
   const card = useCardStyle();
@@ -95,7 +120,7 @@ function Item({ title, body, time, tag, tagColor, unread, Icon, onPress }: {
           {time ? <Text style={{ fontSize: 10, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{fmtRelative(time)}</Text> : null}
         </View>
         {body ? <Text numberOfLines={3} style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 3, lineHeight: 16 }}>{body}</Text> : null}
-        <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: tagColor, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 6 }}>{tag}</Text>
+        {tag ? <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: tagColor, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 6 }}>{tag}</Text> : null}
       </View>
       <ChevronRight size={14} color={colors.mutedForeground} style={{ marginTop: 2 }} />
     </Tap>
@@ -103,29 +128,13 @@ function Item({ title, body, time, tag, tagColor, unread, Icon, onPress }: {
 }
 
 export default function NotificationsScreen() {
-  const qc = useQueryClient();
   const crmQ = useCrmNotifications();
+  const { markAllRead, open } = useNotificationActions();
   const { alerts, isLoading: alertsLoading, refetch: refetchAlerts } = useMaintenanceAlerts();
   const [refreshing, setRefreshing] = useState(false);
   const items = crmQ.data ?? [];
   const unread = items.filter((n) => !n.isRead).length;
 
-  const markRead = (id: number) => {
-    qc.setQueryData<BellItem[]>(NOTIFICATIONS_KEY, (old) => old?.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
-    fetchWithAuth(`/api/sa/notifications/${id}/read`, { method: "PUT" }).catch(() => {});
-  };
-  // Only the CRM ones shown here — the web bell's other modules' alerts stay unread for the web.
-  const markAllRead = async () => {
-    const ids = items.filter((n) => !n.isRead).map((n) => n.id);
-    qc.setQueryData<BellItem[]>(NOTIFICATIONS_KEY, (old) => old?.map((n) => (ids.includes(n.id) ? { ...n, isRead: true } : n)));
-    await Promise.all(ids.map((id) => fetchWithAuth(`/api/sa/notifications/${id}/read`, { method: "PUT" }).catch(() => {})));
-    crmQ.refetch();
-  };
-  const open = (n: BellItem) => {
-    if (!n.isRead) markRead(n.id);
-    const t = notificationTarget(n);
-    if (t.route !== "Notifications") navigate(t.route as never, t.params as never);
-  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -153,7 +162,7 @@ export default function NotificationsScreen() {
       ) : items.length === 0 ? (
         <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, paddingVertical: 12 }}>No CRM notifications yet.</Text>
       ) : items.map((n) => (
-        <Item key={n.id} title={n.title} body={n.body} time={n.createdAt} tag="CRM" tagColor={accent} unread={!n.isRead} Icon={Bell} onPress={() => open(n)} />
+        <Item key={n.id} title={n.title} body={n.body} time={n.createdAt} tagColor={accent} unread={!n.isRead} Icon={Bell} onPress={() => open(n)} />
       ))}
 
       {alertsLoading || alerts.length ? <SectionTitle>Maintenance</SectionTitle> : null}

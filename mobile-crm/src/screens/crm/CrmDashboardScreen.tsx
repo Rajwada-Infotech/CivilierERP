@@ -1,21 +1,23 @@
-// The CRM Dashboard on the phone — the web's (src/pages/CRM/CrmDashboard.tsx), same route (crmDashboard.js GET /) and
-// the same wording: the collection (due, paid, with Finance, outstanding), what needs attention, this month and next,
-// collection per project, the pipeline and the week ahead. A project chip narrows it as the web's project picker does.
-import { useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+// The CRM dashboard's parts — the web's CRM Dashboard (src/pages/CRM/CrmDashboard.tsx), same route
+// (crmDashboard.js GET /) and the same words — built from the app's kit and laid out on the CRM tab (CrmHubScreen.tsx):
+// the project picker, this month and next, the collection (due, paid, with Finance, outstanding), what needs attention,
+// the pipeline, collection per project and the seven-day lookahead. Home reuses the attention list.
+import { ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { CalendarDays, KeyRound, ReceiptIndianRupee, ScrollText } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { crmGet } from "@/api/crmApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
-import { colors } from "@/theme/colors";
+import { useBrand } from "@/theme/ThemeContext";
 import { fonts } from "@/theme/fonts";
+import { formatCompactINR } from "@/utils/formatCurrency";
 import { registerByKey } from "./crmRegisters";
-import { CRM, Figure, Kv, LinkRow, Section, money } from "./ui";
+import { Bar, Figure, HeroSurface, LinkRow, ON_HERO, Section, Tap, useCardStyle } from "./ui";
 
 // The web dashboard's attention list (CrmDashboard.tsx), with the phone list each one opens where the app has it.
-const ATTENTION: { key: string; label: string; note: string; hot: boolean; register?: string }[] = [
+export const ATTENTION: { key: string; label: string; note: string; hot: boolean; register?: string }[] = [
   { key: "overduePayments", label: "Overdue payments", note: "Demand milestones past their due date", hot: true, register: "demands" },
   { key: "disputedNotices", label: "Possession notices disputed", note: "Disputed by the customer", hot: true, register: "possession" },
   { key: "urgentTickets", label: "Urgent service tickets", note: "High priority, not resolved", hot: true, register: "service-tickets" },
@@ -29,9 +31,11 @@ const ATTENTION: { key: string; label: string; note: string; hot: boolean; regis
 ];
 
 const n0 = (v: unknown) => Number(v) || 0;
+const short = (v: unknown) => `₹${formatCompactINR(v)}`;
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** The CRM Dashboard's figures, for one project or all (crmDashboard.js GET /) — one query key, so Home and the
- * dashboard share it. */
+/** The dashboard's figures, for one project or all (crmDashboard.js GET /) — one query key, so Home and the CRM tab
+ * share them. */
 export function useCrmDashboard(projectId: number | null = null, enabled = true) {
   return useQuery({
     queryKey: ["crm-dashboard", projectId],
@@ -40,7 +44,7 @@ export function useCrmDashboard(projectId: number | null = null, enabled = true)
   });
 }
 
-/** Open a CRM list when the person has a right on it; null when they don't (the row then shows without a link). */
+/** Open a CRM list when the person has a right on it; undefined when they don't (the row then shows without a link). */
 function useOpenRegister() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { canAccessPage } = useAuth();
@@ -50,132 +54,196 @@ function useOpenRegister() {
   };
 }
 
-/** Due, paid, with Finance, outstanding — the collection at a glance (the web's band). */
+/** The lists "Needs attention" links to right now (an alert above 0) — the screens leave those lists' own counts out,
+ * so one screen never says the same thing twice. */
+export const attentionRegisters = (d: any): string[] =>
+  ATTENTION.filter((a) => a.register && n0(d?.alerts?.[a.key]) > 0).map((a) => a.register!);
+
+/** The project picker: all projects, or one — every figure on the page follows it. */
+export function ProjectChips({ projects, value, onChange }: { projects: { Id: number; Name: string }[]; value: number | null; onChange: (id: number | null) => void }) {
+  const b = useBrand();
+  if ((projects ?? []).length < 2) return null;
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }} style={{ marginHorizontal: -16 }}>
+      <View style={{ width: 8 }} />
+      {[{ Id: null as number | null, Name: "All projects" }, ...projects].map((p) => {
+        const on = p.Id === value;
+        return (
+          <Tap key={String(p.Id)} onPress={() => onChange(p.Id)} accessibilityRole="button" accessibilityState={{ selected: on }}
+            style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, backgroundColor: on ? b.accent : b.surfaceCard, borderWidth: on ? 0 : 1, borderColor: b.border }}>
+            <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: on ? "#fff" : b.textSecondary }}>{p.Name}</Text>
+          </Tap>
+        );
+      })}
+      <View style={{ width: 8 }} />
+    </ScrollView>
+  );
+}
+
+/** This month and next (the web's figures and words): units sold, booking value, what falls due in 30 days. */
+export function ThisMonthCard({ d }: { d: any }) {
+  const m = d?.metrics ?? {};
+  const label = (t: string) => <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: ON_HERO.secondary, marginTop: 2 }}>{t}</Text>;
+  return (
+    <HeroSurface>
+      <View style={{ flexDirection: "row", gap: 16 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 30, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, letterSpacing: -0.5 }}>{n0(m.unitsSoldThisMonth)}</Text>
+          {label("Units sold this month")}
+        </View>
+        <View style={{ flex: 1.3 }}>
+          <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 30, fontFamily: fonts.heading.semibold, color: ON_HERO.primary, letterSpacing: -0.5 }}>{short(m.revenueThisMonth)}</Text>
+          {label("Booking value this month")}
+        </View>
+      </View>
+      <View style={{ height: 1, backgroundColor: ON_HERO.glass, marginVertical: 14 }} />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: ON_HERO.glass, alignItems: "center", justifyContent: "center" }}>
+          <CalendarDays size={17} color={ON_HERO.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 17, fontFamily: fonts.heading.semibold, color: ON_HERO.primary }}>{short(m.forwardDue30Days)}</Text>
+          <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: ON_HERO.secondary }}>Falling due in 30 days · {plural(n0(m.forwardDueCount), "milestone")}</Text>
+        </View>
+      </View>
+    </HeroSurface>
+  );
+}
+
+/** Due, paid, with Finance, outstanding — the collection at a glance (the web's band), short (₹6.1Cr) as the web's band
+ * shows them, so they fit two to a row on a phone. */
 export function MoneyFigures({ d }: { d: any }) {
-  const openRegister = useOpenRegister();
-  const payments = d?.payments ?? {};
-  const due = n0(payments.TotalDue);
-  const paid = n0(payments.TotalPaid);
-  const withFinance = n0(payments.WithFinance);
+  const b = useBrand();
+  const p = d?.payments ?? {};
+  const due = n0(p.TotalDue);
+  const paid = n0(p.TotalPaid);
+  const withFinance = n0(p.WithFinance);
   const outstanding = Math.max(0, due - paid - withFinance);
   return (
     <View style={{ gap: 10, marginBottom: 12 }}>
       <View style={{ flexDirection: "row", gap: 10 }}>
-        <Figure label="Due" value={money(due)} tone="#3b82f6" />
-        <Figure label="Paid" value={money(paid)} tone="#10b981" sub={due ? `${Math.round((paid / due) * 100)}% of due` : undefined} />
+        <Figure label="Due" value={short(due)} tone={b.isDark ? "#60A5FA" : "#2563EB"} />
+        <Figure label="Paid" value={short(paid)} tone={b.success} sub={due ? `${Math.round((paid / due) * 100)}% of due` : undefined} />
       </View>
       <View style={{ flexDirection: "row", gap: 10 }}>
-        <Figure label="With Finance" value={money(withFinance)} tone="#8b5cf6" />
-        <Figure label="Outstanding" value={money(outstanding)} tone="#f59e0b" sub={n0(payments.OverdueCount) ? `${payments.OverdueCount} overdue` : undefined}
-          onPress={openRegister("demands")} />
+        <Figure label="With Finance" value={short(withFinance)} tone="#8B5CF6" />
+        <Figure label="Outstanding" value={short(outstanding)} tone={b.warning} />
       </View>
     </View>
   );
 }
 
-/** What needs attention, with the list each one opens. */
-export function AttentionList({ d }: { d: any }) {
+/** What needs attention, each row opening its list — or, with `links={false}` where the page lists those pages itself
+ * (the CRM tab), just the counts, so no page is offered twice on one screen. */
+export function AttentionList({ d, links = true }: { d: any; links?: boolean }) {
+  const b = useBrand();
   const openRegister = useOpenRegister();
   const alerts = d?.alerts ?? {};
   const attention = ATTENTION.filter((a) => n0(alerts[a.key]) > 0);
   return (
     <Section title="Needs attention">
       {attention.length === 0 ? (
-        <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: colors.mutedForeground, paddingVertical: 10 }}>Nothing needs attention.</Text>
+        <Text style={{ fontSize: 13.5, fontFamily: fonts.body.regular, color: b.textSecondary, paddingVertical: 10 }}>Nothing needs attention.</Text>
       ) : attention.map((a) => (
         <LinkRow key={a.key} title={a.label} sub={a.note}
-          right={<Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: a.hot ? "#ef4444" : colors.foreground, fontVariant: ["tabular-nums"] }}>{n0(alerts[a.key])}</Text>}
-          onPress={openRegister(a.register)} />
+          right={<Text style={{ fontSize: 17, fontFamily: fonts.heading.semibold, color: a.hot ? b.danger : b.textPrimary, fontVariant: ["tabular-nums"] }}>{n0(alerts[a.key])}</Text>}
+          onPress={links ? openRegister(a.register) : undefined} />
       ))}
     </Section>
   );
 }
 
-export default function CrmDashboardScreen() {
-  const [projectId, setProjectId] = useState<number | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const q = useCrmDashboard(projectId);
-  const d = q.data ?? {};
-  const metrics = d.metrics ?? {};
-
+/** The pipeline, applications to possessions, with how much carries on to the next stage (the web's "Pipeline"). The
+ * figures only: each stage's list is opened from its own place (the Bookings tab, the CRM tab's rows). */
+export function Pipeline({ d }: { d: any }) {
+  const b = useBrand();
+  const stages = ["Applications", "Bookings", "Agreements", "Possessions"].map((key) => ({ key, value: n0(d?.funnel?.[key]) }));
+  const max = Math.max(1, ...stages.map((s) => s.value));
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await q.refetch(); setRefreshing(false); }} tintColor={CRM} />}
-    >
-      {(d.projects ?? []).length > 1 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 12 }}>
-          {[{ Id: null, Name: "All projects" }, ...d.projects].map((p: { Id: number | null; Name: string }) => {
-            const active = p.Id === projectId;
-            return (
-              <Pressable key={String(p.Id)} onPress={() => setProjectId(p.Id)}
-                style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: active ? `${CRM}80` : colors.border, backgroundColor: active ? `${CRM}22` : colors.card }}>
-                <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: active ? colors.foreground : colors.mutedForeground }}>{p.Name}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      ) : null}
+    <Section title="Pipeline">
+      <View style={{ gap: 12, paddingVertical: 6 }}>
+        {stages.map((s, i) => {
+          const next = stages[i + 1];
+          return (
+            <View key={s.key} accessibilityLabel={`${s.key}: ${s.value}`} style={{ gap: 6 }}>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                <Text style={{ flex: 1, fontSize: 14, fontFamily: fonts.body.medium, color: b.textPrimary }}>{s.key}</Text>
+                {next ? (
+                  <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: b.textSecondary }}>
+                    {s.value > 0 ? `${Math.round((next.value / s.value) * 100)}% go on` : ""}
+                  </Text>
+                ) : null}
+                <Text style={{ minWidth: 34, textAlign: "right", fontSize: 16, fontFamily: fonts.heading.semibold, color: b.textPrimary, fontVariant: ["tabular-nums"] }}>{s.value}</Text>
+              </View>
+              <Bar pct={(s.value / max) * 100} color={b.accent} />
+            </View>
+          );
+        })}
+      </View>
+    </Section>
+  );
+}
 
-      {q.isLoading ? (
-        <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 60 }} />
-      ) : q.error ? (
-        <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular }}>{(q.error as Error).message}</Text>
+/** Collection per project: paid of due, a bar, overdue milestones. */
+export function CollectionPerProject({ d }: { d: any }) {
+  const b = useBrand();
+  const rows: any[] = d?.metrics?.collectionPerProject ?? [];
+  if (rows.length < 2) return null;
+  return (
+    <Section title="Collection per project">
+      <View style={{ gap: 14, paddingVertical: 6 }}>
+        {rows.map((p) => {
+          const pct = n0(p.TotalDue) ? Math.min(100, (n0(p.TotalPaid) / n0(p.TotalDue)) * 100) : 0;
+          return (
+            <View key={p.ProjectName} style={{ gap: 6 }}>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, fontFamily: fonts.heading.semibold, color: b.textPrimary }}>{p.ProjectName}</Text>
+                <Text style={{ fontSize: 13, fontFamily: fonts.body.medium, color: b.textSecondary, fontVariant: ["tabular-nums"] }}>{short(p.TotalPaid)} of {short(p.TotalDue)}</Text>
+              </View>
+              <Bar pct={pct} color={b.success} />
+              <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: n0(p.OverdueCount) ? b.danger : b.textSecondary }}>
+                {Math.round(pct)}% collected{n0(p.OverdueCount) ? ` · ${p.OverdueCount} overdue` : ""}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    </Section>
+  );
+}
+
+/** The seven-day lookahead (the web's): the days with handovers, registries or payments due — the quiet days left out. */
+export function WeekAhead({ d }: { d: any }) {
+  const b = useBrand();
+  const card = useCardStyle();
+  const days: any[] = (d?.thisWeek ?? []).filter((w: any) => n0(w.Handovers) || n0(w.Registries) || n0(w.MilestonesDue));
+  const chip = (Icon: typeof KeyRound, n: number, one: string, many: string) => n ? (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999, backgroundColor: b.surfaceGlass }}>
+      <Icon size={12} color={b.accent} />
+      <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: b.textPrimary }}>{plural(n, one, many)}</Text>
+    </View>
+  ) : null;
+  return (
+    <Section title="Seven-day lookahead">
+      {days.length === 0 ? (
+        <Text style={{ fontSize: 13.5, fontFamily: fonts.body.regular, color: b.textSecondary, paddingVertical: 10 }}>No handovers, registries or payments due in the next 7 days.</Text>
       ) : (
-        <>
-          <MoneyFigures d={d} />
-          <AttentionList d={d} />
-
-          <Section title="This month and next">
-            <Kv label="Units sold this month" value={String(n0(metrics.unitsSoldThisMonth))} strong />
-            <Kv label="Booking value this month" value={money(metrics.revenueThisMonth)} strong />
-            <Kv label={`Falling due in 30 days (${n0(metrics.forwardDueCount)} milestone${n0(metrics.forwardDueCount) === 1 ? "" : "s"})`} value={money(metrics.forwardDue30Days)} strong />
-          </Section>
-
-          {(metrics.collectionPerProject ?? []).length ? (
-            <Section title="Collection per project">
-              {metrics.collectionPerProject.map((p: any) => {
-                const pct = n0(p.TotalDue) ? Math.min(100, (n0(p.TotalPaid) / n0(p.TotalDue)) * 100) : 0;
-                return (
-                  <View key={p.ProjectName} style={{ paddingVertical: 8 }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
-                      <Text numberOfLines={1} style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{p.ProjectName}</Text>
-                      <Text style={{ fontSize: 11.5, fontFamily: fonts.body.medium, color: colors.mutedForeground, fontVariant: ["tabular-nums"] }}>{money(p.TotalPaid)} / {money(p.TotalDue)}</Text>
-                    </View>
-                    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.muted, marginTop: 6, overflow: "hidden" }}>
-                      <View style={{ width: `${pct}%`, height: 6, backgroundColor: "#10b981" }} />
-                    </View>
-                    {n0(p.OverdueCount) ? <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: "#ef4444", marginTop: 3 }}>{p.OverdueCount} overdue</Text> : null}
-                  </View>
-                );
-              })}
-            </Section>
-          ) : null}
-
-          {d.funnel ? (
-            <Section title="Pipeline">
-              <Kv label="Applications" value={String(n0(d.funnel.Applications))} />
-              <Kv label="Bookings" value={String(n0(d.funnel.Bookings))} />
-              <Kv label="Agreements" value={String(n0(d.funnel.Agreements))} />
-              <Kv label="Possessions" value={String(n0(d.funnel.Possessions))} />
-            </Section>
-          ) : null}
-
-          {(d.thisWeek ?? []).length ? (
-            <Section title="Seven-day lookahead">
-              {d.thisWeek.map((w: any) => {
-                const parts = [
-                  n0(w.Handovers) && `${w.Handovers} handover${n0(w.Handovers) === 1 ? "" : "s"}`,
-                  n0(w.Registries) && `${w.Registries} registr${n0(w.Registries) === 1 ? "y" : "ies"}`,
-                  n0(w.MilestonesDue) && `${w.MilestonesDue} payment${n0(w.MilestonesDue) === 1 ? "" : "s"} due`,
-                ].filter(Boolean);
-                return <Kv key={w.DayDate} label={w.DayLabel} value={parts.length ? parts.join(" · ") : "—"} />;
-              })}
-            </Section>
-          ) : null}
-        </>
+        <View style={{ gap: 10, paddingVertical: 6 }}>
+          {days.map((w) => (
+            <View key={w.DayDate} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <View style={{ ...card, width: 54, alignItems: "center", paddingVertical: 8, borderRadius: 14 }}>
+                <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: b.textSecondary }}>{String(w.DayLabel).split(" ")[0]}</Text>
+                <Text style={{ fontSize: 17, fontFamily: fonts.heading.semibold, color: b.textPrimary }}>{String(w.DayLabel).split(" ")[1]}</Text>
+              </View>
+              <View style={{ flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {chip(KeyRound, n0(w.Handovers), "handover", "handovers")}
+                {chip(ScrollText, n0(w.Registries), "registry", "registries")}
+                {chip(ReceiptIndianRupee, n0(w.MilestonesDue), "payment due", "payments due")}
+              </View>
+            </View>
+          ))}
+        </View>
       )}
-    </ScrollView>
+    </Section>
   );
 }

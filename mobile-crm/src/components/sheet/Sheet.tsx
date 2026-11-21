@@ -624,12 +624,13 @@ export function useDraw(len: number) {
 
 /** The shell for a working page (lists, forms): the sheet's frame and title block around the page's own content,
  * which sits in one ruled cell below. The parts rise in as on the web. */
-export const SheetShell: React.FC<{ eyebrow: string; title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode }> = ({ eyebrow, title, subtitle, action, children }) => (
+/** A sheet page. Leave out `eyebrow` and `title` where the app's header already names the page, so it isn't said twice. */
+export const SheetShell: React.FC<{ eyebrow?: string; title?: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode }> = ({ eyebrow, title, subtitle, action, children }) => (
   <SheetFrame>
     <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 18, gap: 12 }}>
       <View style={{ gap: 8 }}>
-        <Label>{eyebrow}</Label>
-        <TitleText size={26}>{title}</TitleText>
+        {eyebrow ? <Label>{eyebrow}</Label> : null}
+        {title ? <TitleText size={26}>{title}</TitleText> : null}
         {!!subtitle && <Body size={13} color={S.ink2}>{subtitle}</Body>}
       </View>
       {action}

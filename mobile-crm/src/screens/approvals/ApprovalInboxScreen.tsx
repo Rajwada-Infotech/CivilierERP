@@ -131,9 +131,8 @@ export default function ApprovalInboxScreen() {
   return (
     <View style={{ flex: 1 }}>
       <SheetPage refreshing={isFetching && !isLoading} onRefresh={() => void refetch()}>
+        {/* The header names the page (Approval Inbox), so the sheet doesn't repeat it. */}
         <SheetShell
-          eyebrow="CivilierERP · Approvals"
-          title="Approval inbox"
           subtitle="Every record waiting on your approval, across all modules, grouped by the kind of document."
           action={<Key label={isFetching ? "Reading…" : "Refresh"} icon={<RefreshCw size={13} color={S.ink} />} onPress={() => void refetch()} disabled={isFetching} style={{ alignSelf: "flex-start" }} />}
         >

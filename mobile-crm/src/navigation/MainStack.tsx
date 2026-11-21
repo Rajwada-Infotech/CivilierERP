@@ -1,6 +1,6 @@
 // Civilier CRM's layout, as Civilier Home's (mobile-maintenance CustomerStack.tsx): a floating, rounded tab bar —
 // Home, Bookings, CRM (every other CRM list), Maintenance, each shown only to staff with a right on it — and Menu,
-// which pops up the Approval Inbox, Notifications and Profile & settings (TopHeader.tsx NavMenuSheet). Every other
+// which pops up the Approval Inbox (TopHeader.tsx NavMenuSheet). Every other
 // screen is pushed over the tabs with a round back key.
 import { Text, View } from "react-native";
 import { createBottomTabNavigator, type BottomTabBarProps } from "@react-navigation/bottom-tabs";
@@ -12,7 +12,7 @@ import { fonts } from "@/theme/fonts";
 import { useBrand } from "@/theme/ThemeContext";
 import HomeScreen from "@/screens/dashboard/DashboardScreen";
 import MaintenanceScreen, { useHasMaintenance } from "@/screens/dashboard/MaintenanceScreen";
-import ProfileScreen from "@/screens/dashboard/ProfileScreen";
+import ProfileScreen, { SettingsScreen } from "@/screens/dashboard/ProfileScreen";
 import NotificationsScreen from "@/screens/notifications/NotificationsScreen";
 import DirectoryScreen from "@/screens/directory/DirectoryScreen";
 import CustomerProfileScreen from "@/screens/directory/CustomerProfileScreen";
@@ -24,7 +24,6 @@ import ElectricityScreen from "@/screens/electricity/ElectricityScreen";
 import ServiceRequestsScreen from "@/screens/tickets/ServiceRequestsScreen";
 import ApprovalInboxScreen from "@/screens/approvals/ApprovalInboxScreen";
 import CrmHubScreen from "@/screens/crm/CrmHubScreen";
-import CrmDashboardScreen from "@/screens/crm/CrmDashboardScreen";
 import CrmRegisterScreen from "@/screens/crm/CrmRegisterScreen";
 import BookingDetailScreen from "@/screens/crm/BookingDetailScreen";
 import Customer360Screen from "@/screens/crm/Customer360Screen";
@@ -45,6 +44,7 @@ export type MainStackParamList = {
   Tabs: { screen?: keyof TabParamList } | undefined;
   Notifications: undefined;
   Profile: undefined;
+  Settings: undefined;
   Approvals: undefined;
   // Maintenance
   Directory: undefined;
@@ -55,9 +55,8 @@ export type MainStackParamList = {
   ServiceRequests: undefined;
   Attendance: undefined;
   Electricity: undefined;
-  // CRM (screens/crm): the dashboard, any list from crmRegisters.ts, one booking, one customer, one ticket, and the
+  // CRM (screens/crm): any list from crmRegisters.ts, one booking, one customer, one ticket, and the
   // forms that change something (CrmForms.tsx).
-  CrmDashboard: undefined;
   CrmRegister: { register: string };
   CrmBooking: { bookingId: number; title?: string };
   CrmCustomer: { customerId: number; title?: string };
@@ -116,7 +115,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           };
           return item(route.key, tab?.label ?? descriptors[route.key].options.title ?? route.name, tab?.icon ?? Home, focused, onPress);
         })}
-        {/* Menu: not a page of its own — it pops up the Approval Inbox, Notifications and Profile & settings. */}
+        {/* Menu: not a page of its own — it pops up the Approval Inbox. */}
         {item("menu", "Menu", LayoutGrid, false, menus.nav, menuCount)}
       </View>
     </View>
@@ -148,7 +147,8 @@ export default function MainStack() {
       <Stack.Navigator screenOptions={{ header: (props) => <TopHeader {...props} />, contentStyle: { backgroundColor: b.surface } }}>
         <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
-        <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile & settings" }} />
+        <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "My profile" }} />
+        <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: "Settings" }} />
         <Stack.Screen name="Approvals" component={ApprovalInboxScreen} options={{ title: "Approval Inbox" }} />
         <Stack.Screen name="Directory" component={DirectoryScreen} options={{ title: "Customer Directory" }} />
         <Stack.Screen name="CustomerProfile" component={CustomerProfileScreen} options={{ title: "Customer Profile" }} />
@@ -158,7 +158,6 @@ export default function MainStack() {
         <Stack.Screen name="ServiceRequests" component={ServiceRequestsScreen} options={{ title: "Service Requests" }} />
         <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "Security Attendance" }} />
         <Stack.Screen name="Electricity" component={ElectricityScreen} options={{ title: "Electricity Maintenance" }} />
-        <Stack.Screen name="CrmDashboard" component={CrmDashboardScreen} options={{ title: "CRM Dashboard" }} />
         <Stack.Screen name="CrmRegister" component={CrmRegisterScreen} options={({ route }) => ({ title: (pairParent(route.params.register) ?? registerByKey(route.params.register))?.label ?? "CRM" })} />
         <Stack.Screen name="CrmBooking" component={BookingDetailScreen} options={({ route }) => ({ title: route.params.title || "Booking" })} />
         <Stack.Screen name="CrmCustomer" component={Customer360Screen} options={({ route }) => ({ title: route.params.title || "Customer 360" })} />

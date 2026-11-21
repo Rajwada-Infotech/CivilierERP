@@ -1,14 +1,14 @@
-// Profile & settings (from the account menu), laid out like Civilier Home's: who is signed in and what their rights
-// open; Appearance (dark mode and the accent colour, kept on this phone); notifications; the app (installed version,
-// check for update); changing their own password (the web profile's route, backend/routes/userProfile.js); sign out.
+// The account pages from the avatar menu, laid out like Civilier Home's (My profile, Settings):
+//   ProfileScreen   who is signed in, what their rights open, and changing their own password (the web profile's route,
+//                   backend/routes/userProfile.js);
+//   SettingsScreen  Appearance (dark mode and the accent colour, kept on this phone) and the app (installed version,
+//                   check for update).
+// Signing out is the avatar menu's.
 import { useState } from "react";
-import { Alert, Platform, Switch, Text, TextInput, View } from "react-native";
+import { Platform, Switch, Text, TextInput, View } from "react-native";
 import * as Application from "expo-application";
-import { Bell, Check, KeyRound, LogOut, RefreshCw } from "lucide-react-native";
-import { useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { Check, KeyRound, RefreshCw } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import type { MainStackParamList } from "@/navigation/MainStack";
 import { roleText } from "@/navigation/TopHeader";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 import { checkForUpdateNow } from "@/updater/UpdateGate";
@@ -18,7 +18,6 @@ import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { useHasCrm } from "@/screens/crm/crmRegisters";
 import { useHasMaintenance } from "@/screens/dashboard/MaintenanceScreen";
-import { useBellCount } from "@/screens/notifications/NotificationsScreen";
 import { AccentAvatar, Button, HeroSurface, Kv, LinkRow, ON_HERO, Page, Section, Tap } from "@/screens/crm/ui";
 
 function PasswordInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
@@ -79,33 +78,11 @@ function ChangePassword({ userId }: { userId: string }) {
 
 export default function ProfileScreen() {
   const b = useBrand();
-  const { mode, toggleMode, accentKey, setAccent } = useTheme();
-  const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
-  const { currentUser, logout, canAccessPage } = useAuth();
-  const { appVersion } = useAppVersion();
-  const bell = useBellCount();
+  const { currentUser, canAccessPage } = useAuth();
   const hasCrm = useHasCrm();
   const hasMaintenance = useHasMaintenance();
-  const [checking, setChecking] = useState(false);
   const opens = [hasCrm && "CRM", canAccessPage("approval-inbox") && "Approvals", hasMaintenance && "Maintenance"].filter(Boolean).join(", ");
   const initials = (currentUser?.name || "?").split(" ").filter(Boolean).map((n) => n[0]).join("").toUpperCase().slice(0, 2);
-
-  const checkUpdate = async () => {
-    if (Platform.OS !== "android") return toast.info("Updates are installed from the Android app.");
-    setChecking(true);
-    const r = await checkForUpdateNow();
-    setChecking(false);
-    if (r === "latest") toast.success("You have the latest version.");
-    else if (r === "unavailable") toast.error("Couldn't check for updates. Check your connection.");
-  };
-
-  const signOut = () => {
-    if (Platform.OS === "web") { logout(); return; }
-    Alert.alert("Sign out?", "You'll need your email and password to sign in again.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Sign out", style: "destructive", onPress: () => logout() },
-    ]);
-  };
 
   return (
     <Page gap={0}>
@@ -129,6 +106,30 @@ export default function ProfileScreen() {
         </Text>
       </Section>
 
+      <Section title="Account">
+        {currentUser ? <ChangePassword userId={currentUser.id} /> : null}
+      </Section>
+    </Page>
+  );
+}
+
+export function SettingsScreen() {
+  const b = useBrand();
+  const { mode, toggleMode, accentKey, setAccent } = useTheme();
+  const { appVersion } = useAppVersion();
+  const [checking, setChecking] = useState(false);
+
+  const checkUpdate = async () => {
+    if (Platform.OS !== "android") return toast.info("Updates are installed from the Android app.");
+    setChecking(true);
+    const r = await checkForUpdateNow();
+    setChecking(false);
+    if (r === "latest") toast.success("You have the latest version.");
+    else if (r === "unavailable") toast.error("Couldn't check for updates. Check your connection.");
+  };
+
+  return (
+    <Page gap={0}>
       <Section title="Appearance">
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8 }}>
           <Text style={{ fontSize: 15, fontFamily: fonts.body.medium, color: b.textPrimary }}>Dark mode</Text>
@@ -149,21 +150,11 @@ export default function ProfileScreen() {
         </View>
       </Section>
 
-      <Section title="Notifications">
-        <LinkRow title="Notifications" sub={bell ? `${bell} need attention` : "All caught up"} icon={Bell} onPress={() => nav.navigate("Notifications")} />
-      </Section>
-
       <Section title="App">
         <Kv label="Installed" value={Application.nativeApplicationVersion ? `${Application.nativeApplicationVersion} (${Application.nativeBuildVersion})` : "—"} />
         <Kv label="Server" value={appVersion && appVersion !== "…" ? appVersion : "—"} />
         <LinkRow title={checking ? "Checking…" : "Check for update"} icon={RefreshCw} onPress={checking ? undefined : checkUpdate} />
       </Section>
-
-      <Section title="Account">
-        {currentUser ? <ChangePassword userId={currentUser.id} /> : null}
-      </Section>
-
-      <Button label="Sign out" icon={LogOut} kind="line" onPress={signOut} />
     </Page>
   );
 }

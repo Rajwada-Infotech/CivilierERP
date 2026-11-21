@@ -33,7 +33,9 @@ export interface CardAction { label: string; pages: string[]; right: "create" | 
 export interface CrmRegister {
   key: string;
   label: string;
-  /** Its icon in the Menu pop-up. */
+  /** What the list holds, in a line — under its name on the CRM tab and in the Menu. */
+  about: string;
+  /** Its icon on the CRM tab and in the Menu. */
   icon: LucideIcon;
   group: CrmGroup;
   /** Shown to anyone with a right on any of these pages (the server route's own rule). */
@@ -77,7 +79,7 @@ const stepName = (s: any) => (s == null ? "" : typeof s === "string" ? s : s.lab
 export const CRM_REGISTERS: CrmRegister[] = [
   // ── Buyers & Bookings ──────────────────────────────────────────────────────
   {
-    key: "leads", icon: UserRound, label: "Leads", group: "Buyers & Bookings", pages: ["crm-leads"], path: "/api/crm/leads",
+    key: "leads", about: "Handed over from Sales Automation", icon: UserRound, label: "Leads", group: "Buyers & Bookings", pages: ["crm-leads"], path: "/api/crm/leads",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.CustomerName || r.LeadUid, sub: (r) => joinDot(r.LeadUid, r.Mobile),
     lines: (r) => [
@@ -91,7 +93,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No leads handed over to the CRM.",
   },
   {
-    key: "customers", icon: Users, label: "Customers", group: "Buyers & Bookings", pages: ["crm-customers"], path: "/api/crm/customers",
+    key: "customers", about: "Everyone who has applied or booked", icon: Users, label: "Customers", group: "Buyers & Bookings", pages: ["crm-customers"], path: "/api/crm/customers",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.CustomerName, sub: (r) => joinDot(r.CustomerNo, r.Mobile),
     status: (r) => (r.IsActive === false ? "Inactive" : null),
@@ -102,7 +104,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No customers yet.",
   },
   {
-    key: "applications", icon: FileCheck2, label: "Applications", group: "Buyers & Bookings", pages: ["crm-applications"], path: "/api/crm/applications",
+    key: "applications", about: "Applications for a unit or plot", icon: FileCheck2, label: "Applications", group: "Buyers & Bookings", pages: ["crm-applications"], path: "/api/crm/applications",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.ApplicationNo, r.Mobile),
     status: (r) => r.Status,
@@ -117,7 +119,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No applications yet.",
   },
   {
-    key: "bookings", icon: ClipboardList, label: "Bookings", group: "Buyers & Bookings", pages: ["crm-bookings"], path: "/api/crm/bookings",
+    key: "bookings", about: "Booked units and plots", icon: ClipboardList, label: "Bookings", group: "Buyers & Bookings", pages: ["crm-bookings"], path: "/api/crm/bookings",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.BookingNo, sub: unitOf,
     status: (r) => r.Status,
@@ -130,7 +132,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
   },
   {
     // The web's call queue (crmWelcomeCalls.js GET /queue): approved bookings still waiting for their welcome call.
-    key: "welcome-calls", icon: PhoneCall, label: "Welcome Calls", group: "Buyers & Bookings", pages: ["crm-welcome-calls"], path: "/api/crm/welcome-calls/queue",
+    key: "welcome-calls", about: "Approved bookings waiting for their call", icon: PhoneCall, label: "Welcome Calls", group: "Buyers & Bookings", pages: ["crm-welcome-calls"], path: "/api/crm/welcome-calls/queue",
     rows: list, id: (r) => String(r.BookingId),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.ProjectName, r.UnitNo),
     status: (r) => (r.LastOutcome ? OUTCOME_LABEL[r.LastOutcome] ?? r.LastOutcome : "Not called"),
@@ -147,7 +149,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No bookings waiting for a welcome call.",
   },
   {
-    key: "call-history", icon: PhoneIncoming, label: "Call History", group: "Buyers & Bookings", pages: ["crm-welcome-calls"], path: "/api/crm/welcome-calls",
+    key: "call-history", about: "Welcome calls made", icon: PhoneIncoming, label: "Call History", group: "Buyers & Bookings", pages: ["crm-welcome-calls"], path: "/api/crm/welcome-calls",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.ProjectName, r.UnitNo),
     status: (r) => (r.Outcome ? OUTCOME_LABEL[r.Outcome] ?? r.Outcome : null),
@@ -162,7 +164,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
   },
   // ── Finance ────────────────────────────────────────────────────────────────
   {
-    key: "demands", icon: ReceiptIndianRupee, label: "Demands", group: "Finance", pages: ["crm-payments"], path: "/api/crm/payments/demands",
+    key: "demands", about: "Milestones demanded from buyers", icon: ReceiptIndianRupee, label: "Demands", group: "Finance", pages: ["crm-payments"], path: "/api/crm/payments/demands",
     rows: (b) => list(b?.demands), id: (r) => String(r.Id),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.ProjectName, r.UnitNo),
     status: (r) => (r.IsOverdue && r.DemandStatus !== "Paid" ? "Overdue" : r.DemandStatus),
@@ -177,7 +179,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No demands.",
   },
   {
-    key: "money-receipts", icon: ListChecks, label: "Money Receipts", group: "Finance", pages: ["crm-money-receipts"], path: "/api/crm/money-receipts", serverSearch: true,
+    key: "money-receipts", about: "Receipts for money received", icon: ListChecks, label: "Money Receipts", group: "Finance", pages: ["crm-money-receipts"], path: "/api/crm/money-receipts", serverSearch: true,
     rows: (b) => list(b?.rows), id: (r) => String(r.Id),
     title: (r) => r.ReceiptNo, sub: (r) => joinDot(r.ApplicantName, r.BookingNo, r.UnitNo),
     status: (r) => r.Status,
@@ -191,7 +193,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No money receipts.",
   },
   {
-    key: "on-account", icon: Wallet, label: "On Account", group: "Finance", pages: ["crm-payments"], path: "/api/crm/payments/on-account", serverSearch: true,
+    key: "on-account", about: "Payments held before they are adjusted", icon: Wallet, label: "On Account", group: "Finance", pages: ["crm-payments"], path: "/api/crm/payments/on-account", serverSearch: true,
     rows: (b) => list(b?.deposits), id: (r) => String(r.Id),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.ReceiptNo, r.BookingNo, r.UnitNo),
     status: (r) => r.Status,
@@ -205,7 +207,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
   },
   // ── Legal & Possession ─────────────────────────────────────────────────────
   {
-    key: "possession", icon: KeyRound, label: "Possession & Handover", group: "Legal & Possession",
+    key: "possession", about: "Checklist, notice and handover", icon: KeyRound, label: "Possession & Handover", group: "Legal & Possession",
     pages: ["crm-pre-possession", "crm-possession-notice", "crm-handover"], path: "/api/crm/pre-possession/board", serverSearch: true,
     rows: (b) => list(b?.rows), id: (r) => String(r.BookingId),
     title: (r) => r.ApplicantName, sub: (r) => joinDot(r.BookingNo, r.ProjectName, [r.BlockName, r.UnitNo].filter(Boolean).join(" / ")),
@@ -220,7 +222,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
   },
   // ── After-Sales ────────────────────────────────────────────────────────────
   {
-    key: "customer-360", icon: Building2, label: "Customer 360", group: "After-Sales", pages: ["crm-customer-360"], path: "/api/crm/customer-360",
+    key: "customer-360", about: "One customer, everything", icon: Building2, label: "Customer 360", group: "After-Sales", pages: ["crm-customer-360"], path: "/api/crm/customer-360",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.CustomerName, sub: (r) => joinDot(r.CustomerNo, r.Mobile),
     amount: (r) => (Number(r.TotalOutstanding) > 0 ? { label: "Outstanding", value: money(r.TotalOutstanding) } : null),
@@ -231,7 +233,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No customers yet.",
   },
   {
-    key: "service-tickets", icon: Ticket, label: "Service Tickets", group: "After-Sales", pages: ["crm-service-tickets"], path: "/api/crm/service-tickets",
+    key: "service-tickets", about: "Buyers' service requests", icon: Ticket, label: "Service Tickets", group: "After-Sales", pages: ["crm-service-tickets"], path: "/api/crm/service-tickets",
     rows: list, id: (r) => String(r.Id),
     title: (r) => r.Subject || r.TicketNo, sub: (r) => joinDot(r.TicketNo, r.ApplicantName, r.UnitNo),
     status: (r) => r.Status,
@@ -244,7 +246,7 @@ export const CRM_REGISTERS: CrmRegister[] = [
     empty: "No service tickets.",
   },
   {
-    key: "construction-updates", icon: HardHat, label: "Construction Updates", group: "After-Sales", pages: ["crm-construction-updates"], path: "/api/crm/construction-updates/progress",
+    key: "construction-updates", about: "Site progress by project", icon: HardHat, label: "Construction Updates", group: "After-Sales", pages: ["crm-construction-updates"], path: "/api/crm/construction-updates/progress",
     rows: (b) => list(b?.projects), id: (r) => String(r.projectId),
     title: (r) => r.projectName,
     sub: (r) => (r.hasDpr ? `${r.done ?? 0} of ${r.steps ?? 0} steps done` : "No site progress recorded yet"),
@@ -271,3 +273,6 @@ export function useHasCrm() {
 export const pairParent = (key: string) => CRM_REGISTERS.find((r) => r.pair?.key === key);
 /** The lists the CRM page shows on their own: not a paired list (it opens from its parent's switch). */
 export const isListedRegister = (r: CrmRegister) => !pairParent(r.key);
+
+/** The CRM lists the bottom bar's Menu also offers (TopHeader.tsx NavMenuSheet), in this order. */
+export const MENU_LISTS = ["customer-360", "service-tickets", "construction-updates"];

@@ -104,7 +104,6 @@ export default function BookingDetailScreen() {
             </View>
             <Text style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.foreground, marginTop: 6 }}>
               {customer?.CustomerName || head.ApplicantName || "—"}
-              {customer?.Mobile || head.Mobile ? <Text style={{ color: colors.mutedForeground }}>{`  ${customer?.Mobile || head.Mobile}`}</Text> : null}
             </Text>
             <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 4 }}>
               {joinDot(head.ProjectName, [head.BlockName, head.FloorName, head.UnitNo].filter(Boolean).join(" / "), head.UnitType)}
@@ -238,8 +237,8 @@ export default function BookingDetailScreen() {
           {customer ? (
             <Section title="Buyer">
               <LinkRow
-                title={customer.CustomerName}
-                sub={joinDot(customer.CustomerNo, customer.Mobile, customer.Email)}
+                title={customer.CustomerNo || customer.CustomerName}
+                sub={joinDot(customer.Mobile, customer.Email)}
                 onPress={canAccessPage("crm-customer-360") ? () => open({ to: "customer", customerId: Number(customer.Id), title: customer.CustomerName }) : undefined}
               />
               <Kv label="PAN" value={customer.PanNo} />
