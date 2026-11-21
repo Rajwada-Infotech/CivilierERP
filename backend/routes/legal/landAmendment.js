@@ -91,7 +91,11 @@ async function currentRows(pool, landId) {
 async function isLocked(pool, landId) {
   if (!landId) return false;
   const r = await pool.request().input("L", sql.Int, landId).query("SELECT WorkflowStatus FROM dbo.LegalLand WHERE LandId = @L");
-  return r.recordset[0]?.WorkflowStatus === "Registered";
+  if (r.recordset[0]?.WorkflowStatus !== "Registered") return false;
+  // An approved amendment opens the land for editing until its edits are approved as a version (Status Completed).
+  const open = await pool.request().input("L", sql.Int, landId).query(
+    "IF OBJECT_ID(N'dbo.LegalLandAmendment', N'U') IS NULL SELECT 0 AS n ELSE SELECT COUNT(*) AS n FROM dbo.LegalLandAmendment WHERE LandId = @L AND Status = N'Open'");
+  return !open.recordset[0].n;
 }
 const LOCK_MSG = "This land is registered and locked. Use Request amendment (Legal Flow Chart) to change it.";
 
@@ -151,14 +155,16 @@ router.post("/land/:landId", requirePageRight(PAGE, "edit"), async (req, res) =>
   const referenceNo = String(b.referenceNo || "").trim().slice(0, 150) || null;
   if (!TYPES.includes(type)) return res.status(400).json({ error: "Choose the amendment type" });
   if (reason.length < 5) return res.status(400).json({ error: "Write the reason for the amendment" });
-  if (!Array.isArray(b.changes) || !b.changes.length) return res.status(400).json({ error: "Add at least one change" });
+  // Changes are optional: an amendment without them opens the land for editing once approved.
+  if (b.changes !== undefined && !Array.isArray(b.changes)) return res.status(400).json({ error: "Invalid changes" });
+  b.changes = b.changes || [];
   try {
     const pool = getPool();
     if (!(await ready(pool))) return notReady(res);
     const land = (await pool.request().input("L", sql.Int, landId).query("SELECT * FROM dbo.LegalLand WHERE LandId = @L AND IsActive = 1")).recordset[0];
     if (!land) return res.status(404).json({ error: "Land not found" });
     if (land.WorkflowStatus !== "Registered") return res.status(409).json({ error: "Only a registered land needs an amendment — edit this land directly" });
-    const open = (await pool.request().input("L", sql.Int, landId).query("SELECT COUNT(*) AS n FROM dbo.LegalLandAmendment WHERE LandId = @L AND Status = N'Pending'")).recordset[0].n;
+    const open = (await pool.request().input("L", sql.Int, landId).query("SELECT COUNT(*) AS n FROM dbo.LegalLandAmendment WHERE LandId = @L AND Status IN (N'Pending', N'Open')")).recordset[0].n;
     if (open) return res.status(409).json({ error: "This land already has an amendment waiting for approval" });
     const changes = [];
     const cur = await currentRows(pool, landId);
@@ -290,6 +296,12 @@ router.post("/:id/approve", requirePageRight(PAGE, "view"), async (req, res) => 
     const own = ownWork(req, a.RequestedBy, "this amendment");
     if (own) return res.status(403).json({ error: own });
 
+    if (!a.changes.length) {
+      await pool.request().input("Id", sql.Int, id).input("U", sql.Int, userOf(req)).input("R", sql.NVarChar(1000), remarks.slice(0, 1000))
+        .query("UPDATE dbo.LegalLandAmendment SET Status = N'Open', DecidedBy = @U, DecidedAt = SYSUTCDATETIME(), DecisionRemarks = @R WHERE AmendmentId = @Id AND Status = N'Pending'");
+      await writeAudit(pool, req, { action: "Amendment approved", entityType: "Land Amendment", entityId: id, landId: a.LandId, remarks: `Amendment ${a.AmendmentNo} · ${a.AmendType}: ${remarks}`.slice(0, 1000) });
+      return res.json({ message: `Amendment ${a.AmendmentNo} approved — ${a.LandCode} is open for editing. After the edits, send it for verification.` });
+    }
     const tx = pool.transaction();
     await tx.begin();
     try {

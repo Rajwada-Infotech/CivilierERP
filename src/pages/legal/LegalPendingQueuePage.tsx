@@ -87,7 +87,7 @@ export default function LegalPendingQueuePage() {
               <h3 className="text-sm font-heading font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
                 <AlertTriangle size={16} className="text-red-600" /> Missing Mandatory Checklist Items ({missingDocs.length})
               </h3>
-              <p className="text-xs text-muted-foreground">Documents that block L1 and L2 approvals until uploaded, verified, or waived.</p>
+              <p className="text-xs text-muted-foreground">Documents that block approval until uploaded, verified, or waived.</p>
             </div>
 
             <div className="rounded-xl border border-border/80 bg-card overflow-hidden shadow-sm">

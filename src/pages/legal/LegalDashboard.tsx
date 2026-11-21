@@ -24,7 +24,7 @@ const READINESS: { key: string; label: string; hint: string }[] = [
   { key: "document-type", label: "Document types", hint: "Deed, porcha, tax receipt …" },
   { key: "deed-type", label: "Deed types", hint: "Sale, gift, partition …" },
   { key: "registration-office", label: "Registration offices", hint: "The ADSR / DSR offices where deeds were registered" },
-  { key: "approval-authority", label: "L1 / L2 approvers", hint: "Who reviews (L1) and approves (L2) land records" },
+  { key: "approval-authority", label: "Approval Control", hint: "Who verifies, approves, reviews and approves amendments" },
   { key: "portal-link", label: "Government site links", hint: "Banglarbhumi, WB registration … for checking plots" },
 ];
 
@@ -130,8 +130,7 @@ export default function LegalDashboard() {
                   ["High-risk properties", "highRisk", "/legal/approvals", true],
                   ["Restricted properties", "restricted", "/legal/approvals", true],
                   ["Pending final verification", "pendingFinal", "/legal/approvals", true],
-                  ["Pending L1 approval", "pendingL1", "/legal/land/deed-process", true],
-                  ["Pending L2 approval", "pendingL2", "/legal/land/deed-process", true],
+                  ["Pending deed approval", "pendingL1", "/legal/approvals?tab=approve", true],
                   ["Pending deed registration", "pendingRegistration", "/legal/deed-registration", true],
                   ["Deed payment overdue", "paymentOverdue", "/legal/deed-registration", true],
                   ["Overdue deed timeline", "deedOverdue", "/legal/land/deed-process", true],

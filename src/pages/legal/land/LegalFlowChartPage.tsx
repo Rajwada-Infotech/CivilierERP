@@ -5,9 +5,9 @@ import { Hierarchy, SearchNormal1 } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { useProjectScope } from "@/components/legal/ProjectPicker";
-import { Section, Versions } from "@/components/legal/LandVersions";
+import { NextVersionCard, Section, Versions } from "@/components/legal/LandVersions";
 import { LandAmendmentActions } from "@/components/legal/LandAmendmentPanel";
-import { getFlowEnquiry, getFlowLand, searchFlow, type FlowLand } from "@/api/legalFlowApi";
+import { getFlowEnquiry, getFlowLand, getFlowLands, searchFlow, type FlowLand } from "@/api/legalFlowApi";
 
 type Row = Record<string, unknown>;
 
@@ -25,6 +25,8 @@ function LandView({ data }: { data: FlowLand }) {
         {l && <button onClick={() => navigate(`/legal/land/properties/${l.LandId}`)} className="h-9 border border-foreground px-4 text-xs font-semibold uppercase tracking-[0.1em] hover:bg-foreground hover:text-background">Open land profile</button>}
       </div>
 
+      {l && <NextVersionCard landId={Number(l.LandId)} />}
+
       {l && <LandAmendmentActions landId={Number(l.LandId)} />}
 
       <Section title="Versions" count={data.versions?.length}><Versions versions={data.versions ?? []} landId={(l?.LandId as number) ?? null} code={String(l?.LandCode ?? e?.EnquiryNo ?? "land")} stages={data.stages} /></Section>
@@ -32,8 +34,7 @@ function LandView({ data }: { data: FlowLand }) {
   );
 }
 
-/** Legal Flow Chart: search a land by any number it is known by and see its whole flow, details and change history. */
-/** Versions & Amendments: search a land by any number, see its versions and ask for / decide amendments. */
+/** Land Flowchart: find a land, verify it step by step, approve it — every approval makes a version. */
 export default function LegalFlowChartPage() {
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState(params.get("q") ?? "");
@@ -49,14 +50,16 @@ export default function LegalFlowChartPage() {
     queryFn: () => (landId ? getFlowLand(landId) : getFlowEnquiry(enquiryId!)),
     enabled: !!(landId || enquiryId),
   });
+  const all = useQuery({ queryKey: ["legal-flow-lands"], queryFn: getFlowLands });
+  const landTabs = useMemo(() => (all.data?.lands ?? []).filter((l) => inScope(l.ProjectId)), [all.data, inScope]);
   const hits = useMemo(() => (search.data?.results ?? []).filter((h) => inScope(h.ProjectId)), [search.data, inScope]);
   const open = (h: { LandId: number | null; EnquiryId: number | null }) =>
     setParams((p) => { const n = new URLSearchParams(p); n.delete("land"); n.delete("enquiry"); if (h.LandId) n.set("land", String(h.LandId)); else if (h.EnquiryId) n.set("enquiry", String(h.EnquiryId)); if (q.trim()) n.set("q", q.trim()); return n; });
 
   return (
     <>
-      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Versions & Amendments" }]} />
-      <LegalShell title="Versions & Amendments" subtitle="Search a land by Land ID, Enquiry no., RS / LR Khatian or Dag number — see every version, download it, and request or approve amendments." icon={Hierarchy}>
+      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Land Flowchart" }]} />
+      <LegalShell title="Land Flowchart" subtitle="Search a land by Land ID, Enquiry no., RS / LR Khatian or Dag number — see its versions, what changed in each, and download them. Verification and approval are in Approvals." icon={Hierarchy}>
         <div className="space-y-4">
           <div className="border border-border bg-card p-4">
             <label className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Search</label>
@@ -91,12 +94,34 @@ export default function LegalFlowChartPage() {
             )}
           </div>
 
+          {/* The selected project's lands as tabs, named by their RS / LR numbers. */}
+          <div className="border border-border bg-card p-3">
+            <p className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Lands in this project ({landTabs.length})</p>
+            {landTabs.length ? (
+              <div className="flex flex-wrap gap-1.5" role="tablist">
+                {landTabs.map((l) => {
+                  const on = l.LandId === landId;
+                  const rs = [l.RsKhatianNo && `Kh ${l.RsKhatianNo}`, l.RsDagNo && `Dag ${l.RsDagNo}`].filter(Boolean).join(" · ");
+                  const lr = [l.LrKhatianNo && `Kh ${l.LrKhatianNo}`, l.LrDagNo && `Dag ${l.LrDagNo}`].filter(Boolean).join(" · ");
+                  return (
+                    <button key={l.LandId} role="tab" aria-selected={on} title={`${l.LandCode} · ${l.LandName}${l.WorkflowStatus ? ` · ${l.WorkflowStatus}` : ""}`}
+                      onClick={() => open({ LandId: l.LandId, EnquiryId: null })}
+                      className={`border px-3 py-1.5 text-left text-xs ${on ? "border-foreground bg-foreground text-background" : "border-border hover:border-foreground"}`}>
+                      <span className="block font-semibold">RS {rs || "—"}</span>
+                      <span className={`block ${on ? "opacity-80" : "text-muted-foreground"}`}>LR {lr || "—"}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : <p className="text-sm text-muted-foreground">{all.isLoading ? "Loading…" : "No land in this project."}</p>}
+          </div>
+
           {(landId || enquiryId) ? (
             detail.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p>
               : detail.error ? <p className="text-sm text-destructive">{(detail.error as Error).message}</p>
               : detail.data ? <LandView data={detail.data} /> : null
           ) : !term && (
-            <p className="border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Type any number the land is known by to see its versions and amendments.</p>
+            <p className="border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Type any number the land is known by to see its versions. Verification and approval are in <b>Approvals</b>.</p>
           )}
         </div>
       </LegalShell>

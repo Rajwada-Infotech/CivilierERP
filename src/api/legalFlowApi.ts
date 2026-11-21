@@ -28,7 +28,9 @@ export interface FlowLand {
   rsRecords: Row[]; lrRecords: Row[]; owners: Row[]; transfers: Row[]; documents: Row[]; clearances: Row[]; mutations: Row[];
   stages: FlowStage[]; history: FlowChange[]; versions: FlowVersion[];
 }
-export interface FlowSnapshot { land: Row; rsRecords: Row[]; lrRecords: Row[]; owners: Row[]; documents: Row[]; clearances: Row[]; mutations: Row[] }
+export interface FlowSnapshot { land: Row; rsRecords: Row[]; lrRecords: Row[]; owners: Row[]; documents: Row[]; clearances: Row[]; mutations: Row[];
+  /** Entry sections saved at approval (Land Flowchart review), field by field. */
+  entry?: { key: string; label: string; records: { master: string; title: string; id: number; fields: { n: string; l: string; v: string | null }[] }[] }[] }
 /** One full cycle ending in approval (v1: enquiry → register → verification; later: change → re-verification). */
 export interface FlowVersion {
   no: number; status: string; startedAt: string | null; approvedAt: string | null; approvedBy: string | null; approval: string | null;
@@ -55,3 +57,35 @@ export const getVersionFile = async (landId: number, no: number, kind: "pdf" | "
   if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || "Download failed");
   return res.blob();
 };
+
+/** Land review (Land Flowchart): the verifier ticks each step, submits; an Approver approves → the next version. */
+export interface EntryField { n: string; l: string; v: string | null; req: boolean; file?: number }
+export interface EntryRecord { master: string; title: string; id: number; fields: EntryField[] }
+export interface ReviewStep {
+  key: string; label: string; records: EntryRecord[]; previous: EntryRecord[] | null;
+  /** An empty section: the fields it asks for. */
+  template?: { title: string; fields: { l: string; req: boolean }[] }[];
+  needed: boolean; filled: number; total: number; missingRequired: string[]; files: number;
+  checklist?: { doc: string; requirement: string; stage: string | null; state: string }[];
+  changed: boolean; checked: boolean; checkedBy: string | null; checkedAt: string | null; staleTick: boolean;
+}
+export interface LandReview {
+  land: { LandId: number; LandCode: string; LandName: string; WorkflowStatus: string | null };
+  versionNo: number; first: boolean; steps: ReviewStep[]; toCheck: number; ticked: number;
+  status: "Draft" | "Verifying" | "Submitted" | "Up to date";
+  registered?: boolean; amendment?: { AmendmentId: number; AmendmentNo: number; AmendType: string; Reason: string; Status: string } | null;
+  review: { ReviewId: number; Status: string; SubmittedBy: number | null; SubmittedByName: string | null; SubmittedAt: string | null; Remarks: string | null; EntrySubmittedByName?: string | null; EntrySubmittedAt?: string | null } | null;
+  returned: { Remarks: string | null; DecidedAt: string; DecidedByName: string | null } | null;
+  canVerify: boolean; canApprove: boolean; userId: number | null;
+}
+export interface ReviewQueueRow { LandId: number; LandCode: string; LandName: string; ProjectId: number | null; WorkflowStatus: string | null; MouzaName: string | null; VersionNo: number; Since: string | null; ByName: string | null }
+const json = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+export const getLandReview = async (id: number) => handle<LandReview>(await fetchWithAuth(`${BASE}/land/${id}/review`));
+export const checkReviewStep = async (id: number, step: string, checked: boolean) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/check`, json("PUT", { step, checked })));
+export const submitReview = async (id: number, remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/submit`, json("POST", { remarks })));
+export const decideReview = async (id: number, action: "Approve" | "Return", remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/decide`, json("POST", { action, remarks })));
+export const getReviewQueue = async (qs: string) => handle<{ items: ReviewQueueRow[]; total?: number; page?: number; pageSize?: number; canVerify?: boolean; canApprove?: boolean }>(await fetchWithAuth(`${BASE}/reviews?${qs}`));
+export const requestReview = async (id: number, remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/request`, json("POST", { remarks })));
+export const returnReview = async (id: number, remarks: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/land/${id}/review/return`, json("POST", { remarks })));
+export interface FlowLandTab { LandId: number; LandCode: string; LandName: string; ProjectId: number | null; WorkflowStatus: string | null; RsKhatianNo: string | null; RsDagNo: string | null; LrKhatianNo: string | null; LrDagNo: string | null }
+export const getFlowLands = async () => handle<{ lands: FlowLandTab[] }>(await fetchWithAuth(`${BASE}/lands`));

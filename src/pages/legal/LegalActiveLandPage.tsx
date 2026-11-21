@@ -7,7 +7,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { getLegalDeeds, type LegalDeedSummary } from "@/api/legalOperationsApi";
 
-// The final approved land register — all deeds that have passed L2 approval.
+// The final approved land register — all deeds that have been approved.
 // This is the user's single source of truth for what land the company owns.
 
 const ACTIVE_STATUSES = ["L2 Approved", "Closed", "Active", "Registered"];
@@ -86,7 +86,7 @@ export default function LegalActiveLandPage() {
       <Breadcrumbs items={["Dashboard", "Legal", "Active Land Register"]} />
       <LegalShell
         title="Active Land Register"
-        subtitle="All land deeds that have completed L2 approval — the company's confirmed land holdings."
+        subtitle="All land deeds that have been approved — the company's confirmed land holdings."
         icon={TableDocument}
         action={
           <button
@@ -124,7 +124,7 @@ export default function LegalActiveLandPage() {
               <CheckCircle2 size={32} className="mx-auto mb-3 text-muted-foreground/40" />
               <p className="text-sm font-semibold text-foreground">No active land records yet</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Land deed entries appear here after completing L1 and L2 approval.
+                Land deed entries appear here after approval.
                 <br />
                 Go to <strong>Land Deed Entries</strong> to submit a deed for approval.
               </p>

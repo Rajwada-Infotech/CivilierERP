@@ -864,3 +864,4 @@ router.delete("/:master/:id", withRight("delete"), async (req, res) => {
 });
 
 module.exports = router;
+module.exports.baseSql = baseSql;

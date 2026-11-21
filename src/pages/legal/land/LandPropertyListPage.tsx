@@ -168,7 +168,7 @@ export default function LandPropertyListPage() {
         <LegalMasterTable
           entry={entry}
           requestEditId={params.get("edit")}
-          rowLock={(r) => (r.WorkflowStatus === "Registered" ? REGISTERED_LOCK : null)}
+          rowLock={(r) => (r.WorkflowStatus === "Registered" && !Number(r.AmendmentOpen) ? REGISTERED_LOCK : null)}
           defaults={{ LandStatus: "Owned" }}
           // Land added here is land the company already owns; new purchases come in through Land Enquiries.
           fixed={{ EntryType: BACKLOG }}

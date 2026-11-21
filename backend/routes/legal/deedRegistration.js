@@ -70,7 +70,7 @@ router.get("/list", requirePageRight(PAGE, "view"), pageable("lands"), async (re
       LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
       WHERE l.IsActive = 1 AND l.WorkflowStatus = ${tab === "registered" ? "N'Registered'" : "N'Deed Registration'"}
       ORDER BY ${tab === "registered" ? "l.RegCompletedAt DESC" : "l.L2ApprovedAt DESC"}`)).recordset;
-    const canApply = (await canAct(req, "L1 Approver", PAGE)) || (await canAct(req, "L2 Approver", PAGE));
+    const canApply = await canAct(req, "Approver", PAGE);
     res.json({ lands: rows, canApply });
   } catch (err) {
     console.error("[legal-deed-reg] list:", err.message);
@@ -147,7 +147,7 @@ router.get("/:id", requirePageRight(PAGE, "view"), async (req, res) => {
     const valuation = (await pool.request().input("i", sql.Int, id).query(`
       SELECT TOP 1 v.ValuationId, CONVERT(char(10), v.ValuationDate, 23) AS ValuationDate, v.GovernmentValuation, v.EstimatedMarketValue, v.MarketRate, v.ValuationSource
       FROM dbo.LegalValuation v WHERE v.LandId = @i AND v.IsActive = 1 ORDER BY v.ValuationDate DESC, v.ValuationId DESC`)).recordset[0] ?? null;
-    const canApply = (await canAct(req, "L1 Approver", PAGE)) || (await canAct(req, "L2 Approver", PAGE));
+    const canApply = await canAct(req, "Approver", PAGE);
     res.json({ land, queries, tracking, payments, schedule, revisions, valuation, canApply });
   } catch (err) {
     console.error("[legal-deed-reg] detail:", err.message);

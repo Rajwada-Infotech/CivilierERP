@@ -19,7 +19,7 @@ export const legalNavItems: NavItem[] = [
     children: [
       { label: "1 · Enquiries", path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
       { label: "2 · Deed search", path: "/legal/land/deed-search", pageKey: "legal-land-enquiry" },
-      { label: "3 · Verification", path: "/legal/approvals?tab=verify", pageKey: "legal-approvals" },
+      { label: "3 · Land verification", path: "/legal/approvals?tab=landverify", pageKey: "legal-approvals" },
       { label: "4 · Deed Process", path: "/legal/land/deed-process", pageKey: "legal-land-master" },
       { label: "5 · LA & ULC", path: "/legal/land/la-ulc", pageKey: "legal-land-master" },
       { label: "6 · Deed Registration", path: "/legal/deed-registration", pageKey: "legal-approvals" },
@@ -27,7 +27,7 @@ export const legalNavItems: NavItem[] = [
     ],
   },
   { label: "Approvals", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
-  { label: "Versions & Amendments", icon: Layer, path: "/legal/versions", pageKey: "legal-land-master" },
+  { label: "Land Flowchart", icon: Layer, path: "/legal/versions", pageKey: "legal-land-master" },
   {
     label: "Registers", icon: DocumentText,
     children: [
